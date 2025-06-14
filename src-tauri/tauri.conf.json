@@ -31,7 +31,7 @@
         "skipTaskbar": true,
         "decorations": false,
         "transparent": true,
-        "center": true,
+        "center": false,
         "visible": false
       }
     ],

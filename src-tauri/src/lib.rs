@@ -1,6 +1,8 @@
 mod audio;
 mod db;
 mod transcription;
+#[cfg(target_os = "macos")]
+mod macos;
 
 use audio::AudioRecorder;
 use db::Database;
@@ -20,6 +22,8 @@ pub struct AppState {
     pub models_dir: PathBuf,
     pub current_shortcut: Arc<Mutex<String>>,
     pub is_recording_overlay_active: Arc<AtomicBool>,
+    #[cfg(target_os = "macos")]
+    pub native_overlay: Arc<Mutex<macos::MacOSOverlay>>,
 }
 
 #[tauri::command]
@@ -36,58 +40,47 @@ async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> R
         let _ = menu_item.set_text("Stop Recording");
     }
 
-    // Show overlay window and emit recording state
-    if let Some(overlay_window) = app.get_webview_window("overlay") {
-        // Show the window first (it will be centered due to center: true in config)
-        let _ = overlay_window.show();
+    // Show native overlay on macOS
+    #[cfg(target_os = "macos")]
+    {
+        let overlay = state.native_overlay.lock().await;
+        overlay.show();
         
-        // Then adjust position to top-center
-        use tauri::{LogicalPosition, PhysicalPosition, Position};
-        
-        // Small delay to ensure window is shown
-        let overlay_for_positioning = overlay_window.clone();
-        tauri::async_runtime::spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-            
-            if let Ok(pos) = overlay_for_positioning.outer_position() {
-                // Get current x position (which should be centered)
-                let current_x = pos.x;
-                let new_y = 40; // 40px from top
-                
-                println!("Moving overlay from current position to x: {}, y: {}", current_x, new_y);
-                
-                // Keep x position but move to top
-                let _ = overlay_for_positioning.set_position(Position::Physical(PhysicalPosition::new(
-                    current_x,
-                    new_y
-                )));
-            }
-        });
-        let _ = overlay_window.emit("recording-state-update", serde_json::json!({
-            "isRecording": true,
-            "duration": 0
-        }));
-        
-        // Set recording active flag and start duration updates
+        // Set recording active flag
         state.is_recording_overlay_active.store(true, Ordering::Relaxed);
-        
-        // Start a task to periodically update the duration
-        let overlay_window_clone = overlay_window.clone();
-        let start_time = std::time::Instant::now();
-        let is_recording = state.is_recording_overlay_active.clone();
-        
-        tauri::async_runtime::spawn(async move {
-            while is_recording.load(Ordering::Relaxed) {
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                let duration = start_time.elapsed().as_millis() as u64;
-                if overlay_window_clone.emit("recording-state-update", serde_json::json!({
-                    "isRecording": true,
-                    "duration": duration
-                })).is_err() {
-                    break;
+    }
+    
+    // Fallback to Tauri overlay on other platforms
+    #[cfg(not(target_os = "macos"))]
+    {
+        if let Some(overlay_window) = app.get_webview_window("overlay") {
+            let _ = overlay_window.show();
+            let _ = overlay_window.emit("recording-state-update", serde_json::json!({
+                "isRecording": true,
+                "duration": 0
+            }));
+            
+            // Set recording active flag and start duration updates
+            state.is_recording_overlay_active.store(true, Ordering::Relaxed);
+            
+            // Start a task to periodically update the duration
+            let overlay_window_clone = overlay_window.clone();
+            let start_time = std::time::Instant::now();
+            let is_recording = state.is_recording_overlay_active.clone();
+            
+            tauri::async_runtime::spawn(async move {
+                while is_recording.load(Ordering::Relaxed) {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                    let duration = start_time.elapsed().as_millis() as u64;
+                    if overlay_window_clone.emit("recording-state-update", serde_json::json!({
+                        "isRecording": true,
+                        "duration": duration
+                    })).is_err() {
+                        break;
+                    }
                 }
-            }
-        });
+            });
+        }
     }
 
     Ok(filename)
@@ -109,19 +102,32 @@ async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Re
     // Stop recording overlay updates and hide window
     state.is_recording_overlay_active.store(false, Ordering::Relaxed);
     
-    if let Some(overlay_window) = app.get_webview_window("overlay") {
-        let _ = overlay_window.emit("recording-stopped", ());
-        let _ = overlay_window.emit("recording-state-update", serde_json::json!({
-            "isRecording": false,
-            "duration": 0
-        }));
-        
-        // Hide the overlay after a short delay
-        let overlay_to_hide = overlay_window.clone();
-        tauri::async_runtime::spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
-            let _ = overlay_to_hide.hide();
-        });
+    // Hide native overlay on macOS
+    #[cfg(target_os = "macos")]
+    {
+        let overlay = state.native_overlay.lock().await;
+        // Add a short delay before hiding
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+        overlay.hide();
+    }
+    
+    // Fallback to Tauri overlay on other platforms
+    #[cfg(not(target_os = "macos"))]
+    {
+        if let Some(overlay_window) = app.get_webview_window("overlay") {
+            let _ = overlay_window.emit("recording-stopped", ());
+            let _ = overlay_window.emit("recording-state-update", serde_json::json!({
+                "isRecording": false,
+                "duration": 0
+            }));
+            
+            // Hide the overlay after a short delay
+            let overlay_to_hide = overlay_window.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+                let _ = overlay_to_hide.hide();
+            });
+        }
     }
     
     Ok(())
@@ -327,6 +333,8 @@ pub fn run() {
                 models_dir,
                 current_shortcut: Arc::new(Mutex::new("CmdOrCtrl+Shift+Space".to_string())),
                 is_recording_overlay_active: Arc::new(AtomicBool::new(false)),
+                #[cfg(target_os = "macos")]
+                native_overlay: Arc::new(Mutex::new(macos::MacOSOverlay::new())),
             };
 
             app.manage(state);
