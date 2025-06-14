@@ -42,23 +42,23 @@ async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> R
         let _ = overlay_window.show();
         
         // Then adjust position to top-center
-        use tauri::{LogicalPosition, Position};
+        use tauri::{LogicalPosition, PhysicalPosition, Position};
         
         // Small delay to ensure window is shown
         let overlay_for_positioning = overlay_window.clone();
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
             
-            if let Ok(Some(pos)) = overlay_for_positioning.outer_position() {
+            if let Ok(pos) = overlay_for_positioning.outer_position() {
                 // Get current x position (which should be centered)
                 let current_x = pos.x;
-                let new_y = 40.0; // 40px from top
+                let new_y = 40; // 40px from top
                 
                 println!("Moving overlay from current position to x: {}, y: {}", current_x, new_y);
                 
                 // Keep x position but move to top
-                let _ = overlay_for_positioning.set_position(Position::Logical(LogicalPosition::new(
-                    current_x as f64,
+                let _ = overlay_for_positioning.set_position(Position::Physical(PhysicalPosition::new(
+                    current_x,
                     new_y
                 )));
             }
