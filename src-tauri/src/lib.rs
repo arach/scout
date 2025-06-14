@@ -38,6 +38,22 @@ async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> R
 
     // Show overlay window and emit recording state
     if let Some(overlay_window) = app.get_webview_window("overlay") {
+        // Position window in top-center before showing
+        use tauri::{LogicalPosition, Position};
+        if let Some(monitor) = overlay_window.primary_monitor().ok().flatten() {
+            let monitor_size = monitor.size();
+            let scale_factor = monitor.scale_factor();
+            let window_width = 280.0;
+            let padding = 20.0;
+            
+            // Position in top-center with padding
+            let screen_width = monitor_size.width as f64 / scale_factor;
+            let x = (screen_width - window_width) / 2.0;
+            let y = padding;
+            
+            let _ = overlay_window.set_position(Position::Logical(LogicalPosition::new(x, y)));
+        }
+        
         let _ = overlay_window.show();
         let _ = overlay_window.emit("recording-state-update", serde_json::json!({
             "isRecording": true,
@@ -292,33 +308,8 @@ pub fn run() {
 
             app.manage(state);
             
-            // Position overlay window in top-center when showing
-            if let Some(overlay_window) = app.get_webview_window("overlay") {
-                // Store a reference to position the window when it's shown
-                let overlay_for_positioning = overlay_window.clone();
-                
-                // Position window whenever it becomes visible
-                overlay_window.on_window_event(move |event| {
-                    use tauri::{LogicalPosition, Position, WindowEvent};
-                    
-                    if let WindowEvent::Visible = event {
-                        // Get primary monitor to calculate position
-                        if let Some(monitor) = overlay_for_positioning.primary_monitor().ok().flatten() {
-                            let monitor_size = monitor.size();
-                            let scale_factor = monitor.scale_factor();
-                            let window_width = 280.0;
-                            let padding = 20.0;
-                            
-                            // Position in top-center with padding
-                            let screen_width = monitor_size.width as f64 / scale_factor;
-                            let x = (screen_width - window_width) / 2.0;
-                            let y = padding;
-                            
-                            let _ = overlay_for_positioning.set_position(Position::Logical(LogicalPosition::new(x, y)));
-                        }
-                    }
-                });
-            }
+            // Setup overlay window positioning
+            // We'll position it when it's shown in the start_recording command
             
             // Set up global hotkey
             let app_handle = app.app_handle().clone();
