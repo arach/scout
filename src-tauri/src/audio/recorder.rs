@@ -107,6 +107,10 @@ struct AudioRecorderWorker {
     is_recording: Arc<Mutex<bool>>,
     vad_enabled: Arc<Mutex<bool>>,
     vad: Option<VoiceActivityDetector>,
+    sample_count: Arc<Mutex<u64>>,
+    sample_rate: u32,
+    channels: u16,
+    sample_format: Option<cpal::SampleFormat>,
 }
 
 impl AudioRecorderWorker {
@@ -117,6 +121,10 @@ impl AudioRecorderWorker {
             is_recording,
             vad_enabled,
             vad: None,
+            sample_count: Arc::new(Mutex::new(0)),
+            sample_rate: 48000, // default, will be updated when recording starts
+            channels: 1, // default, will be updated when recording starts
+            sample_format: None,
         }
     }
 
@@ -136,6 +144,13 @@ impl AudioRecorderWorker {
             .default_input_config()
             .map_err(|e| format!("Failed to get input config: {}", e))?;
 
+        // Store sample rate, channels, and format for later use
+        self.sample_rate = config.sample_rate().0;
+        self.channels = config.channels();
+        self.sample_format = Some(config.sample_format());
+        
+        // Reset sample count
+        *self.sample_count.lock().unwrap() = 0;
 
         // Match the WAV spec to the actual audio format
         let (bits_per_sample, sample_format) = match config.sample_format() {
@@ -174,6 +189,7 @@ impl AudioRecorderWorker {
                 &config.into(),
                 writer.clone(),
                 is_recording.clone(),
+                self.sample_count.clone(),
                 err_fn,
             ),
             cpal::SampleFormat::U16 => {
@@ -184,6 +200,7 @@ impl AudioRecorderWorker {
                 &config.into(),
                 writer.clone(),
                 is_recording.clone(),
+                self.sample_count.clone(),
                 err_fn,
             ),
             _ => return Err("Unsupported sample format".to_string()),
@@ -213,6 +230,42 @@ impl AudioRecorderWorker {
         // Add another small delay to ensure all samples are written
         std::thread::sleep(std::time::Duration::from_millis(100));
 
+        // Check if we need to pad with silence
+        let total_samples = *self.sample_count.lock().unwrap();
+        let duration_seconds = total_samples as f32 / self.sample_rate as f32 / self.channels as f32;
+        
+        if duration_seconds < 1.0 && self.writer.lock().unwrap().is_some() {
+            // Calculate how many silence samples we need to reach 1.1 seconds (with a small buffer)
+            let target_samples = (self.sample_rate as f64 * self.channels as f64 * 1.1) as u64; // 1.1 seconds worth
+            let silence_samples_needed = target_samples.saturating_sub(total_samples);
+            
+            if silence_samples_needed > 0 {
+                println!("Recording too short ({:.2}s), padding with silence to 1.1 seconds", duration_seconds);
+                
+                // Write silence samples
+                if let Some(ref mut writer) = *self.writer.lock().unwrap() {
+                    match self.sample_format {
+                        Some(cpal::SampleFormat::F32) => {
+                            for _ in 0..silence_samples_needed {
+                                writer.write_sample(0.0f32).ok();
+                            }
+                        }
+                        Some(cpal::SampleFormat::I16) => {
+                            for _ in 0..silence_samples_needed {
+                                writer.write_sample(0i16).ok();
+                            }
+                        }
+                        _ => {
+                            // Default to i16 if format is unknown
+                            for _ in 0..silence_samples_needed {
+                                writer.write_sample(0i16).ok();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         if let Some(writer) = self.writer.lock().unwrap().take() {
             writer
                 .finalize()
@@ -229,6 +282,7 @@ impl AudioRecorderWorker {
         config: &cpal::StreamConfig,
         writer: Arc<Mutex<Option<hound::WavWriter<std::io::BufWriter<std::fs::File>>>>>,
         is_recording: Arc<Mutex<bool>>,
+        sample_count: Arc<Mutex<u64>>,
         err_fn: impl FnMut(cpal::StreamError) + Send + 'static,
     ) -> Result<cpal::Stream, String>
     where
@@ -242,9 +296,11 @@ impl AudioRecorderWorker {
                 move |data: &[T], _: &cpal::InputCallbackInfo| {
                     if *is_recording.lock().unwrap() {
                         if let Some(ref mut writer) = *writer.lock().unwrap() {
+                            let samples_written = data.len();
                             for &sample in data.iter() {
                                 writer.write_sample(sample).ok();
                             }
+                            *sample_count.lock().unwrap() += samples_written as u64;
                         }
                     }
                 },
