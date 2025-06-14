@@ -6,7 +6,8 @@ use audio::AudioRecorder;
 use db::Database;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
+use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tokio::sync::Mutex;
 
 pub struct AppState {
@@ -117,7 +118,7 @@ pub fn run() {
             
             // Set up global hotkey
             let app_handle = app.app_handle().clone();
-            app.global_shortcut().on_shortcut("CmdOrCtrl+Shift+Space", move |_app, _event| {
+            app.global_shortcut().on_shortcut("CmdOrCtrl+Shift+Space", move |_app, _event, _shortcut| {
                 // Emit event to frontend to toggle recording
                 app_handle.emit("toggle-recording", ()).unwrap();
             }).unwrap();
