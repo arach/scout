@@ -12,11 +12,27 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Scout - Voice Transcription",
         "width": 960,
         "height": 720,
         "closable": true,
         "minimizable": true
+      },
+      {
+        "label": "overlay",
+        "title": "Scout Recording",
+        "url": "overlay.html",
+        "width": 280,
+        "height": 60,
+        "resizable": false,
+        "fullscreen": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "decorations": false,
+        "transparent": true,
+        "center": false,
+        "visible": false
       }
     ],
     "security": {

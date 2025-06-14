@@ -728,3 +728,121 @@ h1 {
   margin-right: 8px;
   cursor: pointer;
 }
+
+/* Delete Confirmation Modal */
+.delete-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.delete-modal {
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  width: 480px;
+  max-width: 90vw;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  animation: slideIn 0.2s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateY(-20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.delete-modal-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-primary);
+}
+
+.delete-modal-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.delete-modal-body {
+  padding: 20px;
+}
+
+.delete-modal-body p {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.delete-preview {
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  padding: 12px;
+  margin: 16px 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-style: italic;
+  max-height: 100px;
+  overflow-y: auto;
+}
+
+.delete-warning {
+  color: var(--error) !important;
+  font-size: 12px !important;
+  margin-top: 16px !important;
+  margin-bottom: 0 !important;
+}
+
+.delete-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border-primary);
+  background-color: var(--bg-secondary);
+  border-radius: 0 0 8px 8px;
+}
+
+.delete-modal-footer button {
+  padding: 6px 16px;
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+
+.cancel-button {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.cancel-button:hover {
+  background-color: var(--bg-hover);
+  border-color: var(--border-secondary);
+}
+
+.confirm-delete-button {
+  background-color: var(--error);
+  color: white;
+  border-color: var(--error);
+}
+
+.confirm-delete-button:hover {
+  background-color: #b83636;
+  border-color: #b83636;
+}

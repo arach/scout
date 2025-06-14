@@ -26,7 +26,12 @@ function App() {
   const [isCapturingHotkey, setIsCapturingHotkey] = useState(false);
   const [capturedKeys, setCapturedKeys] = useState<string[]>([]);
   const [selectedTranscripts, setSelectedTranscripts] = useState<Set<number>>(new Set());
-  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{
+    show: boolean;
+    transcriptId: number | null;
+    transcriptText: string;
+    isBulk: boolean;
+  }>({ show: false, transcriptId: null, transcriptText: "", isBulk: false });
 
   useEffect(() => {
     loadRecentTranscripts();
@@ -89,10 +94,15 @@ function App() {
   };
 
   const stopRecording = async () => {
+    // Prevent multiple simultaneous stop attempts
+    if (isProcessing) return;
+    
+    // Immediately update UI state for responsiveness
+    setIsRecording(false);
+    setIsProcessing(true);
+    
     try {
       await invoke("stop_recording");
-      setIsRecording(false);
-      setIsProcessing(true);
       
       if (currentRecordingFile) {
         // Transcribe the audio
@@ -134,6 +144,8 @@ function App() {
       }
     } catch (error) {
       console.error("Failed to stop recording:", error);
+      // Reset states on error
+      setIsRecording(false);
       setIsProcessing(false);
     }
   };
@@ -162,29 +174,46 @@ function App() {
     });
   };
 
-  const deleteTranscript = async (id: number) => {
-    try {
-      await invoke("delete_transcript", { id });
-      await loadRecentTranscripts();
-      setDeleteConfirmId(null);
-    } catch (error) {
-      console.error("Failed to delete transcript:", error);
-      alert(`Failed to delete transcript: ${error}`);
-    }
-  };
-
-  const deleteSelectedTranscripts = async () => {
-    if (selectedTranscripts.size === 0) return;
-    
-    if (confirm(`Are you sure you want to delete ${selectedTranscripts.size} transcript(s)?`)) {
+  const confirmDelete = async () => {
+    if (deleteConfirmation.isBulk) {
       try {
         await invoke("delete_transcripts", { ids: Array.from(selectedTranscripts) });
         setSelectedTranscripts(new Set());
         await loadRecentTranscripts();
       } catch (error) {
         console.error("Failed to delete transcripts:", error);
+        alert(`Failed to delete transcripts: ${error}`);
+      }
+    } else if (deleteConfirmation.transcriptId !== null) {
+      try {
+        await invoke("delete_transcript", { id: deleteConfirmation.transcriptId });
+        await loadRecentTranscripts();
+      } catch (error) {
+        console.error("Failed to delete transcript:", error);
+        alert(`Failed to delete transcript: ${error}`);
       }
     }
+    setDeleteConfirmation({ show: false, transcriptId: null, transcriptText: "", isBulk: false });
+  };
+
+  const showDeleteConfirmation = (id: number, text: string) => {
+    setDeleteConfirmation({
+      show: true,
+      transcriptId: id,
+      transcriptText: text.length > 100 ? text.substring(0, 100) + "..." : text,
+      isBulk: false
+    });
+  };
+
+  const showBulkDeleteConfirmation = () => {
+    if (selectedTranscripts.size === 0) return;
+    
+    setDeleteConfirmation({
+      show: true,
+      transcriptId: null,
+      transcriptText: `${selectedTranscripts.size} transcript(s)`,
+      isBulk: true
+    });
   };
 
   const exportTranscripts = async (format: 'json' | 'markdown' | 'text') => {
@@ -359,7 +388,6 @@ function App() {
         <button
           className={`record-button ${isRecording ? 'recording' : ''} ${isProcessing ? 'processing' : ''}`}
           onClick={isRecording ? stopRecording : startRecording}
-          disabled={isProcessing}
         >
           {isProcessing ? 'Processing...' : isRecording ? 'Stop Recording' : 'Start Recording'}
         </button>
@@ -423,7 +451,7 @@ function App() {
                 <>
                   <button
                     className="delete-button"
-                    onClick={deleteSelectedTranscripts}
+                    onClick={showBulkDeleteConfirmation}
                   >
                     Delete ({selectedTranscripts.size})
                   </button>
@@ -473,31 +501,13 @@ function App() {
                 >
                   Copy
                 </button>
-                {deleteConfirmId === transcript.id ? (
-                  <>
-                    <button
-                      className="delete-item-button"
-                      onClick={() => deleteTranscript(transcript.id)}
-                      style={{ backgroundColor: 'var(--error)', color: 'white' }}
-                    >
-                      Confirm
-                    </button>
-                    <button
-                      onClick={() => setDeleteConfirmId(null)}
-                      title="Cancel"
-                    >
-                      Cancel
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    className="delete-item-button"
-                    onClick={() => setDeleteConfirmId(transcript.id)}
-                    title="Delete transcript"
-                  >
-                    Delete
-                  </button>
-                )}
+                <button
+                  className="delete-item-button"
+                  onClick={() => showDeleteConfirmation(transcript.id, transcript.text)}
+                  title="Delete transcript"
+                >
+                  Delete
+                </button>
               </div>
             </div>
           ))
@@ -565,6 +575,39 @@ function App() {
                   Automatically start recording when you speak
                 </p>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteConfirmation.show && (
+        <div className="delete-modal-overlay">
+          <div className="delete-modal">
+            <div className="delete-modal-header">
+              <h3>Confirm Delete</h3>
+            </div>
+            <div className="delete-modal-body">
+              <p>Are you sure you want to delete {deleteConfirmation.isBulk ? deleteConfirmation.transcriptText : 'this transcript'}?</p>
+              {!deleteConfirmation.isBulk && (
+                <div className="delete-preview">
+                  "{deleteConfirmation.transcriptText}"
+                </div>
+              )}
+              <p className="delete-warning">This action cannot be undone.</p>
+            </div>
+            <div className="delete-modal-footer">
+              <button 
+                className="cancel-button"
+                onClick={() => setDeleteConfirmation({ show: false, transcriptId: null, transcriptText: "", isBulk: false })}
+              >
+                Cancel
+              </button>
+              <button 
+                className="confirm-delete-button"
+                onClick={confirmDelete}
+              >
+                Delete
+              </button>
             </div>
           </div>
         </div>

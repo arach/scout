@@ -6,6 +6,7 @@ use audio::AudioRecorder;
 use db::Database;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Emitter, Manager, State, WindowEvent};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tauri::tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState};
@@ -18,6 +19,7 @@ pub struct AppState {
     pub recordings_dir: PathBuf,
     pub models_dir: PathBuf,
     pub current_shortcut: Arc<Mutex<String>>,
+    pub is_recording_overlay_active: Arc<AtomicBool>,
 }
 
 #[tauri::command]
@@ -34,6 +36,36 @@ async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> R
         let _ = menu_item.set_text("Stop Recording");
     }
 
+    // Show overlay window and emit recording state
+    if let Some(overlay_window) = app.get_webview_window("overlay") {
+        let _ = overlay_window.show();
+        let _ = overlay_window.emit("recording-state-update", serde_json::json!({
+            "isRecording": true,
+            "duration": 0
+        }));
+        
+        // Set recording active flag and start duration updates
+        state.is_recording_overlay_active.store(true, Ordering::Relaxed);
+        
+        // Start a task to periodically update the duration
+        let overlay_window_clone = overlay_window.clone();
+        let start_time = std::time::Instant::now();
+        let is_recording = state.is_recording_overlay_active.clone();
+        
+        tauri::async_runtime::spawn(async move {
+            while is_recording.load(Ordering::Relaxed) {
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                let duration = start_time.elapsed().as_millis() as u64;
+                if overlay_window_clone.emit("recording-state-update", serde_json::json!({
+                    "isRecording": true,
+                    "duration": duration
+                })).is_err() {
+                    break;
+                }
+            }
+        });
+    }
+
     Ok(filename)
 }
 
@@ -43,11 +75,22 @@ async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Re
     recorder.stop_recording()?;
     
     // Give the worker thread time to finalize the file
-    tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     
     // Update tray menu item text
     if let Some(menu_item) = app.try_state::<MenuItem<tauri::Wry>>() {
         let _ = menu_item.set_text("Start Recording");
+    }
+    
+    // Stop recording overlay updates and hide window
+    state.is_recording_overlay_active.store(false, Ordering::Relaxed);
+    
+    if let Some(overlay_window) = app.get_webview_window("overlay") {
+        let _ = overlay_window.emit("recording-stopped", ());
+        let _ = overlay_window.emit("recording-state-update", serde_json::json!({
+            "isRecording": false,
+            "duration": 0
+        }));
     }
     
     Ok(())
@@ -244,9 +287,38 @@ pub fn run() {
                 recordings_dir,
                 models_dir,
                 current_shortcut: Arc::new(Mutex::new("CmdOrCtrl+Shift+Space".to_string())),
+                is_recording_overlay_active: Arc::new(AtomicBool::new(false)),
             };
 
             app.manage(state);
+            
+            // Position overlay window in top-center when showing
+            if let Some(overlay_window) = app.get_webview_window("overlay") {
+                // Store a reference to position the window when it's shown
+                let overlay_for_positioning = overlay_window.clone();
+                
+                // Position window whenever it becomes visible
+                overlay_window.on_window_event(move |event| {
+                    use tauri::{LogicalPosition, Position, WindowEvent};
+                    
+                    if let WindowEvent::Visible = event {
+                        // Get primary monitor to calculate position
+                        if let Some(monitor) = overlay_for_positioning.primary_monitor().ok().flatten() {
+                            let monitor_size = monitor.size();
+                            let scale_factor = monitor.scale_factor();
+                            let window_width = 280.0;
+                            let padding = 20.0;
+                            
+                            // Position in top-center with padding
+                            let screen_width = monitor_size.width as f64 / scale_factor;
+                            let x = (screen_width - window_width) / 2.0;
+                            let y = padding;
+                            
+                            let _ = overlay_for_positioning.set_position(Position::Logical(LogicalPosition::new(x, y)));
+                        }
+                    }
+                });
+            }
             
             // Set up global hotkey
             let app_handle = app.app_handle().clone();

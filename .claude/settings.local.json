@@ -6,7 +6,16 @@
       "Bash(ls:*)",
       "Bash(pnpm tauri:*)",
       "Bash(pnpm build:*)",
-      "Bash(cargo check:*)"
+      "Bash(cargo check:*)",
+      "mcp__peekaboo__image",
+      "mcp__peekaboo__list",
+      "mcp__playwright__browser_console_messages",
+      "mcp__playwright__browser_close",
+      "Bash(sqlite3:*)",
+      "Bash(pnpm list:*)",
+      "Bash(pkill:*)",
+      "Bash(cargo:*)",
+      "Bash(grep:*)"
     ],
     "deny": []
   }
