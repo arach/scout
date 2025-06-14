@@ -40,21 +40,36 @@ async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> R
     if let Some(overlay_window) = app.get_webview_window("overlay") {
         // Position window in top-center before showing
         use tauri::{LogicalPosition, Position};
-        if let Some(monitor) = overlay_window.primary_monitor().ok().flatten() {
-            let monitor_size = monitor.size();
-            let scale_factor = monitor.scale_factor();
-            let window_width = 280.0;
-            let padding = 20.0;
-            
-            // Position in top-center with padding
-            let screen_width = monitor_size.width as f64 / scale_factor;
-            let x = (screen_width - window_width) / 2.0;
-            let y = padding;
-            
-            let _ = overlay_window.set_position(Position::Logical(LogicalPosition::new(x, y)));
-        }
         
+        // First, show the window (it needs to be visible to position correctly on some systems)
         let _ = overlay_window.show();
+        
+        // Position window after a small delay to ensure it's ready
+        let overlay_for_positioning = overlay_window.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            
+            use tauri::{LogicalPosition, Position};
+            if let Some(monitor) = overlay_for_positioning.primary_monitor().ok().flatten() {
+                let monitor_size = monitor.size();
+                let scale_factor = monitor.scale_factor();
+                let window_width = 280.0;
+                let padding = 20.0;
+                
+                // Position in top-center with padding
+                let screen_width = monitor_size.width as f64 / scale_factor;
+                let x = (screen_width - window_width) / 2.0;
+                let y = padding;
+                
+                println!("Positioning overlay window at x: {}, y: {} (screen width: {})", x, y, screen_width);
+                
+                if let Err(e) = overlay_for_positioning.set_position(Position::Logical(LogicalPosition::new(x, y))) {
+                    eprintln!("Failed to position overlay window: {}", e);
+                }
+            } else {
+                eprintln!("Failed to get primary monitor for overlay positioning");
+            }
+        });
         let _ = overlay_window.emit("recording-state-update", serde_json::json!({
             "isRecording": true,
             "duration": 0
