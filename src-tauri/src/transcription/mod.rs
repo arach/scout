@@ -79,6 +79,11 @@ impl Transcriber {
                     .collect()
             }
         };
+        
+        // Check if we have any samples
+        if samples.is_empty() {
+            return Err("Audio file contains no samples".to_string());
+        }
 
         // Convert to mono if stereo
         let mono_samples = if spec.channels > 1 {
@@ -89,13 +94,25 @@ impl Transcriber {
         } else {
             samples
         };
+        
+        // Check if we still have samples after mono conversion
+        if mono_samples.is_empty() {
+            return Err("No audio samples after mono conversion".to_string());
+        }
 
         // Resample if necessary
-        if resample_ratio != 1.0 {
-            Ok(self.resample(&mono_samples, resample_ratio))
+        let resampled = if resample_ratio != 1.0 {
+            self.resample(&mono_samples, resample_ratio)
         } else {
-            Ok(mono_samples)
+            mono_samples
+        };
+        
+        // Final check
+        if resampled.is_empty() {
+            return Err("No audio samples after resampling".to_string());
         }
+        
+        Ok(resampled)
     }
 
     fn resample(&self, samples: &[f32], ratio: f32) -> Vec<f32> {

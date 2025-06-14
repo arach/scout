@@ -88,6 +88,8 @@ function App() {
       setCurrentRecordingFile(filename);
       setIsRecording(true);
       setCurrentTranscript("");
+      // Store start time to ensure minimum recording duration
+      (window as any).__recordingStartTime = Date.now();
     } catch (error) {
       console.error("Failed to start recording:", error);
     }
@@ -96,6 +98,16 @@ function App() {
   const stopRecording = async () => {
     // Prevent multiple simultaneous stop attempts
     if (isProcessing) return;
+    
+    // Check minimum recording duration
+    const startTime = (window as any).__recordingStartTime;
+    if (startTime) {
+      const duration = Date.now() - startTime;
+      if (duration < 500) {  // Minimum 500ms recording
+        console.warn("Recording too short, waiting a bit more...");
+        await new Promise(resolve => setTimeout(resolve, 500 - duration));
+      }
+    }
     
     // Immediately update UI state for responsiveness
     setIsRecording(false);

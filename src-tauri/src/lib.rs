@@ -90,8 +90,8 @@ async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Re
     let recorder = state.recorder.lock().await;
     recorder.stop_recording()?;
     
-    // Give the worker thread time to finalize the file
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    // Give the worker thread more time to finalize the file and write all data
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
     
     // Update tray menu item text
     if let Some(menu_item) = app.try_state::<MenuItem<tauri::Wry>>() {
@@ -128,6 +128,14 @@ async fn transcribe_audio(
     // Check if audio file exists
     if !audio_path.exists() {
         return Err(format!("Audio file not found at path: {:?}", audio_path));
+    }
+    
+    // Check file size to ensure it's not empty
+    let metadata = std::fs::metadata(&audio_path)
+        .map_err(|e| format!("Failed to read file metadata: {}", e))?;
+    
+    if metadata.len() < 1024 {  // Less than 1KB is probably an empty or corrupted file
+        return Err(format!("Audio file appears to be empty or corrupted (size: {} bytes)", metadata.len()));
     }
     
     // Get the model path - using base.en model for good balance
