@@ -2,15 +2,18 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::sync::mpsc;
+use super::vad::VoiceActivityDetector;
 
 pub struct AudioRecorder {
     control_tx: Option<mpsc::Sender<RecorderCommand>>,
     is_recording: Arc<Mutex<bool>>,
+    vad_enabled: Arc<Mutex<bool>>,
 }
 
 enum RecorderCommand {
     StartRecording(String),
     StopRecording,
+    SetVadEnabled(bool),
 }
 
 impl AudioRecorder {
@@ -18,6 +21,7 @@ impl AudioRecorder {
         Self {
             control_tx: None,
             is_recording: Arc::new(Mutex::new(false)),
+            vad_enabled: Arc::new(Mutex::new(false)),
         }
     }
 
@@ -25,9 +29,10 @@ impl AudioRecorder {
         let (tx, rx) = mpsc::channel();
         self.control_tx = Some(tx);
         let is_recording = self.is_recording.clone();
+        let vad_enabled = self.vad_enabled.clone();
 
         thread::spawn(move || {
-            let mut recorder = AudioRecorderWorker::new(is_recording);
+            let mut recorder = AudioRecorderWorker::new(is_recording, vad_enabled);
             
             while let Ok(cmd) = rx.recv() {
                 match cmd {
@@ -40,6 +45,9 @@ impl AudioRecorder {
                         if let Err(e) = recorder.stop_recording() {
                             eprintln!("Failed to stop recording: {}", e);
                         }
+                    }
+                    RecorderCommand::SetVadEnabled(enabled) => {
+                        *recorder.vad_enabled.lock().unwrap() = enabled;
                     }
                 }
             }
@@ -75,20 +83,40 @@ impl AudioRecorder {
     pub fn is_recording(&self) -> bool {
         *self.is_recording.lock().unwrap()
     }
+
+    pub fn set_vad_enabled(&self, enabled: bool) -> Result<(), String> {
+        if self.control_tx.is_none() {
+            return Err("Recorder not initialized".to_string());
+        }
+
+        self.control_tx
+            .as_ref()
+            .unwrap()
+            .send(RecorderCommand::SetVadEnabled(enabled))
+            .map_err(|e| format!("Failed to send VAD command: {}", e))
+    }
+
+    pub fn is_vad_enabled(&self) -> bool {
+        *self.vad_enabled.lock().unwrap()
+    }
 }
 
 struct AudioRecorderWorker {
     stream: Option<cpal::Stream>,
     writer: Arc<Mutex<Option<hound::WavWriter<std::io::BufWriter<std::fs::File>>>>>,
     is_recording: Arc<Mutex<bool>>,
+    vad_enabled: Arc<Mutex<bool>>,
+    vad: Option<VoiceActivityDetector>,
 }
 
 impl AudioRecorderWorker {
-    fn new(is_recording: Arc<Mutex<bool>>) -> Self {
+    fn new(is_recording: Arc<Mutex<bool>>, vad_enabled: Arc<Mutex<bool>>) -> Self {
         Self {
             stream: None,
             writer: Arc::new(Mutex::new(None)),
             is_recording,
+            vad_enabled,
+            vad: None,
         }
     }
 
@@ -110,6 +138,11 @@ impl AudioRecorderWorker {
             bits_per_sample: 16,
             sample_format: hound::SampleFormat::Int,
         };
+
+        // Initialize VAD if enabled
+        if *self.vad_enabled.lock().unwrap() {
+            self.vad = Some(VoiceActivityDetector::new(config.sample_rate().0)?);
+        }
 
         let writer = hound::WavWriter::create(output_path, spec)
             .map_err(|e| format!("Failed to create WAV writer: {}", e))?;

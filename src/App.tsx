@@ -18,6 +18,7 @@ function App() {
   const [currentTranscript, setCurrentTranscript] = useState<string>("");
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
+  const [vadEnabled, setVadEnabled] = useState(false);
 
   useEffect(() => {
     loadRecentTranscripts();
@@ -113,6 +114,16 @@ function App() {
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
   };
 
+  const toggleVAD = async () => {
+    try {
+      const newVadState = !vadEnabled;
+      await invoke("set_vad_enabled", { enabled: newVadState });
+      setVadEnabled(newVadState);
+    } catch (error) {
+      console.error("Failed to toggle VAD:", error);
+    }
+  };
+
   return (
     <main className="container">
       <h1>Scout - Voice Transcription</h1>
@@ -125,6 +136,17 @@ function App() {
           {isRecording ? '⏹ Stop Recording' : '🎤 Start Recording'}
         </button>
         <p className="hotkey-hint">Press Cmd+Shift+Space to toggle recording</p>
+        
+        <div className="recording-options">
+          <label className="vad-toggle">
+            <input
+              type="checkbox"
+              checked={vadEnabled}
+              onChange={toggleVAD}
+            />
+            <span>Voice Activity Detection (Auto-record when speaking)</span>
+          </label>
+        </div>
         
         {isRecording && (
           <div className="recording-indicator">

@@ -85,6 +85,18 @@ async fn search_transcripts(
     state.database.search_transcripts(&query).await
 }
 
+#[tauri::command]
+async fn set_vad_enabled(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
+    let recorder = state.recorder.lock().await;
+    recorder.set_vad_enabled(enabled)
+}
+
+#[tauri::command]
+async fn is_vad_enabled(state: State<'_, AppState>) -> Result<bool, String> {
+    let recorder = state.recorder.lock().await;
+    Ok(recorder.is_vad_enabled())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -132,7 +144,9 @@ pub fn run() {
             transcribe_audio,
             save_transcript,
             get_recent_transcripts,
-            search_transcripts
+            search_transcripts,
+            set_vad_enabled,
+            is_vad_enabled
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

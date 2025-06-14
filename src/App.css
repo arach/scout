@@ -81,6 +81,22 @@ h1 {
   color: #666;
 }
 
+.recording-options {
+  margin-top: 1rem;
+}
+
+.vad-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.vad-toggle input[type="checkbox"] {
+  cursor: pointer;
+}
+
 .recording-dot {
   width: 10px;
   height: 10px;
