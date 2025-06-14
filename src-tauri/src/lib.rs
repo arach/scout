@@ -6,8 +6,10 @@ use audio::AudioRecorder;
 use db::Database;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::{Emitter, Manager, State};
+use tauri::{Emitter, Manager, State, WindowEvent};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
+use tauri::tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, MenuItemBuilder};
 use tokio::sync::Mutex;
 
 pub struct AppState {
@@ -19,7 +21,7 @@ pub struct AppState {
 }
 
 #[tauri::command]
-async fn start_recording(state: State<'_, AppState>) -> Result<String, String> {
+async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<String, String> {
     let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
     let filename = format!("recording_{}.wav", timestamp);
     let path = state.recordings_dir.join(&filename);
@@ -27,16 +29,26 @@ async fn start_recording(state: State<'_, AppState>) -> Result<String, String> {
     let recorder = state.recorder.lock().await;
     recorder.start_recording(&path)?;
 
+    // Update tray menu item text
+    if let Some(menu_item) = app.try_state::<MenuItem<tauri::Wry>>() {
+        let _ = menu_item.set_text("Stop Recording");
+    }
+
     Ok(filename)
 }
 
 #[tauri::command]
-async fn stop_recording(state: State<'_, AppState>) -> Result<(), String> {
+async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<(), String> {
     let recorder = state.recorder.lock().await;
     recorder.stop_recording()?;
     
     // Give the worker thread time to finalize the file
     tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+    
+    // Update tray menu item text
+    if let Some(menu_item) = app.try_state::<MenuItem<tauri::Wry>>() {
+        let _ = menu_item.set_text("Start Recording");
+    }
     
     Ok(())
 }
@@ -111,6 +123,67 @@ async fn is_vad_enabled(state: State<'_, AppState>) -> Result<bool, String> {
 }
 
 #[tauri::command]
+async fn delete_transcript(
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<(), String> {
+    state.database.delete_transcript(id).await
+}
+
+#[tauri::command]
+async fn delete_transcripts(
+    state: State<'_, AppState>,
+    ids: Vec<i64>,
+) -> Result<(), String> {
+    state.database.delete_transcripts(&ids).await
+}
+
+#[tauri::command]
+async fn export_transcripts(
+    transcripts: Vec<db::Transcript>,
+    format: String,
+) -> Result<String, String> {
+    match format.as_str() {
+        "json" => {
+            serde_json::to_string_pretty(&transcripts)
+                .map_err(|e| format!("Failed to serialize to JSON: {}", e))
+        }
+        "markdown" => {
+            let mut output = String::from("# Scout Transcripts\n\n");
+            for transcript in transcripts {
+                output.push_str(&format!(
+                    "## {}\n\n{}\n\n*Duration: {}*\n\n---\n\n",
+                    transcript.created_at,
+                    transcript.text,
+                    format_duration(transcript.duration_ms)
+                ));
+            }
+            Ok(output)
+        }
+        "text" => {
+            let mut output = String::new();
+            for transcript in transcripts {
+                output.push_str(&format!(
+                    "[{}] ({}):\n{}\n\n",
+                    transcript.created_at,
+                    format_duration(transcript.duration_ms),
+                    transcript.text
+                ));
+            }
+            Ok(output)
+        }
+        _ => Err("Invalid export format".to_string())
+    }
+}
+
+fn format_duration(ms: i32) -> String {
+    let seconds = ms / 1000;
+    let minutes = seconds / 60;
+    let remaining_seconds = seconds % 60;
+    format!("{}:{:02}", minutes, remaining_seconds)
+}
+
+#[tauri::command]
 async fn update_global_shortcut(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
@@ -179,6 +252,94 @@ pub fn run() {
                 app_handle.emit("toggle-recording", ()).unwrap();
             }).unwrap();
             
+            // Set up system tray
+            let toggle_recording_item = MenuItemBuilder::with_id("toggle_recording", "Start Recording")
+                .accelerator("CmdOrCtrl+Shift+Space")
+                .build(app)?;
+            
+            // Store reference to the menu item
+            app.manage(toggle_recording_item.clone());
+            
+            let tray_menu = Menu::with_items(app, &[
+                &MenuItemBuilder::with_id("show", "Show/Hide Window")
+                    .accelerator("CmdOrCtrl+Shift+S")
+                    .build(app)?,
+                &toggle_recording_item,
+                &PredefinedMenuItem::separator(app)?,
+                &MenuItemBuilder::with_id("quit", "Quit Scout")
+                    .accelerator("CmdOrCtrl+Q")
+                    .build(app)?
+            ])?;
+            
+            // Load tray icon
+            let icon_path = std::env::current_dir()
+                .unwrap()
+                .join("icons/tray-icon.png");
+            
+            let tray_icon = tauri::image::Image::from_path(&icon_path)
+                .unwrap_or_else(|_| {
+                    // Fallback to default icon if tray icon not found
+                    println!("Warning: Could not load tray icon from {:?}, using default icon", icon_path);
+                    app.default_window_icon().unwrap().clone()
+                });
+            
+            let _ = TrayIconBuilder::new()
+                .icon(tray_icon)
+                .tooltip("Scout - Local-first dictation")
+                .menu(&tray_menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| {
+                    match event.id.as_ref() {
+                        "show" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                if window.is_visible().unwrap_or(false) {
+                                    let _ = window.hide();
+                                } else {
+                                    let _ = window.show();
+                                    let _ = window.set_focus();
+                                }
+                            }
+                        }
+                        "toggle_recording" => {
+                            app.emit("toggle-recording", ()).unwrap();
+                        }
+                        "quit" => {
+                            app.exit(0);
+                        }
+                        _ => {}
+                    }
+                })
+                .on_tray_icon_event(|tray, event| {
+                    match event {
+                        TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } => {
+                            if let Some(window) = tray.app_handle().get_webview_window("main") {
+                                if window.is_visible().unwrap_or(false) {
+                                    let _ = window.hide();
+                                } else {
+                                    let _ = window.show();
+                                    let _ = window.set_focus();
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                })
+                .build(app)?;
+            
+            // Handle window events to hide instead of close
+            let window_for_events = app.get_webview_window("main").unwrap().clone();
+            app.get_webview_window("main").unwrap().on_window_event(move |event| {
+                if let WindowEvent::CloseRequested { api, .. } = &event {
+                    // Hide window instead of closing
+                    api.prevent_close();
+                    let _ = window_for_events.hide();
+                }
+            });
+            
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -191,6 +352,9 @@ pub fn run() {
             search_transcripts,
             set_vad_enabled,
             is_vad_enabled,
+            delete_transcript,
+            delete_transcripts,
+            export_transcripts,
             update_global_shortcut
         ])
         .run(tauri::generate_context!())

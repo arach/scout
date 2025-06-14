@@ -25,6 +25,7 @@ function App() {
   const [hotkey, setHotkey] = useState("CmdOrCtrl+Shift+Space");
   const [isCapturingHotkey, setIsCapturingHotkey] = useState(false);
   const [capturedKeys, setCapturedKeys] = useState<string[]>([]);
+  const [selectedTranscripts, setSelectedTranscripts] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     loadRecentTranscripts();
@@ -54,7 +55,7 @@ function App() {
   }, [isRecording]);
 
   useEffect(() => {
-    let interval: NodeJS.Timeout;
+    let interval: number;
     if (isRecording) {
       const startTime = Date.now();
       interval = setInterval(() => {
@@ -152,6 +153,86 @@ function App() {
     const minutes = Math.floor(seconds / 60);
     const remainingSeconds = seconds % 60;
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+  };
+
+  const copyTranscript = (text: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      // Could show a toast notification here
+    });
+  };
+
+  const deleteTranscript = async (id: number) => {
+    if (confirm('Are you sure you want to delete this transcript?')) {
+      try {
+        await invoke("delete_transcript", { id });
+        await loadRecentTranscripts();
+      } catch (error) {
+        console.error("Failed to delete transcript:", error);
+      }
+    }
+  };
+
+  const deleteSelectedTranscripts = async () => {
+    if (selectedTranscripts.size === 0) return;
+    
+    if (confirm(`Are you sure you want to delete ${selectedTranscripts.size} transcript(s)?`)) {
+      try {
+        await invoke("delete_transcripts", { ids: Array.from(selectedTranscripts) });
+        setSelectedTranscripts(new Set());
+        await loadRecentTranscripts();
+      } catch (error) {
+        console.error("Failed to delete transcripts:", error);
+      }
+    }
+  };
+
+  const exportTranscripts = async (format: 'json' | 'markdown' | 'text') => {
+    try {
+      const toExport = selectedTranscripts.size > 0 
+        ? transcripts.filter(t => selectedTranscripts.has(t.id))
+        : transcripts;
+      
+      if (toExport.length === 0) {
+        alert('No transcripts to export');
+        return;
+      }
+
+      const exported = await invoke<string>("export_transcripts", { 
+        transcripts: toExport, 
+        format 
+      });
+      
+      // Create a download
+      const blob = new Blob([exported], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `scout-transcripts-${new Date().toISOString().split('T')[0]}.${format === 'json' ? 'json' : format === 'markdown' ? 'md' : 'txt'}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Failed to export transcripts:", error);
+    }
+  };
+
+  const toggleTranscriptSelection = (id: number) => {
+    const newSelected = new Set(selectedTranscripts);
+    if (newSelected.has(id)) {
+      newSelected.delete(id);
+    } else {
+      newSelected.add(id);
+    }
+    setSelectedTranscripts(newSelected);
+  };
+
+  const selectAllTranscripts = () => {
+    if (selectedTranscripts.size === transcripts.length) {
+      setSelectedTranscripts(new Set());
+    } else {
+      setSelectedTranscripts(new Set(transcripts.map(t => t.id)));
+    }
   };
 
   const toggleVAD = async () => {
@@ -327,21 +408,78 @@ function App() {
 
 
       <div className="transcripts-list">
-        <h2>Transcripts</h2>
+        <div className="transcripts-header">
+          <h2>Transcripts</h2>
+          {transcripts.length > 0 && (
+            <div className="transcript-actions">
+              <button 
+                className="select-all-button"
+                onClick={selectAllTranscripts}
+              >
+                {selectedTranscripts.size === transcripts.length ? 'Deselect All' : 'Select All'}
+              </button>
+              {selectedTranscripts.size > 0 && (
+                <>
+                  <button
+                    className="delete-button"
+                    onClick={deleteSelectedTranscripts}
+                  >
+                    Delete ({selectedTranscripts.size})
+                  </button>
+                  <div className="export-menu">
+                    <button className="export-button">Export</button>
+                    <div className="export-options">
+                      <button onClick={() => exportTranscripts('json')}>JSON</button>
+                      <button onClick={() => exportTranscripts('markdown')}>Markdown</button>
+                      <button onClick={() => exportTranscripts('text')}>Text</button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
         {transcripts.length === 0 ? (
-          <p>No transcripts yet. Start recording!</p>
+          <p className="no-transcripts">No transcripts yet. Start recording!</p>
         ) : (
           transcripts.map((transcript) => (
-            <div key={transcript.id} className="transcript-item">
-              <div className="transcript-header">
-                <span className="transcript-date">
-                  {new Date(transcript.created_at).toLocaleString()}
-                </span>
-                <span className="transcript-duration">
-                  {formatDuration(transcript.duration_ms)}
-                </span>
+            <div 
+              key={transcript.id} 
+              className={`transcript-item ${selectedTranscripts.has(transcript.id) ? 'selected' : ''}`}
+            >
+              <input
+                type="checkbox"
+                className="transcript-checkbox"
+                checked={selectedTranscripts.has(transcript.id)}
+                onChange={() => toggleTranscriptSelection(transcript.id)}
+              />
+              <div className="transcript-content">
+                <div className="transcript-header">
+                  <span className="transcript-date">
+                    {new Date(transcript.created_at).toLocaleString()}
+                  </span>
+                  <span className="transcript-duration">
+                    {formatDuration(transcript.duration_ms)}
+                  </span>
+                </div>
+                <p className="transcript-text">{transcript.text}</p>
               </div>
-              <p className="transcript-text">{transcript.text}</p>
+              <div className="transcript-item-actions">
+                <button
+                  className="copy-button"
+                  onClick={() => copyTranscript(transcript.text)}
+                  title="Copy transcript"
+                >
+                  Copy
+                </button>
+                <button
+                  className="delete-item-button"
+                  onClick={() => deleteTranscript(transcript.id)}
+                  title="Delete transcript"
+                >
+                  Delete
+                </button>
+              </div>
             </div>
           ))
         )}

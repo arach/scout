@@ -264,21 +264,107 @@ h1 {
   padding: 16px;
 }
 
-.transcripts-list h2 {
-  margin: 0 0 16px 0;
+.transcripts-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.transcripts-header h2 {
+  margin: 0;
   font-size: 14px;
   font-weight: 400;
   color: var(--text-primary);
 }
 
+.transcript-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.transcript-actions button {
+  padding: 4px 12px;
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  background-color: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+
+.transcript-actions button:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-secondary);
+}
+
+.delete-button {
+  color: var(--error);
+  border-color: var(--error);
+}
+
+.delete-button:hover {
+  background-color: var(--error);
+  color: white;
+}
+
+.export-menu {
+  position: relative;
+}
+
+.export-options {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  display: none;
+  min-width: 120px;
+}
+
+.export-menu:hover .export-options {
+  display: block;
+}
+
+.export-options button {
+  display: block;
+  width: 100%;
+  padding: 6px 12px;
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+
+.export-options button:hover {
+  background-color: var(--bg-hover);
+}
+
+.no-transcripts {
+  color: var(--text-secondary);
+  text-align: center;
+  padding: 32px;
+}
+
 .transcript-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
   padding: 12px;
   margin-bottom: 8px;
   background-color: var(--bg-primary);
   border: 1px solid var(--border-primary);
   border-radius: 2px;
   transition: all 0.1s ease;
-  cursor: pointer;
 }
 
 .transcript-item:hover {
@@ -286,8 +372,61 @@ h1 {
   border-color: var(--border-secondary);
 }
 
+.transcript-item.selected {
+  background-color: var(--bg-active);
+  border-color: var(--accent-primary);
+}
+
 .transcript-item:last-child {
   margin-bottom: 0;
+}
+
+.transcript-checkbox {
+  width: 16px;
+  height: 16px;
+  margin: 2px 0;
+  cursor: pointer;
+}
+
+.transcript-content {
+  flex: 1;
+}
+
+.transcript-item-actions {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.transcript-item:hover .transcript-item-actions {
+  opacity: 1;
+}
+
+.transcript-item-actions button {
+  padding: 4px 8px;
+  border: 1px solid var(--border-primary);
+  border-radius: 2px;
+  background-color: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+
+.transcript-item-actions button:hover {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.copy-button:hover {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+.delete-item-button:hover {
+  border-color: var(--error);
+  color: var(--error);
 }
 
 .transcript-header {

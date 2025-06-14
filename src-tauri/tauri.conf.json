@@ -14,7 +14,9 @@
       {
         "title": "Scout - Voice Transcription",
         "width": 960,
-        "height": 720
+        "height": 720,
+        "closable": true,
+        "minimizable": true
       }
     ],
     "security": {

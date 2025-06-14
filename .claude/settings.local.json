@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(rg:*)",
+      "Bash(ls:*)",
+      "Bash(pnpm tauri:*)",
+      "Bash(pnpm build:*)",
+      "Bash(cargo check:*)"
+    ],
+    "deny": []
+  }
+}

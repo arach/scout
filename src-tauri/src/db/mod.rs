@@ -129,4 +129,36 @@ impl Database {
 
         Ok(transcripts)
     }
+
+    pub async fn delete_transcript(&self, id: i64) -> Result<(), String> {
+        sqlx::query("DELETE FROM transcripts WHERE id = ?1")
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| format!("Failed to delete transcript: {}", e))?;
+        
+        Ok(())
+    }
+
+    pub async fn delete_transcripts(&self, ids: &[i64]) -> Result<(), String> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+
+        // Build placeholders for the query
+        let placeholders: Vec<String> = ids.iter().map(|_| "?".to_string()).collect();
+        let query = format!("DELETE FROM transcripts WHERE id IN ({})", placeholders.join(", "));
+        
+        let mut query_builder = sqlx::query(&query);
+        for id in ids {
+            query_builder = query_builder.bind(id);
+        }
+        
+        query_builder
+            .execute(&self.pool)
+            .await
+            .map_err(|e| format!("Failed to delete transcripts: {}", e))?;
+        
+        Ok(())
+    }
 }
