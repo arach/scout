@@ -12,9 +12,9 @@
   "app": {
     "windows": [
       {
-        "title": "Scout",
-        "width": 800,
-        "height": 600
+        "title": "Scout - Voice Transcription",
+        "width": 960,
+        "height": 720
       }
     ],
     "security": {

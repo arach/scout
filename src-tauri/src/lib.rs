@@ -15,6 +15,7 @@ pub struct AppState {
     pub database: Arc<Database>,
     pub recordings_dir: PathBuf,
     pub models_dir: PathBuf,
+    pub current_shortcut: Arc<Mutex<String>>,
 }
 
 #[tauri::command]
@@ -109,6 +110,35 @@ async fn is_vad_enabled(state: State<'_, AppState>) -> Result<bool, String> {
     Ok(recorder.is_vad_enabled())
 }
 
+#[tauri::command]
+async fn update_global_shortcut(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    shortcut: String,
+) -> Result<(), String> {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+    
+    // Get the current shortcut and unregister it
+    let global_shortcut = app.global_shortcut();
+    let current = state.current_shortcut.lock().await;
+    let _ = global_shortcut.unregister(current.as_str());
+    drop(current);
+    
+    // Clone app handle for the closure
+    let app_handle = app.clone();
+    
+    // Register the new shortcut
+    global_shortcut.on_shortcut(shortcut.as_str(), move |_app, _event, _shortcut| {
+        // Emit event to frontend to toggle recording
+        app_handle.emit("toggle-recording", ()).unwrap();
+    }).map_err(|e| format!("Failed to register shortcut '{}': {}", shortcut, e))?;
+    
+    // Update the stored shortcut
+    *state.current_shortcut.lock().await = shortcut;
+    
+    Ok(())
+}
+
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -137,6 +167,7 @@ pub fn run() {
                 database: Arc::new(database),
                 recordings_dir,
                 models_dir,
+                current_shortcut: Arc::new(Mutex::new("CmdOrCtrl+Shift+Space".to_string())),
             };
 
             app.manage(state);
@@ -159,7 +190,8 @@ pub fn run() {
             get_recent_transcripts,
             search_transcripts,
             set_vad_enabled,
-            is_vad_enabled
+            is_vad_enabled,
+            update_global_shortcut
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

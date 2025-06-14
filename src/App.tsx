@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, Fragment } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./App.css";
@@ -21,9 +21,23 @@ function App() {
   const [vadEnabled, setVadEnabled] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [hotkey, setHotkey] = useState("CmdOrCtrl+Shift+Space");
+  const [isCapturingHotkey, setIsCapturingHotkey] = useState(false);
+  const [capturedKeys, setCapturedKeys] = useState<string[]>([]);
 
   useEffect(() => {
     loadRecentTranscripts();
+    
+    // Load saved hotkey
+    const savedHotkey = localStorage.getItem('scout-hotkey');
+    if (savedHotkey) {
+      setHotkey(savedHotkey);
+      // Update the global shortcut to use the saved hotkey
+      invoke("update_global_shortcut", { shortcut: savedHotkey }).catch(err => {
+        console.error("Failed to set saved hotkey:", err);
+      });
+    }
     
     // Listen for global hotkey events
     const unsubscribe = listen('toggle-recording', () => {
@@ -150,9 +164,114 @@ function App() {
     }
   };
 
+  const updateHotkey = async (newHotkey: string) => {
+    try {
+      await invoke("update_global_shortcut", { shortcut: newHotkey });
+      setHotkey(newHotkey);
+      localStorage.setItem('scout-hotkey', newHotkey);
+    } catch (error) {
+      console.error("Failed to update hotkey:", error);
+      alert(`Failed to set hotkey: ${error}`);
+    }
+  };
+
+  const startCapturingHotkey = () => {
+    setIsCapturingHotkey(true);
+    setCapturedKeys([]);
+  };
+
+  const stopCapturingHotkey = () => {
+    setIsCapturingHotkey(false);
+    if (capturedKeys.length > 0) {
+      const newHotkey = capturedKeys.join('+');
+      setHotkey(newHotkey);
+    }
+    setCapturedKeys([]);
+  };
+
+  useEffect(() => {
+    if (!isCapturingHotkey) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      const keys: string[] = [];
+      
+      // Add modifiers
+      if (e.metaKey || e.ctrlKey) keys.push('CmdOrCtrl');
+      if (e.shiftKey) keys.push('Shift');
+      if (e.altKey) keys.push('Alt');
+      
+      // Add the main key
+      if (e.key && !['Control', 'Shift', 'Alt', 'Meta', 'Command'].includes(e.key)) {
+        let key = e.key;
+        
+        // Capitalize single letters
+        if (key.length === 1) {
+          key = key.toUpperCase();
+        }
+        
+        // Map special keys to their common names
+        const keyMap: Record<string, string> = {
+          ' ': 'Space',
+          'ArrowUp': 'Up',
+          'ArrowDown': 'Down',
+          'ArrowLeft': 'Left',
+          'ArrowRight': 'Right',
+          'Escape': 'Esc',
+          'Enter': 'Return',
+        };
+        
+        if (keyMap[key]) {
+          key = keyMap[key];
+        }
+        
+        keys.push(key);
+      }
+      
+      if (keys.length > 0) {
+        setCapturedKeys(keys);
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      // Stop capturing on key up if we have captured keys
+      if (capturedKeys.length > 0) {
+        stopCapturingHotkey();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [isCapturingHotkey, capturedKeys]);
+
   return (
     <main className="container">
-      <h1>Scout - Voice Transcription</h1>
+      <div className="header">
+        <h1>Scout Voice Transcription</h1>
+        <div className="header-controls">
+          <input
+            type="text"
+            className="search-input"
+            placeholder="Search..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyPress={(e) => e.key === 'Enter' && searchTranscripts()}
+          />
+          <button className="settings-button" onClick={() => setShowSettings(true)}>
+            Settings
+          </button>
+        </div>
+      </div>
       
       <div className="recording-section">
         <button
@@ -160,20 +279,16 @@ function App() {
           onClick={isRecording ? stopRecording : startRecording}
           disabled={isProcessing}
         >
-          {isProcessing ? '⏳ Processing...' : isRecording ? '⏹ Stop Recording' : '🎤 Start Recording'}
+          {isProcessing ? 'Processing...' : isRecording ? 'Stop Recording' : 'Start Recording'}
         </button>
-        <p className="hotkey-hint">Press Cmd+Shift+Space to toggle recording</p>
-        
-        <div className="recording-options">
-          <label className="vad-toggle">
-            <input
-              type="checkbox"
-              checked={vadEnabled}
-              onChange={toggleVAD}
-            />
-            <span>Voice Activity Detection (Auto-record when speaking)</span>
-          </label>
-        </div>
+        <p className="hotkey-hint">
+          Press {hotkey.split('+').map((key, idx) => (
+            <Fragment key={idx}>
+              {idx > 0 && ' + '}
+              <kbd>{key}</kbd>
+            </Fragment>
+          ))} to toggle recording
+        </p>
         
         {isRecording && (
           <div className="recording-indicator">
@@ -204,23 +319,12 @@ function App() {
         
         {currentTranscript && (
           <div className="current-transcript">
-            <h3>Latest Transcript:</h3>
+            <h3>Latest Transcript</h3>
             <p>{currentTranscript}</p>
           </div>
         )}
       </div>
 
-      <div className="search-section">
-        <input
-          type="text"
-          placeholder="Search transcripts..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          onKeyPress={(e) => e.key === 'Enter' && searchTranscripts()}
-        />
-        <button onClick={searchTranscripts}>Search</button>
-        <button onClick={loadRecentTranscripts}>Show Recent</button>
-      </div>
 
       <div className="transcripts-list">
         <h2>Transcripts</h2>
@@ -242,6 +346,72 @@ function App() {
           ))
         )}
       </div>
+
+      {showSettings && (
+        <div className="settings-modal">
+          <div className="settings-content">
+            <div className="settings-header">
+              <h2>Settings</h2>
+              <button className="close-button" onClick={() => setShowSettings(false)}>
+                ×
+              </button>
+            </div>
+            
+            <div className="settings-body">
+              <div className="setting-item">
+                <label>Global Hotkey</label>
+                <div className="hotkey-input-group">
+                  <div className={`hotkey-display ${isCapturingHotkey ? 'capturing' : ''}`}>
+                    {isCapturingHotkey ? (
+                      <span className="capturing-text">Press shortcut keys...</span>
+                    ) : (
+                      <span className="hotkey-keys">
+                        {hotkey.split('+').map((key, idx) => (
+                          <Fragment key={idx}>
+                            {idx > 0 && <span className="plus">+</span>}
+                            <kbd>{key}</kbd>
+                          </Fragment>
+                        ))}
+                      </span>
+                    )}
+                  </div>
+                  {isCapturingHotkey ? (
+                    <button onClick={stopCapturingHotkey} className="cancel-button">
+                      Cancel
+                    </button>
+                  ) : (
+                    <>
+                      <button onClick={startCapturingHotkey}>
+                        Capture
+                      </button>
+                      <button onClick={() => updateHotkey(hotkey)} className="apply-button">
+                        Apply
+                      </button>
+                    </>
+                  )}
+                </div>
+                <p className="setting-hint">
+                  Click "Capture" and press your desired shortcut combination
+                </p>
+              </div>
+              
+              <div className="setting-item">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={vadEnabled}
+                    onChange={toggleVAD}
+                  />
+                  Voice Activity Detection
+                </label>
+                <p className="setting-hint">
+                  Automatically start recording when you speak
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
