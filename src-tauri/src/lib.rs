@@ -127,7 +127,10 @@ async fn delete_transcript(
     state: State<'_, AppState>,
     id: i64,
 ) -> Result<(), String> {
-    state.database.delete_transcript(id).await
+    println!("Delete transcript called with id: {}", id);
+    let result = state.database.delete_transcript(id).await;
+    println!("Delete result: {:?}", result);
+    result
 }
 
 #[tauri::command]

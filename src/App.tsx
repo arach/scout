@@ -26,6 +26,7 @@ function App() {
   const [isCapturingHotkey, setIsCapturingHotkey] = useState(false);
   const [capturedKeys, setCapturedKeys] = useState<string[]>([]);
   const [selectedTranscripts, setSelectedTranscripts] = useState<Set<number>>(new Set());
+  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
 
   useEffect(() => {
     loadRecentTranscripts();
@@ -162,13 +163,13 @@ function App() {
   };
 
   const deleteTranscript = async (id: number) => {
-    if (confirm('Are you sure you want to delete this transcript?')) {
-      try {
-        await invoke("delete_transcript", { id });
-        await loadRecentTranscripts();
-      } catch (error) {
-        console.error("Failed to delete transcript:", error);
-      }
+    try {
+      await invoke("delete_transcript", { id });
+      await loadRecentTranscripts();
+      setDeleteConfirmId(null);
+    } catch (error) {
+      console.error("Failed to delete transcript:", error);
+      alert(`Failed to delete transcript: ${error}`);
     }
   };
 
@@ -472,13 +473,31 @@ function App() {
                 >
                   Copy
                 </button>
-                <button
-                  className="delete-item-button"
-                  onClick={() => deleteTranscript(transcript.id)}
-                  title="Delete transcript"
-                >
-                  Delete
-                </button>
+                {deleteConfirmId === transcript.id ? (
+                  <>
+                    <button
+                      className="delete-item-button"
+                      onClick={() => deleteTranscript(transcript.id)}
+                      style={{ backgroundColor: 'var(--error)', color: 'white' }}
+                    >
+                      Confirm
+                    </button>
+                    <button
+                      onClick={() => setDeleteConfirmId(null)}
+                      title="Cancel"
+                    >
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    className="delete-item-button"
+                    onClick={() => setDeleteConfirmId(transcript.id)}
+                    title="Delete transcript"
+                  >
+                    Delete
+                  </button>
+                )}
               </div>
             </div>
           ))
