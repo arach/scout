@@ -2,6 +2,8 @@
 
 Scout is a privacy-focused, cross-platform voice transcription application built with Tauri v2, React/TypeScript, and Rust. It provides real-time voice-to-text transcription optimized for agentic use cases.
 
+![Scout Application](screenshot.png)
+
 ## Features
 
 - **Local-First Processing**: All audio processing and transcription happens locally on your device
