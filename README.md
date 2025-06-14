@@ -42,6 +42,7 @@ scout/
 ## Prerequisites
 
 - Node.js (v16 or later)
+- pnpm (v8 or later) - Install with `npm install -g pnpm`
 - Rust (latest stable)
 - CMake (for building whisper.cpp)
 - macOS, Windows, or Linux
@@ -50,18 +51,23 @@ scout/
 
 1. Clone the repository:
 ```bash
-git clone <repository-url>
+git clone https://github.com/arach/scout.git
 cd scout
 ```
 
 2. Install dependencies:
 ```bash
-npm install
+pnpm install
 ```
 
-3. Run in development mode:
+3. Download Whisper models:
 ```bash
-npm run tauri dev
+./scripts/download-models.sh
+```
+
+4. Run in development mode:
+```bash
+pnpm tauri dev
 ```
 
 ## Building
@@ -69,7 +75,7 @@ npm run tauri dev
 To build for production:
 
 ```bash
-npm run tauri build
+pnpm tauri build
 ```
 
 This will create platform-specific binaries in `src-tauri/target/release/bundle/`.
@@ -105,7 +111,7 @@ Features in progress:
 
 ```bash
 # Frontend tests
-npm test
+pnpm test
 
 # Rust tests
 cd src-tauri
