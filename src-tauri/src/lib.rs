@@ -13,6 +13,7 @@ pub struct AppState {
     pub recorder: Arc<Mutex<AudioRecorder>>,
     pub database: Arc<Database>,
     pub recordings_dir: PathBuf,
+    pub models_dir: PathBuf,
 }
 
 #[tauri::command]
@@ -44,11 +45,18 @@ async fn transcribe_audio(
     state: State<'_, AppState>,
     audio_filename: String,
 ) -> Result<String, String> {
-    let _audio_path = state.recordings_dir.join(audio_filename);
+    let audio_path = state.recordings_dir.join(audio_filename);
     
-    // TODO: Implement transcription with whisper.cpp
-    // For now, return a placeholder
-    Ok("Transcription will be implemented with whisper.cpp".to_string())
+    // Get the model path - using base.en model for good balance
+    let model_path = state.models_dir.join("ggml-base.en.bin");
+    
+    if !model_path.exists() {
+        return Err("Whisper model not found. Please run scripts/download-models.sh".to_string());
+    }
+    
+    // Create transcriber and transcribe
+    let transcriber = transcription::Transcriber::new(&model_path)?;
+    transcriber.transcribe(&audio_path)
 }
 
 #[tauri::command]
@@ -94,13 +102,26 @@ pub fn run() {
             let mut recorder = AudioRecorder::new();
             recorder.init();
             
+            // Get the base directory of the app
+            let base_dir = std::env::current_dir().expect("Failed to get current directory");
+            let models_dir = base_dir.join("models");
+            
             let state = AppState {
                 recorder: Arc::new(Mutex::new(recorder)),
                 database: Arc::new(database),
                 recordings_dir,
+                models_dir,
             };
 
             app.manage(state);
+            
+            // Set up global hotkey
+            let app_handle = app.app_handle().clone();
+            app.global_shortcut().on_shortcut("CmdOrCtrl+Shift+Space", move |_app, _event| {
+                // Emit event to frontend to toggle recording
+                app_handle.emit("toggle-recording", ()).unwrap();
+            }).unwrap();
+            
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

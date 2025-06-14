@@ -75,6 +75,12 @@ h1 {
   gap: 0.5rem;
 }
 
+.hotkey-hint {
+  margin-top: 0.5rem;
+  font-size: 0.9rem;
+  color: #666;
+}
+
 .recording-dot {
   width: 10px;
   height: 10px;
@@ -194,5 +200,9 @@ h1 {
 
   .transcript-header {
     color: #aaa;
+  }
+
+  .hotkey-hint {
+    color: #999;
   }
 }

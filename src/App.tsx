@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import "./App.css";
 
 interface Transcript {
@@ -20,7 +21,20 @@ function App() {
 
   useEffect(() => {
     loadRecentTranscripts();
-  }, []);
+    
+    // Listen for global hotkey events
+    const unsubscribe = listen('toggle-recording', () => {
+      if (isRecording) {
+        stopRecording();
+      } else {
+        startRecording();
+      }
+    });
+    
+    return () => {
+      unsubscribe.then(fn => fn());
+    };
+  }, [isRecording]);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -110,6 +124,7 @@ function App() {
         >
           {isRecording ? '⏹ Stop Recording' : '🎤 Start Recording'}
         </button>
+        <p className="hotkey-hint">Press Cmd+Shift+Space to toggle recording</p>
         
         {isRecording && (
           <div className="recording-indicator">
