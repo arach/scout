@@ -12,18 +12,21 @@
 }
 
 .overlay-content {
-  background: rgba(30, 30, 30, 0.98);
-  backdrop-filter: blur(10px);
-  border: 2px solid rgba(255, 68, 68, 0.5);
-  border-radius: 12px;
-  padding: 12px 16px;
+  background: rgba(220, 38, 38, 0.95);
+  backdrop-filter: blur(12px);
+  border: 3px solid rgba(255, 255, 255, 0.9);
+  border-radius: 16px;
+  padding: 16px 24px;
   display: flex;
   align-items: center;
-  gap: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 20px rgba(255, 68, 68, 0.2);
+  gap: 16px;
+  box-shadow: 
+    0 10px 40px rgba(220, 38, 38, 0.8),
+    0 0 60px rgba(255, 68, 68, 0.6),
+    inset 0 0 20px rgba(255, 255, 255, 0.2);
   pointer-events: all;
   transition: all 0.3s ease;
-  animation: slideIn 0.3s ease-out;
+  animation: slideIn 0.4s ease-out, pulse-glow 2s ease-in-out infinite;
 }
 
 @keyframes slideIn {
@@ -49,12 +52,15 @@
 }
 
 .recording-dot {
-  width: 14px;
-  height: 14px;
-  background-color: #ff4444;
+  width: 20px;
+  height: 20px;
+  background-color: #ffffff;
   border-radius: 50%;
   animation: pulse 1.5s ease-in-out infinite;
-  box-shadow: 0 0 20px rgba(255, 68, 68, 0.8), 0 0 40px rgba(255, 68, 68, 0.4);
+  box-shadow: 
+    0 0 30px rgba(255, 255, 255, 0.9),
+    0 0 50px rgba(255, 255, 255, 0.6),
+    inset 0 0 10px rgba(255, 68, 68, 0.5);
 }
 
 @keyframes pulse {
@@ -68,20 +74,38 @@
   }
 }
 
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 
+      0 10px 40px rgba(220, 38, 38, 0.8),
+      0 0 60px rgba(255, 68, 68, 0.6),
+      inset 0 0 20px rgba(255, 255, 255, 0.2);
+  }
+  50% {
+    box-shadow: 
+      0 15px 50px rgba(220, 38, 38, 1),
+      0 0 80px rgba(255, 68, 68, 0.8),
+      inset 0 0 30px rgba(255, 255, 255, 0.3);
+  }
+}
+
 .recording-text {
   color: #ffffff;
-  font-size: 14px;
-  font-weight: 500;
-  letter-spacing: 0.5px;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
 .duration {
-  color: #cccccc;
-  font-size: 16px;
+  color: #ffffff;
+  font-size: 20px;
   font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
-  font-weight: 500;
-  min-width: 50px;
+  font-weight: 700;
+  min-width: 60px;
   text-align: center;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
 .overlay-actions {
@@ -119,38 +143,4 @@
   background: rgba(255, 68, 68, 0.3);
 }
 
-/* Dark mode is default since overlay should be unobtrusive */
-@media (prefers-color-scheme: light) {
-  .overlay-content {
-    background: rgba(255, 255, 255, 0.95);
-    border: 1px solid rgba(0, 0, 0, 0.1);
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-  }
-  
-  .recording-text {
-    color: #333333;
-  }
-  
-  .duration {
-    color: #666666;
-  }
-  
-  .minimize-btn,
-  .close-btn,
-  .expand-btn {
-    background: rgba(0, 0, 0, 0.05);
-    color: #666666;
-  }
-  
-  .minimize-btn:hover,
-  .close-btn:hover,
-  .expand-btn:hover {
-    background: rgba(0, 0, 0, 0.1);
-    color: #333333;
-  }
-  
-  .close-btn:hover {
-    background: rgba(255, 68, 68, 0.2);
-    color: #ff4444;
-  }
-}
+/* Keep red theme in both light and dark modes for visibility */

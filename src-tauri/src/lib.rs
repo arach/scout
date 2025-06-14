@@ -38,36 +38,29 @@ async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> R
 
     // Show overlay window and emit recording state
     if let Some(overlay_window) = app.get_webview_window("overlay") {
-        // Position window in top-center before showing
-        use tauri::{LogicalPosition, Position};
-        
-        // First, show the window (it needs to be visible to position correctly on some systems)
+        // Show the window first (it will be centered due to center: true in config)
         let _ = overlay_window.show();
         
-        // Position window after a small delay to ensure it's ready
+        // Then adjust position to top-center
+        use tauri::{LogicalPosition, Position};
+        
+        // Small delay to ensure window is shown
         let overlay_for_positioning = overlay_window.clone();
         tauri::async_runtime::spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
             
-            use tauri::{LogicalPosition, Position};
-            if let Some(monitor) = overlay_for_positioning.primary_monitor().ok().flatten() {
-                let monitor_size = monitor.size();
-                let scale_factor = monitor.scale_factor();
-                let window_width = 280.0;
-                let padding = 20.0;
+            if let Ok(Some(pos)) = overlay_for_positioning.outer_position() {
+                // Get current x position (which should be centered)
+                let current_x = pos.x;
+                let new_y = 40.0; // 40px from top
                 
-                // Position in top-center with padding
-                let screen_width = monitor_size.width as f64 / scale_factor;
-                let x = (screen_width - window_width) / 2.0;
-                let y = padding;
+                println!("Moving overlay from current position to x: {}, y: {}", current_x, new_y);
                 
-                println!("Positioning overlay window at x: {}, y: {} (screen width: {})", x, y, screen_width);
-                
-                if let Err(e) = overlay_for_positioning.set_position(Position::Logical(LogicalPosition::new(x, y))) {
-                    eprintln!("Failed to position overlay window: {}", e);
-                }
-            } else {
-                eprintln!("Failed to get primary monitor for overlay positioning");
+                // Keep x position but move to top
+                let _ = overlay_for_positioning.set_position(Position::Logical(LogicalPosition::new(
+                    current_x as f64,
+                    new_y
+                )));
             }
         });
         let _ = overlay_window.emit("recording-state-update", serde_json::json!({
@@ -122,6 +115,13 @@ async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Re
             "isRecording": false,
             "duration": 0
         }));
+        
+        // Hide the overlay after a short delay
+        let overlay_to_hide = overlay_window.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+            let _ = overlay_to_hide.hide();
+        });
     }
     
     Ok(())
