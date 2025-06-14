@@ -19,6 +19,8 @@ function App() {
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [vadEnabled, setVadEnabled] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
 
   useEffect(() => {
     loadRecentTranscripts();
@@ -74,25 +76,49 @@ function App() {
     try {
       await invoke("stop_recording");
       setIsRecording(false);
+      setIsProcessing(true);
       
       if (currentRecordingFile) {
         // Transcribe the audio
-        const transcript = await invoke<string>("transcribe_audio", { 
-          audioFilename: currentRecordingFile 
-        });
-        setCurrentTranscript(transcript);
+        let transcriptText = "";
+        try {
+          const transcript = await invoke<string>("transcribe_audio", { 
+            audioFilename: currentRecordingFile 
+          });
+          
+          if (!transcript || transcript.trim() === "") {
+            transcriptText = "(No speech detected in recording)";
+          } else {
+            transcriptText = transcript;
+          }
+          setCurrentTranscript(transcriptText);
+        } catch (transcriptionError) {
+          console.error("Transcription failed:", transcriptionError);
+          transcriptText = `Transcription error: ${transcriptionError}`;
+          setCurrentTranscript(transcriptText);
+          setIsProcessing(false);
+          return; // Don't continue if transcription failed
+        }
         
-        // Save the transcript
-        await invoke("save_transcript", { 
-          text: transcript, 
-          durationMs: recordingDuration 
-        });
+        // Save the transcript only if we have valid content
+        if (transcriptText && transcriptText !== "(No speech detected in recording)" && !transcriptText.startsWith("Transcription error:")) {
+          await invoke("save_transcript", { 
+            text: transcriptText, 
+            durationMs: recordingDuration 
+          });
+        }
         
         // Reload transcripts
         await loadRecentTranscripts();
+        
+        // Show success feedback
+        setIsProcessing(false);
+        setShowSuccess(true);
+        setTimeout(() => setShowSuccess(false), 2000);
       }
     } catch (error) {
       console.error("Failed to stop recording:", error);
+      setIsProcessing(false);
     }
   };
 
@@ -130,10 +156,11 @@ function App() {
       
       <div className="recording-section">
         <button
-          className={`record-button ${isRecording ? 'recording' : ''}`}
+          className={`record-button ${isRecording ? 'recording' : ''} ${isProcessing ? 'processing' : ''}`}
           onClick={isRecording ? stopRecording : startRecording}
+          disabled={isProcessing}
         >
-          {isRecording ? '⏹ Stop Recording' : '🎤 Start Recording'}
+          {isProcessing ? '⏳ Processing...' : isRecording ? '⏹ Stop Recording' : '🎤 Start Recording'}
         </button>
         <p className="hotkey-hint">Press Cmd+Shift+Space to toggle recording</p>
         
@@ -150,8 +177,28 @@ function App() {
         
         {isRecording && (
           <div className="recording-indicator">
-            <span className="recording-dot"></span>
-            Recording... {formatDuration(recordingDuration)}
+            <div className="waveform">
+              <span className="wave"></span>
+              <span className="wave"></span>
+              <span className="wave"></span>
+              <span className="wave"></span>
+              <span className="wave"></span>
+            </div>
+            <span>Recording... {formatDuration(recordingDuration)}</span>
+          </div>
+        )}
+        
+        {isProcessing && (
+          <div className="processing-indicator">
+            <div className="spinner"></div>
+            <span>Transcribing your audio...</span>
+          </div>
+        )}
+        
+        {showSuccess && (
+          <div className="success-indicator">
+            <span className="checkmark">✓</span>
+            <span>Recording saved successfully!</span>
           </div>
         )}
         

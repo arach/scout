@@ -34,12 +34,14 @@ impl Transcriber {
 
         // Run the transcription
         let mut state = self.context.create_state().map_err(|e| format!("Failed to create state: {}", e))?;
+        
         state
             .full(params, &audio_data)
             .map_err(|e| format!("Failed to transcribe: {}", e))?;
 
         // Get the transcribed text
         let num_segments = state.full_n_segments().map_err(|e| format!("Failed to get segments: {}", e))?;
+        
         let mut transcription = String::new();
 
         for i in 0..num_segments {

@@ -32,7 +32,12 @@ async fn start_recording(state: State<'_, AppState>) -> Result<String, String> {
 #[tauri::command]
 async fn stop_recording(state: State<'_, AppState>) -> Result<(), String> {
     let recorder = state.recorder.lock().await;
-    recorder.stop_recording()
+    recorder.stop_recording()?;
+    
+    // Give the worker thread time to finalize the file
+    tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+    
+    Ok(())
 }
 
 #[tauri::command]
@@ -46,7 +51,12 @@ async fn transcribe_audio(
     state: State<'_, AppState>,
     audio_filename: String,
 ) -> Result<String, String> {
-    let audio_path = state.recordings_dir.join(audio_filename);
+    let audio_path = state.recordings_dir.join(&audio_filename);
+    
+    // Check if audio file exists
+    if !audio_path.exists() {
+        return Err(format!("Audio file not found at path: {:?}", audio_path));
+    }
     
     // Get the model path - using base.en model for good balance
     let model_path = state.models_dir.join("ggml-base.en.bin");
@@ -57,7 +67,9 @@ async fn transcribe_audio(
     
     // Create transcriber and transcribe
     let transcriber = transcription::Transcriber::new(&model_path)?;
-    transcriber.transcribe(&audio_path)
+    let result = transcriber.transcribe(&audio_path)?;
+    
+    Ok(result)
 }
 
 #[tauri::command]
@@ -96,6 +108,7 @@ async fn is_vad_enabled(state: State<'_, AppState>) -> Result<bool, String> {
     let recorder = state.recorder.lock().await;
     Ok(recorder.is_vad_enabled())
 }
+
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

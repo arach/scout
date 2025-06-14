@@ -34,6 +34,7 @@ impl Database {
             .await
             .map_err(|e| format!("Failed to connect to database: {}", e))?;
 
+        
         // Create tables manually for now
         sqlx::query(
             r#"
@@ -41,7 +42,7 @@ impl Database {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 text TEXT NOT NULL,
                 duration_ms INTEGER NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_at TEXT DEFAULT (datetime('now')),
                 metadata TEXT
             );
             

@@ -1,10 +1,12 @@
 use webrtc_vad::{Vad, VadMode};
 
+#[allow(dead_code)]
 pub struct VoiceActivityDetector {
     vad: Vad,
     sample_rate: u32,
 }
 
+#[allow(dead_code)]
 impl VoiceActivityDetector {
     pub fn new(sample_rate: u32) -> Result<Self, String> {
         let mut vad = Vad::new();

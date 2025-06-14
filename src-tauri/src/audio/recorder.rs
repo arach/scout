@@ -123,20 +123,32 @@ impl AudioRecorderWorker {
     fn start_recording(&mut self, output_path: &str) -> Result<(), String> {
         use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
+
         let host = cpal::default_host();
+        
+        
         let device = host
             .default_input_device()
-            .ok_or("No input device available")?;
+            .ok_or("No input device available - please check microphone permissions")?;
+
 
         let config = device
             .default_input_config()
             .map_err(|e| format!("Failed to get input config: {}", e))?;
 
+
+        // Match the WAV spec to the actual audio format
+        let (bits_per_sample, sample_format) = match config.sample_format() {
+            cpal::SampleFormat::I16 => (16, hound::SampleFormat::Int),
+            cpal::SampleFormat::F32 => (32, hound::SampleFormat::Float),
+            _ => return Err("Unsupported sample format".to_string()),
+        };
+        
         let spec = hound::WavSpec {
             channels: config.channels(),
             sample_rate: config.sample_rate().0,
-            bits_per_sample: 16,
-            sample_format: hound::SampleFormat::Int,
+            bits_per_sample,
+            sample_format,
         };
 
         // Initialize VAD if enabled
@@ -146,6 +158,7 @@ impl AudioRecorderWorker {
 
         let writer = hound::WavWriter::create(output_path, spec)
             .map_err(|e| format!("Failed to create WAV writer: {}", e))?;
+
 
         let writer = Arc::new(Mutex::new(Some(writer)));
         self.writer = writer.clone();
@@ -176,10 +189,13 @@ impl AudioRecorderWorker {
             _ => return Err("Unsupported sample format".to_string()),
         }?;
 
+        
         stream
             .play()
             .map_err(|e| format!("Failed to play stream: {}", e))?;
 
+        println!("Recording started");
+        
         self.stream = Some(stream);
         Ok(())
     }
@@ -187,9 +203,15 @@ impl AudioRecorderWorker {
     fn stop_recording(&mut self) -> Result<(), String> {
         *self.is_recording.lock().unwrap() = false;
 
+        // Give the stream a moment to process any remaining audio
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
         if let Some(stream) = self.stream.take() {
             drop(stream);
         }
+
+        // Add another small delay to ensure all samples are written
+        std::thread::sleep(std::time::Duration::from_millis(100));
 
         if let Some(writer) = self.writer.lock().unwrap().take() {
             writer
@@ -197,6 +219,7 @@ impl AudioRecorderWorker {
                 .map_err(|e| format!("Failed to finalize recording: {}", e))?;
         }
 
+        println!("Recording stopped");
         Ok(())
     }
 

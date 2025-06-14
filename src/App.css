@@ -72,7 +72,7 @@ h1 {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
+  gap: 1rem;
 }
 
 .hotkey-hint {
@@ -220,5 +220,140 @@ h1 {
 
   .hotkey-hint {
     color: #999;
+  }
+}
+
+/* Recording waveform animation */
+.waveform {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-right: 0.5rem;
+}
+
+.wave {
+  width: 3px;
+  height: 20px;
+  background-color: #e74c3c;
+  border-radius: 2px;
+  animation: wave 1.2s ease-in-out infinite;
+}
+
+.wave:nth-child(1) { animation-delay: 0s; }
+.wave:nth-child(2) { animation-delay: 0.1s; }
+.wave:nth-child(3) { animation-delay: 0.2s; }
+.wave:nth-child(4) { animation-delay: 0.3s; }
+.wave:nth-child(5) { animation-delay: 0.4s; }
+
+@keyframes wave {
+  0%, 100% {
+    transform: scaleY(0.5);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+/* Processing indicator */
+.processing-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+  color: #4a90e2;
+  font-size: 1.1rem;
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid #e0e0e0;
+  border-top-color: #4a90e2;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Success indicator */
+.success-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 1.5rem;
+  color: #27ae60;
+  font-size: 1.1rem;
+  animation: fadeInScale 0.4s ease-out;
+}
+
+.checkmark {
+  font-size: 1.5rem;
+  color: #27ae60;
+  animation: checkmarkPop 0.4s ease-out;
+}
+
+@keyframes fadeInScale {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes checkmarkPop {
+  0% {
+    transform: scale(0);
+  }
+  70% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Processing button state */
+.record-button.processing {
+  background-color: #95a5a6;
+  cursor: not-allowed;
+  opacity: 0.8;
+}
+
+.record-button.processing:hover {
+  background-color: #95a5a6;
+  transform: none;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+/* Dark mode additions */
+@media (prefers-color-scheme: dark) {
+  .processing-indicator {
+    color: #5dade2;
+  }
+  
+  .spinner {
+    border-color: #444;
+    border-top-color: #5dade2;
+  }
+  
+  .success-indicator {
+    color: #2ecc71;
+  }
+  
+  .checkmark {
+    color: #2ecc71;
+  }
+  
+  .wave {
+    background-color: #ec7063;
   }
 }
