@@ -39,10 +39,38 @@ function App() {
     // Load saved hotkey
     const savedHotkey = localStorage.getItem('scout-hotkey');
     if (savedHotkey) {
-      setHotkey(savedHotkey);
+      // Validate and potentially fix the saved hotkey
+      let validHotkey = savedHotkey;
+      
+      // Fix common issues with saved hotkeys
+      if (savedHotkey.includes('Cmd+Ctrl')) {
+        validHotkey = savedHotkey.replace('Cmd+Ctrl', 'CmdOrCtrl');
+      }
+      if (validHotkey.includes('down')) {
+        validHotkey = validHotkey.replace('down', 'Down');
+      }
+      if (validHotkey.includes('up')) {
+        validHotkey = validHotkey.replace('up', 'Up');
+      }
+      if (validHotkey.includes('left')) {
+        validHotkey = validHotkey.replace('left', 'Left');
+      }
+      if (validHotkey.includes('right')) {
+        validHotkey = validHotkey.replace('right', 'Right');
+      }
+      
+      setHotkey(validHotkey);
+      
       // Update the global shortcut to use the saved hotkey
-      invoke("update_global_shortcut", { shortcut: savedHotkey }).catch(err => {
+      invoke("update_global_shortcut", { shortcut: validHotkey }).catch(err => {
         console.error("Failed to set saved hotkey:", err);
+        // Reset to default on error
+        const defaultHotkey = "CmdOrCtrl+Shift+Space";
+        setHotkey(defaultHotkey);
+        localStorage.setItem('scout-hotkey', defaultHotkey);
+        invoke("update_global_shortcut", { shortcut: defaultHotkey }).catch(err2 => {
+          console.error("Failed to set default hotkey:", err2);
+        });
       });
     }
     
