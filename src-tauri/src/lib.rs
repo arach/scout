@@ -1,11 +1,19 @@
 mod audio;
 mod db;
 mod transcription;
+mod recording_progress;
+mod recording_workflow;
+mod processing_queue;
+mod overlay_position;
 #[cfg(target_os = "macos")]
 mod macos;
 
 use audio::AudioRecorder;
 use db::Database;
+use overlay_position::OverlayPosition;
+use processing_queue::{ProcessingQueue, ProcessingStatus};
+use recording_progress::ProgressTracker;
+use recording_workflow::RecordingWorkflow;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,18 +30,38 @@ pub struct AppState {
     pub models_dir: PathBuf,
     pub current_shortcut: Arc<Mutex<String>>,
     pub is_recording_overlay_active: Arc<AtomicBool>,
+    pub current_recording_file: Arc<Mutex<Option<String>>>,
+    pub progress_tracker: Arc<ProgressTracker>,
+    pub recording_workflow: Arc<RecordingWorkflow>,
+    pub processing_queue: Arc<ProcessingQueue>,
+    pub overlay_position: Arc<Mutex<OverlayPosition>>,
     #[cfg(target_os = "macos")]
     pub native_overlay: Arc<Mutex<macos::MacOSOverlay>>,
 }
 
 #[tauri::command]
 async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<String, String> {
-    let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
-    let filename = format!("recording_{}.wav", timestamp);
-    let path = state.recordings_dir.join(&filename);
-
+    // Check if already recording
+    if state.progress_tracker.is_busy() {
+        println!("WARNING: Attempted to start recording while already recording");
+        return Err("Recording already in progress".to_string());
+    }
+    
+    // Double-check with the audio recorder
     let recorder = state.recorder.lock().await;
-    recorder.start_recording(&path)?;
+    if recorder.is_recording() {
+        drop(recorder);
+        println!("WARNING: Audio recorder is already recording");
+        return Err("Audio recorder is already active".to_string());
+    }
+    drop(recorder);
+    // Use the recording workflow to start recording
+    let filename = state.recording_workflow.start_recording().await?;
+    
+    // Progress is already updated by recording_workflow, no need to update again
+    
+    // Store the current recording filename
+    *state.current_recording_file.lock().await = Some(filename.clone());
 
     // Update tray menu item text
     if let Some(menu_item) = app.try_state::<MenuItem<tauri::Wry>>() {
@@ -88,28 +116,44 @@ async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> R
 
 #[tauri::command]
 async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<(), String> {
-    let recorder = state.recorder.lock().await;
-    recorder.stop_recording()?;
     
-    // Give the worker thread more time to finalize the file and write all data
-    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    // Use the recording workflow to stop recording
+    let _result = state.recording_workflow.stop_recording().await?;
+    
+    // Get the filename for background processing
+    let filename = state.current_recording_file.lock().await.take();
+    
+    // Spawn a background task to ensure file is ready
+    if let Some(filename) = filename {
+        let recordings_dir = state.recordings_dir.clone();
+        
+        tokio::spawn(async move {
+            // Wait for the audio file to be fully written
+            tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+            
+            // Verify file exists and has content
+            let file_path = recordings_dir.join(&filename);
+            match tokio::fs::metadata(&file_path).await {
+                Ok(metadata) => {
+                    println!("Recording file {} ready, size: {} bytes", filename, metadata.len());
+                }
+                Err(e) => {
+                    eprintln!("Failed to verify recording file: {}", e);
+                }
+            }
+        });
+    }
     
     // Update tray menu item text
     if let Some(menu_item) = app.try_state::<MenuItem<tauri::Wry>>() {
         let _ = menu_item.set_text("Start Recording");
     }
     
-    // Stop recording overlay updates and hide window
+    // Stop recording overlay updates
     state.is_recording_overlay_active.store(false, Ordering::Relaxed);
     
-    // Hide native overlay on macOS
-    #[cfg(target_os = "macos")]
-    {
-        let overlay = state.native_overlay.lock().await;
-        // Add a short delay before hiding
-        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
-        overlay.hide();
-    }
+    // Don't immediately hide overlay - let the progress state handle it
+    // The overlay will be minimized when we reach Complete or Failed state
     
     // Fallback to Tauri overlay on other platforms
     #[cfg(not(target_os = "macos"))]
@@ -137,6 +181,12 @@ async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Re
 async fn is_recording(state: State<'_, AppState>) -> Result<bool, String> {
     let recorder = state.recorder.lock().await;
     Ok(recorder.is_recording())
+}
+
+#[tauri::command]
+async fn get_current_recording_file(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    let file = state.current_recording_file.lock().await;
+    Ok(file.clone())
 }
 
 #[tauri::command]
@@ -202,6 +252,53 @@ async fn search_transcripts(
 async fn set_vad_enabled(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
     let recorder = state.recorder.lock().await;
     recorder.set_vad_enabled(enabled)
+}
+
+#[tauri::command]
+async fn subscribe_to_progress(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<(), String> {
+    let mut receiver = state.progress_tracker.subscribe();
+    
+    tauri::async_runtime::spawn(async move {
+        while receiver.changed().await.is_ok() {
+            let progress = receiver.borrow().clone();
+            let _ = app.emit("recording-progress", &progress);
+        }
+    });
+    
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_overlay_position(state: State<'_, AppState>) -> Result<String, String> {
+    let position = state.overlay_position.lock().await;
+    Ok(position.to_string().to_string())
+}
+
+#[tauri::command]
+async fn set_overlay_position(state: State<'_, AppState>, position: String) -> Result<(), String> {
+    let overlay_position = match position.as_str() {
+        "top-left" => OverlayPosition::TopLeft,
+        "top-center" => OverlayPosition::TopCenter,
+        "top-right" => OverlayPosition::TopRight,
+        "bottom-left" => OverlayPosition::BottomLeft,
+        "bottom-center" => OverlayPosition::BottomCenter,
+        "bottom-right" => OverlayPosition::BottomRight,
+        "left-center" => OverlayPosition::LeftCenter,
+        "right-center" => OverlayPosition::RightCenter,
+        _ => return Err("Invalid overlay position".to_string()),
+    };
+    
+    // Update the stored position
+    *state.overlay_position.lock().await = overlay_position;
+    
+    // Update the native overlay position
+    #[cfg(target_os = "macos")]
+    {
+        let overlay = state.native_overlay.lock().await;
+        overlay.set_position(&position);
+    }
+    
+    Ok(())
 }
 
 #[tauri::command]
@@ -275,6 +372,12 @@ fn format_duration(ms: i32) -> String {
 }
 
 #[tauri::command]
+async fn get_processing_status() -> Result<Vec<String>, String> {
+    // This could be enhanced to return actual queue status
+    Ok(vec!["Processing queue is active".to_string()])
+}
+
+#[tauri::command]
 async fn update_global_shortcut(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
@@ -326,28 +429,131 @@ pub fn run() {
             let base_dir = std::env::current_dir().expect("Failed to get current directory");
             let models_dir = base_dir.join("models");
             
+            // Initialize the native overlay (will show minimal pill immediately)
+            #[cfg(target_os = "macos")]
+            let native_overlay = Arc::new(Mutex::new(macos::MacOSOverlay::new()));
+            
+            // Force show the overlay pill after a short delay
+            #[cfg(target_os = "macos")]
+            {
+                let overlay_clone = native_overlay.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
+                    let overlay = overlay_clone.lock().await;
+                    println!("Ensuring overlay is visible on startup");
+                    // Set default position
+                    overlay.set_position("top-center");
+                    overlay.ensure_visible();
+                });
+            }
+            
+            let recorder_arc = Arc::new(Mutex::new(recorder));
+            let database_arc = Arc::new(database);
+            let progress_tracker = Arc::new(ProgressTracker::new());
+            let progress_tracker_clone = progress_tracker.clone();
+            
+            // Create the processing queue
+            let (processing_queue, mut processing_status_rx) = ProcessingQueue::new(
+                database_arc.clone(),
+                models_dir.clone(),
+            );
+            let processing_queue_arc = Arc::new(processing_queue);
+            
+            let recording_workflow = Arc::new(RecordingWorkflow::new(
+                recorder_arc.clone(),
+                recordings_dir.clone(),
+                progress_tracker.clone(),
+                processing_queue_arc.clone(),
+            ));
+            
             let state = AppState {
-                recorder: Arc::new(Mutex::new(recorder)),
-                database: Arc::new(database),
+                recorder: recorder_arc,
+                database: database_arc,
                 recordings_dir,
                 models_dir,
                 current_shortcut: Arc::new(Mutex::new("CmdOrCtrl+Shift+Space".to_string())),
                 is_recording_overlay_active: Arc::new(AtomicBool::new(false)),
+                current_recording_file: Arc::new(Mutex::new(None)),
+                progress_tracker,
+                recording_workflow,
+                processing_queue: processing_queue_arc,
+                overlay_position: Arc::new(Mutex::new(OverlayPosition::default())),
                 #[cfg(target_os = "macos")]
-                native_overlay: Arc::new(Mutex::new(macos::MacOSOverlay::new())),
+                native_overlay: native_overlay.clone(),
             };
-
+            
             app.manage(state);
+            
+            // Set up progress tracking listener for macOS overlay
+            #[cfg(target_os = "macos")]
+            {
+                let overlay_clone = native_overlay.clone();
+                let mut receiver = progress_tracker_clone.subscribe();
+                
+                tauri::async_runtime::spawn(async move {
+                    while receiver.changed().await.is_ok() {
+                        let progress = receiver.borrow().clone();
+                        let overlay = overlay_clone.lock().await;
+                        
+                        match progress {
+                            recording_progress::RecordingProgress::Recording { .. } => {
+                                overlay.update_progress("recording");
+                            }
+                            recording_progress::RecordingProgress::Stopping { .. } => {
+                                // Immediately hide overlay when stopping
+                                overlay.hide();
+                            }
+                            recording_progress::RecordingProgress::Idle => {
+                                // Already hidden, just update state
+                                overlay.update_progress("idle");
+                            }
+                        }
+                    }
+                });
+            }
+            
+            // Set up processing status monitoring
+            {
+                let app_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    while let Some(status) = processing_status_rx.recv().await {
+                        // Emit processing status to frontend
+                        let _ = app_handle.emit("processing-status", &status);
+                        
+                        // Log the status
+                        match &status {
+                            ProcessingStatus::Queued { position } => {
+                                println!("Processing queued at position {}", position);
+                            }
+                            ProcessingStatus::Processing { filename } => {
+                                println!("Processing file: {}", filename);
+                            }
+                            ProcessingStatus::Transcribing { filename } => {
+                                println!("Transcribing file: {}", filename);
+                            }
+                            ProcessingStatus::Complete { filename, transcript } => {
+                                println!("Transcription complete for {}: {} chars", filename, transcript.len());
+                            }
+                            ProcessingStatus::Failed { filename, error } => {
+                                eprintln!("Processing failed for {}: {}", filename, error);
+                            }
+                        }
+                    }
+                });
+            }
             
             // Setup overlay window positioning
             // We'll position it when it's shown in the start_recording command
             
             // Set up global hotkey
             let app_handle = app.app_handle().clone();
-            app.global_shortcut().on_shortcut("CmdOrCtrl+Shift+Space", move |_app, _event, _shortcut| {
+            if let Err(e) = app.global_shortcut().on_shortcut("CmdOrCtrl+Shift+Space", move |_app, _event, _shortcut| {
                 // Emit event to frontend to toggle recording
+                println!("Global shortcut triggered");
                 app_handle.emit("toggle-recording", ()).unwrap();
-            }).unwrap();
+            }) {
+                eprintln!("Failed to register default global shortcut: {:?}", e);
+            }
             
             // Set up system tray
             let toggle_recording_item = MenuItemBuilder::with_id("toggle_recording", "Start Recording")
@@ -443,6 +649,7 @@ pub fn run() {
             start_recording,
             stop_recording,
             is_recording,
+            get_current_recording_file,
             transcribe_audio,
             save_transcript,
             get_recent_transcripts,
@@ -452,7 +659,11 @@ pub fn run() {
             delete_transcript,
             delete_transcripts,
             export_transcripts,
-            update_global_shortcut
+            update_global_shortcut,
+            subscribe_to_progress,
+            get_overlay_position,
+            set_overlay_position,
+            get_processing_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,4 +1,4 @@
-import { useState, useEffect, Fragment } from "react";
+import { useState, useEffect, Fragment, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./App.css";
@@ -32,61 +32,156 @@ function App() {
     transcriptText: string;
     isBulk: boolean;
   }>({ show: false, transcriptId: null, transcriptText: "", isBulk: false });
+  const lastToggleTimeRef = useRef(0);
+  const [hotkeyUpdateStatus, setHotkeyUpdateStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const isStoppingRef = useRef(false);
+  const [overlayPosition, setOverlayPosition] = useState<string>('top-center');
 
   useEffect(() => {
     loadRecentTranscripts();
     
-    // Load saved hotkey
-    const savedHotkey = localStorage.getItem('scout-hotkey');
+    // Subscribe to recording progress updates
+    invoke('subscribe_to_progress').catch(console.error);
+    
+    // Load saved overlay position
+    const savedPosition = localStorage.getItem('scout-overlay-position');
+    if (savedPosition) {
+      setOverlayPosition(savedPosition);
+      invoke('set_overlay_position', { position: savedPosition }).catch(console.error);
+    } else {
+      // Get current position from backend
+      invoke<string>('get_overlay_position').then(pos => {
+        setOverlayPosition(pos);
+      }).catch(console.error);
+    }
+    
+    // Check if this is the first time the app has ever been launched
+    const hasInitialized = localStorage.getItem('scout-initialized');
+    let savedHotkey = localStorage.getItem('scout-hotkey');
+    
+    // Clean up any invalid shortcuts
     if (savedHotkey) {
-      // Validate and potentially fix the saved hotkey
-      let validHotkey = savedHotkey;
-      
-      // Fix common issues with saved hotkeys
-      if (savedHotkey.includes('Cmd+Ctrl')) {
-        validHotkey = savedHotkey.replace('Cmd+Ctrl', 'CmdOrCtrl');
-      }
-      if (validHotkey.includes('down')) {
-        validHotkey = validHotkey.replace('down', 'Down');
-      }
-      if (validHotkey.includes('up')) {
-        validHotkey = validHotkey.replace('up', 'Up');
-      }
-      if (validHotkey.includes('left')) {
-        validHotkey = validHotkey.replace('left', 'Left');
-      }
-      if (validHotkey.includes('right')) {
-        validHotkey = validHotkey.replace('right', 'Right');
+      // Fix redundant CmdOrCtrl+Ctrl
+      if (savedHotkey.includes('CmdOrCtrl') && savedHotkey.includes('Ctrl')) {
+        savedHotkey = savedHotkey.replace(/\+Ctrl/g, '').replace(/Ctrl\+/g, '');
       }
       
-      setHotkey(validHotkey);
+      // Fix corrupted "CmdOrShift" (should be CmdOrCtrl+Shift)
+      if (savedHotkey.includes('CmdOrShift')) {
+        savedHotkey = savedHotkey.replace('CmdOrShift', 'CmdOrCtrl+Shift');
+      }
       
-      // Update the global shortcut to use the saved hotkey
-      invoke("update_global_shortcut", { shortcut: validHotkey }).catch(err => {
-        console.error("Failed to set saved hotkey:", err);
-        // Reset to default on error
+      // Validate that the shortcut has proper format
+      const validModifiers = ['CmdOrCtrl', 'Cmd', 'Ctrl', 'Shift', 'Alt'];
+      const parts = savedHotkey.split('+');
+      const isValid = parts.every(part => 
+        validModifiers.includes(part) || 
+        /^[A-Z0-9]$/.test(part) || 
+        ['Space', 'Enter', 'Tab', 'Escape', 'Up', 'Down', 'Left', 'Right', 'Backspace', 'Delete'].includes(part)
+      );
+      
+      if (!isValid) {
+        // If invalid, reset to default
+        savedHotkey = "CmdOrCtrl+Shift+Space";
+      }
+      
+      localStorage.setItem('scout-hotkey', savedHotkey);
+    }
+    
+    if (!hasInitialized) {
+      // First time setup
+      localStorage.setItem('scout-initialized', 'true');
+      
+      // If there's a saved hotkey from a previous version, use it
+      if (savedHotkey) {
+        setHotkey(savedHotkey);
+        // Update backend with saved hotkey
+        invoke("update_global_shortcut", { shortcut: savedHotkey }).catch(console.error);
+      } else {
+        // Otherwise, save the default
+        const defaultHotkey = "CmdOrCtrl+Shift+Space";
+        localStorage.setItem('scout-hotkey', defaultHotkey);
+        setHotkey(defaultHotkey);
+      }
+    } else if (savedHotkey) {
+      // Not first time, load the saved hotkey and update backend
+      setHotkey(savedHotkey);
+      // Update backend with saved hotkey on every app start
+      invoke("update_global_shortcut", { shortcut: savedHotkey }).catch(err => {
+        console.error("Failed to restore saved hotkey:", err);
+        // If registration fails, reset to default
         const defaultHotkey = "CmdOrCtrl+Shift+Space";
         setHotkey(defaultHotkey);
         localStorage.setItem('scout-hotkey', defaultHotkey);
-        invoke("update_global_shortcut", { shortcut: defaultHotkey }).catch(err2 => {
-          console.error("Failed to set default hotkey:", err2);
-        });
+        invoke("update_global_shortcut", { shortcut: defaultHotkey }).catch(console.error);
       });
     }
     
     // Listen for global hotkey events
-    const unsubscribe = listen('toggle-recording', () => {
-      if (isRecording) {
-        stopRecording();
-      } else {
-        startRecording();
+    const unsubscribe = listen('toggle-recording', async () => {
+      // Debounce to prevent rapid toggles
+      const now = Date.now();
+      if (now - lastToggleTimeRef.current < 300) {
+        return;
+      }
+      lastToggleTimeRef.current = now;
+      
+      // Check the actual recording state from the backend
+      try {
+        const recording = await invoke<boolean>("is_recording");
+        if (recording) {
+          stopRecording();
+        } else {
+          startRecording();
+        }
+      } catch (error) {
+        console.error("Failed to check recording state:", error);
+      }
+    });
+    
+    // Listen for recording progress updates
+    const unsubscribeProgress = listen('recording-progress', (event) => {
+      const progress = event.payload as any;
+      console.log("Recording progress:", progress);
+      
+      // Update UI based on progress
+      if (progress.Complete) {
+        // Recording complete, transcript available
+        setIsProcessing(false);
+        loadRecentTranscripts();
+      } else if (progress.Failed) {
+        // Recording failed
+        setIsProcessing(false);
+        console.error("Recording failed:", progress.Failed.error);
+      } else if (progress.Processing || progress.Transcribing) {
+        // Still processing
+        setIsProcessing(true);
+      }
+    });
+    
+    // Listen for processing status updates from the background queue
+    const unsubscribeProcessing = listen('processing-status', (event) => {
+      const status = event.payload as any;
+      console.log("Processing status:", status);
+      
+      // Update UI based on processing status
+      if (status.Complete) {
+        // Transcription complete, refresh the transcript list
+        console.log("Transcription complete, refreshing transcript list");
+        loadRecentTranscripts();
+        setShowSuccess(true);
+        setTimeout(() => setShowSuccess(false), 2000);
+      } else if (status.Failed) {
+        console.error("Processing failed:", status.Failed);
       }
     });
     
     return () => {
       unsubscribe.then(fn => fn());
+      unsubscribeProgress.then(fn => fn());
+      unsubscribeProcessing.then(fn => fn());
     };
-  }, [isRecording]);
+  }, []); // Empty dependency array since we're checking state from backend
 
   useEffect(() => {
     let interval: number;
@@ -111,83 +206,68 @@ function App() {
   };
 
   const startRecording = async () => {
+    console.log("Start recording clicked", { isProcessing, isStoppingRef: isStoppingRef.current });
+    
+    // Prevent starting if we're still processing
+    if (isProcessing || isStoppingRef.current) {
+      console.log("Cannot start - still processing or stopping");
+      return;
+    }
+    
+    // IMMEDIATELY update UI for instant feedback
+    setIsRecording(true);
+    setCurrentTranscript("");
+    (window as any).__recordingStartTime = Date.now();
+    
+    // Start the backend recording asynchronously
     try {
       const filename = await invoke<string>("start_recording");
       setCurrentRecordingFile(filename);
-      setIsRecording(true);
-      setCurrentTranscript("");
-      // Store start time to ensure minimum recording duration
-      (window as any).__recordingStartTime = Date.now();
+      console.log("Recording started:", filename);
     } catch (error) {
       console.error("Failed to start recording:", error);
+      // Revert UI state on error
+      setIsRecording(false);
     }
   };
 
   const stopRecording = async () => {
-    // Prevent multiple simultaneous stop attempts
-    if (isProcessing) return;
-    
-    // Check minimum recording duration
-    const startTime = (window as any).__recordingStartTime;
-    if (startTime) {
-      const duration = Date.now() - startTime;
-      if (duration < 500) {  // Minimum 500ms recording
-        console.warn("Recording too short, waiting a bit more...");
-        await new Promise(resolve => setTimeout(resolve, 500 - duration));
-      }
+    // Prevent multiple simultaneous stop attempts using a ref
+    if (isStoppingRef.current) {
+      return;
     }
+    isStoppingRef.current = true;
     
-    // Immediately update UI state for responsiveness
+    // IMMEDIATELY update UI for instant feedback
     setIsRecording(false);
-    setIsProcessing(true);
+    let recordingFile = currentRecordingFile;
+    const duration = recordingDuration;
     
-    try {
-      await invoke("stop_recording");
-      
-      if (currentRecordingFile) {
-        // Transcribe the audio
-        let transcriptText = "";
-        try {
-          const transcript = await invoke<string>("transcribe_audio", { 
-            audioFilename: currentRecordingFile 
-          });
-          
-          if (!transcript || transcript.trim() === "") {
-            transcriptText = "(No speech detected in recording)";
-          } else {
-            transcriptText = transcript;
-          }
-          setCurrentTranscript(transcriptText);
-        } catch (transcriptionError) {
-          console.error("Transcription failed:", transcriptionError);
-          transcriptText = `Transcription error: ${transcriptionError}`;
-          setCurrentTranscript(transcriptText);
-          setIsProcessing(false);
-          return; // Don't continue if transcription failed
+    // Process everything else asynchronously
+    (async () => {
+      try {
+        // If we don't have a recording file (e.g., from hotkey toggle), get it from backend
+        if (!recordingFile) {
+          const backendFile = await invoke<string | null>("get_current_recording_file");
+          recordingFile = backendFile || null;
         }
         
-        // Save the transcript only if we have valid content
-        if (transcriptText && transcriptText !== "(No speech detected in recording)" && !transcriptText.startsWith("Transcription error:")) {
-          await invoke("save_transcript", { 
-            text: transcriptText, 
-            durationMs: recordingDuration 
-          });
+        // Stop the backend recording
+        await invoke("stop_recording");
+        
+        // The processing queue will handle transcription and saving
+        // Just show that we're done recording
+        if (recordingFile) {
+          console.log("Recording stopped, file will be processed:", recordingFile);
         }
-        
-        // Reload transcripts
-        await loadRecentTranscripts();
-        
-        // Show success feedback
+      } catch (error) {
+        console.error("Failed to stop recording:", error);
+      } finally {
         setIsProcessing(false);
-        setShowSuccess(true);
-        setTimeout(() => setShowSuccess(false), 2000);
+        // Always reset the stopping flag
+        isStoppingRef.current = false;
       }
-    } catch (error) {
-      console.error("Failed to stop recording:", error);
-      // Reset states on error
-      setIsRecording(false);
-      setIsProcessing(false);
-    }
+    })(); // Execute the async function immediately
   };
 
   const searchTranscripts = async () => {
@@ -314,15 +394,37 @@ function App() {
       console.error("Failed to toggle VAD:", error);
     }
   };
+  
+  const updateOverlayPosition = async (position: string) => {
+    try {
+      await invoke('set_overlay_position', { position });
+      setOverlayPosition(position);
+      localStorage.setItem('scout-overlay-position', position);
+    } catch (error) {
+      console.error("Failed to update overlay position:", error);
+    }
+  };
 
   const updateHotkey = async (newHotkey: string) => {
     try {
+      setHotkeyUpdateStatus('idle');
       await invoke("update_global_shortcut", { shortcut: newHotkey });
       setHotkey(newHotkey);
       localStorage.setItem('scout-hotkey', newHotkey);
+      setHotkeyUpdateStatus('success');
+      
+      // Reset status after 2 seconds
+      setTimeout(() => {
+        setHotkeyUpdateStatus('idle');
+      }, 2000);
     } catch (error) {
       console.error("Failed to update hotkey:", error);
-      alert(`Failed to set hotkey: ${error}`);
+      setHotkeyUpdateStatus('error');
+      
+      // Reset status after 3 seconds
+      setTimeout(() => {
+        setHotkeyUpdateStatus('idle');
+      }, 3000);
     }
   };
 
@@ -334,7 +436,14 @@ function App() {
   const stopCapturingHotkey = () => {
     setIsCapturingHotkey(false);
     if (capturedKeys.length > 0) {
-      const newHotkey = capturedKeys.join('+');
+      // Convert captured keys to Tauri format
+      const convertedKeys = capturedKeys.map(key => {
+        // For cross-platform compatibility, convert Cmd to CmdOrCtrl when it's alone
+        if (key === 'Cmd') return 'CmdOrCtrl';
+        // CmdOrCtrl stays as is (already handled in capture)
+        return key;
+      });
+      const newHotkey = convertedKeys.join('+');
       setHotkey(newHotkey);
     }
     setCapturedKeys([]);
@@ -349,14 +458,33 @@ function App() {
       
       const keys: string[] = [];
       
-      // Add modifiers
-      if (e.metaKey || e.ctrlKey) keys.push('CmdOrCtrl');
+      // Add all modifiers separately - don't treat Hyper as special
+      // This allows Karabiner's Hyper key (Cmd+Ctrl+Alt+Shift) to work properly
+      // Important: On macOS, when both Cmd and Ctrl are pressed, we only need CmdOrCtrl
+      const hasCmd = e.metaKey;
+      const hasCtrl = e.ctrlKey;
+      
+      if (hasCmd && hasCtrl) {
+        // When both are pressed, just use CmdOrCtrl for Tauri compatibility
+        keys.push('CmdOrCtrl');
+      } else if (hasCmd) {
+        keys.push('Cmd');
+      } else if (hasCtrl) {
+        keys.push('Ctrl');
+      }
+      
       if (e.shiftKey) keys.push('Shift');
       if (e.altKey) keys.push('Alt');
       
       // Add the main key
       if (e.key && !['Control', 'Shift', 'Alt', 'Meta', 'Command'].includes(e.key)) {
         let key = e.key;
+        
+        // Handle Escape specially to cancel capture
+        if (key === 'Escape') {
+          stopCapturingHotkey();
+          return;
+        }
         
         // Capitalize single letters
         if (key.length === 1) {
@@ -370,8 +498,14 @@ function App() {
           'ArrowDown': 'Down',
           'ArrowLeft': 'Left',
           'ArrowRight': 'Right',
-          'Escape': 'Esc',
           'Enter': 'Return',
+          'Tab': 'Tab',
+          'Backspace': 'Backspace',
+          'Delete': 'Delete',
+          'Home': 'Home',
+          'End': 'End',
+          'PageUp': 'PageUp',
+          'PageDown': 'PageDown',
         };
         
         if (keyMap[key]) {
@@ -390,8 +524,11 @@ function App() {
       e.preventDefault();
       e.stopPropagation();
       
-      // Stop capturing on key up if we have captured keys
-      if (capturedKeys.length > 0) {
+      // Only stop capturing when a non-modifier key is released
+      // This allows capturing complex modifier combinations
+      const isModifierKey = ['Control', 'Shift', 'Alt', 'Meta', 'Command'].includes(e.key);
+      
+      if (!isModifierKey && capturedKeys.length > 0) {
         stopCapturingHotkey();
       }
     };
@@ -428,6 +565,7 @@ function App() {
         <button
           className={`record-button ${isRecording ? 'recording' : ''} ${isProcessing ? 'processing' : ''}`}
           onClick={isRecording ? stopRecording : startRecording}
+          disabled={isProcessing || isStoppingRef.current}
         >
           {isProcessing ? 'Processing...' : isRecording ? 'Stop Recording' : 'Start Recording'}
         </button>
@@ -600,6 +738,12 @@ function App() {
                 <p className="setting-hint">
                   Click "Capture" and press your desired shortcut combination
                 </p>
+                {hotkeyUpdateStatus === 'success' && (
+                  <p className="setting-success">✓ Shortcut updated successfully!</p>
+                )}
+                {hotkeyUpdateStatus === 'error' && (
+                  <p className="setting-error">Failed to update shortcut. Please try a different combination.</p>
+                )}
               </div>
               
               <div className="setting-item">
@@ -613,6 +757,60 @@ function App() {
                 </label>
                 <p className="setting-hint">
                   Automatically start recording when you speak
+                </p>
+              </div>
+              
+              <div className="setting-item">
+                <label>Overlay Position</label>
+                <div className="overlay-position-grid">
+                  <button
+                    className={`position-button ${overlayPosition === 'top-left' ? 'active' : ''}`}
+                    onClick={() => updateOverlayPosition('top-left')}
+                    title="Top Left"
+                  >↖</button>
+                  <button
+                    className={`position-button ${overlayPosition === 'top-center' ? 'active' : ''}`}
+                    onClick={() => updateOverlayPosition('top-center')}
+                    title="Top Center"
+                  >↑</button>
+                  <button
+                    className={`position-button ${overlayPosition === 'top-right' ? 'active' : ''}`}
+                    onClick={() => updateOverlayPosition('top-right')}
+                    title="Top Right"
+                  >↗</button>
+                  
+                  <button
+                    className={`position-button ${overlayPosition === 'left-center' ? 'active' : ''}`}
+                    onClick={() => updateOverlayPosition('left-center')}
+                    title="Left Center"
+                  >←</button>
+                  <button
+                    className="position-button center" disabled
+                  >●</button>
+                  <button
+                    className={`position-button ${overlayPosition === 'right-center' ? 'active' : ''}`}
+                    onClick={() => updateOverlayPosition('right-center')}
+                    title="Right Center"
+                  >→</button>
+                  
+                  <button
+                    className={`position-button ${overlayPosition === 'bottom-left' ? 'active' : ''}`}
+                    onClick={() => updateOverlayPosition('bottom-left')}
+                    title="Bottom Left"
+                  >↙</button>
+                  <button
+                    className={`position-button ${overlayPosition === 'bottom-center' ? 'active' : ''}`}
+                    onClick={() => updateOverlayPosition('bottom-center')}
+                    title="Bottom Center"
+                  >↓</button>
+                  <button
+                    className={`position-button ${overlayPosition === 'bottom-right' ? 'active' : ''}`}
+                    onClick={() => updateOverlayPosition('bottom-right')}
+                    title="Bottom Right"
+                  >↘</button>
+                </div>
+                <p className="setting-hint">
+                  Choose where the recording indicator appears on your screen
                 </p>
               </div>
             </div>

@@ -15,7 +15,17 @@
       "Bash(pnpm list:*)",
       "Bash(pkill:*)",
       "Bash(cargo:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(true)",
+      "Bash(pnpm tsc:*)",
+      "Bash(kill:*)",
+      "Bash(./target/debug/scout:*)",
+      "Bash(rm:*)",
+      "Bash(touch:*)",
+      "Bash(cat:*)",
+      "Bash(log show:*)",
+      "Bash(src-tauri/target/debug/scout:*)",
+      "Bash(git add:*)"
     ],
     "deny": []
   }

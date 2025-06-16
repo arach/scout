@@ -724,6 +724,23 @@ h1 {
   margin: 4px 0 0 0;
 }
 
+.setting-success {
+  font-size: 12px;
+  color: #34c759;
+  margin: 8px 0 0 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  animation: fadeIn 0.3s ease-out;
+}
+
+.setting-error {
+  font-size: 12px;
+  color: var(--error);
+  margin: 8px 0 0 0;
+  animation: fadeIn 0.3s ease-out;
+}
+
 .setting-item input[type="checkbox"] {
   margin-right: 8px;
   cursor: pointer;
@@ -845,4 +862,50 @@ h1 {
 .confirm-delete-button:hover {
   background-color: #b83636;
   border-color: #b83636;
+}
+
+/* Overlay position grid */
+.overlay-position-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  max-width: 150px;
+  margin-bottom: 8px;
+}
+
+.position-button {
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--border-primary);
+  background-color: var(--bg-secondary);
+  color: var(--text-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  transition: all 0.2s ease;
+}
+
+.position-button:hover:not(:disabled) {
+  background-color: var(--bg-hover);
+  border-color: var(--color-blue);
+  color: var(--text-primary);
+}
+
+.position-button.active {
+  background-color: var(--color-blue);
+  color: white;
+  border-color: var(--color-blue);
+}
+
+.position-button.center {
+  background-color: var(--bg-primary);
+  cursor: default;
+  opacity: 0.5;
+}
+
+.position-button:disabled {
+  cursor: default;
 }

@@ -1,0 +1,146 @@
+use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::sync::{mpsc, oneshot};
+use chrono;
+
+use crate::audio::AudioRecorder;
+use crate::recording_progress::RecordingProgress;
+use crate::processing_queue::{ProcessingQueue, ProcessingJob};
+
+#[derive(Debug)]
+pub enum RecordingCommand {
+    StartRecording {
+        response: oneshot::Sender<Result<String, String>>,
+    },
+    StopRecording {
+        response: oneshot::Sender<Result<RecordingResult, String>>,
+    },
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RecordingResult {
+    pub filename: String,
+    pub transcript: Option<String>,
+    pub duration_ms: i32,
+}
+
+pub struct RecordingWorkflow {
+    command_tx: mpsc::Sender<RecordingCommand>,
+}
+
+impl RecordingWorkflow {
+    pub fn new(
+        recorder: Arc<tokio::sync::Mutex<AudioRecorder>>,
+        recordings_dir: PathBuf,
+        progress_tracker: Arc<crate::recording_progress::ProgressTracker>,
+        processing_queue: Arc<ProcessingQueue>,
+    ) -> Self {
+        let (command_tx, mut command_rx) = mpsc::channel::<RecordingCommand>(100);
+        
+        // Spawn the workflow task using Tauri's runtime
+        tauri::async_runtime::spawn(async move {
+            let mut current_recording: Option<(String, std::time::Instant)> = None;
+            
+            while let Some(command) = command_rx.recv().await {
+                match command {
+                    RecordingCommand::StartRecording { response } => {
+                        // Generate filename
+                        let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
+                        let filename = format!("recording_{}.wav", timestamp);
+                        let path = recordings_dir.join(&filename);
+                        
+                        println!("Recording workflow: Starting recording with filename: {}", filename);
+                        
+                        // Start recording
+                        let recorder = recorder.lock().await;
+                        match recorder.start_recording(&path) {
+                            Ok(_) => {
+                                let start_time = std::time::Instant::now();
+                                current_recording = Some((filename.clone(), start_time));
+                                
+                                // Update progress to Recording state
+                                progress_tracker.update(RecordingProgress::Recording { 
+                                    filename: filename.clone(),
+                                    start_time: chrono::Utc::now().timestamp_millis() as u64
+                                });
+                                
+                                let _ = response.send(Ok(filename));
+                            }
+                            Err(e) => {
+                                // Go back to idle on error
+                                progress_tracker.update(RecordingProgress::Idle);
+                                let _ = response.send(Err(e));
+                            }
+                        }
+                    }
+                    
+                    RecordingCommand::StopRecording { response } => {
+                        if let Some((filename, start_time)) = current_recording.take() {
+                            let duration_ms = start_time.elapsed().as_millis() as i32;
+                            
+                            // Update to Stopping state briefly
+                            progress_tracker.update(RecordingProgress::Stopping { 
+                                filename: filename.clone() 
+                            });
+                            
+                            // Stop recording
+                            let recorder = recorder.lock().await;
+                            if let Err(e) = recorder.stop_recording() {
+                                // Update to idle on error
+                                progress_tracker.update(RecordingProgress::Idle);
+                                let _ = response.send(Err(e));
+                                continue;
+                            }
+                            drop(recorder); // Release lock
+                            
+                            // Queue the processing job
+                            let audio_path = recordings_dir.join(&filename);
+                            let job = ProcessingJob {
+                                filename: filename.clone(),
+                                audio_path,
+                                duration_ms,
+                            };
+                            
+                            // Queue the job for processing
+                            let _ = processing_queue.queue_job(job).await;
+                            
+                            // Update to idle state immediately - recording is done
+                            progress_tracker.update(RecordingProgress::Idle);
+                            
+                            // Send immediate response
+                            let _ = response.send(Ok(RecordingResult {
+                                filename,
+                                transcript: None,
+                                duration_ms,
+                            }));
+                        } else {
+                            let _ = response.send(Err("No recording in progress".to_string()));
+                        }
+                    }
+                }
+            }
+        });
+        
+        RecordingWorkflow { command_tx }
+    }
+    
+    pub async fn start_recording(&self) -> Result<String, String> {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.command_tx
+            .send(RecordingCommand::StartRecording { response: response_tx })
+            .await
+            .map_err(|_| "Failed to send command".to_string())?;
+        
+        response_rx.await.map_err(|_| "Failed to receive response".to_string())?
+    }
+    
+    pub async fn stop_recording(&self) -> Result<RecordingResult, String> {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.command_tx
+            .send(RecordingCommand::StopRecording { response: response_tx })
+            .await
+            .map_err(|_| "Failed to send command".to_string())?;
+        
+        response_rx.await.map_err(|_| "Failed to receive response".to_string())?
+    }
+}

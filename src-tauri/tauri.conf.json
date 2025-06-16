@@ -18,21 +18,6 @@
         "height": 720,
         "closable": true,
         "minimizable": true
-      },
-      {
-        "label": "overlay",
-        "title": "Scout Recording",
-        "url": "overlay.html",
-        "width": 320,
-        "height": 80,
-        "resizable": false,
-        "fullscreen": false,
-        "alwaysOnTop": true,
-        "skipTaskbar": true,
-        "decorations": false,
-        "transparent": true,
-        "center": false,
-        "visible": false
       }
     ],
     "security": {
