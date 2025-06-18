@@ -35,8 +35,9 @@ function Overlay() {
   const [pulseKey, setPulseKey] = useState(0);
   const animationRef = useRef<number>();
   const timeRef = useRef<number>(0);
+  const minimizeTimeoutRef = useRef<number>();
 
-  // Generate smooth audio visualization with simulated waveform
+  // Generate smooth audio visualization with real audio levels
   useEffect(() => {
     if (recordingState.isRecording) {
       const animate = (timestamp: number) => {
@@ -44,16 +45,32 @@ function Overlay() {
         const elapsed = timestamp - timeRef.current;
         
         setAudioHistory(prev => {
-          // Create organic-looking waveform using multiple sine waves
-          const newValues = prev.map((_, index) => {
-            const base = 0.4 + Math.sin(elapsed * 0.002 + index * 0.8) * 0.2;
-            const wave = Math.sin(elapsed * 0.005 + index * 1.2) * 0.15;
-            const flutter = Math.sin(elapsed * 0.01 + index * 2) * 0.1;
-            const random = (Math.random() - 0.5) * 0.1;
-            
-            return Math.max(0.1, Math.min(1, base + wave + flutter + random));
-          });
-          return newValues;
+          // Use real audio level if available
+          const audioLevel = recordingState.audioLevel || 0;
+          
+          if (audioLevel > 0) {
+            // Real audio data - create responsive waveform
+            const newValues = prev.map((_, index) => {
+              // Add some variation between bars
+              const variation = 0.7 + (index * 0.1);
+              const flutter = Math.sin(elapsed * 0.01 + index * 2) * 0.05;
+              const value = audioLevel * variation + flutter;
+              
+              return Math.max(0.1, Math.min(1, value));
+            });
+            // Smooth transition by averaging with previous values
+            return newValues.map((val, i) => (val + prev[i]) / 2);
+          } else {
+            // Fallback to simulated waveform if no audio data
+            const newValues = prev.map((_, index) => {
+              const base = 0.3 + Math.sin(elapsed * 0.002 + index * 0.8) * 0.15;
+              const wave = Math.sin(elapsed * 0.005 + index * 1.2) * 0.1;
+              const random = (Math.random() - 0.5) * 0.05;
+              
+              return Math.max(0.1, Math.min(1, base + wave + random));
+            });
+            return newValues;
+          }
         });
         
         animationRef.current = requestAnimationFrame(animate);
@@ -73,7 +90,7 @@ function Overlay() {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [recordingState.isRecording]);
+  }, [recordingState.isRecording, recordingState.audioLevel]);
 
   useEffect(() => {
     // Start in minimized state
@@ -98,6 +115,16 @@ function Overlay() {
       setAudioHistory([0.1, 0.1, 0.1, 0.1, 0.1]);
       // Immediately show processing state
       setProgress({ status: "processing" });
+      
+      // Clear any existing minimize timeout
+      if (minimizeTimeoutRef.current) {
+        clearTimeout(minimizeTimeoutRef.current);
+      }
+      
+      // Schedule minimize after delay
+      minimizeTimeoutRef.current = window.setTimeout(() => {
+        setIsExpanded(false);
+      }, 800);
     });
 
     // Listen for progress updates
@@ -122,6 +149,10 @@ function Overlay() {
         status = "processing";
       } else if (event.payload.Transcribing !== undefined) {
         status = "transcribing";
+        // Clear minimize timeout if we're still transcribing
+        if (minimizeTimeoutRef.current) {
+          clearTimeout(minimizeTimeoutRef.current);
+        }
       } else if (event.payload.Complete !== undefined) {
         status = "complete";
         setPulseKey(prev => prev + 1); // Trigger completion animation
@@ -133,7 +164,12 @@ function Overlay() {
       
       // Minimize with elegant delay for completion states
       if (status === "complete" || status === "failed") {
-        setTimeout(() => {
+        // Clear any existing timeout
+        if (minimizeTimeoutRef.current) {
+          clearTimeout(minimizeTimeoutRef.current);
+        }
+        
+        minimizeTimeoutRef.current = window.setTimeout(() => {
           setIsExpanded(false);
         }, status === "complete" ? 2500 : 1500);
       }
@@ -144,6 +180,11 @@ function Overlay() {
       unsubscribeStopped.then(fn => fn());
       unsubscribeProgress.then(fn => fn());
       unsubscribeProcessing.then(fn => fn());
+      
+      // Clear minimize timeout on cleanup
+      if (minimizeTimeoutRef.current) {
+        clearTimeout(minimizeTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -177,9 +218,8 @@ function Overlay() {
                       key={index}
                       className="bar" 
                       style={{ 
-                        height: `${Math.max(4, level * 20)}px`,
-                        transform: `scaleY(${0.8 + level * 0.4})`,
-                        animationDelay: `${index * 0.05}s`
+                        height: `${Math.max(3, level * 18)}px`,
+                        opacity: 0.6 + level * 0.4
                       }} 
                     />
                   ))}
