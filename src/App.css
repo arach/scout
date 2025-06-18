@@ -67,25 +67,27 @@
   
   /* Dark mode drag overlay adjustments */
   .drag-drop-backdrop {
-    background: rgba(0, 0, 0, 0.5);
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
   }
   
   .drag-drop-border {
-    background: rgba(36, 36, 36, 0.95);
-    border-color: rgba(255, 255, 255, 0.1);
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    background: rgba(42, 42, 42, 0.95);
+    border-color: rgba(255, 255, 255, 0.15);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   }
   
   .drag-drop-border::before {
-    background: linear-gradient(90deg, transparent 40%, rgba(255, 255, 255, 0.05) 50%, transparent 60%);
+    background: linear-gradient(90deg, transparent 40%, rgba(255, 255, 255, 0.08) 50%, transparent 60%);
   }
   
   .drag-drop-icon {
-    background: rgba(255, 255, 255, 0.05);
+    background: rgba(255, 255, 255, 0.08);
   }
   
   .drag-drop-icon svg {
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.7);
   }
   
   .drag-drop-title {
@@ -93,13 +95,13 @@
   }
   
   .drag-drop-subtitle {
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.6);
   }
   
   .format-badge {
-    background: rgba(255, 255, 255, 0.05);
-    border-color: rgba(255, 255, 255, 0.1);
-    color: rgba(255, 255, 255, 0.5);
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.6);
   }
 }
 
@@ -264,9 +266,9 @@ h1 {
 .drag-drop-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.3);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  background: rgba(128, 128, 128, 0.4);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
 
 .drag-drop-container {
@@ -284,14 +286,14 @@ h1 {
   height: 100%;
   max-width: 600px;
   max-height: 400px;
-  background: rgba(255, 255, 255, 0.95);
-  border: 2px dashed rgba(0, 0, 0, 0.15);
+  background: rgba(248, 248, 248, 0.98);
+  border: 2px dashed rgba(0, 0, 0, 0.2);
   border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
 }
 
 .drag-drop-border::before {
@@ -1422,163 +1424,6 @@ h1 {
   }
 }
 
-/* Full-window drag overlay */
-.drag-drop-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.92);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  z-index: 9999;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  animation: dragOverlayFadeIn 0.3s cubic-bezier(0.23, 1, 0.32, 1);
-  pointer-events: none;
-}
-
-@keyframes dragOverlayFadeIn {
-  from {
-    opacity: 0;
-    backdrop-filter: blur(0px);
-    -webkit-backdrop-filter: blur(0px);
-  }
-  to {
-    opacity: 1;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-  }
-}
-
-.drag-drop-border {
-  width: calc(100% - 48px);
-  height: calc(100% - 48px);
-  max-width: 800px;
-  max-height: 600px;
-  border: 3px dashed rgba(74, 158, 255, 0.6);
-  border-radius: 24px;
-  background: linear-gradient(
-    135deg,
-    rgba(74, 158, 255, 0.05) 0%,
-    rgba(147, 51, 234, 0.05) 50%,
-    rgba(236, 72, 153, 0.05) 100%
-  );
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-  animation: borderPulse 2s ease-in-out infinite;
-  box-shadow: 
-    0 0 0 1px rgba(74, 158, 255, 0.2),
-    0 0 80px rgba(74, 158, 255, 0.2),
-    inset 0 0 120px rgba(74, 158, 255, 0.1);
-}
-
-@keyframes borderPulse {
-  0%, 100% {
-    transform: scale(1);
-    opacity: 1;
-  }
-  50% {
-    transform: scale(1.02);
-    opacity: 0.9;
-  }
-}
-
-.drag-drop-content {
-  text-align: center;
-  padding: 48px;
-  animation: contentSlideUp 0.4s cubic-bezier(0.23, 1, 0.32, 1) 0.1s both;
-}
-
-@keyframes contentSlideUp {
-  from {
-    transform: translateY(20px);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
-}
-
-.drag-drop-icon {
-  margin-bottom: 24px;
-  color: var(--accent-primary);
-  display: inline-flex;
-  position: relative;
-  animation: iconFloat 3s ease-in-out infinite;
-}
-
-.drag-drop-icon svg {
-  filter: drop-shadow(0 4px 24px rgba(74, 158, 255, 0.4));
-}
-
-@keyframes iconFloat {
-  0%, 100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-10px);
-  }
-}
-
-.drag-drop-title {
-  font-size: 32px;
-  font-weight: 600;
-  color: white;
-  margin: 0 0 12px 0;
-  letter-spacing: -0.5px;
-  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
-}
-
-.drag-drop-subtitle {
-  font-size: 16px;
-  color: rgba(255, 255, 255, 0.7);
-  margin: 0 0 32px 0;
-  font-weight: 400;
-}
-
-.drag-drop-formats {
-  display: flex;
-  gap: 8px;
-  justify-content: center;
-  flex-wrap: wrap;
-}
-
-.format-badge {
-  background: rgba(74, 158, 255, 0.15);
-  color: var(--accent-primary);
-  padding: 6px 12px;
-  border-radius: 16px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
-  border: 1px solid rgba(74, 158, 255, 0.3);
-  animation: badgeFadeIn 0.5s cubic-bezier(0.23, 1, 0.32, 1) both;
-  box-shadow: 0 2px 8px rgba(74, 158, 255, 0.1);
-}
-
-.format-badge:nth-child(1) { animation-delay: 0.2s; }
-.format-badge:nth-child(2) { animation-delay: 0.25s; }
-.format-badge:nth-child(3) { animation-delay: 0.3s; }
-.format-badge:nth-child(4) { animation-delay: 0.35s; }
-.format-badge:nth-child(5) { animation-delay: 0.4s; }
-.format-badge:nth-child(6) { animation-delay: 0.45s; }
-
-@keyframes badgeFadeIn {
-  from {
-    opacity: 0;
-    transform: scale(0.8) translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
-}
 
 /* Enhanced drag state for the container - removed since we have full overlay now */
 .container.drag-highlight::before {
