@@ -2,6 +2,9 @@ import { useState, useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import "./Overlay.css";
 
+// Configuration constants
+const COMPLETE_DISPLAY_DURATION = 1000; // 1 second
+
 interface RecordingState {
   isRecording: boolean;
   duration: number;
@@ -129,17 +132,9 @@ function Overlay() {
       // Immediately show processing state
       setProgress({ status: "processing" });
       
-      // Clear any existing minimize timeout
-      if (minimizeTimeoutRef.current) {
-        clearTimeout(minimizeTimeoutRef.current);
-      }
-      
-      // Schedule minimize after delay
-      console.log('Scheduling minimize in 800ms');
-      minimizeTimeoutRef.current = window.setTimeout(() => {
-        console.log('Minimizing overlay');
-        setIsExpanded(false);
-      }, 800);
+      // Immediately minimize when recording stops
+      console.log('Immediately minimizing overlay');
+      setIsExpanded(false);
     });
 
     // Listen for progress updates
@@ -164,10 +159,6 @@ function Overlay() {
         status = "processing";
       } else if (event.payload.Transcribing !== undefined) {
         status = "transcribing";
-        // Clear minimize timeout if we're still transcribing
-        if (minimizeTimeoutRef.current) {
-          clearTimeout(minimizeTimeoutRef.current);
-        }
       } else if (event.payload.Complete !== undefined) {
         status = "complete";
         setPulseKey(prev => prev + 1); // Trigger completion animation
@@ -177,16 +168,16 @@ function Overlay() {
       
       setProgress({ status });
       
-      // Minimize with elegant delay for completion states
-      if (status === "complete" || status === "failed") {
+      // Return to idle after showing complete state
+      if (status === "complete") {
         // Clear any existing timeout
         if (minimizeTimeoutRef.current) {
           clearTimeout(minimizeTimeoutRef.current);
         }
         
         minimizeTimeoutRef.current = window.setTimeout(() => {
-          setIsExpanded(false);
-        }, status === "complete" ? 2500 : 1500);
+          setProgress({ status: "idle" });
+        }, COMPLETE_DISPLAY_DURATION);
       }
     });
 
@@ -297,7 +288,23 @@ function Overlay() {
           </div>
         ) : (
           <div className="minimized-content">
-            <div className="minimized-indicator" />
+            {progress.status === "idle" && (
+              <div className="minimized-indicator" />
+            )}
+            {(progress.status === "processing" || progress.status === "transcribing") && (
+              <div className="minimized-processing">
+                <div className="processing-wave" />
+                <div className="processing-wave" />
+                <div className="processing-wave" />
+              </div>
+            )}
+            {progress.status === "complete" && (
+              <div className="minimized-complete">
+                <svg className="checkmark-mini" width="12" height="12" viewBox="0 0 24 24" fill="none">
+                  <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </div>
+            )}
           </div>
         )}
       </div>
