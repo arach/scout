@@ -33,6 +33,7 @@ impl ProcessingQueue {
     pub fn new(
         database: Arc<Database>,
         models_dir: PathBuf,
+        app_data_dir: PathBuf,
     ) -> (Self, mpsc::Receiver<ProcessingStatus>) {
         let (job_tx, mut job_rx) = mpsc::channel::<ProcessingJob>(100);
         let (status_tx, status_rx) = mpsc::channel::<ProcessingStatus>(100);
@@ -128,30 +129,15 @@ impl ProcessingQueue {
                             }).await;
                             
                             // File is valid, proceed with transcription
-                            // This is a limitation - we can't access settings from here
-                            // For now, try to find any available model
-                            let mut model_path = models_dir.join("ggml-tiny.en.bin");
-                            if !model_path.exists() {
-                                // Try base model
-                                model_path = models_dir.join("ggml-base.en.bin");
-                                if !model_path.exists() {
-                                    // Find any .bin file
-                                    let mut found = false;
-                                    if let Ok(entries) = std::fs::read_dir(&models_dir) {
-                                        for entry in entries.filter_map(Result::ok) {
-                                            let path = entry.path();
-                                            if path.extension().and_then(|e| e.to_str()) == Some("bin") {
-                                                model_path = path;
-                                                found = true;
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    if !found {
-                                        eprintln!("No model files found in {:?}", models_dir);
-                                    }
+                            // Read settings to get the active model
+                            let model_path = match read_settings_and_get_model_path(&app_data_dir, &models_dir) {
+                                Ok(path) => path,
+                                Err(e) => {
+                                    eprintln!("Failed to get model path from settings: {}", e);
+                                    // Fallback to any available model
+                                    find_any_available_model(&models_dir).unwrap_or_else(|| models_dir.join("ggml-tiny.en.bin"))
                                 }
-                            }
+                            };
                             
                             println!("🔍 Processing queue attempting to use model: {:?}", model_path);
                             
@@ -260,4 +246,76 @@ impl ProcessingQueue {
         self.sender.send(job).await
             .map_err(|_| "Failed to queue processing job".to_string())
     }
+}
+
+// Helper function to read settings and get the active model path
+fn read_settings_and_get_model_path(app_data_dir: &PathBuf, models_dir: &PathBuf) -> Result<PathBuf, String> {
+    let settings_path = app_data_dir.join("settings.json");
+    
+    let settings_content = std::fs::read_to_string(&settings_path)
+        .map_err(|e| format!("Failed to read settings file: {}", e))?;
+    
+    let settings: serde_json::Value = serde_json::from_str(&settings_content)
+        .map_err(|e| format!("Failed to parse settings JSON: {}", e))?;
+    
+    let active_model_id = settings["models"]["active_model_id"]
+        .as_str()
+        .unwrap_or("base.en");
+    
+    println!("🔍 Processing queue: Active model from settings: {}", active_model_id);
+    
+    // Convert model ID to filename (same logic as in models.rs)
+    let filename = match active_model_id {
+        "tiny.en" => "ggml-tiny.en.bin",
+        "base.en" => "ggml-base.en.bin", 
+        "small.en" => "ggml-small.en.bin",
+        "medium.en" => "ggml-medium.en.bin",
+        "large-v3" => "ggml-large-v3.bin",
+        id if id.starts_with("custom_") => {
+            // Custom model filename
+            &id[7..] // Remove "custom_" prefix
+        }
+        _ => "ggml-base.en.bin" // Default fallback
+    };
+    
+    let model_path = models_dir.join(filename);
+    
+    // Check if this model exists, if not try fallbacks
+    if model_path.exists() {
+        println!("✓ Processing queue: Found requested model: {:?}", model_path);
+        Ok(model_path)
+    } else {
+        println!("⚠️  Processing queue: Requested model {} not found, trying fallbacks", filename);
+        
+        // Try fallback models in order of preference
+        let fallbacks = ["ggml-base.en.bin", "ggml-tiny.en.bin", "ggml-small.en.bin"];
+        for fallback in &fallbacks {
+            let fallback_path = models_dir.join(fallback);
+            if fallback_path.exists() {
+                println!("✓ Processing queue: Using fallback model: {:?}", fallback_path);
+                return Ok(fallback_path);
+            }
+        }
+        
+        // Last resort: find any .bin file
+        if let Some(any_model) = find_any_available_model(models_dir) {
+            println!("✓ Processing queue: Using any available model: {:?}", any_model);
+            Ok(any_model)
+        } else {
+            Err("No models found".to_string())
+        }
+    }
+}
+
+// Helper function to find any available model file
+fn find_any_available_model(models_dir: &PathBuf) -> Option<PathBuf> {
+    if let Ok(entries) = std::fs::read_dir(models_dir) {
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("bin") {
+                return Some(path);
+            }
+        }
+    }
+    None
 }

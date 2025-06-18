@@ -875,6 +875,7 @@ pub fn run() {
             let (processing_queue, mut processing_status_rx) = ProcessingQueue::new(
                 database_arc.clone(),
                 models_dir.clone(),
+                app_data_dir.clone(),
             );
             let processing_queue_arc = Arc::new(processing_queue);
             
