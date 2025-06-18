@@ -19,10 +19,10 @@ void show_overlay_window(void* overlay) {
     });
 }
 
-void hide_overlay_window(void* overlay) {
+void minimize_overlay_window(void* overlay) {
     MacOSOverlay* obj = (__bridge MacOSOverlay*)overlay;
     dispatch_async(dispatch_get_main_queue(), ^{
-        [obj hideOverlay];
+        [obj minimizeOverlay];
     });
 }
 

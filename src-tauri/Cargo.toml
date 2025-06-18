@@ -22,6 +22,8 @@ cc = "1.0"
 tauri = { version = "2", features = [ "macos-private-api", "tray-icon", "image-png"] }
 tauri-plugin-opener = "2"
 tauri-plugin-global-shortcut = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-http = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sqlx = { version = "0.8", features = ["runtime-tokio-native-tls", "sqlite"] }
@@ -31,4 +33,8 @@ hound = "3.5"
 cpal = "0.15"
 webrtc-vad = "0.4"
 chrono = "0.4"
+symphonia = { version = "0.5", features = ["mp3", "aac", "flac", "isomp4", "ogg", "vorbis"] }
+dirs = "5.0"
+reqwest = { version = "0.11", features = ["stream"] }
+futures-util = "0.3"
 

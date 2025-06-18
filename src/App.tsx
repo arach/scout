@@ -1,6 +1,10 @@
 import { useState, useEffect, Fragment, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { ModelManager } from "./components/ModelManager";
+import { FirstRunSetup } from "./components/FirstRunSetup";
 import "./App.css";
 
 interface Transcript {
@@ -36,9 +40,38 @@ function App() {
   const [hotkeyUpdateStatus, setHotkeyUpdateStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const isStoppingRef = useRef(false);
   const [overlayPosition, setOverlayPosition] = useState<string>('top-center');
+  const [isDragging, setIsDragging] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{
+    filename?: string;
+    fileSize?: number;
+    status: 'idle' | 'uploading' | 'queued' | 'processing' | 'converting' | 'transcribing';
+    queuePosition?: number;
+    progress?: number;
+  }>({ status: 'idle' });
+  const [showFirstRun, setShowFirstRun] = useState(false);
+
+  useEffect(() => {
+    // Check if we have any models
+    const checkModels = async () => {
+      try {
+        const hasModel = await invoke<boolean>('has_any_model');
+        if (!hasModel) {
+          setShowFirstRun(true);
+        }
+      } catch (error) {
+        console.error('Failed to check models:', error);
+      }
+    };
+    checkModels();
+  }, []);
 
   useEffect(() => {
     loadRecentTranscripts();
+    
+    // Log current model on startup
+    invoke<string>('get_current_model').then(model => {
+      console.log('🤖 Current active model:', model);
+    }).catch(console.error);
     
     // Subscribe to recording progress updates
     invoke('subscribe_to_progress').catch(console.error);
@@ -55,66 +88,21 @@ function App() {
       }).catch(console.error);
     }
     
-    // Check if this is the first time the app has ever been launched
-    const hasInitialized = localStorage.getItem('scout-initialized');
-    let savedHotkey = localStorage.getItem('scout-hotkey');
-    
-    // Clean up any invalid shortcuts
-    if (savedHotkey) {
-      // Fix redundant CmdOrCtrl+Ctrl
-      if (savedHotkey.includes('CmdOrCtrl') && savedHotkey.includes('Ctrl')) {
-        savedHotkey = savedHotkey.replace(/\+Ctrl/g, '').replace(/Ctrl\+/g, '');
-      }
-      
-      // Fix corrupted "CmdOrShift" (should be CmdOrCtrl+Shift)
-      if (savedHotkey.includes('CmdOrShift')) {
-        savedHotkey = savedHotkey.replace('CmdOrShift', 'CmdOrCtrl+Shift');
-      }
-      
-      // Validate that the shortcut has proper format
-      const validModifiers = ['CmdOrCtrl', 'Cmd', 'Ctrl', 'Shift', 'Alt'];
-      const parts = savedHotkey.split('+');
-      const isValid = parts.every(part => 
-        validModifiers.includes(part) || 
-        /^[A-Z0-9]$/.test(part) || 
-        ['Space', 'Enter', 'Tab', 'Escape', 'Up', 'Down', 'Left', 'Right', 'Backspace', 'Delete'].includes(part)
-      );
-      
-      if (!isValid) {
-        // If invalid, reset to default
-        savedHotkey = "CmdOrCtrl+Shift+Space";
-      }
-      
-      localStorage.setItem('scout-hotkey', savedHotkey);
-    }
-    
-    if (!hasInitialized) {
-      // First time setup
-      localStorage.setItem('scout-initialized', 'true');
-      
-      // If there's a saved hotkey from a previous version, use it
-      if (savedHotkey) {
-        setHotkey(savedHotkey);
-        // Update backend with saved hotkey
-        invoke("update_global_shortcut", { shortcut: savedHotkey }).catch(console.error);
-      } else {
-        // Otherwise, save the default
-        const defaultHotkey = "CmdOrCtrl+Shift+Space";
-        localStorage.setItem('scout-hotkey', defaultHotkey);
-        setHotkey(defaultHotkey);
-      }
-    } else if (savedHotkey) {
-      // Not first time, load the saved hotkey and update backend
+    // Get the current shortcut from backend (source of truth)
+    invoke<string>('get_current_shortcut').then(backendShortcut => {
+      setHotkey(backendShortcut);
+      // Save to localStorage for quick access
+      localStorage.setItem('scout-hotkey', backendShortcut);
+    }).catch(err => {
+      console.error('Failed to get current shortcut:', err);
+      // Fallback to localStorage if backend fails
+      const savedHotkey = localStorage.getItem('scout-hotkey') || 'CmdOrCtrl+Shift+Space';
       setHotkey(savedHotkey);
-      // Update backend with saved hotkey on every app start
-      invoke("update_global_shortcut", { shortcut: savedHotkey }).catch(err => {
-        console.error("Failed to restore saved hotkey:", err);
-        // If registration fails, reset to default
-        const defaultHotkey = "CmdOrCtrl+Shift+Space";
-        setHotkey(defaultHotkey);
-        localStorage.setItem('scout-hotkey', defaultHotkey);
-        invoke("update_global_shortcut", { shortcut: defaultHotkey }).catch(console.error);
-      });
+    });
+    
+    // Mark as initialized
+    if (!localStorage.getItem('scout-initialized')) {
+      localStorage.setItem('scout-initialized', 'true');
     }
     
     // Listen for global hotkey events
@@ -152,7 +140,7 @@ function App() {
       } else if (progress.Failed) {
         // Recording failed
         setIsProcessing(false);
-        console.error("Recording failed:", progress.Failed.error);
+        console.error("Recording failed:", progress.Failed);
       } else if (progress.Processing || progress.Transcribing) {
         // Still processing
         setIsProcessing(true);
@@ -165,21 +153,126 @@ function App() {
       console.log("Processing status:", status);
       
       // Update UI based on processing status
-      if (status.Complete) {
+      if (status.Queued) {
+        setUploadProgress(prev => ({
+          ...prev,
+          status: 'queued',
+          queuePosition: status.Queued.position
+        }));
+      } else if (status.Processing) {
+        setUploadProgress(prev => ({
+          ...prev,
+          status: 'processing',
+          filename: status.Processing.filename
+        }));
+      } else if (status.Converting) {
+        setUploadProgress(prev => ({
+          ...prev,
+          status: 'converting',
+          filename: status.Converting.filename
+        }));
+      } else if (status.Transcribing) {
+        setUploadProgress(prev => ({
+          ...prev,
+          status: 'transcribing',
+          filename: status.Transcribing.filename
+        }));
+      } else if (status.Complete) {
         // Transcription complete, refresh the transcript list
         console.log("Transcription complete, refreshing transcript list");
         loadRecentTranscripts();
         setShowSuccess(true);
         setTimeout(() => setShowSuccess(false), 2000);
+        setUploadProgress({ status: 'idle' });
+        setIsProcessing(false);
       } else if (status.Failed) {
         console.error("Processing failed:", status.Failed);
+        setIsProcessing(false);
+        setUploadProgress({ status: 'idle' });
+        // Show error message to user
+        alert(`Failed to process audio file: ${status.Failed.error || 'Unknown error'}`);
       }
     });
+    
+    // Listen for file upload complete events
+    const unsubscribeFileUpload = listen('file-upload-complete', (event) => {
+      const data = event.payload as any;
+      console.log("File upload complete:", data);
+      
+      // Update upload progress with file info
+      setUploadProgress(prev => ({
+        ...prev,
+        filename: data.originalName || data.filename,
+        fileSize: data.size,
+        status: 'queued'
+      }));
+    });
+    
+    // Set up Tauri file drop handling for the entire window
+    let unsubscribeFileDrop: (() => void) | undefined;
+    const setupFileDrop = async () => {
+      const appWindow = getCurrentWindow();
+      unsubscribeFileDrop = await appWindow.onFileDropEvent(async (event) => {
+        console.log('File drop event:', event);
+        
+        if (event.payload.type === 'hover') {
+          setIsDragging(true);
+        } else if (event.payload.type === 'drop') {
+          setIsDragging(false);
+          
+          const files = event.payload.paths;
+          const audioFiles = files.filter((filePath: string) => {
+            const extension = filePath.split('.').pop()?.toLowerCase();
+            return ['wav', 'mp3', 'm4a', 'flac', 'ogg', 'webm'].includes(extension || '');
+          });
+
+          if (audioFiles.length > 0) {
+            // Process the first audio file
+            const filePath = audioFiles[0];
+            console.log('Processing dropped file:', filePath);
+            
+            try {
+              setIsProcessing(true);
+              setShowSuccess(false);
+              
+              const filename = filePath.split('/').pop() || 'audio file';
+              setUploadProgress({
+                filename: filename,
+                status: 'uploading',
+                progress: 0
+              });
+
+              const queuedFilename = await invoke<string>('transcribe_file', { 
+                filePath: filePath 
+              });
+
+              console.log('File queued for processing:', queuedFilename);
+            } catch (error) {
+              console.error('Failed to process dropped file:', error);
+              alert(`Failed to process file: ${error}`);
+              setIsProcessing(false);
+            }
+          } else if (files.length > 0) {
+            // Non-audio files were dropped
+            alert('Please drop audio files only (wav, mp3, m4a, flac, ogg, webm)');
+            setIsProcessing(false);
+          }
+        } else if (event.payload.type === 'cancel') {
+          setIsDragging(false);
+        }
+      });
+    };
+    
+    setupFileDrop();
     
     return () => {
       unsubscribe.then(fn => fn());
       unsubscribeProgress.then(fn => fn());
       unsubscribeProcessing.then(fn => fn());
+      unsubscribeFileUpload.then(fn => fn());
+      if (unsubscribeFileDrop) {
+        unsubscribeFileDrop();
+      }
     };
   }, []); // Empty dependency array since we're checking state from backend
 
@@ -241,7 +334,6 @@ function App() {
     // IMMEDIATELY update UI for instant feedback
     setIsRecording(false);
     let recordingFile = currentRecordingFile;
-    const duration = recordingDuration;
     
     // Process everything else asynchronously
     (async () => {
@@ -286,6 +378,13 @@ function App() {
     const minutes = Math.floor(seconds / 60);
     const remainingSeconds = seconds % 60;
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
   };
 
   const copyTranscript = (text: string) => {
@@ -384,6 +483,54 @@ function App() {
       setSelectedTranscripts(new Set(transcripts.map(t => t.id)));
     }
   };
+
+  const handleFileUpload = async () => {
+    try {
+      const filePath = await open({
+        multiple: false,
+        filters: [
+          {
+            name: 'Audio Files',
+            extensions: ['wav', 'mp3', 'm4a', 'flac', 'ogg', 'webm']
+          }
+        ]
+      });
+
+      if (!filePath) return;
+
+      setIsProcessing(true);
+      setShowSuccess(false);
+
+      // Get filename from path
+      const filename = filePath.split('/').pop() || 'audio file';
+      
+      // Set initial upload state
+      setUploadProgress({
+        filename: filename,
+        status: 'uploading',
+        progress: 0
+      });
+
+      // Show upload started message
+      console.log('Uploading file:', filePath);
+
+      // Send file to backend for processing - filePath is already a string
+      const queuedFilename = await invoke<string>('transcribe_file', { 
+        filePath: filePath 
+      });
+
+      console.log('File queued for processing:', queuedFilename);
+      
+      // File is now queued, processing will happen in background
+      // The progress updates will come through the existing event listeners
+      
+    } catch (error) {
+      console.error('Failed to upload file:', error);
+      alert(`Failed to upload file: ${error}`);
+      setIsProcessing(false);
+    }
+  };
+
 
   const toggleVAD = async () => {
     try {
@@ -542,8 +689,12 @@ function App() {
     };
   }, [isCapturingHotkey, capturedKeys]);
 
+  if (showFirstRun) {
+    return <FirstRunSetup onComplete={() => setShowFirstRun(false)} />;
+  }
+
   return (
-    <main className="container">
+    <main className={`container ${isDragging ? 'drag-highlight' : ''}`}>
       <div className="header">
         <h1>Scout Voice Transcription</h1>
         <div className="header-controls">
@@ -561,22 +712,63 @@ function App() {
         </div>
       </div>
       
-      <div className="recording-section">
-        <button
-          className={`record-button ${isRecording ? 'recording' : ''} ${isProcessing ? 'processing' : ''}`}
-          onClick={isRecording ? stopRecording : startRecording}
-          disabled={isProcessing || isStoppingRef.current}
-        >
-          {isProcessing ? 'Processing...' : isRecording ? 'Stop Recording' : 'Start Recording'}
-        </button>
-        <p className="hotkey-hint">
-          Press {hotkey.split('+').map((key, idx) => (
-            <Fragment key={idx}>
-              {idx > 0 && ' + '}
-              <kbd>{key}</kbd>
-            </Fragment>
-          ))} to toggle recording
-        </p>
+      <div 
+        className={`recording-section ${isDragging ? 'dragging' : ''}`}
+      >
+        <div className="recording-controls">
+          <button
+            className={`record-button ${isRecording ? 'recording' : ''} ${isProcessing ? 'processing' : ''}`}
+            onClick={isRecording ? stopRecording : startRecording}
+            disabled={isProcessing || isStoppingRef.current}
+          >
+            {isProcessing ? (
+              <span>Processing...</span>
+            ) : isRecording ? (
+              <div className="recording-content">
+                <div className="mini-waveform">
+                  <span className="mini-wave"></span>
+                  <span className="mini-wave"></span>
+                  <span className="mini-wave"></span>
+                </div>
+                <span className="rec-timer">{formatDuration(recordingDuration)}</span>
+              </div>
+            ) : (
+              <>
+                <div className="record-circle" />
+                <span>Start Recording</span>
+              </>
+            )}
+          </button>
+          
+          <div className="upload-divider">or</div>
+          
+          <button
+            className="upload-button"
+            onClick={handleFileUpload}
+            disabled={isProcessing}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            <span>Upload Audio</span>
+          </button>
+        </div>
+        
+        {isDragging && (
+          <div className="drop-zone-overlay">
+            <div className="drop-zone-content">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              <p>Drop audio files here</p>
+              <span className="drop-zone-formats">Supported: WAV, MP3, M4A, FLAC, OGG, WebM</span>
+            </div>
+          </div>
+        )}
         
         {isRecording && (
           <div className="recording-indicator">
@@ -587,14 +779,68 @@ function App() {
               <span className="wave"></span>
               <span className="wave"></span>
             </div>
-            <span>Recording... {formatDuration(recordingDuration)}</span>
           </div>
         )}
         
-        {isProcessing && (
-          <div className="processing-indicator">
-            <div className="spinner"></div>
-            <span>Transcribing your audio...</span>
+        <div className="hints-container">
+          <p className="hotkey-hint">
+            {hotkey.split('+').map((key, idx) => (
+              <Fragment key={idx}>
+                {idx > 0 && ' + '}
+                <kbd>{key}</kbd>
+              </Fragment>
+            ))}
+          </p>
+          <p className="drag-hint">or drag & drop audio files</p>
+        </div>
+        
+        {uploadProgress.status !== 'idle' && (
+          <div className="upload-progress-container">
+            <div className="upload-progress-header">
+              <h3>Processing Upload</h3>
+              {uploadProgress.filename && (
+                <span className="upload-filename">{uploadProgress.filename}</span>
+              )}
+            </div>
+            
+            <div className="upload-progress-status">
+              {uploadProgress.status === 'uploading' && (
+                <>
+                  <div className="spinner"></div>
+                  <span>Uploading file...</span>
+                </>
+              )}
+              {uploadProgress.status === 'queued' && (
+                <>
+                  <div className="spinner"></div>
+                  <span>In queue{uploadProgress.queuePosition ? ` (position ${uploadProgress.queuePosition})` : ''}</span>
+                </>
+              )}
+              {uploadProgress.status === 'processing' && (
+                <>
+                  <div className="spinner"></div>
+                  <span>Processing audio file...</span>
+                </>
+              )}
+              {uploadProgress.status === 'converting' && (
+                <>
+                  <div className="spinner"></div>
+                  <span>Converting to WAV format...</span>
+                </>
+              )}
+              {uploadProgress.status === 'transcribing' && (
+                <>
+                  <div className="spinner"></div>
+                  <span>Transcribing speech to text...</span>
+                </>
+              )}
+            </div>
+            
+            {uploadProgress.fileSize && (
+              <div className="upload-file-info">
+                <span>Size: {formatFileSize(uploadProgress.fileSize)}</span>
+              </div>
+            )}
           </div>
         )}
         
@@ -647,7 +893,16 @@ function App() {
           )}
         </div>
         {transcripts.length === 0 ? (
-          <p className="no-transcripts">No transcripts yet. Start recording!</p>
+          <div className="no-transcripts">
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.3">
+              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              <line x1="12" y1="19" x2="12" y2="22"/>
+              <line x1="8" y1="22" x2="16" y2="22"/>
+            </svg>
+            <h3>No transcripts yet</h3>
+            <p>Press {hotkey.split('+').join(' + ')} or click "Start Recording" to begin</p>
+          </div>
         ) : (
           transcripts.map((transcript) => (
             <div 
@@ -669,7 +924,18 @@ function App() {
                     {formatDuration(transcript.duration_ms)}
                   </span>
                 </div>
-                <p className="transcript-text">{transcript.text}</p>
+                <p className="transcript-text">
+                  {transcript.text === "[BLANK_AUDIO]" ? (
+                    <span className="transcript-empty">
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style={{ marginRight: '6px', verticalAlign: 'text-bottom' }}>
+                        <path d="M8 1a7 7 0 100 14A7 7 0 008 1zM7 4h2v5H7V4zm0 6h2v2H7v-2z"/>
+                      </svg>
+                      No speech detected in recording
+                    </span>
+                  ) : (
+                    transcript.text
+                  )}
+                </p>
               </div>
               <div className="transcript-item-actions">
                 <button
@@ -812,6 +1078,10 @@ function App() {
                 <p className="setting-hint">
                   Choose where the recording indicator appears on your screen
                 </p>
+              </div>
+              
+              <div className="setting-item model-manager-section">
+                <ModelManager />
               </div>
             </div>
           </div>

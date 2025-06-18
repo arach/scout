@@ -2,12 +2,14 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::sync::mpsc;
+use std::any::TypeId;
 use super::vad::VoiceActivityDetector;
 
 pub struct AudioRecorder {
     control_tx: Option<mpsc::Sender<RecorderCommand>>,
     is_recording: Arc<Mutex<bool>>,
     vad_enabled: Arc<Mutex<bool>>,
+    current_audio_level: Arc<Mutex<f32>>,
 }
 
 enum RecorderCommand {
@@ -22,7 +24,12 @@ impl AudioRecorder {
             control_tx: None,
             is_recording: Arc::new(Mutex::new(false)),
             vad_enabled: Arc::new(Mutex::new(false)),
+            current_audio_level: Arc::new(Mutex::new(0.0)),
         }
+    }
+    
+    pub fn get_current_audio_level(&self) -> f32 {
+        *self.current_audio_level.lock().unwrap()
     }
 
     pub fn init(&mut self) {
@@ -30,9 +37,10 @@ impl AudioRecorder {
         self.control_tx = Some(tx);
         let is_recording = self.is_recording.clone();
         let vad_enabled = self.vad_enabled.clone();
+        let audio_level = self.current_audio_level.clone();
 
         thread::spawn(move || {
-            let mut recorder = AudioRecorderWorker::new(is_recording, vad_enabled);
+            let mut recorder = AudioRecorderWorker::new(is_recording, vad_enabled, audio_level);
             
             while let Ok(cmd) = rx.recv() {
                 match cmd {
@@ -111,10 +119,11 @@ struct AudioRecorderWorker {
     sample_rate: u32,
     channels: u16,
     sample_format: Option<cpal::SampleFormat>,
+    current_audio_level: Arc<Mutex<f32>>,
 }
 
 impl AudioRecorderWorker {
-    fn new(is_recording: Arc<Mutex<bool>>, vad_enabled: Arc<Mutex<bool>>) -> Self {
+    fn new(is_recording: Arc<Mutex<bool>>, vad_enabled: Arc<Mutex<bool>>, audio_level: Arc<Mutex<f32>>) -> Self {
         Self {
             stream: None,
             writer: Arc::new(Mutex::new(None)),
@@ -125,6 +134,7 @@ impl AudioRecorderWorker {
             sample_rate: 48000, // default, will be updated when recording starts
             channels: 1, // default, will be updated when recording starts
             sample_format: None,
+            current_audio_level: audio_level,
         }
     }
 
@@ -190,6 +200,7 @@ impl AudioRecorderWorker {
                 writer.clone(),
                 is_recording.clone(),
                 self.sample_count.clone(),
+                self.current_audio_level.clone(),
                 err_fn,
             ),
             cpal::SampleFormat::U16 => {
@@ -201,6 +212,7 @@ impl AudioRecorderWorker {
                 writer.clone(),
                 is_recording.clone(),
                 self.sample_count.clone(),
+                self.current_audio_level.clone(),
                 err_fn,
             ),
             _ => return Err("Unsupported sample format".to_string()),
@@ -219,6 +231,9 @@ impl AudioRecorderWorker {
 
     fn stop_recording(&mut self) -> Result<(), String> {
         *self.is_recording.lock().unwrap() = false;
+        
+        // Reset audio level
+        *self.current_audio_level.lock().unwrap() = 0.0;
 
         // Give the stream a moment to process any remaining audio
         std::thread::sleep(std::time::Duration::from_millis(100));
@@ -283,6 +298,7 @@ impl AudioRecorderWorker {
         writer: Arc<Mutex<Option<hound::WavWriter<std::io::BufWriter<std::fs::File>>>>>,
         is_recording: Arc<Mutex<bool>>,
         sample_count: Arc<Mutex<u64>>,
+        audio_level: Arc<Mutex<f32>>,
         err_fn: impl FnMut(cpal::StreamError) + Send + 'static,
     ) -> Result<cpal::Stream, String>
     where
@@ -295,6 +311,31 @@ impl AudioRecorderWorker {
                 config,
                 move |data: &[T], _: &cpal::InputCallbackInfo| {
                     if *is_recording.lock().unwrap() {
+                        // Calculate RMS (Root Mean Square) level for volume
+                        let mut sum_squares = 0.0f32;
+                        
+                        // Convert samples to f32 for RMS calculation
+                        if TypeId::of::<T>() == TypeId::of::<f32>() {
+                            // For f32 samples
+                            for &sample in data.iter() {
+                                let s = unsafe { *(&sample as *const T as *const f32) };
+                                sum_squares += s * s;
+                            }
+                        } else if TypeId::of::<T>() == TypeId::of::<i16>() {
+                            // For i16 samples
+                            for &sample in data.iter() {
+                                let s = unsafe { *(&sample as *const T as *const i16) } as f32 / 32768.0;
+                                sum_squares += s * s;
+                            }
+                        }
+                        
+                        let rms = (sum_squares / data.len() as f32).sqrt();
+                        
+                        // Update audio level (with some smoothing)
+                        let current_level = *audio_level.lock().unwrap();
+                        let new_level = current_level * 0.7 + rms * 0.3; // Smooth the level changes
+                        *audio_level.lock().unwrap() = new_level.min(1.0); // Cap at 1.0
+                        
                         if let Some(ref mut writer) = *writer.lock().unwrap() {
                             let samples_written = data.len();
                             for &sample in data.iter() {

@@ -1,0 +1,195 @@
+.model-manager {
+  padding: 20px 0;
+}
+
+.model-manager-header {
+  margin-bottom: 24px;
+}
+
+.model-manager-header h3 {
+  margin: 0 0 8px 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.model-manager-subtitle {
+  margin: 0 0 16px 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.btn-secondary {
+  background: var(--button-background);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  padding: 6px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-secondary:hover {
+  background: var(--button-hover);
+  border-color: var(--border-hover);
+}
+
+.model-manager-loading {
+  text-align: center;
+  padding: 40px;
+  color: var(--text-muted);
+}
+
+.model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.model-item {
+  background: var(--button-background);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: all 0.2s ease;
+}
+
+.model-item.active {
+  border-color: var(--accent-primary);
+  background: rgba(0, 122, 204, 0.1);
+}
+
+.model-item:hover {
+  border-color: var(--border-hover);
+}
+
+.model-info {
+  flex: 1;
+}
+
+.model-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.model-header h4 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.model-size {
+  font-size: 13px;
+  color: var(--text-muted);
+  background: var(--background-primary);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.auto-download-badge {
+  font-size: 11px;
+  color: var(--accent-primary);
+  background: rgba(0, 122, 204, 0.1);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.model-description {
+  margin: 0 0 12px 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.model-stats {
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+}
+
+.model-speed,
+.model-accuracy {
+  color: var(--text-muted);
+}
+
+.model-actions {
+  display: flex;
+  align-items: center;
+  min-width: 200px;
+  justify-content: flex-end;
+}
+
+.btn {
+  padding: 6px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-download {
+  background: var(--accent-primary);
+  color: white;
+}
+
+.btn-download:hover {
+  background: var(--accent-hover);
+}
+
+.btn-activate {
+  background: var(--button-background);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}
+
+.btn-activate:hover {
+  background: var(--button-hover);
+  border-color: var(--border-hover);
+}
+
+.model-active-badge {
+  font-size: 11px;
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.1);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.download-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 200px;
+}
+
+.progress-bar {
+  height: 6px;
+  background: var(--background-primary);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--accent-primary);
+  transition: width 0.3s ease;
+}
+
+.progress-text {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+}

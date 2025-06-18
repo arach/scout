@@ -1,0 +1,78 @@
+{"mcpServers": {
+        "filesystem": {
+          "command": "npx",
+          "args": [
+            "-y",
+            "@modelcontextprotocol/server-filesystem",
+            "/Users/arach"
+          ],
+          "env": {
+            "NODE_ENV": "development"
+          }
+        },
+        "github": {
+          "command": "npx",
+          "args": [
+            "-y",
+            "@modelcontextprotocol/server-github"
+          ],
+          "env": {
+            "GITHUB_PERSONAL_ACCESS_TOKEN": "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"
+          }
+        },
+        "obsidian": {
+          "command": "npx",
+          "args": [
+            "-y",
+            "obsidian-mcp",
+            "/Users/arach/dev/Breathe"
+          ],
+          "env": {
+            "VAULT_PATH": "/Users/arach/dev/Breathe",
+            "OBSIDIAN_API_KEY": "5fb551a9c00e3fdfb8dbe37d02d0cc1a195e576cdc626bec1387a7b71bfda105",
+            "OBSIDIAN_HOST": "https://127.0.0.1:27124/"
+          }
+        },
+        "peekaboo": {
+          "command": "npx",
+          "args": [
+            "-y",
+            "@steipete/peekaboo-mcp@beta"
+          ],
+          "env": {
+            "PEEKABOO_AI_PROVIDERS": "openai/gpt-4o,ollama/llava:latest",
+            "OPENAI_API_KEY": "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"
+          }
+        },
+        "context7": {
+          "command": "npx",
+          "args": [
+            "-y",
+            "@upstash/context7-mcp@latest"
+          ]
+        },
+        "agent": {
+          "command": "npx",
+          "args": [
+            "-y",
+            "@steipete/claude-code-mcp@latest"
+          ]
+        },
+        "automator": {
+          "command": "npx",
+          "args": [
+            "-y",
+            "@steipete/macos-automator-mcp@latest"
+          ],
+          "env": {
+            "LOG_LEVEL": "INFO"
+          }
+        },
+        "playwright": {
+          "command": "npx",
+          "args": [
+            "@playwright/mcp@latest"
+          ]
+        }
+      }
+    }
