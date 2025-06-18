@@ -17,7 +17,8 @@
         "width": 960,
         "height": 720,
         "closable": true,
-        "minimizable": true
+        "minimizable": true,
+        "fileDropEnabled": true
       },
       {
         "label": "overlay",
