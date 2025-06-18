@@ -1,6 +1,7 @@
 import { useState, useEffect, Fragment, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 import "./App.css";
 
 interface Transcript {
@@ -55,66 +56,21 @@ function App() {
       }).catch(console.error);
     }
     
-    // Check if this is the first time the app has ever been launched
-    const hasInitialized = localStorage.getItem('scout-initialized');
-    let savedHotkey = localStorage.getItem('scout-hotkey');
-    
-    // Clean up any invalid shortcuts
-    if (savedHotkey) {
-      // Fix redundant CmdOrCtrl+Ctrl
-      if (savedHotkey.includes('CmdOrCtrl') && savedHotkey.includes('Ctrl')) {
-        savedHotkey = savedHotkey.replace(/\+Ctrl/g, '').replace(/Ctrl\+/g, '');
-      }
-      
-      // Fix corrupted "CmdOrShift" (should be CmdOrCtrl+Shift)
-      if (savedHotkey.includes('CmdOrShift')) {
-        savedHotkey = savedHotkey.replace('CmdOrShift', 'CmdOrCtrl+Shift');
-      }
-      
-      // Validate that the shortcut has proper format
-      const validModifiers = ['CmdOrCtrl', 'Cmd', 'Ctrl', 'Shift', 'Alt'];
-      const parts = savedHotkey.split('+');
-      const isValid = parts.every(part => 
-        validModifiers.includes(part) || 
-        /^[A-Z0-9]$/.test(part) || 
-        ['Space', 'Enter', 'Tab', 'Escape', 'Up', 'Down', 'Left', 'Right', 'Backspace', 'Delete'].includes(part)
-      );
-      
-      if (!isValid) {
-        // If invalid, reset to default
-        savedHotkey = "CmdOrCtrl+Shift+Space";
-      }
-      
-      localStorage.setItem('scout-hotkey', savedHotkey);
-    }
-    
-    if (!hasInitialized) {
-      // First time setup
-      localStorage.setItem('scout-initialized', 'true');
-      
-      // If there's a saved hotkey from a previous version, use it
-      if (savedHotkey) {
-        setHotkey(savedHotkey);
-        // Update backend with saved hotkey
-        invoke("update_global_shortcut", { shortcut: savedHotkey }).catch(console.error);
-      } else {
-        // Otherwise, save the default
-        const defaultHotkey = "CmdOrCtrl+Shift+Space";
-        localStorage.setItem('scout-hotkey', defaultHotkey);
-        setHotkey(defaultHotkey);
-      }
-    } else if (savedHotkey) {
-      // Not first time, load the saved hotkey and update backend
+    // Get the current shortcut from backend (source of truth)
+    invoke<string>('get_current_shortcut').then(backendShortcut => {
+      setHotkey(backendShortcut);
+      // Save to localStorage for quick access
+      localStorage.setItem('scout-hotkey', backendShortcut);
+    }).catch(err => {
+      console.error('Failed to get current shortcut:', err);
+      // Fallback to localStorage if backend fails
+      const savedHotkey = localStorage.getItem('scout-hotkey') || 'CmdOrCtrl+Shift+Space';
       setHotkey(savedHotkey);
-      // Update backend with saved hotkey on every app start
-      invoke("update_global_shortcut", { shortcut: savedHotkey }).catch(err => {
-        console.error("Failed to restore saved hotkey:", err);
-        // If registration fails, reset to default
-        const defaultHotkey = "CmdOrCtrl+Shift+Space";
-        setHotkey(defaultHotkey);
-        localStorage.setItem('scout-hotkey', defaultHotkey);
-        invoke("update_global_shortcut", { shortcut: defaultHotkey }).catch(console.error);
-      });
+    });
+    
+    // Mark as initialized
+    if (!localStorage.getItem('scout-initialized')) {
+      localStorage.setItem('scout-initialized', 'true');
     }
     
     // Listen for global hotkey events
@@ -176,10 +132,21 @@ function App() {
       }
     });
     
+    // Listen for file upload complete events
+    const unsubscribeFileUpload = listen('file-upload-complete', (event) => {
+      const data = event.payload as any;
+      console.log("File upload complete:", data);
+      
+      // Show a message that the file is being processed
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 2000);
+    });
+    
     return () => {
       unsubscribe.then(fn => fn());
       unsubscribeProgress.then(fn => fn());
       unsubscribeProcessing.then(fn => fn());
+      unsubscribeFileUpload.then(fn => fn());
     };
   }, []); // Empty dependency array since we're checking state from backend
 
@@ -241,7 +208,6 @@ function App() {
     // IMMEDIATELY update UI for instant feedback
     setIsRecording(false);
     let recordingFile = currentRecordingFile;
-    const duration = recordingDuration;
     
     // Process everything else asynchronously
     (async () => {
@@ -382,6 +348,43 @@ function App() {
       setSelectedTranscripts(new Set());
     } else {
       setSelectedTranscripts(new Set(transcripts.map(t => t.id)));
+    }
+  };
+
+  const handleFileUpload = async () => {
+    try {
+      const file = await open({
+        multiple: false,
+        filters: [
+          {
+            name: 'Audio Files',
+            extensions: ['wav', 'mp3', 'm4a', 'flac', 'ogg', 'webm']
+          }
+        ]
+      });
+
+      if (!file) return;
+
+      setIsProcessing(true);
+      setShowSuccess(false);
+
+      // Show upload started message
+      console.log('Uploading file:', file);
+
+      // Send file to backend for processing
+      const filename = await invoke<string>('transcribe_file', { 
+        filePath: file.path 
+      });
+
+      console.log('File queued for processing:', filename);
+      
+      // File is now queued, processing will happen in background
+      // The progress updates will come through the existing event listeners
+      
+    } catch (error) {
+      console.error('Failed to upload file:', error);
+      alert(`Failed to upload file: ${error}`);
+      setIsProcessing(false);
     }
   };
 
@@ -562,21 +565,46 @@ function App() {
       </div>
       
       <div className="recording-section">
-        <button
-          className={`record-button ${isRecording ? 'recording' : ''} ${isProcessing ? 'processing' : ''}`}
-          onClick={isRecording ? stopRecording : startRecording}
-          disabled={isProcessing || isStoppingRef.current}
-        >
-          {isProcessing ? 'Processing...' : isRecording ? 'Stop Recording' : 'Start Recording'}
-        </button>
-        <p className="hotkey-hint">
-          Press {hotkey.split('+').map((key, idx) => (
-            <Fragment key={idx}>
-              {idx > 0 && ' + '}
-              <kbd>{key}</kbd>
-            </Fragment>
-          ))} to toggle recording
-        </p>
+        <div className="recording-controls">
+          <button
+            className={`record-button ${isRecording ? 'recording' : ''} ${isProcessing ? 'processing' : ''}`}
+            onClick={isRecording ? stopRecording : startRecording}
+            disabled={isProcessing || isStoppingRef.current}
+          >
+            {isProcessing ? (
+              <span>Processing...</span>
+            ) : isRecording ? (
+              <div className="recording-content">
+                <div className="mini-waveform">
+                  <span className="mini-wave"></span>
+                  <span className="mini-wave"></span>
+                  <span className="mini-wave"></span>
+                </div>
+                <span className="rec-timer">{formatDuration(recordingDuration)}</span>
+              </div>
+            ) : (
+              <>
+                <div className="record-circle" />
+                <span>Start Recording</span>
+              </>
+            )}
+          </button>
+          
+          <div className="upload-divider">or</div>
+          
+          <button
+            className="upload-button"
+            onClick={handleFileUpload}
+            disabled={isProcessing}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            <span>Upload Audio</span>
+          </button>
+        </div>
         
         {isRecording && (
           <div className="recording-indicator">
@@ -587,9 +615,17 @@ function App() {
               <span className="wave"></span>
               <span className="wave"></span>
             </div>
-            <span>Recording... {formatDuration(recordingDuration)}</span>
           </div>
         )}
+        
+        <p className="hotkey-hint">
+          {hotkey.split('+').map((key, idx) => (
+            <Fragment key={idx}>
+              {idx > 0 && ' + '}
+              <kbd>{key}</kbd>
+            </Fragment>
+          ))}
+        </p>
         
         {isProcessing && (
           <div className="processing-indicator">
@@ -647,7 +683,16 @@ function App() {
           )}
         </div>
         {transcripts.length === 0 ? (
-          <p className="no-transcripts">No transcripts yet. Start recording!</p>
+          <div className="no-transcripts">
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.3">
+              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              <line x1="12" y1="19" x2="12" y2="22"/>
+              <line x1="8" y1="22" x2="16" y2="22"/>
+            </svg>
+            <h3>No transcripts yet</h3>
+            <p>Press {hotkey.split('+').join(' + ')} or click "Start Recording" to begin</p>
+          </div>
         ) : (
           transcripts.map((transcript) => (
             <div 
@@ -669,7 +714,18 @@ function App() {
                     {formatDuration(transcript.duration_ms)}
                   </span>
                 </div>
-                <p className="transcript-text">{transcript.text}</p>
+                <p className="transcript-text">
+                  {transcript.text === "[BLANK_AUDIO]" ? (
+                    <span className="transcript-empty">
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style={{ marginRight: '6px', verticalAlign: 'text-bottom' }}>
+                        <path d="M8 1a7 7 0 100 14A7 7 0 008 1zM7 4h2v5H7V4zm0 6h2v2H7v-2z"/>
+                      </svg>
+                      No speech detected in recording
+                    </span>
+                  ) : (
+                    transcript.text
+                  )}
+                </p>
               </div>
               <div className="transcript-item-actions">
                 <button

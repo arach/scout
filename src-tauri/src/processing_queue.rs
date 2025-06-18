@@ -28,6 +28,10 @@ pub struct ProcessingQueue {
 }
 
 impl ProcessingQueue {
+    pub async fn queue_job(&self, job: ProcessingJob) {
+        let _ = self.sender.send(job).await;
+    }
+    
     pub fn new(
         database: Arc<Database>,
         models_dir: PathBuf,
@@ -56,6 +60,7 @@ impl ProcessingQueue {
                 
                 // Process the next job if not currently processing
                 if !processing && !queue.is_empty() {
+                    let _ = processing; // Mark as used
                     processing = true;
                     let job = queue.remove(0);
                     
@@ -64,12 +69,33 @@ impl ProcessingQueue {
                         filename: job.filename.clone() 
                     }).await;
                     
-                    // Wait for file to be fully written
-                    sleep(Duration::from_millis(200)).await;
+                    // Wait for file to be fully written with retries
+                    let mut retry_count = 0;
+                    let max_retries = 10;
+                    let mut file_ready = false;
+                    
+                    while retry_count < max_retries && !file_ready {
+                        sleep(Duration::from_millis(500)).await;
+                        
+                        match std::fs::metadata(&job.audio_path) {
+                            Ok(metadata) if metadata.len() > 1024 => {
+                                file_ready = true;
+                                println!("Audio file ready after {} retries, size: {} bytes", retry_count, metadata.len());
+                            }
+                            Ok(metadata) => {
+                                println!("Audio file exists but too small ({} bytes), retry {}/{}", metadata.len(), retry_count + 1, max_retries);
+                            }
+                            Err(e) => {
+                                println!("Audio file not found yet, retry {}/{}: {}", retry_count + 1, max_retries, e);
+                            }
+                        }
+                        retry_count += 1;
+                    }
                     
                     // Check if file exists and is valid
-                    match std::fs::metadata(&job.audio_path) {
-                        Ok(metadata) if metadata.len() > 1024 => {
+                    if file_ready {
+                        match std::fs::metadata(&job.audio_path) {
+                            Ok(metadata) if metadata.len() > 1024 => {
                             // Update to transcribing
                             let _ = status_tx.send(ProcessingStatus::Transcribing { 
                                 filename: job.filename.clone() 
@@ -127,13 +153,21 @@ impl ProcessingQueue {
                                 }).await;
                             }
                         }
-                        _ => {
-                            eprintln!("Audio file not ready or too small");
-                            let _ = status_tx.send(ProcessingStatus::Failed { 
-                                filename: job.filename.clone(),
-                                error: "Audio file not ready or too small".to_string(),
-                            }).await;
+                            _ => {
+                                eprintln!("Audio file not ready or too small");
+                                let _ = status_tx.send(ProcessingStatus::Failed { 
+                                    filename: job.filename.clone(),
+                                    error: "Audio file not ready or too small".to_string(),
+                                }).await;
+                            }
                         }
+                    } else {
+                        // File not ready after all retries
+                        eprintln!("Audio file not ready after {} retries", max_retries);
+                        let _ = status_tx.send(ProcessingStatus::Failed { 
+                            filename: job.filename.clone(),
+                            error: format!("Audio file not ready after {} seconds", max_retries / 2),
+                        }).await;
                     }
                     
                     processing = false;

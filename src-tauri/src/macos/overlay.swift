@@ -584,6 +584,10 @@ class OverlayViewController: NSViewController {
     }
     
     @objc func showOverlay() {
+        // DISABLED: Using Tauri overlay window instead of native overlay
+        return
+        
+        /*
         // If overlay doesn't exist, create it
         if overlayWindow == nil {
             setupOverlay()
@@ -599,6 +603,9 @@ class OverlayViewController: NSViewController {
         
         // Calculate expanded size and position
         let expandedWidth = OverlayConstants.EXPANDED_WIDTH
+        */
+        
+        /*
         let expandedHeight = OverlayConstants.EXPANDED_HEIGHT
         
         // Use helper function to calculate position
@@ -668,15 +675,23 @@ class OverlayViewController: NSViewController {
         print("Recording started, overlay expanded from \(currentFrame) to target \(expandedWidth)x\(expandedHeight)")
         print("Controller isRecording: \(overlayController?.isRecording ?? false)")
         print("WebView frame: \(overlayController?.webView.frame ?? .zero)")
+        */
     }
     
-    @objc func hideOverlay() {
+    // Minimizes overlay to pill state - does NOT hide it completely
+    @objc func minimizeOverlay() {
+        // DISABLED: Using Tauri overlay window instead
+        return
+        /*
         overlayController?.stopRecording()
         
         guard let window = overlayWindow, let screen = NSScreen.main else { return }
         
         // Get the current frame to shrink from
         let currentFrame = window.frame
+        */
+        
+        /*
         let currentCenter = NSPoint(x: currentFrame.midX, y: currentFrame.midY)
         
         // Calculate the final minimal size
@@ -727,6 +742,7 @@ class OverlayViewController: NSViewController {
         playStopSound()
         
         print("Recording stopped, overlay minimized")
+        */
     }
     
     @objc func positionOverlay(_ x: CGFloat, y: CGFloat) {
@@ -951,5 +967,23 @@ class OverlayViewController: NSViewController {
                 }
             }
         }
+    }
+    
+    // MARK: - Future hide/show functionality
+    // These methods completely hide/show the overlay window (remove from screen)
+    
+    @objc func hideOverlay() {
+        // Future implementation: completely hide the overlay window
+        guard let window = overlayWindow else { return }
+        window.orderOut(nil)
+        print("Overlay hidden (removed from screen)")
+    }
+    
+    @objc func showOverlayAgain() {
+        // Future implementation: restore a previously hidden overlay
+        guard let window = overlayWindow else { return }
+        window.orderFront(nil)
+        window.setIsVisible(true)
+        print("Overlay shown again")
     }
 }

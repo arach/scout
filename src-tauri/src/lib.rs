@@ -5,6 +5,7 @@ mod recording_progress;
 mod recording_workflow;
 mod processing_queue;
 mod overlay_position;
+mod sound;
 #[cfg(target_os = "macos")]
 mod macos;
 
@@ -22,6 +23,7 @@ use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tauri::tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, MenuItemBuilder};
 use tokio::sync::Mutex;
+use chrono;
 
 pub struct AppState {
     pub recorder: Arc<Mutex<AudioRecorder>>,
@@ -37,6 +39,34 @@ pub struct AppState {
     pub overlay_position: Arc<Mutex<OverlayPosition>>,
     #[cfg(target_os = "macos")]
     pub native_overlay: Arc<Mutex<macos::MacOSOverlay>>,
+}
+
+fn calculate_overlay_position(position: &OverlayPosition, window: &tauri::WebviewWindow) -> (f64, f64) {
+    // Get the primary monitor to calculate position
+    let monitor = window.primary_monitor().unwrap_or_default();
+    let (screen_width, screen_height) = if let Some(m) = monitor {
+        let size = m.size();
+        let scale = m.scale_factor();
+        (size.width as f64 / scale, size.height as f64 / scale)
+    } else {
+        (1920.0, 1080.0) // Default fallback
+    };
+    
+    let window_width = 180.0;
+    let window_height = 40.0;
+    let padding = 20.0;
+    let top_padding = 5.0; // Closer to top edge
+    
+    match position {
+        OverlayPosition::TopLeft => (padding, top_padding),
+        OverlayPosition::TopCenter => ((screen_width - window_width) / 2.0, top_padding),
+        OverlayPosition::TopRight => (screen_width - window_width - padding, top_padding),
+        OverlayPosition::BottomLeft => (padding, screen_height - window_height - padding),
+        OverlayPosition::BottomCenter => ((screen_width - window_width) / 2.0, screen_height - window_height - padding),
+        OverlayPosition::BottomRight => (screen_width - window_width - padding, screen_height - window_height - padding),
+        OverlayPosition::LeftCenter => (padding, (screen_height - window_height) / 2.0),
+        OverlayPosition::RightCenter => (screen_width - window_width - padding, (screen_height - window_height) / 2.0),
+    }
 }
 
 #[tauri::command]
@@ -55,6 +85,9 @@ async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> R
         return Err("Audio recorder is already active".to_string());
     }
     drop(recorder);
+    // Play start sound
+    sound::SoundPlayer::play_start();
+    
     // Use the recording workflow to start recording
     let filename = state.recording_workflow.start_recording().await?;
     
@@ -68,47 +101,67 @@ async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> R
         let _ = menu_item.set_text("Stop Recording");
     }
 
-    // Show native overlay on macOS
-    #[cfg(target_os = "macos")]
-    {
-        let overlay = state.native_overlay.lock().await;
-        overlay.show();
+    // Show overlay window
+    if let Some(overlay_window) = app.get_webview_window("overlay") {
+        println!("DEBUG: Found overlay window, showing it");
+        // Position the window (native code controls position)
+        // Use saved position from overlay_position
+        let position = state.overlay_position.lock().await;
+        let (x, y) = calculate_overlay_position(&position, &overlay_window);
+        println!("DEBUG: Setting overlay position to ({}, {})", x, y);
+        let _ = overlay_window.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x, y)));
         
-        // Set recording active flag
-        state.is_recording_overlay_active.store(true, Ordering::Relaxed);
-    }
-    
-    // Fallback to Tauri overlay on other platforms
-    #[cfg(not(target_os = "macos"))]
-    {
-        if let Some(overlay_window) = app.get_webview_window("overlay") {
-            let _ = overlay_window.show();
-            let _ = overlay_window.emit("recording-state-update", serde_json::json!({
-                "isRecording": true,
-                "duration": 0
-            }));
-            
-            // Set recording active flag and start duration updates
-            state.is_recording_overlay_active.store(true, Ordering::Relaxed);
-            
-            // Start a task to periodically update the duration
-            let overlay_window_clone = overlay_window.clone();
-            let start_time = std::time::Instant::now();
-            let is_recording = state.is_recording_overlay_active.clone();
-            
-            tauri::async_runtime::spawn(async move {
-                while is_recording.load(Ordering::Relaxed) {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                    let duration = start_time.elapsed().as_millis() as u64;
-                    if overlay_window_clone.emit("recording-state-update", serde_json::json!({
-                        "isRecording": true,
-                        "duration": duration
-                    })).is_err() {
-                        break;
-                    }
-                }
-            });
+        // Make sure window is properly sized for expanded state
+        let _ = overlay_window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(180.0, 40.0)));
+        
+        // Show the window without focusing it
+        match overlay_window.show() {
+            Ok(_) => println!("DEBUG: Overlay window shown successfully"),
+            Err(e) => println!("DEBUG: Failed to show overlay window: {:?}", e),
         }
+        
+        // Ensure main window retains focus after overlay operations
+        if let Some(main_window) = app.get_webview_window("main") {
+            let _ = main_window.set_focus();
+        }
+        
+        match overlay_window.emit("recording-state-update", serde_json::json!({
+            "isRecording": true,
+            "duration": 0
+        })) {
+            Ok(_) => println!("DEBUG: Sent recording-state-update (isRecording: true) to overlay"),
+            Err(e) => println!("DEBUG: Failed to send event to overlay: {:?}", e),
+        }
+        
+        // Set recording active flag and start duration updates
+        state.is_recording_overlay_active.store(true, Ordering::Relaxed);
+        
+        // Start a task to periodically update the duration and audio levels
+        let overlay_window_clone = overlay_window.clone();
+        let start_time = std::time::Instant::now();
+        let is_recording = state.is_recording_overlay_active.clone();
+        let recorder_clone = state.recorder.clone();
+        
+        tauri::async_runtime::spawn(async move {
+            while is_recording.load(Ordering::Relaxed) {
+                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await; // Faster updates for responsiveness
+                let duration = start_time.elapsed().as_millis() as u64;
+                
+                // Get current audio level from recorder
+                let audio_level = {
+                    let recorder = recorder_clone.lock().await;
+                    recorder.get_current_audio_level()
+                };
+                
+                if overlay_window_clone.emit("recording-state-update", serde_json::json!({
+                    "isRecording": true,
+                    "duration": duration,
+                    "audioLevel": audio_level
+                })).is_err() {
+                    break;
+                }
+            }
+        });
     }
 
     Ok(filename)
@@ -119,6 +172,9 @@ async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Re
     
     // Use the recording workflow to stop recording
     let _result = state.recording_workflow.stop_recording().await?;
+    
+    // Play stop sound
+    sound::SoundPlayer::play_stop();
     
     // Get the filename for background processing
     let filename = state.current_recording_file.lock().await.take();
@@ -152,26 +208,21 @@ async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Re
     // Stop recording overlay updates
     state.is_recording_overlay_active.store(false, Ordering::Relaxed);
     
-    // Don't immediately hide overlay - let the progress state handle it
-    // The overlay will be minimized when we reach Complete or Failed state
-    
-    // Fallback to Tauri overlay on other platforms
-    #[cfg(not(target_os = "macos"))]
-    {
-        if let Some(overlay_window) = app.get_webview_window("overlay") {
-            let _ = overlay_window.emit("recording-stopped", ());
-            let _ = overlay_window.emit("recording-state-update", serde_json::json!({
-                "isRecording": false,
-                "duration": 0
-            }));
-            
-            // Hide the overlay after a short delay
-            let overlay_to_hide = overlay_window.clone();
-            tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
-                let _ = overlay_to_hide.hide();
-            });
+    // Handle overlay window
+    if let Some(overlay_window) = app.get_webview_window("overlay") {
+        let _ = overlay_window.emit("recording-stopped", ());
+        let _ = overlay_window.emit("recording-state-update", serde_json::json!({
+            "isRecording": false,
+            "duration": 0
+        }));
+        
+        // Ensure main window retains focus after overlay events
+        if let Some(main_window) = app.get_webview_window("main") {
+            let _ = main_window.set_focus();
         }
+        
+        // Don't hide the overlay - let the frontend handle the minimize animation
+        // The window stays visible but the content animates to minimized state
     }
     
     Ok(())
@@ -221,6 +272,72 @@ async fn transcribe_audio(
     let result = transcriber.transcribe(&audio_path)?;
     
     Ok(result)
+}
+
+#[tauri::command]
+async fn transcribe_file(
+    state: State<'_, AppState>,
+    file_path: String,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    use std::path::Path;
+    
+    let path = Path::new(&file_path);
+    
+    // Validate file exists
+    if !path.exists() {
+        return Err("File not found".to_string());
+    }
+    
+    // Check file size (limit to ~100MB for 10 minute files)
+    let metadata = std::fs::metadata(&path)
+        .map_err(|e| format!("Failed to read file metadata: {}", e))?;
+    
+    let file_size_mb = metadata.len() as f64 / (1024.0 * 1024.0);
+    if file_size_mb > 100.0 {
+        return Err(format!("File too large: {:.1}MB (max 100MB)", file_size_mb));
+    }
+    
+    // Get file extension
+    let extension = path.extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    
+    // Support common audio formats
+    let supported_formats = ["wav", "mp3", "m4a", "flac", "ogg", "webm"];
+    if !supported_formats.contains(&extension.as_str()) {
+        return Err(format!("Unsupported file format: .{}", extension));
+    }
+    
+    // Copy file to our recordings directory with timestamp
+    let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+    let filename = format!("upload_{}_{}", timestamp, path.file_name().unwrap().to_string_lossy());
+    let dest_path = state.recordings_dir.join(&filename);
+    
+    std::fs::copy(&path, &dest_path)
+        .map_err(|e| format!("Failed to copy file: {}", e))?;
+    
+    // Estimate duration (rough estimate based on file size)
+    let estimated_duration_ms = (file_size_mb * 60000.0) as i32; // Rough: 1MB ≈ 1 minute
+    
+    // Queue for processing
+    let job = processing_queue::ProcessingJob {
+        filename: filename.clone(),
+        audio_path: dest_path,
+        duration_ms: estimated_duration_ms,
+    };
+    
+    state.processing_queue.queue_job(job).await;
+    
+    // Emit status update
+    app.emit("file-upload-complete", serde_json::json!({
+        "filename": filename,
+        "originalName": path.file_name().unwrap().to_string_lossy(),
+        "size": metadata.len(),
+    })).map_err(|e| format!("Failed to emit event: {}", e))?;
+    
+    Ok(filename)
 }
 
 #[tauri::command]
@@ -275,7 +392,7 @@ async fn get_overlay_position(state: State<'_, AppState>) -> Result<String, Stri
 }
 
 #[tauri::command]
-async fn set_overlay_position(state: State<'_, AppState>, position: String) -> Result<(), String> {
+async fn set_overlay_position(state: State<'_, AppState>, position: String, app: tauri::AppHandle) -> Result<(), String> {
     let overlay_position = match position.as_str() {
         "top-left" => OverlayPosition::TopLeft,
         "top-center" => OverlayPosition::TopCenter,
@@ -289,13 +406,12 @@ async fn set_overlay_position(state: State<'_, AppState>, position: String) -> R
     };
     
     // Update the stored position
-    *state.overlay_position.lock().await = overlay_position;
+    *state.overlay_position.lock().await = overlay_position.clone();
     
-    // Update the native overlay position
-    #[cfg(target_os = "macos")]
-    {
-        let overlay = state.native_overlay.lock().await;
-        overlay.set_position(&position);
+    // Update the actual window position
+    if let Some(overlay_window) = app.get_webview_window("overlay") {
+        let (x, y) = calculate_overlay_position(&overlay_position, &overlay_window);
+        let _ = overlay_window.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x, y)));
     }
     
     Ok(())
@@ -378,6 +494,47 @@ async fn get_processing_status() -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
+async fn set_sound_enabled(enabled: bool) -> Result<(), String> {
+    sound::SoundPlayer::set_enabled(enabled);
+    Ok(())
+}
+
+#[tauri::command]
+async fn is_sound_enabled() -> Result<bool, String> {
+    Ok(sound::SoundPlayer::is_enabled())
+}
+
+#[tauri::command]
+async fn get_available_sounds() -> Result<Vec<String>, String> {
+    Ok(sound::SoundPlayer::get_available_sounds())
+}
+
+#[tauri::command]
+async fn get_sound_settings() -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!({
+        "startSound": sound::SoundPlayer::get_start_sound(),
+        "stopSound": sound::SoundPlayer::get_stop_sound()
+    }))
+}
+
+#[tauri::command]
+async fn set_start_sound(sound: String) -> Result<(), String> {
+    sound::SoundPlayer::set_start_sound(sound);
+    Ok(())
+}
+
+#[tauri::command]
+async fn set_stop_sound(sound: String) -> Result<(), String> {
+    sound::SoundPlayer::set_stop_sound(sound);
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_current_shortcut(state: State<'_, AppState>) -> Result<String, String> {
+    Ok(state.current_shortcut.lock().await.clone())
+}
+
+#[tauri::command]
 async fn update_global_shortcut(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
@@ -412,6 +569,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir().expect("Failed to get app data dir");
             let recordings_dir = app_data_dir.join("recordings");
@@ -429,23 +587,10 @@ pub fn run() {
             let base_dir = std::env::current_dir().expect("Failed to get current directory");
             let models_dir = base_dir.join("models");
             
-            // Initialize the native overlay (will show minimal pill immediately)
+            // Initialize the native overlay (disabled - using Tauri overlay window instead)
             #[cfg(target_os = "macos")]
             let native_overlay = Arc::new(Mutex::new(macos::MacOSOverlay::new()));
-            
-            // Force show the overlay pill after a short delay
-            #[cfg(target_os = "macos")]
-            {
-                let overlay_clone = native_overlay.clone();
-                tauri::async_runtime::spawn(async move {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
-                    let overlay = overlay_clone.lock().await;
-                    println!("Ensuring overlay is visible on startup");
-                    // Set default position
-                    overlay.set_position("top-center");
-                    overlay.ensure_visible();
-                });
-            }
+            // Don't show the native overlay since we're using the Tauri window
             
             let recorder_arc = Arc::new(Mutex::new(recorder));
             let database_arc = Arc::new(database);
@@ -484,29 +629,18 @@ pub fn run() {
             
             app.manage(state);
             
-            // Set up progress tracking listener for macOS overlay
-            #[cfg(target_os = "macos")]
+            // Set up progress tracking listener for overlay window
             {
-                let overlay_clone = native_overlay.clone();
+                let app_handle = app.handle().clone();
                 let mut receiver = progress_tracker_clone.subscribe();
                 
                 tauri::async_runtime::spawn(async move {
                     while receiver.changed().await.is_ok() {
                         let progress = receiver.borrow().clone();
-                        let overlay = overlay_clone.lock().await;
                         
-                        match progress {
-                            recording_progress::RecordingProgress::Recording { .. } => {
-                                overlay.update_progress("recording");
-                            }
-                            recording_progress::RecordingProgress::Stopping { .. } => {
-                                // Immediately hide overlay when stopping
-                                overlay.hide();
-                            }
-                            recording_progress::RecordingProgress::Idle => {
-                                // Already hidden, just update state
-                                overlay.update_progress("idle");
-                            }
+                        // Send progress to overlay window specifically
+                        if let Some(overlay_window) = app_handle.get_webview_window("overlay") {
+                            let _ = overlay_window.emit("recording-progress", &progress);
                         }
                     }
                 });
@@ -517,8 +651,13 @@ pub fn run() {
                 let app_handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     while let Some(status) = processing_status_rx.recv().await {
-                        // Emit processing status to frontend
+                        // Emit processing status to frontend and overlay
                         let _ = app_handle.emit("processing-status", &status);
+                        
+                        // Also emit to overlay window specifically
+                        if let Some(overlay_window) = app_handle.get_webview_window("overlay") {
+                            let _ = overlay_window.emit("processing-status", &status);
+                        }
                         
                         // Log the status
                         match &status {
@@ -543,7 +682,33 @@ pub fn run() {
             }
             
             // Setup overlay window positioning
-            // We'll position it when it's shown in the start_recording command
+            // Show the overlay window immediately but in minimized state
+            if let Some(overlay_window) = app.get_webview_window("overlay") {
+                println!("DEBUG: Overlay window found during setup");
+                // Position it based on saved preference
+                let position = OverlayPosition::TopCenter; // Default position
+                let (x, y) = calculate_overlay_position(&position, &overlay_window);
+                println!("DEBUG: Initial overlay position: ({}, {})", x, y);
+                let _ = overlay_window.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x, y)));
+                
+                // Start with minimal size to avoid blocking clicks
+                let _ = overlay_window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(84.0, 12.0)));
+                
+                // Make the overlay ignore cursor events to prevent click issues
+                let _ = overlay_window.set_ignore_cursor_events(true);
+                
+                match overlay_window.show() {
+                    Ok(_) => println!("DEBUG: Initial overlay window show successful"),
+                    Err(e) => println!("DEBUG: Failed to show overlay window initially: {:?}", e),
+                }
+                
+                // Keep focus on main window
+                if let Some(main_window) = app.get_webview_window("main") {
+                    let _ = main_window.set_focus();
+                }
+            } else {
+                println!("DEBUG: No overlay window found during setup!");
+            }
             
             // Set up global hotkey
             let app_handle = app.app_handle().clone();
@@ -663,7 +828,15 @@ pub fn run() {
             subscribe_to_progress,
             get_overlay_position,
             set_overlay_position,
-            get_processing_status
+            get_processing_status,
+            set_sound_enabled,
+            is_sound_enabled,
+            get_available_sounds,
+            get_sound_settings,
+            set_start_sound,
+            set_stop_sound,
+            get_current_shortcut,
+            transcribe_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
