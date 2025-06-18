@@ -1137,33 +1137,6 @@ function App() {
         </div>
       )}
       
-      {/* Full-window drag overlay */}
-      {isDragging && (
-        <div className="drag-drop-overlay">
-          <div className="drag-drop-border">
-            <div className="drag-drop-content">
-              <div className="drag-drop-icon">
-                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="7 10 12 15 17 10" />
-                  <line x1="12" y1="15" x2="12" y2="3" />
-                  <circle cx="12" cy="16" r="1" fill="currentColor" />
-                </svg>
-              </div>
-              <h2 className="drag-drop-title">Drop your audio files here</h2>
-              <p className="drag-drop-subtitle">Release to start transcription</p>
-              <div className="drag-drop-formats">
-                <span className="format-badge">WAV</span>
-                <span className="format-badge">MP3</span>
-                <span className="format-badge">M4A</span>
-                <span className="format-badge">FLAC</span>
-                <span className="format-badge">OGG</span>
-                <span className="format-badge">WebM</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </main>
   );
 }
