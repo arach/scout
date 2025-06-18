@@ -855,11 +855,9 @@ function App() {
             <div className="drag-drop-border">
               <div className="drag-drop-content">
                 <div className="drag-drop-icon">
-                  <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <circle cx="24" cy="24" r="20" stroke="currentColor" strokeWidth="1" opacity="0.1"/>
-                    <path d="M16 20V28M20 16V32M24 18V30M28 16V32M32 20V28" stroke="currentColor" strokeWidth="2" strokeLinecap="round" opacity="0.3"/>
-                    <path d="M24 12V24M24 24L19 19M24 24L29 19" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                    <path d="M15 36H33" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                  <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M20 8V25M20 25L14 19M20 25L26 19" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M10 32H30" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.5"/>
                   </svg>
                 </div>
                 <h2 className="drag-drop-title">Drop your audio files here</h2>
