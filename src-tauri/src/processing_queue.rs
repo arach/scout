@@ -128,7 +128,30 @@ impl ProcessingQueue {
                             }).await;
                             
                             // File is valid, proceed with transcription
-                            let model_path = models_dir.join("ggml-base.en.bin");
+                            // This is a limitation - we can't access settings from here
+                            // For now, try to find any available model
+                            let mut model_path = models_dir.join("ggml-tiny.en.bin");
+                            if !model_path.exists() {
+                                // Try base model
+                                model_path = models_dir.join("ggml-base.en.bin");
+                                if !model_path.exists() {
+                                    // Find any .bin file
+                                    let mut found = false;
+                                    if let Ok(entries) = std::fs::read_dir(&models_dir) {
+                                        for entry in entries.filter_map(Result::ok) {
+                                            let path = entry.path();
+                                            if path.extension().and_then(|e| e.to_str()) == Some("bin") {
+                                                model_path = path;
+                                                found = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    if !found {
+                                        eprintln!("No model files found in {:?}", models_dir);
+                                    }
+                                }
+                            }
                             
                             if model_path.exists() {
                                 match Transcriber::new(&model_path) {
@@ -181,7 +204,7 @@ impl ProcessingQueue {
                                     }
                                 }
                             } else {
-                                eprintln!("Model file not found");
+                                eprintln!("Model file not found at: {:?}", model_path);
                                 let _ = status_tx.send(ProcessingStatus::Failed { 
                                     filename: job.filename.clone(),
                                     error: "Whisper model not found".to_string(),

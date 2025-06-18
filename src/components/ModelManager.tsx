@@ -136,19 +136,37 @@ export const ModelManager: React.FC = () => {
     return <div className="model-manager-loading">Loading models...</div>;
   }
 
+  const openModelsFolder = async () => {
+    try {
+      await invoke('open_models_folder');
+    } catch (error) {
+      console.error('Failed to open models folder:', error);
+    }
+  };
+
   return (
     <div className="model-manager">
       <div className="model-manager-header">
         <h3>Whisper Models</h3>
         <p className="model-manager-subtitle">
-          Download better models for improved accuracy. The base model is included by default.
+          {models.some(m => m.downloaded) 
+            ? "Download better models for improved accuracy."
+            : "Download a model to start transcribing. We recommend starting with Tiny (39MB)."}
         </p>
+        <button 
+          className="btn btn-secondary"
+          onClick={openModelsFolder}
+          title="Add your own .bin model files here"
+        >
+          Open Models Folder
+        </button>
       </div>
       
       <div className="model-list">
         {models.map(model => {
           const progress = downloading[model.id];
           const isDownloading = !!progress;
+          const isAutoDownload = model.id === 'tiny.en' || model.id === 'base.en';
           
           return (
             <div key={model.id} className={`model-item ${model.active ? 'active' : ''}`}>
@@ -156,6 +174,7 @@ export const ModelManager: React.FC = () => {
                 <div className="model-header">
                   <h4>{model.name}</h4>
                   <span className="model-size">{model.size_mb} MB</span>
+                  {isAutoDownload && <span className="auto-download-badge">Auto</span>}
                 </div>
                 <p className="model-description">{model.description}</p>
                 <div className="model-stats">

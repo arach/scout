@@ -14,9 +14,26 @@
 }
 
 .model-manager-subtitle {
-  margin: 0;
+  margin: 0 0 16px 0;
   color: var(--text-muted);
   font-size: 14px;
+}
+
+.btn-secondary {
+  background: var(--button-background);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  padding: 6px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-secondary:hover {
+  background: var(--button-hover);
+  border-color: var(--border-hover);
 }
 
 .model-manager-loading {
@@ -75,6 +92,16 @@
   background: var(--background-primary);
   padding: 2px 8px;
   border-radius: 4px;
+}
+
+.auto-download-badge {
+  font-size: 11px;
+  color: var(--accent-primary);
+  background: rgba(0, 122, 204, 0.1);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
 }
 
 .model-description {

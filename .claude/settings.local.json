@@ -32,7 +32,9 @@
       "Bash(git commit:*)",
       "Bash(curl:*)",
       "Bash(pnpm add:*)",
-      "Bash(pnpm remove:*)"
+      "Bash(pnpm remove:*)",
+      "Bash(cp:*)",
+      "Bash(mkdir:*)"
     ],
     "deny": []
   }

@@ -2,7 +2,9 @@ import { useState, useEffect, Fragment, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ModelManager } from "./components/ModelManager";
+import { FirstRunSetup } from "./components/FirstRunSetup";
 import "./App.css";
 
 interface Transcript {
@@ -39,7 +41,6 @@ function App() {
   const isStoppingRef = useRef(false);
   const [overlayPosition, setOverlayPosition] = useState<string>('top-center');
   const [isDragging, setIsDragging] = useState(false);
-  const dragCounter = useRef(0);
   const [uploadProgress, setUploadProgress] = useState<{
     filename?: string;
     fileSize?: number;
@@ -47,6 +48,22 @@ function App() {
     queuePosition?: number;
     progress?: number;
   }>({ status: 'idle' });
+  const [showFirstRun, setShowFirstRun] = useState(false);
+
+  useEffect(() => {
+    // Check if we have any models
+    const checkModels = async () => {
+      try {
+        const hasModel = await invoke<boolean>('has_any_model');
+        if (!hasModel) {
+          setShowFirstRun(true);
+        }
+      } catch (error) {
+        console.error('Failed to check models:', error);
+      }
+    };
+    checkModels();
+  }, []);
 
   useEffect(() => {
     loadRecentTranscripts();
@@ -186,11 +203,71 @@ function App() {
       }));
     });
     
+    // Set up Tauri file drop handling for the entire window
+    let unsubscribeFileDrop: (() => void) | undefined;
+    const setupFileDrop = async () => {
+      const appWindow = getCurrentWindow();
+      unsubscribeFileDrop = await appWindow.onFileDropEvent(async (event) => {
+        console.log('File drop event:', event);
+        
+        if (event.payload.type === 'hover') {
+          setIsDragging(true);
+        } else if (event.payload.type === 'drop') {
+          setIsDragging(false);
+          
+          const files = event.payload.paths;
+          const audioFiles = files.filter((filePath: string) => {
+            const extension = filePath.split('.').pop()?.toLowerCase();
+            return ['wav', 'mp3', 'm4a', 'flac', 'ogg', 'webm'].includes(extension || '');
+          });
+
+          if (audioFiles.length > 0) {
+            // Process the first audio file
+            const filePath = audioFiles[0];
+            console.log('Processing dropped file:', filePath);
+            
+            try {
+              setIsProcessing(true);
+              setShowSuccess(false);
+              
+              const filename = filePath.split('/').pop() || 'audio file';
+              setUploadProgress({
+                filename: filename,
+                status: 'uploading',
+                progress: 0
+              });
+
+              const queuedFilename = await invoke<string>('transcribe_file', { 
+                filePath: filePath 
+              });
+
+              console.log('File queued for processing:', queuedFilename);
+            } catch (error) {
+              console.error('Failed to process dropped file:', error);
+              alert(`Failed to process file: ${error}`);
+              setIsProcessing(false);
+            }
+          } else if (files.length > 0) {
+            // Non-audio files were dropped
+            alert('Please drop audio files only (wav, mp3, m4a, flac, ogg, webm)');
+            setIsProcessing(false);
+          }
+        } else if (event.payload.type === 'cancel') {
+          setIsDragging(false);
+        }
+      });
+    };
+    
+    setupFileDrop();
+    
     return () => {
       unsubscribe.then(fn => fn());
       unsubscribeProgress.then(fn => fn());
       unsubscribeProcessing.then(fn => fn());
       unsubscribeFileUpload.then(fn => fn());
+      if (unsubscribeFileDrop) {
+        unsubscribeFileDrop();
+      }
     };
   }, []); // Empty dependency array since we're checking state from backend
 
@@ -449,85 +526,6 @@ function App() {
     }
   };
 
-  const handleDragEnter = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
-    dragCounter.current++;
-    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
-      setIsDragging(true);
-    }
-  };
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
-    dragCounter.current--;
-    if (dragCounter.current === 0) {
-      setIsDragging(false);
-    }
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-  };
-
-  const handleDrop = async (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
-    setIsDragging(false);
-    dragCounter.current = 0;
-
-    const files = Array.from(e.dataTransfer.files);
-    const audioFiles = files.filter(file => {
-      const extension = file.name.split('.').pop()?.toLowerCase();
-      return ['wav', 'mp3', 'm4a', 'flac', 'ogg', 'webm'].includes(extension || '');
-    });
-
-    if (audioFiles.length === 0) {
-      alert('Please drop audio files only (wav, mp3, m4a, flac, ogg, webm)');
-      return;
-    }
-
-    // Process the first audio file (we can enhance this to handle multiple files later)
-    const file = audioFiles[0];
-    
-    if (audioFiles.length > 1) {
-      console.log(`Processing first file only. ${audioFiles.length - 1} additional files were dropped but will be ignored.`);
-    }
-
-    try {
-      setIsProcessing(true);
-      setShowSuccess(false);
-
-      console.log('Processing dropped file:', file.name);
-
-      // In Tauri, dropped files don't provide direct file paths
-      // We need to use the file dialog for now
-      alert(`Direct file drops are not yet supported. Please use the "Upload Audio" button to select files.`);
-      setIsProcessing(false);
-      return;
-      
-      // TODO: To properly support file drops in Tauri, we would need to:
-      // 1. Configure the Tauri window to accept file drops
-      // 2. Listen to Tauri's file-drop events instead of browser drag events
-      // 3. Handle the file paths provided by Tauri's file-drop API
-      
-      // const filename = await invoke<string>('transcribe_file', { 
-      //   filePath: filePath 
-      // });
-
-      // console.log('File queued for processing:', filename);
-      
-    } catch (error) {
-      console.error('Failed to process dropped file:', error);
-      alert(`Failed to process dropped file: ${error}`);
-      setIsProcessing(false);
-    }
-  };
 
   const toggleVAD = async () => {
     try {
@@ -686,8 +684,12 @@ function App() {
     };
   }, [isCapturingHotkey, capturedKeys]);
 
+  if (showFirstRun) {
+    return <FirstRunSetup onComplete={() => setShowFirstRun(false)} />;
+  }
+
   return (
-    <main className="container">
+    <main className={`container ${isDragging ? 'drag-highlight' : ''}`}>
       <div className="header">
         <h1>Scout Voice Transcription</h1>
         <div className="header-controls">
@@ -707,10 +709,6 @@ function App() {
       
       <div 
         className={`recording-section ${isDragging ? 'dragging' : ''}`}
-        onDragEnter={handleDragEnter}
-        onDragLeave={handleDragLeave}
-        onDragOver={handleDragOver}
-        onDrop={handleDrop}
       >
         <div className="recording-controls">
           <button

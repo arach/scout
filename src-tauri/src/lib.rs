@@ -7,6 +7,7 @@ mod processing_queue;
 mod overlay_position;
 mod sound;
 mod models;
+mod settings;
 #[cfg(target_os = "macos")]
 mod macos;
 
@@ -16,6 +17,7 @@ use overlay_position::OverlayPosition;
 use processing_queue::{ProcessingQueue, ProcessingStatus};
 use recording_progress::ProgressTracker;
 use recording_workflow::RecordingWorkflow;
+use settings::SettingsManager;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -29,15 +31,15 @@ use chrono;
 pub struct AppState {
     pub recorder: Arc<Mutex<AudioRecorder>>,
     pub database: Arc<Database>,
+    pub app_data_dir: PathBuf,
     pub recordings_dir: PathBuf,
     pub models_dir: PathBuf,
-    pub current_shortcut: Arc<Mutex<String>>,
+    pub settings: Arc<Mutex<SettingsManager>>,
     pub is_recording_overlay_active: Arc<AtomicBool>,
     pub current_recording_file: Arc<Mutex<Option<String>>>,
     pub progress_tracker: Arc<ProgressTracker>,
     pub recording_workflow: Arc<RecordingWorkflow>,
     pub processing_queue: Arc<ProcessingQueue>,
-    pub overlay_position: Arc<Mutex<OverlayPosition>>,
     #[cfg(target_os = "macos")]
     pub native_overlay: Arc<Mutex<macos::MacOSOverlay>>,
 }
@@ -106,9 +108,22 @@ async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> R
     if let Some(overlay_window) = app.get_webview_window("overlay") {
         println!("DEBUG: Found overlay window, showing it");
         // Position the window (native code controls position)
-        // Use saved position from overlay_position
-        let position = state.overlay_position.lock().await;
-        let (x, y) = calculate_overlay_position(&position, &overlay_window);
+        // Use saved position from settings
+        let settings = state.settings.lock().await;
+        let position_str = &settings.get().ui.overlay_position;
+        let overlay_position = match position_str.as_str() {
+            "top-left" => OverlayPosition::TopLeft,
+            "top-center" => OverlayPosition::TopCenter,
+            "top-right" => OverlayPosition::TopRight,
+            "bottom-left" => OverlayPosition::BottomLeft,
+            "bottom-center" => OverlayPosition::BottomCenter,
+            "bottom-right" => OverlayPosition::BottomRight,
+            "left-center" => OverlayPosition::LeftCenter,
+            "right-center" => OverlayPosition::RightCenter,
+            _ => OverlayPosition::TopCenter,
+        };
+        drop(settings);
+        let (x, y) = calculate_overlay_position(&overlay_position, &overlay_window);
         println!("DEBUG: Setting overlay position to ({}, {})", x, y);
         let _ = overlay_window.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x, y)));
         
@@ -262,10 +277,22 @@ async fn transcribe_audio(
     }
     
     // Get the active model path
-    let model_path = models::WhisperModel::get_active_model_path(&state.models_dir);
+    let settings = state.settings.lock().await;
+    let model_path = models::WhisperModel::get_active_model_path(&state.models_dir, settings.get());
+    drop(settings); // Release the lock early
+    println!("Attempting to use model at: {:?}", model_path);
     
     if !model_path.exists() {
-        return Err("Whisper model not found. Please run scripts/download-models.sh".to_string());
+        eprintln!("Model file does not exist at: {:?}", model_path);
+        eprintln!("Models directory contents:");
+        if let Ok(entries) = std::fs::read_dir(&state.models_dir) {
+            for entry in entries.filter_map(Result::ok) {
+                eprintln!("  - {:?}", entry.path());
+            }
+        }
+        return Err("No Whisper model found. Please download a model from Settings.".to_string());
+    } else {
+        println!("✓ Model file exists at: {:?}", model_path);
     }
     
     // Create transcriber and transcribe
@@ -388,8 +415,8 @@ async fn subscribe_to_progress(state: State<'_, AppState>, app: tauri::AppHandle
 
 #[tauri::command]
 async fn get_overlay_position(state: State<'_, AppState>) -> Result<String, String> {
-    let position = state.overlay_position.lock().await;
-    Ok(position.to_string().to_string())
+    let settings = state.settings.lock().await;
+    Ok(settings.get().ui.overlay_position.clone())
 }
 
 #[tauri::command]
@@ -406,8 +433,10 @@ async fn set_overlay_position(state: State<'_, AppState>, position: String, app:
         _ => return Err("Invalid overlay position".to_string()),
     };
     
-    // Update the stored position
-    *state.overlay_position.lock().await = overlay_position.clone();
+    // Update the settings
+    let mut settings = state.settings.lock().await;
+    settings.update(|s| s.ui.overlay_position = position.clone())
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
     
     // Update the actual window position
     if let Some(overlay_window) = app.get_webview_window("overlay") {
@@ -532,22 +561,89 @@ async fn set_stop_sound(sound: String) -> Result<(), String> {
 
 #[tauri::command]
 async fn get_current_shortcut(state: State<'_, AppState>) -> Result<String, String> {
-    Ok(state.current_shortcut.lock().await.clone())
+    let settings = state.settings.lock().await;
+    Ok(settings.get().ui.hotkey.clone())
 }
 
 #[tauri::command]
 async fn get_available_models(state: State<'_, AppState>) -> Result<Vec<models::WhisperModel>, String> {
-    Ok(models::WhisperModel::all(&state.models_dir))
+    let settings = state.settings.lock().await;
+    Ok(models::WhisperModel::all(&state.models_dir, settings.get()))
 }
 
 #[tauri::command]
-async fn set_active_model(model_id: String) -> Result<(), String> {
-    models::WhisperModel::set_active_model(&model_id)
+async fn has_any_model(state: State<'_, AppState>) -> Result<bool, String> {
+    println!("Checking for models in: {:?}", state.models_dir);
+    
+    let has_models = match std::fs::read_dir(&state.models_dir) {
+        Ok(entries) => {
+            let mut found_models = false;
+            for entry in entries.filter_map(Result::ok) {
+                let path = entry.path();
+                if path.extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| ext == "bin")
+                    .unwrap_or(false) 
+                {
+                    println!("Found model: {:?}", path);
+                    found_models = true;
+                }
+            }
+            found_models
+        }
+        Err(e) => {
+            eprintln!("Error reading models directory: {}", e);
+            false
+        }
+    };
+    
+    println!("has_any_model result: {}", has_models);
+    Ok(has_models)
+}
+
+#[tauri::command]
+async fn set_active_model(state: State<'_, AppState>, model_id: String) -> Result<(), String> {
+    let mut settings = state.settings.lock().await;
+    settings.update(|s| s.models.active_model_id = model_id.clone())
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    println!("Active model set to: {}", model_id);
+    Ok(())
 }
 
 #[tauri::command]
 async fn get_models_dir(state: State<'_, AppState>) -> Result<String, String> {
-    Ok(state.models_dir.to_string_lossy().to_string())
+    let path = state.models_dir.to_string_lossy().to_string();
+    println!("get_models_dir returning: {}", path);
+    Ok(path)
+}
+
+#[tauri::command]
+async fn open_models_folder(state: State<'_, AppState>) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&state.models_dir)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {}", e))?;
+    }
+    
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&state.models_dir)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {}", e))?;
+    }
+    
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&state.models_dir)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {}", e))?;
+    }
+    
+    Ok(())
 }
 
 #[tauri::command]
@@ -561,13 +657,26 @@ async fn download_file(
     use tokio::io::AsyncWriteExt;
     use futures_util::StreamExt;
     
+    println!("=== DOWNLOAD START ===");
+    println!("URL: {}", url);
+    println!("Destination path: {}", dest_path);
+    
     // Ensure parent directory exists
     if let Some(parent) = Path::new(&dest_path).parent() {
+        println!("Creating parent directory: {:?}", parent);
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("Failed to create directory: {}", e))?;
+        
+        // Verify directory was created
+        if parent.exists() && parent.is_dir() {
+            println!("✓ Parent directory exists and is a directory");
+        } else {
+            eprintln!("✗ Parent directory was not created properly!");
+        }
     }
     
     // Start download
+    println!("Starting HTTP request...");
     let client = reqwest::Client::new();
     let response = client.get(&url)
         .send()
@@ -575,10 +684,13 @@ async fn download_file(
         .map_err(|e| format!("Failed to start download: {}", e))?;
     
     let total_size = response.content_length().unwrap_or(0);
+    println!("Total file size: {} bytes ({:.2} MB)", total_size, total_size as f64 / 1_048_576.0);
     
     // Create the file
+    println!("Creating file at: {}", dest_path);
     let mut file = File::create(&dest_path).await
-        .map_err(|e| format!("Failed to create file: {}", e))?;
+        .map_err(|e| format!("Failed to create file at {}: {}", dest_path, e))?;
+    println!("✓ File created successfully");
     
     // Download with progress
     let mut downloaded = 0u64;
@@ -611,7 +723,17 @@ async fn download_file(
     file.flush().await
         .map_err(|e| format!("Failed to flush file: {}", e))?;
     
-    println!("Download complete: {} -> {}", url, dest_path);
+    println!("=== DOWNLOAD COMPLETE ===");
+    println!("Downloaded {} bytes to {}", downloaded, dest_path);
+    
+    // Verify the file exists
+    if Path::new(&dest_path).exists() {
+        let metadata = std::fs::metadata(&dest_path)
+            .map_err(|e| format!("Failed to get file metadata: {}", e))?;
+        println!("✓ File exists, size: {} bytes", metadata.len());
+    } else {
+        eprintln!("✗ File does not exist after download!");
+    }
     
     Ok(())
 }
@@ -626,9 +748,9 @@ async fn update_global_shortcut(
     
     // Get the current shortcut and unregister it
     let global_shortcut = app.global_shortcut();
-    let current = state.current_shortcut.lock().await;
+    let mut settings = state.settings.lock().await;
+    let current = settings.get().ui.hotkey.clone();
     let _ = global_shortcut.unregister(current.as_str());
-    drop(current);
     
     // Clone app handle for the closure
     let app_handle = app.clone();
@@ -640,7 +762,29 @@ async fn update_global_shortcut(
     }).map_err(|e| format!("Failed to register shortcut '{}': {}", shortcut, e))?;
     
     // Update the stored shortcut
-    *state.current_shortcut.lock().await = shortcut;
+    settings.update(|s| s.ui.hotkey = shortcut.clone())
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_settings(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let settings = state.settings.lock().await;
+    serde_json::to_value(settings.get())
+        .map_err(|e| format!("Failed to serialize settings: {}", e))
+}
+
+#[tauri::command]
+async fn update_settings(state: State<'_, AppState>, new_settings: serde_json::Value) -> Result<(), String> {
+    let mut settings = state.settings.lock().await;
+    
+    // Parse the new settings
+    let app_settings: settings::AppSettings = serde_json::from_value(new_settings)
+        .map_err(|e| format!("Invalid settings format: {}", e))?;
+    
+    // Update the settings
+    settings.update(|s| *s = app_settings)?;
     
     Ok(())
 }
@@ -655,10 +799,14 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir().expect("Failed to get app data dir");
+            println!("App data directory: {:?}", app_data_dir);
+            
             let recordings_dir = app_data_dir.join("recordings");
+            println!("Creating recordings directory: {:?}", recordings_dir);
             std::fs::create_dir_all(&recordings_dir).expect("Failed to create recordings directory");
 
             let db_path = app_data_dir.join("scout.db");
+            println!("Database path: {:?}", db_path);
             let database = tauri::async_runtime::block_on(async {
                 Database::new(&db_path).await.expect("Failed to initialize database")
             });
@@ -666,9 +814,23 @@ pub fn run() {
             let mut recorder = AudioRecorder::new();
             recorder.init();
             
-            // Get the base directory of the app
-            let base_dir = std::env::current_dir().expect("Failed to get current directory");
-            let models_dir = base_dir.join("models");
+            // Models directory in app data
+            let models_dir = app_data_dir.join("models");
+            println!("Models directory: {:?}", models_dir);
+            println!("Creating models directory...");
+            std::fs::create_dir_all(&models_dir).expect("Failed to create models directory");
+            
+            // Verify the directory was created
+            if models_dir.exists() && models_dir.is_dir() {
+                println!("✓ Models directory created successfully");
+            } else {
+                eprintln!("✗ Models directory was not created properly!");
+            }
+            
+            // Initialize settings manager
+            let settings_manager = SettingsManager::new(&app_data_dir)
+                .expect("Failed to initialize settings manager");
+            let settings_arc = Arc::new(Mutex::new(settings_manager));
             
             // Initialize the native overlay (disabled - using Tauri overlay window instead)
             #[cfg(target_os = "macos")]
@@ -697,15 +859,15 @@ pub fn run() {
             let state = AppState {
                 recorder: recorder_arc,
                 database: database_arc,
+                app_data_dir: app_data_dir.clone(),
                 recordings_dir,
                 models_dir,
-                current_shortcut: Arc::new(Mutex::new("CmdOrCtrl+Shift+Space".to_string())),
+                settings: settings_arc.clone(),
                 is_recording_overlay_active: Arc::new(AtomicBool::new(false)),
                 current_recording_file: Arc::new(Mutex::new(None)),
                 progress_tracker,
                 recording_workflow,
                 processing_queue: processing_queue_arc,
-                overlay_position: Arc::new(Mutex::new(OverlayPosition::default())),
                 #[cfg(target_os = "macos")]
                 native_overlay: native_overlay.clone(),
             };
@@ -771,8 +933,23 @@ pub fn run() {
             // Show the overlay window immediately but in minimized state
             if let Some(overlay_window) = app.get_webview_window("overlay") {
                 println!("DEBUG: Overlay window found during setup");
-                // Position it based on saved preference
-                let position = OverlayPosition::TopCenter; // Default position
+                // Position it based on saved preference from settings
+                let position_str = {
+                    let settings_lock = settings_arc.lock();
+                    let settings = tauri::async_runtime::block_on(settings_lock);
+                    settings.get().ui.overlay_position.clone()
+                };
+                let position = match position_str.as_str() {
+                    "top-left" => OverlayPosition::TopLeft,
+                    "top-center" => OverlayPosition::TopCenter,
+                    "top-right" => OverlayPosition::TopRight,
+                    "bottom-left" => OverlayPosition::BottomLeft,
+                    "bottom-center" => OverlayPosition::BottomCenter,
+                    "bottom-right" => OverlayPosition::BottomRight,
+                    "left-center" => OverlayPosition::LeftCenter,
+                    "right-center" => OverlayPosition::RightCenter,
+                    _ => OverlayPosition::TopCenter,
+                };
                 let (x, y) = calculate_overlay_position(&position, &overlay_window);
                 println!("DEBUG: Initial overlay position: ({}, {})", x, y);
                 let _ = overlay_window.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x, y)));
@@ -796,19 +973,25 @@ pub fn run() {
                 println!("DEBUG: No overlay window found during setup!");
             }
             
-            // Set up global hotkey
+            // Set up global hotkey from settings
             let app_handle = app.app_handle().clone();
-            if let Err(e) = app.global_shortcut().on_shortcut("CmdOrCtrl+Shift+Space", move |_app, _event, _shortcut| {
+            let hotkey = {
+                let settings_lock = settings_arc.lock();
+                let settings = tauri::async_runtime::block_on(settings_lock);
+                settings.get().ui.hotkey.clone()
+            };
+            
+            if let Err(e) = app.global_shortcut().on_shortcut(hotkey.as_str(), move |_app, _event, _shortcut| {
                 // Emit event to frontend to toggle recording
                 println!("Global shortcut triggered");
                 app_handle.emit("toggle-recording", ()).unwrap();
             }) {
-                eprintln!("Failed to register default global shortcut: {:?}", e);
+                eprintln!("Failed to register global shortcut '{}': {:?}", hotkey, e);
             }
             
             // Set up system tray
             let toggle_recording_item = MenuItemBuilder::with_id("toggle_recording", "Start Recording")
-                .accelerator("CmdOrCtrl+Shift+Space")
+                .accelerator(&hotkey)
                 .build(app)?;
             
             // Store reference to the menu item
@@ -924,9 +1107,13 @@ pub fn run() {
             get_current_shortcut,
             transcribe_file,
             get_available_models,
+            has_any_model,
             set_active_model,
             get_models_dir,
-            download_file
+            open_models_folder,
+            download_file,
+            get_settings,
+            update_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

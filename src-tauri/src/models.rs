@@ -1,6 +1,23 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::fs;
+use serde_json;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelConfig {
+    pub active_model_id: String,
+    #[serde(default)]
+    pub model_preferences: serde_json::Value, // For future extensibility
+}
+
+impl Default for ModelConfig {
+    fn default() -> Self {
+        Self {
+            active_model_id: "base.en".to_string(),
+            model_preferences: serde_json::json!({}),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WhisperModel {
@@ -17,8 +34,8 @@ pub struct WhisperModel {
 }
 
 impl WhisperModel {
-    pub fn all(models_dir: &Path) -> Vec<Self> {
-        let models = vec![
+    pub fn all(models_dir: &Path, settings: &crate::settings::AppSettings) -> Vec<Self> {
+        let mut models = vec![
             WhisperModel {
                 id: "tiny.en".to_string(),
                 name: "Tiny English".to_string(),
@@ -81,8 +98,35 @@ impl WhisperModel {
             },
         ];
 
+        // Add any custom models found in the models directory
+        if let Ok(entries) = fs::read_dir(models_dir) {
+            for entry in entries.flatten() {
+                if let Some(filename) = entry.file_name().to_str() {
+                    // Check if it's a .bin file and not already in our list
+                    if filename.ends_with(".bin") && !models.iter().any(|m| m.filename == filename) {
+                        // This is a custom model
+                        let id = format!("custom_{}", filename.trim_end_matches(".bin"));
+                        let file_size = entry.metadata().ok().map(|m| m.len() / 1_048_576).unwrap_or(0) as u32;
+                        
+                        models.push(WhisperModel {
+                            id: id.clone(),
+                            name: format!("Custom: {}", filename),
+                            size_mb: file_size,
+                            description: "User-provided custom model".to_string(),
+                            url: String::new(), // No URL for custom models
+                            filename: filename.to_string(),
+                            speed: "Unknown".to_string(),
+                            accuracy: "Unknown".to_string(),
+                            downloaded: true, // Already exists
+                            active: false,
+                        });
+                    }
+                }
+            }
+        }
+
         // Check which models are downloaded and which is active
-        let active_model = Self::get_active_model_id();
+        let active_model = Self::get_active_model_id(settings);
         
         models.into_iter().map(|mut model| {
             let model_path = models_dir.join(&model.filename);
@@ -92,35 +136,40 @@ impl WhisperModel {
         }).collect()
     }
 
-    pub fn get_active_model_id() -> Option<String> {
-        // Read from a config file or use default
-        if let Ok(contents) = fs::read_to_string(Self::config_path()) {
-            contents.trim().parse().ok()
-        } else {
-            Some("base.en".to_string()) // Default
-        }
+    pub fn get_active_model_id(settings: &crate::settings::AppSettings) -> Option<String> {
+        println!("Active model from settings: {}", settings.models.active_model_id);
+        Some(settings.models.active_model_id.clone())
     }
 
-    pub fn set_active_model(model_id: &str) -> Result<(), String> {
-        fs::write(Self::config_path(), model_id)
-            .map_err(|e| format!("Failed to save active model: {}", e))
-    }
-
-    fn config_path() -> PathBuf {
-        // Store in app data directory
-        dirs::config_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("scout")
-            .join("active_model.txt")
-    }
-
-    pub fn get_active_model_path(models_dir: &Path) -> PathBuf {
-        let model_id = Self::get_active_model_id().unwrap_or_else(|| "base.en".to_string());
-        let models = Self::all(models_dir);
+    pub fn get_active_model_path(models_dir: &Path, settings: &crate::settings::AppSettings) -> PathBuf {
+        println!("Getting active model path...");
+        println!("Models directory: {:?}", models_dir);
         
-        models.iter()
-            .find(|m| m.id == model_id)
-            .map(|m| models_dir.join(&m.filename))
-            .unwrap_or_else(|| models_dir.join("ggml-base.en.bin"))
+        let model_id = Self::get_active_model_id(settings).unwrap_or_else(|| "tiny.en".to_string());
+        println!("Looking for model with ID: {}", model_id);
+        
+        let models = Self::all(models_dir, settings);
+        println!("Found {} models total", models.len());
+        
+        // First try to find the requested model
+        if let Some(model) = models.iter().find(|m| m.id == model_id && m.downloaded) {
+            let path = models_dir.join(&model.filename);
+            println!("Found requested model: {:?}", path);
+            return path;
+        }
+        
+        println!("Requested model {} not found or not downloaded", model_id);
+        
+        // Fallback to any available model
+        if let Some(model) = models.iter().find(|m| m.downloaded) {
+            let path = models_dir.join(&model.filename);
+            println!("Falling back to available model: {:?}", path);
+            return path;
+        }
+        
+        // Last resort - return expected path even if not downloaded
+        let fallback = models_dir.join("ggml-tiny.en.bin");
+        println!("No models downloaded, returning fallback path: {:?}", fallback);
+        fallback
     }
 }
