@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import "./Overlay.css";
 
@@ -30,9 +30,35 @@ function Overlay() {
     duration: 0
   });
   const [isExpanded, setIsExpanded] = useState(false);
-  
-  // Component mounted
   const [progress, setProgress] = useState<RecordingProgress>({ status: "idle" });
+  const [audioHistory, setAudioHistory] = useState<number[]>([0, 0, 0, 0, 0]);
+  const [pulseKey, setPulseKey] = useState(0);
+  const animationRef = useRef<number>();
+
+  // Generate smooth audio visualization
+  useEffect(() => {
+    if (recordingState.isRecording) {
+      const animate = () => {
+        setAudioHistory(prev => {
+          const newLevel = recordingState.audioLevel || 0;
+          const smoothed = prev.slice(1).concat(newLevel);
+          return smoothed;
+        });
+        animationRef.current = requestAnimationFrame(animate);
+      };
+      animationRef.current = requestAnimationFrame(animate);
+    } else {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+      }
+    }
+
+    return () => {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+      }
+    };
+  }, [recordingState.isRecording, recordingState.audioLevel]);
 
   useEffect(() => {
     // Start in minimized state
@@ -42,22 +68,22 @@ function Overlay() {
     const unsubscribeRecording = listen<RecordingState>("recording-state-update", (event) => {
       setRecordingState(event.payload);
       
-      // Automatically expand when recording starts
+      // Automatically expand with staggered animation when recording starts
       if (event.payload.isRecording) {
         setIsExpanded(true);
+        setPulseKey(prev => prev + 1);
       }
     });
 
     // Listen for recording stopped event
     const unsubscribeStopped = listen("recording-stopped", () => {
       setRecordingState({ isRecording: false, duration: 0 });
-      // Keep expanded to show processing state
-      // Will minimize when processing is complete
+      // Reset audio visualization
+      setAudioHistory([0, 0, 0, 0, 0]);
     });
 
     // Listen for progress updates
     const unsubscribeProgress = listen<RecordingProgress>("recording-progress", (event) => {
-      // Convert Rust enum to our status format
       let status: RecordingProgress["status"] = "idle";
       if (event.payload.Idle !== undefined) {
         status = "idle";
@@ -80,17 +106,18 @@ function Overlay() {
         status = "transcribing";
       } else if (event.payload.Complete !== undefined) {
         status = "complete";
+        setPulseKey(prev => prev + 1); // Trigger completion animation
       } else if (event.payload.Failed !== undefined) {
         status = "failed";
       }
       
       setProgress({ status });
       
-      // Minimize when processing is complete or failed
+      // Minimize with elegant delay for completion states
       if (status === "complete" || status === "failed") {
         setTimeout(() => {
           setIsExpanded(false);
-        }, 2000); // Let the completion animation play for 2 seconds before minimizing
+        }, status === "complete" ? 2500 : 1500);
       }
     });
 
@@ -100,7 +127,7 @@ function Overlay() {
       unsubscribeProgress.then(fn => fn());
       unsubscribeProcessing.then(fn => fn());
     };
-  }, []); // Remove isExpanded dependency to prevent re-subscription
+  }, []);
 
   const formatDuration = (ms: number) => {
     const seconds = Math.floor(ms / 1000);
@@ -109,46 +136,92 @@ function Overlay() {
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
   };
 
-  // Debug removed
-
   return (
-    <div className={`overlay-container ${isExpanded ? 'expanded' : 'minimized'}`}>
-      <div className="overlay-pill">
+    <div className={`overlay-container ${isExpanded ? 'expanded' : 'minimized'} state-${progress.status || 'idle'}`}>
+      <div className="overlay-pill" key={`pill-${pulseKey}`}>
+        {/* Background gradient effects */}
+        <div className="gradient-bg" />
+        <div className="shimmer-effect" />
+        
         {isExpanded ? (
           <div className="expanded-content">
             {recordingState.isRecording && (
               <>
-                <div className="visualizer">
-                  <div className="bar" style={{ height: `${Math.max(8, (recordingState.audioLevel || 0) * 20)}px` }} />
-                  <div className="bar" style={{ height: `${Math.max(12, (recordingState.audioLevel || 0) * 28)}px` }} />
-                  <div className="bar" style={{ height: `${Math.max(10, (recordingState.audioLevel || 0) * 24)}px` }} />
+                <div className="recording-indicator">
+                  <div className="pulse-ring" key={`pulse-${pulseKey}`} />
+                  <div className="recording-dot" />
                 </div>
-                <span className="duration">{formatDuration(recordingState.duration)}</span>
+                
+                <div className="visualizer">
+                  {audioHistory.map((level, index) => (
+                    <div 
+                      key={index}
+                      className="bar" 
+                      style={{ 
+                        height: `${Math.max(4, level * 32 + Math.sin(Date.now() * 0.01 + index) * 2)}px`,
+                        animationDelay: `${index * 0.1}s`
+                      }} 
+                    />
+                  ))}
+                </div>
+                
+                <div className="duration-container">
+                  <span className="duration">{formatDuration(recordingState.duration)}</span>
+                  <div className="duration-pulse" />
+                </div>
               </>
             )}
+            
             {!recordingState.isRecording && (progress.status === "processing" || progress.status === "transcribing") && (
               <>
                 <div className="processing-indicator">
-                  <div className="processing-dot" />
-                  <div className="processing-dot" />
-                  <div className="processing-dot" />
+                  <div className="processing-ring">
+                    <div className="processing-orbit" />
+                    <div className="processing-orbit delay-1" />
+                    <div className="processing-orbit delay-2" />
+                  </div>
                 </div>
-                <span className="status-text">
-                  {progress.status === "processing" ? "Processing..." : "Transcribing..."}
-                </span>
+                <div className="status-container">
+                  <span className="status-text">
+                    {progress.status === "processing" ? "Processing" : "Transcribing"}
+                  </span>
+                  <div className="status-dots">
+                    <span className="dot">.</span>
+                    <span className="dot">.</span>
+                    <span className="dot">.</span>
+                  </div>
+                </div>
               </>
             )}
+            
             {!recordingState.isRecording && progress.status === "complete" && (
-              <div className="completion-animation">
-                <div className="completion-pulse" />
+              <div className="completion-animation" key={`complete-${pulseKey}`}>
+                <div className="success-ring" />
+                <div className="checkmark-container">
+                  <svg className="checkmark" viewBox="0 0 24 24" fill="none">
+                    <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </div>
+                <div className="completion-sparkles">
+                  <div className="sparkle" style={{ top: '20%', left: '20%' }} />
+                  <div className="sparkle" style={{ top: '30%', right: '15%' }} />
+                  <div className="sparkle" style={{ bottom: '25%', left: '15%' }} />
+                  <div className="sparkle" style={{ bottom: '20%', right: '20%' }} />
+                </div>
               </div>
             )}
+            
             {!recordingState.isRecording && progress.status === "failed" && (
-              <span className="status-text">✗ Failed</span>
+              <div className="error-state">
+                <div className="error-icon">✗</div>
+                <span className="status-text">Failed</span>
+              </div>
             )}
           </div>
         ) : (
-          <div className="minimized-content" />
+          <div className="minimized-content">
+            <div className="minimized-indicator" />
+          </div>
         )}
       </div>
     </div>
