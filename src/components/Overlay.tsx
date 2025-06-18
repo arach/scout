@@ -31,19 +31,31 @@ function Overlay() {
   });
   const [isExpanded, setIsExpanded] = useState(false);
   const [progress, setProgress] = useState<RecordingProgress>({ status: "idle" });
-  const [audioHistory, setAudioHistory] = useState<number[]>([0, 0, 0, 0, 0]);
+  const [audioHistory, setAudioHistory] = useState<number[]>([0.3, 0.5, 0.4, 0.6, 0.3]);
   const [pulseKey, setPulseKey] = useState(0);
   const animationRef = useRef<number>();
+  const timeRef = useRef<number>(0);
 
-  // Generate smooth audio visualization
+  // Generate smooth audio visualization with simulated waveform
   useEffect(() => {
     if (recordingState.isRecording) {
-      const animate = () => {
+      const animate = (timestamp: number) => {
+        if (!timeRef.current) timeRef.current = timestamp;
+        const elapsed = timestamp - timeRef.current;
+        
         setAudioHistory(prev => {
-          const newLevel = recordingState.audioLevel || 0;
-          const smoothed = prev.slice(1).concat(newLevel);
-          return smoothed;
+          // Create organic-looking waveform using multiple sine waves
+          const newValues = prev.map((_, index) => {
+            const base = 0.4 + Math.sin(elapsed * 0.002 + index * 0.8) * 0.2;
+            const wave = Math.sin(elapsed * 0.005 + index * 1.2) * 0.15;
+            const flutter = Math.sin(elapsed * 0.01 + index * 2) * 0.1;
+            const random = (Math.random() - 0.5) * 0.1;
+            
+            return Math.max(0.1, Math.min(1, base + wave + flutter + random));
+          });
+          return newValues;
         });
+        
         animationRef.current = requestAnimationFrame(animate);
       };
       animationRef.current = requestAnimationFrame(animate);
@@ -51,6 +63,9 @@ function Overlay() {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
       }
+      timeRef.current = 0;
+      // Animate bars down when stopping
+      setAudioHistory([0.1, 0.1, 0.1, 0.1, 0.1]);
     }
 
     return () => {
@@ -58,7 +73,7 @@ function Overlay() {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [recordingState.isRecording, recordingState.audioLevel]);
+  }, [recordingState.isRecording]);
 
   useEffect(() => {
     // Start in minimized state
@@ -79,7 +94,9 @@ function Overlay() {
     const unsubscribeStopped = listen("recording-stopped", () => {
       setRecordingState({ isRecording: false, duration: 0 });
       // Reset audio visualization
-      setAudioHistory([0, 0, 0, 0, 0]);
+      setAudioHistory([0.1, 0.1, 0.1, 0.1, 0.1]);
+      // Immediately show processing state
+      setProgress({ status: "processing" });
     });
 
     // Listen for progress updates
@@ -150,6 +167,7 @@ function Overlay() {
                 <div className="recording-indicator">
                   <div className="pulse-ring" key={`pulse-${pulseKey}`} />
                   <div className="recording-dot" />
+                  <span className="rec-label">REC</span>
                 </div>
                 
                 <div className="visualizer">
@@ -158,8 +176,9 @@ function Overlay() {
                       key={index}
                       className="bar" 
                       style={{ 
-                        height: `${Math.max(4, level * 32 + Math.sin(Date.now() * 0.01 + index) * 2)}px`,
-                        animationDelay: `${index * 0.1}s`
+                        height: `${Math.max(4, level * 20)}px`,
+                        transform: `scaleY(${0.8 + level * 0.4})`,
+                        animationDelay: `${index * 0.05}s`
                       }} 
                     />
                   ))}
