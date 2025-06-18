@@ -166,7 +166,11 @@ async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> R
                 // Get current audio level from recorder
                 let audio_level = {
                     let recorder = recorder_clone.lock().await;
-                    recorder.get_current_audio_level()
+                    let level = recorder.get_current_audio_level();
+                    if duration % 1000 < 50 {  // Log every second
+                        println!("📊 Audio level: {}", level);
+                    }
+                    level
                 };
                 
                 if overlay_window_clone.emit("recording-state-update", serde_json::json!({
