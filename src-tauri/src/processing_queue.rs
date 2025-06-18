@@ -153,20 +153,29 @@ impl ProcessingQueue {
                                 }
                             }
                             
+                            println!("🔍 Processing queue attempting to use model: {:?}", model_path);
+                            
                             if model_path.exists() {
+                                let model_name = model_path.file_name()
+                                    .and_then(|name| name.to_str())
+                                    .unwrap_or("unknown");
+                                println!("🤖 Processing queue using model: {}", model_name);
+                                
                                 match Transcriber::new(&model_path) {
                                     Ok(transcriber) => {
                                         match transcriber.transcribe(&audio_path_for_transcription) {
                                             Ok(transcript) => {
-                                                println!("Transcription successful: {} chars", transcript.len());
+                                                println!("✅ Processing queue transcription completed using model: {} (length: {} chars)", model_name, transcript.len());
                                                 
-                                                // Save to database
+                                                // Save to database with model information
                                                 if let Err(e) = database.save_transcript(
                                                     &transcript,
                                                     job.duration_ms,
                                                     Some(&serde_json::json!({
                                                         "filename": job.filename,
-                                                        "audio_path": job.audio_path.to_str().unwrap_or("")
+                                                        "audio_path": job.audio_path.to_str().unwrap_or(""),
+                                                        "model_used": model_name,
+                                                        "processing_type": "file_upload"
                                                     }).to_string())
                                                 ).await {
                                                     eprintln!("Failed to save transcript to database: {}", e);

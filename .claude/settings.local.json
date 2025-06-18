@@ -34,7 +34,8 @@
       "Bash(pnpm add:*)",
       "Bash(pnpm remove:*)",
       "Bash(cp:*)",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(git push:*)"
     ],
     "deny": []
   }

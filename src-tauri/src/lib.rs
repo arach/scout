@@ -293,11 +293,23 @@ async fn transcribe_audio(
         return Err("No Whisper model found. Please download a model from Settings.".to_string());
     } else {
         println!("✓ Model file exists at: {:?}", model_path);
+        
+        // Extract model name from path for logging
+        let model_name = model_path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("unknown");
+        println!("🤖 Using model: {}", model_name);
     }
     
     // Create transcriber and transcribe
+    let model_name = model_path.file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("unknown");
+    
+    println!("🎯 Starting transcription with model: {}", model_name);
     let transcriber = transcription::Transcriber::new(&model_path)?;
     let result = transcriber.transcribe(&audio_path)?;
+    println!("✅ Transcription completed using model: {} (length: {} chars)", model_name, result.len());
     
     Ok(result)
 }
@@ -374,7 +386,17 @@ async fn save_transcript(
     text: String,
     duration_ms: i32,
 ) -> Result<i64, String> {
-    state.database.save_transcript(&text, duration_ms, None).await
+    // Get current active model for metadata
+    let settings = state.settings.lock().await;
+    let active_model = settings.get().models.active_model_id.clone();
+    drop(settings);
+    
+    let metadata = serde_json::json!({
+        "model_used": active_model,
+        "processing_type": "manual_save"
+    }).to_string();
+    
+    state.database.save_transcript(&text, duration_ms, Some(&metadata)).await
 }
 
 #[tauri::command]
@@ -566,6 +588,12 @@ async fn get_current_shortcut(state: State<'_, AppState>) -> Result<String, Stri
 }
 
 #[tauri::command]
+async fn get_current_model(state: State<'_, AppState>) -> Result<String, String> {
+    let settings = state.settings.lock().await;
+    Ok(settings.get().models.active_model_id.clone())
+}
+
+#[tauri::command]
 async fn get_available_models(state: State<'_, AppState>) -> Result<Vec<models::WhisperModel>, String> {
     let settings = state.settings.lock().await;
     Ok(models::WhisperModel::all(&state.models_dir, settings.get()))
@@ -604,9 +632,10 @@ async fn has_any_model(state: State<'_, AppState>) -> Result<bool, String> {
 #[tauri::command]
 async fn set_active_model(state: State<'_, AppState>, model_id: String) -> Result<(), String> {
     let mut settings = state.settings.lock().await;
+    let previous_model = settings.get().models.active_model_id.clone();
     settings.update(|s| s.models.active_model_id = model_id.clone())
         .map_err(|e| format!("Failed to save settings: {}", e))?;
-    println!("Active model set to: {}", model_id);
+    println!("🔄 Active model changed: {} → {}", previous_model, model_id);
     Ok(())
 }
 
@@ -1113,7 +1142,8 @@ pub fn run() {
             open_models_folder,
             download_file,
             get_settings,
-            update_settings
+            update_settings,
+            get_current_model
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

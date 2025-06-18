@@ -68,6 +68,11 @@ function App() {
   useEffect(() => {
     loadRecentTranscripts();
     
+    // Log current model on startup
+    invoke<string>('get_current_model').then(model => {
+      console.log('🤖 Current active model:', model);
+    }).catch(console.error);
+    
     // Subscribe to recording progress updates
     invoke('subscribe_to_progress').catch(console.error);
     
