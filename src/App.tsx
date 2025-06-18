@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { ModelManager } from "./components/ModelManager";
 import { FirstRunSetup } from "./components/FirstRunSetup";
 import "./App.css";
@@ -211,8 +212,8 @@ function App() {
     // Set up Tauri file drop handling for the entire window
     let unsubscribeFileDrop: (() => void) | undefined;
     const setupFileDrop = async () => {
-      const appWindow = getCurrentWindow();
-      unsubscribeFileDrop = await appWindow.onFileDropEvent(async (event) => {
+      const webview = getCurrentWebview();
+      unsubscribeFileDrop = await webview.onDragDropEvent(async (event) => {
         console.log('File drop event:', event);
         
         if (event.payload.type === 'hover') {

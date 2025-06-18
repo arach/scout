@@ -35,7 +35,9 @@
       "Bash(pnpm remove:*)",
       "Bash(cp:*)",
       "Bash(mkdir:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(git stash:*)",
+      "WebFetch(domain:v2.tauri.app)"
     ],
     "deny": []
   }
