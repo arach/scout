@@ -7,11 +7,31 @@ pub struct Transcriber {
 
 impl Transcriber {
     pub fn new(model_path: &Path) -> Result<Self, String> {
-        let context = WhisperContext::new_with_params(
-            model_path.to_str().ok_or("Invalid model path")?,
-            WhisperContextParameters::default(),
-        )
-        .map_err(|e| format!("Failed to create whisper context: {}", e))?;
+        let model_path_str = model_path.to_str().ok_or("Invalid model path")?;
+        
+        // Try Core ML first (faster, more efficient on macOS)
+        let context = match WhisperContext::new_with_params(
+            model_path_str,
+            WhisperContextParameters::default(), // Uses Core ML on macOS
+        ) {
+            Ok(ctx) => {
+                println!("Successfully initialized Whisper with Core ML acceleration");
+                ctx
+            }
+            Err(core_ml_error) => {
+                println!("Core ML initialization failed: {}, falling back to CPU mode", core_ml_error);
+                
+                // Fallback to CPU-only mode
+                let mut params = WhisperContextParameters::default();
+                params.use_gpu(false);
+                
+                WhisperContext::new_with_params(model_path_str, params)
+                    .map_err(|cpu_error| {
+                        format!("Both Core ML and CPU initialization failed. Core ML: {}. CPU: {}", 
+                               core_ml_error, cpu_error)
+                    })?
+            }
+        };
 
         Ok(Self { context })
     }

@@ -25,7 +25,17 @@
       "Bash(cat:*)",
       "Bash(log show:*)",
       "Bash(src-tauri/target/debug/scout:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(open:*)",
+      "Bash(afplay:*)",
+      "Bash(git checkout:*)",
+      "Bash(git commit:*)",
+      "Bash(curl:*)",
+      "Bash(pnpm add:*)",
+      "Bash(pnpm remove:*)",
+      "Bash(cp:*)",
+      "Bash(mkdir:*)",
+      "Bash(git push:*)"
     ],
     "deny": []
   }

@@ -30,11 +30,12 @@ export default defineConfig(async () => ({
       ignored: ["**/src-tauri/**"],
     },
   },
-  // Configure single entry point (removed overlay for macOS native implementation)
+  // Configure entry points
   build: {
     rollupOptions: {
       input: {
         main: resolve(__dirname, "index.html"),
+        overlay: resolve(__dirname, "overlay.html"),
       },
     },
   },
