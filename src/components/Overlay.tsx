@@ -84,7 +84,8 @@ function Overlay() {
       setRecordingState(event.payload);
       
       // Automatically expand with staggered animation when recording starts
-      if (event.payload.isRecording) {
+      if (event.payload.isRecording && !isExpanded) {
+        console.log('Recording started, expanding overlay');
         setIsExpanded(true);
         setPulseKey(prev => prev + 1);
       }
@@ -154,7 +155,7 @@ function Overlay() {
   };
 
   return (
-    <div className={`overlay-container ${isExpanded ? 'expanded' : 'minimized'} state-${progress.status || 'idle'}`}>
+    <div className={`overlay-container ${isExpanded ? 'expanded' : 'minimized'} state-${progress.status || 'idle'} ${recordingState.isRecording ? 'is-recording' : ''}`}>
       <div className="overlay-pill" key={`pill-${pulseKey}`}>
         {/* Background gradient effects */}
         <div className="gradient-bg" />
