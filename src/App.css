@@ -64,6 +64,16 @@
     
     --recording: #ff5555;
   }
+  
+  /* Dark mode drag overlay adjustments */
+  .drag-drop-backdrop {
+    background: rgba(0, 0, 0, 0.7);
+  }
+  
+  .drag-drop-border {
+    background: rgba(36, 36, 36, 0.95);
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+  }
 }
 
 * {
@@ -227,9 +237,9 @@ h1 {
 .drag-drop-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
 .drag-drop-container {
@@ -247,25 +257,31 @@ h1 {
   height: 100%;
   max-width: 600px;
   max-height: 400px;
-  background: linear-gradient(135deg, rgba(74, 158, 255, 0.1) 0%, rgba(74, 158, 255, 0.05) 100%);
-  border: 3px dashed var(--accent-primary);
-  border-radius: 24px;
+  background: var(--bg-secondary);
+  border: 2px dashed var(--border-secondary);
+  border-radius: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.15);
 }
 
 .drag-drop-border::before {
   content: '';
   position: absolute;
-  inset: -3px;
-  background: linear-gradient(45deg, transparent 30%, var(--accent-primary) 50%, transparent 70%);
-  background-size: 200% 200%;
-  animation: shimmer 3s linear infinite;
-  border-radius: 24px;
-  opacity: 0.6;
+  inset: -2px;
+  background: linear-gradient(90deg, transparent 0%, var(--accent-primary) 50%, transparent 100%);
+  background-size: 200% 100%;
+  animation: shimmer 2s linear infinite;
+  border-radius: 16px;
+  opacity: 0;
   z-index: -1;
+  transition: opacity 0.3s ease;
+}
+
+.drag-drop-border:hover::before {
+  opacity: 0.4;
 }
 
 .drag-drop-content {
@@ -278,9 +294,10 @@ h1 {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 120px;
-  height: 120px;
-  background: rgba(74, 158, 255, 0.1);
+  width: 100px;
+  height: 100px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
   border-radius: 50%;
   margin-bottom: 24px;
   animation: floatIcon 2s ease-in-out infinite;
@@ -288,15 +305,15 @@ h1 {
 
 .drag-drop-icon svg {
   color: var(--accent-primary);
-  filter: drop-shadow(0 4px 12px rgba(74, 158, 255, 0.3));
+  opacity: 0.9;
 }
 
 .drag-drop-title {
   margin: 0 0 8px 0;
-  font-size: 28px;
-  font-weight: 600;
+  font-size: 24px;
+  font-weight: 500;
   color: var(--text-primary);
-  letter-spacing: -0.5px;
+  letter-spacing: -0.25px;
 }
 
 .drag-drop-subtitle {
@@ -314,12 +331,12 @@ h1 {
 
 .format-badge {
   padding: 4px 12px;
-  background: rgba(74, 158, 255, 0.15);
-  border: 1px solid rgba(74, 158, 255, 0.3);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
-  color: var(--accent-primary);
+  color: var(--text-secondary);
   animation: badgeFadeIn 0.5s cubic-bezier(0.23, 1, 0.32, 1) backwards;
 }
 

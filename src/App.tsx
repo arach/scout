@@ -216,9 +216,10 @@ function App() {
       unsubscribeFileDrop = await webview.onDragDropEvent(async (event) => {
         console.log('File drop event:', event);
         
-        if (event.payload.type === 'hover') {
+        // Check the event type from the event name
+        if (event.event === 'tauri://drag-over') {
           setIsDragging(true);
-        } else if (event.payload.type === 'drop') {
+        } else if (event.event === 'tauri://drag-drop') {
           setIsDragging(false);
           
           const files = event.payload.paths;
@@ -258,7 +259,7 @@ function App() {
             alert('Please drop audio files only (wav, mp3, m4a, flac, ogg, webm)');
             setIsProcessing(false);
           }
-        } else if (event.payload.type === 'cancel') {
+        } else if (event.event === 'tauri://drag-leave') {
           setIsDragging(false);
         }
       });
