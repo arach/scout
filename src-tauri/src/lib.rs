@@ -6,6 +6,7 @@ mod recording_workflow;
 mod processing_queue;
 mod overlay_position;
 mod sound;
+mod models;
 #[cfg(target_os = "macos")]
 mod macos;
 
@@ -260,8 +261,8 @@ async fn transcribe_audio(
         return Err(format!("Audio file appears to be empty or corrupted (size: {} bytes)", metadata.len()));
     }
     
-    // Get the model path - using base.en model for good balance
-    let model_path = state.models_dir.join("ggml-base.en.bin");
+    // Get the active model path
+    let model_path = models::WhisperModel::get_active_model_path(&state.models_dir);
     
     if !model_path.exists() {
         return Err("Whisper model not found. Please run scripts/download-models.sh".to_string());
@@ -535,6 +536,87 @@ async fn get_current_shortcut(state: State<'_, AppState>) -> Result<String, Stri
 }
 
 #[tauri::command]
+async fn get_available_models(state: State<'_, AppState>) -> Result<Vec<models::WhisperModel>, String> {
+    Ok(models::WhisperModel::all(&state.models_dir))
+}
+
+#[tauri::command]
+async fn set_active_model(model_id: String) -> Result<(), String> {
+    models::WhisperModel::set_active_model(&model_id)
+}
+
+#[tauri::command]
+async fn get_models_dir(state: State<'_, AppState>) -> Result<String, String> {
+    Ok(state.models_dir.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+async fn download_file(
+    url: String,
+    dest_path: String,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    use std::path::Path;
+    use tokio::fs::File;
+    use tokio::io::AsyncWriteExt;
+    use futures_util::StreamExt;
+    
+    // Ensure parent directory exists
+    if let Some(parent) = Path::new(&dest_path).parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create directory: {}", e))?;
+    }
+    
+    // Start download
+    let client = reqwest::Client::new();
+    let response = client.get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to start download: {}", e))?;
+    
+    let total_size = response.content_length().unwrap_or(0);
+    
+    // Create the file
+    let mut file = File::create(&dest_path).await
+        .map_err(|e| format!("Failed to create file: {}", e))?;
+    
+    // Download with progress
+    let mut downloaded = 0u64;
+    let mut stream = response.bytes_stream();
+    
+    while let Some(chunk_result) = stream.next().await {
+        let chunk = chunk_result
+            .map_err(|e| format!("Download error: {}", e))?;
+        
+        file.write_all(&chunk).await
+            .map_err(|e| format!("Failed to write chunk: {}", e))?;
+        
+        downloaded += chunk.len() as u64;
+        
+        // Emit progress event
+        let progress = if total_size > 0 {
+            (downloaded as f64 / total_size as f64) * 100.0
+        } else {
+            0.0
+        };
+        
+        let _ = app.emit("download-progress", serde_json::json!({
+            "url": url,
+            "downloaded": downloaded,
+            "total": total_size,
+            "progress": progress
+        }));
+    }
+    
+    file.flush().await
+        .map_err(|e| format!("Failed to flush file: {}", e))?;
+    
+    println!("Download complete: {} -> {}", url, dest_path);
+    
+    Ok(())
+}
+
+#[tauri::command]
 async fn update_global_shortcut(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
@@ -570,6 +652,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_http::init())
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir().expect("Failed to get app data dir");
             let recordings_dir = app_data_dir.join("recordings");
@@ -666,6 +749,9 @@ pub fn run() {
                             }
                             ProcessingStatus::Processing { filename } => {
                                 println!("Processing file: {}", filename);
+                            }
+                            ProcessingStatus::Converting { filename } => {
+                                println!("Converting file to WAV: {}", filename);
                             }
                             ProcessingStatus::Transcribing { filename } => {
                                 println!("Transcribing file: {}", filename);
@@ -836,7 +922,11 @@ pub fn run() {
             set_start_sound,
             set_stop_sound,
             get_current_shortcut,
-            transcribe_file
+            transcribe_file,
+            get_available_models,
+            set_active_model,
+            get_models_dir,
+            download_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

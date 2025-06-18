@@ -6,6 +6,7 @@ use serde_json;
 
 use crate::db::Database;
 use crate::transcription::Transcriber;
+use crate::audio::AudioConverter;
 
 #[derive(Debug, Clone)]
 pub struct ProcessingJob {
@@ -18,6 +19,7 @@ pub struct ProcessingJob {
 pub enum ProcessingStatus {
     Queued { position: usize },
     Processing { filename: String },
+    Converting { filename: String },
     Transcribing { filename: String },
     Complete { filename: String, transcript: String },
     Failed { filename: String, error: String },
@@ -28,10 +30,6 @@ pub struct ProcessingQueue {
 }
 
 impl ProcessingQueue {
-    pub async fn queue_job(&self, job: ProcessingJob) {
-        let _ = self.sender.send(job).await;
-    }
-    
     pub fn new(
         database: Arc<Database>,
         models_dir: PathBuf,
@@ -60,7 +58,6 @@ impl ProcessingQueue {
                 
                 // Process the next job if not currently processing
                 if !processing && !queue.is_empty() {
-                    let _ = processing; // Mark as used
                     processing = true;
                     let job = queue.remove(0);
                     
@@ -96,6 +93,35 @@ impl ProcessingQueue {
                     if file_ready {
                         match std::fs::metadata(&job.audio_path) {
                             Ok(metadata) if metadata.len() > 1024 => {
+                            // Check if we need to convert the audio file
+                            let audio_path_for_transcription = if AudioConverter::needs_conversion(&job.audio_path) {
+                                println!("Converting audio file to WAV format...");
+                                
+                                // Update status to converting
+                                let _ = status_tx.send(ProcessingStatus::Converting { 
+                                    filename: job.filename.clone() 
+                                }).await;
+                                
+                                let wav_path = AudioConverter::get_wav_path(&job.audio_path);
+                                
+                                match AudioConverter::convert_to_wav(&job.audio_path, &wav_path) {
+                                    Ok(_) => {
+                                        println!("Audio conversion successful");
+                                        wav_path
+                                    }
+                                    Err(e) => {
+                                        let _ = status_tx.send(ProcessingStatus::Failed { 
+                                            filename: job.filename.clone(),
+                                            error: format!("Audio conversion failed: {}", e),
+                                        }).await;
+                                        processing = false;
+                                        continue;
+                                    }
+                                }
+                            } else {
+                                job.audio_path.clone()
+                            };
+                            
                             // Update to transcribing
                             let _ = status_tx.send(ProcessingStatus::Transcribing { 
                                 filename: job.filename.clone() 
@@ -107,7 +133,7 @@ impl ProcessingQueue {
                             if model_path.exists() {
                                 match Transcriber::new(&model_path) {
                                     Ok(transcriber) => {
-                                        match transcriber.transcribe(&job.audio_path) {
+                                        match transcriber.transcribe(&audio_path_for_transcription) {
                                             Ok(transcript) => {
                                                 println!("Transcription successful: {} chars", transcript.len());
                                                 
@@ -127,6 +153,15 @@ impl ProcessingQueue {
                                                     filename: job.filename.clone(),
                                                     transcript,
                                                 }).await;
+                                                
+                                                // Clean up temporary WAV file if we converted
+                                                if AudioConverter::needs_conversion(&job.audio_path) {
+                                                    let wav_path = AudioConverter::get_wav_path(&job.audio_path);
+                                                    if wav_path.exists() {
+                                                        let _ = std::fs::remove_file(&wav_path);
+                                                        println!("Cleaned up temporary WAV file");
+                                                    }
+                                                }
                                             }
                                             Err(e) => {
                                                 eprintln!("Transcription failed: {}", e);

@@ -27,12 +27,20 @@ else
 fi
 
 # Download small model (466 MB) - better quality
-# Uncomment if you want the small model
-# if [ ! -f "$MODEL_DIR/ggml-small.en.bin" ]; then
-#     echo "Downloading small.en model..."
-#     curl -L -o "$MODEL_DIR/ggml-small.en.bin" "$BASE_URL/ggml-small.en.bin"
+if [ ! -f "$MODEL_DIR/ggml-small.en.bin" ]; then
+    echo "Downloading small.en model..."
+    curl -L -o "$MODEL_DIR/ggml-small.en.bin" "$BASE_URL/ggml-small.en.bin"
+else
+    echo "small.en model already exists"
+fi
+
+# Download medium model (1.5 GB) - excellent quality
+# Uncomment if you want the medium model
+# if [ ! -f "$MODEL_DIR/ggml-medium.en.bin" ]; then
+#     echo "Downloading medium.en model..."
+#     curl -L -o "$MODEL_DIR/ggml-medium.en.bin" "$BASE_URL/ggml-medium.en.bin"
 # else
-#     echo "small.en model already exists"
+#     echo "medium.en model already exists"
 # fi
 
 echo "Model download complete!"

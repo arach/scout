@@ -2,6 +2,7 @@ import { useState, useEffect, Fragment, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import { ModelManager } from "./components/ModelManager";
 import "./App.css";
 
 interface Transcript {
@@ -37,6 +38,15 @@ function App() {
   const [hotkeyUpdateStatus, setHotkeyUpdateStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const isStoppingRef = useRef(false);
   const [overlayPosition, setOverlayPosition] = useState<string>('top-center');
+  const [isDragging, setIsDragging] = useState(false);
+  const dragCounter = useRef(0);
+  const [uploadProgress, setUploadProgress] = useState<{
+    filename?: string;
+    fileSize?: number;
+    status: 'idle' | 'uploading' | 'queued' | 'processing' | 'converting' | 'transcribing';
+    queuePosition?: number;
+    progress?: number;
+  }>({ status: 'idle' });
 
   useEffect(() => {
     loadRecentTranscripts();
@@ -108,7 +118,7 @@ function App() {
       } else if (progress.Failed) {
         // Recording failed
         setIsProcessing(false);
-        console.error("Recording failed:", progress.Failed.error);
+        console.error("Recording failed:", progress.Failed);
       } else if (progress.Processing || progress.Transcribing) {
         // Still processing
         setIsProcessing(true);
@@ -121,14 +131,44 @@ function App() {
       console.log("Processing status:", status);
       
       // Update UI based on processing status
-      if (status.Complete) {
+      if (status.Queued) {
+        setUploadProgress(prev => ({
+          ...prev,
+          status: 'queued',
+          queuePosition: status.Queued.position
+        }));
+      } else if (status.Processing) {
+        setUploadProgress(prev => ({
+          ...prev,
+          status: 'processing',
+          filename: status.Processing.filename
+        }));
+      } else if (status.Converting) {
+        setUploadProgress(prev => ({
+          ...prev,
+          status: 'converting',
+          filename: status.Converting.filename
+        }));
+      } else if (status.Transcribing) {
+        setUploadProgress(prev => ({
+          ...prev,
+          status: 'transcribing',
+          filename: status.Transcribing.filename
+        }));
+      } else if (status.Complete) {
         // Transcription complete, refresh the transcript list
         console.log("Transcription complete, refreshing transcript list");
         loadRecentTranscripts();
         setShowSuccess(true);
         setTimeout(() => setShowSuccess(false), 2000);
+        setUploadProgress({ status: 'idle' });
+        setIsProcessing(false);
       } else if (status.Failed) {
         console.error("Processing failed:", status.Failed);
+        setIsProcessing(false);
+        setUploadProgress({ status: 'idle' });
+        // Show error message to user
+        alert(`Failed to process audio file: ${status.Failed.error || 'Unknown error'}`);
       }
     });
     
@@ -137,9 +177,13 @@ function App() {
       const data = event.payload as any;
       console.log("File upload complete:", data);
       
-      // Show a message that the file is being processed
-      setShowSuccess(true);
-      setTimeout(() => setShowSuccess(false), 2000);
+      // Update upload progress with file info
+      setUploadProgress(prev => ({
+        ...prev,
+        filename: data.originalName || data.filename,
+        fileSize: data.size,
+        status: 'queued'
+      }));
     });
     
     return () => {
@@ -254,6 +298,13 @@ function App() {
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
   };
 
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  };
+
   const copyTranscript = (text: string) => {
     navigator.clipboard.writeText(text).then(() => {
       // Could show a toast notification here
@@ -353,7 +404,7 @@ function App() {
 
   const handleFileUpload = async () => {
     try {
-      const file = await open({
+      const filePath = await open({
         multiple: false,
         filters: [
           {
@@ -363,20 +414,30 @@ function App() {
         ]
       });
 
-      if (!file) return;
+      if (!filePath) return;
 
       setIsProcessing(true);
       setShowSuccess(false);
 
-      // Show upload started message
-      console.log('Uploading file:', file);
-
-      // Send file to backend for processing
-      const filename = await invoke<string>('transcribe_file', { 
-        filePath: file.path 
+      // Get filename from path
+      const filename = filePath.split('/').pop() || 'audio file';
+      
+      // Set initial upload state
+      setUploadProgress({
+        filename: filename,
+        status: 'uploading',
+        progress: 0
       });
 
-      console.log('File queued for processing:', filename);
+      // Show upload started message
+      console.log('Uploading file:', filePath);
+
+      // Send file to backend for processing - filePath is already a string
+      const queuedFilename = await invoke<string>('transcribe_file', { 
+        filePath: filePath 
+      });
+
+      console.log('File queued for processing:', queuedFilename);
       
       // File is now queued, processing will happen in background
       // The progress updates will come through the existing event listeners
@@ -384,6 +445,86 @@ function App() {
     } catch (error) {
       console.error('Failed to upload file:', error);
       alert(`Failed to upload file: ${error}`);
+      setIsProcessing(false);
+    }
+  };
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    dragCounter.current++;
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      setIsDragging(true);
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    dragCounter.current--;
+    if (dragCounter.current === 0) {
+      setIsDragging(false);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    setIsDragging(false);
+    dragCounter.current = 0;
+
+    const files = Array.from(e.dataTransfer.files);
+    const audioFiles = files.filter(file => {
+      const extension = file.name.split('.').pop()?.toLowerCase();
+      return ['wav', 'mp3', 'm4a', 'flac', 'ogg', 'webm'].includes(extension || '');
+    });
+
+    if (audioFiles.length === 0) {
+      alert('Please drop audio files only (wav, mp3, m4a, flac, ogg, webm)');
+      return;
+    }
+
+    // Process the first audio file (we can enhance this to handle multiple files later)
+    const file = audioFiles[0];
+    
+    if (audioFiles.length > 1) {
+      console.log(`Processing first file only. ${audioFiles.length - 1} additional files were dropped but will be ignored.`);
+    }
+
+    try {
+      setIsProcessing(true);
+      setShowSuccess(false);
+
+      console.log('Processing dropped file:', file.name);
+
+      // In Tauri, dropped files don't provide direct file paths
+      // We need to use the file dialog for now
+      alert(`Direct file drops are not yet supported. Please use the "Upload Audio" button to select files.`);
+      setIsProcessing(false);
+      return;
+      
+      // TODO: To properly support file drops in Tauri, we would need to:
+      // 1. Configure the Tauri window to accept file drops
+      // 2. Listen to Tauri's file-drop events instead of browser drag events
+      // 3. Handle the file paths provided by Tauri's file-drop API
+      
+      // const filename = await invoke<string>('transcribe_file', { 
+      //   filePath: filePath 
+      // });
+
+      // console.log('File queued for processing:', filename);
+      
+    } catch (error) {
+      console.error('Failed to process dropped file:', error);
+      alert(`Failed to process dropped file: ${error}`);
       setIsProcessing(false);
     }
   };
@@ -564,7 +705,13 @@ function App() {
         </div>
       </div>
       
-      <div className="recording-section">
+      <div 
+        className={`recording-section ${isDragging ? 'dragging' : ''}`}
+        onDragEnter={handleDragEnter}
+        onDragLeave={handleDragLeave}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+      >
         <div className="recording-controls">
           <button
             className={`record-button ${isRecording ? 'recording' : ''} ${isProcessing ? 'processing' : ''}`}
@@ -606,6 +753,20 @@ function App() {
           </button>
         </div>
         
+        {isDragging && (
+          <div className="drop-zone-overlay">
+            <div className="drop-zone-content">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              <p>Drop audio files here</p>
+              <span className="drop-zone-formats">Supported: WAV, MP3, M4A, FLAC, OGG, WebM</span>
+            </div>
+          </div>
+        )}
+        
         {isRecording && (
           <div className="recording-indicator">
             <div className="waveform">
@@ -618,19 +779,65 @@ function App() {
           </div>
         )}
         
-        <p className="hotkey-hint">
-          {hotkey.split('+').map((key, idx) => (
-            <Fragment key={idx}>
-              {idx > 0 && ' + '}
-              <kbd>{key}</kbd>
-            </Fragment>
-          ))}
-        </p>
+        <div className="hints-container">
+          <p className="hotkey-hint">
+            {hotkey.split('+').map((key, idx) => (
+              <Fragment key={idx}>
+                {idx > 0 && ' + '}
+                <kbd>{key}</kbd>
+              </Fragment>
+            ))}
+          </p>
+          <p className="drag-hint">or drag & drop audio files</p>
+        </div>
         
-        {isProcessing && (
-          <div className="processing-indicator">
-            <div className="spinner"></div>
-            <span>Transcribing your audio...</span>
+        {uploadProgress.status !== 'idle' && (
+          <div className="upload-progress-container">
+            <div className="upload-progress-header">
+              <h3>Processing Upload</h3>
+              {uploadProgress.filename && (
+                <span className="upload-filename">{uploadProgress.filename}</span>
+              )}
+            </div>
+            
+            <div className="upload-progress-status">
+              {uploadProgress.status === 'uploading' && (
+                <>
+                  <div className="spinner"></div>
+                  <span>Uploading file...</span>
+                </>
+              )}
+              {uploadProgress.status === 'queued' && (
+                <>
+                  <div className="spinner"></div>
+                  <span>In queue{uploadProgress.queuePosition ? ` (position ${uploadProgress.queuePosition})` : ''}</span>
+                </>
+              )}
+              {uploadProgress.status === 'processing' && (
+                <>
+                  <div className="spinner"></div>
+                  <span>Processing audio file...</span>
+                </>
+              )}
+              {uploadProgress.status === 'converting' && (
+                <>
+                  <div className="spinner"></div>
+                  <span>Converting to WAV format...</span>
+                </>
+              )}
+              {uploadProgress.status === 'transcribing' && (
+                <>
+                  <div className="spinner"></div>
+                  <span>Transcribing speech to text...</span>
+                </>
+              )}
+            </div>
+            
+            {uploadProgress.fileSize && (
+              <div className="upload-file-info">
+                <span>Size: {formatFileSize(uploadProgress.fileSize)}</span>
+              </div>
+            )}
           </div>
         )}
         
@@ -868,6 +1075,10 @@ function App() {
                 <p className="setting-hint">
                   Choose where the recording indicator appears on your screen
                 </p>
+              </div>
+              
+              <div className="setting-item model-manager-section">
+                <ModelManager />
               </div>
             </div>
           </div>

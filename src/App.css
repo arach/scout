@@ -150,6 +150,15 @@ h1 {
   padding: 32px;
   margin-bottom: 24px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  position: relative;
+  transition: all 0.3s ease;
+}
+
+.recording-section.dragging {
+  border-color: var(--accent-primary);
+  border-style: dashed;
+  border-width: 2px;
+  background-color: var(--bg-tertiary);
 }
 
 .recording-controls {
@@ -201,6 +210,55 @@ h1 {
 .upload-button svg {
   width: 18px;
   height: 18px;
+}
+
+/* Drop zone overlay */
+.drop-zone-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(74, 158, 255, 0.05);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.drop-zone-content {
+  text-align: center;
+  color: var(--accent-primary);
+}
+
+.drop-zone-content svg {
+  margin-bottom: 16px;
+  opacity: 0.8;
+  animation: dropBounce 1.5s ease-in-out infinite;
+}
+
+.drop-zone-content p {
+  margin: 0 0 8px 0;
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--accent-primary);
+}
+
+.drop-zone-formats {
+  font-size: 12px;
+  color: var(--text-secondary);
+  opacity: 0.8;
+}
+
+@keyframes dropBounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
 }
 
 .record-button {
@@ -288,17 +346,29 @@ h1 {
   gap: 8px;
 }
 
-.hotkey-hint {
+.hints-container {
+  text-align: center;
   margin-top: 8px;
+}
+
+.hotkey-hint {
+  margin: 0;
   font-size: 10px;
   color: var(--text-tertiary);
-  text-align: center;
   opacity: 0.7;
   transition: opacity 0.2s ease;
 }
 
 .hotkey-hint:hover {
   opacity: 1;
+}
+
+.drag-hint {
+  margin: 4px 0 0 0;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  opacity: 0.6;
+  font-style: italic;
 }
 
 .hotkey-hint kbd {
@@ -668,6 +738,61 @@ h1 {
   }
 }
 
+/* Upload progress container */
+.upload-progress-container {
+  margin-top: 20px;
+  padding: 16px;
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  animation: fadeIn 0.3s ease-out;
+}
+
+.upload-progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.upload-progress-header h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.upload-filename {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", monospace;
+  background-color: var(--bg-secondary);
+  padding: 2px 8px;
+  border-radius: 4px;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-progress-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.upload-file-info {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  display: flex;
+  gap: 16px;
+}
+
 /* Processing indicator */
 .processing-indicator {
   display: flex;
@@ -751,7 +876,8 @@ h1 {
   background-color: var(--bg-primary);
   border: 1px solid var(--border-primary);
   border-radius: 8px;
-  width: 500px;
+  width: 600px;
+  max-width: 90vw;
   max-height: 80vh;
   overflow-y: auto;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
@@ -1091,4 +1217,11 @@ h1 {
 
 .position-button:disabled {
   cursor: default;
+}
+
+/* Model Manager section */
+.model-manager-section {
+  border-top: 1px solid var(--border-primary);
+  padding-top: 24px;
+  margin-top: 24px;
 }
