@@ -48,6 +48,11 @@ function Overlay() {
           // Use real audio level if available
           const audioLevel = recordingState.audioLevel || 0;
           
+          // Log audio level every 500ms
+          if (elapsed % 500 < 50) {
+            console.log('Audio level:', audioLevel);
+          }
+          
           if (audioLevel > 0) {
             // Real audio data - create responsive waveform
             const newValues = prev.map((_, index) => {
@@ -95,9 +100,16 @@ function Overlay() {
   useEffect(() => {
     // Start in minimized state
     setIsExpanded(false);
+    console.log('Overlay component mounted');
     
     // Listen for recording state updates
     const unsubscribeRecording = listen<RecordingState>("recording-state-update", (event) => {
+      console.log('Recording state update:', {
+        isRecording: event.payload.isRecording,
+        audioLevel: event.payload.audioLevel,
+        duration: event.payload.duration
+      });
+      
       setRecordingState(event.payload);
       
       // Automatically expand with staggered animation when recording starts
@@ -110,6 +122,7 @@ function Overlay() {
 
     // Listen for recording stopped event
     const unsubscribeStopped = listen("recording-stopped", () => {
+      console.log('Recording stopped event received');
       setRecordingState({ isRecording: false, duration: 0 });
       // Reset audio visualization
       setAudioHistory([0.1, 0.1, 0.1, 0.1, 0.1]);
@@ -122,7 +135,9 @@ function Overlay() {
       }
       
       // Schedule minimize after delay
+      console.log('Scheduling minimize in 800ms');
       minimizeTimeoutRef.current = window.setTimeout(() => {
+        console.log('Minimizing overlay');
         setIsExpanded(false);
       }, 800);
     });
@@ -195,6 +210,8 @@ function Overlay() {
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
   };
 
+  console.log('Render state:', { isExpanded, isRecording: recordingState.isRecording, status: progress.status });
+  
   return (
     <div className={`overlay-container ${isExpanded ? 'expanded' : 'minimized'} state-${progress.status || 'idle'} ${recordingState.isRecording ? 'is-recording' : ''}`}>
       <div className="overlay-pill" key={`pill-${pulseKey}`}>
