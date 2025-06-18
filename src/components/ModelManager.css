@@ -159,12 +159,13 @@
 }
 
 .model-active-badge {
-  padding: 6px 16px;
-  background: var(--accent-primary);
-  color: white;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 500;
+  font-size: 11px;
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.1);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
 }
 
 .download-progress {

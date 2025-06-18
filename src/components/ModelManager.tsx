@@ -175,6 +175,7 @@ export const ModelManager: React.FC = () => {
                   <h4>{model.name}</h4>
                   <span className="model-size">{model.size_mb} MB</span>
                   {isAutoDownload && <span className="auto-download-badge">Auto</span>}
+                  {model.active && <span className="model-active-badge">Active</span>}
                 </div>
                 <p className="model-description">{model.description}</p>
                 <div className="model-stats">
@@ -214,10 +215,6 @@ export const ModelManager: React.FC = () => {
                   >
                     Use This Model
                   </button>
-                )}
-                
-                {model.active && (
-                  <span className="model-active-badge">Active</span>
                 )}
               </div>
             </div>
