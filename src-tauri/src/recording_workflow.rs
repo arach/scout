@@ -15,6 +15,9 @@ pub enum RecordingCommand {
     StopRecording {
         response: oneshot::Sender<Result<RecordingResult, String>>,
     },
+    CancelRecording {
+        response: oneshot::Sender<Result<(), String>>,
+    },
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -117,6 +120,31 @@ impl RecordingWorkflow {
                             let _ = response.send(Err("No recording in progress".to_string()));
                         }
                     }
+                    
+                    RecordingCommand::CancelRecording { response } => {
+                        if let Some((filename, _start_time)) = current_recording.take() {
+                            // Stop recording
+                            let recorder = recorder.lock().await;
+                            if let Err(e) = recorder.stop_recording() {
+                                let _ = response.send(Err(e));
+                                continue;
+                            }
+                            drop(recorder); // Release lock
+                            
+                            // Delete the recording file
+                            let audio_path = recordings_dir.join(&filename);
+                            if let Err(e) = tokio::fs::remove_file(&audio_path).await {
+                                println!("Failed to delete cancelled recording: {}", e);
+                            }
+                            
+                            // Update to idle state
+                            progress_tracker.update(RecordingProgress::Idle);
+                            
+                            let _ = response.send(Ok(()));
+                        } else {
+                            let _ = response.send(Err("No recording in progress".to_string()));
+                        }
+                    }
                 }
             }
         });
@@ -138,6 +166,16 @@ impl RecordingWorkflow {
         let (response_tx, response_rx) = oneshot::channel();
         self.command_tx
             .send(RecordingCommand::StopRecording { response: response_tx })
+            .await
+            .map_err(|_| "Failed to send command".to_string())?;
+        
+        response_rx.await.map_err(|_| "Failed to receive response".to_string())?
+    }
+    
+    pub async fn cancel_recording(&self) -> Result<(), String> {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.command_tx
+            .send(RecordingCommand::CancelRecording { response: response_tx })
             .await
             .map_err(|_| "Failed to send command".to_string())?;
         

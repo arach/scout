@@ -7,7 +7,7 @@ struct OverlayConstants {
     static let MINIMIZED_WIDTH: CGFloat = 80
     static let EXPANDED_WIDTH: CGFloat = 180
     static let EXPANDED_HEIGHT: CGFloat = 40
-    static let MINIMIZED_HEIGHT: CGFloat = 4
+    static let MINIMIZED_HEIGHT: CGFloat = 8
     static let VERTICAL_MENU_OFFSET: CGFloat = 5
 }
 
@@ -20,7 +20,7 @@ class OverlayWindow: NSWindow {
         var adjustedRect = contentRect
         if contentRect.width < 1 || contentRect.height < 1 {
             NSLog("WARNING: Window rect too small, adjusting to minimum size")
-            adjustedRect = NSRect(x: contentRect.origin.x, y: contentRect.origin.y, width: 80, height: 4)
+            adjustedRect = NSRect(x: contentRect.origin.x, y: contentRect.origin.y, width: 80, height: 8)
         }
         
         super.init(contentRect: adjustedRect, styleMask: [.borderless], backing: .buffered, defer: false)
@@ -184,7 +184,7 @@ class OverlayViewController: NSViewController {
                     transform: translate(-50%, -50%);
                     display: flex;
                     align-items: center;
-                    gap: 10px;
+                    gap: 5px;
                     width: 100%;
                     padding: 0 12px;
                     box-sizing: border-box;
@@ -441,7 +441,7 @@ class OverlayViewController: NSViewController {
         let windowWidth = OverlayConstants.MINIMIZED_WIDTH
         let windowHeight = OverlayConstants.MINIMIZED_HEIGHT
         NSLog("Window dimensions: width=%f, height=%f", windowWidth, windowHeight)
-        let padding: CGFloat = 20
+        let padding: CGFloat = 10
         let menuBarHeight = NSStatusBar.system.thickness
         
         var x: CGFloat = 0
@@ -457,7 +457,7 @@ class OverlayViewController: NSViewController {
         case "top-center":
             x = (screenWidth - windowWidth) / 2
             // Position at top of screen with minimal gap
-            y = screenHeight - windowHeight - 5
+            y = screenHeight - windowHeight - 10
         case "top-right":
             x = screenWidth - windowWidth - padding
             y = screenHeight - windowHeight - padding
