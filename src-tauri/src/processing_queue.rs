@@ -50,8 +50,10 @@ impl ProcessingQueue {
                     // Notify about queue position
                     for (i, _queued_job) in queue.iter().enumerate() {
                         if !processing || i > 0 {
+                            let position = if processing { i } else { i + 1 };
+                            println!("📋 Queue position: {}", position);
                             let _ = status_tx.send(ProcessingStatus::Queued { 
-                                position: if processing { i } else { i + 1 } 
+                                position 
                             }).await;
                         }
                     }
@@ -167,6 +169,7 @@ impl ProcessingQueue {
                                                     eprintln!("Failed to save transcript to database: {}", e);
                                                 }
                                                 
+                                                println!("✅ Processing complete for: {}", job.filename);
                                                 let _ = status_tx.send(ProcessingStatus::Complete { 
                                                     filename: job.filename.clone(),
                                                     transcript,

@@ -209,6 +209,23 @@ function App() {
       }));
     });
     
+    // Listen for recording state changes from overlay
+    const unsubscribeRecordingState = listen("recording-state-changed", (event: any) => {
+      console.log("📡 Main window received recording-state-changed:", event.payload);
+      const { state, filename } = event.payload;
+      
+      if (state === "recording") {
+        // Update UI to show recording state
+        setIsRecording(true);
+        setCurrentTranscript("");
+        setCurrentRecordingFile(filename || null);
+        (window as any).__recordingStartTime = Date.now();
+      } else if (state === "stopped") {
+        // Update UI to show stopped state
+        setIsRecording(false);
+      }
+    });
+    
     // Set up Tauri file drop handling for the entire window
     let unsubscribeFileDrop: (() => void) | undefined;
     const setupFileDrop = async () => {
@@ -272,6 +289,7 @@ function App() {
       unsubscribeProgress.then(fn => fn());
       unsubscribeProcessing.then(fn => fn());
       unsubscribeFileUpload.then(fn => fn());
+      unsubscribeRecordingState.then(fn => fn());
       if (unsubscribeFileDrop) {
         unsubscribeFileDrop();
       }

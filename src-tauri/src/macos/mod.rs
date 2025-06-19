@@ -1,3 +1,6 @@
+mod window_ext;
+pub use window_ext::MacOSWindowExt;
+
 #[cfg(target_os = "macos")]
 use std::ffi::c_void;
 
