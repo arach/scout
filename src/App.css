@@ -450,7 +450,7 @@ h1 {
   background-color: var(--bg-primary);
   color: var(--text-primary);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
   display: inline-flex;
   align-items: center;
   gap: 12px;
@@ -476,7 +476,7 @@ h1 {
   color: white;
   border-color: var(--recording);
   box-shadow: 0 4px 12px rgba(215, 58, 73, 0.3);
-  padding: 12px 24px;
+  /* Keep same padding to prevent size change */
   gap: 8px;
 }
 
@@ -490,7 +490,7 @@ h1 {
   height: 16px;
   background-color: var(--recording);
   border-radius: 50%;
-  transition: all 0.2s ease;
+  transition: transform 0.1s ease; /* Only transition transform for hover effect */
 }
 
 .record-button:hover .record-circle {
@@ -614,6 +614,9 @@ h1 {
   border-radius: 1px;
   animation: miniWave 0.8s ease-in-out infinite;
   transform-origin: bottom;
+  /* Start at rest position to prevent jitter */
+  transform: scaleY(0.5);
+  opacity: 0.6;
 }
 
 .mini-wave:nth-child(1) { height: 6px; animation-delay: 0s; }

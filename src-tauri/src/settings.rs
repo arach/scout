@@ -43,7 +43,6 @@ pub struct ModelSettings {
 pub struct UISettings {
     pub hotkey: String,
     pub overlay_position: String,
-    pub overlay_type: Option<String>,
     pub theme: String,
     pub sound_enabled: bool,
     pub start_sound: String,
@@ -99,7 +98,6 @@ impl Default for UISettings {
         Self {
             hotkey: "CmdOrCtrl+Shift+Space".to_string(),
             overlay_position: "top-center".to_string(),
-            overlay_type: Some("tauri".to_string()),
             theme: "dark".to_string(),
             sound_enabled: true,
             start_sound: "start".to_string(),

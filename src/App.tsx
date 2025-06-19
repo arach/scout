@@ -1,4 +1,5 @@
 import { useState, useEffect, Fragment, useRef } from "react";
+import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -38,7 +39,6 @@ function App() {
   }>({ show: false, transcriptId: null, transcriptText: "", isBulk: false });
   const lastToggleTimeRef = useRef(0);
   const [hotkeyUpdateStatus, setHotkeyUpdateStatus] = useState<'idle' | 'success' | 'error'>('idle');
-  const isStoppingRef = useRef(false);
   const isRecordingRef = useRef(false); // Add ref to track recording state
   const [overlayPosition, setOverlayPosition] = useState<string>('top-center');
   const [isDragging, setIsDragging] = useState(false);
@@ -75,34 +75,34 @@ function App() {
   useEffect(() => {
     loadRecentTranscripts();
     
-    // Log current model on startup
-    invoke<string>('get_current_model').then(model => {
-      console.log('🤖 Current active model:', model);
-    }).catch(console.error);
+    // Check current model on startup
+    invoke<string>('get_current_model').catch(console.error);
     
     // Listen for recording requests from native overlay
     const unsubscribeNativeStart = listen('native-overlay-start-recording', async () => {
-      console.log('Starting recording from native overlay');
-      if (!isRecording && !isProcessing && !isStoppingRef.current) {
+      // Check the actual recording state from backend to avoid stale closure
+      const isCurrentlyRecording = await invoke<boolean>("is_recording");
+      if (!isCurrentlyRecording) {
         await startRecording();
       }
     });
 
     const unsubscribeNativeStop = listen('native-overlay-stop-recording', async () => {
-      console.log('Stopping recording from native overlay');
-      if (isRecordingRef.current) {
+      // Check the actual recording state from backend
+      const isCurrentlyRecording = await invoke<boolean>("is_recording");
+      if (isCurrentlyRecording) {
         await stopRecording();
       }
     });
 
     const unsubscribeNativeCancel = listen('native-overlay-cancel-recording', async () => {
-      console.log('Cancelling recording from native overlay');
-      if (isRecordingRef.current) {
+      // Check the actual recording state from backend
+      const isCurrentlyRecording = await invoke<boolean>("is_recording");
+      if (isCurrentlyRecording) {
         // Cancel the recording without processing
         setIsRecording(false);
         isRecordingRef.current = false;
-        await invoke('cancel_recording'); // Use the new cancel command
-        // The cancel_recording command handles all cleanup including overlay state
+        await invoke('cancel_recording');
       }
     });
     
@@ -169,7 +169,6 @@ function App() {
     // Listen for recording progress updates
     const unsubscribeProgress = listen('recording-progress', (event) => {
       const progress = event.payload as any;
-      console.log("Recording progress:", progress);
       
       // Update UI based on progress
       if (progress.Complete) {
@@ -225,10 +224,7 @@ function App() {
         setUploadProgress({ status: 'idle' });
         setIsProcessing(false);
         
-        // Update native overlay to idle state if using native overlay
-        if (overlayType === 'native') {
-          invoke('update_native_overlay_state', { recording: false, processing: false });
-        }
+        // Native overlay state is managed by the backend
       } else if (status.Failed) {
         console.error("Processing failed:", status.Failed);
         setIsProcessing(false);
@@ -236,17 +232,14 @@ function App() {
         // Show error message to user
         alert(`Failed to process audio file: ${status.Failed.error || 'Unknown error'}`);
         
-        // Update native overlay to idle state if using native overlay
-        if (overlayType === 'native') {
-          invoke('update_native_overlay_state', { recording: false, processing: false });
-        }
+        // Native overlay state is managed by the backend
       }
     });
     
     // Listen for file upload complete events
     const unsubscribeFileUpload = listen('file-upload-complete', (event) => {
       const data = event.payload as any;
-      console.log("File upload complete:", data);
+      // File upload complete
       
       // Update upload progress with file info
       setUploadProgress(prev => ({
@@ -257,20 +250,25 @@ function App() {
       }));
     });
     
-    // Listen for recording state changes from overlay
+    // Listen for recording state changes from backend
     const unsubscribeRecordingState = listen("recording-state-changed", (event: any) => {
-      console.log("📡 Main window received recording-state-changed:", event.payload);
       const { state, filename } = event.payload;
       
       if (state === "recording") {
-        // Update UI to show recording state
-        setIsRecording(true);
-        setCurrentTranscript("");
-        setCurrentRecordingFile(filename || null);
-        (window as any).__recordingStartTime = Date.now();
+        // Only update if not already recording (avoid unnecessary re-renders)
+        if (!isRecordingRef.current) {
+          setIsRecording(true);
+          isRecordingRef.current = true;
+          setCurrentTranscript("");
+          setCurrentRecordingFile(filename || null);
+          (window as any).__recordingStartTime = Date.now();
+        }
       } else if (state === "stopped") {
-        // Update UI to show stopped state
-        setIsRecording(false);
+        // Only update if currently recording (avoid unnecessary re-renders)
+        if (isRecordingRef.current) {
+          setIsRecording(false);
+          isRecordingRef.current = false;
+        }
       }
     });
     
@@ -359,6 +357,29 @@ function App() {
     }
     return () => clearInterval(interval);
   }, [isRecording]);
+  
+  // Periodically sync recording state with backend to ensure consistency
+  useEffect(() => {
+    const syncInterval = setInterval(async () => {
+      try {
+        const backendIsRecording = await invoke<boolean>("is_recording");
+        if (backendIsRecording !== isRecordingRef.current) {
+          setIsRecording(backendIsRecording);
+          isRecordingRef.current = backendIsRecording;
+          
+          // If backend is recording but frontend wasn't aware, sync other state
+          if (backendIsRecording && !isRecording) {
+            setCurrentTranscript("");
+            (window as any).__recordingStartTime = Date.now();
+          }
+        }
+      } catch (error) {
+        // Silent fail - state sync is not critical
+      }
+    }, 2000); // Check every 2 seconds to reduce overhead
+    
+    return () => clearInterval(syncInterval);
+  }, []); // Remove isRecording dependency to avoid recreating interval
 
   const loadRecentTranscripts = async () => {
     try {
@@ -370,38 +391,39 @@ function App() {
   };
 
   const startRecording = async () => {
-    console.log("Start recording clicked", { isProcessing, isStoppingRef: isStoppingRef.current });
-    
-    // Prevent starting if we're still processing
-    if (isProcessing || isStoppingRef.current) {
-      console.log("Cannot start - still processing or stopping");
+    // Prevent starting if already recording
+    if (isRecordingRef.current) {
       return;
     }
     
-    // IMMEDIATELY update UI for instant feedback
-    setIsRecording(true);
-    setCurrentTranscript("");
+    // IMMEDIATELY update UI for instant feedback - using flushSync to force synchronous update
+    flushSync(() => {
+      setIsRecording(true);
+      setCurrentTranscript("");
+    });
+    
+    isRecordingRef.current = true;
     (window as any).__recordingStartTime = Date.now();
     
     // Start the backend recording asynchronously
     try {
       const filename = await invoke<string>("start_recording");
       setCurrentRecordingFile(filename);
-      console.log("Recording started:", filename);
       
-      // Update native overlay state if using native overlay
+      // Native overlay state is managed by the backend
       if (overlayType === 'native') {
-        await invoke('update_native_overlay_state', { recording: true, processing: false });
         
-        // Start audio level monitoring for debugging
+        // Start audio level monitoring - ensure we don't have multiple intervals
+        if ((window as any).__audioLevelInterval) {
+          clearInterval((window as any).__audioLevelInterval);
+        }
+        
         const levelInterval = setInterval(async () => {
           try {
-            const level = await invoke<number>('get_audio_level');
-            if (level > 0.001) {
-              console.log('Audio level from frontend:', level);
-            }
+            await invoke<number>('get_audio_level');
+            // Removed logging to reduce noise
           } catch (e) {
-            console.error('Failed to get audio level:', e);
+            // Silent fail - audio level monitoring is not critical
           }
         }, 100);
         
@@ -411,16 +433,18 @@ function App() {
     } catch (error) {
       console.error("Failed to start recording:", error);
       // Revert UI state on error
-      setIsRecording(false);
+      flushSync(() => {
+        setIsRecording(false);
+      });
+      isRecordingRef.current = false;
     }
   };
 
   const stopRecording = async () => {
-    // Prevent multiple simultaneous stop attempts using a ref
-    if (isStoppingRef.current) {
+    // Prevent stopping if not recording
+    if (!isRecordingRef.current) {
       return;
     }
-    isStoppingRef.current = true;
     
     // Clear audio level monitoring if running
     if ((window as any).__audioLevelInterval) {
@@ -428,40 +452,16 @@ function App() {
       (window as any).__audioLevelInterval = null;
     }
     
-    // IMMEDIATELY update UI for instant feedback
-    setIsRecording(false);
-    let recordingFile = currentRecordingFile;
+    // IMMEDIATELY update UI for instant feedback - using flushSync for synchronous update
+    flushSync(() => {
+      setIsRecording(false);
+    });
+    isRecordingRef.current = false;
     
-    // Process everything else asynchronously
-    (async () => {
-      try {
-        // If we don't have a recording file (e.g., from hotkey toggle), get it from backend
-        if (!recordingFile) {
-          const backendFile = await invoke<string | null>("get_current_recording_file");
-          recordingFile = backendFile || null;
-        }
-        
-        // Stop the backend recording
-        await invoke("stop_recording");
-        
-        // Update native overlay state if using native overlay
-        if (overlayType === 'native') {
-          await invoke('update_native_overlay_state', { recording: false, processing: true });
-        }
-        
-        // The processing queue will handle transcription and saving
-        // Just show that we're done recording
-        if (recordingFile) {
-          console.log("Recording stopped, file will be processed:", recordingFile);
-        }
-      } catch (error) {
-        console.error("Failed to stop recording:", error);
-      } finally {
-        setIsProcessing(false);
-        // Always reset the stopping flag
-        isStoppingRef.current = false;
-      }
-    })(); // Execute the async function immediately
+    // Stop the backend recording without waiting
+    invoke("stop_recording").catch(error => {
+      console.error("Failed to stop recording:", error);
+    });
   };
 
   const searchTranscripts = async () => {
@@ -840,7 +840,7 @@ function App() {
           <button
             className={`record-button ${isRecording ? 'recording' : ''} ${isProcessing ? 'processing' : ''}`}
             onClick={isRecording ? stopRecording : startRecording}
-            disabled={isProcessing || isStoppingRef.current}
+            disabled={isProcessing}
           >
             {isProcessing ? (
               <span>Processing...</span>

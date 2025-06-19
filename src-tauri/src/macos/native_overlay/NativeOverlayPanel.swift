@@ -10,27 +10,27 @@ private struct UIConfig {
     static let processingSize = CGSize(width: 60, height: 12)
     
     // Animation timings
-    static let panelAnimationDuration: TimeInterval = 0.15
-    static let processingDotInterval: TimeInterval = 0.4  // Slightly faster for better feel
+    static let panelAnimationDuration: TimeInterval = 0.2  // Slightly smoother
+    static let processingDotInterval: TimeInterval = 0.5  // More elegant pace
     static let waveformUpdateInterval: TimeInterval = 0.05
     static let recordingPulseDuration: TimeInterval = 0.8
     
     // UI element sizes
-    static let dotSize: CGFloat = 4
-    static let dotSpacing: CGFloat = 4  // Tighter spacing
+    static let dotSize: CGFloat = 3  // Smaller, more refined
+    static let dotSpacing: CGFloat = 5  // Better spacing
     static let buttonSize: CGFloat = 20  // Smaller button for compact view
-    static let cornerRadius: CGFloat = 8
-    static let minimizedCornerRadius: CGFloat = 6
-    static let borderWidth: CGFloat = 1.0
+    static let cornerRadius: CGFloat = 12  // More rounded for modern look
+    static let minimizedCornerRadius: CGFloat = 5
+    static let borderWidth: CGFloat = 0.5  // Thinner, more elegant
     static let contentPadding: CGFloat = 4  // Smaller padding for compact view
     
-    // Colors
-    static let backgroundColor = NSColor(white: 0.05, alpha: 0.95)
-    static let borderColor = NSColor(white: 0.5, alpha: 1.0)
-    static let dotActiveColor = NSColor(white: 0.7, alpha: 1.0)
-    static let dotInactiveColor = NSColor(white: 0.3, alpha: 1.0)
-    static let recordButtonColor = NSColor(calibratedRed: 0.93, green: 0.27, blue: 0.18, alpha: 1.0)
-    static let recordButtonHoverColor = NSColor(calibratedRed: 0.95, green: 0.35, blue: 0.28, alpha: 1.0)
+    // Modern color palette
+    static let backgroundColor = NSColor(white: 0.08, alpha: 0.92)  // Darker, more transparent
+    static let borderColor = NSColor(white: 1.0, alpha: 0.12)  // Very subtle border
+    static let dotActiveColor = NSColor(white: 1.0, alpha: 0.8)  // Brighter dots
+    static let dotInactiveColor = NSColor(white: 1.0, alpha: 0.2)  // More contrast
+    static let recordButtonColor = NSColor(calibratedRed: 1.0, green: 0.231, blue: 0.188, alpha: 1.0)  // iOS red
+    static let recordButtonHoverColor = NSColor(calibratedRed: 1.0, green: 0.3, blue: 0.25, alpha: 1.0)
 }
 
 // MARK: - Processing Dots View
@@ -220,9 +220,9 @@ class CancelButton: NSButton {
     private var trackingArea: NSTrackingArea?
     
     override func draw(_ dirtyRect: NSRect) {
-        // Draw X symbol
-        let inset: CGFloat = 5
-        let lineWidth: CGFloat = 2.0
+        // Draw X symbol - smaller and more refined
+        let inset: CGFloat = 6
+        let lineWidth: CGFloat = 1.5
         
         let path = NSBezierPath()
         path.lineWidth = lineWidth
@@ -235,9 +235,9 @@ class CancelButton: NSButton {
         path.line(to: NSPoint(x: inset, y: bounds.height - inset))
         
         if isHovering {
-            NSColor(white: 0.9, alpha: 1.0).setStroke()
+            NSColor(white: 1.0, alpha: 0.8).setStroke()
         } else {
-            NSColor(white: 0.6, alpha: 1.0).setStroke()
+            NSColor(white: 1.0, alpha: 0.4).setStroke()
         }
         
         path.stroke()
@@ -282,14 +282,8 @@ class CircleButton: NSButton {
     private var trackingArea: NSTrackingArea?
     
     override func draw(_ dirtyRect: NSRect) {
-        // Draw circle border
-        let borderPath = NSBezierPath(ovalIn: bounds.insetBy(dx: 1, dy: 1))
-        NSColor(white: 0.6, alpha: 1.0).setStroke()
-        borderPath.lineWidth = 1.0
-        borderPath.stroke()
-        
-        // Draw filled circle inside (record button) - smaller for compact view
-        let circleSize: CGFloat = 8
+        // Modern design - no border, just the filled circle
+        let circleSize: CGFloat = 10  // Slightly larger
         let circleRect = NSRect(
             x: bounds.midX - circleSize / 2,
             y: bounds.midY - circleSize / 2,
@@ -300,6 +294,13 @@ class CircleButton: NSButton {
         
         if isHovering {
             hoverColor.setFill()
+            // Add subtle glow on hover
+            circlePath.lineWidth = 0
+            let glowColor = hoverColor.withAlphaComponent(0.3)
+            glowColor.setStroke()
+            let glowPath = NSBezierPath(ovalIn: circleRect.insetBy(dx: -2, dy: -2))
+            glowPath.lineWidth = 4
+            glowPath.stroke()
         } else {
             fillColor.setFill()
         }
@@ -342,36 +343,29 @@ class SquareButton: NSButton {
     private var trackingArea: NSTrackingArea?
     
     override func draw(_ dirtyRect: NSRect) {
-        // Draw circle border
-        let borderPath = NSBezierPath(ovalIn: bounds.insetBy(dx: 1, dy: 1))
-        NSColor(white: 0.6, alpha: 1.0).setStroke()
-        borderPath.lineWidth = 1.0
-        borderPath.stroke()
-        
-        // Draw pause symbol (two vertical bars) - smaller for compact view
-        let barWidth: CGFloat = 2
-        let barHeight: CGFloat = 8
-        let spacing: CGFloat = 2
-        
-        let leftBarRect = NSRect(
-            x: bounds.midX - spacing - barWidth / 2,
-            y: bounds.midY - barHeight / 2,
-            width: barWidth,
-            height: barHeight
+        // Modern stop button - filled square, no border
+        let squareSize: CGFloat = 8
+        let squareRect = NSRect(
+            x: bounds.midX - squareSize / 2,
+            y: bounds.midY - squareSize / 2,
+            width: squareSize,
+            height: squareSize
         )
+        let squarePath = NSBezierPath(roundedRect: squareRect, xRadius: 2, yRadius: 2)
         
-        let rightBarRect = NSRect(
-            x: bounds.midX + spacing - barWidth / 2,
-            y: bounds.midY - barHeight / 2,
-            width: barWidth,
-            height: barHeight
-        )
+        if isHovering {
+            NSColor(white: 1.0, alpha: 0.9).setFill()
+            // Add subtle glow
+            let glowColor = NSColor(white: 1.0, alpha: 0.2)
+            glowColor.setStroke()
+            let glowPath = NSBezierPath(roundedRect: squareRect.insetBy(dx: -2, dy: -2), xRadius: 3, yRadius: 3)
+            glowPath.lineWidth = 3
+            glowPath.stroke()
+        } else {
+            NSColor(white: 1.0, alpha: 0.7).setFill()
+        }
         
-        let color = isHovering ? NSColor(white: 0.9, alpha: 1.0) : NSColor(white: 0.8, alpha: 1.0)
-        color.setFill()
-        
-        NSBezierPath(rect: leftBarRect).fill()
-        NSBezierPath(rect: rightBarRect).fill()
+        squarePath.fill()
     }
     
     override func updateTrackingAreas() {
@@ -449,7 +443,7 @@ final class NativeOverlayPanel: NSPanel {
     
     // Override to prevent stealing focus
     override var canBecomeKey: Bool {
-        return true  // Can become key, but only when needed
+        return false  // Never become key to prevent focus stealing
     }
     
     override var canBecomeMain: Bool {
@@ -468,8 +462,8 @@ final class NativeOverlayPanel: NSPanel {
     // Animate size changes
     func animateToSize(_ newSize: CGSize, centered: Bool = false) {
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.15  // Snappy animation
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            context.duration = UIConfig.panelAnimationDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             
             // Keep the panel at its current position, just change size
             var frame = self.frame
@@ -486,7 +480,7 @@ final class NativeOverlayPanel: NSPanel {
             
             // Animate corner radius change
             if let contentView = self.contentView as? OverlayContentView {
-                contentView.updateCornerRadius(isExpanded: newSize.width > 100)
+                contentView.updateCornerRadius(isExpanded: newSize.width > minimizedSize.width * 1.5)
             }
         }
     }
@@ -547,10 +541,10 @@ class OverlayContentView: NSView {
     private func setupView() {
         // Dark background with border
         backgroundView.wantsLayer = true
-        backgroundView.layer?.backgroundColor = NSColor(white: 0.05, alpha: 0.95).cgColor
-        backgroundView.layer?.cornerRadius = 6
-        backgroundView.layer?.borderWidth = 1.0
-        backgroundView.layer?.borderColor = NSColor(white: 0.5, alpha: 1.0).cgColor
+        backgroundView.layer?.backgroundColor = UIConfig.backgroundColor.cgColor
+        backgroundView.layer?.cornerRadius = UIConfig.minimizedCornerRadius
+        backgroundView.layer?.borderWidth = UIConfig.borderWidth
+        backgroundView.layer?.borderColor = UIConfig.borderColor.cgColor
         backgroundView.layer?.masksToBounds = true
         addSubview(backgroundView)
         
@@ -781,8 +775,8 @@ class OverlayContentView: NSView {
     
     func updateCornerRadius(isExpanded: Bool) {
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.15
-            backgroundView.animator().layer?.cornerRadius = isExpanded ? 8 : 6
+            context.duration = UIConfig.panelAnimationDuration
+            backgroundView.animator().layer?.cornerRadius = isExpanded ? UIConfig.cornerRadius : UIConfig.minimizedCornerRadius
         }
     }
     

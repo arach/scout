@@ -109,11 +109,7 @@ class OverlayViewController: NSViewController {
         updateState()
         onStartRecording?()
         
-        // Make the overlay take keyboard focus for shortcuts
-        if let panel = panel {
-            panel.makeKeyAndOrderFront(nil)
-            view.window?.makeFirstResponder(view)
-        }
+        // Don't steal focus - the main window should remain active
     }
     
     private func handleStopRecording() {
@@ -136,11 +132,7 @@ class OverlayViewController: NSViewController {
             isExpanded = true
             panel?.expand()
             
-            // Make the overlay take keyboard focus for shortcuts
-            if let panel = panel {
-                panel.makeKeyAndOrderFront(nil)
-                view.window?.makeFirstResponder(view)
-            }
+            // Don't steal focus - the main window should remain active
         } else {
             // When recording stops, transition to processing with smaller size
             currentState = .processing
@@ -219,8 +211,8 @@ class OverlayViewController: NSViewController {
     
     @objc func showOverlay() {
         guard panel == nil else {
-            // If panel exists, just ensure it's visible and in idle state
-            panel?.orderFront(nil)
+            // If panel exists, just ensure it's in idle state
+            // Don't orderFront to avoid stealing focus
             controller?.setIdleState()
             return
         }
