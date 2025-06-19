@@ -2,7 +2,6 @@ import { useState, useEffect, Fragment, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { ModelManager } from "./components/ModelManager";
 import { FirstRunSetup } from "./components/FirstRunSetup";
@@ -40,6 +39,7 @@ function App() {
   const lastToggleTimeRef = useRef(0);
   const [hotkeyUpdateStatus, setHotkeyUpdateStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const isStoppingRef = useRef(false);
+  const isRecordingRef = useRef(false); // Add ref to track recording state
   const [overlayPosition, setOverlayPosition] = useState<string>('top-center');
   const [isDragging, setIsDragging] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{
@@ -50,6 +50,12 @@ function App() {
     progress?: number;
   }>({ status: 'idle' });
   const [showFirstRun, setShowFirstRun] = useState(false);
+  const [overlayType, setOverlayType] = useState<'tauri' | 'native'>('tauri');
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    isRecordingRef.current = isRecording;
+  }, [isRecording]);
 
   useEffect(() => {
     // Check if we have any models
@@ -73,6 +79,32 @@ function App() {
     invoke<string>('get_current_model').then(model => {
       console.log('🤖 Current active model:', model);
     }).catch(console.error);
+    
+    // Listen for recording requests from native overlay
+    const unsubscribeNativeStart = listen('native-overlay-start-recording', async () => {
+      console.log('Starting recording from native overlay');
+      if (!isRecording && !isProcessing && !isStoppingRef.current) {
+        await startRecording();
+      }
+    });
+
+    const unsubscribeNativeStop = listen('native-overlay-stop-recording', async () => {
+      console.log('Stopping recording from native overlay');
+      if (isRecordingRef.current) {
+        await stopRecording();
+      }
+    });
+
+    const unsubscribeNativeCancel = listen('native-overlay-cancel-recording', async () => {
+      console.log('Cancelling recording from native overlay');
+      if (isRecordingRef.current) {
+        // Cancel the recording without processing
+        setIsRecording(false);
+        isRecordingRef.current = false;
+        await invoke('cancel_recording'); // Use the new cancel command
+        // The cancel_recording command handles all cleanup including overlay state
+      }
+    });
     
     // Subscribe to recording progress updates
     invoke('subscribe_to_progress').catch(console.error);
@@ -100,6 +132,12 @@ function App() {
       const savedHotkey = localStorage.getItem('scout-hotkey') || 'CmdOrCtrl+Shift+Space';
       setHotkey(savedHotkey);
     });
+    
+    // Load overlay type preference
+    const savedOverlayType = localStorage.getItem('scout-overlay-type');
+    if (savedOverlayType === 'native' || savedOverlayType === 'tauri') {
+      setOverlayType(savedOverlayType);
+    }
     
     // Mark as initialized
     if (!localStorage.getItem('scout-initialized')) {
@@ -186,12 +224,22 @@ function App() {
         setTimeout(() => setShowSuccess(false), 2000);
         setUploadProgress({ status: 'idle' });
         setIsProcessing(false);
+        
+        // Update native overlay to idle state if using native overlay
+        if (overlayType === 'native') {
+          invoke('update_native_overlay_state', { recording: false, processing: false });
+        }
       } else if (status.Failed) {
         console.error("Processing failed:", status.Failed);
         setIsProcessing(false);
         setUploadProgress({ status: 'idle' });
         // Show error message to user
         alert(`Failed to process audio file: ${status.Failed.error || 'Unknown error'}`);
+        
+        // Update native overlay to idle state if using native overlay
+        if (overlayType === 'native') {
+          invoke('update_native_overlay_state', { recording: false, processing: false });
+        }
       }
     });
     
@@ -239,7 +287,7 @@ function App() {
         } else if (event.event === 'tauri://drag-drop') {
           setIsDragging(false);
           
-          const files = event.payload.paths;
+          const files = (event.payload as any).paths;
           const audioFiles = files.filter((filePath: string) => {
             const extension = filePath.split('.').pop()?.toLowerCase();
             return ['wav', 'mp3', 'm4a', 'flac', 'ogg', 'webm'].includes(extension || '');
@@ -290,6 +338,9 @@ function App() {
       unsubscribeProcessing.then(fn => fn());
       unsubscribeFileUpload.then(fn => fn());
       unsubscribeRecordingState.then(fn => fn());
+      unsubscribeNativeStart.then(fn => fn());
+      unsubscribeNativeStop.then(fn => fn());
+      unsubscribeNativeCancel.then(fn => fn());
       if (unsubscribeFileDrop) {
         unsubscribeFileDrop();
       }
@@ -337,6 +388,26 @@ function App() {
       const filename = await invoke<string>("start_recording");
       setCurrentRecordingFile(filename);
       console.log("Recording started:", filename);
+      
+      // Update native overlay state if using native overlay
+      if (overlayType === 'native') {
+        await invoke('update_native_overlay_state', { recording: true, processing: false });
+        
+        // Start audio level monitoring for debugging
+        const levelInterval = setInterval(async () => {
+          try {
+            const level = await invoke<number>('get_audio_level');
+            if (level > 0.001) {
+              console.log('Audio level from frontend:', level);
+            }
+          } catch (e) {
+            console.error('Failed to get audio level:', e);
+          }
+        }, 100);
+        
+        // Store interval ID for cleanup
+        (window as any).__audioLevelInterval = levelInterval;
+      }
     } catch (error) {
       console.error("Failed to start recording:", error);
       // Revert UI state on error
@@ -350,6 +421,12 @@ function App() {
       return;
     }
     isStoppingRef.current = true;
+    
+    // Clear audio level monitoring if running
+    if ((window as any).__audioLevelInterval) {
+      clearInterval((window as any).__audioLevelInterval);
+      (window as any).__audioLevelInterval = null;
+    }
     
     // IMMEDIATELY update UI for instant feedback
     setIsRecording(false);
@@ -366,6 +443,11 @@ function App() {
         
         // Stop the backend recording
         await invoke("stop_recording");
+        
+        // Update native overlay state if using native overlay
+        if (overlayType === 'native') {
+          await invoke('update_native_overlay_state', { recording: false, processing: true });
+        }
         
         // The processing queue will handle transcription and saving
         // Just show that we're done recording
@@ -569,6 +651,25 @@ function App() {
       localStorage.setItem('scout-overlay-position', position);
     } catch (error) {
       console.error("Failed to update overlay position:", error);
+    }
+  };
+  
+  const updateOverlayType = async (type: 'tauri' | 'native') => {
+    try {
+      setOverlayType(type);
+      localStorage.setItem('scout-overlay-type', type);
+      // Notify backend about overlay type change
+      await invoke('set_overlay_type', { overlayType: type });
+      
+      // If switching to native, show the native overlay
+      if (type === 'native') {
+        await invoke('show_native_overlay');
+      } else {
+        // If switching away from native, hide it
+        await invoke('hide_native_overlay');
+      }
+    } catch (error) {
+      console.error("Failed to update overlay type:", error);
     }
   };
 
@@ -1111,6 +1212,29 @@ function App() {
                 </div>
                 <p className="setting-hint">
                   Choose where the recording indicator appears on your screen
+                </p>
+              </div>
+              
+              <div className="setting-item">
+                <label>Overlay Type</label>
+                <div className="overlay-type-toggle">
+                  <button
+                    className={`overlay-type-button ${overlayType === 'tauri' ? 'active' : ''}`}
+                    onClick={() => updateOverlayType('tauri')}
+                  >
+                    <span className="type-label">Standard</span>
+                    <span className="type-description">WebView-based overlay</span>
+                  </button>
+                  <button
+                    className={`overlay-type-button ${overlayType === 'native' ? 'active' : ''}`}
+                    onClick={() => updateOverlayType('native')}
+                  >
+                    <span className="type-label">Native (Beta)</span>
+                    <span className="type-description">True hover-without-focus</span>
+                  </button>
+                </div>
+                <p className="setting-hint">
+                  Native overlay provides better hover detection without window focus
                 </p>
               </div>
               

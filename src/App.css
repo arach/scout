@@ -1399,6 +1399,49 @@ h1 {
   cursor: default;
 }
 
+/* Overlay type toggle */
+.overlay-type-toggle {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.overlay-type-button {
+  flex: 1;
+  padding: 12px 16px;
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.overlay-type-button:hover {
+  background-color: var(--bg-hover);
+  border-color: var(--accent-primary);
+}
+
+.overlay-type-button.active {
+  background-color: var(--accent-primary);
+  color: white;
+  border-color: var(--accent-primary);
+}
+
+.overlay-type-button .type-label {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.overlay-type-button .type-description {
+  font-size: 11px;
+  opacity: 0.8;
+}
+
 /* Model Manager section */
 .model-manager-section {
   border-top: 1px solid var(--border-primary);

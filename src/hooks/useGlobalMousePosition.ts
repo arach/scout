@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { PhysicalPosition } from '@tauri-apps/api/window';
 
 interface MousePosition {
   x: number;
@@ -8,9 +7,9 @@ interface MousePosition {
 }
 
 export function useGlobalMousePosition(enabled: boolean = true) {
-  const [mousePosition, setMousePosition] = useState<MousePosition>({ x: 0, y: 0 });
+  const [mousePosition] = useState<MousePosition>({ x: 0, y: 0 });
   const [windowBounds, setWindowBounds] = useState<DOMRect | null>(null);
-  const [isHovering, setIsHovering] = useState(false);
+  const [isHovering] = useState(false);
 
   useEffect(() => {
     if (!enabled) return;

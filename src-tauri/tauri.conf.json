@@ -39,6 +39,15 @@
         "center": false,
         "x": 100,
         "y": 100
+      },
+      {
+        "label": "native-overlay-demo",
+        "title": "Native Overlay Demo",
+        "url": "/native-overlay.html",
+        "width": 600,
+        "height": 500,
+        "resizable": true,
+        "visible": false
       }
     ],
     "security": {

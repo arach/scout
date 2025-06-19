@@ -331,10 +331,20 @@ impl AudioRecorderWorker {
                         
                         let rms = (sum_squares / data.len() as f32).sqrt();
                         
+                        // Amplify the RMS value for better visual response
+                        // Most speech is quite low in amplitude, so we need to scale it up
+                        let amplified_rms = (rms * 20.0).min(1.0);  // Increased from 8x to 20x
+                        
+                        // Debug logging for audio levels (only log significant changes)
+                        // Commented out to reduce noise
+                        // if rms > 0.001 {
+                        //     println!("Audio recorder - RMS: {:.4}, Amplified: {:.4}", rms, amplified_rms);
+                        // }
+                        
                         // Update audio level (with some smoothing)
                         let current_level = *audio_level.lock().unwrap();
-                        let new_level = current_level * 0.7 + rms * 0.3; // Smooth the level changes
-                        *audio_level.lock().unwrap() = new_level.min(1.0); // Cap at 1.0
+                        let new_level = current_level * 0.7 + amplified_rms * 0.3; // Smooth the level changes
+                        *audio_level.lock().unwrap() = new_level; // Already capped by amplified_rms
                         
                         if let Some(ref mut writer) = *writer.lock().unwrap() {
                             let samples_written = data.len();

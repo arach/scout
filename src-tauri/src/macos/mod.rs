@@ -1,6 +1,9 @@
 mod window_ext;
 pub use window_ext::MacOSWindowExt;
 
+mod native_overlay;
+pub use native_overlay::NativeOverlay;
+
 #[cfg(target_os = "macos")]
 use std::ffi::c_void;
 
