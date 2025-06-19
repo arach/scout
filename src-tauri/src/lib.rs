@@ -28,6 +28,12 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, MenuItemBuilder};
 use tokio::sync::Mutex;
 use chrono;
 
+// Overlay dimensions configuration
+const OVERLAY_EXPANDED_WIDTH: f64 = 180.0;
+const OVERLAY_EXPANDED_HEIGHT: f64 = 44.0;
+const OVERLAY_MINIMIZED_WIDTH: f64 = 48.0;
+const OVERLAY_MINIMIZED_HEIGHT: f64 = 16.0;
+
 pub struct AppState {
     pub recorder: Arc<Mutex<AudioRecorder>>,
     pub database: Arc<Database>,
@@ -55,10 +61,11 @@ fn calculate_overlay_position(position: &OverlayPosition, window: &tauri::Webvie
         (1920.0, 1080.0) // Default fallback
     };
     
-    let window_width = 180.0;
-    let window_height = 40.0;
-    let padding = 20.0;
-    let top_padding = 5.0; // Closer to top edge
+    // Always calculate position based on minimized size since that's the initial state
+    let window_width = OVERLAY_MINIMIZED_WIDTH;
+    let window_height = OVERLAY_MINIMIZED_HEIGHT;
+    let padding = 10.0;
+    let top_padding = 10.0; // Slightly more padding from top
     
     match position {
         OverlayPosition::TopLeft => (padding, top_padding),
@@ -90,6 +97,10 @@ async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> R
     drop(recorder);
     // Play start sound
     sound::SoundPlayer::play_start();
+    
+    println!("═══════════════════════════════════════");
+    println!("🎙️  BACKEND: Starting recording session");
+    println!("═══════════════════════════════════════");
     
     // Use the recording workflow to start recording
     let filename = state.recording_workflow.start_recording().await?;
@@ -123,12 +134,11 @@ async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> R
             _ => OverlayPosition::TopCenter,
         };
         drop(settings);
-        let (x, y) = calculate_overlay_position(&overlay_position, &overlay_window);
-        println!("DEBUG: Setting overlay position to ({}, {})", x, y);
-        let _ = overlay_window.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x, y)));
+        // Don't reposition here - the overlay is already positioned from initial setup
+        // The frontend will handle centering when resizing
         
-        // Make sure window is properly sized for expanded state
-        let _ = overlay_window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(180.0, 40.0)));
+        // Don't resize here - let the frontend handle sizing
+        // The frontend will resize based on hover/recording state
         
         // Show the window without focusing it
         match overlay_window.show() {
@@ -136,10 +146,16 @@ async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> R
             Err(e) => println!("DEBUG: Failed to show overlay window: {:?}", e),
         }
         
-        // Ensure main window retains focus after overlay operations
-        if let Some(main_window) = app.get_webview_window("main") {
-            let _ = main_window.set_focus();
+        // Open DevTools for overlay window in debug mode
+        #[cfg(debug_assertions)]
+        {
+            println!("DEBUG: Opening DevTools for overlay window");
+            overlay_window.open_devtools();
         }
+        
+        
+        // Don't force focus to main window - allow overlay to be interactive
+        // The overlay has acceptFirstMouse: true to handle mouse events without focus
         
         match overlay_window.emit("recording-state-update", serde_json::json!({
             "isRecording": true,
@@ -167,8 +183,17 @@ async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> R
                 let audio_level = {
                     let recorder = recorder_clone.lock().await;
                     let level = recorder.get_current_audio_level();
-                    if duration % 1000 < 50 {  // Log every second
-                        println!("📊 Audio level: {}", level);
+                    if duration % 500 < 50 {  // Log every 500ms for better granularity
+                        let level_desc = if level < 0.1 { "🔇" }
+                                     else if level < 0.3 { "🔈" }
+                                     else if level < 0.6 { "🔉" }
+                                     else { "🔊" };
+                        
+                        let bar_count = (level * 10.0) as usize;
+                        let bars = "█".repeat(bar_count.min(10));
+                        
+                        println!("📊 Backend: {} {:10} {:.3} @ {}s", 
+                                 level_desc, bars, level, duration / 1000);
                     }
                     level
                 };
@@ -184,11 +209,23 @@ async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> R
         });
     }
 
+    // Broadcast recording state change to ALL windows
+    match app.emit("recording-state-changed", serde_json::json!({
+        "state": "recording",
+        "filename": &filename
+    })) {
+        Ok(_) => println!("📡 Broadcasted recording-state-changed to all windows"),
+        Err(e) => eprintln!("Failed to broadcast recording state: {:?}", e),
+    }
+
     Ok(filename)
 }
 
 #[tauri::command]
 async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<(), String> {
+    println!("═══════════════════════════════════════");
+    println!("⏹️  BACKEND: Stopping recording session");
+    println!("═══════════════════════════════════════");
     
     // Use the recording workflow to stop recording
     let _result = state.recording_workflow.stop_recording().await?;
@@ -236,13 +273,18 @@ async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Re
             "duration": 0
         }));
         
-        // Ensure main window retains focus after overlay events
-        if let Some(main_window) = app.get_webview_window("main") {
-            let _ = main_window.set_focus();
-        }
+        // Don't force focus - let the user interact with whichever window they want
         
         // Don't hide the overlay - let the frontend handle the minimize animation
         // The window stays visible but the content animates to minimized state
+    }
+    
+    // Broadcast recording state change to ALL windows
+    match app.emit("recording-state-changed", serde_json::json!({
+        "state": "stopped"
+    })) {
+        Ok(_) => println!("📡 Broadcasted recording-state-changed (stopped) to all windows"),
+        Err(e) => eprintln!("Failed to broadcast recording stop state: {:?}", e),
     }
     
     Ok(())
@@ -252,6 +294,22 @@ async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Re
 async fn is_recording(state: State<'_, AppState>) -> Result<bool, String> {
     let recorder = state.recorder.lock().await;
     Ok(recorder.is_recording())
+}
+
+#[tauri::command]
+async fn log_from_overlay(message: String) -> Result<(), String> {
+    println!("[OVERLAY LOG] {}", message);
+    Ok(())
+}
+
+#[tauri::command]
+async fn open_overlay_devtools(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(overlay_window) = app.get_webview_window("overlay") {
+        overlay_window.open_devtools();
+        Ok(())
+    } else {
+        Err("Overlay window not found".to_string())
+    }
 }
 
 #[tauri::command]
@@ -988,21 +1046,29 @@ pub fn run() {
                 println!("DEBUG: Initial overlay position: ({}, {})", x, y);
                 let _ = overlay_window.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x, y)));
                 
-                // Start with minimal size to avoid blocking clicks
-                let _ = overlay_window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(84.0, 12.0)));
+                // The window starts at minimized size from tauri.conf.json (48x16)
+                // Frontend will handle resizing when needed
                 
-                // Make the overlay ignore cursor events to prevent click issues
-                let _ = overlay_window.set_ignore_cursor_events(true);
+                // Allow cursor events for hover functionality
+                let _ = overlay_window.set_ignore_cursor_events(false);
+                
+                // Configure window for hover-without-focus on macOS
+                #[cfg(target_os = "macos")]
+                {
+                    use crate::macos::MacOSWindowExt;
+                    match overlay_window.setup_overlay_window() {
+                        Ok(_) => println!("DEBUG: Successfully configured overlay window for hover-without-focus"),
+                        Err(e) => eprintln!("DEBUG: Failed to configure overlay window: {}", e),
+                    }
+                }
                 
                 match overlay_window.show() {
-                    Ok(_) => println!("DEBUG: Initial overlay window show successful"),
+                    Ok(_) => println!("DEBUG: Initial overlay window shown successful"),
                     Err(e) => println!("DEBUG: Failed to show overlay window initially: {:?}", e),
                 }
                 
-                // Keep focus on main window
-                if let Some(main_window) = app.get_webview_window("main") {
-                    let _ = main_window.set_focus();
-                }
+                // Don't force focus back to main window to allow overlay interactions
+                // The overlay is configured with acceptFirstMouse: true in tauri.conf.json
             } else {
                 println!("DEBUG: No overlay window found during setup!");
             }
@@ -1117,6 +1183,8 @@ pub fn run() {
             start_recording,
             stop_recording,
             is_recording,
+            log_from_overlay,
+            open_overlay_devtools,
             get_current_recording_file,
             transcribe_audio,
             save_transcript,
