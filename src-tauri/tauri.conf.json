@@ -19,35 +19,6 @@
         "closable": true,
         "minimizable": true,
         "dragDropEnabled": true
-      },
-      {
-        "label": "overlay",
-        "title": "Scout Recording Overlay",
-        "url": "/overlay.html",
-        "width": 48,
-        "height": 16,
-        "resizable": true,
-        "fullscreen": false,
-        "transparent": true,
-        "decorations": false,
-        "alwaysOnTop": true,
-        "skipTaskbar": true,
-        "acceptFirstMouse": true,
-        "visibleOnAllWorkspaces": true,
-        "hiddenTitle": true,
-        "visible": false,
-        "center": false,
-        "x": 100,
-        "y": 100
-      },
-      {
-        "label": "native-overlay-demo",
-        "title": "Native Overlay Demo",
-        "url": "/native-overlay.html",
-        "width": 600,
-        "height": 500,
-        "resizable": true,
-        "visible": false
       }
     ],
     "security": {
