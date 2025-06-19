@@ -2,7 +2,6 @@ import { useState, useEffect, Fragment, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { ModelManager } from "./components/ModelManager";
 import { FirstRunSetup } from "./components/FirstRunSetup";
@@ -40,6 +39,7 @@ function App() {
   const lastToggleTimeRef = useRef(0);
   const [hotkeyUpdateStatus, setHotkeyUpdateStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const isStoppingRef = useRef(false);
+  const isRecordingRef = useRef(false); // Add ref to track recording state
   const [overlayPosition, setOverlayPosition] = useState<string>('top-center');
   const [isDragging, setIsDragging] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{
@@ -50,6 +50,12 @@ function App() {
     progress?: number;
   }>({ status: 'idle' });
   const [showFirstRun, setShowFirstRun] = useState(false);
+  const [overlayType, setOverlayType] = useState<'tauri' | 'native'>('tauri');
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    isRecordingRef.current = isRecording;
+  }, [isRecording]);
 
   useEffect(() => {
     // Check if we have any models
@@ -73,6 +79,32 @@ function App() {
     invoke<string>('get_current_model').then(model => {
       console.log('🤖 Current active model:', model);
     }).catch(console.error);
+    
+    // Listen for recording requests from native overlay
+    const unsubscribeNativeStart = listen('native-overlay-start-recording', async () => {
+      console.log('Starting recording from native overlay');
+      if (!isRecording && !isProcessing && !isStoppingRef.current) {
+        await startRecording();
+      }
+    });
+
+    const unsubscribeNativeStop = listen('native-overlay-stop-recording', async () => {
+      console.log('Stopping recording from native overlay');
+      if (isRecordingRef.current) {
+        await stopRecording();
+      }
+    });
+
+    const unsubscribeNativeCancel = listen('native-overlay-cancel-recording', async () => {
+      console.log('Cancelling recording from native overlay');
+      if (isRecordingRef.current) {
+        // Cancel the recording without processing
+        setIsRecording(false);
+        isRecordingRef.current = false;
+        await invoke('cancel_recording'); // Use the new cancel command
+        // The cancel_recording command handles all cleanup including overlay state
+      }
+    });
     
     // Subscribe to recording progress updates
     invoke('subscribe_to_progress').catch(console.error);
@@ -100,6 +132,12 @@ function App() {
       const savedHotkey = localStorage.getItem('scout-hotkey') || 'CmdOrCtrl+Shift+Space';
       setHotkey(savedHotkey);
     });
+    
+    // Load overlay type preference
+    const savedOverlayType = localStorage.getItem('scout-overlay-type');
+    if (savedOverlayType === 'native' || savedOverlayType === 'tauri') {
+      setOverlayType(savedOverlayType);
+    }
     
     // Mark as initialized
     if (!localStorage.getItem('scout-initialized')) {
@@ -186,12 +224,22 @@ function App() {
         setTimeout(() => setShowSuccess(false), 2000);
         setUploadProgress({ status: 'idle' });
         setIsProcessing(false);
+        
+        // Update native overlay to idle state if using native overlay
+        if (overlayType === 'native') {
+          invoke('update_native_overlay_state', { recording: false, processing: false });
+        }
       } else if (status.Failed) {
         console.error("Processing failed:", status.Failed);
         setIsProcessing(false);
         setUploadProgress({ status: 'idle' });
         // Show error message to user
         alert(`Failed to process audio file: ${status.Failed.error || 'Unknown error'}`);
+        
+        // Update native overlay to idle state if using native overlay
+        if (overlayType === 'native') {
+          invoke('update_native_overlay_state', { recording: false, processing: false });
+        }
       }
     });
     
@@ -209,6 +257,23 @@ function App() {
       }));
     });
     
+    // Listen for recording state changes from overlay
+    const unsubscribeRecordingState = listen("recording-state-changed", (event: any) => {
+      console.log("📡 Main window received recording-state-changed:", event.payload);
+      const { state, filename } = event.payload;
+      
+      if (state === "recording") {
+        // Update UI to show recording state
+        setIsRecording(true);
+        setCurrentTranscript("");
+        setCurrentRecordingFile(filename || null);
+        (window as any).__recordingStartTime = Date.now();
+      } else if (state === "stopped") {
+        // Update UI to show stopped state
+        setIsRecording(false);
+      }
+    });
+    
     // Set up Tauri file drop handling for the entire window
     let unsubscribeFileDrop: (() => void) | undefined;
     const setupFileDrop = async () => {
@@ -216,12 +281,13 @@ function App() {
       unsubscribeFileDrop = await webview.onDragDropEvent(async (event) => {
         console.log('File drop event:', event);
         
-        if (event.payload.type === 'hover') {
+        // Check the event type from the event name
+        if (event.event === 'tauri://drag-over') {
           setIsDragging(true);
-        } else if (event.payload.type === 'drop') {
+        } else if (event.event === 'tauri://drag-drop') {
           setIsDragging(false);
           
-          const files = event.payload.paths;
+          const files = (event.payload as any).paths;
           const audioFiles = files.filter((filePath: string) => {
             const extension = filePath.split('.').pop()?.toLowerCase();
             return ['wav', 'mp3', 'm4a', 'flac', 'ogg', 'webm'].includes(extension || '');
@@ -258,7 +324,7 @@ function App() {
             alert('Please drop audio files only (wav, mp3, m4a, flac, ogg, webm)');
             setIsProcessing(false);
           }
-        } else if (event.payload.type === 'cancel') {
+        } else if (event.event === 'tauri://drag-leave') {
           setIsDragging(false);
         }
       });
@@ -271,6 +337,10 @@ function App() {
       unsubscribeProgress.then(fn => fn());
       unsubscribeProcessing.then(fn => fn());
       unsubscribeFileUpload.then(fn => fn());
+      unsubscribeRecordingState.then(fn => fn());
+      unsubscribeNativeStart.then(fn => fn());
+      unsubscribeNativeStop.then(fn => fn());
+      unsubscribeNativeCancel.then(fn => fn());
       if (unsubscribeFileDrop) {
         unsubscribeFileDrop();
       }
@@ -318,6 +388,26 @@ function App() {
       const filename = await invoke<string>("start_recording");
       setCurrentRecordingFile(filename);
       console.log("Recording started:", filename);
+      
+      // Update native overlay state if using native overlay
+      if (overlayType === 'native') {
+        await invoke('update_native_overlay_state', { recording: true, processing: false });
+        
+        // Start audio level monitoring for debugging
+        const levelInterval = setInterval(async () => {
+          try {
+            const level = await invoke<number>('get_audio_level');
+            if (level > 0.001) {
+              console.log('Audio level from frontend:', level);
+            }
+          } catch (e) {
+            console.error('Failed to get audio level:', e);
+          }
+        }, 100);
+        
+        // Store interval ID for cleanup
+        (window as any).__audioLevelInterval = levelInterval;
+      }
     } catch (error) {
       console.error("Failed to start recording:", error);
       // Revert UI state on error
@@ -331,6 +421,12 @@ function App() {
       return;
     }
     isStoppingRef.current = true;
+    
+    // Clear audio level monitoring if running
+    if ((window as any).__audioLevelInterval) {
+      clearInterval((window as any).__audioLevelInterval);
+      (window as any).__audioLevelInterval = null;
+    }
     
     // IMMEDIATELY update UI for instant feedback
     setIsRecording(false);
@@ -347,6 +443,11 @@ function App() {
         
         // Stop the backend recording
         await invoke("stop_recording");
+        
+        // Update native overlay state if using native overlay
+        if (overlayType === 'native') {
+          await invoke('update_native_overlay_state', { recording: false, processing: true });
+        }
         
         // The processing queue will handle transcription and saving
         // Just show that we're done recording
@@ -552,6 +653,25 @@ function App() {
       console.error("Failed to update overlay position:", error);
     }
   };
+  
+  const updateOverlayType = async (type: 'tauri' | 'native') => {
+    try {
+      setOverlayType(type);
+      localStorage.setItem('scout-overlay-type', type);
+      // Notify backend about overlay type change
+      await invoke('set_overlay_type', { overlayType: type });
+      
+      // If switching to native, show the native overlay
+      if (type === 'native') {
+        await invoke('show_native_overlay');
+      } else {
+        // If switching away from native, hide it
+        await invoke('hide_native_overlay');
+      }
+    } catch (error) {
+      console.error("Failed to update overlay type:", error);
+    }
+  };
 
   const updateHotkey = async (newHotkey: string) => {
     try {
@@ -714,7 +834,7 @@ function App() {
       </div>
       
       <div 
-        className={`recording-section ${isDragging ? 'dragging' : ''}`}
+        className="recording-section"
       >
         <div className="recording-controls">
           <button
@@ -757,19 +877,6 @@ function App() {
           </button>
         </div>
         
-        {isDragging && (
-          <div className="drop-zone-overlay">
-            <div className="drop-zone-content">
-              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="7 10 12 15 17 10" />
-                <line x1="12" y1="15" x2="12" y2="3" />
-              </svg>
-              <p>Drop audio files here</p>
-              <span className="drop-zone-formats">Supported: WAV, MP3, M4A, FLAC, OGG, WebM</span>
-            </div>
-          </div>
-        )}
         
         {isRecording && (
           <div className="recording-indicator">
@@ -860,6 +967,33 @@ function App() {
         )}
       </div>
 
+      {isDragging && (
+        <div className="drag-drop-overlay">
+          <div className="drag-drop-backdrop" />
+          <div className="drag-drop-container">
+            <div className="drag-drop-border">
+              <div className="drag-drop-content">
+                <div className="drag-drop-icon">
+                  <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M20 8V25M20 25L14 19M20 25L26 19" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M10 32H30" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.5"/>
+                  </svg>
+                </div>
+                <h2 className="drag-drop-title">Drop your audio files here</h2>
+                <p className="drag-drop-subtitle">Release to upload and transcribe</p>
+                <div className="drag-drop-formats">
+                  <span className="format-badge">WAV</span>
+                  <span className="format-badge">MP3</span>
+                  <span className="format-badge">M4A</span>
+                  <span className="format-badge">FLAC</span>
+                  <span className="format-badge">OGG</span>
+                  <span className="format-badge">WebM</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="transcripts-list">
         <div className="transcripts-header">
@@ -1081,6 +1215,29 @@ function App() {
                 </p>
               </div>
               
+              <div className="setting-item">
+                <label>Overlay Type</label>
+                <div className="overlay-type-toggle">
+                  <button
+                    className={`overlay-type-button ${overlayType === 'tauri' ? 'active' : ''}`}
+                    onClick={() => updateOverlayType('tauri')}
+                  >
+                    <span className="type-label">Standard</span>
+                    <span className="type-description">WebView-based overlay</span>
+                  </button>
+                  <button
+                    className={`overlay-type-button ${overlayType === 'native' ? 'active' : ''}`}
+                    onClick={() => updateOverlayType('native')}
+                  >
+                    <span className="type-label">Native (Beta)</span>
+                    <span className="type-description">True hover-without-focus</span>
+                  </button>
+                </div>
+                <p className="setting-hint">
+                  Native overlay provides better hover detection without window focus
+                </p>
+              </div>
+              
               <div className="setting-item model-manager-section">
                 <ModelManager />
               </div>
@@ -1121,6 +1278,7 @@ function App() {
           </div>
         </div>
       )}
+      
     </main>
   );
 }

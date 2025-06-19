@@ -37,7 +37,8 @@
       "Bash(mkdir:*)",
       "Bash(git push:*)",
       "Bash(git stash:*)",
-      "WebFetch(domain:v2.tauri.app)"
+      "WebFetch(domain:v2.tauri.app)",
+      "Bash(./scout)"
     ],
     "deny": []
   }
