@@ -62,18 +62,51 @@
     font-weight: 400;
 }
 
-.audio-seek-bar {
+.seek-bar-container {
+    position: relative;
     flex: 1;
+    height: 20px;
+    display: flex;
+    align-items: center;
+}
+
+.seek-bar-background {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
     height: 3px;
+    background: var(--border-secondary);
+    border-radius: 1.5px;
+    transform: translateY(-50%);
+    pointer-events: none;
+}
+
+.seek-bar-progress {
+    height: 100%;
+    background: var(--accent-primary);
+    border-radius: 1.5px;
+    transition: width 0.1s ease;
+    opacity: 0.8;
+}
+
+.audio-seek-bar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: 20px;
     -webkit-appearance: none;
     appearance: none;
     background: transparent;
     cursor: pointer;
-    border-radius: 1.5px;
+    margin: 0;
 }
 
 .audio-seek-bar::-webkit-slider-track {
-    background: var(--border-secondary);
+    background: transparent;
     height: 3px;
     border-radius: 1.5px;
 }
@@ -98,7 +131,7 @@
 
 /* Firefox */
 .audio-seek-bar::-moz-range-track {
-    background: var(--border-secondary);
+    background: transparent;
     height: 3px;
     border-radius: 1.5px;
 }
@@ -119,12 +152,6 @@
     opacity: 1;
 }
 
-/* Progress fill effect */
-.audio-seek-bar::-webkit-slider-runnable-track {
-    background-size: var(--progress, 0%) 100%;
-    background-image: linear-gradient(var(--accent-primary), var(--accent-primary));
-    background-repeat: no-repeat;
-}
 
 .playback-rate-button {
     padding: 4px 8px;
