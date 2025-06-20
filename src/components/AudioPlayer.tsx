@@ -89,6 +89,9 @@ export function AudioPlayer({ audioPath, duration, formatDuration }: AudioPlayer
         setCurrentTime(parseFloat(e.target.value));
     };
 
+    // Calculate progress percentage for visual progress bar
+    const progressPercentage = duration > 0 ? (currentTime / duration) * 100 : 0;
+
     const handlePlaybackRateChange = () => {
         if (!audioRef.current) return;
         const rates = [1, 1.25, 1.5, 1.75, 2];
@@ -131,14 +134,22 @@ export function AudioPlayer({ audioPath, duration, formatDuration }: AudioPlayer
 
                 <div className="audio-player-timeline">
                     <span className="audio-time">{formatDuration(currentTime)}</span>
-                    <input
-                        type="range"
-                        className="audio-seek-bar"
-                        min="0"
-                        max={duration}
-                        value={currentTime}
-                        onChange={handleSeek}
-                    />
+                    <div className="seek-bar-container">
+                        <div className="seek-bar-background">
+                            <div 
+                                className="seek-bar-progress"
+                                style={{ width: `${progressPercentage}%` }}
+                            />
+                        </div>
+                        <input
+                            type="range"
+                            className="audio-seek-bar"
+                            min="0"
+                            max={duration}
+                            value={currentTime}
+                            onChange={handleSeek}
+                        />
+                    </div>
                     <span className="audio-time">{formatDuration(duration)}</span>
                 </div>
 
