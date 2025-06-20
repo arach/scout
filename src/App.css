@@ -728,47 +728,8 @@ h1 {
   color: var(--text-secondary);
 }
 
-.transcript-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 16px;
-  margin-bottom: 12px;
-  background-color: var(--bg-secondary);
-  border: 1px solid var(--border-primary);
-  border-radius: 6px;
-  transition: all 0.2s ease;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-}
-
-.transcript-item:hover {
-  background-color: var(--bg-hover);
-  border-color: var(--accent-primary);
-  transform: translateY(-1px);
-  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15);
-}
-
-.transcript-item.selected {
-  background-color: var(--bg-active);
-  border-color: var(--accent-primary);
-  box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.2);
-}
-
-.transcript-item:last-child {
-  margin-bottom: 0;
-}
-
-.transcript-checkbox {
-  width: 16px;
-  height: 16px;
-  margin: 2px 0;
-  cursor: pointer;
-}
-
-.transcript-content {
-  flex: 1;
-}
-
+/* Legacy transcript card styles - replaced by list view in TranscriptsView.css */
+/*
 .transcript-item-actions {
   display: flex;
   gap: 4px;
@@ -836,6 +797,7 @@ h1 {
   align-items: center;
   opacity: 0.8;
 }
+*/
 
 
 /* Recording waveform animation */

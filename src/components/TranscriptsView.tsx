@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import './TranscriptsView.css';
 
 interface Transcript {
@@ -40,6 +40,22 @@ export function TranscriptsView({
     showDeleteConfirmation,
     formatDuration,
 }: TranscriptsViewProps) {
+    const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
+
+    const toggleExpanded = (id: number) => {
+        const newExpanded = new Set(expandedIds);
+        if (newExpanded.has(id)) {
+            newExpanded.delete(id);
+        } else {
+            newExpanded.add(id);
+        }
+        setExpandedIds(newExpanded);
+    };
+
+    const truncateText = (text: string, maxLength: number = 80) => {
+        if (text.length <= maxLength) return text;
+        return text.substring(0, maxLength) + '...';
+    };
     return (
         <div className="transcripts-view">
             <div className="transcripts-header-container">
@@ -100,57 +116,95 @@ export function TranscriptsView({
                         <p>Press {hotkey.split('+').join(' + ')} or click "Start Recording" to begin</p>
                     </div>
                 ) : (
-                    transcripts.map((transcript) => (
-                        <div
-                            key={transcript.id}
-                            className={`transcript-item ${selectedTranscripts.has(transcript.id) ? 'selected' : ''}`}
-                        >
-                            <input
-                                type="checkbox"
-                                className="transcript-checkbox"
-                                checked={selectedTranscripts.has(transcript.id)}
-                                onChange={() => toggleTranscriptSelection(transcript.id)}
-                            />
-                            <div className="transcript-content">
-                                <div className="transcript-header">
-                                    <span className="transcript-date">
-                                        {new Date(transcript.created_at).toLocaleString()}
-                                    </span>
-                                    <span className="transcript-duration">
-                                        {formatDuration(transcript.duration_ms)}
-                                    </span>
-                                </div>
-                                <p className="transcript-text">
-                                    {transcript.text === "[BLANK_AUDIO]" ? (
-                                        <span className="transcript-empty">
-                                            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style={{ marginRight: '6px', verticalAlign: 'text-bottom' }}>
-                                                <path d="M8 1a7 7 0 100 14A7 7 0 008 1zM7 4h2v5H7V4zm0 6h2v2H7v-2z" />
-                                            </svg>
-                                            No speech detected in recording
+                    <div className="transcript-list-container">
+                        {transcripts.map((transcript) => {
+                            const isExpanded = expandedIds.has(transcript.id);
+                            const isBlankAudio = transcript.text === "[BLANK_AUDIO]";
+                            
+                            return (
+                                <div
+                                    key={transcript.id}
+                                    className={`transcript-list-item ${selectedTranscripts.has(transcript.id) ? 'selected' : ''} ${isExpanded ? 'expanded' : ''}`}
+                                >
+                                    <div className="transcript-row">
+                                        <input
+                                            type="checkbox"
+                                            className="transcript-checkbox"
+                                            checked={selectedTranscripts.has(transcript.id)}
+                                            onChange={(e) => {
+                                                e.stopPropagation();
+                                                toggleTranscriptSelection(transcript.id);
+                                            }}
+                                            onClick={(e) => e.stopPropagation()}
+                                        />
+                                        <span className="transcript-date">
+                                            {new Date(transcript.created_at).toLocaleDateString()} {new Date(transcript.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                         </span>
-                                    ) : (
-                                        transcript.text
-                                    )}
-                                </p>
-                            </div>
-                            <div className="transcript-item-actions">
-                                <button
-                                    className="copy-button"
-                                    onClick={() => copyTranscript(transcript.text)}
-                                    title="Copy transcript"
-                                >
-                                    Copy
-                                </button>
-                                <button
-                                    className="delete-item-button"
-                                    onClick={() => showDeleteConfirmation(transcript.id, transcript.text)}
-                                    title="Delete transcript"
-                                >
-                                    Delete
-                                </button>
-                            </div>
-                        </div>
-                    ))
+                                        <span className="transcript-duration">
+                                            {formatDuration(transcript.duration_ms)}
+                                        </span>
+                                        <div 
+                                            className="transcript-preview"
+                                            onClick={() => toggleExpanded(transcript.id)}
+                                        >
+                                            {isBlankAudio ? (
+                                                <span className="transcript-empty-inline">No speech detected</span>
+                                            ) : (
+                                                isExpanded ? transcript.text : truncateText(transcript.text)
+                                            )}
+                                        </div>
+                                        <button
+                                            className="expand-button"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                toggleExpanded(transcript.id);
+                                            }}
+                                            title={isExpanded ? "Collapse" : "Expand"}
+                                        >
+                                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                <path 
+                                                    d="M3 5L6 8L9 5" 
+                                                    stroke="currentColor" 
+                                                    strokeWidth="1.5" 
+                                                    strokeLinecap="round" 
+                                                    strokeLinejoin="round"
+                                                    transform={isExpanded ? "rotate(180 6 6)" : ""}
+                                                    style={{ transformOrigin: 'center' }}
+                                                />
+                                            </svg>
+                                        </button>
+                                        <div className="transcript-row-actions">
+                                            <button
+                                                className="icon-button copy-button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    copyTranscript(transcript.text);
+                                                }}
+                                                title="Copy transcript"
+                                            >
+                                                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                    <rect x="3" y="3" width="8" height="8" stroke="currentColor" strokeWidth="1" rx="1"/>
+                                                    <path d="M3 7H2C1.44772 7 1 6.55228 1 6V2C1 1.44772 1.44772 1 2 1H6C6.55228 1 7 1.44772 7 2V3" stroke="currentColor" strokeWidth="1"/>
+                                                </svg>
+                                            </button>
+                                            <button
+                                                className="icon-button delete-button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    showDeleteConfirmation(transcript.id, transcript.text);
+                                                }}
+                                                title="Delete transcript"
+                                            >
+                                                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                    <path d="M2 4H12M5 4V2.5C5 2.22386 5.22386 2 5.5 2H8.5C8.77614 2 9 2.22386 9 2.5V4M6 7V10M8 7V10M3 4L4 11.5C4 11.7761 4.22386 12 4.5 12H9.5C9.77614 12 10 11.7761 10 11.5L11 4" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"/>
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
                 )}
             </div>
         </div>
