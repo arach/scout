@@ -18,6 +18,8 @@ interface Transcript {
   duration_ms: number;
   created_at: string;
   metadata?: string;
+  audio_path?: string;
+  file_size?: number;
 }
 
 type View = 'record' | 'transcripts' | 'settings';
@@ -863,6 +865,7 @@ function App() {
             copyTranscript={copyTranscript}
             showDeleteConfirmation={showDeleteConfirmation}
             formatDuration={formatDuration}
+            formatFileSize={formatFileSize}
           />
         )}
         {currentView === 'settings' && (

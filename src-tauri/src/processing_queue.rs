@@ -155,16 +155,23 @@ impl ProcessingQueue {
                                             Ok(transcript) => {
                                                 println!("✅ Processing queue transcription completed using model: {} (length: {} chars)", model_name, transcript.len());
                                                 
-                                                // Save to database with model information
+                                                // Get file size
+                                                let file_size = tokio::fs::metadata(&job.audio_path)
+                                                    .await
+                                                    .map(|m| m.len() as i64)
+                                                    .ok();
+                                                
+                                                // Save to database with model information and audio path
                                                 if let Err(e) = database.save_transcript(
                                                     &transcript,
                                                     job.duration_ms,
                                                     Some(&serde_json::json!({
                                                         "filename": job.filename,
-                                                        "audio_path": job.audio_path.to_str().unwrap_or(""),
                                                         "model_used": model_name,
                                                         "processing_type": "file_upload"
-                                                    }).to_string())
+                                                    }).to_string()),
+                                                    Some(job.audio_path.to_str().unwrap_or("")),
+                                                    file_size
                                                 ).await {
                                                     eprintln!("Failed to save transcript to database: {}", e);
                                                 }

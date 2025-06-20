@@ -16,6 +16,8 @@ interface Transcript {
     duration_ms: number;
     created_at: string;
     metadata?: string;
+    audio_path?: string;
+    file_size?: number;
 }
 
 interface RecordViewProps {
