@@ -24,42 +24,35 @@ export function WaveformPlayer({ audioPath, duration, formatDuration }: Waveform
     // Create blob URL for WaveSurfer
     const audioUrl = useMemo(() => {
         if (!blob) return null;
-        const url = URL.createObjectURL(blob);
-        console.log('🎵 Created blob URL:', url);
-        return url;
+        return URL.createObjectURL(blob);
     }, [blob]);
 
     // Cleanup blob URL when component unmounts or blob changes
     useEffect(() => {
         return () => {
             if (audioUrl) {
-                console.log('🎵 Revoking blob URL:', audioUrl);
                 URL.revokeObjectURL(audioUrl);
             }
         };
     }, [audioUrl]);
 
     const onReady = (ws: any) => {
-        console.log('🎵 WaveSurfer ready!');
         const audioDuration = ws.getDuration();
-        console.log('🎵 WaveSurfer duration:', audioDuration);
         setActualDuration(audioDuration * 1000); // Convert to milliseconds
         setWavesurfer(ws);
         setIsReady(true);
     };
 
     const onPlay = () => {
-        console.log('🎵 WaveSurfer playing');
         setIsPlaying(true);
     };
 
     const onPause = () => {
-        console.log('🎵 WaveSurfer paused');
         setIsPlaying(false);
     };
 
-    const onTimeupdate = (time: number) => {
-        setCurrentTime(time * 1000);
+    const onTimeupdate = (wavesurfer: any) => {
+        setCurrentTime(wavesurfer.getCurrentTime() * 1000);
     };
 
     const [playbackRate, setPlaybackRate] = useState(1);
@@ -67,7 +60,6 @@ export function WaveformPlayer({ audioPath, duration, formatDuration }: Waveform
 
     const togglePlayPause = () => {
         if (!wavesurfer) return;
-        console.log('🎵 WaveformPlayer: togglePlayPause called');
         wavesurfer.playPause();
     };
 
@@ -77,7 +69,6 @@ export function WaveformPlayer({ audioPath, duration, formatDuration }: Waveform
         const currentIndex = rates.indexOf(playbackRate);
         const nextIndex = (currentIndex + 1) % rates.length;
         const newRate = rates[nextIndex];
-        console.log('🎵 WaveformPlayer: Setting playback rate to', newRate);
         setPlaybackRate(newRate);
         wavesurfer.setPlaybackRate(newRate);
     };
@@ -94,7 +85,6 @@ export function WaveformPlayer({ audioPath, duration, formatDuration }: Waveform
         }
         
         if (newIndex !== currentZoomIndex) {
-            console.log('🎵 WaveformPlayer: Zooming to level', ZOOM_LEVELS[newIndex]);
             setCurrentZoomIndex(newIndex);
             wavesurfer.zoom(ZOOM_LEVELS[newIndex]);
         }
