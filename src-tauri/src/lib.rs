@@ -73,9 +73,6 @@ async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> R
     // Play start sound
     sound::SoundPlayer::play_start();
     
-    println!("═══════════════════════════════════════");
-    println!("🎙️  BACKEND: Starting recording session");
-    println!("═══════════════════════════════════════");
     
     // Use the recording workflow to start recording
     let filename = state.recording_workflow.start_recording().await?;
@@ -159,9 +156,6 @@ async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> R
 
 #[tauri::command]
 async fn cancel_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<(), String> {
-    println!("═══════════════════════════════════════");
-    println!("❌  BACKEND: Cancelling recording session");
-    println!("═══════════════════════════════════════");
     
     // Cancel recording without queueing for processing
     state.recording_workflow.cancel_recording().await?;
@@ -189,9 +183,6 @@ async fn cancel_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> 
 
 #[tauri::command]
 async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<(), String> {
-    println!("═══════════════════════════════════════");
-    println!("⏹️  BACKEND: Stopping recording session");
-    println!("═══════════════════════════════════════");
     
     // Use the recording workflow to stop recording
     let _result = state.recording_workflow.stop_recording().await?;
@@ -214,7 +205,6 @@ async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Re
             let file_path = recordings_dir.join(&filename);
             match tokio::fs::metadata(&file_path).await {
                 Ok(metadata) => {
-                    println!("Recording file {} ready, size: {} bytes", filename, metadata.len());
                 }
                 Err(e) => {
                     eprintln!("Failed to verify recording file: {}", e);
@@ -255,7 +245,6 @@ async fn is_recording(state: State<'_, AppState>) -> Result<bool, String> {
 
 #[tauri::command]
 async fn log_from_overlay(message: String) -> Result<(), String> {
-    println!("[OVERLAY LOG] {}", message);
     Ok(())
 }
 
@@ -290,7 +279,6 @@ async fn transcribe_audio(
     let settings = state.settings.lock().await;
     let model_path = models::WhisperModel::get_active_model_path(&state.models_dir, settings.get());
     drop(settings); // Release the lock early
-    println!("Attempting to use model at: {:?}", model_path);
     
     if !model_path.exists() {
         eprintln!("Model file does not exist at: {:?}", model_path);
@@ -302,13 +290,11 @@ async fn transcribe_audio(
         }
         return Err("No Whisper model found. Please download a model from Settings.".to_string());
     } else {
-        println!("✓ Model file exists at: {:?}", model_path);
         
         // Extract model name from path for logging
         let model_name = model_path.file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("unknown");
-        println!("🤖 Using model: {}", model_name);
     }
     
     // Create transcriber and transcribe
@@ -316,10 +302,8 @@ async fn transcribe_audio(
         .and_then(|name| name.to_str())
         .unwrap_or("unknown");
     
-    println!("🎯 Starting transcription with model: {}", model_name);
     let transcriber = transcription::Transcriber::new(&model_path)?;
     let result = transcriber.transcribe(&audio_path)?;
-    println!("✅ Transcription completed using model: {} (length: {} chars)", model_name, result.len());
     
     Ok(result)
 }
@@ -481,9 +465,7 @@ async fn delete_transcript(
     state: State<'_, AppState>,
     id: i64,
 ) -> Result<(), String> {
-    println!("Delete transcript called with id: {}", id);
     let result = state.database.delete_transcript(id).await;
-    println!("Delete result: {:?}", result);
     result
 }
 
@@ -602,7 +584,6 @@ async fn get_available_models(state: State<'_, AppState>) -> Result<Vec<models::
 
 #[tauri::command]
 async fn has_any_model(state: State<'_, AppState>) -> Result<bool, String> {
-    println!("Checking for models in: {:?}", state.models_dir);
     
     let has_models = match std::fs::read_dir(&state.models_dir) {
         Ok(entries) => {
@@ -614,7 +595,6 @@ async fn has_any_model(state: State<'_, AppState>) -> Result<bool, String> {
                     .map(|ext| ext == "bin")
                     .unwrap_or(false) 
                 {
-                    println!("Found model: {:?}", path);
                     found_models = true;
                 }
             }
@@ -626,7 +606,6 @@ async fn has_any_model(state: State<'_, AppState>) -> Result<bool, String> {
         }
     };
     
-    println!("has_any_model result: {}", has_models);
     Ok(has_models)
 }
 
@@ -636,14 +615,12 @@ async fn set_active_model(state: State<'_, AppState>, model_id: String) -> Resul
     let previous_model = settings.get().models.active_model_id.clone();
     settings.update(|s| s.models.active_model_id = model_id.clone())
         .map_err(|e| format!("Failed to save settings: {}", e))?;
-    println!("🔄 Active model changed: {} → {}", previous_model, model_id);
     Ok(())
 }
 
 #[tauri::command]
 async fn get_models_dir(state: State<'_, AppState>) -> Result<String, String> {
     let path = state.models_dir.to_string_lossy().to_string();
-    println!("get_models_dir returning: {}", path);
     Ok(path)
 }
 
@@ -687,26 +664,20 @@ async fn download_file(
     use tokio::io::AsyncWriteExt;
     use futures_util::StreamExt;
     
-    println!("=== DOWNLOAD START ===");
-    println!("URL: {}", url);
-    println!("Destination path: {}", dest_path);
     
     // Ensure parent directory exists
     if let Some(parent) = Path::new(&dest_path).parent() {
-        println!("Creating parent directory: {:?}", parent);
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("Failed to create directory: {}", e))?;
         
         // Verify directory was created
         if parent.exists() && parent.is_dir() {
-            println!("✓ Parent directory exists and is a directory");
         } else {
             eprintln!("✗ Parent directory was not created properly!");
         }
     }
     
     // Start download
-    println!("Starting HTTP request...");
     let client = reqwest::Client::new();
     let response = client.get(&url)
         .send()
@@ -714,13 +685,10 @@ async fn download_file(
         .map_err(|e| format!("Failed to start download: {}", e))?;
     
     let total_size = response.content_length().unwrap_or(0);
-    println!("Total file size: {} bytes ({:.2} MB)", total_size, total_size as f64 / 1_048_576.0);
     
     // Create the file
-    println!("Creating file at: {}", dest_path);
     let mut file = File::create(&dest_path).await
         .map_err(|e| format!("Failed to create file at {}: {}", dest_path, e))?;
-    println!("✓ File created successfully");
     
     // Download with progress
     let mut downloaded = 0u64;
@@ -753,14 +721,11 @@ async fn download_file(
     file.flush().await
         .map_err(|e| format!("Failed to flush file: {}", e))?;
     
-    println!("=== DOWNLOAD COMPLETE ===");
-    println!("Downloaded {} bytes to {}", downloaded, dest_path);
     
     // Verify the file exists
     if Path::new(&dest_path).exists() {
         let metadata = std::fs::metadata(&dest_path)
             .map_err(|e| format!("Failed to get file metadata: {}", e))?;
-        println!("✓ File exists, size: {} bytes", metadata.len());
     } else {
         eprintln!("✗ File does not exist after download!");
     }
@@ -828,14 +793,11 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir().expect("Failed to get app data dir");
-            println!("App data directory: {:?}", app_data_dir);
             
             let recordings_dir = app_data_dir.join("recordings");
-            println!("Creating recordings directory: {:?}", recordings_dir);
             std::fs::create_dir_all(&recordings_dir).expect("Failed to create recordings directory");
 
             let db_path = app_data_dir.join("scout.db");
-            println!("Database path: {:?}", db_path);
             let database = tauri::async_runtime::block_on(async {
                 Database::new(&db_path).await.expect("Failed to initialize database")
             });
@@ -845,13 +807,10 @@ pub fn run() {
             
             // Models directory in app data
             let models_dir = app_data_dir.join("models");
-            println!("Models directory: {:?}", models_dir);
-            println!("Creating models directory...");
             std::fs::create_dir_all(&models_dir).expect("Failed to create models directory");
             
             // Verify the directory was created
             if models_dir.exists() && models_dir.is_dir() {
-                println!("✓ Models directory created successfully");
             } else {
                 eprintln!("✗ Models directory was not created properly!");
             }
@@ -911,7 +870,6 @@ pub fn run() {
                 
                 // Show the overlay at startup
                 overlay.show();
-                println!("Native overlay shown at startup");
                 
                 Arc::new(Mutex::new(overlay))
             };
@@ -978,7 +936,6 @@ pub fn run() {
                                     let overlay = native_overlay_clone.lock().await;
                                     overlay.set_processing_state(false);
                                     drop(overlay);
-                                    println!("Native overlay: Processing complete, showing completion state");
                                 }
                                 _ => {
                                     // Still processing, ensure overlay shows processing state
@@ -989,13 +946,10 @@ pub fn run() {
                         // Log the status
                         match &status {
                             ProcessingStatus::Queued { position } => {
-                                println!("Processing queued at position {}", position);
                             }
                             ProcessingStatus::Processing { filename } => {
-                                println!("Processing file: {}", filename);
                             }
                             ProcessingStatus::Converting { filename } => {
-                                println!("Converting file to WAV: {}", filename);
                             }
                             ProcessingStatus::Transcribing { filename } => {
                                 println!("Transcribing file: {}", filename);
@@ -1016,7 +970,6 @@ pub fn run() {
             {
                 let overlay = tauri::async_runtime::block_on(native_panel_overlay.lock());
                 overlay.show();
-                println!("Showing native overlay on startup");
             }
             
             // Set up global hotkey from settings
@@ -1029,7 +982,6 @@ pub fn run() {
             
             if let Err(e) = app.global_shortcut().on_shortcut(hotkey.as_str(), move |_app, _event, _shortcut| {
                 // Emit event to frontend to toggle recording
-                println!("Global shortcut triggered");
                 app_handle.emit("toggle-recording", ()).unwrap();
             }) {
                 eprintln!("Failed to register global shortcut '{}': {:?}", hotkey, e);
@@ -1062,7 +1014,7 @@ pub fn run() {
             let tray_icon = tauri::image::Image::from_path(&icon_path)
                 .unwrap_or_else(|_| {
                     // Fallback to default icon if tray icon not found
-                    println!("Warning: Could not load tray icon from {:?}, using default icon", icon_path);
+;
                     app.default_window_icon().unwrap().clone()
                 });
             

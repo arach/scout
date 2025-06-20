@@ -137,39 +137,30 @@ impl WhisperModel {
     }
 
     pub fn get_active_model_id(settings: &crate::settings::AppSettings) -> Option<String> {
-        println!("Active model from settings: {}", settings.models.active_model_id);
         Some(settings.models.active_model_id.clone())
     }
 
     pub fn get_active_model_path(models_dir: &Path, settings: &crate::settings::AppSettings) -> PathBuf {
-        println!("Getting active model path...");
-        println!("Models directory: {:?}", models_dir);
         
         let model_id = Self::get_active_model_id(settings).unwrap_or_else(|| "tiny.en".to_string());
-        println!("Looking for model with ID: {}", model_id);
         
         let models = Self::all(models_dir, settings);
-        println!("Found {} models total", models.len());
         
         // First try to find the requested model
         if let Some(model) = models.iter().find(|m| m.id == model_id && m.downloaded) {
             let path = models_dir.join(&model.filename);
-            println!("Found requested model: {:?}", path);
             return path;
         }
         
-        println!("Requested model {} not found or not downloaded", model_id);
         
         // Fallback to any available model
         if let Some(model) = models.iter().find(|m| m.downloaded) {
             let path = models_dir.join(&model.filename);
-            println!("Falling back to available model: {:?}", path);
             return path;
         }
         
         // Last resort - return expected path even if not downloaded
         let fallback = models_dir.join("ggml-tiny.en.bin");
-        println!("No models downloaded, returning fallback path: {:?}", fallback);
         fallback
     }
 }

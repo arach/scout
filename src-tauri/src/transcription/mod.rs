@@ -15,7 +15,6 @@ impl Transcriber {
             WhisperContextParameters::default(), // Uses Core ML on macOS
         ) {
             Ok(ctx) => {
-                println!("Successfully initialized Whisper with Core ML acceleration");
                 ctx
             }
             Err(core_ml_error) => {

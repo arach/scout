@@ -51,7 +51,6 @@ impl ProcessingQueue {
                     for (i, _queued_job) in queue.iter().enumerate() {
                         if !processing || i > 0 {
                             let position = if processing { i } else { i + 1 };
-                            println!("📋 Queue position: {}", position);
                             let _ = status_tx.send(ProcessingStatus::Queued { 
                                 position 
                             }).await;
@@ -80,13 +79,10 @@ impl ProcessingQueue {
                         match std::fs::metadata(&job.audio_path) {
                             Ok(metadata) if metadata.len() > 1024 => {
                                 file_ready = true;
-                                println!("Audio file ready after {} retries, size: {} bytes", retry_count, metadata.len());
                             }
                             Ok(metadata) => {
-                                println!("Audio file exists but too small ({} bytes), retry {}/{}", metadata.len(), retry_count + 1, max_retries);
                             }
                             Err(e) => {
-                                println!("Audio file not found yet, retry {}/{}: {}", retry_count + 1, max_retries, e);
                             }
                         }
                         retry_count += 1;
@@ -98,7 +94,6 @@ impl ProcessingQueue {
                             Ok(metadata) if metadata.len() > 1024 => {
                             // Check if we need to convert the audio file
                             let audio_path_for_transcription = if AudioConverter::needs_conversion(&job.audio_path) {
-                                println!("Converting audio file to WAV format...");
                                 
                                 // Update status to converting
                                 let _ = status_tx.send(ProcessingStatus::Converting { 
@@ -109,7 +104,6 @@ impl ProcessingQueue {
                                 
                                 match AudioConverter::convert_to_wav(&job.audio_path, &wav_path) {
                                     Ok(_) => {
-                                        println!("Audio conversion successful");
                                         wav_path
                                     }
                                     Err(e) => {
@@ -141,19 +135,16 @@ impl ProcessingQueue {
                                 }
                             };
                             
-                            println!("🔍 Processing queue attempting to use model: {:?}", model_path);
-                            
+                                            
                             if model_path.exists() {
                                 let model_name = model_path.file_name()
                                     .and_then(|name| name.to_str())
                                     .unwrap_or("unknown");
-                                println!("🤖 Processing queue using model: {}", model_name);
                                 
                                 match Transcriber::new(&model_path) {
                                     Ok(transcriber) => {
                                         match transcriber.transcribe(&audio_path_for_transcription) {
                                             Ok(transcript) => {
-                                                println!("✅ Processing queue transcription completed using model: {} (length: {} chars)", model_name, transcript.len());
                                                 
                                                 // Get file size
                                                 let file_size = tokio::fs::metadata(&job.audio_path)
@@ -176,7 +167,6 @@ impl ProcessingQueue {
                                                     eprintln!("Failed to save transcript to database: {}", e);
                                                 }
                                                 
-                                                println!("✅ Processing complete for: {}", job.filename);
                                                 let _ = status_tx.send(ProcessingStatus::Complete { 
                                                     filename: job.filename.clone(),
                                                     transcript,
@@ -187,7 +177,6 @@ impl ProcessingQueue {
                                                     let wav_path = AudioConverter::get_wav_path(&job.audio_path);
                                                     if wav_path.exists() {
                                                         let _ = std::fs::remove_file(&wav_path);
-                                                        println!("Cleaned up temporary WAV file");
                                                     }
                                                 }
                                             }
@@ -217,7 +206,6 @@ impl ProcessingQueue {
                             }
                         }
                             _ => {
-                                eprintln!("Audio file not ready or too small");
                                 let _ = status_tx.send(ProcessingStatus::Failed { 
                                     filename: job.filename.clone(),
                                     error: "Audio file not ready or too small".to_string(),
@@ -226,8 +214,7 @@ impl ProcessingQueue {
                         }
                     } else {
                         // File not ready after all retries
-                        eprintln!("Audio file not ready after {} retries", max_retries);
-                        let _ = status_tx.send(ProcessingStatus::Failed { 
+                                        let _ = status_tx.send(ProcessingStatus::Failed { 
                             filename: job.filename.clone(),
                             error: format!("Audio file not ready after {} seconds", max_retries / 2),
                         }).await;
@@ -252,7 +239,6 @@ impl ProcessingQueue {
     }
     
     pub async fn queue_job(&self, job: ProcessingJob) -> Result<(), String> {
-        println!("Queueing processing job for file: {}", job.filename);
         self.sender.send(job).await
             .map_err(|_| "Failed to queue processing job".to_string())
     }
@@ -272,7 +258,6 @@ fn read_settings_and_get_model_path(app_data_dir: &PathBuf, models_dir: &PathBuf
         .as_str()
         .unwrap_or("base.en");
     
-    println!("🔍 Processing queue: Active model from settings: {}", active_model_id);
     
     // Convert model ID to filename (same logic as in models.rs)
     let filename = match active_model_id {
@@ -292,24 +277,20 @@ fn read_settings_and_get_model_path(app_data_dir: &PathBuf, models_dir: &PathBuf
     
     // Check if this model exists, if not try fallbacks
     if model_path.exists() {
-        println!("✓ Processing queue: Found requested model: {:?}", model_path);
         Ok(model_path)
     } else {
-        println!("⚠️  Processing queue: Requested model {} not found, trying fallbacks", filename);
         
         // Try fallback models in order of preference
         let fallbacks = ["ggml-base.en.bin", "ggml-tiny.en.bin", "ggml-small.en.bin"];
         for fallback in &fallbacks {
             let fallback_path = models_dir.join(fallback);
             if fallback_path.exists() {
-                println!("✓ Processing queue: Using fallback model: {:?}", fallback_path);
                 return Ok(fallback_path);
             }
         }
         
         // Last resort: find any .bin file
         if let Some(any_model) = find_any_available_model(models_dir) {
-            println!("✓ Processing queue: Using any available model: {:?}", any_model);
             Ok(any_model)
         } else {
             Err("No models found".to_string())
