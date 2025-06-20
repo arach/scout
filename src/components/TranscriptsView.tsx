@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { TranscriptDetailPanel } from './TranscriptDetailPanel';
 import './TranscriptsView.css';
 
 interface Transcript {
@@ -40,21 +41,18 @@ export function TranscriptsView({
     showDeleteConfirmation,
     formatDuration,
 }: TranscriptsViewProps) {
-    const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
+    const [selectedTranscript, setSelectedTranscript] = useState<Transcript | null>(null);
+    const [isPanelOpen, setIsPanelOpen] = useState(false);
 
-    const toggleExpanded = (id: number) => {
-        const newExpanded = new Set(expandedIds);
-        if (newExpanded.has(id)) {
-            newExpanded.delete(id);
-        } else {
-            newExpanded.add(id);
-        }
-        setExpandedIds(newExpanded);
+    const openDetailPanel = (transcript: Transcript) => {
+        setSelectedTranscript(transcript);
+        setIsPanelOpen(true);
     };
 
-    const truncateText = (text: string, maxLength: number = 80) => {
-        if (text.length <= maxLength) return text;
-        return text.substring(0, maxLength) + '...';
+    const closeDetailPanel = () => {
+        setIsPanelOpen(false);
+        // Keep selected transcript for animation
+        setTimeout(() => setSelectedTranscript(null), 200);
     };
     return (
         <div className="transcripts-view">
@@ -118,13 +116,13 @@ export function TranscriptsView({
                 ) : (
                     <div className="transcript-list-container">
                         {transcripts.map((transcript) => {
-                            const isExpanded = expandedIds.has(transcript.id);
                             const isBlankAudio = transcript.text === "[BLANK_AUDIO]";
                             
                             return (
                                 <div
                                     key={transcript.id}
-                                    className={`transcript-list-item ${selectedTranscripts.has(transcript.id) ? 'selected' : ''} ${isExpanded ? 'expanded' : ''}`}
+                                    className={`transcript-list-item ${selectedTranscripts.has(transcript.id) ? 'selected' : ''} ${selectedTranscript?.id === transcript.id ? 'active' : ''}`}
+                                    onClick={() => openDetailPanel(transcript)}
                                 >
                                     <div className="transcript-row">
                                         <input
@@ -143,62 +141,12 @@ export function TranscriptsView({
                                         <span className="transcript-duration">
                                             {formatDuration(transcript.duration_ms)}
                                         </span>
-                                        <div 
-                                            className="transcript-preview"
-                                            onClick={() => toggleExpanded(transcript.id)}
-                                        >
+                                        <div className="transcript-preview">
                                             {isBlankAudio ? (
                                                 <span className="transcript-empty-inline">No speech detected</span>
                                             ) : (
-                                                isExpanded ? transcript.text : truncateText(transcript.text)
+                                                <span className="transcript-text-preview">{transcript.text}</span>
                                             )}
-                                        </div>
-                                        <button
-                                            className="expand-button"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                toggleExpanded(transcript.id);
-                                            }}
-                                            title={isExpanded ? "Collapse" : "Expand"}
-                                        >
-                                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                                <path 
-                                                    d="M3 5L6 8L9 5" 
-                                                    stroke="currentColor" 
-                                                    strokeWidth="1.5" 
-                                                    strokeLinecap="round" 
-                                                    strokeLinejoin="round"
-                                                    transform={isExpanded ? "rotate(180 6 6)" : ""}
-                                                    style={{ transformOrigin: 'center' }}
-                                                />
-                                            </svg>
-                                        </button>
-                                        <div className="transcript-row-actions">
-                                            <button
-                                                className="icon-button copy-button"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    copyTranscript(transcript.text);
-                                                }}
-                                                title="Copy transcript"
-                                            >
-                                                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                                    <rect x="3" y="3" width="8" height="8" stroke="currentColor" strokeWidth="1" rx="1"/>
-                                                    <path d="M3 7H2C1.44772 7 1 6.55228 1 6V2C1 1.44772 1.44772 1 2 1H6C6.55228 1 7 1.44772 7 2V3" stroke="currentColor" strokeWidth="1"/>
-                                                </svg>
-                                            </button>
-                                            <button
-                                                className="icon-button delete-button"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    showDeleteConfirmation(transcript.id, transcript.text);
-                                                }}
-                                                title="Delete transcript"
-                                            >
-                                                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                                    <path d="M2 4H12M5 4V2.5C5 2.22386 5.22386 2 5.5 2H8.5C8.77614 2 9 2.22386 9 2.5V4M6 7V10M8 7V10M3 4L4 11.5C4 11.7761 4.22386 12 4.5 12H9.5C9.77614 12 10 11.7761 10 11.5L11 4" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"/>
-                                                </svg>
-                                            </button>
                                         </div>
                                     </div>
                                 </div>
@@ -207,6 +155,16 @@ export function TranscriptsView({
                     </div>
                 )}
             </div>
+            
+            <TranscriptDetailPanel
+                transcript={selectedTranscript}
+                isOpen={isPanelOpen}
+                onClose={closeDetailPanel}
+                onCopy={copyTranscript}
+                onDelete={showDeleteConfirmation}
+                onExport={exportTranscripts}
+                formatDuration={formatDuration}
+            />
         </div>
     );
 } 
