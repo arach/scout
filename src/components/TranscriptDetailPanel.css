@@ -1,13 +1,12 @@
-/* Backdrop overlay */
+/* Backdrop overlay - removed heavy overlay, just invisible click target */
 .detail-panel-backdrop {
     position: fixed;
     top: 0;
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: rgba(0, 0, 0, 0.3);
+    background-color: transparent;
     z-index: 999;
-    animation: fadeIn 0.2s ease-out;
 }
 
 /* Side panel */
@@ -16,7 +15,7 @@
     top: 0;
     right: 0;
     bottom: 0;
-    width: 400px;
+    width: 480px;
     background-color: var(--bg-primary);
     border-left: 1px solid var(--border-primary);
     box-shadow: -4px 0 12px rgba(0, 0, 0, 0.15);
@@ -260,10 +259,6 @@
 
 /* Dark mode adjustments */
 @media (prefers-color-scheme: dark) {
-    .detail-panel-backdrop {
-        background-color: rgba(0, 0, 0, 0.5);
-    }
-    
     .transcript-detail-panel {
         box-shadow: -4px 0 12px rgba(0, 0, 0, 0.4);
     }

@@ -618,16 +618,10 @@ h1 {
 
 .transcripts-header {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
   margin-bottom: 16px;
-}
-
-.transcripts-header h2 {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 400;
-  color: var(--text-primary);
+  padding-right: 12px;
 }
 
 .transcript-actions {

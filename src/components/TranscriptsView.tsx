@@ -54,6 +54,52 @@ export function TranscriptsView({
         // Keep selected transcript for animation
         setTimeout(() => setSelectedTranscript(null), 200);
     };
+
+    // Group transcripts by date
+    const groupTranscriptsByDate = (transcripts: Transcript[]) => {
+        const groups: { [key: string]: Transcript[] } = {};
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        const thisWeek = new Date(today);
+        thisWeek.setDate(thisWeek.getDate() - 7);
+        const thisMonth = new Date(today);
+        thisMonth.setDate(thisMonth.getDate() - 30);
+
+        transcripts.forEach(transcript => {
+            const date = new Date(transcript.created_at);
+            let groupKey: string;
+
+            if (date >= today) {
+                groupKey = 'Today';
+            } else if (date >= yesterday) {
+                groupKey = 'Yesterday';
+            } else if (date >= thisWeek) {
+                groupKey = 'This Week';
+            } else if (date >= thisMonth) {
+                groupKey = 'This Month';
+            } else {
+                groupKey = 'Older';
+            }
+
+            if (!groups[groupKey]) {
+                groups[groupKey] = [];
+            }
+            groups[groupKey].push(transcript);
+        });
+
+        // Return in order
+        const orderedGroups: { title: string; transcripts: Transcript[] }[] = [];
+        const order = ['Today', 'Yesterday', 'This Week', 'This Month', 'Older'];
+        order.forEach(key => {
+            if (groups[key]) {
+                orderedGroups.push({ title: key, transcripts: groups[key] });
+            }
+        });
+
+        return orderedGroups;
+    };
     return (
         <div className="transcripts-view">
             <div className="transcripts-header-container">
@@ -71,9 +117,8 @@ export function TranscriptsView({
             </div>
 
             <div className="transcripts-list">
-                <div className="transcripts-header">
-                    <h2>All Transcripts</h2>
-                    {transcripts.length > 0 && (
+                {transcripts.length > 0 && (
+                    <div className="transcripts-header">
                         <div className="transcript-actions">
                             <button
                                 className="select-all-button"
@@ -100,8 +145,8 @@ export function TranscriptsView({
                                 </>
                             )}
                         </div>
-                    )}
-                </div>
+                    </div>
+                )}
                 {transcripts.length === 0 ? (
                     <div className="no-transcripts">
                         <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.3">
@@ -115,43 +160,48 @@ export function TranscriptsView({
                     </div>
                 ) : (
                     <div className="transcript-list-container">
-                        {transcripts.map((transcript) => {
-                            const isBlankAudio = transcript.text === "[BLANK_AUDIO]";
-                            
-                            return (
-                                <div
-                                    key={transcript.id}
-                                    className={`transcript-list-item ${selectedTranscripts.has(transcript.id) ? 'selected' : ''} ${selectedTranscript?.id === transcript.id ? 'active' : ''}`}
-                                    onClick={() => openDetailPanel(transcript)}
-                                >
-                                    <div className="transcript-row">
-                                        <input
-                                            type="checkbox"
-                                            className="transcript-checkbox"
-                                            checked={selectedTranscripts.has(transcript.id)}
-                                            onChange={(e) => {
-                                                e.stopPropagation();
-                                                toggleTranscriptSelection(transcript.id);
-                                            }}
-                                            onClick={(e) => e.stopPropagation()}
-                                        />
-                                        <span className="transcript-date">
-                                            {new Date(transcript.created_at).toLocaleDateString()} {new Date(transcript.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                        </span>
-                                        <span className="transcript-duration">
-                                            {formatDuration(transcript.duration_ms)}
-                                        </span>
-                                        <div className="transcript-preview">
-                                            {isBlankAudio ? (
-                                                <span className="transcript-empty-inline">No speech detected</span>
-                                            ) : (
-                                                <span className="transcript-text-preview">{transcript.text}</span>
-                                            )}
+                        {groupTranscriptsByDate(transcripts).map(group => (
+                            <div key={group.title} className="transcript-group">
+                                <h3 className="transcript-group-title">{group.title}</h3>
+                                {group.transcripts.map((transcript) => {
+                                    const isBlankAudio = transcript.text === "[BLANK_AUDIO]";
+                                    
+                                    return (
+                                        <div
+                                            key={transcript.id}
+                                            className={`transcript-list-item ${selectedTranscripts.has(transcript.id) ? 'selected' : ''} ${selectedTranscript?.id === transcript.id ? 'active' : ''}`}
+                                            onClick={() => openDetailPanel(transcript)}
+                                        >
+                                            <div className="transcript-row">
+                                                <input
+                                                    type="checkbox"
+                                                    className="transcript-checkbox"
+                                                    checked={selectedTranscripts.has(transcript.id)}
+                                                    onChange={(e) => {
+                                                        e.stopPropagation();
+                                                        toggleTranscriptSelection(transcript.id);
+                                                    }}
+                                                    onClick={(e) => e.stopPropagation()}
+                                                />
+                                                <span className="transcript-time">
+                                                    {new Date(transcript.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                </span>
+                                                <span className="transcript-duration">
+                                                    {formatDuration(transcript.duration_ms)}
+                                                </span>
+                                                <div className="transcript-preview">
+                                                    {isBlankAudio ? (
+                                                        <span className="transcript-empty-inline">No speech detected</span>
+                                                    ) : (
+                                                        <span className="transcript-text-preview">{transcript.text}</span>
+                                                    )}
+                                                </div>
+                                            </div>
                                         </div>
-                                    </div>
-                                </div>
-                            );
-                        })}
+                                    );
+                                })}
+                            </div>
+                        ))}
                     </div>
                 )}
             </div>
