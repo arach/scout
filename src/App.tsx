@@ -59,6 +59,7 @@ function App() {
   const [overlayType, setOverlayType] = useState<'tauri' | 'native'>('tauri');
   const [currentView, setCurrentView] = useState<View>('record');
   const [sessionStartTime] = useState(() => new Date().toISOString());
+  const processingFileRef = useRef<string | null>(null); // Track file being processed to prevent duplicates
 
   // Keep ref in sync with state
   useEffect(() => {
@@ -196,7 +197,6 @@ function App() {
     // Listen for processing status updates from the background queue
     const unsubscribeProcessing = listen('processing-status', (event) => {
       const status = event.payload as any;
-      console.log("Processing status:", status);
       
       // Update UI based on processing status
       if (status.Queued) {
@@ -225,17 +225,18 @@ function App() {
         }));
       } else if (status.Complete) {
         // Transcription complete, refresh the transcript list
-        console.log("Transcription complete, refreshing transcript list");
         loadRecentTranscripts();
         setShowSuccess(true);
         setTimeout(() => setShowSuccess(false), 2000);
         setUploadProgress({ status: 'idle' });
         setIsProcessing(false);
+        processingFileRef.current = null; // Clear the processing file reference
         
         // Native overlay state is managed by the backend
       } else if (status.Failed) {
         console.error("Processing failed:", status.Failed);
         setIsProcessing(false);
+        processingFileRef.current = null; // Clear the processing file reference
         setUploadProgress({ status: 'idle' });
         // Show error message to user
         alert(`Failed to process audio file: ${status.Failed.error || 'Unknown error'}`);
@@ -285,8 +286,6 @@ function App() {
     const setupFileDrop = async () => {
       const webview = getCurrentWebview();
       unsubscribeFileDrop = await webview.onDragDropEvent(async (event) => {
-        console.log('File drop event:', event);
-        
         // Check the event type from the event name
         if (event.event === 'tauri://drag-over') {
           setIsDragging(true);
@@ -294,6 +293,12 @@ function App() {
           setIsDragging(false);
           
           const files = (event.payload as any).paths;
+          
+          // Check if we're already processing to prevent duplicates
+          if (isProcessing) {
+            return;
+          }
+          
           const audioFiles = files.filter((filePath: string) => {
             const extension = filePath.split('.').pop()?.toLowerCase();
             return ['wav', 'mp3', 'm4a', 'flac', 'ogg', 'webm'].includes(extension || '');
@@ -302,9 +307,15 @@ function App() {
           if (audioFiles.length > 0) {
             // Process the first audio file
             const filePath = audioFiles[0];
-            console.log('Processing dropped file:', filePath);
+            
+            // Check if we're already processing this specific file
+            if (processingFileRef.current === filePath) {
+              return;
+            }
             
             try {
+              // Mark this file as being processed
+              processingFileRef.current = filePath;
               setIsProcessing(true);
               setShowSuccess(false);
               
@@ -318,12 +329,11 @@ function App() {
               const queuedFilename = await invoke<string>('transcribe_file', { 
                 filePath: filePath 
               });
-
-              console.log('File queued for processing:', queuedFilename);
             } catch (error) {
               console.error('Failed to process dropped file:', error);
               alert(`Failed to process file: ${error}`);
               setIsProcessing(false);
+              processingFileRef.current = null;
             }
           } else if (files.length > 0) {
             // Non-audio files were dropped
@@ -621,15 +631,10 @@ function App() {
         progress: 0
       });
 
-      // Show upload started message
-      console.log('Uploading file:', filePath);
-
       // Send file to backend for processing - filePath is already a string
       const queuedFilename = await invoke<string>('transcribe_file', { 
         filePath: filePath 
       });
-
-      console.log('File queued for processing:', queuedFilename);
       
       // File is now queued, processing will happen in background
       // The progress updates will come through the existing event listeners
