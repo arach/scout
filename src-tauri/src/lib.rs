@@ -20,12 +20,14 @@ use settings::SettingsManager;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::{Emitter, Manager, State, WindowEvent};
+use tauri::{Emitter, Manager, State, WindowEvent, AppHandle};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tauri::tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, MenuItemBuilder};
 use tokio::sync::Mutex;
 use chrono;
+use audio::converter::AudioConverter;
+use std::path::Path;
 
 // Overlay dimensions configuration
 const OVERLAY_EXPANDED_WIDTH: f64 = 180.0;
@@ -424,6 +426,15 @@ async fn search_transcripts(
 }
 
 #[tauri::command]
+async fn read_audio_file(audio_path: String) -> Result<Vec<u8>, String> {
+    let path = Path::new(&audio_path);
+    if path.extension().and_then(|s| s.to_str()) == Some("wav") {
+        return std::fs::read(&audio_path).map_err(|e| e.to_string());
+    }
+    AudioConverter::convert_to_wav_bytes(path)
+}
+
+#[tauri::command]
 async fn set_vad_enabled(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
     let recorder = state.recorder.lock().await;
     recorder.set_vad_enabled(enabled)
@@ -808,8 +819,6 @@ async fn update_settings(state: State<'_, AppState>, new_settings: serde_json::V
     Ok(())
 }
 
-
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -817,6 +826,7 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_http::init())
+        .plugin(tauri_plugin_fs::init())
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir().expect("Failed to get app data dir");
             println!("App data directory: {:?}", app_data_dir);
@@ -1127,6 +1137,7 @@ pub fn run() {
             save_transcript,
             get_recent_transcripts,
             search_transcripts,
+            read_audio_file,
             set_vad_enabled,
             is_vad_enabled,
             delete_transcript,
@@ -1157,4 +1168,9 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    // ... existing code ...
 }

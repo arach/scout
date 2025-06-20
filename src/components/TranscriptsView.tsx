@@ -45,18 +45,23 @@ export function TranscriptsView({
     formatDuration,
     formatFileSize,
 }: TranscriptsViewProps) {
-    const [selectedTranscript, setSelectedTranscript] = useState<Transcript | null>(null);
-    const [isPanelOpen, setIsPanelOpen] = useState(false);
+    const [panelState, setPanelState] = useState<{
+        transcript: Transcript | null;
+        isOpen: boolean;
+    }>({ transcript: null, isOpen: false });
 
     const openDetailPanel = (transcript: Transcript) => {
-        setSelectedTranscript(transcript);
-        setIsPanelOpen(true);
+        console.log('Opening detail panel for transcript:', transcript.id);
+        setPanelState({ transcript: transcript, isOpen: true });
+        console.log('Panel state set to open');
     };
 
     const closeDetailPanel = () => {
-        setIsPanelOpen(false);
+        setPanelState(prev => ({ ...prev, isOpen: false }));
         // Keep selected transcript for animation
-        setTimeout(() => setSelectedTranscript(null), 200);
+        setTimeout(() => {
+            setPanelState(prev => ({ ...prev, transcript: null }));
+        }, 200);
     };
 
     // Group transcripts by date
@@ -104,6 +109,8 @@ export function TranscriptsView({
 
         return orderedGroups;
     };
+    console.log('TranscriptsView rendering:', { transcripts: transcripts.length, isPanelOpen: panelState.isOpen, selectedTranscript: panelState.transcript?.id });
+    
     return (
         <div className="transcripts-view">
             <div className="transcripts-header-container">
@@ -173,7 +180,7 @@ export function TranscriptsView({
                                     return (
                                         <div
                                             key={transcript.id}
-                                            className={`transcript-list-item ${selectedTranscripts.has(transcript.id) ? 'selected' : ''} ${selectedTranscript?.id === transcript.id ? 'active' : ''}`}
+                                            className={`transcript-list-item ${selectedTranscripts.has(transcript.id) ? 'selected' : ''} ${panelState.transcript?.id === transcript.id ? 'active' : ''}`}
                                             onClick={() => openDetailPanel(transcript)}
                                         >
                                             <div className="transcript-row">
@@ -211,8 +218,8 @@ export function TranscriptsView({
             </div>
             
             <TranscriptDetailPanel
-                transcript={selectedTranscript}
-                isOpen={isPanelOpen}
+                transcript={panelState.transcript}
+                isOpen={panelState.isOpen}
                 onClose={closeDetailPanel}
                 onCopy={copyTranscript}
                 onDelete={showDeleteConfirmation}

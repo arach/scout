@@ -14,18 +14,33 @@ importers:
       '@tauri-apps/plugin-dialog':
         specifier: ^2.2.2
         version: 2.2.2
+      '@tauri-apps/plugin-fs':
+        specifier: ^2.3.0
+        version: 2.3.0
       '@tauri-apps/plugin-http':
         specifier: ^2.4.4
         version: 2.4.4
       '@tauri-apps/plugin-opener':
         specifier: ^2
         version: 2.2.7
+      '@wavesurfer/react':
+        specifier: ^1.0.11
+        version: 1.0.11(react@18.3.1)(wavesurfer.js@7.9.5)
+      konva:
+        specifier: ^9.3.20
+        version: 9.3.20
+      peaks.js:
+        specifier: ^0.25.0
+        version: 0.25.0
       react:
         specifier: ^18.3.1
         version: 18.3.1
       react-dom:
         specifier: ^18.3.1
         version: 18.3.1(react@18.3.1)
+      waveform-data:
+        specifier: ^4.5.2
+        version: 4.5.2
       wavesurfer.js:
         specifier: ^7.9.5
         version: 7.9.5
@@ -482,6 +497,9 @@ packages:
   '@tauri-apps/plugin-dialog@2.2.2':
     resolution: {integrity: sha512-Pm9qnXQq8ZVhAMFSEPwxvh+nWb2mk7LASVlNEHYaksHvcz8P6+ElR5U5dNL9Ofrm+uwhh1/gYKWswK8JJJAh6A==}
 
+  '@tauri-apps/plugin-fs@2.3.0':
+    resolution: {integrity: sha512-G9gEyYVUaaxhdRJBgQTTLmzAe0vtHYxYyN1oTQzU3zwvb8T+tVLcAqCdFMWHq0qGeGbmynI5whvYpcXo5LvZ1w==}
+
   '@tauri-apps/plugin-http@2.4.4':
     resolution: {integrity: sha512-IjlaaS4z8ybB10qnh6djZ2FIaHdWVs/U1D1C56udKcjX1f+jAmR8/s7qBV5cv/OmcGkOIzet3LWuH70LKf4J2A==}
 
@@ -520,6 +538,12 @@ packages:
     peerDependencies:
       vite: ^4.2.0 || ^5.0.0 || ^6.0.0 || ^7.0.0-beta.0
 
+  '@wavesurfer/react@1.0.11':
+    resolution: {integrity: sha512-DRpaA3MRTKy4Jby12xvoHASa+w31FZtxaqanXcJjfqNqfamkKi8VJfRnz+Uub9LkpdgoAc3g5SuZF75lEcGgzQ==}
+    peerDependencies:
+      react: ^18.2.0 || ^19.0.0
+      wavesurfer.js: '>=7.7.14'
+
   browserslist@4.25.0:
     resolution: {integrity: sha512-PJ8gYKeS5e/whHBh8xrwYK+dAvEj7JXtz6uTucnMRB8OiGTsKccFekoRrjajPBHV8oOY+2tI4uxeceSimKwMFA==}
     engines: {node: ^6 || ^7 || ^8 || ^9 || ^10 || ^11 || ^12 || >=13.7}
@@ -555,6 +579,9 @@ packages:
     resolution: {integrity: sha512-WUj2qlxaQtO4g6Pq5c29GTcWGDyd8itL8zTlipgECz3JesAiiOKotd8JU6otB3PACgG6xkJUyVhboMS+bje/jA==}
     engines: {node: '>=6'}
 
+  eventemitter3@4.0.7:
+    resolution: {integrity: sha512-8guHBZCwKnFhYdHr2ysuRWErTwhoN2X8XELRlrRwpmfeY2jjuUN4taQMsULKUVo1K4DvZl+0pgfyoysHxvmvEw==}
+
   fdir@6.4.6:
     resolution: {integrity: sha512-hiFoqpyZcfNm1yc4u8oWCf9A2c4D3QjCrks3zmoVKVxpQRzmPNar1hUJcBG2RQHvEVGDN+Jm81ZheVLAQMK6+w==}
     peerDependencies:
@@ -576,6 +603,9 @@ packages:
     resolution: {integrity: sha512-WOBp/EEGUiIsJSp7wcv/y6MO+lV9UoncWqxuFfm8eBwzWNgyfBd6Gz+IeKQ9jCmyhoH99g15M3T+QaVHFjizVA==}
     engines: {node: '>=4'}
 
+  inline-worker@1.1.0:
+    resolution: {integrity: sha512-2nlxBGg5Uoop6IRco9wMzlAz62690ylokrUDg3IaCi9bJaq0HykbWlRtRXgvSKiBNmCBGXnOCFBkIFjaSGJocA==}
+
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
 
@@ -588,6 +618,12 @@ packages:
     resolution: {integrity: sha512-XmOWe7eyHYH14cLdVPoyg+GOH3rYX++KpzrylJwSW98t3Nk+U8XOl8FWKOgwtzdb8lXGf6zYwDUzeHMWfxasyg==}
     engines: {node: '>=6'}
     hasBin: true
+
+  konva@7.2.5:
+    resolution: {integrity: sha512-yk/li8rUF+09QNlOdkwbEId+QvfATMe/aMGVouWW1oFoUVTYWHsQuIAE6lWy11DK8mLJEJijkNAXC5K+NVlMew==}
+
+  konva@9.3.20:
+    resolution: {integrity: sha512-7XPD/YtgfzC8b1c7z0hhY5TF1IO/pBYNa29zMTA2PeBaqI0n5YplUeo4JRuRcljeAF8lWtW65jePZZF7064c8w==}
 
   loose-envify@1.4.0:
     resolution: {integrity: sha512-lyuxPGr/Wfhrlem2CL/UcnUc1zcqKAImBDzukY7Y5F/yQiNdko6+fRLevlw1HgMySw7f611UIY408EtxRSoK3Q==}
@@ -606,6 +642,10 @@ packages:
 
   node-releases@2.0.19:
     resolution: {integrity: sha512-xxOWJsBKtzAq7DY0J+DTzuz58K8e7sJbdgwkbMWQe8UYB6ekmsQ45q0M/tJDsGaZmbC+l7n57UV8Hl5tHxO9uw==}
+
+  peaks.js@0.25.0:
+    resolution: {integrity: sha512-X2jgeGOW0nagG9me8uhuglln8UThXugBnEJOucFJy0blbzFRC/jHWAw/VPh7u0hcAZqTLPpWvGyXUEqlW7KElA==}
+    engines: {node: '>= 8.11.2'}
 
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
@@ -701,6 +741,12 @@ packages:
         optional: true
       yaml:
         optional: true
+
+  waveform-data@3.3.4:
+    resolution: {integrity: sha512-mE7455avSygHPXt3QJ0+fmpkWxWAxYVaXrInhIEksLd98NvDpxSoKDCFFM/xcSR+f7fr2OzJ5xUBZiT8ZbdBRA==}
+
+  waveform-data@4.5.2:
+    resolution: {integrity: sha512-1wDQ2LmaCM76xXXkOamWui1dp7uS2UHVeNccuHDS/qnoOrczrXR6g7Q9m/UjlibHfukxBrceoRIVTKKY1tDLdA==}
 
   wavesurfer.js@7.9.5:
     resolution: {integrity: sha512-ioOG9chuAn0bF2NYYKkZtaxjcQK/hFskLg8ViLYbJHhWPk1N5wWtuqVhqeh2ZWT2SK3t0E8UkD7lLDLuZQQaSA==}
@@ -1032,6 +1078,10 @@ snapshots:
     dependencies:
       '@tauri-apps/api': 2.5.0
 
+  '@tauri-apps/plugin-fs@2.3.0':
+    dependencies:
+      '@tauri-apps/api': 2.5.0
+
   '@tauri-apps/plugin-http@2.4.4':
     dependencies:
       '@tauri-apps/api': 2.5.0
@@ -1086,6 +1136,11 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  '@wavesurfer/react@1.0.11(react@18.3.1)(wavesurfer.js@7.9.5)':
+    dependencies:
+      react: 18.3.1
+      wavesurfer.js: 7.9.5
+
   browserslist@4.25.0:
     dependencies:
       caniuse-lite: 1.0.30001723
@@ -1135,6 +1190,8 @@ snapshots:
 
   escalade@3.2.0: {}
 
+  eventemitter3@4.0.7: {}
+
   fdir@6.4.6(picomatch@4.0.2):
     optionalDependencies:
       picomatch: 4.0.2
@@ -1146,11 +1203,17 @@ snapshots:
 
   globals@11.12.0: {}
 
+  inline-worker@1.1.0: {}
+
   js-tokens@4.0.0: {}
 
   jsesc@3.1.0: {}
 
   json5@2.2.3: {}
+
+  konva@7.2.5: {}
+
+  konva@9.3.20: {}
 
   loose-envify@1.4.0:
     dependencies:
@@ -1165,6 +1228,12 @@ snapshots:
   nanoid@3.3.11: {}
 
   node-releases@2.0.19: {}
+
+  peaks.js@0.25.0:
+    dependencies:
+      eventemitter3: 4.0.7
+      konva: 7.2.5
+      waveform-data: 3.3.4
 
   picocolors@1.1.1: {}
 
@@ -1245,6 +1314,12 @@ snapshots:
       tinyglobby: 0.2.14
     optionalDependencies:
       fsevents: 2.3.3
+
+  waveform-data@3.3.4:
+    dependencies:
+      inline-worker: 1.1.0
+
+  waveform-data@4.5.2: {}
 
   wavesurfer.js@7.9.5: {}
 

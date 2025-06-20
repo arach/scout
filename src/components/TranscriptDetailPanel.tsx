@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { WaveformPlayer } from './WaveformPlayer';
 import './TranscriptDetailPanel.css';
 
@@ -33,17 +33,57 @@ export function TranscriptDetailPanel({
     formatDuration,
     formatFileSize,
 }: TranscriptDetailPanelProps) {
-    // Handle ESC key to close panel
+    const [canRenderPlayer, setCanRenderPlayer] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false);
+
+    // Handle ESC key to close panel and manage player rendering
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if (e.key === 'Escape' && isOpen) {
                 onClose();
             }
         };
-
         document.addEventListener('keydown', handleKeyDown);
-        return () => document.removeEventListener('keydown', handleKeyDown);
+
+        let timer: number;
+        if (isOpen) {
+            // Delay rendering the heavy WaveformPlayer component to avoid issues with
+            // animations and React's StrictMode double-render in dev.
+            timer = setTimeout(() => {
+                setCanRenderPlayer(true);
+            }, 200);
+        } else {
+            setCanRenderPlayer(false);
+        }
+
+        return () => {
+            document.removeEventListener('keydown', handleKeyDown);
+            clearTimeout(timer);
+        };
     }, [isOpen, onClose]);
+
+    const handleExport = (format: 'json' | 'markdown' | 'text') => {
+        onExport([transcript], format);
+    };
+
+    const handleDelete = async () => {
+        if (
+            await confirm(
+                `Are you sure you want to delete this transcript? This action cannot be undone.`
+            )
+        ) {
+            setIsDeleting(true);
+            try {
+                await invoke('delete_transcript', { id: transcript.id });
+                onClose(); // Close the panel
+                onRefresh(); // Refresh the list
+            } catch (err) {
+                console.error('Failed to delete transcript:', err);
+                alert('Failed to delete transcript. Please check the logs.');
+                setIsDeleting(false);
+            }
+        }
+    };
 
     if (!isOpen || !transcript) return null;
 
@@ -54,10 +94,6 @@ export function TranscriptDetailPanel({
     } catch (e) {
         // Invalid JSON, ignore
     }
-
-    const handleExport = (format: 'json' | 'markdown' | 'text') => {
-        onExport([transcript], format);
-    };
 
     return (
         <>
@@ -119,7 +155,7 @@ export function TranscriptDetailPanel({
                         )}
                     </div>
 
-                    {transcript.audio_path && (
+                    {transcript.audio_path && canRenderPlayer && (
                         <WaveformPlayer 
                             audioPath={transcript.audio_path}
                             duration={transcript.duration_ms}

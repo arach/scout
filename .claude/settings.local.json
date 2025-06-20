@@ -39,7 +39,11 @@
       "Bash(git stash:*)",
       "WebFetch(domain:v2.tauri.app)",
       "Bash(./scout)",
-      "mcp__puppeteer__puppeteer_navigate"
+      "mcp__puppeteer__puppeteer_navigate",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:wavesurfer.js.org)",
+      "WebFetch(domain:www.npmjs.com)"
     ],
     "deny": []
   }

@@ -12,10 +12,15 @@
   "dependencies": {
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.2.2",
+    "@tauri-apps/plugin-fs": "^2.3.0",
     "@tauri-apps/plugin-http": "^2.4.4",
     "@tauri-apps/plugin-opener": "^2",
+    "@wavesurfer/react": "^1.0.11",
+    "konva": "^9.3.20",
+    "peaks.js": "^0.25.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "waveform-data": "^4.5.2",
     "wavesurfer.js": "^7.9.5"
   },
   "devDependencies": {
