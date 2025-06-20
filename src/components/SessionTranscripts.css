@@ -55,10 +55,9 @@
 
 .session-item-header {
     display: flex;
-    justify-content: space-between;
     align-items: center;
     margin-bottom: 8px;
-    position: relative;
+    gap: 8px;
 }
 
 .session-time {
@@ -88,25 +87,18 @@
 }
 
 .session-delete-button {
-    position: absolute;
-    right: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 20px;
-    height: 20px;
+    padding: 4px 6px;
     border: none;
-    background: var(--bg-danger, #ef4444);
-    color: white;
-    border-radius: 50%;
-    font-size: 12px;
-    font-weight: bold;
+    background: transparent;
+    color: var(--text-tertiary);
+    border-radius: 4px;
     cursor: pointer;
     opacity: 0;
     transition: all 0.15s ease;
     display: flex;
     align-items: center;
     justify-content: center;
-    line-height: 1;
+    margin-left: auto;
 }
 
 .session-item:hover .session-delete-button {
@@ -114,8 +106,9 @@
 }
 
 .session-delete-button:hover {
-    background: var(--bg-danger-hover, #dc2626);
-    transform: translateY(-50%) scale(1.1);
+    background: var(--bg-secondary);
+    color: var(--text-danger, #ef4444);
+    transform: scale(1.05);
 }
 
 @keyframes slideIn {
