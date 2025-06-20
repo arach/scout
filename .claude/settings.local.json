@@ -38,7 +38,8 @@
       "Bash(git push:*)",
       "Bash(git stash:*)",
       "WebFetch(domain:v2.tauri.app)",
-      "Bash(./scout)"
+      "Bash(./scout)",
+      "mcp__puppeteer__puppeteer_navigate"
     ],
     "deny": []
   }

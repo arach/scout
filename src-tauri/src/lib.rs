@@ -404,7 +404,7 @@ async fn save_transcript(
         "processing_type": "manual_save"
     }).to_string();
     
-    state.database.save_transcript(&text, duration_ms, Some(&metadata)).await
+    state.database.save_transcript(&text, duration_ms, Some(&metadata), None, None).await
 }
 
 #[tauri::command]

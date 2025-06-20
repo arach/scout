@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { AudioPlayer } from './AudioPlayer';
 import './TranscriptDetailPanel.css';
 
 interface Transcript {
@@ -7,6 +8,8 @@ interface Transcript {
     duration_ms: number;
     created_at: string;
     metadata?: string;
+    audio_path?: string;
+    file_size?: number;
 }
 
 interface TranscriptDetailPanelProps {
@@ -17,6 +20,7 @@ interface TranscriptDetailPanelProps {
     onDelete: (id: number, text: string) => void;
     onExport: (transcripts: Transcript[], format: 'json' | 'markdown' | 'text') => void;
     formatDuration: (ms: number) => string;
+    formatFileSize?: (bytes: number) => string;
 }
 
 export function TranscriptDetailPanel({
@@ -27,6 +31,7 @@ export function TranscriptDetailPanel({
     onDelete,
     onExport,
     formatDuration,
+    formatFileSize,
 }: TranscriptDetailPanelProps) {
     // Handle ESC key to close panel
     useEffect(() => {
@@ -104,7 +109,23 @@ export function TranscriptDetailPanel({
                                 </span>
                             </div>
                         )}
+                        {transcript.file_size && formatFileSize && (
+                            <div className="metadata-item">
+                                <span className="metadata-label">File Size</span>
+                                <span className="metadata-value">
+                                    {formatFileSize(transcript.file_size)}
+                                </span>
+                            </div>
+                        )}
                     </div>
+
+                    {transcript.audio_path && (
+                        <AudioPlayer 
+                            audioPath={transcript.audio_path}
+                            duration={transcript.duration_ms}
+                            formatDuration={formatDuration}
+                        />
+                    )}
 
                     <div className="detail-transcript">
                         <h3>Transcript</h3>

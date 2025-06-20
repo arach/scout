@@ -8,6 +8,8 @@ interface Transcript {
     duration_ms: number;
     created_at: string;
     metadata?: string;
+    audio_path?: string;
+    file_size?: number;
 }
 
 interface TranscriptsViewProps {
@@ -24,6 +26,7 @@ interface TranscriptsViewProps {
     copyTranscript: (text: string) => void;
     showDeleteConfirmation: (id: number, text: string) => void;
     formatDuration: (ms: number) => string;
+    formatFileSize?: (bytes: number) => string;
 }
 
 export function TranscriptsView({
@@ -40,6 +43,7 @@ export function TranscriptsView({
     copyTranscript,
     showDeleteConfirmation,
     formatDuration,
+    formatFileSize,
 }: TranscriptsViewProps) {
     const [selectedTranscript, setSelectedTranscript] = useState<Transcript | null>(null);
     const [isPanelOpen, setIsPanelOpen] = useState(false);
@@ -214,6 +218,7 @@ export function TranscriptsView({
                 onDelete={showDeleteConfirmation}
                 onExport={exportTranscripts}
                 formatDuration={formatDuration}
+                formatFileSize={formatFileSize}
             />
         </div>
     );
