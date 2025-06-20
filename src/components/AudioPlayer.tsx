@@ -118,13 +118,13 @@ export function AudioPlayer({ audioPath, duration, formatDuration }: AudioPlayer
                     title={isPlaying ? "Pause" : "Play"}
                 >
                     {isPlaying ? (
-                        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <rect x="5" y="4" width="3" height="12" rx="1" fill="currentColor"/>
-                            <rect x="12" y="4" width="3" height="12" rx="1" fill="currentColor"/>
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <rect x="4" y="3" width="2.5" height="10" rx="0.5" fill="currentColor"/>
+                            <rect x="9.5" y="3" width="2.5" height="10" rx="0.5" fill="currentColor"/>
                         </svg>
                     ) : (
-                        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M6 4.5V15.5L15 10L6 4.5Z" fill="currentColor"/>
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M5 3.5V12.5L12 8L5 3.5Z" fill="currentColor"/>
                         </svg>
                     )}
                 </button>
