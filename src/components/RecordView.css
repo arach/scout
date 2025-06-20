@@ -1,0 +1,58 @@
+.record-view {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    height: 100%;
+    padding: 80px 20px 40px 20px;
+    box-sizing: border-box;
+    overflow-y: auto;
+}
+
+.record-view-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    width: 100%;
+    max-width: 600px;
+}
+
+.record-button {
+    /* Styles from App.css will be reused, but we can add overrides here */
+    min-width: 200px; /* Example override */
+    min-height: 50px;
+    font-size: 18px;
+}
+
+.upload-section {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #888;
+}
+
+.upload-link-button {
+    background: none;
+    border: none;
+    color: #007acc;
+    cursor: pointer;
+    text-decoration: underline;
+    font-size: 14px;
+    padding: 0;
+}
+
+.upload-link-button:hover {
+    color: #009eff;
+}
+
+.hints-container {
+    text-align: center;
+    color: #888;
+    font-size: 13px;
+}
+
+/* Session transcripts integration */
+.record-view-content .session-transcripts {
+    width: 100%;
+    margin-top: 60px;
+} 

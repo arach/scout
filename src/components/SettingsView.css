@@ -1,0 +1,24 @@
+.settings-view {
+    padding: 20px;
+    height: 100%;
+    overflow-y: auto;
+    box-sizing: border-box;
+}
+
+.settings-view h1 {
+    margin-top: 0;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #444;
+}
+
+.settings-body {
+    display: flex;
+    flex-direction: column;
+    gap: 30px;
+}
+
+/* Re-using setting-item styles from App.css, but we can add overrides here */
+.setting-item {
+    /* Add specific styles for the settings view if needed */
+} 
