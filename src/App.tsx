@@ -6,6 +6,10 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { ModelManager } from "./components/ModelManager";
 import { FirstRunSetup } from "./components/FirstRunSetup";
+import { Sidebar } from "./components/Sidebar";
+import { RecordView } from "./components/RecordView";
+import { TranscriptsView } from "./components/TranscriptsView";
+import { SettingsView } from "./components/SettingsView";
 import "./App.css";
 
 interface Transcript {
@@ -15,6 +19,8 @@ interface Transcript {
   created_at: string;
   metadata?: string;
 }
+
+type View = 'record' | 'transcripts' | 'settings';
 
 function App() {
   const [isRecording, setIsRecording] = useState(false);
@@ -51,6 +57,8 @@ function App() {
   }>({ status: 'idle' });
   const [showFirstRun, setShowFirstRun] = useState(false);
   const [overlayType, setOverlayType] = useState<'tauri' | 'native'>('tauri');
+  const [currentView, setCurrentView] = useState<View>('record');
+  const [sessionStartTime] = useState(() => new Date().toISOString());
 
   // Keep ref in sync with state
   useEffect(() => {
@@ -815,471 +823,121 @@ function App() {
   }
 
   return (
-    <main className={`container ${isDragging ? 'drag-highlight' : ''}`}>
-      <div className="header">
-        <h1>Scout Voice Transcription</h1>
-        <div className="header-controls">
-          <input
-            type="text"
-            className="search-input"
-            placeholder="Search..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && searchTranscripts()}
+    <div className="app-container">
+      <Sidebar currentView={currentView} onViewChange={setCurrentView} />
+      <main className={`container ${isDragging ? 'drag-highlight' : ''}`}>
+        {currentView === 'record' && (
+          <RecordView
+            isRecording={isRecording}
+            isProcessing={isProcessing}
+            recordingDuration={recordingDuration}
+            hotkey={hotkey}
+            uploadProgress={uploadProgress}
+            sessionTranscripts={transcripts
+              .filter(t => new Date(t.created_at) >= new Date(sessionStartTime))
+              .slice(-10)}
+            startRecording={startRecording}
+            stopRecording={stopRecording}
+            handleFileUpload={handleFileUpload}
+            formatDuration={formatDuration}
+            formatFileSize={formatFileSize}
           />
-          <button className="settings-button" onClick={() => setShowSettings(true)}>
-            Settings
-          </button>
-        </div>
-      </div>
-      
-      <div 
-        className="recording-section"
-      >
-        <div className="recording-controls">
-          <button
-            className={`record-button ${isRecording ? 'recording' : ''} ${isProcessing ? 'processing' : ''}`}
-            onClick={isRecording ? stopRecording : startRecording}
-            disabled={isProcessing}
-          >
-            {isProcessing ? (
-              <span>Processing...</span>
-            ) : isRecording ? (
-              <div className="recording-content">
-                <div className="mini-waveform">
-                  <span className="mini-wave"></span>
-                  <span className="mini-wave"></span>
-                  <span className="mini-wave"></span>
-                </div>
-                <span className="rec-timer">{formatDuration(recordingDuration)}</span>
-              </div>
-            ) : (
-              <>
-                <div className="record-circle" />
-                <span>Start Recording</span>
-              </>
-            )}
-          </button>
-          
-          <div className="upload-divider">or</div>
-          
-          <button
-            className="upload-button"
-            onClick={handleFileUpload}
-            disabled={isProcessing}
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="17 8 12 3 7 8" />
-              <line x1="12" y1="3" x2="12" y2="15" />
-            </svg>
-            <span>Upload Audio</span>
-          </button>
-        </div>
-        
-        
-        {isRecording && (
-          <div className="recording-indicator">
-            <div className="waveform">
-              <span className="wave"></span>
-              <span className="wave"></span>
-              <span className="wave"></span>
-              <span className="wave"></span>
-              <span className="wave"></span>
-            </div>
-          </div>
         )}
-        
-        <div className="hints-container">
-          <p className="hotkey-hint">
-            {hotkey.split('+').map((key, idx) => (
-              <Fragment key={idx}>
-                {idx > 0 && ' + '}
-                <kbd>{key}</kbd>
-              </Fragment>
-            ))}
-          </p>
-          <p className="drag-hint">or drag & drop audio files</p>
-        </div>
-        
-        {uploadProgress.status !== 'idle' && (
-          <div className="upload-progress-container">
-            <div className="upload-progress-header">
-              <h3>Processing Upload</h3>
-              {uploadProgress.filename && (
-                <span className="upload-filename">{uploadProgress.filename}</span>
-              )}
-            </div>
-            
-            <div className="upload-progress-status">
-              {uploadProgress.status === 'uploading' && (
-                <>
-                  <div className="spinner"></div>
-                  <span>Uploading file...</span>
-                </>
-              )}
-              {uploadProgress.status === 'queued' && (
-                <>
-                  <div className="spinner"></div>
-                  <span>In queue{uploadProgress.queuePosition ? ` (position ${uploadProgress.queuePosition})` : ''}</span>
-                </>
-              )}
-              {uploadProgress.status === 'processing' && (
-                <>
-                  <div className="spinner"></div>
-                  <span>Processing audio file...</span>
-                </>
-              )}
-              {uploadProgress.status === 'converting' && (
-                <>
-                  <div className="spinner"></div>
-                  <span>Converting to WAV format...</span>
-                </>
-              )}
-              {uploadProgress.status === 'transcribing' && (
-                <>
-                  <div className="spinner"></div>
-                  <span>Transcribing speech to text...</span>
-                </>
-              )}
-            </div>
-            
-            {uploadProgress.fileSize && (
-              <div className="upload-file-info">
-                <span>Size: {formatFileSize(uploadProgress.fileSize)}</span>
-              </div>
-            )}
-          </div>
+        {currentView === 'transcripts' && (
+          <TranscriptsView
+            transcripts={transcripts}
+            selectedTranscripts={selectedTranscripts}
+            searchQuery={searchQuery}
+            hotkey={hotkey}
+            setSearchQuery={setSearchQuery}
+            searchTranscripts={searchTranscripts}
+            toggleTranscriptSelection={toggleTranscriptSelection}
+            selectAllTranscripts={selectAllTranscripts}
+            showBulkDeleteConfirmation={showBulkDeleteConfirmation}
+            exportTranscripts={exportTranscripts}
+            copyTranscript={copyTranscript}
+            showDeleteConfirmation={showDeleteConfirmation}
+            formatDuration={formatDuration}
+          />
         )}
-        
-        {showSuccess && (
-          <div className="success-indicator">
-            <span className="checkmark">✓</span>
-            <span>Recording saved successfully!</span>
-          </div>
+        {currentView === 'settings' && (
+          <SettingsView
+            hotkey={hotkey}
+            isCapturingHotkey={isCapturingHotkey}
+            hotkeyUpdateStatus={hotkeyUpdateStatus}
+            vadEnabled={vadEnabled}
+            overlayPosition={overlayPosition}
+            overlayType={overlayType}
+            stopCapturingHotkey={stopCapturingHotkey}
+            startCapturingHotkey={startCapturingHotkey}
+            updateHotkey={updateHotkey}
+            toggleVAD={toggleVAD}
+            updateOverlayPosition={updateOverlayPosition}
+            updateOverlayType={updateOverlayType}
+          />
         )}
-        
-        {currentTranscript && (
-          <div className="current-transcript">
-            <h3>Latest Transcript</h3>
-            <p>{currentTranscript}</p>
-          </div>
-        )}
-      </div>
-
-      {isDragging && (
-        <div className="drag-drop-overlay">
-          <div className="drag-drop-backdrop" />
-          <div className="drag-drop-container">
-            <div className="drag-drop-border">
-              <div className="drag-drop-content">
-                <div className="drag-drop-icon">
-                  <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M20 8V25M20 25L14 19M20 25L26 19" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                    <path d="M10 32H30" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.5"/>
-                  </svg>
-                </div>
-                <h2 className="drag-drop-title">Drop your audio files here</h2>
-                <p className="drag-drop-subtitle">Release to upload and transcribe</p>
-                <div className="drag-drop-formats">
-                  <span className="format-badge">WAV</span>
-                  <span className="format-badge">MP3</span>
-                  <span className="format-badge">M4A</span>
-                  <span className="format-badge">FLAC</span>
-                  <span className="format-badge">OGG</span>
-                  <span className="format-badge">WebM</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="transcripts-list">
-        <div className="transcripts-header">
-          <h2>Transcripts</h2>
-          {transcripts.length > 0 && (
-            <div className="transcript-actions">
-              <button 
-                className="select-all-button"
-                onClick={selectAllTranscripts}
-              >
-                {selectedTranscripts.size === transcripts.length ? 'Deselect All' : 'Select All'}
-              </button>
-              {selectedTranscripts.size > 0 && (
-                <>
-                  <button
-                    className="delete-button"
-                    onClick={showBulkDeleteConfirmation}
-                  >
-                    Delete ({selectedTranscripts.size})
-                  </button>
-                  <div className="export-menu">
-                    <button className="export-button">Export</button>
-                    <div className="export-options">
-                      <button onClick={() => exportTranscripts('json')}>JSON</button>
-                      <button onClick={() => exportTranscripts('markdown')}>Markdown</button>
-                      <button onClick={() => exportTranscripts('text')}>Text</button>
-                    </div>
+        {isDragging && (
+          <div className="drag-drop-overlay">
+            <div className="drag-drop-backdrop" />
+            <div className="drag-drop-container">
+              <div className="drag-drop-border">
+                <div className="drag-drop-content">
+                  <div className="drag-drop-icon">
+                    <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M20 8V25M20 25L14 19M20 25L26 19" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M10 32H30" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.5"/>
+                    </svg>
                   </div>
-                </>
-              )}
-            </div>
-          )}
-        </div>
-        {transcripts.length === 0 ? (
-          <div className="no-transcripts">
-            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.3">
-              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>
-              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-              <line x1="12" y1="19" x2="12" y2="22"/>
-              <line x1="8" y1="22" x2="16" y2="22"/>
-            </svg>
-            <h3>No transcripts yet</h3>
-            <p>Press {hotkey.split('+').join(' + ')} or click "Start Recording" to begin</p>
-          </div>
-        ) : (
-          transcripts.map((transcript) => (
-            <div 
-              key={transcript.id} 
-              className={`transcript-item ${selectedTranscripts.has(transcript.id) ? 'selected' : ''}`}
-            >
-              <input
-                type="checkbox"
-                className="transcript-checkbox"
-                checked={selectedTranscripts.has(transcript.id)}
-                onChange={() => toggleTranscriptSelection(transcript.id)}
-              />
-              <div className="transcript-content">
-                <div className="transcript-header">
-                  <span className="transcript-date">
-                    {new Date(transcript.created_at).toLocaleString()}
-                  </span>
-                  <span className="transcript-duration">
-                    {formatDuration(transcript.duration_ms)}
-                  </span>
+                  <h2 className="drag-drop-title">Drop your audio files here</h2>
+                  <p className="drag-drop-subtitle">Release to upload and transcribe</p>
+                  <div className="drag-drop-formats">
+                    <span className="format-badge">WAV</span>
+                    <span className="format-badge">MP3</span>
+                    <span className="format-badge">M4A</span>
+                    <span className="format-badge">FLAC</span>
+                    <span className="format-badge">OGG</span>
+                    <span className="format-badge">WebM</span>
+                  </div>
                 </div>
-                <p className="transcript-text">
-                  {transcript.text === "[BLANK_AUDIO]" ? (
-                    <span className="transcript-empty">
-                      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style={{ marginRight: '6px', verticalAlign: 'text-bottom' }}>
-                        <path d="M8 1a7 7 0 100 14A7 7 0 008 1zM7 4h2v5H7V4zm0 6h2v2H7v-2z"/>
-                      </svg>
-                      No speech detected in recording
-                    </span>
-                  ) : (
-                    transcript.text
-                  )}
-                </p>
               </div>
-              <div className="transcript-item-actions">
-                <button
-                  className="copy-button"
-                  onClick={() => copyTranscript(transcript.text)}
-                  title="Copy transcript"
+            </div>
+          </div>
+        )}
+
+        {deleteConfirmation.show && (
+          <div className="delete-modal-overlay">
+            <div className="delete-modal">
+              <div className="delete-modal-header">
+                <h3>Confirm Delete</h3>
+              </div>
+              <div className="delete-modal-body">
+                <p>Are you sure you want to delete {deleteConfirmation.isBulk ? deleteConfirmation.transcriptText : 'this transcript'}?</p>
+                {!deleteConfirmation.isBulk && (
+                  <div className="delete-preview">
+                    "{deleteConfirmation.transcriptText}"
+                  </div>
+                )}
+                <p className="delete-warning">This action cannot be undone.</p>
+              </div>
+              <div className="delete-modal-footer">
+                <button 
+                  className="cancel-button"
+                  onClick={() => setDeleteConfirmation({ show: false, transcriptId: null, transcriptText: "", isBulk: false })}
                 >
-                  Copy
+                  Cancel
                 </button>
-                <button
-                  className="delete-item-button"
-                  onClick={() => showDeleteConfirmation(transcript.id, transcript.text)}
-                  title="Delete transcript"
+                <button 
+                  className="confirm-delete-button"
+                  onClick={confirmDelete}
                 >
                   Delete
                 </button>
               </div>
             </div>
-          ))
+          </div>
         )}
-      </div>
-
-      {showSettings && (
-        <div className="settings-modal">
-          <div className="settings-content">
-            <div className="settings-header">
-              <h2>Settings</h2>
-              <button className="close-button" onClick={() => setShowSettings(false)}>
-                ×
-              </button>
-            </div>
-            
-            <div className="settings-body">
-              <div className="setting-item">
-                <label>Global Hotkey</label>
-                <div className="hotkey-input-group">
-                  <div className={`hotkey-display ${isCapturingHotkey ? 'capturing' : ''}`}>
-                    {isCapturingHotkey ? (
-                      <span className="capturing-text">Press shortcut keys...</span>
-                    ) : (
-                      <span className="hotkey-keys">
-                        {hotkey.split('+').map((key, idx) => (
-                          <Fragment key={idx}>
-                            {idx > 0 && <span className="plus">+</span>}
-                            <kbd>{key}</kbd>
-                          </Fragment>
-                        ))}
-                      </span>
-                    )}
-                  </div>
-                  {isCapturingHotkey ? (
-                    <button onClick={stopCapturingHotkey} className="cancel-button">
-                      Cancel
-                    </button>
-                  ) : (
-                    <>
-                      <button onClick={startCapturingHotkey}>
-                        Capture
-                      </button>
-                      <button onClick={() => updateHotkey(hotkey)} className="apply-button">
-                        Apply
-                      </button>
-                    </>
-                  )}
-                </div>
-                <p className="setting-hint">
-                  Click "Capture" and press your desired shortcut combination
-                </p>
-                {hotkeyUpdateStatus === 'success' && (
-                  <p className="setting-success">✓ Shortcut updated successfully!</p>
-                )}
-                {hotkeyUpdateStatus === 'error' && (
-                  <p className="setting-error">Failed to update shortcut. Please try a different combination.</p>
-                )}
-              </div>
-              
-              <div className="setting-item">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={vadEnabled}
-                    onChange={toggleVAD}
-                  />
-                  Voice Activity Detection
-                </label>
-                <p className="setting-hint">
-                  Automatically start recording when you speak
-                </p>
-              </div>
-              
-              <div className="setting-item">
-                <label>Overlay Position</label>
-                <div className="overlay-position-grid">
-                  <button
-                    className={`position-button ${overlayPosition === 'top-left' ? 'active' : ''}`}
-                    onClick={() => updateOverlayPosition('top-left')}
-                    title="Top Left"
-                  >↖</button>
-                  <button
-                    className={`position-button ${overlayPosition === 'top-center' ? 'active' : ''}`}
-                    onClick={() => updateOverlayPosition('top-center')}
-                    title="Top Center"
-                  >↑</button>
-                  <button
-                    className={`position-button ${overlayPosition === 'top-right' ? 'active' : ''}`}
-                    onClick={() => updateOverlayPosition('top-right')}
-                    title="Top Right"
-                  >↗</button>
-                  
-                  <button
-                    className={`position-button ${overlayPosition === 'left-center' ? 'active' : ''}`}
-                    onClick={() => updateOverlayPosition('left-center')}
-                    title="Left Center"
-                  >←</button>
-                  <button
-                    className="position-button center" disabled
-                  >●</button>
-                  <button
-                    className={`position-button ${overlayPosition === 'right-center' ? 'active' : ''}`}
-                    onClick={() => updateOverlayPosition('right-center')}
-                    title="Right Center"
-                  >→</button>
-                  
-                  <button
-                    className={`position-button ${overlayPosition === 'bottom-left' ? 'active' : ''}`}
-                    onClick={() => updateOverlayPosition('bottom-left')}
-                    title="Bottom Left"
-                  >↙</button>
-                  <button
-                    className={`position-button ${overlayPosition === 'bottom-center' ? 'active' : ''}`}
-                    onClick={() => updateOverlayPosition('bottom-center')}
-                    title="Bottom Center"
-                  >↓</button>
-                  <button
-                    className={`position-button ${overlayPosition === 'bottom-right' ? 'active' : ''}`}
-                    onClick={() => updateOverlayPosition('bottom-right')}
-                    title="Bottom Right"
-                  >↘</button>
-                </div>
-                <p className="setting-hint">
-                  Choose where the recording indicator appears on your screen
-                </p>
-              </div>
-              
-              <div className="setting-item">
-                <label>Overlay Type</label>
-                <div className="overlay-type-toggle">
-                  <button
-                    className={`overlay-type-button ${overlayType === 'tauri' ? 'active' : ''}`}
-                    onClick={() => updateOverlayType('tauri')}
-                  >
-                    <span className="type-label">Standard</span>
-                    <span className="type-description">WebView-based overlay</span>
-                  </button>
-                  <button
-                    className={`overlay-type-button ${overlayType === 'native' ? 'active' : ''}`}
-                    onClick={() => updateOverlayType('native')}
-                  >
-                    <span className="type-label">Native (Beta)</span>
-                    <span className="type-description">True hover-without-focus</span>
-                  </button>
-                </div>
-                <p className="setting-hint">
-                  Native overlay provides better hover detection without window focus
-                </p>
-              </div>
-              
-              <div className="setting-item model-manager-section">
-                <ModelManager />
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {deleteConfirmation.show && (
-        <div className="delete-modal-overlay">
-          <div className="delete-modal">
-            <div className="delete-modal-header">
-              <h3>Confirm Delete</h3>
-            </div>
-            <div className="delete-modal-body">
-              <p>Are you sure you want to delete {deleteConfirmation.isBulk ? deleteConfirmation.transcriptText : 'this transcript'}?</p>
-              {!deleteConfirmation.isBulk && (
-                <div className="delete-preview">
-                  "{deleteConfirmation.transcriptText}"
-                </div>
-              )}
-              <p className="delete-warning">This action cannot be undone.</p>
-            </div>
-            <div className="delete-modal-footer">
-              <button 
-                className="cancel-button"
-                onClick={() => setDeleteConfirmation({ show: false, transcriptId: null, transcriptText: "", isBulk: false })}
-              >
-                Cancel
-              </button>
-              <button 
-                className="confirm-delete-button"
-                onClick={confirmDelete}
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      
-    </main>
+      </main>
+    </div>
   );
 }
 

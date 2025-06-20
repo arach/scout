@@ -1,0 +1,91 @@
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  width: 52px;
+  background-color: var(--bg-secondary);
+  border-right: 1px solid var(--border-primary);
+  padding-top: 8px;
+}
+
+.sidebar-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  width: 52px;
+  height: 52px;
+  position: relative;
+  transition: color 0.15s ease, background-color 0.15s ease;
+  opacity: 0.6;
+}
+
+.sidebar-button svg {
+  width: 20px;
+  height: 20px;
+}
+
+.sidebar-button:hover {
+  opacity: 0.8;
+  color: var(--text-primary);
+  background-color: var(--bg-hover);
+}
+
+.sidebar-button.active {
+  opacity: 1;
+  color: var(--accent-primary);
+  background-color: var(--bg-active);
+  position: relative;
+}
+
+.sidebar-button.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 24px;
+  background-color: var(--accent-primary);
+  border-radius: 0 2px 2px 0;
+}
+
+.sidebar-button .sidebar-tooltip {
+  position: absolute;
+  left: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  background-color: rgba(0, 0, 0, 0.9);
+  color: rgba(255, 255, 255, 0.9);
+  padding: 6px 12px;
+  border-radius: 6px;
+  white-space: nowrap;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.15s ease, visibility 0.15s ease;
+  margin-left: 8px;
+  z-index: 1000;
+  font-size: 12px;
+  font-weight: 500;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.sidebar-button:hover .sidebar-tooltip {
+  visibility: visible;
+  opacity: 1;
+  transition-delay: 0.5s;
+}
+
+/* Dark mode adjustments */
+@media (prefers-color-scheme: dark) {
+  .sidebar-button.active {
+    background-color: rgba(74, 158, 255, 0.1);
+  }
+  
+  .sidebar-button:hover:not(.active) {
+    background-color: rgba(255, 255, 255, 0.05);
+  }
+} 
