@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { AudioPlayer } from './AudioPlayer';
+import { WaveformPlayer } from './WaveformPlayer';
 import './TranscriptDetailPanel.css';
 
 interface Transcript {
@@ -120,7 +120,7 @@ export function TranscriptDetailPanel({
                     </div>
 
                     {transcript.audio_path && (
-                        <AudioPlayer 
+                        <WaveformPlayer 
                             audioPath={transcript.audio_path}
                             duration={transcript.duration_ms}
                             formatDuration={formatDuration}

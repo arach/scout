@@ -1,0 +1,160 @@
+.waveform-player {
+    padding: 0;
+    margin: 0 0 16px 0;
+}
+
+.waveform-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+    margin-bottom: 8px;
+}
+
+.play-pause-button {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background-color: var(--accent-primary);
+    color: white;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.12s ease;
+    flex-shrink: 0;
+    opacity: 0.9;
+}
+
+.play-pause-button:hover {
+    opacity: 1;
+    transform: scale(1.02);
+}
+
+.play-pause-button:active {
+    transform: scale(0.98);
+}
+
+.play-pause-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background-color: var(--bg-tertiary);
+}
+
+.play-pause-button:disabled:hover {
+    transform: none;
+    background-color: var(--bg-tertiary);
+}
+
+.loading-spinner {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.waveform-timeline {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.time-display {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    font-family: "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", monospace;
+    font-weight: 400;
+}
+
+.time-separator {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    font-family: "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", monospace;
+    opacity: 0.5;
+}
+
+.playback-rate-button {
+    padding: 4px 8px;
+    background-color: transparent;
+    border: 1px solid var(--border-secondary);
+    border-radius: 3px;
+    color: var(--text-secondary);
+    font-size: 10px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.12s ease;
+    font-family: "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", monospace;
+    min-width: 28px;
+    text-align: center;
+    margin-left: auto;
+}
+
+.playback-rate-button:hover {
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+    border-color: var(--border-primary);
+}
+
+.playback-rate-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.waveform-container {
+    position: relative;
+    background-color: var(--bg-secondary);
+    border-radius: 4px;
+    border: 1px solid var(--border-secondary);
+    overflow: hidden;
+}
+
+.waveform {
+    width: 100%;
+    cursor: pointer;
+}
+
+.loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: var(--bg-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+}
+
+.loading-text {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+.error-message {
+    color: var(--text-danger, #ef4444);
+    font-size: 12px;
+    margin-bottom: 8px;
+    padding: 8px 12px;
+    background-color: var(--bg-danger, rgba(239, 68, 68, 0.1));
+    border-radius: 4px;
+    border: 1px solid var(--border-danger, rgba(239, 68, 68, 0.2));
+}
+
+/* Dark mode adjustments */
+@media (prefers-color-scheme: dark) {
+    .waveform-container {
+        background-color: var(--bg-tertiary);
+    }
+}
+
+/* Make sure WaveSurfer uses our CSS variables */
+.waveform wave {
+    --wave-color: var(--border-secondary);
+    --progress-color: var(--accent-primary);
+    --cursor-color: var(--accent-primary);
+}
