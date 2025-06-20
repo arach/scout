@@ -1,7 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
-import WaveSurfer from 'wavesurfer.js';
-import { convertFileSrc } from '@tauri-apps/api/core';
+import React, { useState, useEffect, useMemo } from 'react';
+import WavesurferPlayer from '@wavesurfer/react';
 import './WaveformPlayer.css';
+import { useAudioBlob } from '../hooks/useAudioBlob';
+
+const ZOOM_LEVELS = [50, 100, 200, 400, 800];
+const INITIAL_ZOOM_INDEX = 1;
 
 interface WaveformPlayerProps {
     audioPath: string;
@@ -10,165 +13,156 @@ interface WaveformPlayerProps {
 }
 
 export function WaveformPlayer({ audioPath, duration, formatDuration }: WaveformPlayerProps) {
-    const waveformRef = useRef<HTMLDivElement>(null);
-    const wavesurfer = useRef<WaveSurfer | null>(null);
+    const [wavesurfer, setWavesurfer] = useState<any>(null);
+    const [isReady, setIsReady] = useState(false);
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
-    const [playbackRate, setPlaybackRate] = useState(1);
-    const [isLoading, setIsLoading] = useState(true);
-    const [hasError, setHasError] = useState(false);
+    const [actualDuration, setActualDuration] = useState(duration);
 
-    // Convert the file path to a URL that can be loaded by WaveSurfer
-    const audioUrl = convertFileSrc(audioPath);
+    const { blob, isLoading: isBlobLoading, error: blobError } = useAudioBlob(audioPath);
 
+    // Create blob URL for WaveSurfer
+    const audioUrl = useMemo(() => {
+        if (!blob) return null;
+        const url = URL.createObjectURL(blob);
+        console.log('🎵 Created blob URL:', url);
+        return url;
+    }, [blob]);
+
+    // Cleanup blob URL when component unmounts or blob changes
     useEffect(() => {
-        if (!waveformRef.current) return;
-
-        // Get computed CSS variables
-        const computedStyle = getComputedStyle(document.documentElement);
-        const waveColor = computedStyle.getPropertyValue('--border-secondary').trim() || '#dddddd';
-        const progressColor = computedStyle.getPropertyValue('--accent-primary').trim() || '#007acc';
-
-        // Initialize WaveSurfer
-        wavesurfer.current = WaveSurfer.create({
-            container: waveformRef.current,
-            waveColor: waveColor,
-            progressColor: progressColor,
-            cursorColor: progressColor,
-            barWidth: 2,
-            barGap: 1,
-            barRadius: 2,
-            responsive: true,
-            height: 48,
-            normalize: true,
-            backend: 'WebAudio',
-            mediaControls: false,
-        });
-
-        // Event listeners
-        wavesurfer.current.on('ready', () => {
-            console.log('WaveSurfer ready');
-            setIsLoading(false);
-            setHasError(false);
-        });
-
-        wavesurfer.current.on('loading', (percent) => {
-            console.log('WaveSurfer loading:', percent);
-        });
-
-        wavesurfer.current.on('error', (error) => {
-            console.error('WaveSurfer error:', error);
-            setHasError(true);
-            setIsLoading(false);
-        });
-
-        wavesurfer.current.on('play', () => {
-            setIsPlaying(true);
-        });
-
-        wavesurfer.current.on('pause', () => {
-            setIsPlaying(false);
-        });
-
-        wavesurfer.current.on('finish', () => {
-            setIsPlaying(false);
-        });
-
-        wavesurfer.current.on('audioprocess', () => {
-            if (wavesurfer.current) {
-                const current = wavesurfer.current.getCurrentTime();
-                setCurrentTime(current * 1000); // Convert to milliseconds
-            }
-        });
-
-        wavesurfer.current.on('seek', () => {
-            if (wavesurfer.current) {
-                const current = wavesurfer.current.getCurrentTime();
-                setCurrentTime(current * 1000);
-            }
-        });
-
-        // Load the audio
-        wavesurfer.current.load(audioUrl);
-
         return () => {
-            if (wavesurfer.current) {
-                wavesurfer.current.destroy();
+            if (audioUrl) {
+                console.log('🎵 Revoking blob URL:', audioUrl);
+                URL.revokeObjectURL(audioUrl);
             }
         };
     }, [audioUrl]);
 
+    const onReady = (ws: any) => {
+        console.log('🎵 WaveSurfer ready!');
+        const audioDuration = ws.getDuration();
+        console.log('🎵 WaveSurfer duration:', audioDuration);
+        setActualDuration(audioDuration * 1000); // Convert to milliseconds
+        setWavesurfer(ws);
+        setIsReady(true);
+    };
+
+    const onPlay = () => {
+        console.log('🎵 WaveSurfer playing');
+        setIsPlaying(true);
+    };
+
+    const onPause = () => {
+        console.log('🎵 WaveSurfer paused');
+        setIsPlaying(false);
+    };
+
+    const onTimeupdate = (time: number) => {
+        setCurrentTime(time * 1000);
+    };
+
+    const [playbackRate, setPlaybackRate] = useState(1);
+    const [currentZoomIndex, setCurrentZoomIndex] = useState(INITIAL_ZOOM_INDEX);
+
     const togglePlayPause = () => {
-        if (!wavesurfer.current || hasError) return;
-        wavesurfer.current.playPause();
+        if (!wavesurfer) return;
+        console.log('🎵 WaveformPlayer: togglePlayPause called');
+        wavesurfer.playPause();
     };
 
     const handlePlaybackRateChange = () => {
-        if (!wavesurfer.current) return;
+        if (!wavesurfer) return;
         const rates = [1, 1.25, 1.5, 1.75, 2];
         const currentIndex = rates.indexOf(playbackRate);
         const nextIndex = (currentIndex + 1) % rates.length;
         const newRate = rates[nextIndex];
-        
-        wavesurfer.current.setPlaybackRate(newRate);
+        console.log('🎵 WaveformPlayer: Setting playback rate to', newRate);
         setPlaybackRate(newRate);
+        wavesurfer.setPlaybackRate(newRate);
     };
+
+    const handleZoomChange = (direction: 'in' | 'out') => {
+        if (!wavesurfer) return;
+        
+        let newIndex = currentZoomIndex;
+        
+        if (direction === 'in' && currentZoomIndex < ZOOM_LEVELS.length - 1) {
+            newIndex = currentZoomIndex + 1;
+        } else if (direction === 'out' && currentZoomIndex > 0) {
+            newIndex = currentZoomIndex - 1;
+        }
+        
+        if (newIndex !== currentZoomIndex) {
+            console.log('🎵 WaveformPlayer: Zooming to level', ZOOM_LEVELS[newIndex]);
+            setCurrentZoomIndex(newIndex);
+            wavesurfer.zoom(ZOOM_LEVELS[newIndex]);
+        }
+    };
+
+    const isLoading = isBlobLoading || !isReady;
+    const error = blobError;
 
     return (
         <div className="waveform-player">
-            {hasError && (
-                <div className="error-message">
-                    Error loading audio file. The file may be missing or in an unsupported format.
-                </div>
-            )}
-            
             <div className="waveform-controls">
-                <button 
-                    className="play-pause-button" 
-                    onClick={togglePlayPause}
-                    disabled={isLoading || hasError}
-                    title={isPlaying ? "Pause" : "Play"}
-                >
-                    {isLoading ? (
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <circle cx="8" cy="8" r="3" stroke="currentColor" strokeWidth="1" fill="none" strokeDasharray="5,2" className="loading-spinner"/>
-                        </svg>
-                    ) : isPlaying ? (
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <rect x="4" y="3" width="2.5" height="10" rx="0.5" fill="currentColor"/>
-                            <rect x="9.5" y="3" width="2.5" height="10" rx="0.5" fill="currentColor"/>
-                        </svg>
-                    ) : (
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M5 3.5V12.5L12 8L5 3.5Z" fill="currentColor"/>
-                        </svg>
-                    )}
+                <button onClick={togglePlayPause} className="play-pause-button" disabled={isLoading || !!error}>
+                    {isLoading ? <div className="loading-spinner" /> : isPlaying ? '❚❚' : '►'}
                 </button>
-
                 <div className="waveform-timeline">
                     <span className="time-display">{formatDuration(currentTime)}</span>
                     <span className="time-separator">/</span>
-                    <span className="time-display">{formatDuration(duration)}</span>
+                    <span className="time-display">{formatDuration(actualDuration)}</span>
                 </div>
-
-                <button 
-                    className="playback-rate-button"
-                    onClick={handlePlaybackRateChange}
-                    disabled={isLoading || hasError}
-                    title="Playback speed"
-                >
+                <button onClick={handlePlaybackRateChange} className="playback-rate-button" disabled={isLoading || !!error}>
                     {playbackRate}x
                 </button>
+                <div className="zoom-controls">
+                    <button 
+                        onClick={() => handleZoomChange('out')} 
+                        className="zoom-button" 
+                        disabled={isLoading || !!error || currentZoomIndex === 0}
+                        title="Zoom Out"
+                    >
+                        −
+                    </button>
+                    <button 
+                        onClick={() => handleZoomChange('in')} 
+                        className="zoom-button" 
+                        disabled={isLoading || !!error || currentZoomIndex === ZOOM_LEVELS.length - 1}
+                        title="Zoom In"
+                    >
+                        +
+                    </button>
+                </div>
             </div>
-
+            
             <div className="waveform-container">
-                <div ref={waveformRef} className="waveform" />
-                {isLoading && (
+                {audioUrl ? (
+                    <WavesurferPlayer
+                        height={120}
+                        waveColor="#ddd"
+                        progressColor="#0066cc"
+                        cursorColor="#0066cc"
+                        url={audioUrl}
+                        onReady={onReady}
+                        onPlay={onPlay}
+                        onPause={onPause}
+                        onTimeupdate={onTimeupdate}
+                        barWidth={3}
+                        barGap={1}
+                        barRadius={3}
+                        normalize={true}
+                        interact={true}
+                    />
+                ) : (
                     <div className="loading-overlay">
                         <div className="loading-text">Loading waveform...</div>
                     </div>
                 )}
             </div>
+
+            {error && <div className="error-message">{error}</div>}
         </div>
     );
 }

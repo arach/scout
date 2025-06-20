@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::fs::File;
+use std::io::Cursor;
 use symphonia::core::audio::AudioBufferRef;
 use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
 use symphonia::core::errors::Error;
@@ -12,6 +13,88 @@ use hound::{WavWriter, WavSpec};
 pub struct AudioConverter;
 
 impl AudioConverter {
+    /// Convert any audio file to WAV format and return as a byte vector
+    pub fn convert_to_wav_bytes(input_path: &Path) -> Result<Vec<u8>, String> {
+        let file = File::open(input_path)
+            .map_err(|e| format!("Failed to open input file: {}", e))?;
+        let mss = MediaSourceStream::new(Box::new(file), Default::default());
+        let mut hint = Hint::new();
+        if let Some(ext) = input_path.extension() {
+            if let Some(ext_str) = ext.to_str() {
+                hint.with_extension(ext_str);
+            }
+        }
+        let meta_opts: MetadataOptions = Default::default();
+        let fmt_opts: FormatOptions = Default::default();
+        let probed = symphonia::default::get_probe()
+            .format(&hint, mss, &fmt_opts, &meta_opts)
+            .map_err(|e| format!("Failed to probe audio format: {}", e))?;
+        let mut format = probed.format;
+        let track = format
+            .tracks()
+            .iter()
+            .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
+            .ok_or("No audio tracks found")?;
+        
+        let track_id = track.id;
+        let dec_opts: DecoderOptions = Default::default();
+        let mut decoder = symphonia::default::get_codecs()
+            .make(&track.codec_params, &dec_opts)
+            .map_err(|e| format!("Failed to create decoder: {}", e))?;
+
+        let sample_rate = track.codec_params.sample_rate.unwrap_or(44100);
+        let channels = track.codec_params.channels.map(|c| c.count()).unwrap_or(1) as u16;
+
+        let spec = WavSpec {
+            channels,
+            sample_rate,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+
+        let mut buffer = Cursor::new(Vec::new());
+        let mut wav_writer = WavWriter::new(&mut buffer, spec)
+            .map_err(|e| format!("Failed to create WAV writer: {}", e))?;
+
+        loop {
+            let packet = match format.next_packet() {
+                Ok(packet) => packet,
+                Err(Error::IoError(_)) => break,
+                Err(Error::ResetRequired) => {
+                    decoder.reset();
+                    continue;
+                }
+                Err(err) => return Err(format!("Decode error: {}", err)),
+            };
+
+            if packet.track_id() != track_id {
+                continue;
+            }
+
+            match decoder.decode(&packet) {
+                Ok(decoded) => {
+                    let samples = Self::convert_samples_to_f32(decoded);
+                    for sample in samples {
+                        let sample_i16 = (sample.clamp(-1.0, 1.0) * 32767.0) as i16;
+                        wav_writer.write_sample(sample_i16)
+                            .map_err(|e| format!("Failed to write sample: {}", e))?;
+                    }
+                }
+                Err(Error::IoError(_)) => break,
+                Err(Error::ResetRequired) => {
+                    decoder.reset();
+                    continue;
+                }
+                Err(err) => return Err(format!("Decode error: {}", err)),
+            }
+        }
+
+        wav_writer.finalize()
+            .map_err(|e| format!("Failed to finalize WAV writer: {}", e))?;
+        
+        Ok(buffer.into_inner())
+    }
+
     /// Convert any audio file to WAV format using Symphonia
     pub fn convert_to_wav(input_path: &Path, output_path: &Path) -> Result<(), String> {
         // Open the input file

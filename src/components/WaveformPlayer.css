@@ -103,16 +103,64 @@
     cursor: not-allowed;
 }
 
+.zoom-controls {
+    display: flex;
+    gap: 2px;
+    margin-left: 8px;
+}
+
+.zoom-button {
+    width: 24px;
+    height: 24px;
+    background-color: transparent;
+    border: 1px solid var(--border-secondary);
+    border-radius: 3px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.12s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", monospace;
+}
+
+.zoom-button:hover:not(:disabled) {
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+    border-color: var(--border-primary);
+}
+
+.zoom-button:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+.zoom-button:active:not(:disabled) {
+    transform: scale(0.95);
+    background-color: var(--bg-tertiary);
+}
+
 .waveform-container {
     position: relative;
+    margin: 12px 0;
+    height: 120px;
     background-color: var(--bg-secondary);
-    border-radius: 4px;
     border: 1px solid var(--border-secondary);
+    border-radius: 4px;
     overflow: hidden;
+    transition: all 0.12s ease;
+}
+
+.waveform-container:hover {
+    border-color: var(--border-primary);
+    background-color: var(--bg-tertiary);
 }
 
 .waveform {
     width: 100%;
+    height: 100%;
     cursor: pointer;
 }
 
@@ -152,9 +200,17 @@
     }
 }
 
-/* Make sure WaveSurfer uses our CSS variables */
-.waveform wave {
-    --wave-color: var(--border-secondary);
-    --progress-color: var(--accent-primary);
-    --cursor-color: var(--accent-primary);
+/* WaveSurfer canvas styling */
+.waveform canvas {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+/* Prevent UI blocking issues */
+.waveform-player * {
+    pointer-events: auto;
+}
+
+.waveform {
+    pointer-events: auto;
 }
