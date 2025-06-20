@@ -118,7 +118,6 @@ class WaveformView: NSView {
     
     func startAnimating() {
         stopAnimating()
-        print("WaveformView: Starting animation")
         // Set initial volume to show some movement
         if volumeLevel == 0 {
             volumeLevel = 0.1
@@ -141,9 +140,6 @@ class WaveformView: NSView {
     func setVolumeLevel(_ level: CGFloat) {
         volumeLevel = max(0, min(1, level))
         // Debug: log every 10th update to reduce noise
-        if Int.random(in: 0..<10) == 0 && level > 0.01 {
-            print("WaveformView volume level: \(level)")
-        }
         
         // Force redraw
         needsDisplay = true
@@ -815,7 +811,6 @@ class OverlayContentView: NSView {
             activityIndicator.stopAnimation(nil)
             waveformView.startAnimating()
             processingDotsView.stopAnimating()
-            print("setState: Recording - waveform should be animating")
             
         case .processing:
             // Processing state only shows dots, no text

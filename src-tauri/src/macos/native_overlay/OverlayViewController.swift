@@ -156,7 +156,6 @@ class OverlayViewController: NSViewController {
     }
     
     func setIdleState() {
-        print("Setting idle state - resetting all hover tracking")
         currentState = .idle
         isExpanded = false
         isHovering = false
@@ -174,12 +173,10 @@ class OverlayViewController: NSViewController {
             if let panel = self.panel {
                 panel.acceptsMouseMovedEvents = true
                 panel.ignoresMouseEvents = false
-                print("Panel mouse event settings restored - accepts: \(panel.acceptsMouseMovedEvents), ignores: \(panel.ignoresMouseEvents)")
             }
             
             // Force tracking area update
             self.view.updateTrackingAreas()
-            print("Tracking areas updated for idle state")
         }
     }
     
