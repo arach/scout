@@ -2,6 +2,25 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Git Commit Guidelines
+
+Use Gitmoji (https://gitmoji.dev/) in all commit messages:
+- ✨ `:sparkles:` New features
+- 🐛 `:bug:` Bug fixes
+- 🎨 `:art:` Code structure/format improvements
+- ⚡️ `:zap:` Performance improvements
+- 🔧 `:wrench:` Configuration changes
+- 📝 `:memo:` Documentation updates
+- ♻️ `:recycle:` Refactoring
+- 🔥 `:fire:` Removing code/files
+- 🚀 `:rocket:` Deploying/releasing
+- 💄 `:lipstick:` UI/style updates
+- 🩹 `:adhesive_bandage:` Simple fixes
+- 🔊 `:loud_sound:` Adding logs
+- 🔇 `:mute:` Removing logs
+
+Example: `✨ Add voice activity detection for automatic recording`
+
 ## Project Overview
 
 Scout is a cross-platform local-first dictation application built with:
