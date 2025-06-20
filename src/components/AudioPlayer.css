@@ -75,9 +75,9 @@
     top: 50%;
     left: 0;
     right: 0;
-    height: 3px;
+    height: 4px;
     background: var(--border-secondary);
-    border-radius: 1.5px;
+    border-radius: 2px;
     transform: translateY(-50%);
     pointer-events: none;
 }
@@ -85,7 +85,7 @@
 .seek-bar-progress {
     height: 100%;
     background: var(--accent-primary);
-    border-radius: 1.5px;
+    border-radius: 2px;
     transition: width 0.1s ease;
     opacity: 0.8;
 }
@@ -107,8 +107,8 @@
 
 .audio-seek-bar::-webkit-slider-track {
     background: transparent;
-    height: 3px;
-    border-radius: 1.5px;
+    height: 4px;
+    border-radius: 2px;
 }
 
 .audio-seek-bar::-webkit-slider-thumb {
@@ -132,8 +132,8 @@
 /* Firefox */
 .audio-seek-bar::-moz-range-track {
     background: transparent;
-    height: 3px;
-    border-radius: 1.5px;
+    height: 4px;
+    border-radius: 2px;
 }
 
 .audio-seek-bar::-moz-range-thumb {
