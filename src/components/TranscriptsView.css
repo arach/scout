@@ -22,9 +22,140 @@
 }
 
 .header-controls .search-input {
-    width: 250px; /* Adjust as needed */
+    width: 300px;
 }
 
 .transcripts-list {
     flex-grow: 1;
+}
+
+/* List view styles */
+.transcript-list-container {
+    margin-top: 12px;
+}
+
+.transcript-list-item {
+    border-bottom: 1px solid var(--border-primary);
+    transition: background-color 0.15s ease;
+}
+
+.transcript-list-item:hover {
+    background-color: var(--bg-hover);
+}
+
+.transcript-list-item.selected {
+    background-color: var(--bg-active);
+}
+
+.transcript-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    min-height: 36px;
+    cursor: pointer;
+}
+
+.transcript-list-item .transcript-checkbox {
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.transcript-date {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-family: "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", monospace;
+    min-width: 140px;
+    flex-shrink: 0;
+}
+
+.transcript-duration {
+    font-size: 12px;
+    color: var(--text-tertiary);
+    min-width: 50px;
+    flex-shrink: 0;
+    text-align: right;
+}
+
+.transcript-preview {
+    flex: 1;
+    font-size: 13px;
+    color: var(--text-primary);
+    line-height: 1.4;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.transcript-list-item.expanded .transcript-preview {
+    white-space: normal;
+    overflow: visible;
+    padding: 4px 0 8px 0;
+}
+
+.transcript-empty-inline {
+    color: var(--text-tertiary);
+    font-style: italic;
+}
+
+.expand-button {
+    padding: 4px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-tertiary);
+    transition: color 0.15s ease, transform 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.expand-button:hover {
+    color: var(--text-secondary);
+}
+
+.expand-button svg {
+    transition: transform 0.2s ease;
+}
+
+.transcript-row-actions {
+    display: flex;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.transcript-list-item:hover .transcript-row-actions {
+    opacity: 1;
+}
+
+.icon-button {
+    padding: 4px;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    cursor: pointer;
+    color: var(--text-tertiary);
+    transition: all 0.1s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.icon-button:hover {
+    background-color: var(--bg-tertiary);
+    border-color: var(--border-primary);
+}
+
+.icon-button.copy-button:hover {
+    color: var(--accent-primary);
+    border-color: var(--accent-primary);
+}
+
+.icon-button.delete-button:hover {
+    color: var(--error);
+    border-color: var(--error);
 } 
