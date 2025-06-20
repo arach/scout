@@ -223,7 +223,7 @@ export function TranscriptsView({
                 onClose={closeDetailPanel}
                 onCopy={copyTranscript}
                 onDelete={showDeleteConfirmation}
-                onExport={exportTranscripts}
+                onExport={(transcripts, format) => exportTranscripts(format)}
                 formatDuration={formatDuration}
                 formatFileSize={formatFileSize}
             />

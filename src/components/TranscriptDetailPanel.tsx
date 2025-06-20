@@ -34,7 +34,6 @@ export function TranscriptDetailPanel({
     formatFileSize,
 }: TranscriptDetailPanelProps) {
     const [canRenderPlayer, setCanRenderPlayer] = useState(false);
-    const [isDeleting, setIsDeleting] = useState(false);
 
     // Handle ESC key to close panel and manage player rendering
     useEffect(() => {
@@ -63,26 +62,7 @@ export function TranscriptDetailPanel({
     }, [isOpen, onClose]);
 
     const handleExport = (format: 'json' | 'markdown' | 'text') => {
-        onExport([transcript], format);
-    };
-
-    const handleDelete = async () => {
-        if (
-            await confirm(
-                `Are you sure you want to delete this transcript? This action cannot be undone.`
-            )
-        ) {
-            setIsDeleting(true);
-            try {
-                await invoke('delete_transcript', { id: transcript.id });
-                onClose(); // Close the panel
-                onRefresh(); // Refresh the list
-            } catch (err) {
-                console.error('Failed to delete transcript:', err);
-                alert('Failed to delete transcript. Please check the logs.');
-                setIsDeleting(false);
-            }
-        }
+        onExport([transcript!], format);
     };
 
     if (!isOpen || !transcript) return null;
