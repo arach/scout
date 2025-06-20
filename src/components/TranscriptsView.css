@@ -125,26 +125,19 @@
 }
 
 .transcript-delete-button {
-    position: absolute;
-    right: 12px;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 24px;
-    height: 24px;
+    padding: 6px 8px;
     border: none;
-    background: var(--bg-danger, #ef4444);
-    color: white;
-    border-radius: 50%;
-    font-size: 14px;
-    font-weight: bold;
+    background: transparent;
+    color: var(--text-tertiary);
+    border-radius: 4px;
     cursor: pointer;
     opacity: 0;
     transition: all 0.15s ease;
     display: flex;
     align-items: center;
     justify-content: center;
-    line-height: 1;
-    z-index: 1;
+    margin-left: 8px;
+    flex-shrink: 0;
 }
 
 .transcript-list-item:hover .transcript-delete-button {
@@ -152,8 +145,9 @@
 }
 
 .transcript-delete-button:hover {
-    background: var(--bg-danger-hover, #dc2626);
-    transform: translateY(-50%) scale(1.1);
+    background: var(--bg-secondary);
+    color: var(--text-danger, #ef4444);
+    transform: scale(1.05);
 }
 
 /* Active state for opened transcript */
