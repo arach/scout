@@ -116,34 +116,7 @@
     position: relative;
 }
 
-/* Gradient fade effect for long text */
-.transcript-preview::after {
-    content: '';
-    position: absolute;
-    right: 0;
-    top: 0;
-    bottom: 0;
-    width: 80px;
-    background: linear-gradient(to right, 
-        transparent 0%, 
-        var(--bg-primary) 50%, 
-        var(--bg-primary) 100%);
-    pointer-events: none;
-}
-
-.transcript-list-item:hover .transcript-preview::after {
-    background: linear-gradient(to right, 
-        transparent 0%, 
-        var(--bg-hover) 50%, 
-        var(--bg-hover) 100%);
-}
-
-.transcript-list-item.selected .transcript-preview::after {
-    background: linear-gradient(to right, 
-        transparent 0%, 
-        var(--bg-active) 50%, 
-        var(--bg-active) 100%);
-}
+/* Removed gradient fade - not needed with click-to-open pattern */
 
 .transcript-empty-inline {
     color: var(--text-tertiary);
@@ -157,7 +130,4 @@
     padding-left: 9px; /* Adjust for border */
 }
 
-/* Row styles updated for cleaner list view */
-.transcript-row {
-    padding-right: 20px; /* Space for gradient fade */
-} 
+/* Row styles updated for cleaner list view */ 
