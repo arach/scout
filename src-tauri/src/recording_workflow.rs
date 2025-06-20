@@ -52,7 +52,6 @@ impl RecordingWorkflow {
                         let filename = format!("recording_{}.wav", timestamp);
                         let path = recordings_dir.join(&filename);
                         
-                        println!("Recording workflow: Starting recording with filename: {}", filename);
                         
                         // Start recording
                         let recorder = recorder.lock().await;

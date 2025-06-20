@@ -223,7 +223,6 @@ impl AudioRecorderWorker {
             .play()
             .map_err(|e| format!("Failed to play stream: {}", e))?;
 
-        println!("Recording started");
         
         self.stream = Some(stream);
         Ok(())
@@ -255,7 +254,6 @@ impl AudioRecorderWorker {
             let silence_samples_needed = target_samples.saturating_sub(total_samples);
             
             if silence_samples_needed > 0 {
-                println!("Recording too short ({:.2}s), padding with silence to 1.1 seconds", duration_seconds);
                 
                 // Write silence samples
                 if let Some(ref mut writer) = *self.writer.lock().unwrap() {
@@ -287,7 +285,6 @@ impl AudioRecorderWorker {
                 .map_err(|e| format!("Failed to finalize recording: {}", e))?;
         }
 
-        println!("Recording stopped");
         Ok(())
     }
 
@@ -338,7 +335,6 @@ impl AudioRecorderWorker {
                         // Debug logging for audio levels (only log significant changes)
                         // Commented out to reduce noise
                         // if rms > 0.001 {
-                        //     println!("Audio recorder - RMS: {:.4}, Amplified: {:.4}", rms, amplified_rms);
                         // }
                         
                         // Update audio level (with some smoothing)

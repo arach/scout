@@ -136,7 +136,6 @@ impl SettingsManager {
                     })
             }
             Err(_) => {
-                println!("No settings.json found, creating with defaults");
                 let default_settings = AppSettings::default();
                 
                 // Save default settings

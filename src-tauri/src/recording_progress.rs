@@ -26,7 +26,6 @@ impl ProgressTracker {
     }
     
     pub fn update(&self, progress: RecordingProgress) {
-        println!("Progress update: {:?}", progress);
         let _ = self.sender.send(progress);
     }
     
