@@ -14,9 +14,10 @@ interface Transcript {
 interface SessionTranscriptsProps {
     transcripts: Transcript[];
     formatDuration: (ms: number) => string;
+    showDeleteConfirmation: (id: number, text: string) => void;
 }
 
-export function SessionTranscripts({ transcripts, formatDuration }: SessionTranscriptsProps) {
+export function SessionTranscripts({ transcripts, formatDuration, showDeleteConfirmation }: SessionTranscriptsProps) {
     if (transcripts.length === 0) {
         return null;
     }
@@ -39,6 +40,16 @@ export function SessionTranscripts({ transcripts, formatDuration }: SessionTrans
                         <div className="session-item-header">
                             <span className="session-time">{formatTime(transcript.created_at)}</span>
                             <span className="session-duration">{formatDuration(transcript.duration_ms)}</span>
+                            <button
+                                className="session-delete-button"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    showDeleteConfirmation(transcript.id, transcript.text);
+                                }}
+                                title="Delete transcript"
+                            >
+                                ×
+                            </button>
                         </div>
                         <p className="session-text">
                             {transcript.text === "[BLANK_AUDIO]" ? (

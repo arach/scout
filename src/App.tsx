@@ -848,6 +848,7 @@ function App() {
             handleFileUpload={handleFileUpload}
             formatDuration={formatDuration}
             formatFileSize={formatFileSize}
+            showDeleteConfirmation={showDeleteConfirmation}
           />
         )}
         {currentView === 'transcripts' && (

@@ -207,6 +207,16 @@ export function TranscriptsView({
                                                         <span className="transcript-text-preview">{transcript.text}</span>
                                                     )}
                                                 </div>
+                                                <button
+                                                    className="transcript-delete-button"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        showDeleteConfirmation(transcript.id, transcript.text);
+                                                    }}
+                                                    title="Delete transcript"
+                                                >
+                                                    ×
+                                                </button>
                                             </div>
                                         </div>
                                     );

@@ -32,6 +32,7 @@ interface RecordViewProps {
     handleFileUpload: () => void;
     formatDuration: (ms: number) => string;
     formatFileSize: (bytes: number) => string;
+    showDeleteConfirmation: (id: number, text: string) => void;
 }
 
 export function RecordView({
@@ -46,6 +47,7 @@ export function RecordView({
     handleFileUpload,
     formatDuration,
     formatFileSize,
+    showDeleteConfirmation,
 }: RecordViewProps) {
     return (
         <div className="record-view">
@@ -150,6 +152,7 @@ export function RecordView({
                 <SessionTranscripts 
                     transcripts={sessionTranscripts}
                     formatDuration={formatDuration}
+                    showDeleteConfirmation={showDeleteConfirmation}
                 />
             </div>
         </div>
