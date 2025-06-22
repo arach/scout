@@ -21,4 +21,42 @@
 /* Re-using setting-item styles from App.css, but we can add overrides here */
 .setting-item {
     /* Add specific styles for the settings view if needed */
-} 
+}
+
+/* Recording Mode Radio Buttons */
+.recording-mode-options {
+    display: flex;
+    gap: 10px;
+    margin-top: 5px;
+}
+
+.recording-mode-options .radio-option {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+}
+
+.recording-mode-options .radio-option input[type="radio"] {
+    display: none;
+}
+
+.recording-mode-options .radio-option span {
+    padding: 8px 12px;
+    border: 1px solid #555;
+    border-radius: 4px;
+    background-color: #2a2a2a;
+    color: #ccc;
+    transition: all 0.2s ease;
+    font-size: 13px;
+}
+
+.recording-mode-options .radio-option:hover span {
+    border-color: #666;
+    background-color: #333;
+}
+
+.recording-mode-options .radio-option input[type="radio"]:checked + span {
+    background-color: #007acc;
+    color: white;
+    border-color: #007acc;
+}

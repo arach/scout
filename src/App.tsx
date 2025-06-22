@@ -36,7 +36,9 @@ function App() {
   const [showSuccess, setShowSuccess] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [hotkey, setHotkey] = useState("CmdOrCtrl+Shift+Space");
+  const [pushToTalkHotkey, setPushToTalkHotkey] = useState("CmdOrCtrl+Shift+P");
   const [isCapturingHotkey, setIsCapturingHotkey] = useState(false);
+  const [isCapturingPushToTalkHotkey, setIsCapturingPushToTalkHotkey] = useState(false);
   const [capturedKeys, setCapturedKeys] = useState<string[]>([]);
   const [selectedTranscripts, setSelectedTranscripts] = useState<Set<number>>(new Set());
   const [deleteConfirmation, setDeleteConfirmation] = useState<{
@@ -61,7 +63,12 @@ function App() {
   const [overlayType, setOverlayType] = useState<'tauri' | 'native'>('tauri');
   const [currentView, setCurrentView] = useState<View>('record');
   const [sessionStartTime] = useState(() => new Date().toISOString());
+  const [autoCopy, setAutoCopy] = useState(false);
+  const [autoPaste, setAutoPaste] = useState(false);
   const processingFileRef = useRef<string | null>(null); // Track file being processed to prevent duplicates
+  const pushToTalkTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastPushToTalkTimeRef = useRef(0);
+  const isStartingRecording = useRef(false); // Prevent multiple simultaneous start attempts
 
   // Keep ref in sync with state
   useEffect(() => {
@@ -132,16 +139,23 @@ function App() {
       }).catch(console.error);
     }
     
-    // Get the current shortcut from backend (source of truth)
+    // Get the current shortcuts from backend (source of truth)
     invoke<string>('get_current_shortcut').then(backendShortcut => {
       setHotkey(backendShortcut);
-      // Save to localStorage for quick access
       localStorage.setItem('scout-hotkey', backendShortcut);
     }).catch(err => {
       console.error('Failed to get current shortcut:', err);
-      // Fallback to localStorage if backend fails
       const savedHotkey = localStorage.getItem('scout-hotkey') || 'CmdOrCtrl+Shift+Space';
       setHotkey(savedHotkey);
+    });
+    
+    invoke<string>('get_push_to_talk_shortcut').then(backendShortcut => {
+      setPushToTalkHotkey(backendShortcut);
+      localStorage.setItem('scout-push-to-talk-hotkey', backendShortcut);
+    }).catch(err => {
+      console.error('Failed to get push-to-talk shortcut:', err);
+      const savedHotkey = localStorage.getItem('scout-push-to-talk-hotkey') || 'CmdOrCtrl+Shift+P';
+      setPushToTalkHotkey(savedHotkey);
     });
     
     // Load overlay type preference
@@ -149,6 +163,16 @@ function App() {
     if (savedOverlayType === 'native' || savedOverlayType === 'tauri') {
       setOverlayType(savedOverlayType);
     }
+    
+    // Load auto-copy and auto-paste settings
+    invoke<boolean>('is_auto_copy_enabled').then(enabled => {
+      setAutoCopy(enabled);
+    }).catch(console.error);
+    
+    invoke<boolean>('is_auto_paste_enabled').then(enabled => {
+      setAutoPaste(enabled);
+    }).catch(console.error);
+    
     
     // Mark as initialized
     if (!localStorage.getItem('scout-initialized')) {
@@ -174,6 +198,52 @@ function App() {
         }
       } catch (error) {
         console.error("Failed to check recording state:", error);
+      }
+    });
+    
+    // Listen for push-to-talk events
+    const unsubscribePushToTalk = listen('push-to-talk-pressed', async () => {
+      // Debounce to prevent rapid push-to-talk triggers
+      const now = Date.now();
+      if (now - lastPushToTalkTimeRef.current < 500) { // 500ms debounce for push-to-talk
+        console.log('Push-to-talk ignored due to debouncing');
+        return;
+      }
+      lastPushToTalkTimeRef.current = now;
+      
+      try {
+        const recording = await invoke<boolean>("is_recording");
+        console.log('Push-to-talk triggered, currently recording:', recording);
+        
+        if (recording) {
+          // If already recording, stop immediately (second press)
+          console.log('Stopping push-to-talk recording (manual stop)');
+          if (pushToTalkTimeoutRef.current) {
+            clearTimeout(pushToTalkTimeoutRef.current);
+            pushToTalkTimeoutRef.current = null;
+          }
+          stopRecording();
+        } else {
+          // Start recording and set auto-stop timer
+          console.log('Starting push-to-talk recording');
+          startRecording();
+          
+          // Auto-stop after 10 seconds (configurable)
+          pushToTalkTimeoutRef.current = setTimeout(async () => {
+            try {
+              const stillRecording = await invoke<boolean>("is_recording");
+              if (stillRecording) {
+                console.log('Auto-stopping push-to-talk recording after 10 seconds');
+                stopRecording();
+              }
+            } catch (error) {
+              console.error("Failed to auto-stop push-to-talk recording:", error);
+            }
+            pushToTalkTimeoutRef.current = null;
+          }, 10000); // 10 seconds
+        }
+      } catch (error) {
+        console.error("Failed to handle push-to-talk:", error);
       }
     });
     
@@ -352,6 +422,7 @@ function App() {
     
     return () => {
       unsubscribe.then(fn => fn());
+      unsubscribePushToTalk.then(fn => fn());
       unsubscribeProgress.then(fn => fn());
       unsubscribeProcessing.then(fn => fn());
       unsubscribeFileUpload.then(fn => fn());
@@ -411,10 +482,13 @@ function App() {
   };
 
   const startRecording = async () => {
-    // Prevent starting if already recording
-    if (isRecordingRef.current) {
+    // Prevent starting if already recording or in the process of starting
+    if (isRecordingRef.current || isStartingRecording.current) {
+      console.log('Start recording blocked - already recording or starting');
       return;
     }
+    
+    isStartingRecording.current = true;
     
     // IMMEDIATELY update UI for instant feedback - using flushSync to force synchronous update
     flushSync(() => {
@@ -429,6 +503,7 @@ function App() {
     try {
       const filename = await invoke<string>("start_recording");
       setCurrentRecordingFile(filename);
+      isStartingRecording.current = false; // Reset flag on success
       
       // Native overlay state is managed by the backend
       if (overlayType === 'native') {
@@ -457,6 +532,7 @@ function App() {
         setIsRecording(false);
       });
       isRecordingRef.current = false;
+      isStartingRecording.current = false; // Reset flag on error
     }
   };
 
@@ -658,6 +734,27 @@ function App() {
       console.error("Failed to toggle VAD:", error);
     }
   };
+
+  const toggleAutoCopy = async () => {
+    try {
+      const newState = !autoCopy;
+      await invoke("set_auto_copy", { enabled: newState });
+      setAutoCopy(newState);
+    } catch (error) {
+      console.error("Failed to toggle auto-copy:", error);
+    }
+  };
+
+  const toggleAutoPaste = async () => {
+    try {
+      const newState = !autoPaste;
+      await invoke("set_auto_paste", { enabled: newState });
+      setAutoPaste(newState);
+    } catch (error) {
+      console.error("Failed to toggle auto-paste:", error);
+    }
+  };
+
   
   const updateOverlayPosition = async (position: string) => {
     try {
@@ -711,8 +808,23 @@ function App() {
     }
   };
 
+  const updatePushToTalkHotkey = async (newHotkey: string) => {
+    try {
+      await invoke("update_push_to_talk_shortcut", { shortcut: newHotkey });
+      setPushToTalkHotkey(newHotkey);
+      localStorage.setItem('scout-push-to-talk-hotkey', newHotkey);
+    } catch (error) {
+      console.error("Failed to update push-to-talk hotkey:", error);
+    }
+  };
+
   const startCapturingHotkey = () => {
     setIsCapturingHotkey(true);
+    setCapturedKeys([]);
+  };
+
+  const startCapturingPushToTalkHotkey = () => {
+    setIsCapturingPushToTalkHotkey(true);
     setCapturedKeys([]);
   };
 
@@ -732,8 +844,21 @@ function App() {
     setCapturedKeys([]);
   };
 
+  const stopCapturingPushToTalkHotkey = () => {
+    setIsCapturingPushToTalkHotkey(false);
+    if (capturedKeys.length > 0) {
+      const convertedKeys = capturedKeys.map(key => {
+        if (key === 'Cmd') return 'CmdOrCtrl';
+        return key;
+      });
+      const newHotkey = convertedKeys.join('+');
+      updatePushToTalkHotkey(newHotkey);
+    }
+    setCapturedKeys([]);
+  };
+
   useEffect(() => {
-    if (!isCapturingHotkey) return;
+    if (!isCapturingHotkey && !isCapturingPushToTalkHotkey) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       e.preventDefault();
@@ -823,7 +948,7 @@ function App() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [isCapturingHotkey, capturedKeys]);
+  }, [isCapturingHotkey, isCapturingPushToTalkHotkey, capturedKeys]);
 
   if (showFirstRun) {
     return <FirstRunSetup onComplete={() => setShowFirstRun(false)} />;
@@ -874,15 +999,21 @@ function App() {
             hotkey={hotkey}
             isCapturingHotkey={isCapturingHotkey}
             hotkeyUpdateStatus={hotkeyUpdateStatus}
+            pushToTalkHotkey={pushToTalkHotkey}
+            isCapturingPushToTalkHotkey={isCapturingPushToTalkHotkey}
             vadEnabled={vadEnabled}
             overlayPosition={overlayPosition}
-            overlayType={overlayType}
+            autoCopy={autoCopy}
+            autoPaste={autoPaste}
             stopCapturingHotkey={stopCapturingHotkey}
             startCapturingHotkey={startCapturingHotkey}
+            startCapturingPushToTalkHotkey={startCapturingPushToTalkHotkey}
+            stopCapturingPushToTalkHotkey={stopCapturingPushToTalkHotkey}
             updateHotkey={updateHotkey}
             toggleVAD={toggleVAD}
             updateOverlayPosition={updateOverlayPosition}
-            updateOverlayType={updateOverlayType}
+            toggleAutoCopy={toggleAutoCopy}
+            toggleAutoPaste={toggleAutoPaste}
           />
         )}
         {isDragging && (

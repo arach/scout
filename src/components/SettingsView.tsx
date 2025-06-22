@@ -6,37 +6,49 @@ interface SettingsViewProps {
     hotkey: string;
     isCapturingHotkey: boolean;
     hotkeyUpdateStatus: 'idle' | 'success' | 'error';
+    pushToTalkHotkey: string;
+    isCapturingPushToTalkHotkey: boolean;
     vadEnabled: boolean;
     overlayPosition: string;
-    overlayType: 'tauri' | 'native';
+    autoCopy: boolean;
+    autoPaste: boolean;
     stopCapturingHotkey: () => void;
     startCapturingHotkey: () => void;
+    startCapturingPushToTalkHotkey: () => void;
+    stopCapturingPushToTalkHotkey: () => void;
     updateHotkey: (hotkey: string) => void;
     toggleVAD: () => void;
     updateOverlayPosition: (position: string) => void;
-    updateOverlayType: (type: 'tauri' | 'native') => void;
+    toggleAutoCopy: () => void;
+    toggleAutoPaste: () => void;
 }
 
 export function SettingsView({
     hotkey,
     isCapturingHotkey,
     hotkeyUpdateStatus,
+    pushToTalkHotkey,
+    isCapturingPushToTalkHotkey,
     vadEnabled,
     overlayPosition,
-    overlayType,
+    autoCopy,
+    autoPaste,
     stopCapturingHotkey,
     startCapturingHotkey,
+    startCapturingPushToTalkHotkey,
+    stopCapturingPushToTalkHotkey,
     updateHotkey,
     toggleVAD,
     updateOverlayPosition,
-    updateOverlayType,
+    toggleAutoCopy,
+    toggleAutoPaste,
 }: SettingsViewProps) {
     return (
         <div className="settings-view">
             <h1>Settings</h1>
             <div className="settings-body">
                 <div className="setting-item">
-                    <label>Global Hotkey</label>
+                    <label>Toggle Recording Shortcut</label>
                     <div className="hotkey-input-group">
                         <div className={`hotkey-display ${isCapturingHotkey ? 'capturing' : ''}`}>
                             {isCapturingHotkey ? (
@@ -79,6 +91,38 @@ export function SettingsView({
                 </div>
 
                 <div className="setting-item">
+                    <label>Push-to-Talk Shortcut</label>
+                    <div className="hotkey-input-group">
+                        <div className={`hotkey-display ${isCapturingPushToTalkHotkey ? 'capturing' : ''}`}>
+                            {isCapturingPushToTalkHotkey ? (
+                                <span className="capturing-text">Press shortcut keys...</span>
+                            ) : (
+                                <span className="hotkey-keys">
+                                    {pushToTalkHotkey.split('+').map((key, idx) => (
+                                        <Fragment key={idx}>
+                                            {idx > 0 && <span className="plus">+</span>}
+                                            <kbd>{key}</kbd>
+                                        </Fragment>
+                                    ))}
+                                </span>
+                            )}
+                        </div>
+                        {isCapturingPushToTalkHotkey ? (
+                            <button onClick={stopCapturingPushToTalkHotkey} className="cancel-button">
+                                Cancel
+                            </button>
+                        ) : (
+                            <button onClick={startCapturingPushToTalkHotkey}>
+                                Capture
+                            </button>
+                        )}
+                    </div>
+                    <p className="setting-hint">
+                        Auto-stops recording after 10 seconds or press again to stop early
+                    </p>
+                </div>
+
+                <div className="setting-item">
                     <label>
                         <input
                             type="checkbox"
@@ -91,6 +135,35 @@ export function SettingsView({
                         Automatically start recording when you speak
                     </p>
                 </div>
+
+                <div className="setting-item">
+                    <label>
+                        <input
+                            type="checkbox"
+                            checked={autoCopy}
+                            onChange={toggleAutoCopy}
+                        />
+                        Auto-copy to clipboard
+                    </label>
+                    <p className="setting-hint">
+                        Automatically copy transcribed text to clipboard
+                    </p>
+                </div>
+
+                <div className="setting-item">
+                    <label>
+                        <input
+                            type="checkbox"
+                            checked={autoPaste}
+                            onChange={toggleAutoPaste}
+                        />
+                        Auto-paste
+                    </label>
+                    <p className="setting-hint">
+                        Automatically paste transcribed text into active application
+                    </p>
+                </div>
+
 
                 <div className="setting-item">
                     <label>Overlay Position</label>
@@ -146,28 +219,6 @@ export function SettingsView({
                     </p>
                 </div>
 
-                <div className="setting-item">
-                    <label>Overlay Type</label>
-                    <div className="overlay-type-toggle">
-                        <button
-                            className={`overlay-type-button ${overlayType === 'tauri' ? 'active' : ''}`}
-                            onClick={() => updateOverlayType('tauri')}
-                        >
-                            <span className="type-label">Standard</span>
-                            <span className="type-description">WebView-based overlay</span>
-                        </button>
-                        <button
-                            className={`overlay-type-button ${overlayType === 'native' ? 'active' : ''}`}
-                            onClick={() => updateOverlayType('native')}
-                        >
-                            <span className="type-label">Native (Beta)</span>
-                            <span className="type-description">True hover-without-focus</span>
-                        </button>
-                    </div>
-                    <p className="setting-hint">
-                        Native overlay provides better hover detection without window focus
-                    </p>
-                </div>
 
                 <div className="setting-item model-manager-section">
                     <ModelManager />

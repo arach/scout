@@ -42,11 +42,14 @@ pub struct ModelSettings {
 #[serde(default)]
 pub struct UISettings {
     pub hotkey: String,
+    pub push_to_talk_hotkey: String,
     pub overlay_position: String,
     pub theme: String,
     pub sound_enabled: bool,
     pub start_sound: String,
     pub stop_sound: String,
+    pub auto_copy: bool,
+    pub auto_paste: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,11 +100,14 @@ impl Default for UISettings {
     fn default() -> Self {
         Self {
             hotkey: "CmdOrCtrl+Shift+Space".to_string(),
+            push_to_talk_hotkey: "CmdOrCtrl+Shift+P".to_string(),
             overlay_position: "top-center".to_string(),
             theme: "dark".to_string(),
             sound_enabled: true,
             start_sound: "start".to_string(),
             stop_sound: "stop".to_string(),
+            auto_copy: false,
+            auto_paste: false,
         }
     }
 }

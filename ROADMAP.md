@@ -2,45 +2,7 @@
 
 ## Next Features to Implement
 
-### 1. Recording Overlay Indicator
-**Priority:** High  
-**Description:** Display a small, unobtrusive overlay indicator when recording is active, eliminating the need to open the main window to check recording status.
-
-**Requirements:**
-- Small floating window/widget that appears during recording
-- Shows recording status (active/inactive)
-- Displays recording duration
-- Minimal UI that doesn't interfere with user's work
-- Should appear near the screen edge or corner
-- Click-through or easily dismissible
-
-**Technical Considerations:**
-- Use Tauri's window API to create a frameless, always-on-top window
-- Position management to avoid blocking important UI elements
-- Smooth animations for show/hide transitions
-
----
-
-### 2. Push-to-Talk Mode
-**Priority:** High  
-**Description:** Alternative recording mode where recording occurs only while a key combination is held down, with automatic transcription on release.
-
-**Requirements:**
-- Global shortcut that starts recording on key down
-- Stops recording and triggers transcription on key up
-- Different from toggle mode - no manual stop required
-- Configurable key combination in settings
-- Visual/audio feedback for recording state
-
-**Technical Considerations:**
-- Modify global shortcut handler to support key down/up events
-- Implement automatic transcription trigger on key release
-- Add setting to switch between toggle and push-to-talk modes
-- Handle edge cases (app switching while key held, etc.)
-
----
-
-### 3. Automatic Copy & Paste
+### 1. Automatic Copy & Paste
 **Priority:** Medium  
 **Description:** Options to automatically copy transcribed text to clipboard and/or paste into the active application.
 
@@ -59,7 +21,7 @@
 
 ---
 
-### 4. Context Capture
+### 2. Context Capture
 **Priority:** Medium  
 **Description:** Capture and store metadata about the active application during recording to provide context for transcriptions.
 
@@ -80,14 +42,14 @@
 
 ## Implementation Order
 
-1. **Recording Overlay** - Most immediate visual feedback improvement
-2. **Push-to-Talk** - Core functionality enhancement
-3. **Context Capture** - Adds valuable metadata
 4. **Auto Copy/Paste** - Workflow automation features
+3. **Context Capture** - Adds valuable metadata
 
 ## Future Considerations
 
 - Customizable overlay appearance/position
+- Ability to add custom models
+- Ability to map to prominent models via APIs w/ token 
 - Multiple recording modes (continuous, voice-activated, push-to-talk)
 - Rich context capture (URL from browser, document path, etc.)
 - Smart paste with formatting detection
