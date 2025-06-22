@@ -7,6 +7,8 @@ use serde_json;
 use crate::db::Database;
 use crate::transcription::Transcriber;
 use crate::audio::AudioConverter;
+use crate::clipboard;
+use crate::settings::SettingsManager;
 
 #[derive(Debug, Clone)]
 pub struct ProcessingJob {
@@ -34,6 +36,7 @@ impl ProcessingQueue {
         database: Arc<Database>,
         models_dir: PathBuf,
         app_data_dir: PathBuf,
+        settings: Arc<tokio::sync::Mutex<SettingsManager>>,
     ) -> (Self, mpsc::Receiver<ProcessingStatus>) {
         let (job_tx, mut job_rx) = mpsc::channel::<ProcessingJob>(100);
         let (status_tx, status_rx) = mpsc::channel::<ProcessingStatus>(100);
@@ -80,9 +83,9 @@ impl ProcessingQueue {
                             Ok(metadata) if metadata.len() > 1024 => {
                                 file_ready = true;
                             }
-                            Ok(metadata) => {
+                            Ok(_metadata) => {
                             }
-                            Err(e) => {
+                            Err(_e) => {
                             }
                         }
                         retry_count += 1;
@@ -165,6 +168,41 @@ impl ProcessingQueue {
                                                     file_size
                                                 ).await {
                                                     eprintln!("Failed to save transcript to database: {}", e);
+                                                }
+                                                
+                                                // Handle auto-copy and auto-paste
+                                                let settings_guard = settings.lock().await;
+                                                let auto_copy = settings_guard.get().ui.auto_copy;
+                                                let auto_paste = settings_guard.get().ui.auto_paste;
+                                                drop(settings_guard);
+                                                
+                                                if auto_copy {
+                                                    if let Err(e) = clipboard::copy_to_clipboard(&transcript) {
+                                                        eprintln!("Failed to copy transcript to clipboard: {}", e);
+                                                    }
+                                                }
+                                                
+                                                if auto_paste {
+                                                    // Copy to clipboard first (required for paste)
+                                                    if !auto_copy {
+                                                        if let Err(e) = clipboard::copy_to_clipboard(&transcript) {
+                                                            eprintln!("Failed to copy transcript for auto-paste: {}", e);
+                                                        } else {
+                                                            // Small delay to ensure clipboard is ready
+                                                            sleep(Duration::from_millis(100)).await;
+                                                            
+                                                            if let Err(e) = clipboard::simulate_paste() {
+                                                                eprintln!("Failed to auto-paste transcript: {}", e);
+                                                            }
+                                                        }
+                                                    } else {
+                                                        // Auto-copy already happened, just paste
+                                                        sleep(Duration::from_millis(100)).await;
+                                                        
+                                                        if let Err(e) = clipboard::simulate_paste() {
+                                                            eprintln!("Failed to auto-paste transcript: {}", e);
+                                                        }
+                                                    }
                                                 }
                                                 
                                                 let _ = status_tx.send(ProcessingStatus::Complete { 

@@ -8,6 +8,7 @@ mod overlay_position;
 mod sound;
 mod models;
 mod settings;
+mod clipboard;
 #[cfg(target_os = "macos")]
 mod macos;
 
@@ -612,7 +613,7 @@ async fn has_any_model(state: State<'_, AppState>) -> Result<bool, String> {
 #[tauri::command]
 async fn set_active_model(state: State<'_, AppState>, model_id: String) -> Result<(), String> {
     let mut settings = state.settings.lock().await;
-    let previous_model = settings.get().models.active_model_id.clone();
+    let _previous_model = settings.get().models.active_model_id.clone();
     settings.update(|s| s.models.active_model_id = model_id.clone())
         .map_err(|e| format!("Failed to save settings: {}", e))?;
     Ok(())
@@ -724,7 +725,7 @@ async fn download_file(
     
     // Verify the file exists
     if Path::new(&dest_path).exists() {
-        let metadata = std::fs::metadata(&dest_path)
+        let _metadata = std::fs::metadata(&dest_path)
             .map_err(|e| format!("Failed to get file metadata: {}", e))?;
     } else {
         eprintln!("✗ File does not exist after download!");
@@ -752,7 +753,8 @@ async fn update_global_shortcut(
     
     // Register the new shortcut
     global_shortcut.on_shortcut(shortcut.as_str(), move |_app, _event, _shortcut| {
-        // Emit event to frontend to toggle recording
+        // Note: Dynamic shortcuts currently always use toggle mode
+        // TODO: Support recording mode in dynamic shortcuts
         app_handle.emit("toggle-recording", ()).unwrap();
     }).map_err(|e| format!("Failed to register shortcut '{}': {}", shortcut, e))?;
     
@@ -780,6 +782,67 @@ async fn update_settings(state: State<'_, AppState>, new_settings: serde_json::V
     
     // Update the settings
     settings.update(|s| *s = app_settings)?;
+    
+    Ok(())
+}
+
+#[tauri::command]
+async fn set_auto_copy(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
+    let mut settings = state.settings.lock().await;
+    settings.update(|s| s.ui.auto_copy = enabled)
+}
+
+#[tauri::command]
+async fn is_auto_copy_enabled(state: State<'_, AppState>) -> Result<bool, String> {
+    let settings = state.settings.lock().await;
+    Ok(settings.get().ui.auto_copy)
+}
+
+#[tauri::command]
+async fn set_auto_paste(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
+    let mut settings = state.settings.lock().await;
+    settings.update(|s| s.ui.auto_paste = enabled)
+}
+
+#[tauri::command]
+async fn is_auto_paste_enabled(state: State<'_, AppState>) -> Result<bool, String> {
+    let settings = state.settings.lock().await;
+    Ok(settings.get().ui.auto_paste)
+}
+
+
+#[tauri::command]
+async fn get_push_to_talk_shortcut(state: State<'_, AppState>) -> Result<String, String> {
+    let settings = state.settings.lock().await;
+    Ok(settings.get().ui.push_to_talk_hotkey.clone())
+}
+
+#[tauri::command]
+async fn update_push_to_talk_shortcut(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    shortcut: String,
+) -> Result<(), String> {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+    
+    let global_shortcut = app.global_shortcut();
+    let mut settings = state.settings.lock().await;
+    
+    // Unregister old push-to-talk shortcut
+    let current = settings.get().ui.push_to_talk_hotkey.clone();
+    let _ = global_shortcut.unregister(current.as_str());
+    
+    // Clone app handle for the closure
+    let app_handle = app.clone();
+    
+    // Register the new push-to-talk shortcut
+    global_shortcut.on_shortcut(shortcut.as_str(), move |_app, _event, _shortcut| {
+        app_handle.emit("push-to-talk-pressed", ()).unwrap();
+    }).map_err(|e| format!("Failed to register push-to-talk shortcut '{}': {}", shortcut, e))?;
+    
+    // Update the stored shortcut
+    settings.update(|s| s.ui.push_to_talk_hotkey = shortcut.clone())
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
     
     Ok(())
 }
@@ -835,6 +898,7 @@ pub fn run() {
                 database_arc.clone(),
                 models_dir.clone(),
                 app_data_dir.clone(),
+                settings_arc.clone(),
             );
             let processing_queue_arc = Arc::new(processing_queue);
             
@@ -972,24 +1036,36 @@ pub fn run() {
                 overlay.show();
             }
             
-            // Set up global hotkey from settings
+            // Set up both global shortcuts from settings
             let app_handle = app.app_handle().clone();
-            let hotkey = {
+            let (toggle_hotkey, push_to_talk_hotkey) = {
                 let settings_lock = settings_arc.lock();
                 let settings = tauri::async_runtime::block_on(settings_lock);
-                settings.get().ui.hotkey.clone()
+                (
+                    settings.get().ui.hotkey.clone(),
+                    settings.get().ui.push_to_talk_hotkey.clone()
+                )
             };
             
-            if let Err(e) = app.global_shortcut().on_shortcut(hotkey.as_str(), move |_app, _event, _shortcut| {
-                // Emit event to frontend to toggle recording
-                app_handle.emit("toggle-recording", ()).unwrap();
+            // Register toggle shortcut
+            let app_handle_toggle = app_handle.clone();
+            if let Err(e) = app.global_shortcut().on_shortcut(toggle_hotkey.as_str(), move |_app, _event, _shortcut| {
+                app_handle_toggle.emit("toggle-recording", ()).unwrap();
             }) {
-                eprintln!("Failed to register global shortcut '{}': {:?}", hotkey, e);
+                eprintln!("Failed to register toggle shortcut '{}': {:?}", toggle_hotkey, e);
+            }
+            
+            // Register push-to-talk shortcut
+            let app_handle_ptt = app_handle.clone();
+            if let Err(e) = app.global_shortcut().on_shortcut(push_to_talk_hotkey.as_str(), move |_app, _event, _shortcut| {
+                app_handle_ptt.emit("push-to-talk-pressed", ()).unwrap();
+            }) {
+                eprintln!("Failed to register push-to-talk shortcut '{}': {:?}", push_to_talk_hotkey, e);
             }
             
             // Set up system tray
             let toggle_recording_item = MenuItemBuilder::with_id("toggle_recording", "Start Recording")
-                .accelerator(&hotkey)
+                .accelerator(&toggle_hotkey)
                 .build(app)?;
             
             // Store reference to the menu item
@@ -1115,7 +1191,13 @@ pub fn run() {
             download_file,
             get_settings,
             update_settings,
-            get_current_model
+            get_current_model,
+            set_auto_copy,
+            is_auto_copy_enabled,
+            set_auto_paste,
+            is_auto_paste_enabled,
+            get_push_to_talk_shortcut,
+            update_push_to_talk_shortcut
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
