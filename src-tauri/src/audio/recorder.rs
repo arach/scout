@@ -13,9 +13,11 @@ pub struct AudioRecorder {
 }
 
 enum RecorderCommand {
-    StartRecording(String),
+    StartRecording(String, Option<String>), // (path, device_name)
     StopRecording,
     SetVadEnabled(bool),
+    StartAudioLevelMonitoring(Option<String>), // device_name
+    StopAudioLevelMonitoring,
 }
 
 impl AudioRecorder {
@@ -44,8 +46,8 @@ impl AudioRecorder {
             
             while let Ok(cmd) = rx.recv() {
                 match cmd {
-                    RecorderCommand::StartRecording(path) => {
-                        if let Err(e) = recorder.start_recording(&path) {
+                    RecorderCommand::StartRecording(path, device_name) => {
+                        if let Err(e) = recorder.start_recording(&path, device_name.as_deref()) {
                             eprintln!("Failed to start recording: {}", e);
                         }
                     }
@@ -57,12 +59,22 @@ impl AudioRecorder {
                     RecorderCommand::SetVadEnabled(enabled) => {
                         *recorder.vad_enabled.lock().unwrap() = enabled;
                     }
+                    RecorderCommand::StartAudioLevelMonitoring(device_name) => {
+                        if let Err(e) = recorder.start_audio_level_monitoring(device_name.as_deref()) {
+                            eprintln!("Failed to start audio level monitoring: {}", e);
+                        }
+                    }
+                    RecorderCommand::StopAudioLevelMonitoring => {
+                        if let Err(e) = recorder.stop_audio_level_monitoring() {
+                            eprintln!("Failed to stop audio level monitoring: {}", e);
+                        }
+                    }
                 }
             }
         });
     }
 
-    pub fn start_recording(&self, output_path: &Path) -> Result<(), String> {
+    pub fn start_recording(&self, output_path: &Path, device_name: Option<&str>) -> Result<(), String> {
         if self.control_tx.is_none() {
             return Err("Recorder not initialized".to_string());
         }
@@ -72,6 +84,7 @@ impl AudioRecorder {
             .unwrap()
             .send(RecorderCommand::StartRecording(
                 output_path.to_string_lossy().to_string(),
+                device_name.map(|s| s.to_string()),
             ))
             .map_err(|e| format!("Failed to send start command: {}", e))
     }
@@ -107,10 +120,37 @@ impl AudioRecorder {
     pub fn is_vad_enabled(&self) -> bool {
         *self.vad_enabled.lock().unwrap()
     }
+    
+    pub fn start_audio_level_monitoring(&self, device_name: Option<&str>) -> Result<(), String> {
+        if self.control_tx.is_none() {
+            return Err("Recorder not initialized".to_string());
+        }
+
+        self.control_tx
+            .as_ref()
+            .unwrap()
+            .send(RecorderCommand::StartAudioLevelMonitoring(
+                device_name.map(|s| s.to_string()),
+            ))
+            .map_err(|e| format!("Failed to send audio level monitoring command: {}", e))
+    }
+    
+    pub fn stop_audio_level_monitoring(&self) -> Result<(), String> {
+        if self.control_tx.is_none() {
+            return Err("Recorder not initialized".to_string());
+        }
+
+        self.control_tx
+            .as_ref()
+            .unwrap()
+            .send(RecorderCommand::StopAudioLevelMonitoring)
+            .map_err(|e| format!("Failed to send stop audio level monitoring command: {}", e))
+    }
 }
 
 struct AudioRecorderWorker {
     stream: Option<cpal::Stream>,
+    monitoring_stream: Option<cpal::Stream>,
     writer: Arc<Mutex<Option<hound::WavWriter<std::io::BufWriter<std::fs::File>>>>>,
     is_recording: Arc<Mutex<bool>>,
     vad_enabled: Arc<Mutex<bool>>,
@@ -126,6 +166,7 @@ impl AudioRecorderWorker {
     fn new(is_recording: Arc<Mutex<bool>>, vad_enabled: Arc<Mutex<bool>>, audio_level: Arc<Mutex<f32>>) -> Self {
         Self {
             stream: None,
+            monitoring_stream: None,
             writer: Arc::new(Mutex::new(None)),
             is_recording,
             vad_enabled,
@@ -138,16 +179,35 @@ impl AudioRecorderWorker {
         }
     }
 
-    fn start_recording(&mut self, output_path: &str) -> Result<(), String> {
+    fn start_recording(&mut self, output_path: &str, device_name: Option<&str>) -> Result<(), String> {
         use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
+        // Stop monitoring if it's running but preserve the audio level
+        if self.monitoring_stream.is_some() {
+            // Don't reset audio level when transitioning from monitoring to recording
+            if let Some(stream) = self.monitoring_stream.take() {
+                drop(stream);
+            }
+        }
 
         let host = cpal::default_host();
         
-        
-        let device = host
-            .default_input_device()
-            .ok_or("No input device available - please check microphone permissions")?;
+        let device = match device_name {
+            Some(name) => {
+                // Find device by name
+                let devices = host.input_devices()
+                    .map_err(|e| format!("Failed to enumerate devices: {}", e))?;
+                
+                devices.into_iter()
+                    .find(|d| d.name().map(|n| n == name).unwrap_or(false))
+                    .ok_or_else(|| format!("Device '{}' not found", name))?
+            },
+            None => {
+                // Use default device
+                host.default_input_device()
+                    .ok_or("No input device available - please check microphone permissions")?
+            }
+        };
 
 
         let config = device
@@ -231,7 +291,7 @@ impl AudioRecorderWorker {
     fn stop_recording(&mut self) -> Result<(), String> {
         *self.is_recording.lock().unwrap() = false;
         
-        // Reset audio level
+        // Reset audio level only after recording stops
         *self.current_audio_level.lock().unwrap() = 0.0;
 
         // Give the stream a moment to process any remaining audio
@@ -330,7 +390,7 @@ impl AudioRecorderWorker {
                         
                         // Amplify the RMS value for better visual response
                         // Most speech is quite low in amplitude, so we need to scale it up
-                        let amplified_rms = (rms * 20.0).min(1.0);  // Increased from 8x to 20x
+                        let amplified_rms = (rms * 40.0).min(1.0);  // Increased to 40x for better sensitivity
                         
                         // Debug logging for audio levels (only log significant changes)
                         // Commented out to reduce noise
@@ -355,5 +415,105 @@ impl AudioRecorderWorker {
                 None,
             )
             .map_err(|e| format!("Failed to build input stream: {}", e))
+    }
+    
+    fn start_audio_level_monitoring(&mut self, device_name: Option<&str>) -> Result<(), String> {
+        use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+        
+        // Stop any existing monitoring
+        if self.monitoring_stream.is_some() {
+            self.stop_audio_level_monitoring()?;
+        }
+        
+        let host = cpal::default_host();
+        
+        let device = match device_name {
+            Some(name) => {
+                // Find device by name
+                let devices = host.input_devices()
+                    .map_err(|e| format!("Failed to enumerate devices: {}", e))?;
+                
+                devices.into_iter()
+                    .find(|d| d.name().map(|n| n == name).unwrap_or(false))
+                    .ok_or_else(|| format!("Device '{}' not found", name))?
+            },
+            None => {
+                // Use default device
+                host.default_input_device()
+                    .ok_or("No input device available")?
+            }
+        };
+        
+        let config = device
+            .default_input_config()
+            .map_err(|e| format!("Failed to get input config: {}", e))?;
+            
+        let audio_level = self.current_audio_level.clone();
+        
+        let err_fn = |err| eprintln!("Audio level monitoring error: {}", err);
+        
+        // Build monitoring stream based on sample format
+        let monitoring_stream = match config.sample_format() {
+            cpal::SampleFormat::F32 => self.build_monitoring_stream::<f32>(&device, &config.into(), audio_level, err_fn),
+            cpal::SampleFormat::I16 => self.build_monitoring_stream::<i16>(&device, &config.into(), audio_level, err_fn),
+            _ => return Err("Unsupported sample format".to_string()),
+        }?;
+        
+        monitoring_stream.play()
+            .map_err(|e| format!("Failed to start monitoring stream: {}", e))?;
+            
+        self.monitoring_stream = Some(monitoring_stream);
+        
+        Ok(())
+    }
+    
+    fn stop_audio_level_monitoring(&mut self) -> Result<(), String> {
+        if let Some(stream) = self.monitoring_stream.take() {
+            drop(stream);
+        }
+        
+        // Reset audio level to 0
+        *self.current_audio_level.lock().unwrap() = 0.0;
+        
+        Ok(())
+    }
+    
+    fn build_monitoring_stream<T>(
+        &self,
+        device: &cpal::Device,
+        config: &cpal::StreamConfig,
+        audio_level: Arc<Mutex<f32>>,
+        err_fn: impl FnMut(cpal::StreamError) + Send + 'static + Copy,
+    ) -> Result<cpal::Stream, String>
+    where
+        T: cpal::Sample + cpal::SizedSample + Into<f32> + Send + 'static,
+    {
+        use cpal::traits::DeviceTrait;
+        
+        device.build_input_stream(
+            config,
+            move |data: &[T], _: &cpal::InputCallbackInfo| {
+                // Calculate RMS
+                let sum_squares: f32 = data.iter()
+                    .map(|&s| {
+                        let sample_f32: f32 = s.into();
+                        sample_f32 * sample_f32
+                    })
+                    .sum();
+                    
+                let rms = (sum_squares / data.len() as f32).sqrt();
+                
+                // Amplify for better response
+                let amplified_rms = (rms * 40.0).min(1.0);
+                
+                // Update audio level with smoothing
+                let current_level = *audio_level.lock().unwrap();
+                let new_level = current_level * 0.7 + amplified_rms * 0.3;
+                *audio_level.lock().unwrap() = new_level;
+            },
+            err_fn,
+            None,
+        )
+        .map_err(|e| format!("Failed to build monitoring stream: {}", e))
     }
 }

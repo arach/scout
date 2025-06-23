@@ -1,8 +1,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tokio::time::{sleep, Duration};
+use tokio::time::{sleep, Duration, Instant};
 use serde_json;
+use tauri::Emitter;
 
 use crate::db::Database;
 use crate::transcription::Transcriber;
@@ -10,11 +11,14 @@ use crate::audio::AudioConverter;
 use crate::clipboard;
 use crate::settings::SettingsManager;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ProcessingJob {
     pub filename: String,
     pub audio_path: PathBuf,
     pub duration_ms: i32,
+    pub app_handle: Option<tauri::AppHandle>,
+    pub queue_entry_time: Instant,
+    pub user_stop_time: Option<Instant>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -65,6 +69,10 @@ impl ProcessingQueue {
                 if !processing && !queue.is_empty() {
                     processing = true;
                     let job = queue.remove(0);
+                    
+                    // Track when processing starts
+                    let processing_start_time = Instant::now();
+                    let queue_time_ms = job.queue_entry_time.elapsed().as_millis() as i32;
                     
                     // Update status
                     let _ = status_tx.send(ProcessingStatus::Processing { 
@@ -146,8 +154,11 @@ impl ProcessingQueue {
                                 
                                 match Transcriber::new(&model_path) {
                                     Ok(transcriber) => {
+                                        // Track transcription time
+                                        let transcription_start = Instant::now();
                                         match transcriber.transcribe(&audio_path_for_transcription) {
                                             Ok(transcript) => {
+                                                let transcription_time_ms = transcription_start.elapsed().as_millis() as i32;
                                                 
                                                 // Get file size
                                                 let file_size = tokio::fs::metadata(&job.audio_path)
@@ -156,7 +167,7 @@ impl ProcessingQueue {
                                                     .ok();
                                                 
                                                 // Save to database with model information and audio path
-                                                if let Err(e) = database.save_transcript(
+                                                match database.save_transcript(
                                                     &transcript,
                                                     job.duration_ms,
                                                     Some(&serde_json::json!({
@@ -167,7 +178,55 @@ impl ProcessingQueue {
                                                     Some(job.audio_path.to_str().unwrap_or("")),
                                                     file_size
                                                 ).await {
-                                                    eprintln!("Failed to save transcript to database: {}", e);
+                                                    Ok(saved_transcript) => {
+                                                        // Calculate user-perceived latency if we have stop time
+                                                        let user_perceived_latency_ms = job.user_stop_time
+                                                            .map(|stop_time| stop_time.elapsed().as_millis() as i32);
+                                                        
+                                                        // Save performance metrics
+                                                        let audio_format = job.audio_path.extension()
+                                                            .and_then(|ext| ext.to_str())
+                                                            .map(|s| s.to_string());
+                                                        
+                                                        match database.save_performance_metrics(
+                                                            Some(saved_transcript.id),
+                                                            job.duration_ms,
+                                                            transcription_time_ms,
+                                                            user_perceived_latency_ms,
+                                                            Some(queue_time_ms),
+                                                            Some(model_name),
+                                                            file_size,
+                                                            audio_format.as_deref(),
+                                                            true,
+                                                            None,
+                                                            None,
+                                                        ).await {
+                                                            Ok(_metrics_id) => {
+                                                                // Emit performance metrics event
+                                                                if let Some(app) = &job.app_handle {
+                                                                    let _ = app.emit("performance-metrics-recorded", serde_json::json!({
+                                                                        "transcript_id": saved_transcript.id,
+                                                                        "recording_duration_ms": job.duration_ms,
+                                                                        "transcription_time_ms": transcription_time_ms,
+                                                                        "user_perceived_latency_ms": user_perceived_latency_ms,
+                                                                        "processing_queue_time_ms": queue_time_ms,
+                                                                        "model_used": model_name,
+                                                                    }));
+                                                                }
+                                                            }
+                                                            Err(e) => {
+                                                                eprintln!("Failed to save performance metrics: {}", e);
+                                                            }
+                                                        }
+                                                        
+                                                        // Emit transcript-created event
+                                                        if let Some(app) = &job.app_handle {
+                                                            let _ = app.emit("transcript-created", &saved_transcript);
+                                                        }
+                                                    }
+                                                    Err(e) => {
+                                                        eprintln!("Failed to save transcript to database: {}", e);
+                                                    }
                                                 }
                                                 
                                                 // Handle auto-copy and auto-paste

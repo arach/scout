@@ -10,6 +10,7 @@ use crate::processing_queue::{ProcessingQueue, ProcessingJob};
 #[derive(Debug)]
 pub enum RecordingCommand {
     StartRecording {
+        device_name: Option<String>,
         response: oneshot::Sender<Result<String, String>>,
     },
     StopRecording {
@@ -46,7 +47,7 @@ impl RecordingWorkflow {
             
             while let Some(command) = command_rx.recv().await {
                 match command {
-                    RecordingCommand::StartRecording { response } => {
+                    RecordingCommand::StartRecording { device_name, response } => {
                         // Generate filename
                         let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
                         let filename = format!("recording_{}.wav", timestamp);
@@ -55,7 +56,7 @@ impl RecordingWorkflow {
                         
                         // Start recording
                         let recorder = recorder.lock().await;
-                        match recorder.start_recording(&path) {
+                        match recorder.start_recording(&path, device_name.as_deref()) {
                             Ok(_) => {
                                 let start_time = std::time::Instant::now();
                                 current_recording = Some((filename.clone(), start_time));
@@ -101,6 +102,9 @@ impl RecordingWorkflow {
                                 filename: filename.clone(),
                                 audio_path,
                                 duration_ms,
+                                app_handle: None, // TODO: pass app handle for transcript-created events
+                                queue_entry_time: tokio::time::Instant::now(),
+                                user_stop_time: Some(tokio::time::Instant::now()), // Recording just stopped
                             };
                             
                             // Queue the job for processing
@@ -151,10 +155,10 @@ impl RecordingWorkflow {
         RecordingWorkflow { command_tx }
     }
     
-    pub async fn start_recording(&self) -> Result<String, String> {
+    pub async fn start_recording(&self, device_name: Option<String>) -> Result<String, String> {
         let (response_tx, response_rx) = oneshot::channel();
         self.command_tx
-            .send(RecordingCommand::StartRecording { response: response_tx })
+            .send(RecordingCommand::StartRecording { device_name, response: response_tx })
             .await
             .map_err(|_| "Failed to send command".to_string())?;
         
