@@ -19,7 +19,17 @@ interface SessionTranscriptsProps {
 
 export function SessionTranscripts({ transcripts, formatDuration, showDeleteConfirmation }: SessionTranscriptsProps) {
     if (transcripts.length === 0) {
-        return null;
+        return (
+            <div className="session-transcripts">
+                <h3 className="session-header">Recent Transcripts</h3>
+                <div className="session-empty-state">
+                    <div className="session-empty-icon">🎤</div>
+                    <p className="session-empty-message">
+                        No recent transcripts. Start recording or upload an audio file to begin!
+                    </p>
+                </div>
+            </div>
+        );
     }
 
     const formatTime = (dateString: string) => {

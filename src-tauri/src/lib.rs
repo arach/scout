@@ -56,7 +56,7 @@ pub struct AppState {
 
 
 #[tauri::command]
-async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<String, String> {
+async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle, device_name: Option<String>) -> Result<String, String> {
     // Check if already recording
     if state.progress_tracker.is_busy() {
         println!("WARNING: Attempted to start recording while already recording");
@@ -76,7 +76,7 @@ async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> R
     
     
     // Use the recording workflow to start recording
-    let filename = state.recording_workflow.start_recording().await?;
+    let filename = state.recording_workflow.start_recording(device_name).await?;
     
     // Progress is already updated by recording_workflow, no need to update again
     
@@ -249,6 +249,53 @@ async fn log_from_overlay(message: String) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+async fn get_audio_devices() -> Result<Vec<String>, String> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    
+    let host = cpal::default_host();
+    let mut device_names = Vec::new();
+    
+    // Get input devices
+    let devices = host.input_devices()
+        .map_err(|e| format!("Failed to enumerate input devices: {}", e))?;
+    
+    for device in devices {
+        match device.name() {
+            Ok(name) => {
+                device_names.push(name);
+            },
+            Err(e) => {
+                eprintln!("Failed to get device name: {}", e);
+            }
+        }
+    }
+    
+    if device_names.is_empty() {
+        device_names.push("No input devices found".to_string());
+    }
+    
+    Ok(device_names)
+}
+
+#[tauri::command]
+async fn start_audio_level_monitoring(state: State<'_, AppState>, device_name: Option<String>) -> Result<(), String> {
+    let recorder = state.recorder.lock().await;
+    recorder.start_audio_level_monitoring(device_name.as_deref())
+}
+
+#[tauri::command]
+async fn stop_audio_level_monitoring(state: State<'_, AppState>) -> Result<(), String> {
+    let recorder = state.recorder.lock().await;
+    recorder.stop_audio_level_monitoring()
+}
+
+#[tauri::command]
+async fn get_current_audio_level(state: State<'_, AppState>) -> Result<f32, String> {
+    let recorder = state.recorder.lock().await;
+    Ok(recorder.get_current_audio_level())
+}
+
 
 #[tauri::command]
 async fn get_current_recording_file(state: State<'_, AppState>) -> Result<Option<String>, String> {
@@ -293,13 +340,13 @@ async fn transcribe_audio(
     } else {
         
         // Extract model name from path for logging
-        let model_name = model_path.file_name()
+        let _model_name = model_path.file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("unknown");
     }
     
     // Create transcriber and transcribe
-    let model_name = model_path.file_name()
+    let _model_name = model_path.file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("unknown");
     
@@ -361,6 +408,9 @@ async fn transcribe_file(
         filename: filename.clone(),
         audio_path: dest_path,
         duration_ms: estimated_duration_ms,
+        app_handle: Some(app.clone()),
+        queue_entry_time: tokio::time::Instant::now(),
+        user_stop_time: None, // File upload doesn't have user stop time
     };
     
     state.processing_queue.queue_job(job).await;
@@ -377,6 +427,7 @@ async fn transcribe_file(
 
 #[tauri::command]
 async fn save_transcript(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     text: String,
     duration_ms: i32,
@@ -391,7 +442,12 @@ async fn save_transcript(
         "processing_type": "manual_save"
     }).to_string();
     
-    state.database.save_transcript(&text, duration_ms, Some(&metadata), None, None).await
+    let transcript = state.database.save_transcript(&text, duration_ms, Some(&metadata), None, None).await?;
+    
+    // Emit transcript-created event
+    let _ = app.emit("transcript-created", &transcript);
+    
+    Ok(transcript.id)
 }
 
 #[tauri::command]
@@ -400,6 +456,14 @@ async fn get_recent_transcripts(
     limit: i32,
 ) -> Result<Vec<db::Transcript>, String> {
     state.database.get_recent_transcripts(limit).await
+}
+
+#[tauri::command]
+async fn get_performance_metrics(
+    state: State<'_, AppState>,
+    limit: i32,
+) -> Result<Vec<db::PerformanceMetrics>, String> {
+    state.database.get_recent_performance_metrics(limit).await
 }
 
 #[tauri::command]
@@ -1009,11 +1073,11 @@ pub fn run() {
                         
                         // Log the status
                         match &status {
-                            ProcessingStatus::Queued { position } => {
+                            ProcessingStatus::Queued { position: _ } => {
                             }
-                            ProcessingStatus::Processing { filename } => {
+                            ProcessingStatus::Processing { filename: _ } => {
                             }
-                            ProcessingStatus::Converting { filename } => {
+                            ProcessingStatus::Converting { filename: _ } => {
                             }
                             ProcessingStatus::Transcribing { filename } => {
                                 println!("Transcribing file: {}", filename);
@@ -1158,10 +1222,15 @@ pub fn run() {
             stop_recording,
             cancel_recording,
             is_recording,
+            get_audio_devices,
+            start_audio_level_monitoring,
+            stop_audio_level_monitoring,
+            get_current_audio_level,
             log_from_overlay,
             get_current_recording_file,
             transcribe_audio,
             save_transcript,
+            get_performance_metrics,
             get_recent_transcripts,
             search_transcripts,
             read_audio_file,

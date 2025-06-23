@@ -69,14 +69,9 @@ export function SettingsView({
                                 Cancel
                             </button>
                         ) : (
-                            <>
-                                <button onClick={startCapturingHotkey}>
-                                    Capture
-                                </button>
-                                <button onClick={() => updateHotkey(hotkey)} className="apply-button">
-                                    Apply
-                                </button>
-                            </>
+                            <button onClick={startCapturingHotkey}>
+                                Capture
+                            </button>
                         )}
                     </div>
                     <p className="setting-hint">

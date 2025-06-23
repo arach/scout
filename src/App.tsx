@@ -1,4 +1,4 @@
-import { useState, useEffect, Fragment, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -30,8 +30,12 @@ function App() {
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
   const [currentTranscript, setCurrentTranscript] = useState<string>("");
   const [recordingDuration, setRecordingDuration] = useState(0);
+  const [audioLevel, setAudioLevel] = useState(0);
+  const audioLevelRef = useRef(0);
+  const smoothedAudioLevelRef = useRef(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [vadEnabled, setVadEnabled] = useState(false);
+  const [selectedMic, setSelectedMic] = useState<string>('Default microphone');
   const [isProcessing, setIsProcessing] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -66,7 +70,6 @@ function App() {
   const [autoCopy, setAutoCopy] = useState(false);
   const [autoPaste, setAutoPaste] = useState(false);
   const processingFileRef = useRef<string | null>(null); // Track file being processed to prevent duplicates
-  const pushToTalkTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastPushToTalkTimeRef = useRef(0);
   const isStartingRecording = useRef(false); // Prevent multiple simultaneous start attempts
 
@@ -218,29 +221,11 @@ function App() {
         if (recording) {
           // If already recording, stop immediately (second press)
           console.log('Stopping push-to-talk recording (manual stop)');
-          if (pushToTalkTimeoutRef.current) {
-            clearTimeout(pushToTalkTimeoutRef.current);
-            pushToTalkTimeoutRef.current = null;
-          }
           stopRecording();
         } else {
-          // Start recording and set auto-stop timer
+          // Start recording - no auto-stop timer
           console.log('Starting push-to-talk recording');
           startRecording();
-          
-          // Auto-stop after 10 seconds (configurable)
-          pushToTalkTimeoutRef.current = setTimeout(async () => {
-            try {
-              const stillRecording = await invoke<boolean>("is_recording");
-              if (stillRecording) {
-                console.log('Auto-stopping push-to-talk recording after 10 seconds');
-                stopRecording();
-              }
-            } catch (error) {
-              console.error("Failed to auto-stop push-to-talk recording:", error);
-            }
-            pushToTalkTimeoutRef.current = null;
-          }, 10000); // 10 seconds
         }
       } catch (error) {
         console.error("Failed to handle push-to-talk:", error);
@@ -420,6 +405,38 @@ function App() {
     
     setupFileDrop();
     
+    // Listen for transcript-created events (pub/sub for real-time updates)
+    const unsubscribeTranscriptCreated = listen('transcript-created', async (event) => {
+      const newTranscript = event.payload as Transcript;
+      
+      // Add the new transcript to the list
+      setTranscripts(prev => {
+        // Check if transcript already exists (by id)
+        const exists = prev.some(t => t.id === newTranscript.id);
+        if (exists) return prev;
+        
+        // Add new transcript at the beginning and keep only recent ones
+        return [newTranscript, ...prev].slice(0, 100);
+      });
+      
+      // Clear processing state if this was from our current recording
+      setIsProcessing(false);
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 2000);
+    });
+    
+    // Listen for performance metrics events (for debugging)
+    const unsubscribePerformanceMetrics = listen('performance-metrics-recorded', async (event) => {
+      const metrics = event.payload as any;
+      console.log('Performance Metrics:', {
+        recording_duration: `${metrics.recording_duration_ms}ms`,
+        transcription_time: `${metrics.transcription_time_ms}ms`, 
+        user_perceived_latency: metrics.user_perceived_latency_ms ? `${metrics.user_perceived_latency_ms}ms` : 'N/A',
+        queue_time: `${metrics.processing_queue_time_ms}ms`,
+        model: metrics.model_used,
+      });
+    });
+
     return () => {
       unsubscribe.then(fn => fn());
       unsubscribePushToTalk.then(fn => fn());
@@ -430,6 +447,8 @@ function App() {
       unsubscribeNativeStart.then(fn => fn());
       unsubscribeNativeStop.then(fn => fn());
       unsubscribeNativeCancel.then(fn => fn());
+      unsubscribeTranscriptCreated.then(fn => fn());
+      unsubscribePerformanceMetrics.then(fn => fn());
       if (unsubscribeFileDrop) {
         unsubscribeFileDrop();
       }
@@ -446,9 +465,45 @@ function App() {
     } else {
       setRecordingDuration(0);
     }
-    return () => clearInterval(interval);
+    
+    return () => {
+      clearInterval(interval);
+    };
   }, [isRecording]);
-  
+
+  // Audio level monitoring - only when on record view
+  useEffect(() => {
+    if (currentView !== 'record') return;
+    
+    let audioLevelInterval: number;
+    
+    // Start audio level monitoring when on record view
+    audioLevelInterval = setInterval(async () => {
+      try {
+        const level = await invoke<number>('get_audio_level');
+        // Only log if there's actual audio activity to reduce spam
+        if (level > 0.001) {
+          console.log('Audio level:', level);
+        }
+        // Amplify the level for better visual feedback
+        const amplifiedLevel = Math.min(level * 10, 1.0);
+        setAudioLevel(amplifiedLevel);
+      } catch (error) {
+        // Reduce error spam - only log occasionally
+        if (Math.random() < 0.01) {
+          console.warn('Audio level monitoring not available');
+        }
+        setAudioLevel(0);
+      }
+    }, 150); // Less frequent polling
+    
+    return () => {
+      clearInterval(audioLevelInterval);
+      // Reset audio level when leaving record view
+      setAudioLevel(0);
+    };
+  }, [currentView]); // Only depend on currentView
+
   // Periodically sync recording state with backend to ensure consistency
   useEffect(() => {
     const syncInterval = setInterval(async () => {
@@ -490,10 +545,15 @@ function App() {
     
     isStartingRecording.current = true;
     
+    // Store current audio level to preserve it during transition
+    const currentLevel = audioLevelRef.current;
+    
     // IMMEDIATELY update UI for instant feedback - using flushSync to force synchronous update
     flushSync(() => {
       setIsRecording(true);
       setCurrentTranscript("");
+      // Preserve audio level during transition
+      setAudioLevel(currentLevel);
     });
     
     isRecordingRef.current = true;
@@ -501,7 +561,9 @@ function App() {
     
     // Start the backend recording asynchronously
     try {
-      const filename = await invoke<string>("start_recording");
+      const filename = await invoke<string>("start_recording", { 
+        deviceName: selectedMic === 'Default microphone' ? null : selectedMic 
+      });
       setCurrentRecordingFile(filename);
       isStartingRecording.current = false; // Reset flag on success
       
@@ -515,7 +577,8 @@ function App() {
         
         const levelInterval = setInterval(async () => {
           try {
-            await invoke<number>('get_audio_level');
+            const level = await invoke<number>('get_current_audio_level');
+            audioLevelRef.current = level;
             // Removed logging to reduce noise
           } catch (e) {
             // Silent fail - audio level monitoring is not critical
@@ -554,9 +617,38 @@ function App() {
     });
     isRecordingRef.current = false;
     
-    // Stop the backend recording without waiting
-    invoke("stop_recording").catch(error => {
-      console.error("Failed to stop recording:", error);
+    // Stop the backend recording
+    invoke("stop_recording")
+      .then(() => {
+        // Set processing state
+        setIsProcessing(true);
+      })
+      .catch(error => {
+        console.error("Failed to stop recording:", error);
+      });
+  };
+
+  const cancelRecording = async () => {
+    // Prevent canceling if not recording
+    if (!isRecordingRef.current) {
+      return;
+    }
+    
+    // Clear audio level monitoring if running
+    if ((window as any).__audioLevelInterval) {
+      clearInterval((window as any).__audioLevelInterval);
+      (window as any).__audioLevelInterval = null;
+    }
+    
+    // IMMEDIATELY update UI for instant feedback
+    flushSync(() => {
+      setIsRecording(false);
+    });
+    isRecordingRef.current = false;
+    
+    // Cancel the backend recording without processing
+    invoke("cancel_recording").catch(error => {
+      console.error("Failed to cancel recording:", error);
     });
   };
 
@@ -840,6 +932,8 @@ function App() {
       });
       const newHotkey = convertedKeys.join('+');
       setHotkey(newHotkey);
+      // Auto-save the hotkey like push-to-talk does
+      updateHotkey(newHotkey);
     }
     setCapturedKeys([]);
   };
@@ -950,6 +1044,113 @@ function App() {
     };
   }, [isCapturingHotkey, isCapturingPushToTalkHotkey, capturedKeys]);
 
+  // Add escape key handler for canceling recordings
+  useEffect(() => {
+    const handleEscapeKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isRecording) {
+        e.preventDefault();
+        cancelRecording();
+      }
+    };
+
+    window.addEventListener('keydown', handleEscapeKey);
+    return () => window.removeEventListener('keydown', handleEscapeKey);
+  }, [isRecording]);
+
+  // Monitor audio levels when RecordView is visible and not recording
+  useEffect(() => {
+    let intervalId: number | null = null;
+    let animationFrameId: number | null = null;
+    let isMonitoring = false;
+    
+    const updateAudioLevelDisplay = () => {
+      // Apply smoothing to reduce flicker
+      const targetLevel = audioLevelRef.current;
+      const currentSmoothed = smoothedAudioLevelRef.current;
+      
+      // Faster rise, slower fall for more natural feel
+      const smoothingFactor = targetLevel > currentSmoothed ? 0.3 : 0.15;
+      smoothedAudioLevelRef.current = currentSmoothed + (targetLevel - currentSmoothed) * smoothingFactor;
+      
+      // Only update state if the change is significant
+      const roundedLevel = Math.round(smoothedAudioLevelRef.current * 100) / 100;
+      if (Math.abs(roundedLevel - audioLevel) > 0.01) {
+        setAudioLevel(roundedLevel);
+      }
+      
+      if (isMonitoring) {
+        animationFrameId = requestAnimationFrame(updateAudioLevelDisplay);
+      }
+    };
+    
+    const startMonitoring = async () => {
+      if (isMonitoring) return;
+      
+      try {
+        await invoke('start_audio_level_monitoring', { 
+          deviceName: selectedMic === 'Default microphone' ? null : selectedMic 
+        });
+        
+        isMonitoring = true;
+        
+        // Poll for audio levels
+        intervalId = window.setInterval(async () => {
+          try {
+            const level = await invoke<number>('get_current_audio_level');
+            // Update ref immediately, state update happens in animation frame
+            audioLevelRef.current = level;
+          } catch (error) {
+            // Silent fail to avoid console spam
+          }
+        }, 50); // Poll at 20Hz
+        
+        // Start animation frame for smooth updates
+        animationFrameId = requestAnimationFrame(updateAudioLevelDisplay);
+      } catch (error) {
+        console.error('Failed to start audio level monitoring:', error);
+      }
+    };
+    
+    const stopMonitoring = async () => {
+      isMonitoring = false;
+      
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+      
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+      
+      try {
+        await invoke('stop_audio_level_monitoring');
+        // Don't reset audio level if we're starting recording
+        // This preserves the visual feedback during transition
+        if (!isRecording) {
+          audioLevelRef.current = 0;
+          smoothedAudioLevelRef.current = 0;
+          setAudioLevel(0);
+        }
+      } catch (error) {
+        // Silent fail
+      }
+    };
+    
+    // Start monitoring when on record view and not recording
+    if (currentView === 'record' && !isRecording) {
+      startMonitoring();
+    } else {
+      stopMonitoring();
+    }
+    
+    // Cleanup on unmount or when dependencies change
+    return () => {
+      stopMonitoring();
+    };
+  }, [currentView, isRecording, selectedMic]);
+
   if (showFirstRun) {
     return <FirstRunSetup onComplete={() => setShowFirstRun(false)} />;
   }
@@ -963,16 +1164,20 @@ function App() {
             isRecording={isRecording}
             isProcessing={isProcessing}
             recordingDuration={recordingDuration}
+            audioLevel={audioLevel}
             hotkey={hotkey}
+            pushToTalkHotkey={pushToTalkHotkey}
             uploadProgress={uploadProgress}
             sessionTranscripts={transcripts
               .filter(t => new Date(t.created_at) >= new Date(sessionStartTime))
               .slice(-10)}
+            selectedMic={selectedMic}
+            onMicChange={setSelectedMic}
             startRecording={startRecording}
             stopRecording={stopRecording}
+            cancelRecording={cancelRecording}
             handleFileUpload={handleFileUpload}
             formatDuration={formatDuration}
-            formatFileSize={formatFileSize}
             showDeleteConfirmation={showDeleteConfirmation}
           />
         )}

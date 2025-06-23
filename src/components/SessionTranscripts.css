@@ -122,6 +122,27 @@
     }
 }
 
+/* Empty state styles */
+.session-empty-state {
+    text-align: center;
+    padding: 32px 16px;
+    color: var(--text-tertiary);
+}
+
+.session-empty-icon {
+    font-size: 32px;
+    margin-bottom: 12px;
+    opacity: 0.6;
+}
+
+.session-empty-message {
+    font-size: 14px;
+    line-height: 1.5;
+    margin: 0;
+    max-width: 280px;
+    margin: 0 auto;
+}
+
 /* Dark mode adjustments */
 @media (prefers-color-scheme: dark) {
     .session-item {

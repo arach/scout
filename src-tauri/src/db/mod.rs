@@ -13,6 +13,23 @@ pub struct Transcript {
     pub file_size: Option<i64>,
 }
 
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct PerformanceMetrics {
+    pub id: i64,
+    pub transcript_id: Option<i64>,
+    pub recording_duration_ms: i32,
+    pub transcription_time_ms: i32,
+    pub user_perceived_latency_ms: Option<i32>,
+    pub processing_queue_time_ms: Option<i32>,
+    pub model_used: Option<String>,
+    pub audio_file_size_bytes: Option<i64>,
+    pub audio_format: Option<String>,
+    pub success: bool,
+    pub error_message: Option<String>,
+    pub created_at: String,
+    pub metadata: Option<String>,
+}
+
 pub struct Database {
     pool: Pool<Sqlite>,
 }
@@ -66,6 +83,35 @@ impl Database {
             .execute(&pool)
             .await;
 
+        // Create performance metrics table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS performance_metrics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                transcript_id INTEGER,
+                recording_duration_ms INTEGER NOT NULL,
+                transcription_time_ms INTEGER NOT NULL,
+                user_perceived_latency_ms INTEGER,
+                processing_queue_time_ms INTEGER,
+                model_used TEXT,
+                audio_file_size_bytes INTEGER,
+                audio_format TEXT,
+                success BOOLEAN NOT NULL DEFAULT 1,
+                error_message TEXT,
+                created_at TEXT DEFAULT (datetime('now')),
+                metadata TEXT,
+                FOREIGN KEY (transcript_id) REFERENCES transcripts(id) ON DELETE CASCADE
+            );
+            
+            CREATE INDEX IF NOT EXISTS idx_performance_metrics_created_at ON performance_metrics(created_at);
+            CREATE INDEX IF NOT EXISTS idx_performance_metrics_transcript_id ON performance_metrics(transcript_id);
+            CREATE INDEX IF NOT EXISTS idx_performance_metrics_success ON performance_metrics(success);
+            "#
+        )
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("Failed to create performance_metrics table: {}", e))?;
+
         Ok(Self { pool })
     }
 
@@ -76,7 +122,7 @@ impl Database {
         metadata: Option<&str>,
         audio_path: Option<&str>,
         file_size: Option<i64>,
-    ) -> Result<i64, String> {
+    ) -> Result<Transcript, String> {
         let result = sqlx::query(
             r#"
             INSERT INTO transcripts (text, duration_ms, metadata, audio_path, file_size)
@@ -92,7 +138,12 @@ impl Database {
         .await
         .map_err(|e| format!("Failed to save transcript: {}", e))?;
 
-        Ok(result.last_insert_rowid())
+        let id = result.last_insert_rowid();
+        
+        // Fetch the newly created transcript to return it
+        self.get_transcript(id)
+            .await?
+            .ok_or_else(|| "Failed to fetch newly created transcript".to_string())
     }
 
     pub async fn get_transcript(&self, id: i64) -> Result<Option<Transcript>, String> {
@@ -176,5 +227,63 @@ impl Database {
             .map_err(|e| format!("Failed to delete transcripts: {}", e))?;
         
         Ok(())
+    }
+
+    pub async fn save_performance_metrics(
+        &self,
+        transcript_id: Option<i64>,
+        recording_duration_ms: i32,
+        transcription_time_ms: i32,
+        user_perceived_latency_ms: Option<i32>,
+        processing_queue_time_ms: Option<i32>,
+        model_used: Option<&str>,
+        audio_file_size_bytes: Option<i64>,
+        audio_format: Option<&str>,
+        success: bool,
+        error_message: Option<&str>,
+        metadata: Option<&str>,
+    ) -> Result<i64, String> {
+        let result = sqlx::query(
+            r#"
+            INSERT INTO performance_metrics (
+                transcript_id, recording_duration_ms, transcription_time_ms,
+                user_perceived_latency_ms, processing_queue_time_ms, model_used,
+                audio_file_size_bytes, audio_format, success, error_message, metadata
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            "#
+        )
+        .bind(transcript_id)
+        .bind(recording_duration_ms)
+        .bind(transcription_time_ms)
+        .bind(user_perceived_latency_ms)
+        .bind(processing_queue_time_ms)
+        .bind(model_used)
+        .bind(audio_file_size_bytes)
+        .bind(audio_format)
+        .bind(success)
+        .bind(error_message)
+        .bind(metadata)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to save performance metrics: {}", e))?;
+
+        Ok(result.last_insert_rowid())
+    }
+
+    pub async fn get_recent_performance_metrics(&self, limit: i32) -> Result<Vec<PerformanceMetrics>, String> {
+        let metrics = sqlx::query_as::<_, PerformanceMetrics>(
+            r#"
+            SELECT * FROM performance_metrics
+            ORDER BY created_at DESC
+            LIMIT ?1
+            "#
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to get performance metrics: {}", e))?;
+
+        Ok(metrics)
     }
 }
