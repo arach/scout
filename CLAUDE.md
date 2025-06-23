@@ -21,6 +21,8 @@ Use Gitmoji (https://gitmoji.dev/) in all commit messages:
 
 Example: `✨ Add voice activity detection for automatic recording`
 
+**Important**: Do NOT add co-authoring attribution or "Generated with Claude Code" footers to commit messages.
+
 ## Project Overview
 
 Scout is a cross-platform local-first dictation application built with:
