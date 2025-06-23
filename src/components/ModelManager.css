@@ -1,20 +1,20 @@
 .model-manager {
-  padding: 20px 0;
+  padding: 16px 0;
 }
 
 .model-manager-header {
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 
 .model-manager-header h3 {
-  margin: 0 0 8px 0;
+  margin: 0 0 6px 0;
   font-size: 18px;
   font-weight: 600;
   color: var(--text-primary);
 }
 
 .model-manager-subtitle {
-  margin: 0 0 16px 0;
+  margin: 0 0 12px 0;
   color: var(--text-muted);
   font-size: 14px;
 }
@@ -45,14 +45,14 @@
 .model-list {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 
 .model-item {
   background: var(--button-background);
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  padding: 16px;
+  padding: 14px;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -75,8 +75,8 @@
 .model-header {
   display: flex;
   align-items: baseline;
-  gap: 12px;
-  margin-bottom: 8px;
+  gap: 10px;
+  margin-bottom: 6px;
 }
 
 .model-header h4 {
@@ -105,14 +105,14 @@
 }
 
 .model-description {
-  margin: 0 0 12px 0;
+  margin: 0 0 8px 0;
   color: var(--text-secondary);
   font-size: 14px;
 }
 
 .model-stats {
   display: flex;
-  gap: 16px;
+  gap: 14px;
   font-size: 13px;
 }
 

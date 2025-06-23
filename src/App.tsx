@@ -22,6 +22,13 @@ interface Transcript {
   file_size?: number;
 }
 
+interface AudioDeviceInfo {
+  name: string;
+  index: number;
+  sample_rates: number[];
+  channels: number;
+}
+
 type View = 'record' | 'transcripts' | 'settings';
 
 function App() {
@@ -36,6 +43,7 @@ function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [vadEnabled, setVadEnabled] = useState(false);
   const [selectedMic, setSelectedMic] = useState<string>('Default microphone');
+  
   const [isProcessing, setIsProcessing] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -69,6 +77,7 @@ function App() {
   const [sessionStartTime] = useState(() => new Date().toISOString());
   const [autoCopy, setAutoCopy] = useState(false);
   const [autoPaste, setAutoPaste] = useState(false);
+  const [visualMicPicker, setVisualMicPicker] = useState(false);
   const processingFileRef = useRef<string | null>(null); // Track file being processed to prevent duplicates
   const lastPushToTalkTimeRef = useRef(0);
   const isStartingRecording = useRef(false); // Prevent multiple simultaneous start attempts
@@ -91,6 +100,17 @@ function App() {
       }
     };
     checkModels();
+    
+    // One-time check of all audio devices
+    const checkAudioDevices = async () => {
+      try {
+        const devices = await invoke<string[]>('get_audio_devices');
+        console.log('🔊 Audio devices available:', devices);
+      } catch (error) {
+        console.error('🔊 Failed to get audio devices:', error);
+      }
+    };
+    checkAudioDevices();
   }, []);
 
   useEffect(() => {
@@ -176,6 +196,11 @@ function App() {
       setAutoPaste(enabled);
     }).catch(console.error);
     
+    // Load visual mic picker preference
+    const savedVisualMicPicker = localStorage.getItem('scout-visual-mic-picker');
+    if (savedVisualMicPicker === 'true') {
+      setVisualMicPicker(true);
+    }
     
     // Mark as initialized
     if (!localStorage.getItem('scout-initialized')) {
@@ -582,6 +607,11 @@ function App() {
             // Removed logging to reduce noise
           } catch (e) {
             // Silent fail - audio level monitoring is not critical
+            // Only log if it's not an access control error (which happens during init)
+            if (e && typeof e === 'object' && 'message' in e && 
+                !String(e.message).includes('access control')) {
+              console.warn('Audio level monitoring error:', e);
+            }
           }
         }, 100);
         
@@ -664,10 +694,18 @@ function App() {
   };
 
   const formatDuration = (ms: number) => {
-    const seconds = Math.floor(ms / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = seconds % 60;
-    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+    const totalSeconds = Math.floor(ms / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    if (hours > 0) {
+      return `${hours}h ${minutes}m`;
+    } else if (minutes > 0) {
+      return `${minutes}m ${seconds}s`;
+    } else {
+      return `${seconds}s`;
+    }
   };
 
   const formatFileSize = (bytes: number) => {
@@ -845,6 +883,13 @@ function App() {
     } catch (error) {
       console.error("Failed to toggle auto-paste:", error);
     }
+  };
+
+  const toggleVisualMicPicker = () => {
+    const newState = !visualMicPicker;
+    setVisualMicPicker(newState);
+    // Store preference in localStorage for persistence
+    localStorage.setItem('scout-visual-mic-picker', newState.toString());
   };
 
   
@@ -1093,6 +1138,9 @@ function App() {
         
         isMonitoring = true;
         
+        // Add a small delay to ensure backend is ready
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
         // Poll for audio levels
         intervalId = window.setInterval(async () => {
           try {
@@ -1101,6 +1149,11 @@ function App() {
             audioLevelRef.current = level;
           } catch (error) {
             // Silent fail to avoid console spam
+            // Only log non-access control errors
+            if (error && typeof error === 'object' && 'message' in error && 
+                !String((error as any).message).includes('access control')) {
+              console.warn('Audio level monitoring error:', error);
+            }
           }
         }, 50); // Poll at 20Hz
         
@@ -1173,6 +1226,7 @@ function App() {
               .slice(-10)}
             selectedMic={selectedMic}
             onMicChange={setSelectedMic}
+            visualMicPicker={visualMicPicker}
             startRecording={startRecording}
             stopRecording={stopRecording}
             cancelRecording={cancelRecording}
@@ -1210,6 +1264,7 @@ function App() {
             overlayPosition={overlayPosition}
             autoCopy={autoCopy}
             autoPaste={autoPaste}
+            visualMicPicker={visualMicPicker}
             stopCapturingHotkey={stopCapturingHotkey}
             startCapturingHotkey={startCapturingHotkey}
             startCapturingPushToTalkHotkey={startCapturingPushToTalkHotkey}
@@ -1219,6 +1274,7 @@ function App() {
             updateOverlayPosition={updateOverlayPosition}
             toggleAutoCopy={toggleAutoCopy}
             toggleAutoPaste={toggleAutoPaste}
+            toggleVisualMicPicker={toggleVisualMicPicker}
           />
         )}
         {isDragging && (
