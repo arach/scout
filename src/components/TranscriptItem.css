@@ -1,0 +1,228 @@
+/* Transcript Item Styles */
+.transcript-item {
+    position: relative;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+    padding: 16px 20px;
+    margin-bottom: 0;
+    transition: all 0.2s ease;
+    cursor: default;
+}
+
+.transcript-item.clickable {
+    cursor: pointer;
+}
+
+.transcript-item:hover {
+    background: rgba(0, 0, 0, 0.02);
+}
+
+.transcript-item.selected {
+    background: rgba(74, 158, 255, 0.05);
+}
+
+.transcript-item.active {
+    background: rgba(74, 158, 255, 0.05);
+    border-left: 3px solid var(--accent-primary);
+    padding-left: 17px;
+}
+
+/* Compact variant for recent transcripts */
+.transcript-item.compact {
+    padding: 12px 16px;
+    font-size: 13px;
+}
+
+.transcript-item.compact .transcript-text {
+    font-size: 13px;
+    -webkit-line-clamp: 2;
+}
+
+/* Remove animation for table view */
+.transcript-item {
+    animation: none;
+}
+
+/* Last item styling - remove bottom border */
+.transcript-item:last-child {
+    border-bottom: none;
+}
+
+/* Content Layout */
+.transcript-item-content {
+    display: flex;
+    align-items: flex-start;
+    gap: 20px;
+}
+
+.transcript-checkbox {
+    flex-shrink: 0;
+    margin-top: 2px;
+    cursor: pointer;
+}
+
+/* Time column */
+.transcript-time {
+    font-size: 13px;
+    color: rgba(0, 0, 0, 0.5);
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+    flex-shrink: 0;
+    min-width: 85px;
+}
+
+/* Duration column */
+.transcript-duration {
+    font-size: 12px;
+    color: rgba(0, 0, 0, 0.4);
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+    flex-shrink: 0;
+    min-width: 70px;
+    text-align: left;
+}
+
+/* Text Content */
+.transcript-text-container {
+    flex: 1;
+    min-width: 0;
+    padding: 0 12px;
+}
+
+.transcript-text {
+    margin: 0;
+    color: rgba(0, 0, 0, 0.85);
+    font-size: 14px;
+    line-height: 1.6;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-weight: 400;
+    letter-spacing: -0.01em;
+    word-wrap: break-word;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.transcript-empty {
+    color: rgba(0, 0, 0, 0.4);
+    font-style: italic;
+    font-size: 13px;
+}
+
+/* Actions */
+.transcript-actions {
+    display: flex;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    flex-shrink: 0;
+    align-items: flex-start;
+}
+
+.transcript-item:hover .transcript-actions {
+    opacity: 1;
+}
+
+.transcript-action-button {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-primary);
+    border-radius: 4px;
+    padding: 4px 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
+}
+
+.transcript-action-button:hover:not(:disabled) {
+    background: var(--bg-hover);
+    border-color: var(--border-secondary);
+    color: var(--text-primary);
+}
+
+.transcript-action-button:active:not(:disabled) {
+    transform: scale(0.95);
+}
+
+.transcript-action-button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* Copy button states */
+.transcript-action-button.copy.copied {
+    color: var(--success);
+    border-color: var(--success);
+}
+
+.transcript-action-button.copy:hover:not(:disabled):not(.copied) {
+    color: var(--accent-primary);
+    border-color: var(--accent-primary);
+}
+
+/* Delete button */
+.transcript-action-button.delete:hover {
+    color: var(--error);
+    border-color: var(--error);
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.transcript-item {
+    animation: fadeIn 0.3s ease-out;
+}
+
+/* Dark mode adjustments */
+@media (prefers-color-scheme: dark) {
+    .transcript-item {
+        background: transparent;
+        border-color: rgba(255, 255, 255, 0.08);
+    }
+    
+    .transcript-item:hover {
+        background: rgba(255, 255, 255, 0.04);
+    }
+    
+    .transcript-item.selected,
+    .transcript-item.active {
+        background: rgba(74, 158, 255, 0.12);
+    }
+    
+    .transcript-time {
+        color: rgba(255, 255, 255, 0.5);
+    }
+    
+    .transcript-duration {
+        color: rgba(255, 255, 255, 0.4);
+    }
+    
+    .transcript-text {
+        color: rgba(255, 255, 255, 0.85);
+    }
+    
+    .transcript-empty {
+        color: rgba(255, 255, 255, 0.4);
+    }
+    
+    .transcript-action-button {
+        background: rgba(255, 255, 255, 0.05);
+        border-color: rgba(255, 255, 255, 0.1);
+    }
+    
+    .transcript-action-button:hover:not(:disabled) {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: rgba(255, 255, 255, 0.15);
+    }
+}
