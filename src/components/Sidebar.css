@@ -83,7 +83,7 @@
 }
 
 /* Tooltip for collapsed state */
-.sidebar-button .sidebar-tooltip {
+.sidebar.collapsed .sidebar-button .sidebar-tooltip {
   position: absolute;
   left: 100%;
   top: 50%;
@@ -97,7 +97,7 @@
   opacity: 0;
   transition: opacity 0.15s ease, visibility 0.15s ease;
   margin-left: 16px;
-  z-index: 1000;
+  z-index: 9999;
   font-size: 12px;
   font-weight: 500;
   pointer-events: none;
@@ -105,8 +105,13 @@
   border: 1px solid var(--border-primary);
 }
 
+/* Hide tooltips when sidebar is expanded */
+.sidebar.expanded .sidebar-button .sidebar-tooltip {
+  display: none;
+}
+
 /* Tooltip arrow */
-.sidebar-button .sidebar-tooltip::before {
+.sidebar.collapsed .sidebar-button .sidebar-tooltip::before {
   content: '';
   position: absolute;
   right: 100%;
@@ -119,7 +124,7 @@
   border-color: transparent var(--border-primary) transparent transparent;
 }
 
-.sidebar-button .sidebar-tooltip::after {
+.sidebar.collapsed .sidebar-button .sidebar-tooltip::after {
   content: '';
   position: absolute;
   right: 100%;
@@ -133,7 +138,8 @@
   margin-right: -1px;
 }
 
-.sidebar-button:hover .sidebar-tooltip {
+/* Show tooltip on hover when sidebar is collapsed */
+.sidebar.collapsed .sidebar-button:hover .sidebar-tooltip {
   visibility: visible;
   opacity: 1;
   transition-delay: 0.5s;
@@ -151,17 +157,17 @@
   }
   
   /* Fix tooltip colors for dark mode */
-  .sidebar-button .sidebar-tooltip {
+  .sidebar.collapsed .sidebar-button .sidebar-tooltip {
     background-color: var(--bg-tertiary);
     border-color: var(--border-secondary);
     box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
   }
   
-  .sidebar-button .sidebar-tooltip::before {
+  .sidebar.collapsed .sidebar-button .sidebar-tooltip::before {
     border-color: transparent var(--border-secondary) transparent transparent;
   }
   
-  .sidebar-button .sidebar-tooltip::after {
+  .sidebar.collapsed .sidebar-button .sidebar-tooltip::after {
     border-color: transparent var(--bg-tertiary) transparent transparent;
   }
 } 
