@@ -1337,15 +1337,6 @@ h1 {
 }
 
 /* Position button icons - use more subtle arrows */
-.position-button::before {
-  content: '';
-  position: absolute;
-  width: 6px;
-  height: 6px;
-  background-color: currentColor;
-  border-radius: 50%;
-  opacity: 0.8;
-}
 
 /* Dark mode for overlay position grid */
 @media (prefers-color-scheme: dark) {
