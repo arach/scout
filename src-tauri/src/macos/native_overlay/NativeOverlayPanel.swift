@@ -5,30 +5,30 @@ import WebKit
 
 private struct UIConfig {
     // Panel sizes
-    static let expandedSize = CGSize(width: 100, height: 24)  // Slightly wider for cancel + stop buttons
-    static let minimizedSize = CGSize(width: 40, height: 10)  // Even smaller
+    static let expandedSize = CGSize(width: 120, height: 28)  // Larger for better recording experience
+    static let minimizedSize = CGSize(width: 40, height: 8)  // 2 pixels smaller vertically
     static let processingSize = CGSize(width: 60, height: 12)
     
     // Animation timings
-    static let panelAnimationDuration: TimeInterval = 0.2  // Slightly smoother
-    static let processingDotInterval: TimeInterval = 0.5  // More elegant pace
+    static let panelAnimationDuration: TimeInterval = 0.12  // Fast but smooth expansion
+    static let processingDotInterval: TimeInterval = 0.3  // Faster animation
     static let waveformUpdateInterval: TimeInterval = 0.05
     static let recordingPulseDuration: TimeInterval = 0.8
     
     // UI element sizes
     static let dotSize: CGFloat = 3  // Smaller, more refined
-    static let dotSpacing: CGFloat = 5  // Better spacing
-    static let buttonSize: CGFloat = 20  // Smaller button for compact view
+    static let dotSpacing: CGFloat = 3  // Tighter spacing
+    static let buttonSize: CGFloat = 16  // 20% smaller (was 20, now 16)
     static let cornerRadius: CGFloat = 12  // More rounded for modern look
     static let minimizedCornerRadius: CGFloat = 5
-    static let borderWidth: CGFloat = 0.5  // Thinner, more elegant
+    static let borderWidth: CGFloat = 1.0  // More visible white border
     static let contentPadding: CGFloat = 4  // Smaller padding for compact view
     
     // Modern color palette
     static let backgroundColor = NSColor(white: 0.08, alpha: 0.92)  // Darker, more transparent
-    static let borderColor = NSColor(white: 1.0, alpha: 0.12)  // Very subtle border
-    static let dotActiveColor = NSColor(white: 1.0, alpha: 0.8)  // Brighter dots
-    static let dotInactiveColor = NSColor(white: 1.0, alpha: 0.2)  // More contrast
+    static let borderColor = NSColor(white: 1.0, alpha: 0.4)  // More visible white border
+    static let dotActiveColor = NSColor(white: 1.0, alpha: 1.0)  // Pure white, no transparency
+    static let dotInactiveColor = NSColor(white: 1.0, alpha: 0.3)  // Dimmer white for animation contrast
     static let recordButtonColor = NSColor(calibratedRed: 1.0, green: 0.231, blue: 0.188, alpha: 1.0)  // iOS red
     static let recordButtonHoverColor = NSColor(calibratedRed: 1.0, green: 0.3, blue: 0.25, alpha: 1.0)
 }
@@ -95,7 +95,7 @@ class ProcessingDotsView: NSView {
 
 class WaveformView: NSView {
     private var bars: [CGFloat] = []
-    private let barCount = 12  // Further reduced for compact view
+    private let barCount = 16  // Increased for wider recording view
     private var animationTimer: Timer?
     private var volumeLevel: CGFloat = 0.0
     private var targetBars: [CGFloat] = []
@@ -149,31 +149,31 @@ class WaveformView: NSView {
         // Generate target heights based on volume
         for i in 0..<barCount {
             let centerDistance = abs(CGFloat(i) - CGFloat(barCount) / 2.0) / (CGFloat(barCount) / 2.0)
-            let baseHeight = 1.0 - centerDistance * 0.5
+            let baseHeight = 1.0 - centerDistance * 0.4  // Less falloff from center
             
             // Volume-based variation with better thresholds
             let variation: CGFloat
-            if volumeLevel < 0.02 {
+            if volumeLevel < 0.01 {
                 // Silence - minimal movement
-                variation = CGFloat.random(in: -0.05...0.05)
-            } else if volumeLevel < 0.15 {
+                variation = CGFloat.random(in: -0.1...0.1)
+            } else if volumeLevel < 0.1 {
                 // Quiet to normal volume
-                variation = CGFloat.random(in: -0.4...0.4) * (volumeLevel * 3)
+                variation = CGFloat.random(in: -0.5...0.5) * (volumeLevel * 5)
             } else {
-                // Loud - expansive movement
-                variation = CGFloat.random(in: -0.6...0.6) * volumeLevel
+                // Loud - very expansive movement
+                variation = CGFloat.random(in: -0.8...0.8) * volumeLevel
             }
             
             // Make sure we have a minimum height and scale with volume
-            // Amplify the visual effect of the volume
-            let amplifiedVolume = min(1.0, volumeLevel * 3.5)  // Increased from 3.0 to 3.5 for more responsiveness
-            let height = (baseHeight + variation) * max(0.35, amplifiedVolume) + 0.1
+            // Significantly amplify the visual effect
+            let amplifiedVolume = min(1.0, volumeLevel * 5.0)  // Increased to 5.0 for much more responsiveness
+            let height = (baseHeight + variation) * max(0.4, amplifiedVolume) + 0.15
             targetBars[i] = min(1.0, height)
         }
         
         // Faster response for better visual feedback
         for i in 0..<barCount {
-            bars[i] = bars[i] * 0.6 + targetBars[i] * 0.4
+            bars[i] = bars[i] * 0.5 + targetBars[i] * 0.5  // Faster interpolation
         }
     }
     
@@ -187,7 +187,7 @@ class WaveformView: NSView {
         
         for (index, height) in bars.enumerated() {
             let x = startX + CGFloat(index) * (barWidth + spacing)
-            let barHeight = max(3, bounds.height * height * 0.8)  // Increased min height and scale
+            let barHeight = max(4, bounds.height * height * 0.9)  // Increased min height and scale for better visibility
             let y = (bounds.height - barHeight) / 2
             
             let barRect = NSRect(x: x, y: y, width: barWidth, height: barHeight)
@@ -216,9 +216,22 @@ class CancelButton: NSButton {
     private var trackingArea: NSTrackingArea?
     
     override func draw(_ dirtyRect: NSRect) {
-        // Draw X symbol - smaller and more refined
-        let inset: CGFloat = 6
-        let lineWidth: CGFloat = 1.5
+        // Draw X symbol with dark background
+        let buttonSize: CGFloat = bounds.width
+        let circleRect = NSRect(x: 0, y: 0, width: buttonSize, height: buttonSize)
+        let circlePath = NSBezierPath(ovalIn: circleRect)
+        
+        // Dark background circle
+        if isHovering {
+            NSColor(white: 0.2, alpha: 1.0).setFill()
+        } else {
+            NSColor(white: 0.15, alpha: 1.0).setFill()
+        }
+        circlePath.fill()
+        
+        // Draw X symbol - adjusted for smaller button
+        let inset: CGFloat = 5  // Smaller inset for 16px button (was 6)
+        let lineWidth: CGFloat = 1.2  // Slightly thinner line
         
         let path = NSBezierPath()
         path.lineWidth = lineWidth
@@ -231,9 +244,9 @@ class CancelButton: NSButton {
         path.line(to: NSPoint(x: inset, y: bounds.height - inset))
         
         if isHovering {
-            NSColor(white: 1.0, alpha: 0.8).setStroke()
+            NSColor(white: 0.9, alpha: 1.0).setStroke()
         } else {
-            NSColor(white: 1.0, alpha: 0.4).setStroke()
+            NSColor(white: 0.7, alpha: 1.0).setStroke()
         }
         
         path.stroke()
@@ -339,7 +352,7 @@ class SquareButton: NSButton {
     private var trackingArea: NSTrackingArea?
     
     override func draw(_ dirtyRect: NSRect) {
-        // Modern stop button - filled square, no border
+        // Modern stop button - red filled square
         let squareSize: CGFloat = 8
         let squareRect = NSRect(
             x: bounds.midX - squareSize / 2,
@@ -350,15 +363,17 @@ class SquareButton: NSButton {
         let squarePath = NSBezierPath(roundedRect: squareRect, xRadius: 2, yRadius: 2)
         
         if isHovering {
-            NSColor(white: 1.0, alpha: 0.9).setFill()
-            // Add subtle glow
-            let glowColor = NSColor(white: 1.0, alpha: 0.2)
+            // Brighter red on hover
+            NSColor(calibratedRed: 1.0, green: 0.3, blue: 0.25, alpha: 1.0).setFill()
+            // Add red glow
+            let glowColor = NSColor(calibratedRed: 1.0, green: 0.231, blue: 0.188, alpha: 0.3)
             glowColor.setStroke()
             let glowPath = NSBezierPath(roundedRect: squareRect.insetBy(dx: -2, dy: -2), xRadius: 3, yRadius: 3)
             glowPath.lineWidth = 3
             glowPath.stroke()
         } else {
-            NSColor(white: 1.0, alpha: 0.7).setFill()
+            // Standard red color
+            NSColor(calibratedRed: 0.93, green: 0.27, blue: 0.18, alpha: 1.0).setFill()
         }
         
         squarePath.fill()
@@ -400,6 +415,7 @@ final class NativeOverlayPanel: NSPanel {
     private let expandedSize = UIConfig.expandedSize
     private let minimizedSize = UIConfig.minimizedSize
     private let processingSize = UIConfig.processingSize
+    private var currentPosition: String = "top-center"
     
     init() {
         // Start with minimized size
@@ -455,21 +471,57 @@ final class NativeOverlayPanel: NSPanel {
         }
     }
     
-    // Animate size changes
-    func animateToSize(_ newSize: CGSize, centered: Bool = false) {
+    // Animate size changes with anchor point support
+    func animateToSize(_ newSize: CGSize, anchor: AnchorPoint = .center) {
         NSAnimationContext.runAnimationGroup { context in
             context.duration = UIConfig.panelAnimationDuration
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             
             // Keep the panel at its current position, just change size
             var frame = self.frame
             
-            // Adjust position to keep it centered at the same point
+            // Calculate size differences
             let widthDiff = newSize.width - frame.width
             let heightDiff = newSize.height - frame.height
             
-            frame.origin.x -= widthDiff / 2
-            frame.origin.y -= heightDiff / 2
+            // Adjust position based on anchor point
+            switch anchor {
+            case .center:
+                frame.origin.x -= widthDiff / 2
+                frame.origin.y -= heightDiff / 2
+            case .topLeft:
+                // Keep top-left corner fixed (expand right and down)
+                // In macOS coords, to expand down we need to move origin down
+                frame.origin.y -= heightDiff
+            case .topCenter:
+                // Keep top edge fixed, center horizontally, expand down
+                frame.origin.x -= widthDiff / 2
+                frame.origin.y -= heightDiff
+            case .topRight:
+                // Keep top-right corner fixed (expand left and down)
+                frame.origin.x -= widthDiff
+                frame.origin.y -= heightDiff
+            case .bottomLeft:
+                // Keep bottom-left corner fixed (expand right and up)
+                // Don't adjust y - let it expand upward naturally
+                break
+            case .bottomCenter:
+                // Keep bottom edge fixed, center horizontally, expand up
+                frame.origin.x -= widthDiff / 2
+                // Don't adjust y - let it expand upward naturally
+            case .bottomRight:
+                // Keep bottom-right corner fixed (expand left and up)
+                frame.origin.x -= widthDiff
+                // Don't adjust y - let it expand upward naturally
+            case .leftCenter:
+                // Keep left edge fixed, center vertically
+                frame.origin.y -= heightDiff / 2
+            case .rightCenter:
+                // Keep right edge fixed, center vertically
+                frame.origin.x -= widthDiff
+                frame.origin.y -= heightDiff / 2
+            }
+            
             frame.size = newSize
             
             self.animator().setFrame(frame, display: true)
@@ -481,16 +533,50 @@ final class NativeOverlayPanel: NSPanel {
         }
     }
     
+    enum AnchorPoint {
+        case center
+        case topLeft, topCenter, topRight
+        case bottomLeft, bottomCenter, bottomRight
+        case leftCenter, rightCenter
+    }
+    
     func expand() {
-        animateToSize(expandedSize)
+        animateToSize(expandedSize, anchor: getAnchorForPosition())
     }
     
     func minimize() {
-        animateToSize(minimizedSize)
+        animateToSize(minimizedSize, anchor: getAnchorForPosition())
     }
     
     func showProcessing() {
-        animateToSize(processingSize)
+        animateToSize(processingSize, anchor: getAnchorForPosition())
+    }
+    
+    public func setPosition(_ position: String) {
+        currentPosition = position
+    }
+    
+    private func getAnchorForPosition() -> AnchorPoint {
+        switch currentPosition {
+        case "top-left":
+            return .topLeft       // Keep top-left fixed, expand right and down
+        case "top-center":
+            return .topCenter     // Keep top edge fixed, expand down and horizontally
+        case "top-right":
+            return .topRight      // Keep top-right fixed, expand left and down
+        case "bottom-left":
+            return .bottomLeft    // Keep bottom-left fixed, expand right and up
+        case "bottom-center":
+            return .bottomCenter  // Keep bottom edge fixed, expand up and horizontally
+        case "bottom-right":
+            return .bottomRight   // Keep bottom-right fixed, expand left and up
+        case "left-center":
+            return .leftCenter    // Keep left edge fixed, expand right and vertically
+        case "right-center":
+            return .rightCenter   // Keep right edge fixed, expand left and vertically
+        default:
+            return .topCenter
+        }
     }
 }
 

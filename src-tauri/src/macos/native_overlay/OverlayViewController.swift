@@ -285,4 +285,54 @@ class OverlayViewController: NSViewController {
     @objc func setVolumeLevel(_ level: CGFloat) {
         controller?.setVolumeLevel(level)
     }
+    
+    @objc func setPosition(_ position: String) {
+        guard let panel = self.panel, let screen = NSScreen.main else { return }
+        
+        let screenFrame = screen.visibleFrame
+        let panelWidth = panel.frame.width
+        let panelHeight = panel.frame.height
+        let padding: CGFloat = 20
+        
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        
+        switch position {
+        case "top-left":
+            x = 5
+            y = screenFrame.maxY - panelHeight - 5
+        case "top-center":
+            x = screenFrame.midX - panelWidth / 2
+            y = screenFrame.maxY - panelHeight - 5
+        case "top-right":
+            x = screenFrame.maxX - panelWidth - 5
+            y = screenFrame.maxY - panelHeight - 5
+        case "bottom-left":
+            x = 5
+            y = screenFrame.minY + 5
+        case "bottom-center":
+            x = screenFrame.midX - panelWidth / 2
+            y = screenFrame.minY + 5
+        case "bottom-right":
+            x = screenFrame.maxX - panelWidth - 5
+            y = screenFrame.minY + 5
+        case "left-center":
+            x = 5
+            y = screenFrame.midY - panelHeight / 2
+        case "right-center":
+            x = screenFrame.maxX - panelWidth - 5
+            y = screenFrame.midY - panelHeight / 2
+        default:
+            // Default to top-center
+            x = screenFrame.midX - panelWidth / 2
+            y = screenFrame.maxY - panelHeight - 5
+        }
+        
+        panel.setFrameOrigin(NSPoint(x: x, y: y))
+        
+        // Update the panel's position for proper anchor-based expansion
+        if let overlayPanel = panel as? NativeOverlayPanel {
+            overlayPanel.setPosition(position)
+        }
+    }
 }
