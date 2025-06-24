@@ -2,6 +2,7 @@ import { Fragment, useState, useRef, useEffect } from 'react';
 import { Sparkles, FolderOpen } from 'lucide-react';
 import { ModelManager } from './ModelManager';
 import { invoke } from '@tauri-apps/api/core';
+import { formatShortcut } from '../lib/formatShortcut';
 import './SettingsView.css';
 
 interface SettingsViewProps {
@@ -15,6 +16,7 @@ interface SettingsViewProps {
     autoCopy: boolean;
     autoPaste: boolean;
     visualMicPicker: boolean;
+    theme: 'light' | 'dark' | 'system';
     stopCapturingHotkey: () => void;
     startCapturingHotkey: () => void;
     startCapturingPushToTalkHotkey: () => void;
@@ -24,6 +26,7 @@ interface SettingsViewProps {
     toggleAutoCopy: () => void;
     toggleAutoPaste: () => void;
     toggleVisualMicPicker: () => void;
+    updateTheme: (theme: 'light' | 'dark' | 'system') => void;
 }
 
 export function SettingsView({
@@ -37,6 +40,7 @@ export function SettingsView({
     autoCopy,
     autoPaste,
     visualMicPicker,
+    theme,
     stopCapturingHotkey,
     startCapturingHotkey,
     startCapturingPushToTalkHotkey,
@@ -46,6 +50,7 @@ export function SettingsView({
     toggleAutoCopy,
     toggleAutoPaste,
     toggleVisualMicPicker,
+    updateTheme,
 }: SettingsViewProps) {
     const [isModelManagerExpanded, setIsModelManagerExpanded] = useState(false);
     const modelSectionRef = useRef<HTMLDivElement>(null);
@@ -84,13 +89,8 @@ export function SettingsView({
                                     {isCapturingHotkey ? (
                                         <span className="capturing-text">Press shortcut keys...</span>
                                     ) : (
-                                        <span className="hotkey-keys">
-                                            {hotkey.split('+').map((key, idx) => (
-                                                <Fragment key={idx}>
-                                                    {idx > 0 && <span className="plus">+</span>}
-                                                    <kbd>{key}</kbd>
-                                                </Fragment>
-                                            ))}
+                                        <span className="hotkey-keys" title={hotkey}>
+                                            {formatShortcut(hotkey)}
                                         </span>
                                     )}
                                 </div>
@@ -122,13 +122,8 @@ export function SettingsView({
                                     {isCapturingPushToTalkHotkey ? (
                                         <span className="capturing-text">Press shortcut keys...</span>
                                     ) : (
-                                        <span className="hotkey-keys">
-                                            {pushToTalkHotkey.split('+').map((key, idx) => (
-                                                <Fragment key={idx}>
-                                                    {idx > 0 && <span className="plus">+</span>}
-                                                    <kbd>{key}</kbd>
-                                                </Fragment>
-                                            ))}
+                                        <span className="hotkey-keys" title={pushToTalkHotkey}>
+                                            {formatShortcut(pushToTalkHotkey)}
                                         </span>
                                     )}
                                 </div>
@@ -252,23 +247,58 @@ export function SettingsView({
                                 Choose where the recording indicator appears on your screen
                             </p>
                         </div>
-                    </div>
-                </div>
-
-                {/* Experimental Settings - Full Width */}
-                <div className="settings-section">
-                    <div className="setting-item">
-                        <label>
-                            <input
-                                type="checkbox"
-                                checked={visualMicPicker}
-                                onChange={toggleVisualMicPicker}
-                            />
-                            Visual Microphone Picker (Experimental)
-                        </label>
-                        <p className="setting-hint">
-                            Use an enhanced visual interface for microphone selection with live audio visualization
-                        </p>
+                        
+                        <div className="setting-item">
+                            <label>Theme</label>
+                            <div className="theme-selector">
+                                <button
+                                    className={`theme-option ${theme === 'light' ? 'active' : ''}`}
+                                    onClick={() => updateTheme('light')}
+                                >
+                                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <circle cx="8" cy="8" r="3" stroke="currentColor" strokeWidth="1.5"/>
+                                        <path d="M8 1V3M8 13V15M15 8H13M3 8H1M12.95 3.05L11.54 4.46M4.46 11.54L3.05 12.95M12.95 12.95L11.54 11.54M4.46 4.46L3.05 3.05" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                                    </svg>
+                                    Light
+                                </button>
+                                <button
+                                    className={`theme-option ${theme === 'dark' ? 'active' : ''}`}
+                                    onClick={() => updateTheme('dark')}
+                                >
+                                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M8.5 2C5.46 2 3 4.46 3 7.5C3 10.54 5.46 13 8.5 13C10.83 13 12.82 11.45 13.56 9.3C13.19 9.42 12.8 9.5 12.38 9.5C10.17 9.5 8.38 7.71 8.38 5.5C8.38 4.31 8.89 3.24 9.69 2.5C9.3 2.18 8.91 2 8.5 2Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+                                    </svg>
+                                    Dark
+                                </button>
+                                <button
+                                    className={`theme-option ${theme === 'system' ? 'active' : ''}`}
+                                    onClick={() => updateTheme('system')}
+                                >
+                                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <rect x="2" y="3" width="12" height="9" rx="1" stroke="currentColor" strokeWidth="1.5"/>
+                                        <path d="M5 13L6 15M10 13L11 15M4 15H12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                                    </svg>
+                                    System
+                                </button>
+                            </div>
+                            <p className="setting-hint">
+                                Choose your preferred color theme or follow system settings
+                            </p>
+                        </div>
+                        
+                        <div className="setting-item">
+                            <label>
+                                <input
+                                    type="checkbox"
+                                    checked={visualMicPicker}
+                                    onChange={toggleVisualMicPicker}
+                                />
+                                Visual Microphone Picker (Experimental)
+                            </label>
+                            <p className="setting-hint">
+                                Use an enhanced visual interface for microphone selection with live audio visualization
+                            </p>
+                        </div>
                     </div>
                 </div>
 

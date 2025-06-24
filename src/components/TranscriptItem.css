@@ -3,10 +3,10 @@
     position: relative;
     background: transparent;
     border: none;
-    border-bottom: 1px solid var(--border-primary);
+    border-bottom: 1px solid #E5E7EB;
     padding: 12px 16px;
     margin-bottom: 0;
-    transition: all 0.15s ease;
+    transition: background-color 150ms ease;
     cursor: default;
     display: flex;
     align-items: flex-start;
@@ -19,15 +19,15 @@
 }
 
 .transcript-item:hover {
-    background: var(--bg-hover);
+    background: #F3F4F6;
 }
 
 .transcript-item.selected {
-    background: rgba(79, 70, 229, 0.05);
+    background: rgba(59, 130, 246, 0.05);
 }
 
 .transcript-item.active {
-    background: rgba(79, 70, 229, 0.08);
+    background: rgba(59, 130, 246, 0.08);
 }
 
 /* Compact variant for recent transcripts */
@@ -70,7 +70,7 @@
 }
 
 .transcript-checkbox-wrapper:hover {
-    background: rgba(0, 0, 0, 0.02);
+    background: #F3F4F6;
     border-radius: 4px;
 }
 
@@ -82,20 +82,21 @@
 /* Time column */
 .transcript-time {
     font-size: 13px;
-    color: rgba(0, 0, 0, 0.5);
+    color: #6B7280;
     font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
     flex-shrink: 0;
     min-width: 85px;
+    text-align: right;
 }
 
 /* Duration column */
 .transcript-duration {
     font-size: 12px;
-    color: rgba(0, 0, 0, 0.4);
+    color: #6B7280;
     font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
     flex-shrink: 0;
-    min-width: 70px;
-    text-align: left;
+    min-width: 25px;
+    text-align: right;
 }
 
 /* Text Content */
@@ -107,7 +108,7 @@
 
 .transcript-text {
     margin: 0;
-    color: rgba(0, 0, 0, 0.85);
+    color: #111827;
     font-size: 14px;
     line-height: 1.6;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -121,7 +122,7 @@
 }
 
 .transcript-empty {
-    color: rgba(0, 0, 0, 0.4);
+    color: #6B7280;
     font-style: italic;
     font-size: 13px;
 }
@@ -131,7 +132,8 @@
     display: flex;
     gap: 4px;
     opacity: 0;
-    transition: opacity 0.2s ease;
+    transform: translateX(8px);
+    transition: opacity 0.3s ease, transform 0.3s ease;
     flex-shrink: 0;
     align-items: flex-start;
     min-width: fit-content;
@@ -139,11 +141,12 @@
 
 .transcript-item:hover .transcript-actions {
     opacity: 1;
+    transform: translateX(0);
 }
 
 .transcript-action-button {
-    background: var(--bg-primary);
-    border: 1px solid var(--border-primary);
+    background: white;
+    border: 1px solid #E5E7EB;
     border-radius: 6px;
     padding: 6px 8px;
     cursor: pointer;
@@ -151,14 +154,14 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    color: var(--text-secondary);
+    color: #6B7280;
     font-size: 12px;
 }
 
 .transcript-action-button:hover:not(:disabled) {
-    background: var(--bg-hover);
-    border-color: var(--border-secondary);
-    color: var(--text-primary);
+    background: #F3F4F6;
+    border-color: #3B82F6;
+    color: #3B82F6;
 }
 
 .transcript-action-button:active:not(:disabled) {
@@ -172,39 +175,44 @@
 
 /* Play/Pause button */
 .transcript-action-button.play:hover:not(:disabled) {
-    color: var(--accent-primary);
-    border-color: var(--accent-primary);
-    background: rgba(79, 70, 229, 0.05);
+    color: #3B82F6;
+    border-color: #3B82F6;
+    background: rgba(59, 130, 246, 0.05);
+}
+
+.transcript-action-button.play:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
 /* Download button */
 .transcript-action-button.download:hover:not(:disabled) {
-    color: var(--accent-primary);
-    border-color: var(--accent-primary);
+    color: #3B82F6;
+    border-color: #3B82F6;
 }
 
 /* Copy button states */
 .transcript-action-button.copy.copied {
-    color: var(--success);
-    border-color: var(--success);
-    background: rgba(34, 197, 94, 0.05);
+    color: #10B981;
+    border-color: #10B981;
+    background: rgba(16, 185, 129, 0.05);
 }
 
 .transcript-action-button.copy:hover:not(:disabled):not(.copied) {
-    color: var(--accent-primary);
-    border-color: var(--accent-primary);
+    color: #3B82F6;
+    border-color: #3B82F6;
 }
 
 /* View Details button */
 .transcript-action-button.view-details:hover:not(:disabled) {
-    color: var(--accent-primary);
-    border-color: var(--accent-primary);
+    color: #3B82F6;
+    border-color: #3B82F6;
 }
 
 /* Delete button */
 .transcript-action-button.delete:hover {
-    color: var(--error);
-    border-color: var(--error);
+    color: #EF4444;
+    border-color: #EF4444;
     background: rgba(239, 68, 68, 0.05);
 }
 
@@ -227,47 +235,105 @@
 /* Dark mode adjustments */
 @media (prefers-color-scheme: dark) {
     .transcript-item {
-        background: transparent;
-        border-color: rgba(255, 255, 255, 0.08);
+        background: rgba(39, 39, 42, 0.5); /* zinc-800 with opacity for subtlety */
+        border-color: #3f3f46; /* zinc-700 */
     }
     
     .transcript-item:hover {
-        background: rgba(255, 255, 255, 0.04);
+        background: rgba(63, 63, 70, 0.7); /* zinc-700 with opacity */
     }
     
     .transcript-item.selected,
     .transcript-item.active {
-        background: rgba(74, 158, 255, 0.12);
+        background: rgba(59, 130, 246, 0.12); /* blue with less opacity */
     }
     
     .transcript-time {
-        color: rgba(255, 255, 255, 0.5);
+        color: #71717a; /* zinc-500 */
     }
     
     .transcript-duration {
-        color: rgba(255, 255, 255, 0.4);
+        color: #71717a; /* zinc-500 */
     }
     
     .transcript-text {
-        color: rgba(255, 255, 255, 0.85);
+        color: #f4f4f5; /* zinc-100 */
     }
     
     .transcript-empty {
-        color: rgba(255, 255, 255, 0.4);
+        color: #a1a1aa; /* zinc-400 */
     }
     
     .transcript-action-button {
-        background: rgba(255, 255, 255, 0.05);
-        border-color: rgba(255, 255, 255, 0.1);
+        background: #3f3f46; /* zinc-700 */
+        border-color: #52525b; /* zinc-600 */
+        color: #e4e4e7; /* zinc-200 */
     }
     
     .transcript-action-button:hover:not(:disabled) {
-        background: rgba(255, 255, 255, 0.08);
-        border-color: rgba(255, 255, 255, 0.15);
+        background: #52525b; /* zinc-600 */
+        border-color: #71717a; /* zinc-500 */
+        color: #f4f4f5; /* zinc-100 */
     }
     
     .transcript-checkbox-wrapper:hover {
-        background: rgba(255, 255, 255, 0.04);
+        background: rgba(63, 63, 70, 0.5); /* zinc-700 with opacity */
+    }
+}
+
+/* Download dropdown */
+.download-dropdown {
+    position: relative;
+}
+
+.download-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    background: white;
+    border: 1px solid #E5E7EB;
+    border-radius: 6px;
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    z-index: 1000;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    min-width: 100px;
+}
+
+.download-menu button {
+    background: none;
+    border: none;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 12px;
+    color: #6B7280;
+    text-align: left;
+    border-radius: 4px;
+    transition: all 0.15s ease;
+}
+
+.download-menu button:hover {
+    background: #F3F4F6;
+    color: #111827;
+}
+
+/* Dark mode */
+@media (prefers-color-scheme: dark) {
+    .download-menu {
+        background: rgba(30, 30, 30, 0.95);
+        border-color: rgba(255, 255, 255, 0.1);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    }
+    
+    .download-menu button {
+        color: rgba(255, 255, 255, 0.7);
+    }
+    
+    .download-menu button:hover {
+        background: rgba(255, 255, 255, 0.08);
+        color: rgba(255, 255, 255, 0.9);
     }
 }
 

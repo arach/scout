@@ -1012,6 +1012,21 @@ h1 {
   padding: 20px;
 }
 
+.settings-section {
+  margin-bottom: 32px;
+}
+
+.settings-two-column {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+/* Model manager section should span full width */
+.settings-section.model-manager-full-width {
+  grid-column: 1 / -1;
+}
+
 .setting-item {
   margin-bottom: 24px;
 }
@@ -1057,9 +1072,13 @@ h1 {
 }
 
 .hotkey-keys {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+  display: inline-block;
+  font-family: "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", monospace;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  letter-spacing: 0.5px;
+  cursor: default;
 }
 
 .hotkey-keys kbd {
@@ -1454,4 +1473,10 @@ h1 {
 
 .search-input::placeholder {
   color: var(--text-tertiary);
+}
+
+@media (prefers-color-scheme: dark) {
+  .search-input::placeholder {
+    color: #52525b; /* zinc-500 */
+  }
 }

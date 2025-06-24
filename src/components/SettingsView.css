@@ -1,159 +1,61 @@
-/* Two-column layout for settings */
-.settings-two-column {
-    display: grid;
-    grid-template-columns: minmax(300px, 400px) minmax(300px, 400px);
-    gap: 24px;
-    max-width: 840px;
-}
-
-.settings-section {
-    margin-bottom: 32px;
-}
-
-.setting-item {
-    max-width: 400px;
-}
-
-.settings-section:last-child {
-    margin-bottom: 0;
-}
-
-/* Collapsible section styles */
-.collapsible-section {
-    width: 100%;
-    grid-column: 1 / -1;  /* Span all columns */
-}
-
-.collapsible-header-wrapper {
+/* Theme Selector Styles */
+.theme-selector {
     display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    padding: 16px 0;
-}
-
-.collapsible-header {
-    cursor: pointer;
-    user-select: none;
-    flex: 1;
-}
-
-.collapsible-header:hover {
-    opacity: 0.8;
-}
-
-.collapsible-header h3 {
-    display: flex;
-    align-items: center;
     gap: 8px;
-    font-size: 1.1rem;
-    font-weight: 600;
-    margin: 0;
-    color: var(--text-primary);
+    margin-top: 8px;
 }
 
-.collapse-arrow {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    transition: transform 0.2s ease;
-    font-size: 14px;
-}
-
-.collapse-arrow.expanded {
-    transform: rotate(90deg);
-}
-
-.ai-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    margin-left: 8px;
-    font-weight: 400;
-    font-size: 0.875rem;
-    color: var(--text-secondary);
-}
-
-.sparkle-icon {
-    color: var(--text-secondary);
-}
-
-.collapsible-subtitle {
-    margin: 4px 0 0 20px; /* Align with title text after arrow */
-    font-size: 0.875rem;
-    color: var(--text-secondary);
-}
-
-.collapsible-content {
-    margin-top: 12px;
-    /* Remove border-top */
-}
-
-.model-manager-section {
-    padding: 0;
-}
-
-.model-manager-section .model-manager {
-    margin: 0;
-}
-
-/* Open Models Folder link */
-.open-models-folder-link {
-    background: none;
-    border: none;
-    padding: 0;
-    margin-top: 4px;
-    font-size: 0.875rem;
-    color: var(--text-secondary);
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    transition: color 0.2s ease;
-    font-weight: 400;
-}
-
-.open-models-folder-link:hover {
-    color: var(--text-primary);
-}
-
-.open-models-folder-link svg {
-    opacity: 0.7;
-    transition: opacity 0.2s ease;
-}
-
-.open-models-folder-link:hover svg {
-    opacity: 1;
-}
-
-/* Keyboard shortcut button alignment */
-.hotkey-input-group {
-    display: flex;
-    align-items: center;
-    justify-content: flex-start;
-    gap: 12px;
-}
-
-.hotkey-display {
+.theme-option {
     flex: 1;
-    max-width: 280px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 12px;
+    background: white;
+    border: 2px solid #E5E7EB;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 12px;
+    font-weight: 500;
+    color: #6B7280;
 }
 
-.hotkey-input-group button {
-    flex-shrink: 0;
+.theme-option:hover {
+    background: #F9FAFB;
+    border-color: #3B82F6;
+    color: #3B82F6;
 }
 
-/* Model Manager Full Width */
-.model-manager-full-width {
-    grid-column: 1 / -1;
-    width: 100%;
+.theme-option.active {
+    background: #EFF6FF;
+    border-color: #3B82F6;
+    color: #3B82F6;
 }
 
-.model-manager-full-width .collapsible-section {
-    width: 100%;
+.theme-option svg {
+    width: 16px;
+    height: 16px;
 }
 
-.model-manager-full-width .model-grid {
-    max-width: 100%;
-    grid-template-columns: repeat(2, minmax(300px, 1fr));
+/* Dark mode adjustments */
+@media (prefers-color-scheme: dark) {
+    .theme-option {
+        background: rgba(255, 255, 255, 0.05);
+        border-color: rgba(255, 255, 255, 0.1);
+        color: rgba(255, 255, 255, 0.6);
+    }
+    
+    .theme-option:hover {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: #3B82F6;
+        color: #3B82F6;
+    }
+    
+    .theme-option.active {
+        background: rgba(59, 130, 246, 0.15);
+        border-color: #3B82F6;
+        color: #3B82F6;
+    }
 }
