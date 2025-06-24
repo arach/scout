@@ -162,6 +162,9 @@ export function TranscriptsView({
     
     const hasMore = transcripts.length > displayedItems;
     
+    // Get all groups (unpaginated) for select all functionality
+    const allGroups = useMemo(() => groupTranscriptsByDate(transcripts), [transcripts]);
+    
     return (
         <div className="transcripts-view">
             <div className="transcripts-header-container">
@@ -220,43 +223,48 @@ export function TranscriptsView({
                     </div>
                 ) : (
                     <div className="transcript-list-container">
-                        {paginatedGroups.map(group => (
-                            <div key={group.title} className="transcript-group">
-                                <div 
-                                    className="transcript-group-header"
-                                    onClick={() => toggleGroup(group.title)}
-                                >
-                                    <div className="group-header-left">
-                                        <button className="group-toggle-btn">
-                                            {expandedGroups.has(group.title) ? 
-                                                <ChevronUp size={16} /> : 
-                                                <ChevronDown size={16} />
-                                            }
-                                        </button>
-                                        <h3 className="transcript-group-title">{group.title}</h3>
-                                        <span className="group-count">({group.transcripts.length})</span>
-                                    </div>
-                                    <button 
-                                        className="select-group-btn"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            const allGroupIds = group.transcripts.map(t => t.id);
-                                            const allSelected = allGroupIds.every(id => selectedTranscripts.has(id));
-                                            
-                                            allGroupIds.forEach(id => {
-                                                if (allSelected) {
-                                                    // If all are selected, deselect all
-                                                    toggleTranscriptSelection(id);
-                                                } else if (!selectedTranscripts.has(id)) {
-                                                    // If not all are selected, select the unselected ones
-                                                    toggleTranscriptSelection(id);
-                                                }
-                                            });
-                                        }}
+                        {paginatedGroups.map(group => {
+                            // Find the full group data for this title
+                            const fullGroup = allGroups.find(g => g.title === group.title);
+                            const fullGroupTranscripts = fullGroup?.transcripts || [];
+                            
+                            return (
+                                <div key={group.title} className="transcript-group">
+                                    <div 
+                                        className="transcript-group-header"
+                                        onClick={() => toggleGroup(group.title)}
                                     >
-                                        {group.transcripts.every(t => selectedTranscripts.has(t.id)) ? 'Deselect All' : 'Select All'}
-                                    </button>
-                                </div>
+                                        <div className="group-header-left">
+                                            <button className="group-toggle-btn">
+                                                {expandedGroups.has(group.title) ? 
+                                                    <ChevronUp size={16} /> : 
+                                                    <ChevronDown size={16} />
+                                                }
+                                            </button>
+                                            <h3 className="transcript-group-title">{group.title}</h3>
+                                            <span className="group-count">({fullGroupTranscripts.length})</span>
+                                        </div>
+                                        <button 
+                                            className="select-group-btn"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                const allGroupIds = fullGroupTranscripts.map(t => t.id);
+                                                const allSelected = allGroupIds.every(id => selectedTranscripts.has(id));
+                                                
+                                                allGroupIds.forEach(id => {
+                                                    if (allSelected) {
+                                                        // If all are selected, deselect all
+                                                        toggleTranscriptSelection(id);
+                                                    } else if (!selectedTranscripts.has(id)) {
+                                                        // If not all are selected, select the unselected ones
+                                                        toggleTranscriptSelection(id);
+                                                    }
+                                                });
+                                            }}
+                                        >
+                                            {fullGroupTranscripts.every(t => selectedTranscripts.has(t.id)) ? 'Deselect All' : 'Select All'}
+                                        </button>
+                                    </div>
                                 {expandedGroups.has(group.title) && (
                                     <div className="transcript-group-items">
                                         {group.transcripts.map((transcript) => {
@@ -279,8 +287,9 @@ export function TranscriptsView({
                                         })}
                                     </div>
                                 )}
-                            </div>
-                        ))}
+                                </div>
+                            );
+                        })}
                         {hasMore && (
                             <div className="load-more-container">
                                 <button 

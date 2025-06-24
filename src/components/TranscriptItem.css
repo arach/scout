@@ -195,8 +195,8 @@
     border-color: var(--accent-primary);
 }
 
-/* Edit button */
-.transcript-action-button.edit:hover:not(:disabled) {
+/* View Details button */
+.transcript-action-button.view-details:hover:not(:disabled) {
     color: var(--accent-primary);
     border-color: var(--accent-primary);
 }
@@ -268,5 +268,57 @@
     
     .transcript-checkbox-wrapper:hover {
         background: rgba(255, 255, 255, 0.04);
+    }
+}
+
+/* Download menu */
+.download-menu-wrapper {
+    position: relative;
+}
+
+.download-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 4px;
+    background: white;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 6px;
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    z-index: 10;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    min-width: 100px;
+}
+
+.download-menu button {
+    background: none;
+    border: none;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text-secondary);
+    text-align: left;
+    border-radius: 4px;
+    transition: all 0.15s ease;
+}
+
+.download-menu button:hover {
+    background: rgba(0, 0, 0, 0.05);
+    color: var(--text-primary);
+}
+
+/* Dark mode */
+@media (prefers-color-scheme: dark) {
+    .download-menu {
+        background: rgba(30, 30, 30, 0.95);
+        border-color: rgba(255, 255, 255, 0.1);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    }
+    
+    .download-menu button:hover {
+        background: rgba(255, 255, 255, 0.08);
     }
 }
