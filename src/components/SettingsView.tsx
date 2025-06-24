@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useState, useRef, useEffect } from 'react';
 import { Sparkles, FolderOpen } from 'lucide-react';
 import { ModelManager } from './ModelManager';
 import { invoke } from '@tauri-apps/api/core';
@@ -48,6 +48,19 @@ export function SettingsView({
     toggleVisualMicPicker,
 }: SettingsViewProps) {
     const [isModelManagerExpanded, setIsModelManagerExpanded] = useState(false);
+    const modelSectionRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (isModelManagerExpanded && modelSectionRef.current) {
+            // Small delay to ensure the content is rendered
+            setTimeout(() => {
+                modelSectionRef.current?.scrollIntoView({ 
+                    behavior: 'smooth', 
+                    block: 'nearest'
+                });
+            }, 100);
+        }
+    }, [isModelManagerExpanded]);
 
     const openModelsFolder = async () => {
         try {
@@ -260,7 +273,7 @@ export function SettingsView({
                 </div>
 
                 {/* Model Manager - Full Width Collapsible */}
-                <div className="settings-section">
+                <div className="settings-section" ref={modelSectionRef}>
                     <div className="setting-item model-manager-section">
                         <div className="collapsible-section">
                             <div className="collapsible-header-wrapper">
