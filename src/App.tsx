@@ -830,6 +830,21 @@ function App() {
       setSelectedTranscripts(new Set(transcripts.map(t => t.id)));
     }
   };
+  
+  const toggleTranscriptGroupSelection = (ids: number[]) => {
+    const newSelected = new Set(selectedTranscripts);
+    const allSelected = ids.every(id => newSelected.has(id));
+    
+    if (allSelected) {
+      // Deselect all in group
+      ids.forEach(id => newSelected.delete(id));
+    } else {
+      // Select all in group
+      ids.forEach(id => newSelected.add(id));
+    }
+    
+    setSelectedTranscripts(newSelected);
+  };
 
   const handleFileUpload = async () => {
     try {
@@ -1263,6 +1278,7 @@ function App() {
             setSearchQuery={setSearchQuery}
             searchTranscripts={searchTranscripts}
             toggleTranscriptSelection={toggleTranscriptSelection}
+            toggleTranscriptGroupSelection={toggleTranscriptGroupSelection}
             selectAllTranscripts={selectAllTranscripts}
             showBulkDeleteConfirmation={showBulkDeleteConfirmation}
             exportTranscripts={exportTranscripts}

@@ -22,6 +22,7 @@ interface TranscriptsViewProps {
     setSearchQuery: (query: string) => void;
     searchTranscripts: () => void;
     toggleTranscriptSelection: (id: number) => void;
+    toggleTranscriptGroupSelection: (ids: number[]) => void;
     selectAllTranscripts: () => void;
     showBulkDeleteConfirmation: () => void;
     exportTranscripts: (format: 'json' | 'markdown' | 'text') => void;
@@ -41,6 +42,7 @@ export function TranscriptsView({
     setSearchQuery,
     searchTranscripts,
     toggleTranscriptSelection,
+    toggleTranscriptGroupSelection,
     selectAllTranscripts,
     showBulkDeleteConfirmation,
     exportTranscripts,
@@ -249,17 +251,7 @@ export function TranscriptsView({
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 const allGroupIds = fullGroupTranscripts.map(t => t.id);
-                                                const allSelected = allGroupIds.every(id => selectedTranscripts.has(id));
-                                                
-                                                allGroupIds.forEach(id => {
-                                                    if (allSelected) {
-                                                        // If all are selected, deselect all
-                                                        toggleTranscriptSelection(id);
-                                                    } else if (!selectedTranscripts.has(id)) {
-                                                        // If not all are selected, select the unselected ones
-                                                        toggleTranscriptSelection(id);
-                                                    }
-                                                });
+                                                toggleTranscriptGroupSelection(allGroupIds);
                                             }}
                                         >
                                             {fullGroupTranscripts.every(t => selectedTranscripts.has(t.id)) ? 'Deselect All' : 'Select All'}

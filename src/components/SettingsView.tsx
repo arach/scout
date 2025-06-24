@@ -273,9 +273,8 @@ export function SettingsView({
                 </div>
 
                 {/* Model Manager - Full Width Collapsible */}
-                <div className="settings-section" ref={modelSectionRef}>
-                    <div className="setting-item model-manager-section">
-                        <div className="collapsible-section">
+                <div className="settings-section model-manager-full-width" ref={modelSectionRef}>
+                    <div className="collapsible-section">
                             <div className="collapsible-header-wrapper">
                                 <div 
                                     className="collapsible-header"
@@ -306,13 +305,12 @@ export function SettingsView({
                                     Open Models Folder
                                 </button>
                             </div>
-                        </div>
-                        {isModelManagerExpanded && (
-                            <div className="collapsible-content">
-                                <ModelManager />
-                            </div>
-                        )}
                     </div>
+                    {isModelManagerExpanded && (
+                        <div className="collapsible-content">
+                            <ModelManager />
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

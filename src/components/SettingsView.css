@@ -142,3 +142,18 @@
 .hotkey-input-group button {
     flex-shrink: 0;
 }
+
+/* Model Manager Full Width */
+.model-manager-full-width {
+    grid-column: 1 / -1;
+    width: 100%;
+}
+
+.model-manager-full-width .collapsible-section {
+    width: 100%;
+}
+
+.model-manager-full-width .model-grid {
+    max-width: 100%;
+    grid-template-columns: repeat(2, minmax(300px, 1fr));
+}
