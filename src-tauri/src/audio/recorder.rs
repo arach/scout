@@ -218,12 +218,12 @@ impl AudioRecorderWorker {
         let mut channels = 2; // Prefer stereo
         
         // Check if device supports stereo
-        if let Ok(supported_configs) = device.supported_input_configs() {
+        if let Ok(mut supported_configs) = device.supported_input_configs() {
             let stereo_supported = supported_configs
                 .any(|supported_range| {
                     supported_range.channels() >= 2 &&
-                    supported_range.sample_rate().min <= default_config.sample_rate() &&
-                    supported_range.sample_rate().max >= default_config.sample_rate()
+                    supported_range.min_sample_rate().0 <= default_config.sample_rate().0 &&
+                    supported_range.max_sample_rate().0 >= default_config.sample_rate().0
                 });
             
             if !stereo_supported {

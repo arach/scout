@@ -1,62 +1,121 @@
-.settings-view {
-    padding: 20px;
-    height: 100%;
-    overflow-y: auto;
-    box-sizing: border-box;
+/* Two-column layout for settings */
+.settings-two-column {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
 }
 
-.settings-view h1 {
-    margin-top: 0;
-    margin-bottom: 20px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid #444;
+.settings-section {
+    margin-bottom: 32px;
 }
 
-.settings-body {
+.settings-section:last-child {
+    margin-bottom: 0;
+}
+
+/* Collapsible section styles */
+.collapsible-section {
+    width: 100%;
+}
+
+.collapsible-header-wrapper {
     display: flex;
-    flex-direction: column;
-    gap: 30px;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 16px 0;
 }
 
-/* Re-using setting-item styles from App.css, but we can add overrides here */
-.setting-item {
-    /* Add specific styles for the settings view if needed */
+.collapsible-header {
+    cursor: pointer;
+    user-select: none;
+    flex: 1;
 }
 
-/* Recording Mode Radio Buttons */
-.recording-mode-options {
-    display: flex;
-    gap: 10px;
-    margin-top: 5px;
+.collapsible-header:hover {
+    opacity: 0.8;
 }
 
-.recording-mode-options .radio-option {
+.collapsible-header h3 {
     display: flex;
     align-items: center;
+    gap: 8px;
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin: 0;
+    color: var(--text-primary);
+}
+
+.collapse-arrow {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    transition: transform 0.2s ease;
+    font-size: 14px;
+}
+
+.collapse-arrow.expanded {
+    transform: rotate(90deg);
+}
+
+.ai-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 8px;
+    font-weight: 400;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.sparkle-icon {
+    color: var(--text-secondary);
+}
+
+.collapsible-subtitle {
+    margin: 4px 0 0 20px; /* Align with title text after arrow */
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.collapsible-content {
+    margin-top: 12px;
+    /* Remove border-top */
+}
+
+.model-manager-section {
+    padding: 0;
+}
+
+.model-manager-section .model-manager {
+    margin: 0;
+}
+
+/* Open Models Folder link */
+.open-models-folder-link {
+    background: none;
+    border: none;
+    padding: 0;
+    margin-top: 4px;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
     cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    transition: color 0.2s ease;
+    font-weight: 400;
 }
 
-.recording-mode-options .radio-option input[type="radio"] {
-    display: none;
+.open-models-folder-link:hover {
+    color: var(--text-primary);
 }
 
-.recording-mode-options .radio-option span {
-    padding: 8px 12px;
-    border: 1px solid #555;
-    border-radius: 4px;
-    background-color: #2a2a2a;
-    color: #ccc;
-    transition: all 0.2s ease;
-    font-size: 13px;
+.open-models-folder-link svg {
+    opacity: 0.7;
+    transition: opacity 0.2s ease;
 }
 
-.recording-mode-options .radio-option:hover span {
-    border-color: #666;
-    background-color: #333;
-}
-
-.recording-mode-options .radio-option input[type="radio"]:checked + span {
-    background-color: #007acc;
-    color: white;
-    border-color: #007acc;
+.open-models-folder-link:hover svg {
+    opacity: 1;
 }

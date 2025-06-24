@@ -1,0 +1,39 @@
+{
+  "name": "scout-landing",
+  "version": "1.0.0",
+  "description": "Landing page for Scout - Local-first voice recording and transcription app",
+  "scripts": {
+    "dev": "python3 -m http.server 3000",
+    "preview": "python3 -m http.server 8080",
+    "build": "echo 'No build step required for static site'",
+    "deploy:vercel": "vercel --prod",
+    "deploy:netlify": "netlify deploy --prod --dir .",
+    "lighthouse": "lighthouse http://localhost:3000 --view",
+    "validate": "html5validator --root . && echo 'HTML validation passed'"
+  },
+  "keywords": [
+    "scout",
+    "voice-recording",
+    "transcription",
+    "mac-app",
+    "privacy",
+    "local-ai",
+    "whisper",
+    "landing-page"
+  ],
+  "author": "Scout Team",
+  "license": "MIT",
+  "devDependencies": {
+    "html5validator": "^0.4.2",
+    "lighthouse": "^10.4.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arach/scout.git",
+    "directory": "landing"
+  },
+  "homepage": "https://scout-app.dev",
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

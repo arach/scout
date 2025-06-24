@@ -1,40 +1,7 @@
 .model-manager {
-  padding: 16px 0;
+  padding: 0;
 }
 
-.model-manager-header {
-  margin-bottom: 16px;
-}
-
-.model-manager-header h3 {
-  margin: 0 0 6px 0;
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.model-manager-subtitle {
-  margin: 0 0 12px 0;
-  color: var(--text-muted);
-  font-size: 14px;
-}
-
-.btn-secondary {
-  background: var(--button-background);
-  color: var(--text-primary);
-  border: 1px solid var(--border-color);
-  padding: 6px 16px;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.btn-secondary:hover {
-  background: var(--button-hover);
-  border-color: var(--border-hover);
-}
 
 .model-manager-loading {
   text-align: center;
@@ -48,114 +15,132 @@
   gap: 12px;
 }
 
-.model-item {
-  background: var(--button-background);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 14px;
+.model-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.model-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 12px;
+  padding: 16px;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  gap: 12px;
   transition: all 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
-.model-item.active {
+.model-card:hover {
+  border-color: var(--border-secondary);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+.model-card.active {
   border-color: var(--accent-primary);
-  background: rgba(0, 122, 204, 0.1);
+  background: var(--bg-secondary);
 }
 
-.model-item:hover {
-  border-color: var(--border-hover);
-}
-
-.model-info {
-  flex: 1;
-}
-
-.model-header {
+.model-card-header {
   display: flex;
-  align-items: baseline;
-  gap: 10px;
-  margin-bottom: 6px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
-.model-header h4 {
+.model-name {
   margin: 0;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--text-primary);
 }
 
-.model-size {
-  font-size: 13px;
-  color: var(--text-muted);
-  background: var(--background-primary);
-  padding: 2px 8px;
-  border-radius: 4px;
-}
-
-.auto-download-badge {
-  font-size: 11px;
-  color: var(--accent-primary);
-  background: rgba(0, 122, 204, 0.1);
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-weight: 600;
-  text-transform: uppercase;
-}
-
-.model-description {
-  margin: 0 0 8px 0;
-  color: var(--text-secondary);
-  font-size: 14px;
-}
-
-.model-stats {
+.model-status {
   display: flex;
-  gap: 14px;
-  font-size: 13px;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 6px;
 }
 
-.model-speed,
-.model-accuracy {
-  color: var(--text-muted);
+.model-status.active {
+  color: var(--success);
+  background: rgba(22, 130, 93, 0.1);
+}
+
+.model-status.auto {
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+}
+
+.model-details {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.model-stat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.stat-icon {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
 }
 
 .model-actions {
   display: flex;
   align-items: center;
-  min-width: 200px;
-  justify-content: flex-end;
+  justify-content: flex-start;
+  margin-top: auto;
 }
 
 .btn {
-  padding: 6px 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
   border: none;
   border-radius: 6px;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
+  width: 100%;
+  justify-content: center;
 }
 
-.btn-download {
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
   background: var(--accent-primary);
   color: white;
 }
 
-.btn-download:hover {
+.btn-primary:hover:not(:disabled) {
   background: var(--accent-hover);
 }
 
-.btn-activate {
-  background: var(--button-background);
+.btn-secondary {
+  background: var(--bg-tertiary);
   color: var(--text-primary);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border-primary);
 }
 
-.btn-activate:hover {
-  background: var(--button-hover);
-  border-color: var(--border-hover);
+.btn-secondary:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--border-secondary);
 }
 
 .model-active-badge {

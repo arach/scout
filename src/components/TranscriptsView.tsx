@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { TranscriptDetailPanel } from './TranscriptDetailPanel';
+import { TranscriptItem } from './TranscriptItem';
 import './TranscriptsView.css';
 
 interface Transcript {
@@ -51,9 +52,7 @@ export function TranscriptsView({
     }>({ transcript: null, isOpen: false });
 
     const openDetailPanel = (transcript: Transcript) => {
-        console.log('Opening detail panel for transcript:', transcript.id);
         setPanelState({ transcript: transcript, isOpen: true });
-        console.log('Panel state set to open');
     };
 
     const closeDetailPanel = () => {
@@ -109,7 +108,6 @@ export function TranscriptsView({
 
         return orderedGroups;
     };
-    console.log('TranscriptsView rendering:', { transcripts: transcripts.length, isPanelOpen: panelState.isOpen, selectedTranscript: panelState.transcript?.id });
     
     return (
         <div className="transcripts-view">
@@ -129,33 +127,31 @@ export function TranscriptsView({
 
             <div className="transcripts-list">
                 {transcripts.length > 0 && (
-                    <div className="transcripts-header">
-                        <div className="transcript-actions">
-                            <button
-                                className="select-all-button"
-                                onClick={selectAllTranscripts}
-                            >
-                                {selectedTranscripts.size === transcripts.length ? 'Deselect All' : 'Select All'}
-                            </button>
-                            {selectedTranscripts.size > 0 && (
-                                <>
-                                    <button
-                                        className="delete-button"
-                                        onClick={showBulkDeleteConfirmation}
-                                    >
-                                        Delete ({selectedTranscripts.size})
-                                    </button>
-                                    <div className="export-menu">
-                                        <button className="export-button">Export</button>
-                                        <div className="export-options">
-                                            <button onClick={() => exportTranscripts('json')}>JSON</button>
-                                            <button onClick={() => exportTranscripts('markdown')}>Markdown</button>
-                                            <button onClick={() => exportTranscripts('text')}>Text</button>
-                                        </div>
+                    <div className="transcripts-actions-bar">
+                        <button
+                            className="select-all-button"
+                            onClick={selectAllTranscripts}
+                        >
+                            {selectedTranscripts.size === transcripts.length ? 'Deselect All' : 'Select All'}
+                        </button>
+                        {selectedTranscripts.size > 0 && (
+                            <>
+                                <button
+                                    className="delete-button"
+                                    onClick={showBulkDeleteConfirmation}
+                                >
+                                    Delete ({selectedTranscripts.size})
+                                </button>
+                                <div className="export-menu">
+                                    <button className="export-button">Export</button>
+                                    <div className="export-options">
+                                        <button onClick={() => exportTranscripts('json')}>JSON</button>
+                                        <button onClick={() => exportTranscripts('markdown')}>Markdown</button>
+                                        <button onClick={() => exportTranscripts('text')}>Text</button>
                                     </div>
-                                </>
-                            )}
-                        </div>
+                                </div>
+                            </>
+                        )}
                     </div>
                 )}
                 {transcripts.length === 0 ? (
@@ -178,52 +174,18 @@ export function TranscriptsView({
                                     const isBlankAudio = transcript.text === "[BLANK_AUDIO]";
                                     
                                     return (
-                                        <div
+                                        <TranscriptItem
                                             key={transcript.id}
-                                            className={`transcript-list-item ${selectedTranscripts.has(transcript.id) ? 'selected' : ''} ${panelState.transcript?.id === transcript.id ? 'active' : ''}`}
-                                            onClick={() => openDetailPanel(transcript)}
-                                        >
-                                            <div className="transcript-row">
-                                                <input
-                                                    type="checkbox"
-                                                    className="transcript-checkbox"
-                                                    checked={selectedTranscripts.has(transcript.id)}
-                                                    onChange={(e) => {
-                                                        e.stopPropagation();
-                                                        toggleTranscriptSelection(transcript.id);
-                                                    }}
-                                                    onClick={(e) => e.stopPropagation()}
-                                                />
-                                                <span className="transcript-time">
-                                                    {new Date(transcript.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                                </span>
-                                                <span className="transcript-duration">
-                                                    {formatDuration(transcript.duration_ms)}
-                                                </span>
-                                                <div className="transcript-preview">
-                                                    {isBlankAudio ? (
-                                                        <span className="transcript-empty-inline">No speech detected</span>
-                                                    ) : (
-                                                        <span className="transcript-text-preview">{transcript.text}</span>
-                                                    )}
-                                                </div>
-                                                <button
-                                                    className="transcript-delete-button"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        showDeleteConfirmation(transcript.id, transcript.text);
-                                                    }}
-                                                    title="Delete transcript"
-                                                >
-                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                        <polyline points="3,6 5,6 21,6"></polyline>
-                                                        <path d="m19,6v14a2,2 0 0,1 -2,2H7a2,2 0 0,1 -2,-2V6m3,0V4a2,2 0 0,1 2,-2h4a2,2 0 0,1 2,2v2"></path>
-                                                        <line x1="10" y1="11" x2="10" y2="17"></line>
-                                                        <line x1="14" y1="11" x2="14" y2="17"></line>
-                                                    </svg>
-                                                </button>
-                                            </div>
-                                        </div>
+                                            transcript={transcript}
+                                            formatDuration={formatDuration}
+                                            onDelete={showDeleteConfirmation}
+                                            onClick={openDetailPanel}
+                                            showCheckbox={true}
+                                            isSelected={selectedTranscripts.has(transcript.id)}
+                                            onSelectToggle={toggleTranscriptSelection}
+                                            isActive={panelState.transcript?.id === transcript.id}
+                                            variant="default"
+                                        />
                                     );
                                 })}
                             </div>

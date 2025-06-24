@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { BarChart3, Gauge, Package, CheckCircle, Settings2, Download } from 'lucide-react';
 import './ModelManager.css';
 
 interface WhisperModel {
@@ -136,61 +137,55 @@ export const ModelManager: React.FC = () => {
     return <div className="model-manager-loading">Loading models...</div>;
   }
 
-  const openModelsFolder = async () => {
-    try {
-      await invoke('open_models_folder');
-    } catch (error) {
-      console.error('Failed to open models folder:', error);
-    }
-  };
-
   return (
     <div className="model-manager">
-      <div className="model-manager-header">
-        <h3>Whisper Models</h3>
-        <p className="model-manager-subtitle">
-          {models.some(m => m.downloaded) 
-            ? "Download better models for improved accuracy."
-            : "Download a model to start transcribing. We recommend starting with Tiny (39MB)."}
-        </p>
-        <button 
-          className="btn btn-secondary"
-          onClick={openModelsFolder}
-          title="Add your own .bin model files here"
-        >
-          Open Models Folder
-        </button>
-      </div>
-      
-      <div className="model-list">
+      <div className="model-list model-grid">
         {models.map(model => {
           const progress = downloading[model.id];
           const isDownloading = !!progress;
           const isAutoDownload = model.id === 'tiny.en' || model.id === 'base.en';
           
           return (
-            <div key={model.id} className={`model-item ${model.active ? 'active' : ''}`}>
-              <div className="model-info">
-                <div className="model-header">
-                  <h4>{model.name}</h4>
-                  <span className="model-size">{model.size_mb} MB</span>
-                  {isAutoDownload && <span className="auto-download-badge">Auto</span>}
-                  {model.active && <span className="model-active-badge">Active</span>}
+            <div key={model.id} className={`model-card ${model.active ? 'active' : ''}`}>
+              <div className="model-card-header">
+                <h3 className="model-name">{model.name}</h3>
+                {model.active && (
+                  <div className="model-status active">
+                    <CheckCircle size={14} />
+                    <span>Active</span>
+                  </div>
+                )}
+                {isAutoDownload && !model.active && (
+                  <div className="model-status auto">
+                    <Settings2 size={14} />
+                    <span>Auto</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="model-details">
+                <div className="model-stat">
+                  <Gauge size={14} className="stat-icon" />
+                  <span>Speed: {model.speed}</span>
                 </div>
-                <p className="model-description">{model.description}</p>
-                <div className="model-stats">
-                  <span className="model-speed">Speed: {model.speed}</span>
-                  <span className="model-accuracy">Accuracy: {model.accuracy}</span>
+                <div className="model-stat">
+                  <BarChart3 size={14} className="stat-icon" />
+                  <span>Accuracy: {model.accuracy}</span>
+                </div>
+                <div className="model-stat">
+                  <Package size={14} className="stat-icon" />
+                  <span>Size: {model.size_mb} MB</span>
                 </div>
               </div>
               
               <div className="model-actions">
                 {!model.downloaded && !isDownloading && (
                   <button 
-                    className="btn btn-download"
+                    className="btn btn-primary"
                     onClick={() => downloadModel(model)}
                   >
-                    Download
+                    <Download size={14} />
+                    <span>Download</span>
                   </button>
                 )}
                 
@@ -210,10 +205,21 @@ export const ModelManager: React.FC = () => {
                 
                 {model.downloaded && !model.active && (
                   <button 
-                    className="btn btn-activate"
+                    className="btn btn-secondary"
                     onClick={() => setActiveModel(model.id)}
                   >
-                    Use This Model
+                    <CheckCircle size={14} />
+                    <span>Use Model</span>
+                  </button>
+                )}
+                
+                {model.downloaded && model.active && (
+                  <button 
+                    className="btn btn-secondary"
+                    disabled
+                  >
+                    <CheckCircle size={14} />
+                    <span>Already Active</span>
                   </button>
                 )}
               </div>

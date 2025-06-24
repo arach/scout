@@ -1,0 +1,128 @@
+.mic-quick-picker {
+    position: fixed;
+    background: #1e1e1e;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+    width: 240px;
+    z-index: 1000;
+    animation: fadeInScale 0.15s ease-out;
+}
+
+/* Arrow pointing to gear button */
+.mic-quick-picker::before {
+    content: '';
+    position: absolute;
+    top: -6px;
+    left: 50%;
+    transform: translateX(-50%) rotate(45deg);
+    width: 12px;
+    height: 12px;
+    background: #1e1e1e;
+    border-left: 1px solid rgba(255, 255, 255, 0.1);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+@keyframes fadeInScale {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.mic-quick-picker-loading {
+    padding: 16px;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 13px;
+}
+
+.mic-quick-picker-header {
+    padding: 12px 16px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: rgba(255, 255, 255, 0.5);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 8px 8px 0 0;
+}
+
+.mic-quick-picker-list {
+    max-height: 240px;
+    overflow-y: auto;
+    border-radius: 0 0 8px 8px;
+    overflow-x: hidden;
+}
+
+.mic-quick-picker-item {
+    width: 100%;
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    text-align: left;
+}
+
+.mic-quick-picker-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.95);
+}
+
+.mic-quick-picker-item.selected {
+    background: rgba(74, 158, 255, 0.1);
+    color: #4a9eff;
+}
+
+.mic-quick-picker-item.selected:hover {
+    background: rgba(74, 158, 255, 0.15);
+}
+
+.mic-quick-picker-item .mic-icon {
+    flex-shrink: 0;
+    opacity: 0.6;
+}
+
+.mic-quick-picker-item.selected .mic-icon {
+    opacity: 1;
+}
+
+.mic-quick-picker-item .mic-name {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.mic-quick-picker-item .check-icon {
+    flex-shrink: 0;
+    color: #4a9eff;
+}
+
+/* Scrollbar styling */
+.mic-quick-picker-list::-webkit-scrollbar {
+    width: 4px;
+}
+
+.mic-quick-picker-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.mic-quick-picker-list::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 2px;
+}
+
+.mic-quick-picker-list::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+}

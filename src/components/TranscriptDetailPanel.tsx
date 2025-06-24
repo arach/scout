@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { WaveformPlayer } from './WaveformPlayer';
+import { SimpleAudioPlayer } from './SimpleAudioPlayer';
 import './TranscriptDetailPanel.css';
 
 interface Transcript {
@@ -77,11 +77,17 @@ export function TranscriptDetailPanel({
 
     return (
         <>
-            <div className="detail-panel-backdrop" onClick={onClose} />
-            <div className="transcript-detail-panel">
+            <div className="detail-panel-backdrop" onClick={(e) => {
+                e.stopPropagation();
+                onClose();
+            }} />
+            <div className="transcript-detail-panel" onClick={(e) => e.stopPropagation()}>
                 <div className="detail-panel-header">
                     <h2>Transcript Details</h2>
-                    <button className="close-button" onClick={onClose} title="Close (ESC)">
+                    <button className="close-button" onClick={(e) => {
+                        e.stopPropagation();
+                        onClose();
+                    }} title="Close (ESC)">
                         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M10.5 3.5L3.5 10.5M3.5 3.5L10.5 10.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                         </svg>
@@ -136,7 +142,7 @@ export function TranscriptDetailPanel({
                     </div>
 
                     {transcript.audio_path && canRenderPlayer && (
-                        <WaveformPlayer 
+                        <SimpleAudioPlayer
                             audioPath={transcript.audio_path}
                             duration={transcript.duration_ms}
                             formatDuration={formatDuration}
