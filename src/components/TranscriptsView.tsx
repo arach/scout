@@ -232,30 +232,47 @@ export function TranscriptsView({
                             
                             return (
                                 <div key={group.title} className="transcript-group">
-                                    <div 
-                                        className="transcript-group-header"
-                                        onClick={() => toggleGroup(group.title)}
-                                    >
+                                    <div className="transcript-group-header">
                                         <div className="group-header-left">
-                                            <button className="group-toggle-btn">
+                                            <input
+                                                type="checkbox"
+                                                className="group-checkbox"
+                                                checked={fullGroupTranscripts.every(t => selectedTranscripts.has(t.id))}
+                                                onChange={(e) => {
+                                                    e.stopPropagation();
+                                                    const allGroupIds = fullGroupTranscripts.map(t => t.id);
+                                                    toggleTranscriptGroupSelection(allGroupIds);
+                                                }}
+                                            />
+                                            <button 
+                                                className="group-toggle-btn"
+                                                onClick={() => toggleGroup(group.title)}
+                                            >
                                                 {expandedGroups.has(group.title) ? 
                                                     <ChevronUp size={16} /> : 
                                                     <ChevronDown size={16} />
                                                 }
                                             </button>
-                                            <h3 className="transcript-group-title">{group.title}</h3>
+                                            <h3 
+                                                className="transcript-group-title"
+                                                onClick={() => toggleGroup(group.title)}
+                                            >
+                                                {group.title}
+                                            </h3>
                                             <span className="group-count">({fullGroupTranscripts.length})</span>
                                         </div>
-                                        <button 
-                                            className="select-group-btn"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                const allGroupIds = fullGroupTranscripts.map(t => t.id);
-                                                toggleTranscriptGroupSelection(allGroupIds);
-                                            }}
-                                        >
-                                            {fullGroupTranscripts.every(t => selectedTranscripts.has(t.id)) ? 'Deselect All' : 'Select All'}
-                                        </button>
+                                        {fullGroupTranscripts.some(t => selectedTranscripts.has(t.id)) && (
+                                            <button 
+                                                className="group-clear-btn"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    const selectedInGroup = fullGroupTranscripts.filter(t => selectedTranscripts.has(t.id));
+                                                    toggleTranscriptGroupSelection(selectedInGroup.map(t => t.id));
+                                                }}
+                                            >
+                                                Clear
+                                            </button>
+                                        )}
                                     </div>
                                 {expandedGroups.has(group.title) && (
                                     <div className="transcript-group-items">
