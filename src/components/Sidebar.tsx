@@ -61,7 +61,7 @@ export function Sidebar({ currentView, onViewChange, isExpanded }: SidebarProps)
           <circle cx="10" cy="10" r="3" fill="currentColor"/>
         </svg>
         {isExpanded && <span className="sidebar-label">Record</span>}
-        {!isExpanded && <span className="sidebar-tooltip">Record</span>}
+        <span className="sidebar-tooltip">Record</span>
       </button>
       <button
         className={`sidebar-button ${currentView === 'transcripts' ? 'active' : ''}`}
@@ -75,7 +75,7 @@ export function Sidebar({ currentView, onViewChange, isExpanded }: SidebarProps)
           <line x1="7" y1="13" x2="10" y2="13" stroke="currentColor" strokeWidth="1.5"/>
         </svg>
         {isExpanded && <span className="sidebar-label">Transcripts</span>}
-        {!isExpanded && <span className="sidebar-tooltip">Transcripts</span>}
+        <span className="sidebar-tooltip">Transcripts</span>
       </button>
       <button
         className={`sidebar-button ${currentView === 'settings' ? 'active' : ''}`}
@@ -84,7 +84,7 @@ export function Sidebar({ currentView, onViewChange, isExpanded }: SidebarProps)
       >
         <Settings size={20} />
         {isExpanded && <span className="sidebar-label">Settings</span>}
-        {!isExpanded && <span className="sidebar-tooltip">Settings</span>}
+        <span className="sidebar-tooltip">Settings</span>
       </button>
     </div>
   );
