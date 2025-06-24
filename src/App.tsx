@@ -10,7 +10,7 @@ import { Sidebar, useSidebarState } from "./components/Sidebar";
 import { RecordView } from "./components/RecordView";
 import { TranscriptsView } from "./components/TranscriptsView";
 import { SettingsView } from "./components/SettingsView";
-import { ChevronRight, ChevronLeft } from 'lucide-react';
+import { ChevronRight, PanelLeftClose } from 'lucide-react';
 import "./App.css";
 
 interface Transcript {
@@ -1187,7 +1187,7 @@ function App() {
           aria-label={isSidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
           title={isSidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
         >
-          {isSidebarExpanded ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
+          {isSidebarExpanded ? <PanelLeftClose size={14} /> : <ChevronRight size={14} />}
         </button>
         {currentView === 'record' && (
           <RecordView
