@@ -6,6 +6,7 @@
   padding-top: 8px;
   transition: width 0.2s ease;
   position: relative;
+  flex-shrink: 0;
 }
 
 .sidebar.collapsed {

@@ -1042,7 +1042,7 @@ h1 {
 }
 
 .settings-body {
-  padding: 20px;
+  padding: 40px 20px 20px 20px; /* Extra top padding to avoid toggle button overlap */
 }
 
 .settings-section {
