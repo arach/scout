@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Trash2, Copy, Check, Play, Download, Edit3 } from 'lucide-react';
+import { Trash2, Copy, Check, Play, Download, Eye } from 'lucide-react';
 import './TranscriptItem.css';
 
 interface Transcript {
@@ -36,6 +36,7 @@ export function TranscriptItem({
     variant = 'default'
 }: TranscriptItemProps) {
     const [copied, setCopied] = useState(false);
+    const [showDownloadMenu, setShowDownloadMenu] = useState(false);
     const isBlankAudio = transcript.text === "[BLANK_AUDIO]";
     
     const formatTime = (dateString: string) => {
@@ -125,17 +126,64 @@ export function TranscriptItem({
                         </button>
                     )}
                     
-                    <button
-                        className="transcript-action-button download"
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            // TODO: Implement download functionality
-                        }}
-                        title="Download transcript"
-                        disabled={isBlankAudio}
-                    >
-                        <Download size={14} />
-                    </button>
+                    <div className="download-menu-wrapper">
+                        <button
+                            className="transcript-action-button download"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setShowDownloadMenu(!showDownloadMenu);
+                            }}
+                            title="Download transcript"
+                            disabled={isBlankAudio}
+                        >
+                            <Download size={14} />
+                        </button>
+                        {showDownloadMenu && (
+                            <div className="download-menu" onMouseLeave={() => setShowDownloadMenu(false)}>
+                                <button onClick={(e) => {
+                                    e.stopPropagation();
+                                    // Download as JSON
+                                    const downloadData = {
+                                        id: transcript.id,
+                                        text: transcript.text,
+                                        duration_ms: transcript.duration_ms,
+                                        created_at: transcript.created_at,
+                                        metadata: transcript.metadata,
+                                        audio_path: transcript.audio_path,
+                                        file_size: transcript.file_size
+                                    };
+                                    
+                                    const blob = new Blob([JSON.stringify(downloadData, null, 2)], { type: 'application/json' });
+                                    const url = URL.createObjectURL(blob);
+                                    const a = document.createElement('a');
+                                    a.href = url;
+                                    a.download = `transcript-${transcript.id}-${new Date(transcript.created_at).toISOString().split('T')[0]}.json`;
+                                    document.body.appendChild(a);
+                                    a.click();
+                                    document.body.removeChild(a);
+                                    URL.revokeObjectURL(url);
+                                    setShowDownloadMenu(false);
+                                }}>JSON</button>
+                                <button onClick={(e) => {
+                                    e.stopPropagation();
+                                    // Download as Markdown
+                                    const date = new Date(transcript.created_at);
+                                    const markdown = `# Transcript\n\n**Date:** ${date.toLocaleDateString()} ${date.toLocaleTimeString()}\n**Duration:** ${formatDuration(transcript.duration_ms)}\n\n## Text\n\n${transcript.text}\n\n---\n\n*Transcript ID: ${transcript.id}*`;
+                                    
+                                    const blob = new Blob([markdown], { type: 'text/markdown' });
+                                    const url = URL.createObjectURL(blob);
+                                    const a = document.createElement('a');
+                                    a.href = url;
+                                    a.download = `transcript-${transcript.id}-${date.toISOString().split('T')[0]}.md`;
+                                    document.body.appendChild(a);
+                                    a.click();
+                                    document.body.removeChild(a);
+                                    URL.revokeObjectURL(url);
+                                    setShowDownloadMenu(false);
+                                }}>Markdown</button>
+                            </div>
+                        )}
+                    </div>
                     
                     <button
                         className={`transcript-action-button copy ${copied ? 'copied' : ''}`}
@@ -147,15 +195,17 @@ export function TranscriptItem({
                     </button>
                     
                     <button
-                        className="transcript-action-button edit"
+                        className="transcript-action-button view-details"
                         onClick={(e) => {
                             e.stopPropagation();
-                            // TODO: Implement edit functionality
+                            if (onClick) {
+                                onClick(transcript);
+                            }
                         }}
-                        title="Edit transcript"
+                        title="View transcript details"
                         disabled={isBlankAudio}
                     >
-                        <Edit3 size={14} />
+                        <Eye size={14} />
                     </button>
                     
                     {onDelete && (
