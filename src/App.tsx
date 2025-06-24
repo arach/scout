@@ -10,6 +10,7 @@ import { Sidebar, useSidebarState } from "./components/Sidebar";
 import { RecordView } from "./components/RecordView";
 import { TranscriptsView } from "./components/TranscriptsView";
 import { SettingsView } from "./components/SettingsView";
+import { PanelLeftClose, PanelLeft } from 'lucide-react';
 import "./App.css";
 
 interface Transcript {
@@ -1186,15 +1187,7 @@ function App() {
           aria-label={isSidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
           title={isSidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
         >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path
-              d={isSidebarExpanded ? "M10 12L6 8L10 4" : "M6 12L10 8L6 4"}
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
+          {isSidebarExpanded ? <PanelLeftClose size={14} /> : <PanelLeft size={14} />}
         </button>
         {currentView === 'record' && (
           <RecordView
