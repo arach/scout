@@ -141,7 +141,6 @@
     opacity: 0;
     transition: opacity 0.3s ease, transform 0.3s ease;
     background: linear-gradient(to left, transparent, transparent 15%, #F3F4F6 40%);
-    padding-left: 30px; /* Gradient fade area */
     padding-right: 0;
     z-index: 10;
 }
