@@ -22,10 +22,14 @@ export function SessionTranscripts({ transcripts, formatDuration, showDeleteConf
     if (transcripts.length === 0) {
         return (
             <div className="session-transcripts">
-                {onImportAudio && (
-                    <div className="session-header-with-actions">
+                <div className="session-empty-state">
+                    <div className="session-empty-icon">🎤</div>
+                    <p className="session-empty-message">
+                        No recent transcripts. Start recording or upload an audio file to begin!
+                    </p>
+                    {onImportAudio && (
                         <button
-                            className="import-audio-button"
+                            className="import-audio-button-integrated"
                             onClick={onImportAudio}
                             title="Import audio file"
                         >
@@ -34,15 +38,9 @@ export function SessionTranscripts({ transcripts, formatDuration, showDeleteConf
                                 <polyline points="17,8 12,3 7,8"/>
                                 <line x1="12" y1="3" x2="12" y2="15"/>
                             </svg>
-                            import audio
+                            Import Audio File
                         </button>
-                    </div>
-                )}
-                <div className="session-empty-state">
-                    <div className="session-empty-icon">🎤</div>
-                    <p className="session-empty-message">
-                        No recent transcripts. Start recording or upload an audio file to begin!
-                    </p>
+                    )}
                 </div>
             </div>
         );
