@@ -78,7 +78,6 @@ export function SettingsView({
 
     return (
         <div className="settings-view">
-            <h1>Settings</h1>
             <div className="settings-body">
                 {/* Shortcuts Section - Two Columns */}
                 <div className="settings-section">

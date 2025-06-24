@@ -5,20 +5,12 @@
 
 .session-header-with-actions {
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-end;
     align-items: center;
     margin-bottom: 16px;
 }
 
-.session-header {
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--text-secondary);
-    margin: 0;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    opacity: 0.7;
-}
+/* Removed .session-header styles as titles are no longer shown */
 
 .import-audio-button {
     background: transparent;

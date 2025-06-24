@@ -22,9 +22,8 @@ export function SessionTranscripts({ transcripts, formatDuration, showDeleteConf
     if (transcripts.length === 0) {
         return (
             <div className="session-transcripts">
-                <div className="session-header-with-actions">
-                    <h3 className="session-header">Recent Transcripts</h3>
-                    {onImportAudio && (
+                {onImportAudio && (
+                    <div className="session-header-with-actions">
                         <button
                             className="import-audio-button"
                             onClick={onImportAudio}
@@ -37,8 +36,8 @@ export function SessionTranscripts({ transcripts, formatDuration, showDeleteConf
                             </svg>
                             import audio
                         </button>
-                    )}
-                </div>
+                    </div>
+                )}
                 <div className="session-empty-state">
                     <div className="session-empty-icon">🎤</div>
                     <p className="session-empty-message">
@@ -51,9 +50,8 @@ export function SessionTranscripts({ transcripts, formatDuration, showDeleteConf
 
     return (
         <div className="session-transcripts">
-            <div className="session-header-with-actions">
-                <h3 className="session-header">Recent Transcripts</h3>
-                {onImportAudio && (
+            {onImportAudio && (
+                <div className="session-header-with-actions">
                     <button
                         className="import-audio-button"
                         onClick={onImportAudio}
@@ -66,8 +64,8 @@ export function SessionTranscripts({ transcripts, formatDuration, showDeleteConf
                         </svg>
                         import audio
                     </button>
-                )}
-            </div>
+                </div>
+            )}
             <div className="session-list">
                 {transcripts.map((transcript) => (
                     <TranscriptItem
