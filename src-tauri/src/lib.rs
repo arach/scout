@@ -31,8 +31,8 @@ use audio::converter::AudioConverter;
 use std::path::Path;
 
 // Overlay dimensions configuration
-const OVERLAY_EXPANDED_WIDTH: f64 = 180.0;
-const OVERLAY_EXPANDED_HEIGHT: f64 = 44.0;
+const OVERLAY_EXPANDED_WIDTH: f64 = 220.0;
+const OVERLAY_EXPANDED_HEIGHT: f64 = 48.0;
 const OVERLAY_MINIMIZED_WIDTH: f64 = 48.0;
 const OVERLAY_MINIMIZED_HEIGHT: f64 = 16.0;
 
@@ -278,6 +278,60 @@ async fn get_audio_devices() -> Result<Vec<String>, String> {
     Ok(device_names)
 }
 
+#[derive(serde::Serialize)]
+struct AudioDeviceInfo {
+    name: String,
+    index: usize,
+    sample_rates: Vec<u32>,
+    channels: u16,
+}
+
+#[tauri::command]
+async fn get_audio_devices_detailed() -> Result<Vec<AudioDeviceInfo>, String> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    
+    let host = cpal::default_host();
+    let mut device_infos = Vec::new();
+    
+    // Get input devices
+    let devices = host.input_devices()
+        .map_err(|e| format!("Failed to enumerate input devices: {}", e))?;
+    
+    for (index, device) in devices.enumerate() {
+        let name = device.name().unwrap_or_else(|_| format!("Unknown Device {}", index));
+        
+        // Try to get the default input config
+        let (sample_rates, channels) = match device.default_input_config() {
+            Ok(config) => {
+                // Get supported sample rates
+                let mut rates = vec![config.sample_rate().0];
+                
+                // Try common sample rates to see what's supported
+                for &rate in &[16000, 44100, 48000, 96000] {
+                    if rate != config.sample_rate().0 {
+                        rates.push(rate);
+                    }
+                }
+                
+                (rates, config.channels())
+            },
+            Err(_) => {
+                // Fallback values if we can't get config
+                (vec![48000], 2)
+            }
+        };
+        
+        device_infos.push(AudioDeviceInfo {
+            name,
+            index,
+            sample_rates,
+            channels,
+        });
+    }
+    
+    Ok(device_infos)
+}
+
 #[tauri::command]
 async fn start_audio_level_monitoring(state: State<'_, AppState>, device_name: Option<String>) -> Result<(), String> {
     let recorder = state.recorder.lock().await;
@@ -513,8 +567,16 @@ async fn get_overlay_position(state: State<'_, AppState>) -> Result<String, Stri
 async fn set_overlay_position(state: State<'_, AppState>, position: String) -> Result<(), String> {
     // Update the settings
     let mut settings = state.settings.lock().await;
-    settings.update(|s| s.ui.overlay_position = position)
+    settings.update(|s| s.ui.overlay_position = position.clone())
         .map_err(|e| format!("Failed to save settings: {}", e))?;
+    drop(settings);
+    
+    // Update the native overlay position immediately
+    #[cfg(target_os = "macos")]
+    {
+        let overlay = state.native_panel_overlay.lock().await;
+        overlay.set_position(&position);
+    }
     
     Ok(())
 }
@@ -1223,6 +1285,7 @@ pub fn run() {
             cancel_recording,
             is_recording,
             get_audio_devices,
+            get_audio_devices_detailed,
             start_audio_level_monitoring,
             stop_audio_level_monitoring,
             get_current_audio_level,

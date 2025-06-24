@@ -50,6 +50,9 @@ impl Transcriber {
         params.set_print_progress(false);
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
+        
+        // Suppress non-speech tokens (music, background noise descriptions)
+        params.set_suppress_non_speech_tokens(true);
 
         // Run the transcription
         let mut state = self.context.create_state().map_err(|e| format!("Failed to create state: {}", e))?;

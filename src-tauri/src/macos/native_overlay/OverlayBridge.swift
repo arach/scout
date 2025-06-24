@@ -84,3 +84,11 @@ public func nativeOverlaySetVolumeLevel(_ level: Float) {
         NativeOverlayManager.shared.setVolumeLevel(CGFloat(level))
     }
 }
+
+@_cdecl("native_overlay_set_position")
+public func nativeOverlaySetPosition(_ position: UnsafePointer<CChar>) {
+    let positionString = String(cString: position)
+    DispatchQueue.main.async {
+        NativeOverlayManager.shared.setPosition(positionString)
+    }
+}

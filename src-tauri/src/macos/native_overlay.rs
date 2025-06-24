@@ -14,6 +14,7 @@ extern "C" {
     fn native_overlay_set_stop_recording_callback(callback: extern "C" fn());
     fn native_overlay_set_cancel_recording_callback(callback: extern "C" fn());
     fn native_overlay_set_volume_level(level: f32);
+    fn native_overlay_set_position(position: *const std::os::raw::c_char);
 }
 
 // Global callbacks storage
@@ -154,6 +155,14 @@ impl NativeOverlay {
             native_overlay_set_volume_level(level.clamp(0.0, 1.0));
         }
     }
+    
+    pub fn set_position(&self, position: &str) {
+        #[cfg(target_os = "macos")]
+        unsafe {
+            let c_string = std::ffi::CString::new(position).unwrap();
+            native_overlay_set_position(c_string.as_ptr());
+        }
+    }
 }
 
 // Stub implementation for non-macOS platforms
@@ -172,4 +181,5 @@ impl NativeOverlay {
     pub fn set_on_stop_recording<F>(&self, _callback: F) where F: Fn() + Send + Sync + 'static {}
     pub fn set_on_cancel_recording<F>(&self, _callback: F) where F: Fn() + Send + Sync + 'static {}
     pub fn set_volume_level(&self, _level: f32) {}
+    pub fn set_position(&self, _position: &str) {}
 }

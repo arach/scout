@@ -210,35 +210,62 @@ impl AudioRecorderWorker {
         };
 
 
-        let config = device
+        let default_config = device
             .default_input_config()
             .map_err(|e| format!("Failed to get input config: {}", e))?;
 
+        // Try stereo first, fallback to device capabilities if not supported
+        let mut channels = 2; // Prefer stereo
+        
+        // Check if device supports stereo
+        if let Ok(supported_configs) = device.supported_input_configs() {
+            let stereo_supported = supported_configs
+                .any(|supported_range| {
+                    supported_range.channels() >= 2 &&
+                    supported_range.sample_rate().min <= default_config.sample_rate() &&
+                    supported_range.sample_rate().max >= default_config.sample_rate()
+                });
+            
+            if !stereo_supported {
+                println!("Device doesn't support stereo input, falling back to mono");
+                channels = default_config.channels();
+            }
+        } else {
+            println!("Couldn't check device capabilities, using device default");
+            channels = default_config.channels();
+        }
+
+        let config = cpal::StreamConfig {
+            channels,
+            sample_rate: default_config.sample_rate(),
+            buffer_size: cpal::BufferSize::Default,
+        };
+
         // Store sample rate, channels, and format for later use
-        self.sample_rate = config.sample_rate().0;
-        self.channels = config.channels();
-        self.sample_format = Some(config.sample_format());
+        self.sample_rate = config.sample_rate.0;
+        self.channels = channels;
+        self.sample_format = Some(default_config.sample_format());
         
         // Reset sample count
         *self.sample_count.lock().unwrap() = 0;
 
         // Match the WAV spec to the actual audio format
-        let (bits_per_sample, sample_format) = match config.sample_format() {
+        let (bits_per_sample, sample_format) = match default_config.sample_format() {
             cpal::SampleFormat::I16 => (16, hound::SampleFormat::Int),
             cpal::SampleFormat::F32 => (32, hound::SampleFormat::Float),
             _ => return Err("Unsupported sample format".to_string()),
         };
         
         let spec = hound::WavSpec {
-            channels: config.channels(),
-            sample_rate: config.sample_rate().0,
+            channels: config.channels, // Use actual recording channels
+            sample_rate: config.sample_rate.0,
             bits_per_sample,
             sample_format,
         };
 
         // Initialize VAD if enabled
         if *self.vad_enabled.lock().unwrap() {
-            self.vad = Some(VoiceActivityDetector::new(config.sample_rate().0)?);
+            self.vad = Some(VoiceActivityDetector::new(config.sample_rate.0)?);
         }
 
         let writer = hound::WavWriter::create(output_path, spec)
@@ -253,10 +280,10 @@ impl AudioRecorderWorker {
 
         let err_fn = |err| eprintln!("An error occurred on the audio stream: {}", err);
 
-        let stream = match config.sample_format() {
+        let stream = match default_config.sample_format() {
             cpal::SampleFormat::I16 => self.build_input_stream::<i16>(
                 &device,
-                &config.into(),
+                &config,
                 writer.clone(),
                 is_recording.clone(),
                 self.sample_count.clone(),
@@ -268,7 +295,7 @@ impl AudioRecorderWorker {
             }
             cpal::SampleFormat::F32 => self.build_input_stream::<f32>(
                 &device,
-                &config.into(),
+                &config,
                 writer.clone(),
                 is_recording.clone(),
                 self.sample_count.clone(),
