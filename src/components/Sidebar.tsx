@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { Settings } from 'lucide-react';
 import './Sidebar.css';
 
 type View = 'record' | 'transcripts' | 'settings';
@@ -81,10 +82,7 @@ export function Sidebar({ currentView, onViewChange, isExpanded }: SidebarProps)
         onClick={() => onViewChange('settings')}
         aria-label="Settings"
       >
-        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="10" cy="10" r="2" stroke="currentColor" strokeWidth="1.5"/>
-          <path d="M10 3V1M10 19V17M17 10H19M1 10H3M15.364 15.364L16.778 16.778M3.222 3.222L4.636 4.636M15.364 4.636L16.778 3.222M3.222 16.778L4.636 15.364" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-        </svg>
+        <Settings size={20} />
         {isExpanded && <span className="sidebar-label">Settings</span>}
         {!isExpanded && <span className="sidebar-tooltip">Settings</span>}
       </button>
