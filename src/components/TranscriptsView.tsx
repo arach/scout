@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { TranscriptDetailPanel } from './TranscriptDetailPanel';
 import { TranscriptItem } from './TranscriptItem';
 import { ChevronDown, ChevronUp } from 'lucide-react';
+import { formatShortcut } from '../lib/formatShortcut';
 import './TranscriptsView.css';
 
 interface Transcript {
@@ -58,20 +59,22 @@ export function TranscriptsView({
     
     const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['Today', 'Yesterday']));
     const [displayedItems, setDisplayedItems] = useState(ITEMS_PER_PAGE);
+    const [showExportMenu, setShowExportMenu] = useState(false);
+    const [showFloatingExportMenu, setShowFloatingExportMenu] = useState(false);
 
-    const openDetailPanel = (transcript: Transcript) => {
+    const openDetailPanel = useCallback((transcript: Transcript) => {
         setPanelState({ transcript: transcript, isOpen: true });
-    };
+    }, []);
 
-    const closeDetailPanel = () => {
+    const closeDetailPanel = useCallback(() => {
         setPanelState(prev => ({ ...prev, isOpen: false }));
         // Keep selected transcript for animation
         setTimeout(() => {
             setPanelState(prev => ({ ...prev, transcript: null }));
         }, 200);
-    };
+    }, []);
     
-    const toggleGroup = (groupTitle: string) => {
+    const toggleGroup = useCallback((groupTitle: string) => {
         setExpandedGroups(prev => {
             const newSet = new Set(prev);
             if (newSet.has(groupTitle)) {
@@ -81,7 +84,7 @@ export function TranscriptsView({
             }
             return newSet;
         });
-    };
+    }, []);
     
     const loadMore = () => {
         setDisplayedItems(prev => prev + ITEMS_PER_PAGE);
@@ -91,6 +94,26 @@ export function TranscriptsView({
         // Reset displayed items when transcripts change
         setDisplayedItems(ITEMS_PER_PAGE);
     }, [transcripts]);
+    
+    // Handle click outside for export menus
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            const target = event.target as HTMLElement;
+            if (!target.closest('.export-menu')) {
+                setShowExportMenu(false);
+            }
+            if (!target.closest('.export-dropdown')) {
+                setShowFloatingExportMenu(false);
+            }
+        };
+        
+        if (showExportMenu || showFloatingExportMenu) {
+            document.addEventListener('mousedown', handleClickOutside);
+            return () => {
+                document.removeEventListener('mousedown', handleClickOutside);
+            };
+        }
+    }, [showExportMenu, showFloatingExportMenu]);
 
     // Group transcripts by date
     const groupTranscriptsByDate = (transcripts: Transcript[]) => {
@@ -169,9 +192,13 @@ export function TranscriptsView({
     
     return (
         <div className="transcripts-view">
-            <div className="transcripts-header-container">
-                <h1>Transcripts</h1>
-                <div className="header-controls">
+            {/* 🧠 CSS Grid with specific column sizing */}
+            <div className="header-grid mb-4">
+                {/* Left: Title */}
+                <h1 className="text-2xl font-semibold text-white m-0">Transcripts</h1>
+                
+                {/* Center: Search Box */}
+                <div className="search-container">
                     <input
                         type="text"
                         className="search-input"
@@ -181,37 +208,72 @@ export function TranscriptsView({
                         onKeyPress={(e) => e.key === 'Enter' && searchTranscripts()}
                     />
                 </div>
+                
+                {/* Right: Action Buttons */}
+                <div className="header-actions-container">
+                    {transcripts.length > 0 && (
+                        <>
+                            <button
+                                className="header-action-btn select-all"
+                                onClick={selectAllTranscripts}
+                            >
+                                {selectedTranscripts.size === transcripts.length ? 'Deselect All' : 'Select All'}
+                            </button>
+                            {selectedTranscripts.size > 0 && (
+                                <>
+                                    <button
+                                        className="header-action-btn delete"
+                                        onClick={showBulkDeleteConfirmation}
+                                    >
+                                        Delete ({selectedTranscripts.size})
+                                    </button>
+                                    <div className="export-menu relative">
+                                        <button 
+                                            className="header-action-btn export"
+                                            onClick={() => setShowExportMenu(!showExportMenu)}
+                                        >
+                                            Export
+                                        </button>
+                                        {showExportMenu && (
+                                            <div className="absolute top-full mt-1 right-0 bg-zinc-800 border border-zinc-700 rounded-md p-1 min-w-32 shadow-lg z-50">
+                                                <button 
+                                                    className="block w-full text-left px-3 py-1 text-sm text-zinc-300 hover:bg-zinc-700 rounded transition-colors"
+                                                    onClick={() => {
+                                                        exportTranscripts('json');
+                                                        setShowExportMenu(false);
+                                                    }}
+                                                >
+                                                    JSON
+                                                </button>
+                                                <button 
+                                                    className="block w-full text-left px-3 py-1 text-sm text-zinc-300 hover:bg-zinc-700 rounded transition-colors"
+                                                    onClick={() => {
+                                                        exportTranscripts('markdown');
+                                                        setShowExportMenu(false);
+                                                    }}
+                                                >
+                                                    Markdown
+                                                </button>
+                                                <button 
+                                                    className="block w-full text-left px-3 py-1 text-sm text-zinc-300 hover:bg-zinc-700 rounded transition-colors"
+                                                    onClick={() => {
+                                                        exportTranscripts('text');
+                                                        setShowExportMenu(false);
+                                                    }}
+                                                >
+                                                    Text
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                </>
+                            )}
+                        </>
+                    )}
+                </div>
             </div>
 
             <div className="transcripts-list">
-                {transcripts.length > 0 && (
-                    <div className="transcripts-actions-bar">
-                        <button
-                            className="select-all-button"
-                            onClick={selectAllTranscripts}
-                        >
-                            {selectedTranscripts.size === transcripts.length ? 'Deselect All' : 'Select All'}
-                        </button>
-                        {selectedTranscripts.size > 0 && (
-                            <>
-                                <button
-                                    className="delete-button"
-                                    onClick={showBulkDeleteConfirmation}
-                                >
-                                    Delete ({selectedTranscripts.size})
-                                </button>
-                                <div className="export-menu">
-                                    <button className="export-button">Export</button>
-                                    <div className="export-options">
-                                        <button onClick={() => exportTranscripts('json')}>JSON</button>
-                                        <button onClick={() => exportTranscripts('markdown')}>Markdown</button>
-                                        <button onClick={() => exportTranscripts('text')}>Text</button>
-                                    </div>
-                                </div>
-                            </>
-                        )}
-                    </div>
-                )}
                 {transcripts.length === 0 ? (
                     <div className="no-transcripts">
                         <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.3">
@@ -221,7 +283,7 @@ export function TranscriptsView({
                             <line x1="8" y1="22" x2="16" y2="22" />
                         </svg>
                         <h3>No transcripts yet</h3>
-                        <p>Press {hotkey.split('+').join(' + ')} or click "Start Recording" to begin</p>
+                        <p>Press <span title={hotkey}>{formatShortcut(hotkey)}</span> or click "Start Recording" to begin</p>
                     </div>
                 ) : (
                     <div className="transcript-list-container">
@@ -231,7 +293,7 @@ export function TranscriptsView({
                             const fullGroupTranscripts = fullGroup?.transcripts || [];
                             
                             return (
-                                <div key={group.title} className="transcript-group">
+                                <div key={group.title} className={`transcript-group ${expandedGroups.has(group.title) ? 'expanded' : ''}`}>
                                     <div className="transcript-group-header">
                                         <div className="group-header-left">
                                             <input
@@ -248,10 +310,7 @@ export function TranscriptsView({
                                                 className="group-toggle-btn"
                                                 onClick={() => toggleGroup(group.title)}
                                             >
-                                                {expandedGroups.has(group.title) ? 
-                                                    <ChevronUp size={16} /> : 
-                                                    <ChevronDown size={16} />
-                                                }
+                                                <ChevronDown size={16} className="chevron-icon" />
                                             </button>
                                             <h3 
                                                 className="transcript-group-title"
@@ -336,14 +395,28 @@ export function TranscriptsView({
                         Delete Selected
                     </button>
                     <div className="export-dropdown">
-                        <button className="action-btn export">
+                        <button 
+                            className="action-btn export"
+                            onClick={() => setShowFloatingExportMenu(!showFloatingExportMenu)}
+                        >
                             Export
                         </button>
-                        <div className="export-menu">
-                            <button onClick={() => exportTranscripts('json')}>As JSON</button>
-                            <button onClick={() => exportTranscripts('markdown')}>As Markdown</button>
-                            <button onClick={() => exportTranscripts('text')}>As Text</button>
-                        </div>
+                        {showFloatingExportMenu && (
+                            <div className="export-menu">
+                                <button onClick={() => {
+                                    exportTranscripts('json');
+                                    setShowFloatingExportMenu(false);
+                                }}>As JSON</button>
+                                <button onClick={() => {
+                                    exportTranscripts('markdown');
+                                    setShowFloatingExportMenu(false);
+                                }}>As Markdown</button>
+                                <button onClick={() => {
+                                    exportTranscripts('text');
+                                    setShowFloatingExportMenu(false);
+                                }}>As Text</button>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}

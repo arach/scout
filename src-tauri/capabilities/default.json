@@ -23,6 +23,9 @@
     "opener:default",
     "global-shortcut:default",
     "dialog:default",
-    "http:default"
+    "http:default",
+    "fs:default",
+    "fs:allow-write-text-file",
+    "fs:write-all"
   ]
 }

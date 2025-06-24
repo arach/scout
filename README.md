@@ -16,9 +16,11 @@ Scout is a privacy-focused, cross-platform voice transcription application built
 - **Push-to-Talk Interface**: Recording with global hotkeys (Cmd+Shift+Space)
 - **Native macOS Overlay**: Minimal recording indicator with position customization
 - **Transcript Management**: Save, search, export, and manage your transcriptions locally
+- **Export Options**: Download transcripts in JSON, Text, or Markdown formats
 - **Settings System**: Comprehensive settings with hotkey customization and model selection
 - **Audio Format Support**: Handles various audio formats with automatic conversion
 - **Background Processing**: Queued processing system for file uploads
+- **Clean UI**: Modern, VSCode-inspired interface with dark mode support
 
 ## Architecture
 

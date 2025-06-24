@@ -57,6 +57,7 @@
     align-items: flex-start;
     gap: 12px;
     width: 100%;
+    position: relative; /* For absolute positioning of actions */
 }
 
 .transcript-checkbox-wrapper {
@@ -104,6 +105,7 @@
     flex: 1;
     min-width: 0;
     padding: 0 12px;
+    padding-right: 0; /* Remove right padding so text extends full width */
 }
 
 .transcript-text {
@@ -127,21 +129,26 @@
     font-size: 13px;
 }
 
-/* Actions */
+/* Actions - positioned absolutely to overlay over text */
 .transcript-actions {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%) translateX(8px);
+    right: 12px;
     display: flex;
+    align-items: center;
     gap: 4px;
     opacity: 0;
-    transform: translateX(8px);
     transition: opacity 0.3s ease, transform 0.3s ease;
-    flex-shrink: 0;
-    align-items: flex-start;
-    min-width: fit-content;
+    background: linear-gradient(to left, transparent, transparent 15%, #F3F4F6 40%);
+    padding-left: 30px; /* Gradient fade area */
+    padding-right: 0;
+    z-index: 10;
 }
 
 .transcript-item:hover .transcript-actions {
     opacity: 1;
-    transform: translateX(0);
+    transform: translateY(-50%) translateX(0);
 }
 
 .transcript-action-button {
@@ -248,6 +255,10 @@
         background: rgba(59, 130, 246, 0.12); /* blue with less opacity */
     }
     
+    .transcript-actions {
+        background: linear-gradient(to left, transparent, transparent 15%, rgba(63, 63, 70, 0.7) 40%);
+    }
+    
     .transcript-time {
         color: #71717a; /* zinc-500 */
     }
@@ -300,6 +311,7 @@
     z-index: 1000;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     min-width: 100px;
+    white-space: nowrap;
 }
 
 .download-menu button {

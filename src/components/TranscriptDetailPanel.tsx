@@ -34,6 +34,7 @@ export function TranscriptDetailPanel({
     formatFileSize,
 }: TranscriptDetailPanelProps) {
     const [canRenderPlayer, setCanRenderPlayer] = useState(false);
+    const [showExportMenu, setShowExportMenu] = useState(false);
 
     // Handle ESC key to close panel and manage player rendering
     useEffect(() => {
@@ -60,6 +61,23 @@ export function TranscriptDetailPanel({
             clearTimeout(timer);
         };
     }, [isOpen, onClose]);
+    
+    // Handle click outside for export menu
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            const target = event.target as HTMLElement;
+            if (!target.closest('.export-dropdown')) {
+                setShowExportMenu(false);
+            }
+        };
+        
+        if (showExportMenu) {
+            document.addEventListener('mousedown', handleClickOutside);
+            return () => {
+                document.removeEventListener('mousedown', handleClickOutside);
+            };
+        }
+    }, [showExportMenu]);
 
     const handleExport = (format: 'json' | 'markdown' | 'text') => {
         onExport([transcript!], format);
@@ -173,18 +191,32 @@ export function TranscriptDetailPanel({
                         </button>
                         
                         <div className="export-dropdown">
-                            <button className="action-button">
+                            <button 
+                                className="action-button"
+                                onClick={() => setShowExportMenu(!showExportMenu)}
+                            >
                                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
                                     <path d="M7 1V9M7 9L4 6M7 9L10 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                                     <path d="M1 10V12C1 12.5523 1.44772 13 2 13H12C12.5523 13 13 12.5523 13 12V10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
                                 </svg>
                                 Export
                             </button>
-                            <div className="export-dropdown-menu">
-                                <button onClick={() => handleExport('json')}>Export as JSON</button>
-                                <button onClick={() => handleExport('markdown')}>Export as Markdown</button>
-                                <button onClick={() => handleExport('text')}>Export as Text</button>
-                            </div>
+                            {showExportMenu && (
+                                <div className="export-dropdown-menu">
+                                    <button onClick={() => {
+                                        handleExport('json');
+                                        setShowExportMenu(false);
+                                    }}>Export as JSON</button>
+                                    <button onClick={() => {
+                                        handleExport('markdown');
+                                        setShowExportMenu(false);
+                                    }}>Export as Markdown</button>
+                                    <button onClick={() => {
+                                        handleExport('text');
+                                        setShowExportMenu(false);
+                                    }}>Export as Text</button>
+                                </div>
+                            )}
                         </div>
 
                         <button 

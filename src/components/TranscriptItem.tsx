@@ -1,5 +1,8 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, memo } from 'react';
 import { Trash2, Copy, Check, Play, Pause, Download, Eye } from 'lucide-react';
+import { save } from '@tauri-apps/plugin-dialog';
+import { writeTextFile } from '@tauri-apps/plugin-fs';
+import { useAudioBlob } from '../hooks/useAudioBlob';
 import './TranscriptItem.css';
 
 interface Transcript {
@@ -24,7 +27,7 @@ interface TranscriptItemProps {
     variant?: 'default' | 'compact';
 }
 
-export function TranscriptItem({
+export const TranscriptItem = memo(function TranscriptItem({
     transcript,
     formatDuration,
     onDelete,
@@ -37,8 +40,32 @@ export function TranscriptItem({
 }: TranscriptItemProps) {
     const [copied, setCopied] = useState(false);
     const [isPlaying, setIsPlaying] = useState(false);
+    const [showDownloadMenu, setShowDownloadMenu] = useState(false);
     const audioRef = useRef<HTMLAudioElement | null>(null);
+    const [audioUrl, setAudioUrl] = useState<string | null>(null);
     const isBlankAudio = transcript.text === "[BLANK_AUDIO]";
+    
+    // Use the audio blob hook
+    const { blob: audioBlob, isLoading: isAudioLoading } = useAudioBlob(transcript.audio_path || '');
+    
+    // Create audio URL from blob
+    useEffect(() => {
+        if (audioBlob) {
+            const url = URL.createObjectURL(audioBlob);
+            setAudioUrl(url);
+            
+            // Reset audio element when URL changes
+            if (audioRef.current) {
+                audioRef.current.pause();
+                audioRef.current = null;
+                setIsPlaying(false);
+            }
+            
+            return () => {
+                URL.revokeObjectURL(url);
+            };
+        }
+    }, [audioBlob]);
     
     // Cleanup audio on unmount
     useEffect(() => {
@@ -50,11 +77,28 @@ export function TranscriptItem({
         };
     }, []);
     
+    // Handle click outside for download menu
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            const target = event.target as HTMLElement;
+            if (!target.closest('.download-dropdown')) {
+                setShowDownloadMenu(false);
+            }
+        };
+        
+        if (showDownloadMenu) {
+            document.addEventListener('mousedown', handleClickOutside);
+            return () => {
+                document.removeEventListener('mousedown', handleClickOutside);
+            };
+        }
+    }, [showDownloadMenu]);
+    
     const formatTime = (dateString: string) => {
         const date = new Date(dateString);
-        const now = new Date();
-        const isToday = date.toDateString() === now.toDateString();
-        
+        // Remove console.log to avoid spam
+
+        // Always use time-only format for compact variant
         if (variant === 'compact') {
             return date.toLocaleTimeString([], { 
                 hour: '2-digit', 
@@ -62,9 +106,35 @@ export function TranscriptItem({
             });
         }
         
-        return isToday 
-            ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            : date.toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        // Use the EXACT same logic as TranscriptsView grouping
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        
+        // Item is "Today" if date >= today AND date < tomorrow
+        const isToday = date >= today && date < tomorrow;
+        
+        // Always show just time for Today items
+        if (isToday) {
+            return date.toLocaleTimeString([], { 
+                hour: '2-digit', 
+                minute: '2-digit'
+            });
+        }
+        
+        // For other dates, show full date and time
+        const yearPart = date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined;
+        const formatted = date.toLocaleDateString([], { 
+            month: 'short', 
+            day: 'numeric',
+            year: yearPart
+        });
+        const time = date.toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+        return `${formatted} at ${time}`;
     };
     
     const handleCopy = async (e: React.MouseEvent) => {
@@ -133,10 +203,10 @@ export function TranscriptItem({
                                 if (isPlaying && audioRef.current) {
                                     audioRef.current.pause();
                                     setIsPlaying(false);
-                                } else {
+                                } else if (audioUrl && !isAudioLoading) {
                                     // Create audio element if it doesn't exist
                                     if (!audioRef.current) {
-                                        audioRef.current = new Audio(transcript.audio_path);
+                                        audioRef.current = new Audio(audioUrl);
                                         audioRef.current.onended = () => setIsPlaying(false);
                                     }
                                     
@@ -149,42 +219,101 @@ export function TranscriptItem({
                                 }
                             }}
                             title={isPlaying ? "Pause audio" : "Play audio"}
+                            disabled={isAudioLoading || !audioUrl}
                         >
                             {isPlaying ? <Pause size={14} /> : <Play size={14} />}
                         </button>
                     )}
                     
-                    <button
-                        className="transcript-action-button download"
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            
-                            // Download as JSON
-                            const downloadData = {
-                                id: transcript.id,
-                                text: transcript.text,
-                                duration_ms: transcript.duration_ms,
-                                created_at: transcript.created_at,
-                                metadata: transcript.metadata,
-                                audio_path: transcript.audio_path,
-                                file_size: transcript.file_size
-                            };
-                            
-                            const blob = new Blob([JSON.stringify(downloadData, null, 2)], { type: 'application/json' });
-                            const url = URL.createObjectURL(blob);
-                            const a = document.createElement('a');
-                            a.href = url;
-                            a.download = `transcript-${transcript.id}-${new Date(transcript.created_at).toISOString().split('T')[0]}.json`;
-                            document.body.appendChild(a);
-                            a.click();
-                            document.body.removeChild(a);
-                            URL.revokeObjectURL(url);
-                        }}
-                        title="Download transcript as JSON"
-                        disabled={isBlankAudio}
-                    >
-                        <Download size={14} />
-                    </button>
+                    <div className="download-dropdown">
+                        <button
+                            className="transcript-action-button download"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setShowDownloadMenu(!showDownloadMenu);
+                            }}
+                            title="Download transcript"
+                            disabled={isBlankAudio}
+                        >
+                            <Download size={14} />
+                        </button>
+                        {showDownloadMenu && (
+                            <div className="download-menu" onClick={(e) => e.stopPropagation()}>
+                                <button onClick={async (e) => {
+                                    e.stopPropagation();
+                                    e.preventDefault();
+                                    try {
+                                        const filePath = await save({
+                                            defaultPath: `transcript-${transcript.id}-${new Date(transcript.created_at).toISOString().split('T')[0]}.json`,
+                                            filters: [{
+                                                name: 'JSON',
+                                                extensions: ['json']
+                                            }]
+                                        });
+                                        
+                                        if (filePath) {
+                                            const downloadData = {
+                                                id: transcript.id,
+                                                text: transcript.text,
+                                                duration_ms: transcript.duration_ms,
+                                                created_at: transcript.created_at,
+                                                metadata: transcript.metadata,
+                                                audio_path: transcript.audio_path,
+                                                file_size: transcript.file_size
+                                            };
+                                            
+                                            await writeTextFile(filePath, JSON.stringify(downloadData, null, 2));
+                                            setShowDownloadMenu(false);
+                                        }
+                                    } catch (error) {
+                                        console.error('Download failed:', error);
+                                    }
+                                }}>JSON</button>
+                                <button onClick={async (e) => {
+                                    e.stopPropagation();
+                                    e.preventDefault();
+                                    try {
+                                        const filePath = await save({
+                                            defaultPath: `transcript-${transcript.id}-${new Date(transcript.created_at).toISOString().split('T')[0]}.txt`,
+                                            filters: [{
+                                                name: 'Text',
+                                                extensions: ['txt']
+                                            }]
+                                        });
+                                        
+                                        if (filePath) {
+                                            await writeTextFile(filePath, transcript.text);
+                                            setShowDownloadMenu(false);
+                                        }
+                                    } catch (error) {
+                                        console.error('Download failed:', error);
+                                    }
+                                }}>Text</button>
+                                <button onClick={async (e) => {
+                                    e.stopPropagation();
+                                    e.preventDefault();
+                                    try {
+                                        const date = new Date(transcript.created_at);
+                                        const filePath = await save({
+                                            defaultPath: `transcript-${transcript.id}-${date.toISOString().split('T')[0]}.md`,
+                                            filters: [{
+                                                name: 'Markdown',
+                                                extensions: ['md']
+                                            }]
+                                        });
+                                        
+                                        if (filePath) {
+                                            const markdown = `# Transcript\n\n**Date:** ${date.toLocaleDateString()} ${date.toLocaleTimeString()}\n**Duration:** ${formatDuration(transcript.duration_ms)}\n\n## Text\n\n${transcript.text}\n\n---\n\n*Transcript ID: ${transcript.id}*`;
+                                            await writeTextFile(filePath, markdown);
+                                            setShowDownloadMenu(false);
+                                        }
+                                    } catch (error) {
+                                        console.error('Download failed:', error);
+                                    }
+                                }}>Markdown</button>
+                            </div>
+                        )}
+                    </div>
                     
                     <button
                         className={`transcript-action-button copy ${copied ? 'copied' : ''}`}
@@ -225,4 +354,4 @@ export function TranscriptItem({
             </div>
         </div>
     );
-}
+});
