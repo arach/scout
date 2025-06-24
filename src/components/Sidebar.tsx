@@ -7,12 +7,18 @@ type View = 'record' | 'transcripts' | 'settings';
 interface SidebarProps {
   currentView: View;
   onViewChange: (view: View) => void;
+  isExpanded: boolean;
 }
 
-export function Sidebar({ currentView, onViewChange }: SidebarProps) {
+interface SidebarState {
+  isExpanded: boolean;
+  toggleExpanded: () => void;
+}
+
+// Export the sidebar state so it can be used in App.tsx
+export const useSidebarState = (): SidebarState => {
   const [isExpanded, setIsExpanded] = useState(false);
 
-  // Load expanded state from settings
   useEffect(() => {
     const loadSidebarState = async () => {
       try {
@@ -31,7 +37,6 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
     const newState = !isExpanded;
     setIsExpanded(newState);
     
-    // Save to settings
     try {
       await invoke('update_setting', { key: 'sidebar_expanded', value: newState });
     } catch (error) {
@@ -39,6 +44,10 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
     }
   };
 
+  return { isExpanded, toggleExpanded };
+};
+
+export function Sidebar({ currentView, onViewChange, isExpanded }: SidebarProps) {
   return (
     <div className={`sidebar ${isExpanded ? 'expanded' : 'collapsed'}`}>
       <button
@@ -79,23 +88,6 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
         {isExpanded && <span className="sidebar-label">Settings</span>}
         {!isExpanded && <span className="sidebar-tooltip">Settings</span>}
       </button>
-      <div className="sidebar-footer">
-        <button
-          className="sidebar-toggle"
-          onClick={toggleExpanded}
-          aria-label={isExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
-        >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path
-              d={isExpanded ? "M10 12L6 8L10 4" : "M6 12L10 8L6 4"}
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </button>
-      </div>
     </div>
   );
 } 
