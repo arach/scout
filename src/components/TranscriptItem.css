@@ -55,13 +55,28 @@
 .transcript-item-content {
     display: flex;
     align-items: flex-start;
-    gap: 20px;
+    gap: 12px;
+    width: 100%;
+}
+
+.transcript-checkbox-wrapper {
+    flex-shrink: 0;
+    padding: 8px 12px 8px 8px;
+    margin: -8px -12px -8px -8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.transcript-checkbox-wrapper:hover {
+    background: rgba(0, 0, 0, 0.02);
+    border-radius: 4px;
 }
 
 .transcript-checkbox {
-    flex-shrink: 0;
-    margin-top: 2px;
     cursor: pointer;
+    pointer-events: none; /* Let the wrapper handle clicks */
 }
 
 /* Time column */
@@ -249,5 +264,9 @@
     .transcript-action-button:hover:not(:disabled) {
         background: rgba(255, 255, 255, 0.08);
         border-color: rgba(255, 255, 255, 0.15);
+    }
+    
+    .transcript-checkbox-wrapper:hover {
+        background: rgba(255, 255, 255, 0.04);
     }
 }

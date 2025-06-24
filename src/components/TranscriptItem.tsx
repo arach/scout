@@ -77,16 +77,24 @@ export function TranscriptItem({
         >
             <div className="transcript-item-content">
                 {showCheckbox && (
-                    <input
-                        type="checkbox"
-                        className="transcript-checkbox"
-                        checked={isSelected}
-                        onChange={(e) => {
+                    <div 
+                        className="transcript-checkbox-wrapper"
+                        onClick={(e) => {
                             e.stopPropagation();
                             onSelectToggle?.(transcript.id);
                         }}
-                        onClick={(e) => e.stopPropagation()}
-                    />
+                    >
+                        <input
+                            type="checkbox"
+                            className="transcript-checkbox"
+                            checked={isSelected}
+                            onChange={(e) => {
+                                e.stopPropagation();
+                                onSelectToggle?.(transcript.id);
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                        />
+                    </div>
                 )}
                 
                 <span className="transcript-time">{formatTime(transcript.created_at)}</span>

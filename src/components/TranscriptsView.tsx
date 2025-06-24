@@ -240,10 +240,21 @@ export function TranscriptsView({
                                         className="select-group-btn"
                                         onClick={(e) => {
                                             e.stopPropagation();
-                                            // Select all in group logic
+                                            const allGroupIds = group.transcripts.map(t => t.id);
+                                            const allSelected = allGroupIds.every(id => selectedTranscripts.has(id));
+                                            
+                                            allGroupIds.forEach(id => {
+                                                if (allSelected) {
+                                                    // If all are selected, deselect all
+                                                    toggleTranscriptSelection(id);
+                                                } else if (!selectedTranscripts.has(id)) {
+                                                    // If not all are selected, select the unselected ones
+                                                    toggleTranscriptSelection(id);
+                                                }
+                                            });
                                         }}
                                     >
-                                        Select All
+                                        {group.transcripts.every(t => selectedTranscripts.has(t.id)) ? 'Deselect All' : 'Select All'}
                                     </button>
                                 </div>
                                 {expandedGroups.has(group.title) && (

@@ -1,12 +1,17 @@
 /* Two-column layout for settings */
 .settings-two-column {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(300px, 400px) minmax(300px, 400px);
     gap: 24px;
+    max-width: 840px;
 }
 
 .settings-section {
     margin-bottom: 32px;
+}
+
+.setting-item {
+    max-width: 400px;
 }
 
 .settings-section:last-child {
@@ -118,4 +123,21 @@
 
 .open-models-folder-link:hover svg {
     opacity: 1;
+}
+
+/* Keyboard shortcut button alignment */
+.hotkey-input-group {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 12px;
+}
+
+.hotkey-display {
+    flex: 1;
+    max-width: 280px;
+}
+
+.hotkey-input-group button {
+    flex-shrink: 0;
 }
