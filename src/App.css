@@ -1266,41 +1266,89 @@ h1 {
 .overlay-position-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  max-width: 150px;
+  gap: 4px;
+  max-width: 180px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.02);
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
 }
 
 .position-button {
-  padding: 10px;
-  border: 1px solid var(--border-primary);
-  border-radius: 4px;
-  background-color: var(--bg-secondary);
+  padding: 0;
+  width: 48px;
+  height: 48px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+  background-color: white;
   cursor: pointer;
-  font-size: 18px;
+  font-size: 16px;
   line-height: 1;
-  transition: all 0.1s ease;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
 }
 
 .position-button:hover:not(:disabled) {
-  background-color: var(--bg-hover);
-  border-color: var(--accent-primary);
+  background-color: rgba(79, 70, 229, 0.05);
+  border-color: rgba(79, 70, 229, 0.3);
   color: var(--accent-primary);
+  transform: scale(1.05);
 }
 
 .position-button.active {
   background-color: var(--accent-primary);
   color: white;
   border-color: var(--accent-primary);
+  box-shadow: 0 2px 8px rgba(79, 70, 229, 0.3);
 }
 
 .position-button.center {
-  background-color: var(--bg-tertiary);
-  color: var(--text-tertiary);
+  background-color: rgba(0, 0, 0, 0.05);
+  color: rgba(0, 0, 0, 0.3);
+  border-style: dashed;
+  cursor: default;
 }
 
 .position-button:disabled {
   cursor: not-allowed;
-  opacity: 0.6;
+  opacity: 0.5;
+}
+
+/* Position button icons - use more subtle arrows */
+.position-button::before {
+  content: '';
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  background-color: currentColor;
+  border-radius: 50%;
+  opacity: 0.8;
+}
+
+/* Dark mode for overlay position grid */
+@media (prefers-color-scheme: dark) {
+  .overlay-position-grid {
+    background: rgba(255, 255, 255, 0.03);
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+  
+  .position-button {
+    background-color: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+  
+  .position-button:hover:not(:disabled) {
+    background-color: rgba(79, 70, 229, 0.1);
+    border-color: rgba(79, 70, 229, 0.4);
+  }
+  
+  .position-button.center {
+    background-color: rgba(255, 255, 255, 0.02);
+    color: rgba(255, 255, 255, 0.2);
+  }
 }
 
 /* Overlay type toggle */
