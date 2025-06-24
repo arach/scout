@@ -1,8 +1,9 @@
 import { Fragment, useState, useRef, useEffect } from 'react';
-import { Sparkles, FolderOpen } from 'lucide-react';
+import { Sparkles, FolderOpen, ArrowUpLeft, ArrowUp, ArrowUpRight, ArrowLeft, ArrowRight, ArrowDownLeft, ArrowDown, ArrowDownRight } from 'lucide-react';
 import { ModelManager } from './ModelManager';
 import { invoke } from '@tauri-apps/api/core';
 import { formatShortcut } from '../lib/formatShortcut';
+import { formatShortcutJSX } from '../lib/formatShortcutJSX';
 import './SettingsView.css';
 
 interface SettingsViewProps {
@@ -90,7 +91,7 @@ export function SettingsView({
                                         <span className="capturing-text">Press shortcut keys...</span>
                                     ) : (
                                         <span className="hotkey-keys" title={hotkey}>
-                                            {formatShortcut(hotkey)}
+                                            {formatShortcutJSX(hotkey)}
                                         </span>
                                     )}
                                 </div>
@@ -123,7 +124,7 @@ export function SettingsView({
                                         <span className="capturing-text">Press shortcut keys...</span>
                                     ) : (
                                         <span className="hotkey-keys" title={pushToTalkHotkey}>
-                                            {formatShortcut(pushToTalkHotkey)}
+                                            {formatShortcutJSX(pushToTalkHotkey)}
                                         </span>
                                     )}
                                 </div>
@@ -181,67 +182,67 @@ export function SettingsView({
                 <div className="settings-section">
                     <div className="settings-two-column">
                         <div className="setting-item">
-                            <label>
-                                <input
-                                    type="checkbox"
-                                    checked={vadEnabled}
-                                    onChange={toggleVAD}
-                                />
-                                Voice Activity Detection
-                            </label>
-                            <p className="setting-hint">
-                                Automatically start recording when you speak
-                            </p>
-                        </div>
-
-                        <div className="setting-item">
                             <label>Overlay Position</label>
                             <div className="overlay-position-grid">
                                 <button
                                     className={`position-button ${overlayPosition === 'top-left' ? 'active' : ''}`}
                                     onClick={() => updateOverlayPosition('top-left')}
                                     title="Top Left"
-                                >↖</button>
+                                >
+                                    <ArrowUpLeft size={18} />
+                                </button>
                                 <button
                                     className={`position-button ${overlayPosition === 'top-center' ? 'active' : ''}`}
                                     onClick={() => updateOverlayPosition('top-center')}
                                     title="Top Center"
-                                >↑</button>
+                                >
+                                    <ArrowUp size={18} />
+                                </button>
                                 <button
                                     className={`position-button ${overlayPosition === 'top-right' ? 'active' : ''}`}
                                     onClick={() => updateOverlayPosition('top-right')}
                                     title="Top Right"
-                                >↗</button>
+                                >
+                                    <ArrowUpRight size={18} />
+                                </button>
 
                                 <button
                                     className={`position-button ${overlayPosition === 'left-center' ? 'active' : ''}`}
                                     onClick={() => updateOverlayPosition('left-center')}
                                     title="Left Center"
-                                >←</button>
-                                <button
-                                    className="position-button center" disabled
-                                >●</button>
+                                >
+                                    <ArrowLeft size={18} />
+                                </button>
+                                <div className="position-button-spacer"></div>
                                 <button
                                     className={`position-button ${overlayPosition === 'right-center' ? 'active' : ''}`}
                                     onClick={() => updateOverlayPosition('right-center')}
                                     title="Right Center"
-                                >→</button>
+                                >
+                                    <ArrowRight size={18} />
+                                </button>
 
                                 <button
                                     className={`position-button ${overlayPosition === 'bottom-left' ? 'active' : ''}`}
                                     onClick={() => updateOverlayPosition('bottom-left')}
                                     title="Bottom Left"
-                                >↙</button>
+                                >
+                                    <ArrowDownLeft size={18} />
+                                </button>
                                 <button
                                     className={`position-button ${overlayPosition === 'bottom-center' ? 'active' : ''}`}
                                     onClick={() => updateOverlayPosition('bottom-center')}
                                     title="Bottom Center"
-                                >↓</button>
+                                >
+                                    <ArrowDown size={18} />
+                                </button>
                                 <button
                                     className={`position-button ${overlayPosition === 'bottom-right' ? 'active' : ''}`}
                                     onClick={() => updateOverlayPosition('bottom-right')}
                                     title="Bottom Right"
-                                >↘</button>
+                                >
+                                    <ArrowDownRight size={18} />
+                                </button>
                             </div>
                             <p className="setting-hint">
                                 Choose where the recording indicator appears on your screen
@@ -286,6 +287,20 @@ export function SettingsView({
                             </p>
                         </div>
                         
+                        <div className="setting-item">
+                            <label>
+                                <input
+                                    type="checkbox"
+                                    checked={vadEnabled}
+                                    onChange={toggleVAD}
+                                />
+                                Voice Activity Detection
+                            </label>
+                            <p className="setting-hint">
+                                Automatically start recording when you speak
+                            </p>
+                        </div>
+
                         <div className="setting-item">
                             <label>
                                 <input

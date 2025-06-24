@@ -1,3 +1,53 @@
+/* Keyboard Key Styles */
+.keyboard-key {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 12px;
+    background: #f8f8f8;
+    border: 1px solid #999999;
+    border-radius: 6px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "SF Pro Text", "Roboto", sans-serif;
+    font-size: 16px;
+    font-weight: 600;
+    color: #000000 !important;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15), inset 0 -1px 0 rgba(0, 0, 0, 0.1);
+    min-width: 32px;
+    height: 32px;
+    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.key-separator {
+    margin: 0 6px;
+    color: #000000;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.hotkey-keys {
+    display: inline-flex;
+    align-items: center;
+}
+
+@media (prefers-color-scheme: dark) {
+    .keyboard-key {
+        background: #1f2937;
+        border-color: #374151;
+        color: #f9fafb;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+    }
+    
+    .key-separator {
+        color: #9ca3af;
+    }
+}
+
+/* Position Button Spacer */
+.position-button-spacer {
+    width: 36px;
+    height: 36px;
+}
+
 /* Theme Selector Styles */
 .theme-selector {
     display: flex;
