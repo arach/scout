@@ -1,5 +1,5 @@
 .transcripts-view {
-    padding: 32px;
+    padding: 20px 32px; /* 🧠 Reduced top/bottom padding for higher density */
     height: 100%;
     overflow-y: auto;
     box-sizing: border-box;
@@ -7,6 +7,7 @@
     flex-direction: column;
 }
 
+/* 🧠 Legacy header styles - keeping for backward compatibility */
 .transcripts-header-container {
     display: flex;
     justify-content: space-between;
@@ -23,6 +24,144 @@
 
 .header-controls .search-input {
     width: 300px;
+}
+
+/* 🧠 Header grid layout */
+.header-grid {
+    display: grid;
+    grid-template-columns: 150px 1fr 400px;
+    align-items: center;
+    gap: 16px;
+    padding-bottom: 8px;
+}
+
+.search-container {
+    display: flex;
+    justify-content: center;
+}
+
+/* 🧠 Search input for new layout */
+.search-input {
+    width: 240px;
+    padding: 6px 12px;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    font-size: 13px;
+    background: white;
+    color: #111827;
+    outline: none;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    height: 32px;
+    box-sizing: border-box;
+}
+
+.search-input:focus {
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+/* 🧠 Header action buttons container */
+.header-actions-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    justify-content: flex-end;
+    flex-wrap: nowrap;
+    min-width: 0;
+}
+
+/* 🧠 Header action buttons - copy style from floating action bar */
+.header-action-btn {
+    padding: 6px 12px;
+    border: none;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.header-action-btn.select-all {
+    background: white;
+    color: #111827;
+    border: 1px solid #E5E7EB;
+}
+
+.header-action-btn.select-all:hover {
+    background: #F3F4F6;
+    border-color: #3B82F6;
+    color: #3B82F6;
+    transform: scale(1.02);
+}
+
+.header-action-btn.delete {
+    background: #EF4444;
+    color: white;
+}
+
+.header-action-btn.delete:hover {
+    background: #DC2626;
+    transform: scale(1.02);
+}
+
+.header-action-btn.export {
+    background: white;
+    color: #111827;
+    border: 1px solid #E5E7EB;
+}
+
+.header-action-btn.export:hover {
+    background: #F3F4F6;
+    border-color: #3B82F6;
+    color: #3B82F6;
+    transform: scale(1.02);
+}
+
+@media (prefers-color-scheme: dark) {
+    .search-input {
+        background: #3f3f46; /* zinc-700 */
+        border-color: #52525b; /* zinc-600 */
+        color: #f4f4f5; /* zinc-100 */
+    }
+    
+    .search-input:focus {
+        border-color: #60a5fa; /* blue-400 */
+        box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.1);
+    }
+    
+    .search-input::placeholder {
+        color: #a1a1aa; /* zinc-400 */
+    }
+    
+    .header-action-btn.select-all {
+        background: #3f3f46; /* zinc-700 */
+        color: #f4f4f5; /* zinc-100 */
+        border: 1px solid #52525b; /* zinc-600 */
+    }
+    
+    .header-action-btn.select-all:hover {
+        background: #52525b; /* zinc-600 */
+        border-color: #71717a; /* zinc-500 */
+        transform: scale(1.02);
+    }
+    
+    .header-action-btn.export {
+        background: #3f3f46; /* zinc-700 */
+        color: #f4f4f5; /* zinc-100 */
+        border: 1px solid #52525b; /* zinc-600 */
+    }
+    
+    .header-action-btn.export:hover {
+        background: #52525b; /* zinc-600 */
+        border-color: #71717a; /* zinc-500 */
+        transform: scale(1.02);
+    }
 }
 
 .transcripts-list {
@@ -42,11 +181,10 @@
     min-height: 36px;
 }
 
-.select-all-button,
-.delete-button {
+.select-all-button {
     background: white;
-    border: 1px solid rgba(0, 0, 0, 0.08);
-    color: var(--text-secondary);
+    border: 1px solid #E5E7EB;
+    color: #111827;
     padding: 6px 14px;
     border-radius: 6px;
     cursor: pointer;
@@ -60,20 +198,30 @@
 }
 
 .select-all-button:hover {
-    background: var(--bg-hover);
-    border-color: var(--border-secondary);
-    color: var(--text-primary);
+    background: #F3F4F6;
+    border-color: #3B82F6;
+    color: #3B82F6;
 }
 
 .delete-button {
-    background: #ef4444;
+    background: #EF4444;
+    border: 1px solid #EF4444;
     color: white;
-    border-color: #ef4444;
+    padding: 6px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    height: 32px;
 }
 
 .delete-button:hover {
-    background: #dc2626;
-    border-color: #dc2626;
+    background: #DC2626;
+    border-color: #DC2626;
     transform: scale(1.02);
 }
 
@@ -85,8 +233,8 @@
 
 .export-button {
     background: white;
-    border: 1px solid rgba(0, 0, 0, 0.08);
-    color: var(--text-secondary);
+    border: 1px solid #E5E7EB;
+    color: #111827;
     padding: 6px 14px;
     border-radius: 6px;
     cursor: pointer;
@@ -100,9 +248,9 @@
 }
 
 .export-button:hover {
-    background: var(--bg-hover);
-    border-color: var(--border-secondary);
-    color: var(--text-primary);
+    background: #F3F4F6;
+    border-color: #3B82F6;
+    color: #3B82F6;
 }
 
 .export-options {
@@ -110,17 +258,12 @@
     top: calc(100% + 4px);
     right: 0;
     background: white;
-    border: 1px solid rgba(0, 0, 0, 0.08);
+    border: 1px solid #E5E7EB;
     border-radius: 6px;
     padding: 4px;
-    display: none;
-    z-index: 10;
+    z-index: 1000;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     min-width: 120px;
-}
-
-.export-menu:hover .export-options {
-    display: block;
 }
 
 .export-options button {
@@ -128,7 +271,7 @@
     width: 100%;
     background: transparent;
     border: none;
-    color: var(--text-secondary);
+    color: #6B7280;
     padding: 4px 8px;
     cursor: pointer;
     font-size: 12px;
@@ -137,8 +280,8 @@
 }
 
 .export-options button:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
+    background: #F3F4F6;
+    color: #111827;
 }
 
 /* List view styles */
@@ -158,12 +301,16 @@
 
 /* Group Styles */
 .transcript-group {
-    margin-bottom: 16px;
+    margin-bottom: 12px; /* 🧠 Reduced from 16px for tighter spacing */
     background: white;
     border: 1px solid rgba(0, 0, 0, 0.08);
     border-radius: 12px;
     overflow: hidden;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.transcript-group:first-child {
+    margin-top: 0; /* 🧠 Remove any top margin from first group */
 }
 
 .transcript-group-header {
@@ -189,8 +336,8 @@
 
 .group-checkbox {
     cursor: pointer;
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
     flex-shrink: 0;
     margin-left: 2px;
     margin-right: 10px;
@@ -208,22 +355,30 @@
     transition: transform 0.2s ease;
 }
 
+.group-toggle-btn .chevron-icon {
+    transition: transform 0.2s ease;
+}
+
+.transcript-group.expanded .group-toggle-btn .chevron-icon {
+    transform: rotate(180deg);
+}
+
 .transcript-group-title {
     font-size: 14px;
     font-weight: 600;
-    color: rgba(0, 0, 0, 0.9);
+    color: #111827;
     margin: 0;
     cursor: pointer;
     user-select: none;
 }
 
 .transcript-group-title:hover {
-    color: rgba(0, 0, 0, 0.7);
+    color: #111827;
 }
 
 .group-count {
     font-size: 12px;
-    color: var(--text-secondary);
+    color: #6B7280;
 }
 
 .group-clear-btn {
@@ -231,15 +386,15 @@
     border: none;
     padding: 4px 12px;
     font-size: 12px;
-    color: rgba(0, 0, 0, 0.5);
+    color: #6B7280;
     cursor: pointer;
     transition: all 0.2s ease;
     border-radius: 4px;
 }
 
 .group-clear-btn:hover {
-    background: rgba(0, 0, 0, 0.05);
-    color: rgba(0, 0, 0, 0.7);
+    background: #F3F4F6;
+    color: #111827;
 }
 
 .transcript-group-items {
@@ -279,8 +434,10 @@
     bottom: 24px;
     left: 50%;
     transform: translateX(-50%);
-    background: white;
-    border: 1px solid rgba(0, 0, 0, 0.08);
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(229, 231, 235, 0.8);
     border-radius: 12px;
     padding: 8px 12px;
     display: flex;
@@ -295,7 +452,7 @@
 .selection-count {
     font-size: 13px;
     font-weight: 500;
-    color: rgba(0, 0, 0, 0.7);
+    color: #6B7280;
     margin-right: 4px;
 }
 
@@ -314,23 +471,25 @@
 }
 
 .action-btn.delete {
-    background: #ef4444;
+    background: #EF4444;
     color: white;
 }
 
 .action-btn.delete:hover {
-    background: #dc2626;
+    background: #DC2626;
     transform: scale(1.02);
 }
 
 .action-btn.export {
-    background: rgba(0, 0, 0, 0.05);
-    color: rgba(0, 0, 0, 0.8);
-    border: 1px solid rgba(0, 0, 0, 0.08);
+    background: white;
+    color: #111827;
+    border: 1px solid #E5E7EB;
 }
 
 .action-btn.export:hover {
-    background: rgba(0, 0, 0, 0.08);
+    background: #F3F4F6;
+    border-color: #3B82F6;
+    color: #3B82F6;
     transform: scale(1.02);
 }
 
@@ -341,24 +500,15 @@
 
 .floating-action-bar .export-menu {
     position: absolute;
-    bottom: 0;
-    left: calc(100% + 8px);
+    bottom: calc(100% + 8px);
+    right: 0;
     background: white;
     border: 1px solid rgba(0, 0, 0, 0.08);
     border-radius: 8px;
     padding: 4px;
     min-width: 140px;
-    opacity: 0;
-    pointer-events: none;
-    transform: translateX(-4px);
-    transition: all 0.2s ease;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-}
-
-.export-dropdown:hover .export-menu {
-    opacity: 1;
-    pointer-events: auto;
-    transform: translateX(0);
+    z-index: 1000;
 }
 
 .floating-action-bar .export-menu button {
@@ -383,31 +533,39 @@
 
 /* Dark mode adjustments */
 @media (prefers-color-scheme: dark) {
+    .transcripts-view {
+        background: #18181b; /* zinc-900 */
+    }
+    
     .transcript-group {
-        background: rgba(255, 255, 255, 0.05);
-        border-color: rgba(255, 255, 255, 0.08);
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+        background: #27272a; /* zinc-800 */
+        border-color: #3f3f46; /* zinc-700 */
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
     }
     
     .transcript-group-header {
-        background: rgba(255, 255, 255, 0.03);
-        border-bottom-color: rgba(255, 255, 255, 0.08);
+        background: rgba(63, 63, 70, 0.3); /* zinc-700 with opacity */
+        border-bottom-color: #3f3f46; /* zinc-700 */
     }
     
     .transcript-group-header:hover {
-        background: rgba(255, 255, 255, 0.05);
+        background: rgba(63, 63, 70, 0.5); /* zinc-700 with more opacity */
     }
     
     .transcript-group-title {
-        color: rgba(255, 255, 255, 0.9);
+        color: #f4f4f5; /* zinc-100 */
     }
     
     .transcript-group-title:hover {
-        color: rgba(255, 255, 255, 0.7);
+        color: #e4e4e7; /* zinc-200 */
     }
     
     .transcript-group-items {
         background: transparent;
+    }
+    
+    .group-count {
+        color: #a1a1aa; /* zinc-400 */
     }
     
     .group-clear-btn {
@@ -420,23 +578,35 @@
     }
     
     .floating-action-bar {
-        background: rgba(20, 20, 20, 0.95);
-        border-color: rgba(255, 255, 255, 0.1);
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 1px 4px rgba(0, 0, 0, 0.2);
+        background: rgba(39, 39, 42, 0.95); /* zinc-800 with opacity */
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        border: 1px solid rgba(63, 63, 70, 0.8); /* zinc-700 with opacity */
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2), 0 1px 4px rgba(0, 0, 0, 0.1);
     }
     
     .selection-count {
-        color: rgba(255, 255, 255, 0.7);
+        color: #d4d4d8; /* zinc-300 */
     }
     
     .action-btn.export {
-        background: rgba(255, 255, 255, 0.1);
-        color: rgba(255, 255, 255, 0.9);
-        border-color: rgba(255, 255, 255, 0.15);
+        background: #3f3f46; /* zinc-700 */
+        color: #f4f4f5; /* zinc-100 */
+        border: 1px solid #52525b; /* zinc-600 */
     }
     
     .action-btn.export:hover {
-        background: rgba(255, 255, 255, 0.15);
+        background: #52525b; /* zinc-600 */
+        border-color: #71717a; /* zinc-500 */
+    }
+    
+    .action-btn.delete {
+        background: #EF4444;
+        color: white;
+    }
+    
+    .action-btn.delete:hover {
+        background: #DC2626;
     }
     
     .load-more-btn {
@@ -452,27 +622,41 @@
         box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
     }
     
-    .select-all-button,
-    .export-button {
-        background: rgba(255, 255, 255, 0.05);
-        border-color: rgba(255, 255, 255, 0.08);
+    .select-all-button {
+        background: #27272a; /* zinc-800 */
+        border-color: #3f3f46; /* zinc-700 */
+        color: #60a5fa; /* blue-400 */
     }
     
-    .select-all-button:hover,
+    .select-all-button:hover {
+        background: #3f3f46; /* zinc-700 */
+        border-color: #52525b; /* zinc-600 */
+        color: #93bbfc; /* blue-300 */
+    }
+    
+    .export-button {
+        background: #3f3f46; /* zinc-700 */
+        border-color: #52525b; /* zinc-600 */
+        color: #e4e4e7; /* zinc-200 */
+    }
+    
     .export-button:hover {
-        background: rgba(255, 255, 255, 0.08);
-        border-color: rgba(255, 255, 255, 0.12);
+        background: #52525b; /* zinc-600 */
+        border-color: #71717a; /* zinc-500 */
+        color: #f4f4f5; /* zinc-100 */
     }
     
     .delete-button {
-        background: #ef4444;
-        color: white;
-        border-color: #ef4444;
+        background: #dc2626; /* red-600 */
+        color: white !important;
+        border-color: #dc2626; /* red-600 */
+        box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
     }
     
     .delete-button:hover {
-        background: #dc2626;
-        border-color: #dc2626;
+        background: #ef4444; /* red-500 */
+        border-color: #ef4444; /* red-500 */
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
     }
     
     .export-options {
@@ -501,7 +685,7 @@
 @keyframes slideUp {
     from {
         opacity: 0;
-        transform: translateX(-50%) translateY(20px);
+        transform: translateX(-50%) translateY(4px);
     }
     to {
         opacity: 1;

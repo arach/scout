@@ -305,10 +305,19 @@ export function SettingsView({
                 {/* Model Manager - Full Width Collapsible */}
                 <div className="settings-section model-manager-full-width" ref={modelSectionRef}>
                     <div className="collapsible-section">
-                            <div className="collapsible-header-wrapper">
+                            <div className="collapsible-header-wrapper" style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                width: '100%'
+                            }}>
                                 <div 
                                     className="collapsible-header"
                                     onClick={() => setIsModelManagerExpanded(!isModelManagerExpanded)}
+                                    style={{
+                                        flex: 1,
+                                        cursor: 'pointer'
+                                    }}
                                 >
                                     <div>
                                         <h3>
@@ -330,8 +339,34 @@ export function SettingsView({
                                     className="open-models-folder-link"
                                     onClick={openModelsFolder}
                                     title="Add your own .bin model files here"
+                                    style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '4px',
+                                        padding: '4px 10px',
+                                        backgroundColor: 'rgba(0, 0, 0, 0.04)',
+                                        color: '#6b7280',
+                                        border: '1px solid rgba(0, 0, 0, 0.08)',
+                                        borderRadius: '5px',
+                                        fontSize: '12px',
+                                        fontWeight: '400',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s ease',
+                                        marginLeft: 'auto',
+                                        alignSelf: 'center'
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        e.currentTarget.style.backgroundColor = 'rgba(0, 0, 0, 0.06)';
+                                        e.currentTarget.style.borderColor = 'rgba(0, 0, 0, 0.12)';
+                                        e.currentTarget.style.color = '#4b5563';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        e.currentTarget.style.backgroundColor = 'rgba(0, 0, 0, 0.04)';
+                                        e.currentTarget.style.borderColor = 'rgba(0, 0, 0, 0.08)';
+                                        e.currentTarget.style.color = '#6b7280';
+                                    }}
                                 >
-                                    <FolderOpen size={14} />
+                                    <FolderOpen size={12} />
                                     Open Models Folder
                                 </button>
                             </div>
