@@ -156,9 +156,9 @@ export const ModelManager: React.FC = () => {
                   </div>
                 )}
                 {isAutoDownload && !model.active && (
-                  <div className="model-status auto">
+                  <div className="model-status recommended">
                     <Settings2 size={14} />
-                    <span>Auto</span>
+                    <span>Recommended</span>
                   </div>
                 )}
               </div>
