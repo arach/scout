@@ -73,9 +73,15 @@
   background: rgba(22, 130, 93, 0.1);
 }
 
-.model-status.recommended {
-  color: var(--accent-primary);
-  background: rgba(79, 70, 229, 0.1);
+.model-status.included {
+  color: rgba(0, 0, 0, 0.4);
+  background: rgba(0, 0, 0, 0.04);
+  font-size: 11px;
+}
+
+.model-status.good {
+  color: #16a34a;
+  background: rgba(22, 163, 74, 0.1);
 }
 
 .model-details {
@@ -207,5 +213,15 @@
   .btn-secondary:hover:not(:disabled) {
     background: rgba(255, 255, 255, 0.12);
     border-color: rgba(255, 255, 255, 0.15);
+  }
+  
+  .model-status.included {
+    color: rgba(255, 255, 255, 0.3);
+    background: rgba(255, 255, 255, 0.03);
+  }
+  
+  .model-status.good {
+    color: #22c55e;
+    background: rgba(34, 197, 94, 0.15);
   }
 }
