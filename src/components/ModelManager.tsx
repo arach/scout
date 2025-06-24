@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { BarChart3, Gauge, Package, CheckCircle, Settings2, Download } from 'lucide-react';
+import { BarChart3, Gauge, Package, CheckCircle, Sparkles, Download } from 'lucide-react';
 import './ModelManager.css';
 
 interface WhisperModel {
@@ -34,6 +34,13 @@ export const ModelManager: React.FC = () => {
     loadModels();
     getModelsDir();
   }, []);
+  
+  const formatSize = (mb: number): string => {
+    if (mb >= 1000) {
+      return `${(mb / 1000).toFixed(1)} GB`;
+    }
+    return `${mb} MB`;
+  };
 
   const loadModels = async () => {
     try {
@@ -143,7 +150,20 @@ export const ModelManager: React.FC = () => {
         {models.map(model => {
           const progress = downloading[model.id];
           const isDownloading = !!progress;
-          const isAutoDownload = model.id === 'tiny.en' || model.id === 'base.en';
+          
+          // Determine quality label based on model
+          let qualityLabel = null;
+          let qualityClass = '';
+          
+          if (!model.active) {
+            if (model.id === 'tiny.en') {
+              qualityLabel = 'Included';
+              qualityClass = 'included';
+            } else if (model.id === 'base.en') {
+              qualityLabel = 'Good';
+              qualityClass = 'good';
+            }
+          }
           
           return (
             <div key={model.id} className={`model-card ${model.active ? 'active' : ''}`}>
@@ -155,10 +175,10 @@ export const ModelManager: React.FC = () => {
                     <span>Active</span>
                   </div>
                 )}
-                {isAutoDownload && !model.active && (
-                  <div className="model-status recommended">
-                    <Settings2 size={14} />
-                    <span>Recommended</span>
+                {qualityLabel && !model.active && (
+                  <div className={`model-status ${qualityClass}`}>
+                    <Sparkles size={14} />
+                    <span>{qualityLabel}</span>
                   </div>
                 )}
               </div>
@@ -174,7 +194,7 @@ export const ModelManager: React.FC = () => {
                 </div>
                 <div className="model-stat">
                   <Package size={14} className="stat-icon" />
-                  <span>Size: {model.size_mb} MB</span>
+                  <span>Size: {formatSize(model.size_mb)}</span>
                 </div>
               </div>
               
