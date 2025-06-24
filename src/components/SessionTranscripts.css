@@ -3,23 +3,59 @@
     animation: fadeIn 0.3s ease-out;
 }
 
+.session-header-with-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
 .session-header {
     font-size: 14px;
     font-weight: 500;
     color: var(--text-secondary);
-    margin: 0 0 16px 0;
+    margin: 0;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     opacity: 0.7;
 }
 
+.import-audio-button {
+    background: transparent;
+    border: 1px solid var(--border-primary);
+    color: var(--text-tertiary);
+    padding: 4px 10px;
+    opacity: 0.6;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s ease;
+}
+
+.import-audio-button:hover {
+    background: var(--bg-secondary);
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+    opacity: 1;
+}
+
+.import-audio-button svg {
+    width: 12px;
+    height: 12px;
+}
+
 .session-list {
     display: flex;
     flex-direction: column;
-    gap: 12px;
     max-height: 320px;
     overflow-y: auto;
-    padding-right: 8px;
+    background: white;
+    border-radius: 6px;
+    border: 1px solid rgba(0, 0, 0, 0.08);
 }
 
 /* Custom scrollbar for session list */
@@ -145,11 +181,19 @@
 
 /* Dark mode adjustments */
 @media (prefers-color-scheme: dark) {
-    .session-item {
-        background-color: rgba(255, 255, 255, 0.02);
+    .session-list {
+        background: rgba(255, 255, 255, 0.03);
+        border-color: rgba(255, 255, 255, 0.08);
     }
     
-    .session-item:hover {
-        background-color: rgba(255, 255, 255, 0.03);
+    .import-audio-button {
+        color: rgba(255, 255, 255, 0.6);
+        border-color: rgba(255, 255, 255, 0.1);
+    }
+    
+    .import-audio-button:hover {
+        background: rgba(255, 255, 255, 0.05);
+        border-color: var(--accent-primary);
+        color: var(--accent-primary);
     }
 }

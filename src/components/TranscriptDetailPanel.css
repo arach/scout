@@ -1,12 +1,13 @@
-/* Backdrop overlay - removed heavy overlay, just invisible click target */
+/* Backdrop overlay - semi-transparent for better visibility */
 .detail-panel-backdrop {
     position: fixed;
     top: 0;
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: transparent;
+    background-color: rgba(0, 0, 0, 0.3);
     z-index: 999;
+    cursor: pointer;
 }
 
 /* Side panel */

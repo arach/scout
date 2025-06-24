@@ -1269,7 +1269,6 @@ function App() {
             startCapturingHotkey={startCapturingHotkey}
             startCapturingPushToTalkHotkey={startCapturingPushToTalkHotkey}
             stopCapturingPushToTalkHotkey={stopCapturingPushToTalkHotkey}
-            updateHotkey={updateHotkey}
             toggleVAD={toggleVAD}
             updateOverlayPosition={updateOverlayPosition}
             toggleAutoCopy={toggleAutoCopy}

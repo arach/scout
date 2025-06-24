@@ -1,5 +1,8 @@
 import { Fragment, useRef, useEffect, useState } from 'react';
+import { Settings } from 'lucide-react';
 import { MicrophoneSelector } from './MicrophoneSelector';
+import { MicrophoneVisualPicker } from './MicrophoneVisualPicker';
+import { MicrophoneQuickPicker } from './MicrophoneQuickPicker';
 import { SessionTranscripts } from './SessionTranscripts';
 import './RecordView.css';
 
@@ -32,6 +35,7 @@ interface RecordViewProps {
     sessionTranscripts?: Transcript[];
     selectedMic: string;
     onMicChange: (mic: string) => void;
+    visualMicPicker: boolean;
     startRecording: () => void;
     stopRecording: () => void;
     cancelRecording: () => void;
@@ -76,6 +80,7 @@ export function RecordView({
     sessionTranscripts = [],
     selectedMic,
     onMicChange,
+    visualMicPicker,
     startRecording,
     stopRecording,
     cancelRecording,
@@ -84,6 +89,8 @@ export function RecordView({
     showDeleteConfirmation,
 }: RecordViewProps) {
     const [showSuccessHint, setShowSuccessHint] = useState(false);
+    const [showQuickMicPicker, setShowQuickMicPicker] = useState(false);
+    const gearButtonRef = useRef<HTMLButtonElement>(null);
     const transcriptCountRef = useRef(sessionTranscripts.length);
 
     // Show success hint after first few recordings
@@ -128,7 +135,7 @@ export function RecordView({
                                         }}
                                     />
                                     <div className="stop-icon-large">
-                                        <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
+                                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
                                             <rect x="6" y="6" width="12" height="12" fill="currentColor" rx="2"/>
                                         </svg>
                                     </div>
@@ -201,13 +208,31 @@ export function RecordView({
                                     <div 
                                         className="microphone-icon"
                                     >
-                                        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                             <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
                                             <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
                                             <line x1="12" y1="19" x2="12" y2="23"/>
                                             <line x1="8" y1="23" x2="16" y2="23"/>
                                         </svg>
                                     </div>
+                                </button>
+                                
+                                {/* Gear button for mic selection */}
+                                <button
+                                    ref={gearButtonRef}
+                                    className={`mic-settings-button ${showQuickMicPicker ? 'active' : ''}`}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setShowQuickMicPicker(!showQuickMicPicker);
+                                    }}
+                                    title="Select microphone"
+                                >
+                                    <Settings 
+                                        className={`w-2.5 h-2.5 transition-colors duration-200 ${
+                                            showQuickMicPicker ? 'text-blue-600' : 'text-slate-500'
+                                        }`}
+                                        strokeWidth={1.5}
+                                    />
                                 </button>
                                 
                                 {/* Custom tooltip */}
@@ -249,31 +274,6 @@ export function RecordView({
                                     <span className="status-text">Ready</span>
                                 </div>
                             </div>
-                            
-                            <MicrophoneSelector
-                                selectedMic={selectedMic}
-                                onMicChange={onMicChange}
-                                disabled={isRecording}
-                            />
-                        </div>
-                    )}
-                    
-                    {/* Upload Option */}
-                    {!isRecording && !isProcessing && (
-                        <div className="upload-option">
-                            <span className="upload-divider">or</span>
-                            <button
-                                className="upload-button"
-                                onClick={handleFileUpload}
-                            >
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                                    <polyline points="17,8 12,3 7,8"/>
-                                    <line x1="12" y1="3" x2="12" y2="15"/>
-                                </svg>
-                                Import audio file
-                            </button>
-                            <p className="drag-hint">or drag & drop audio files here</p>
                         </div>
                     )}
                 </div>
@@ -303,8 +303,18 @@ export function RecordView({
                     transcripts={sessionTranscripts}
                     formatDuration={formatDuration}
                     showDeleteConfirmation={showDeleteConfirmation}
+                    onImportAudio={handleFileUpload}
                 />
             </div>
+            
+            {/* Mic picker dropdown */}
+            <MicrophoneQuickPicker
+                selectedMic={selectedMic}
+                onMicChange={onMicChange}
+                isOpen={showQuickMicPicker}
+                onClose={() => setShowQuickMicPicker(false)}
+                anchorElement={gearButtonRef.current}
+            />
         </div>
     );
 } 

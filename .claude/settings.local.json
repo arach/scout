@@ -44,7 +44,8 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:wavesurfer.js.org)",
       "WebFetch(domain:www.npmjs.com)",
-      "Bash(pnpm install:*)"
+      "Bash(pnpm install:*)",
+      "Bash(python3:*)"
     ],
     "deny": []
   }

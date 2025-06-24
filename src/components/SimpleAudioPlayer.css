@@ -1,0 +1,185 @@
+.simple-audio-player {
+    background: rgba(0, 0, 0, 0.02);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 8px;
+    padding: 16px;
+    margin: 20px 0;
+}
+
+.audio-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.audio-control-button {
+    background: white;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 50%;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    color: rgba(0, 0, 0, 0.7);
+}
+
+.audio-control-button.play-pause {
+    width: 44px;
+    height: 44px;
+    background: var(--accent-primary);
+    color: white;
+    border: none;
+}
+
+.audio-control-button:hover:not(:disabled) {
+    transform: scale(1.05);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.audio-control-button:active:not(:disabled) {
+    transform: scale(0.95);
+}
+
+.audio-control-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.audio-control-button.play-pause:hover:not(:disabled) {
+    background: var(--accent-hover);
+}
+
+.loading-spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.time-display {
+    margin-left: auto;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 13px;
+    color: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.time-separator {
+    color: rgba(0, 0, 0, 0.3);
+}
+
+.progress-container {
+    position: relative;
+    height: 32px;
+    display: flex;
+    align-items: center;
+}
+
+.progress-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 4px;
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 2px;
+    outline: none;
+    position: relative;
+    z-index: 2;
+}
+
+.progress-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    background: var(--accent-primary);
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.progress-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+    box-shadow: 0 0 0 8px rgba(74, 158, 255, 0.1);
+}
+
+.progress-slider::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    background: var(--accent-primary);
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
+    transition: all 0.15s ease;
+}
+
+.progress-slider::-moz-range-thumb:hover {
+    transform: scale(1.2);
+    box-shadow: 0 0 0 8px rgba(74, 158, 255, 0.1);
+}
+
+.progress-bar {
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    height: 4px;
+    background: var(--accent-primary);
+    border-radius: 2px;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.audio-player-error {
+    color: var(--error);
+    font-size: 13px;
+    padding: 12px;
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    border-radius: 6px;
+    margin: 20px 0;
+}
+
+/* Dark mode adjustments */
+@media (prefers-color-scheme: dark) {
+    .simple-audio-player {
+        background: rgba(255, 255, 255, 0.02);
+        border-color: rgba(255, 255, 255, 0.08);
+    }
+    
+    .audio-control-button {
+        background: rgba(255, 255, 255, 0.05);
+        border-color: rgba(255, 255, 255, 0.1);
+        color: rgba(255, 255, 255, 0.7);
+    }
+    
+    .audio-control-button.play-pause {
+        background: var(--accent-primary);
+        color: white;
+        border: none;
+    }
+    
+    .time-display {
+        color: rgba(255, 255, 255, 0.6);
+    }
+    
+    .time-separator {
+        color: rgba(255, 255, 255, 0.3);
+    }
+    
+    .progress-slider {
+        background: rgba(255, 255, 255, 0.1);
+    }
+}
