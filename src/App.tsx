@@ -6,7 +6,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { ModelManager } from "./components/ModelManager";
 import { FirstRunSetup } from "./components/FirstRunSetup";
-import { Sidebar } from "./components/Sidebar";
+import { Sidebar, useSidebarState } from "./components/Sidebar";
 import { RecordView } from "./components/RecordView";
 import { TranscriptsView } from "./components/TranscriptsView";
 import { SettingsView } from "./components/SettingsView";
@@ -32,6 +32,7 @@ interface AudioDeviceInfo {
 type View = 'record' | 'transcripts' | 'settings';
 
 function App() {
+  const { isExpanded: isSidebarExpanded, toggleExpanded: toggleSidebar } = useSidebarState();
   const [isRecording, setIsRecording] = useState(false);
   const [currentRecordingFile, setCurrentRecordingFile] = useState<string | null>(null);
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
@@ -1177,8 +1178,24 @@ function App() {
 
   return (
     <div className="app-container">
-      <Sidebar currentView={currentView} onViewChange={setCurrentView} />
+      <Sidebar currentView={currentView} onViewChange={setCurrentView} isExpanded={isSidebarExpanded} />
       <main className={`container ${isDragging ? 'drag-highlight' : ''}`}>
+        <button
+          className="sidebar-toggle-main"
+          onClick={toggleSidebar}
+          aria-label={isSidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
+          title={isSidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path
+              d={isSidebarExpanded ? "M10 12L6 8L10 4" : "M6 12L10 8L6 4"}
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
         {currentView === 'record' && (
           <RecordView
             isRecording={isRecording}

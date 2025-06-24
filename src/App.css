@@ -136,6 +136,38 @@ h1 {
   position: relative;
 }
 
+/* Sidebar toggle button in main content */
+.sidebar-toggle-main {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  z-index: 10;
+  opacity: 0.7;
+}
+
+.sidebar-toggle-main:hover {
+  opacity: 1;
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-secondary);
+}
+
+.sidebar-toggle-main svg {
+  width: 16px;
+  height: 16px;
+}
+
 .recording-section {
   background-color: var(--bg-secondary);
   border: 1px solid var(--border-primary);
