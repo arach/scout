@@ -34,24 +34,29 @@
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    gap: 12px;
-    padding: 16px 20px;
+    gap: 8px;
+    padding: 12px 0;
     background: transparent;
     border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-    margin-bottom: 0;
+    margin-bottom: 16px;
+    min-height: 36px;
 }
 
 .select-all-button,
 .delete-button {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-primary);
+    background: white;
+    border: 1px solid rgba(0, 0, 0, 0.08);
     color: var(--text-secondary);
-    padding: 6px 12px;
-    border-radius: 4px;
+    padding: 6px 14px;
+    border-radius: 6px;
     cursor: pointer;
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
     transition: all 0.2s ease;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    height: 32px;
 }
 
 .select-all-button:hover {
@@ -60,10 +65,16 @@
     color: var(--text-primary);
 }
 
+.delete-button {
+    background: #ef4444;
+    color: white;
+    border-color: #ef4444;
+}
+
 .delete-button:hover {
-    background: var(--bg-hover);
-    border-color: var(--error);
-    color: var(--error);
+    background: #dc2626;
+    border-color: #dc2626;
+    transform: scale(1.02);
 }
 
 /* Export menu */
@@ -72,15 +83,19 @@
 }
 
 .export-button {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-primary);
+    background: white;
+    border: 1px solid rgba(0, 0, 0, 0.08);
     color: var(--text-secondary);
-    padding: 6px 12px;
-    border-radius: 4px;
+    padding: 6px 14px;
+    border-radius: 6px;
     cursor: pointer;
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
     transition: all 0.2s ease;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    height: 32px;
 }
 
 .export-button:hover {
@@ -92,15 +107,16 @@
 .export-options {
     position: absolute;
     top: 100%;
-    left: 0;
+    right: 0;
     margin-top: 4px;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-primary);
-    border-radius: 4px;
+    background: white;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 6px;
     padding: 4px;
     display: none;
     z-index: 10;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    min-width: 120px;
 }
 
 .export-menu:hover .export-options {
@@ -396,6 +412,35 @@
         background: rgba(255, 255, 255, 0.08);
         border-color: rgba(255, 255, 255, 0.15);
         box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+    }
+    
+    .select-all-button,
+    .export-button {
+        background: rgba(255, 255, 255, 0.05);
+        border-color: rgba(255, 255, 255, 0.08);
+    }
+    
+    .select-all-button:hover,
+    .export-button:hover {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: rgba(255, 255, 255, 0.12);
+    }
+    
+    .delete-button {
+        background: #ef4444;
+        color: white;
+        border-color: #ef4444;
+    }
+    
+    .delete-button:hover {
+        background: #dc2626;
+        border-color: #dc2626;
+    }
+    
+    .export-options {
+        background: rgba(30, 30, 30, 0.95);
+        border-color: rgba(255, 255, 255, 0.1);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
     }
 }
 
