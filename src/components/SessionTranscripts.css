@@ -40,6 +40,36 @@
     height: 12px;
 }
 
+/* Integrated import button in empty state */
+.import-audio-button-integrated {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-primary);
+    color: var(--text-secondary);
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.2s ease;
+    margin-top: 16px;
+}
+
+.import-audio-button-integrated:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.import-audio-button-integrated svg {
+    width: 16px;
+    height: 16px;
+}
+
 .session-list {
     display: flex;
     flex-direction: column;
