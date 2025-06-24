@@ -37,9 +37,6 @@ function App() {
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
   const [currentTranscript, setCurrentTranscript] = useState<string>("");
   const [recordingDuration, setRecordingDuration] = useState(0);
-  const [audioLevel, setAudioLevel] = useState(0);
-  const audioLevelRef = useRef(0);
-  const smoothedAudioLevelRef = useRef(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [vadEnabled, setVadEnabled] = useState(false);
   const [selectedMic, setSelectedMic] = useState<string>('Default microphone');
@@ -78,6 +75,10 @@ function App() {
   const [autoCopy, setAutoCopy] = useState(false);
   const [autoPaste, setAutoPaste] = useState(false);
   const [visualMicPicker, setVisualMicPicker] = useState(false);
+  const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
+  const [audioLevel, setAudioLevel] = useState(0);
+  const audioTargetRef = useRef(0);
+  const audioCurrentRef = useRef(0);
   const processingFileRef = useRef<string | null>(null); // Track file being processed to prevent duplicates
   const lastPushToTalkTimeRef = useRef(0);
   const isStartingRecording = useRef(false); // Prevent multiple simultaneous start attempts
@@ -200,6 +201,12 @@ function App() {
     const savedVisualMicPicker = localStorage.getItem('scout-visual-mic-picker');
     if (savedVisualMicPicker === 'true') {
       setVisualMicPicker(true);
+    }
+    
+    // Load theme preference
+    const savedTheme = localStorage.getItem('scout-theme');
+    if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system') {
+      setTheme(savedTheme);
     }
     
     // Mark as initialized
@@ -505,38 +512,94 @@ function App() {
     }
   }, [currentView]);
 
-  // Audio level monitoring - only when on record view
+  // Smooth audio level monitoring with organic motion
   useEffect(() => {
     if (currentView !== 'record') return;
     
-    let audioLevelInterval: number;
+    let interval: number;
+    let animationFrame: number;
+    let isActive = true;
     
-    // Start audio level monitoring when on record view
-    audioLevelInterval = setInterval(async () => {
-      try {
-        const level = await invoke<number>('get_audio_level');
-        // Only log if there's actual audio activity to reduce spam
-        if (level > 0.001) {
-          console.log('Audio level:', level);
-        }
-        // Amplify the level for better visual feedback
-        const amplifiedLevel = Math.min(level * 10, 1.0);
-        setAudioLevel(amplifiedLevel);
-      } catch (error) {
-        // Reduce error spam - only log occasionally
-        if (Math.random() < 0.01) {
-          console.warn('Audio level monitoring not available');
-        }
-        setAudioLevel(0);
+    // Smooth interpolation with organic random motion
+    const animate = () => {
+      if (!isActive) return;
+      
+      const target = audioTargetRef.current;
+      const current = audioCurrentRef.current;
+      const diff = target - current;
+      
+      // Very fast movement toward target for immediate response
+      const speed = 0.3; // Much faster for more direct, immediate feel
+      let newLevel = current + (diff * speed);
+      
+      // Add organic motion when there's audio - more vibrant
+      if (target > 0.02) {
+        // Layered organic motion for more natural feel
+        const flutter = (Math.random() - 0.5) * target * 0.12; // Increased flutter
+        const shimmer = Math.sin(Date.now() * 0.007) * target * 0.04; // Fast shimmer
+        const pulse = Math.sin(Date.now() * 0.003) * target * 0.06; // Slower pulse
+        newLevel += flutter + shimmer + pulse;
       }
-    }, 150); // Less frequent polling
+      
+      // More pronounced breathing when silent - makes it feel alive
+      const breathingMotion = Math.sin(Date.now() * 0.0015) * 0.015; // Slightly stronger
+      newLevel += breathingMotion;
+      
+      // Natural capping at 1.0, no artificial bounds
+      audioCurrentRef.current = Math.max(0, Math.min(newLevel, 1.0));
+      setAudioLevel(audioCurrentRef.current);
+      animationFrame = requestAnimationFrame(animate);
+    };
+    
+    const startMonitoring = async () => {
+      try {
+        // Start monitoring first
+        await invoke('start_audio_level_monitoring', { 
+          deviceName: selectedMic === 'Default microphone' ? null : selectedMic 
+        });
+        
+        // Start smooth animation
+        animate();
+        
+        // Sample every 150ms for maximum responsiveness - let it rip!
+        interval = setInterval(async () => {
+          try {
+            const level = await invoke<number>('get_current_audio_level');
+            
+            // More voracious processing like before
+            let processed = 0;
+            if (level > 0.12) {
+              processed = (level - 0.12) * 1.5; // More amplification
+            }
+            
+            // Add bit of raw signal for organic movement
+            processed += level * 0.08; // More jitter for liveliness
+            
+            // Set target - animation will smoothly move toward it
+            audioTargetRef.current = Math.min(processed, 1.0);
+          } catch (error) {
+            console.error('Audio level polling failed:', error);
+            audioTargetRef.current = 0;
+          }
+        }, 150);
+      } catch (error) {
+        console.error('Failed to start audio monitoring:', error);
+      }
+    };
+    
+    startMonitoring();
     
     return () => {
-      clearInterval(audioLevelInterval);
-      // Reset audio level when leaving record view
+      isActive = false;
+      if (interval) clearInterval(interval);
+      if (animationFrame) cancelAnimationFrame(animationFrame);
+      invoke('stop_audio_level_monitoring').catch(() => {});
+      audioTargetRef.current = 0;
+      audioCurrentRef.current = 0;
       setAudioLevel(0);
     };
-  }, [currentView]); // Only depend on currentView
+  }, [currentView, selectedMic]);
+
 
   // Periodically sync recording state with backend to ensure consistency
   useEffect(() => {
@@ -589,15 +652,10 @@ function App() {
     
     isStartingRecording.current = true;
     
-    // Store current audio level to preserve it during transition
-    const currentLevel = audioLevelRef.current;
-    
     // IMMEDIATELY update UI for instant feedback - using flushSync to force synchronous update
     flushSync(() => {
       setIsRecording(true);
       setCurrentTranscript("");
-      // Preserve audio level during transition
-      setAudioLevel(currentLevel);
     });
     
     isRecordingRef.current = true;
@@ -614,28 +672,6 @@ function App() {
       // Native overlay state is managed by the backend
       if (overlayType === 'native') {
         
-        // Start audio level monitoring - ensure we don't have multiple intervals
-        if ((window as any).__audioLevelInterval) {
-          clearInterval((window as any).__audioLevelInterval);
-        }
-        
-        const levelInterval = setInterval(async () => {
-          try {
-            const level = await invoke<number>('get_current_audio_level');
-            audioLevelRef.current = level;
-            // Removed logging to reduce noise
-          } catch (e) {
-            // Silent fail - audio level monitoring is not critical
-            // Only log if it's not an access control error (which happens during init)
-            if (e && typeof e === 'object' && 'message' in e && 
-                !String(e.message).includes('access control')) {
-              console.warn('Audio level monitoring error:', e);
-            }
-          }
-        }, 100);
-        
-        // Store interval ID for cleanup
-        (window as any).__audioLevelInterval = levelInterval;
       }
     } catch (error) {
       console.error("Failed to start recording:", error);
@@ -654,11 +690,6 @@ function App() {
       return;
     }
     
-    // Clear audio level monitoring if running
-    if ((window as any).__audioLevelInterval) {
-      clearInterval((window as any).__audioLevelInterval);
-      (window as any).__audioLevelInterval = null;
-    }
     
     // IMMEDIATELY update UI for instant feedback - using flushSync for synchronous update
     flushSync(() => {
@@ -683,11 +714,6 @@ function App() {
       return;
     }
     
-    // Clear audio level monitoring if running
-    if ((window as any).__audioLevelInterval) {
-      clearInterval((window as any).__audioLevelInterval);
-      (window as any).__audioLevelInterval = null;
-    }
     
     // IMMEDIATELY update UI for instant feedback
     flushSync(() => {
@@ -798,8 +824,11 @@ function App() {
         format 
       });
       
-      // Create a download
-      const blob = new Blob([exported], { type: 'text/plain' });
+      // Create a download with appropriate MIME type
+      const mimeType = format === 'json' ? 'application/json' : 
+                      format === 'markdown' ? 'text/markdown' : 
+                      'text/plain';
+      const blob = new Blob([exported], { type: mimeType });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -924,6 +953,11 @@ function App() {
     setVisualMicPicker(newState);
     // Store preference in localStorage for persistence
     localStorage.setItem('scout-visual-mic-picker', newState.toString());
+  };
+  
+  const updateTheme = (newTheme: 'light' | 'dark' | 'system') => {
+    setTheme(newTheme);
+    localStorage.setItem('scout-theme', newTheme);
   };
 
   
@@ -1136,107 +1170,6 @@ function App() {
     return () => window.removeEventListener('keydown', handleEscapeKey);
   }, [isRecording]);
 
-  // Monitor audio levels when RecordView is visible and not recording
-  useEffect(() => {
-    let intervalId: number | null = null;
-    let animationFrameId: number | null = null;
-    let isMonitoring = false;
-    
-    const updateAudioLevelDisplay = () => {
-      // Apply smoothing to reduce flicker
-      const targetLevel = audioLevelRef.current;
-      const currentSmoothed = smoothedAudioLevelRef.current;
-      
-      // Faster rise, slower fall for more natural feel
-      const smoothingFactor = targetLevel > currentSmoothed ? 0.3 : 0.15;
-      smoothedAudioLevelRef.current = currentSmoothed + (targetLevel - currentSmoothed) * smoothingFactor;
-      
-      // Only update state if the change is significant
-      const roundedLevel = Math.round(smoothedAudioLevelRef.current * 100) / 100;
-      if (Math.abs(roundedLevel - audioLevel) > 0.01) {
-        setAudioLevel(roundedLevel);
-      }
-      
-      if (isMonitoring) {
-        animationFrameId = requestAnimationFrame(updateAudioLevelDisplay);
-      }
-    };
-    
-    const startMonitoring = async () => {
-      if (isMonitoring) return;
-      
-      try {
-        await invoke('start_audio_level_monitoring', { 
-          deviceName: selectedMic === 'Default microphone' ? null : selectedMic 
-        });
-        
-        isMonitoring = true;
-        
-        // Add a small delay to ensure backend is ready
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        // Poll for audio levels
-        intervalId = window.setInterval(async () => {
-          try {
-            const level = await invoke<number>('get_current_audio_level');
-            // Update ref immediately, state update happens in animation frame
-            audioLevelRef.current = level;
-          } catch (error) {
-            // Silent fail to avoid console spam
-            // Only log non-access control errors
-            if (error && typeof error === 'object' && 'message' in error && 
-                !String((error as any).message).includes('access control')) {
-              console.warn('Audio level monitoring error:', error);
-            }
-          }
-        }, 50); // Poll at 20Hz
-        
-        // Start animation frame for smooth updates
-        animationFrameId = requestAnimationFrame(updateAudioLevelDisplay);
-      } catch (error) {
-        console.error('Failed to start audio level monitoring:', error);
-      }
-    };
-    
-    const stopMonitoring = async () => {
-      isMonitoring = false;
-      
-      if (intervalId) {
-        clearInterval(intervalId);
-        intervalId = null;
-      }
-      
-      if (animationFrameId) {
-        cancelAnimationFrame(animationFrameId);
-        animationFrameId = null;
-      }
-      
-      try {
-        await invoke('stop_audio_level_monitoring');
-        // Don't reset audio level if we're starting recording
-        // This preserves the visual feedback during transition
-        if (!isRecording) {
-          audioLevelRef.current = 0;
-          smoothedAudioLevelRef.current = 0;
-          setAudioLevel(0);
-        }
-      } catch (error) {
-        // Silent fail
-      }
-    };
-    
-    // Start monitoring when on record view and not recording
-    if (currentView === 'record' && !isRecording) {
-      startMonitoring();
-    } else {
-      stopMonitoring();
-    }
-    
-    // Cleanup on unmount or when dependencies change
-    return () => {
-      stopMonitoring();
-    };
-  }, [currentView, isRecording, selectedMic]);
 
   if (showFirstRun) {
     return <FirstRunSetup onComplete={() => setShowFirstRun(false)} />;
@@ -1251,7 +1184,6 @@ function App() {
             isRecording={isRecording}
             isProcessing={isProcessing}
             recordingDuration={recordingDuration}
-            audioLevel={audioLevel}
             hotkey={hotkey}
             pushToTalkHotkey={pushToTalkHotkey}
             uploadProgress={uploadProgress}
@@ -1261,6 +1193,7 @@ function App() {
             selectedMic={selectedMic}
             onMicChange={setSelectedMic}
             visualMicPicker={visualMicPicker}
+            audioLevel={audioLevel}
             startRecording={startRecording}
             stopRecording={stopRecording}
             cancelRecording={cancelRecording}
@@ -1300,6 +1233,8 @@ function App() {
             autoCopy={autoCopy}
             autoPaste={autoPaste}
             visualMicPicker={visualMicPicker}
+            theme={theme}
+            audioLevel={audioLevel}
             stopCapturingHotkey={stopCapturingHotkey}
             startCapturingHotkey={startCapturingHotkey}
             startCapturingPushToTalkHotkey={startCapturingPushToTalkHotkey}
@@ -1309,6 +1244,7 @@ function App() {
             toggleAutoCopy={toggleAutoCopy}
             toggleAutoPaste={toggleAutoPaste}
             toggleVisualMicPicker={toggleVisualMicPicker}
+            updateTheme={updateTheme}
           />
         )}
         {isDragging && (

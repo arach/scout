@@ -14,7 +14,7 @@
     align-items: center;
     gap: 16px;
     width: 100%;
-    max-width: 720px;
+    max-width: 960px;
 }
 
 /* Main Recording Zone */
@@ -887,21 +887,82 @@
 
 /* Dark mode adjustments */
 @media (prefers-color-scheme: dark) {
+    /* More subtle, harmonious button with deep blue gradient */
     .circular-record-button {
-        background: var(--bg-secondary);
+        background: linear-gradient(135deg, #1a3a52, #0f2535);
         box-shadow: 
-            0 4px 20px rgba(74, 158, 255, 0.2),
-            0 2px 8px rgba(0, 0, 0, 0.3);
+            0 4px 20px rgba(59, 130, 246, 0.15),
+            0 2px 8px rgba(0, 0, 0, 0.4),
+            inset 0 1px 0 rgba(255, 255, 255, 0.06);
     }
     
     .circular-record-button:hover {
+        background: linear-gradient(135deg, #1e4563, #132e45);
         box-shadow: 
-            0 8px 30px rgba(74, 158, 255, 0.3),
-            0 4px 12px rgba(0, 0, 0, 0.4);
+            0 8px 30px rgba(59, 130, 246, 0.2),
+            0 4px 12px rgba(0, 0, 0, 0.5),
+            inset 0 1px 0 rgba(255, 255, 255, 0.08);
     }
     
+    /* More subtle audio visualizer ring */
+    .audio-visualizer-ring {
+        border-color: rgba(59, 130, 246, 0.15);
+    }
+    
+    /* Warmer recording state with subtle red */
+    .circular-record-button.recording-button {
+        background: linear-gradient(135deg, #4a1f28, #35161c);
+        box-shadow: 
+            0 4px 20px rgba(239, 68, 68, 0.15),
+            0 2px 8px rgba(0, 0, 0, 0.4),
+            inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    }
+    
+    .circular-record-button.recording-button:hover {
+        background: linear-gradient(135deg, #562430, #3f1a21);
+        box-shadow: 
+            0 8px 30px rgba(239, 68, 68, 0.2),
+            0 4px 12px rgba(0, 0, 0, 0.5),
+            inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    }
+    
+    .audio-visualizer-ring.recording-ring {
+        border-color: rgba(239, 68, 68, 0.2);
+        box-shadow: 0 0 20px rgba(239, 68, 68, 0.1);
+    }
+    
+    /* Status indicator with softer green */
+    .status-dot {
+        background: #34d399;
+        opacity: 0.8;
+    }
+    
+    .status-indicator {
+        background: rgba(255, 255, 255, 0.03);
+        color: rgba(255, 255, 255, 0.5);
+    }
+    
+    /* Softer waveform colors */
     .waveform-canvas {
-        background: linear-gradient(135deg, rgba(74, 158, 255, 0.1), rgba(74, 158, 255, 0.15));
-        border-color: rgba(74, 158, 255, 0.3);
+        background: linear-gradient(135deg, rgba(59, 130, 246, 0.05), rgba(59, 130, 246, 0.08));
+        border-color: rgba(59, 130, 246, 0.15);
+    }
+    
+    /* Mic settings gear button - already updated */
+    .mic-settings-button {
+        background: transparent;
+        border-color: rgba(255, 255, 255, 0.1);
+        opacity: 0.4;
+    }
+    
+    .mic-settings-button:hover {
+        background: rgba(255, 255, 255, 0.05);
+        border-color: rgba(255, 255, 255, 0.15);
+        opacity: 0.7;
+    }
+    
+    /* Softer microphone icon */
+    .microphone-icon {
+        opacity: 0.9;
     }
 }

@@ -28,7 +28,6 @@ interface RecordViewProps {
     isRecording: boolean;
     isProcessing: boolean;
     recordingDuration: number;
-    audioLevel: number;
     hotkey: string;
     pushToTalkHotkey: string;
     uploadProgress: UploadProgress;
@@ -36,6 +35,7 @@ interface RecordViewProps {
     selectedMic: string;
     onMicChange: (mic: string) => void;
     visualMicPicker: boolean;
+    audioLevel: number;
     startRecording: () => void;
     stopRecording: () => void;
     cancelRecording: () => void;
@@ -73,7 +73,6 @@ export function RecordView({
     isRecording,
     isProcessing,
     recordingDuration,
-    audioLevel,
     hotkey,
     pushToTalkHotkey,
     uploadProgress,
@@ -81,6 +80,7 @@ export function RecordView({
     selectedMic,
     onMicChange,
     visualMicPicker,
+    audioLevel,
     startRecording,
     stopRecording,
     cancelRecording,
@@ -123,9 +123,6 @@ export function RecordView({
                                     className="circular-record-button recording-button"
                                     onClick={stopRecording}
                                     title="Stop recording"
-                                    style={{
-                                        '--audio-level': audioLevel
-                                    } as React.CSSProperties}
                                 >
                                     {/* Audio level fill indicator - darker for recording state */}
                                     <div 
@@ -183,20 +180,12 @@ export function RecordView({
                         <div className="recording-idle">
                             <div className="button-container">
                                 {/* Audio Visualizer Ring */}
-                                <div 
-                                    className="audio-visualizer-ring"
-                                    style={{
-                                        '--audio-level': audioLevel
-                                    } as React.CSSProperties}
-                                />
+                                <div className="audio-visualizer-ring" />
                                 
                                 <button
                                     className="circular-record-button"
                                     onClick={startRecording}
                                     disabled={isProcessing}
-                                    style={{
-                                        '--audio-level': audioLevel
-                                    } as React.CSSProperties}
                                 >
                                     {/* Audio level fill indicator */}
                                     <div 
