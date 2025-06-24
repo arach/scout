@@ -184,7 +184,7 @@
 .group-header-left {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 4px;
 }
 
 .group-checkbox {
@@ -192,6 +192,8 @@
     width: 16px;
     height: 16px;
     flex-shrink: 0;
+    margin-left: 4px;
+    margin-right: 8px;
 }
 
 .group-toggle-btn {
@@ -274,29 +276,31 @@
 /* Floating Action Bar */
 .floating-action-bar {
     position: fixed;
-    bottom: 32px;
+    bottom: 24px;
     left: 50%;
     transform: translateX(-50%);
     background: white;
     border: 1px solid rgba(0, 0, 0, 0.08);
-    border-radius: 16px;
-    padding: 16px 24px;
+    border-radius: 12px;
+    padding: 8px 12px;
     display: flex;
     align-items: center;
-    gap: 16px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.08);
+    gap: 12px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1), 0 1px 4px rgba(0, 0, 0, 0.06);
     z-index: 100;
     animation: slideUp 0.3s ease-out;
+    height: 48px;
 }
 
 .selection-count {
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 500;
-    color: var(--text-primary);
+    color: rgba(0, 0, 0, 0.7);
+    margin-right: 4px;
 }
 
 .action-btn {
-    padding: 8px 20px;
+    padding: 6px 16px;
     border: none;
     border-radius: 8px;
     font-size: 13px;
@@ -305,7 +309,8 @@
     transition: all 0.2s ease;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
+    height: 32px;
 }
 
 .action-btn.delete {
@@ -415,7 +420,11 @@
     .floating-action-bar {
         background: rgba(20, 20, 20, 0.95);
         border-color: rgba(255, 255, 255, 0.1);
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.2);
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 1px 4px rgba(0, 0, 0, 0.2);
+    }
+    
+    .selection-count {
+        color: rgba(255, 255, 255, 0.7);
     }
     
     .action-btn.export {

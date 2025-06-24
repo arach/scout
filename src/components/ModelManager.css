@@ -73,9 +73,9 @@
   background: rgba(22, 130, 93, 0.1);
 }
 
-.model-status.auto {
-  color: var(--text-secondary);
-  background: var(--bg-tertiary);
+.model-status.recommended {
+  color: var(--accent-primary);
+  background: rgba(79, 70, 229, 0.1);
 }
 
 .model-details {
