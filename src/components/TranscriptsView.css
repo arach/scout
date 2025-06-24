@@ -128,10 +128,7 @@
 /* List view styles */
 .transcript-list-container {
     margin-top: 0;
-    background: white;
-    border-radius: 8px;
-    border: 1px solid rgba(0, 0, 0, 0.08);
-    overflow: hidden;
+    background: transparent;
 }
 
 /* Date grouping styles */
@@ -143,14 +140,273 @@
     border-top: none;
 }
 
-.transcript-group-title {
-    font-size: 12px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+/* Group Styles */
+.transcript-group {
+    margin-bottom: 16px;
+    background: white;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.transcript-group-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    background: rgba(0, 0, 0, 0.02);
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.2s ease;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.transcript-group-header:hover {
+    background: rgba(0, 0, 0, 0.04);
+}
+
+.group-header-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.group-toggle-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
     color: var(--text-secondary);
-    margin: 0 0 12px 0;
-    padding-top: 20px;
-    padding-left: 20px; /* Align with checkboxes */
-    opacity: 0.7;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.2s ease;
+}
+
+.transcript-group-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: rgba(0, 0, 0, 0.9);
+    margin: 0;
+}
+
+.group-count {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.select-group-btn {
+    background: none;
+    border: none;
+    padding: 4px 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: color 0.2s ease;
+}
+
+.select-group-btn:hover {
+    color: var(--text-primary);
+}
+
+.transcript-group-items {
+    background: white;
+}
+
+/* Pagination */
+.load-more-container {
+    display: flex;
+    justify-content: center;
+    padding: 32px;
+}
+
+.load-more-btn {
+    background: white;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    color: rgba(0, 0, 0, 0.7);
+    padding: 10px 28px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.load-more-btn:hover {
+    background: rgba(0, 0, 0, 0.02);
+    border-color: rgba(0, 0, 0, 0.12);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+/* Floating Action Bar */
+.floating-action-bar {
+    position: fixed;
+    bottom: 32px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: white;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 16px;
+    padding: 16px 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.08);
+    z-index: 100;
+    animation: slideUp 0.3s ease-out;
+}
+
+.selection-count {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.action-btn {
+    padding: 8px 20px;
+    border: none;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.action-btn.delete {
+    background: #ef4444;
+    color: white;
+}
+
+.action-btn.delete:hover {
+    background: #dc2626;
+    transform: scale(1.02);
+}
+
+.action-btn.export {
+    background: rgba(0, 0, 0, 0.05);
+    color: rgba(0, 0, 0, 0.8);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.action-btn.export:hover {
+    background: rgba(0, 0, 0, 0.08);
+    transform: scale(1.02);
+}
+
+.export-dropdown {
+    position: relative;
+}
+
+.export-menu {
+    position: absolute;
+    bottom: 100%;
+    right: 0;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-primary);
+    border-radius: 6px;
+    margin-bottom: 8px;
+    padding: 4px;
+    min-width: 150px;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(10px);
+    transition: all 0.2s ease;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.export-dropdown:hover .export-menu {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+}
+
+.export-menu button {
+    display: block;
+    width: 100%;
+    padding: 8px 12px;
+    background: none;
+    border: none;
+    text-align: left;
+    font-size: 13px;
+    color: var(--text-primary);
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background 0.2s ease;
+}
+
+.export-menu button:hover {
+    background: var(--bg-hover);
+}
+
+/* Dark mode adjustments */
+@media (prefers-color-scheme: dark) {
+    .transcript-group {
+        background: rgba(255, 255, 255, 0.05);
+        border-color: rgba(255, 255, 255, 0.08);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    }
+    
+    .transcript-group-header {
+        background: rgba(255, 255, 255, 0.03);
+        border-bottom-color: rgba(255, 255, 255, 0.08);
+    }
+    
+    .transcript-group-header:hover {
+        background: rgba(255, 255, 255, 0.05);
+    }
+    
+    .transcript-group-title {
+        color: rgba(255, 255, 255, 0.9);
+    }
+    
+    .transcript-group-items {
+        background: transparent;
+    }
+    
+    .floating-action-bar {
+        background: rgba(20, 20, 20, 0.95);
+        border-color: rgba(255, 255, 255, 0.1);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.2);
+    }
+    
+    .action-btn.export {
+        background: rgba(255, 255, 255, 0.1);
+        color: rgba(255, 255, 255, 0.9);
+        border-color: rgba(255, 255, 255, 0.15);
+    }
+    
+    .action-btn.export:hover {
+        background: rgba(255, 255, 255, 0.15);
+    }
+    
+    .load-more-btn {
+        background: rgba(255, 255, 255, 0.05);
+        border-color: rgba(255, 255, 255, 0.1);
+        color: rgba(255, 255, 255, 0.8);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    }
+    
+    .load-more-btn:hover {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: rgba(255, 255, 255, 0.15);
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+    }
+}
+
+/* Animations */
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateX(-50%) translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
 } 

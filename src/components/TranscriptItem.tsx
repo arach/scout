@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Trash2, Copy, Check } from 'lucide-react';
+import { Trash2, Copy, Check, Play, Download, Edit3 } from 'lucide-react';
 import './TranscriptItem.css';
 
 interface Transcript {
@@ -104,6 +104,31 @@ export function TranscriptItem({
                 </div>
                 
                 <div className="transcript-actions">
+                    {transcript.audio_path && (
+                        <button
+                            className="transcript-action-button play"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                // TODO: Implement play functionality
+                            }}
+                            title="Play audio"
+                        >
+                            <Play size={14} />
+                        </button>
+                    )}
+                    
+                    <button
+                        className="transcript-action-button download"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            // TODO: Implement download functionality
+                        }}
+                        title="Download transcript"
+                        disabled={isBlankAudio}
+                    >
+                        <Download size={14} />
+                    </button>
+                    
                     <button
                         className={`transcript-action-button copy ${copied ? 'copied' : ''}`}
                         onClick={handleCopy}
@@ -111,6 +136,18 @@ export function TranscriptItem({
                         disabled={isBlankAudio}
                     >
                         {copied ? <Check size={14} /> : <Copy size={14} />}
+                    </button>
+                    
+                    <button
+                        className="transcript-action-button edit"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            // TODO: Implement edit functionality
+                        }}
+                        title="Edit transcript"
+                        disabled={isBlankAudio}
+                    >
+                        <Edit3 size={14} />
                     </button>
                     
                     {onDelete && (
