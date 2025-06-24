@@ -496,6 +496,15 @@ function App() {
     };
   }, [isRecording]);
 
+  // Load appropriate transcripts based on current view
+  useEffect(() => {
+    if (currentView === 'transcripts') {
+      loadAllTranscripts();
+    } else if (currentView === 'record') {
+      loadRecentTranscripts();
+    }
+  }, [currentView]);
+
   // Audio level monitoring - only when on record view
   useEffect(() => {
     if (currentView !== 'record') return;
@@ -558,6 +567,16 @@ function App() {
       setTranscripts(recent);
     } catch (error) {
       console.error("Failed to load transcripts:", error);
+    }
+  };
+
+  const loadAllTranscripts = async () => {
+    try {
+      // Load more transcripts for the transcripts view
+      const all = await invoke<Transcript[]>("get_recent_transcripts", { limit: 1000 });
+      setTranscripts(all);
+    } catch (error) {
+      console.error("Failed to load all transcripts:", error);
     }
   };
 
