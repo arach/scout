@@ -181,10 +181,6 @@ export const TranscriptItem = memo(function TranscriptItem({
                 
                 <span className="transcript-time">{formatTime(transcript.created_at)}</span>
                 
-                {variant === 'default' && (
-                    <span className="transcript-duration">{formatDuration(transcript.duration_ms)}</span>
-                )}
-                
                 <div className="transcript-text-container">
                     {isBlankAudio ? (
                         <span className="transcript-empty">No speech detected</span>
