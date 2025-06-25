@@ -3,7 +3,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 6px 12px;
+    padding: 0 var(--space-1-5);
     background: #f8f8f8;
     border: 1px solid #999999;
     border-radius: 6px;
@@ -12,13 +12,13 @@
     font-weight: 600;
     color: #000000 !important;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15), inset 0 -1px 0 rgba(0, 0, 0, 0.1);
-    min-width: 32px;
-    height: 32px;
+    min-width: var(--button-height-sm);
+    height: var(--button-height-sm);
     text-shadow: 0 1px 0 rgba(255, 255, 255, 0.8);
 }
 
 .key-separator {
-    margin: 0 6px;
+    margin: 0 var(--space-0-5);
     color: #000000;
     font-size: 16px;
     font-weight: 600;
@@ -44,15 +44,15 @@
 
 /* Position Button Spacer */
 .position-button-spacer {
-    width: 36px;
-    height: 36px;
+    width: var(--input-height-md);
+    height: var(--input-height-md);
 }
 
 /* Settings Section Title */
 .settings-section-title {
     font-size: 16px;
     font-weight: 600;
-    margin-bottom: 16px;
+    margin-bottom: var(--space-2);
     color: #1f2937;
 }
 
@@ -74,7 +74,8 @@
 
 /* Preview Sound Button */
 .preview-sound-button {
-    padding: 6px 12px;
+    padding: 0 var(--space-1-5);
+    height: var(--button-height-sm);
     font-size: 13px;
     font-weight: 500;
     background-color: #3b82f6;
@@ -85,7 +86,8 @@
     transition: all 0.2s ease;
     display: flex;
     align-items: center;
-    gap: 6px;
+    justify-content: center;
+    gap: var(--space-0-5);
 }
 
 .preview-sound-button:hover:not(:disabled) {
@@ -183,8 +185,8 @@ input[type="range"]::-moz-range-thumb:hover {
 /* Theme Selector Styles */
 .theme-selector {
     display: flex;
-    gap: 8px;
-    margin-top: 8px;
+    gap: var(--space-1);
+    margin-top: var(--space-1);
 }
 
 .theme-option {
@@ -192,8 +194,9 @@ input[type="range"]::-moz-range-thumb:hover {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 4px;
-    padding: 8px 12px;
+    gap: var(--space-0-5);
+    padding: var(--space-1) var(--space-1-5);
+    min-height: var(--space-7); /* 56px for proper touch target */
     background: white;
     border: 2px solid #E5E7EB;
     border-radius: 8px;

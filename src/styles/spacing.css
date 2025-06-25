@@ -1,0 +1,90 @@
+/* 
+ * Scout Design System - Spacing Variables
+ * Based on 8pt grid system for pixel-perfect layouts
+ * All spacing values are multiples of 8px
+ */
+
+:root {
+  /* Base unit */
+  --space-unit: 8px;
+  
+  /* Spacing scale */
+  --space-0: 0;
+  --space-1: 8px;   /* 1 × 8pt */
+  --space-2: 16px;  /* 2 × 8pt */
+  --space-3: 24px;  /* 3 × 8pt */
+  --space-4: 32px;  /* 4 × 8pt */
+  --space-5: 40px;  /* 5 × 8pt */
+  --space-6: 48px;  /* 6 × 8pt */
+  --space-7: 56px;  /* 7 × 8pt */
+  --space-8: 64px;  /* 8 × 8pt */
+  --space-9: 72px;  /* 9 × 8pt */
+  --space-10: 80px; /* 10 × 8pt */
+  
+  /* Micro spacing for optical adjustments */
+  --space-0-5: 4px;  /* 0.5 × 8pt */
+  --space-1-5: 12px; /* 1.5 × 8pt */
+  
+  /* Component-specific spacing */
+  --component-padding-xs: var(--space-1);
+  --component-padding-sm: var(--space-1-5);
+  --component-padding-md: var(--space-2);
+  --component-padding-lg: var(--space-3);
+  
+  /* Section spacing */
+  --section-padding: var(--space-3);
+  --section-margin: var(--space-3);
+  --section-gap: var(--space-6);
+  
+  /* Layout spacing */
+  --layout-padding: var(--space-4);
+  --layout-margin: var(--space-5);
+  
+  /* Form element spacing */
+  --form-label-margin: var(--space-1);
+  --form-hint-margin: var(--space-0-5);
+  --form-item-margin: var(--space-3);
+  --form-group-gap: var(--space-2);
+  
+  /* Component heights (multiples of 8pt) */
+  --input-height-sm: 32px;  /* 4 × 8pt */
+  --input-height-md: 40px;  /* 5 × 8pt */
+  --input-height-lg: 48px;  /* 6 × 8pt */
+  
+  /* Button heights */
+  --button-height-sm: 32px;  /* 4 × 8pt */
+  --button-height-md: 40px;  /* 5 × 8pt */
+  --button-height-lg: 48px;  /* 6 × 8pt */
+  
+  /* Line heights for vertical rhythm */
+  --line-height-tight: 1.25;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.75;
+}
+
+/* Utility classes for consistent spacing */
+.spacing-xs { padding: var(--space-1); }
+.spacing-sm { padding: var(--space-2); }
+.spacing-md { padding: var(--space-3); }
+.spacing-lg { padding: var(--space-4); }
+.spacing-xl { padding: var(--space-5); }
+
+/* Margin utilities */
+.mt-1 { margin-top: var(--space-1); }
+.mt-2 { margin-top: var(--space-2); }
+.mt-3 { margin-top: var(--space-3); }
+.mt-4 { margin-top: var(--space-4); }
+.mt-5 { margin-top: var(--space-5); }
+
+.mb-1 { margin-bottom: var(--space-1); }
+.mb-2 { margin-bottom: var(--space-2); }
+.mb-3 { margin-bottom: var(--space-3); }
+.mb-4 { margin-bottom: var(--space-4); }
+.mb-5 { margin-bottom: var(--space-5); }
+
+/* Gap utilities */
+.gap-1 { gap: var(--space-1); }
+.gap-2 { gap: var(--space-2); }
+.gap-3 { gap: var(--space-3); }
+.gap-4 { gap: var(--space-4); }
+.gap-5 { gap: var(--space-5); }
