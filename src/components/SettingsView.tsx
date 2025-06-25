@@ -1,6 +1,7 @@
 import { Fragment, useState, useRef, useEffect } from 'react';
 import { Sparkles, FolderOpen, ArrowUpLeft, ArrowUp, ArrowUpRight, ArrowLeft, ArrowRight, ArrowDownLeft, ArrowDown, ArrowDownRight } from 'lucide-react';
 import { ModelManager } from './ModelManager';
+import { Dropdown } from './Dropdown';
 import { invoke } from '@tauri-apps/api/core';
 import { formatShortcut } from '../lib/formatShortcut';
 import { formatShortcutJSX } from '../lib/formatShortcutJSX';
@@ -18,6 +19,11 @@ interface SettingsViewProps {
     autoPaste: boolean;
     visualMicPicker: boolean;
     theme: 'light' | 'dark' | 'system';
+    soundEnabled: boolean;
+    startSound: string;
+    stopSound: string;
+    successSound: string;
+    completionSoundThreshold: number;
     stopCapturingHotkey: () => void;
     startCapturingHotkey: () => void;
     startCapturingPushToTalkHotkey: () => void;
@@ -28,6 +34,11 @@ interface SettingsViewProps {
     toggleAutoPaste: () => void;
     toggleVisualMicPicker: () => void;
     updateTheme: (theme: 'light' | 'dark' | 'system') => void;
+    toggleSoundEnabled: () => void;
+    updateStartSound: (sound: string) => void;
+    updateStopSound: (sound: string) => void;
+    updateSuccessSound: (sound: string) => void;
+    updateCompletionSoundThreshold: (threshold: number) => void;
 }
 
 export function SettingsView({
@@ -42,6 +53,11 @@ export function SettingsView({
     autoPaste,
     visualMicPicker,
     theme,
+    soundEnabled,
+    startSound,
+    stopSound,
+    successSound,
+    completionSoundThreshold,
     stopCapturingHotkey,
     startCapturingHotkey,
     startCapturingPushToTalkHotkey,
@@ -52,9 +68,23 @@ export function SettingsView({
     toggleAutoPaste,
     toggleVisualMicPicker,
     updateTheme,
+    toggleSoundEnabled,
+    updateStartSound,
+    updateStopSound,
+    updateSuccessSound,
+    updateCompletionSoundThreshold,
 }: SettingsViewProps) {
     const [isModelManagerExpanded, setIsModelManagerExpanded] = useState(false);
     const modelSectionRef = useRef<HTMLDivElement>(null);
+    const [availableSounds, setAvailableSounds] = useState<string[]>([]);
+    const [isPreviewingSound, setIsPreviewingSound] = useState(false);
+
+    useEffect(() => {
+        // Fetch available sounds
+        invoke<string[]>('get_available_sounds')
+            .then(sounds => setAvailableSounds(sounds))
+            .catch(console.error);
+    }, []);
 
     useEffect(() => {
         if (isModelManagerExpanded && modelSectionRef.current) {
@@ -74,6 +104,27 @@ export function SettingsView({
         } catch (error) {
             console.error('Failed to open models folder:', error);
         }
+    };
+
+    const previewSoundFlow = async () => {
+        if (isPreviewingSound) return;
+        
+        console.log('Preview button clicked!');
+        try {
+            setIsPreviewingSound(true);
+            await invoke('preview_sound_flow');
+        } catch (error) {
+            console.error('Failed to preview sound flow:', error);
+            // Reset immediately on error
+            setIsPreviewingSound(false);
+            alert('Failed to preview sounds. Make sure the app is fully loaded.');
+            return;
+        }
+        
+        // Reset after the preview duration (2.5 seconds total) only on success
+        setTimeout(() => {
+            setIsPreviewingSound(false);
+        }, 2500);
     };
 
     return (
@@ -174,6 +225,147 @@ export function SettingsView({
                                 Automatically paste transcribed text into active application
                             </p>
                         </div>
+                    </div>
+                </div>
+
+                {/* Sound Settings */}
+                <div className="settings-section">
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+                        <h3 className="settings-section-header" style={{ marginBottom: 0 }}>Sound Settings</h3>
+                        <button
+                            onClick={previewSoundFlow}
+                            disabled={!soundEnabled || isPreviewingSound}
+                            className={`preview-sound-button ${isPreviewingSound ? 'playing' : ''}`}
+                        >
+                            {isPreviewingSound ? (
+                                <>
+                                    <svg
+                                        width="14"
+                                        height="14"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        style={{
+                                            animation: 'spin 1s linear infinite'
+                                        }}
+                                    >
+                                        <path d="M21 12a9 9 0 11-6.219-8.56" />
+                                    </svg>
+                                    Playing...
+                                </>
+                            ) : (
+                                <>
+                                    <svg
+                                        width="14"
+                                        height="14"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                    >
+                                        <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                                    </svg>
+                                    Preview
+                                </>
+                            )}
+                        </button>
+                    </div>
+                    <div className="setting-item" style={{ marginBottom: '20px' }}>
+                        <label>
+                            <input
+                                type="checkbox"
+                                checked={soundEnabled}
+                                onChange={toggleSoundEnabled}
+                            />
+                            Enable sound effects
+                        </label>
+                        <p className="setting-hint">
+                            Play sounds when starting, stopping, and completing transcription
+                        </p>
+                    </div>
+
+                    {/* Sound Flow */}
+                    <div className="setting-item" style={{ marginBottom: '24px' }}>
+                        <label>Sound flow</label>
+                        <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
+                            <div style={{ flex: '0 0 auto' }}>
+                                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '6px' }}>Start</div>
+                                <Dropdown
+                                    value={startSound}
+                                    onChange={updateStartSound}
+                                    options={availableSounds}
+                                    disabled={!soundEnabled}
+                                    style={{ width: '140px' }}
+                                />
+                            </div>
+                            <div style={{ 
+                                display: 'flex', 
+                                alignItems: 'center', 
+                                paddingTop: '20px',
+                                color: 'var(--text-tertiary)'
+                            }}>
+                                →
+                            </div>
+                            <div style={{ flex: '0 0 auto' }}>
+                                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '6px' }}>Stop</div>
+                                <Dropdown
+                                    value={stopSound}
+                                    onChange={updateStopSound}
+                                    options={availableSounds}
+                                    disabled={!soundEnabled}
+                                    style={{ width: '140px' }}
+                                />
+                            </div>
+                            <div style={{ 
+                                display: 'flex', 
+                                alignItems: 'center', 
+                                paddingTop: '20px',
+                                color: 'var(--text-tertiary)'
+                            }}>
+                                →
+                            </div>
+                            <div style={{ flex: '0 0 auto' }}>
+                                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '6px' }}>Complete</div>
+                                <Dropdown
+                                    value={successSound}
+                                    onChange={updateSuccessSound}
+                                    options={availableSounds}
+                                    disabled={!soundEnabled}
+                                    style={{ width: '140px' }}
+                                />
+                            </div>
+                        </div>
+                        <p className="setting-hint">
+                            Sounds played during the recording and transcription process
+                        </p>
+                    </div>
+
+                    {/* Completion Threshold */}
+                    <div className="setting-item">
+                        <label>Completion sound threshold</label>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', maxWidth: '400px' }}>
+                            <input
+                                type="range"
+                                min="0"
+                                max="10000"
+                                step="500"
+                                value={completionSoundThreshold}
+                                onChange={(e) => updateCompletionSoundThreshold(Number(e.target.value))}
+                                disabled={!soundEnabled}
+                                style={{ flex: 1 }}
+                            />
+                            <span style={{ minWidth: '60px', textAlign: 'right' }}>
+                                {(completionSoundThreshold / 1000).toFixed(1)}s
+                            </span>
+                        </div>
+                        <p className="setting-hint">
+                            Only play completion sound when processing takes longer than this duration
+                        </p>
                     </div>
                 </div>
 

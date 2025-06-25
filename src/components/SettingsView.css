@@ -48,6 +48,138 @@
     height: 36px;
 }
 
+/* Settings Section Title */
+.settings-section-title {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    color: #1f2937;
+}
+
+@media (prefers-color-scheme: dark) {
+    .settings-section-title {
+        color: #f3f4f6;
+    }
+}
+
+/* Spinner animation */
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Preview Sound Button */
+.preview-sound-button {
+    padding: 6px 12px;
+    font-size: 13px;
+    font-weight: 500;
+    background-color: #3b82f6;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.preview-sound-button:hover:not(:disabled) {
+    background-color: #2563eb;
+}
+
+.preview-sound-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+.preview-sound-button.playing {
+    background-color: #e5e7eb;
+    color: #6b7280;
+}
+
+@media (prefers-color-scheme: dark) {
+    .preview-sound-button {
+        background-color: #2563eb;
+    }
+    
+    .preview-sound-button:hover:not(:disabled) {
+        background-color: #1d4ed8;
+    }
+    
+    .preview-sound-button.playing {
+        background-color: #374151;
+        color: #9ca3af;
+    }
+}
+
+/* Range Input Styling */
+input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+    cursor: pointer;
+    height: 4px;
+}
+
+input[type="range"]::-webkit-slider-track {
+    background: var(--border-primary);
+    height: 4px;
+    border-radius: 2px;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    background: var(--accent-primary);
+    height: 16px;
+    width: 16px;
+    border-radius: 50%;
+    margin-top: -6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+    background: var(--accent-hover);
+    transform: scale(1.1);
+}
+
+input[type="range"]:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+input[type="range"]:disabled::-webkit-slider-thumb {
+    cursor: not-allowed;
+}
+
+/* Firefox */
+input[type="range"]::-moz-range-track {
+    background: var(--border-primary);
+    height: 4px;
+    border-radius: 2px;
+}
+
+input[type="range"]::-moz-range-thumb {
+    background: var(--accent-primary);
+    height: 16px;
+    width: 16px;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+input[type="range"]::-moz-range-thumb:hover {
+    background: var(--accent-hover);
+    transform: scale(1.1);
+}
+
 /* Theme Selector Styles */
 .theme-selector {
     display: flex;

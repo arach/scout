@@ -12,6 +12,7 @@
   
   --border-primary: #e5e5e5;
   --border-secondary: #ddd;
+  --border-hover: #cccccc;
   
   --accent-primary: #007acc;
   --accent-hover: #005a9e;
@@ -59,6 +60,7 @@
     
     --border-primary: #3a3a3a;
     --border-secondary: #444444;
+    --border-hover: #555555;
     
     --accent-primary: #4a9eff;
     --accent-hover: #5aa3ff;
@@ -1042,18 +1044,38 @@ h1 {
   color: var(--text-primary);
 }
 
+.settings-view {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 40px 32px 32px 32px;
+}
+
 .settings-body {
-  padding: 40px 20px 20px 20px; /* Extra top padding to avoid toggle button overlap */
+  padding: 0;
 }
 
 .settings-section {
-  margin-bottom: 32px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  padding: 24px;
+  margin-bottom: 20px;
+}
+
+.settings-section-header {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 20px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.8;
 }
 
 .settings-two-column {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 24px;
+  gap: 32px;
 }
 
 /* Model manager section should span full width */
