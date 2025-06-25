@@ -35,3 +35,6 @@ src-tauri/WixTools/
 
 # whisper.cpp models
 models/
+
+# MCP configuration with secrets
+mcps.mcp.json
