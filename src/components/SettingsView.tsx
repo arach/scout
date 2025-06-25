@@ -6,6 +6,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { formatShortcut } from '../lib/formatShortcut';
 import { formatShortcutJSX } from '../lib/formatShortcutJSX';
 import './SettingsView.css';
+import './SettingsView-spacing.css';
 
 interface SettingsViewProps {
     hotkey: string;
@@ -230,8 +231,8 @@ export function SettingsView({
 
                 {/* Sound Settings */}
                 <div className="settings-section">
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-                        <h3 className="settings-section-header" style={{ marginBottom: 0 }}>Sound Settings</h3>
+                    <div className="settings-section-header-row">
+                        <h3 className="settings-section-header">Sound Settings</h3>
                         <button
                             onClick={previewSoundFlow}
                             disabled={!soundEnabled || isPreviewingSound}
@@ -290,11 +291,11 @@ export function SettingsView({
                     </div>
 
                     {/* Sound Flow */}
-                    <div className="setting-item" style={{ marginBottom: '24px' }}>
+                    <div className="setting-item">
                         <label>Sound flow</label>
-                        <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
-                            <div style={{ flex: '0 0 auto' }}>
-                                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '6px' }}>Start</div>
+                        <div className="sound-flow-container">
+                            <div className="sound-flow-item">
+                                <div className="sound-flow-label">Start</div>
                                 <Dropdown
                                     value={startSound}
                                     onChange={updateStartSound}
@@ -303,16 +304,9 @@ export function SettingsView({
                                     style={{ width: '140px' }}
                                 />
                             </div>
-                            <div style={{ 
-                                display: 'flex', 
-                                alignItems: 'center', 
-                                paddingTop: '20px',
-                                color: 'var(--text-tertiary)'
-                            }}>
-                                →
-                            </div>
-                            <div style={{ flex: '0 0 auto' }}>
-                                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '6px' }}>Stop</div>
+                            <div className="sound-flow-arrow">→</div>
+                            <div className="sound-flow-item">
+                                <div className="sound-flow-label">Stop</div>
                                 <Dropdown
                                     value={stopSound}
                                     onChange={updateStopSound}
@@ -321,16 +315,9 @@ export function SettingsView({
                                     style={{ width: '140px' }}
                                 />
                             </div>
-                            <div style={{ 
-                                display: 'flex', 
-                                alignItems: 'center', 
-                                paddingTop: '20px',
-                                color: 'var(--text-tertiary)'
-                            }}>
-                                →
-                            </div>
-                            <div style={{ flex: '0 0 auto' }}>
-                                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '6px' }}>Complete</div>
+                            <div className="sound-flow-arrow">→</div>
+                            <div className="sound-flow-item">
+                                <div className="sound-flow-label">Complete</div>
                                 <Dropdown
                                     value={successSound}
                                     onChange={updateSuccessSound}
@@ -348,7 +335,7 @@ export function SettingsView({
                     {/* Completion Threshold */}
                     <div className="setting-item">
                         <label>Completion sound threshold</label>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', maxWidth: '400px' }}>
+                        <div className="range-input-container">
                             <input
                                 type="range"
                                 min="0"
@@ -357,9 +344,8 @@ export function SettingsView({
                                 value={completionSoundThreshold}
                                 onChange={(e) => updateCompletionSoundThreshold(Number(e.target.value))}
                                 disabled={!soundEnabled}
-                                style={{ flex: 1 }}
                             />
-                            <span style={{ minWidth: '60px', textAlign: 'right' }}>
+                            <span className="range-value-display">
                                 {(completionSoundThreshold / 1000).toFixed(1)}s
                             </span>
                         </div>
@@ -511,19 +497,10 @@ export function SettingsView({
                 {/* Model Manager - Full Width Collapsible */}
                 <div className="settings-section model-manager-full-width" ref={modelSectionRef}>
                     <div className="collapsible-section">
-                            <div className="collapsible-header-wrapper" style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'space-between',
-                                width: '100%'
-                            }}>
+                            <div className="collapsible-header-wrapper">
                                 <div 
                                     className="collapsible-header"
                                     onClick={() => setIsModelManagerExpanded(!isModelManagerExpanded)}
-                                    style={{
-                                        flex: 1,
-                                        cursor: 'pointer'
-                                    }}
                                 >
                                     <div>
                                         <h3>
@@ -545,32 +522,6 @@ export function SettingsView({
                                     className="open-models-folder-link"
                                     onClick={openModelsFolder}
                                     title="Add your own .bin model files here"
-                                    style={{
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '4px',
-                                        padding: '4px 10px',
-                                        backgroundColor: 'rgba(0, 0, 0, 0.04)',
-                                        color: '#6b7280',
-                                        border: '1px solid rgba(0, 0, 0, 0.08)',
-                                        borderRadius: '5px',
-                                        fontSize: '12px',
-                                        fontWeight: '400',
-                                        cursor: 'pointer',
-                                        transition: 'all 0.2s ease',
-                                        marginLeft: 'auto',
-                                        alignSelf: 'center'
-                                    }}
-                                    onMouseEnter={(e) => {
-                                        e.currentTarget.style.backgroundColor = 'rgba(0, 0, 0, 0.06)';
-                                        e.currentTarget.style.borderColor = 'rgba(0, 0, 0, 0.12)';
-                                        e.currentTarget.style.color = '#4b5563';
-                                    }}
-                                    onMouseLeave={(e) => {
-                                        e.currentTarget.style.backgroundColor = 'rgba(0, 0, 0, 0.04)';
-                                        e.currentTarget.style.borderColor = 'rgba(0, 0, 0, 0.08)';
-                                        e.currentTarget.style.color = '#6b7280';
-                                    }}
                                 >
                                     <FolderOpen size={12} />
                                     Open Models Folder

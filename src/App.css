@@ -1,3 +1,5 @@
+@import url('./styles/spacing.css');
+
 :root {
   /* VSCode-inspired color scheme - Light mode */
   --bg-primary: #ffffff;
@@ -1047,7 +1049,7 @@ h1 {
 .settings-view {
   max-width: 800px;
   margin: 0 auto;
-  padding: 40px 32px 32px 32px;
+  padding: var(--space-5) var(--space-4) var(--space-4) var(--space-4);
 }
 
 .settings-body {
@@ -1058,15 +1060,15 @@ h1 {
   background: var(--bg-secondary);
   border: 1px solid var(--border-primary);
   border-radius: 8px;
-  padding: 24px;
-  margin-bottom: 20px;
+  padding: var(--section-padding);
+  margin-bottom: var(--section-margin);
 }
 
 .settings-section-header {
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
-  margin-bottom: 20px;
+  margin-bottom: var(--space-3);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   opacity: 0.8;
@@ -1075,7 +1077,7 @@ h1 {
 .settings-two-column {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 32px;
+  gap: var(--space-4);
 }
 
 /* Model manager section should span full width */
@@ -1084,7 +1086,7 @@ h1 {
 }
 
 .setting-item {
-  margin-bottom: 24px;
+  margin-bottom: var(--form-item-margin);
 }
 
 .setting-item:last-child {
@@ -1096,23 +1098,24 @@ h1 {
   font-size: 13px;
   font-weight: 500;
   color: var(--text-primary);
-  margin-bottom: 8px;
+  margin-bottom: var(--form-label-margin);
+  line-height: var(--line-height-normal);
 }
 
 .hotkey-input-group {
   display: flex;
-  gap: 8px;
-  margin-bottom: 4px;
+  gap: var(--space-1);
+  margin-bottom: var(--space-0-5);
   align-items: center;
 }
 
 .hotkey-display {
   flex: 1;
-  padding: 8px 12px;
+  padding: var(--space-1) var(--space-1-5);
   border: 1px solid var(--border-primary);
   border-radius: 4px;
   background-color: var(--bg-secondary);
-  min-height: 36px;
+  height: var(--input-height-md);
   display: flex;
   align-items: center;
 }
@@ -1155,7 +1158,8 @@ h1 {
 }
 
 .hotkey-input-group button {
-  padding: 6px 16px;
+  padding: 0 var(--space-2);
+  height: var(--button-height-md);
   border: 1px solid var(--border-primary);
   border-radius: 4px;
   background-color: var(--bg-primary);
@@ -1163,6 +1167,9 @@ h1 {
   font-size: 13px;
   cursor: pointer;
   transition: all 0.1s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .hotkey-input-group button:hover {
@@ -1194,7 +1201,8 @@ h1 {
 .setting-hint {
   font-size: 11px;
   color: var(--text-secondary);
-  margin: 4px 0 0 0;
+  margin: var(--form-hint-margin) 0 0 0;
+  line-height: var(--line-height-relaxed);
 }
 
 .setting-success {
@@ -1215,8 +1223,11 @@ h1 {
 }
 
 .setting-item input[type="checkbox"] {
-  margin-right: 8px;
+  margin-right: var(--space-1);
   cursor: pointer;
+  width: 16px;
+  height: 16px;
+  vertical-align: text-bottom;
 }
 
 /* Delete Confirmation Modal */
@@ -1268,52 +1279,58 @@ h1 {
 }
 
 .delete-modal-body {
-  padding: 20px;
+  padding: var(--space-3);
 }
 
 .delete-modal-body p {
-  margin: 0 0 12px 0;
+  margin: 0 0 var(--space-1-5) 0;
   font-size: 14px;
   color: var(--text-primary);
+  line-height: var(--line-height-normal);
 }
 
 .delete-preview {
   background-color: var(--bg-tertiary);
   border: 1px solid var(--border-primary);
   border-radius: 4px;
-  padding: 12px;
-  margin: 16px 0;
+  padding: var(--space-1-5);
+  margin: var(--space-2) 0;
   font-size: 13px;
   color: var(--text-secondary);
   font-style: italic;
-  max-height: 100px;
+  max-height: 96px; /* 12 × 8pt */
   overflow-y: auto;
 }
 
 .delete-warning {
   color: var(--error) !important;
   font-size: 12px !important;
-  margin-top: 16px !important;
+  margin-top: var(--space-2) !important;
   margin-bottom: 0 !important;
+  line-height: var(--line-height-relaxed) !important;
 }
 
 .delete-modal-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  padding: 16px 20px;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
   border-top: 1px solid var(--border-primary);
   background-color: var(--bg-secondary);
   border-radius: 0 0 8px 8px;
 }
 
 .delete-modal-footer button {
-  padding: 6px 16px;
+  padding: 0 var(--space-2);
+  height: var(--button-height-sm);
   border: 1px solid var(--border-primary);
   border-radius: 4px;
   font-size: 13px;
   cursor: pointer;
   transition: all 0.1s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .cancel-button {
@@ -1340,10 +1357,10 @@ h1 {
 /* Overlay position grid */
 .overlay-position-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 4px;
-  max-width: 180px;
-  padding: 12px;
+  grid-template-columns: repeat(3, var(--space-6)); /* 48px per button */
+  gap: var(--space-0-5);
+  max-width: 168px; /* 3 × 48px + 2 × 4px gaps */
+  padding: var(--space-1-5);
   background: rgba(0, 0, 0, 0.02);
   border-radius: 12px;
   border: 1px solid rgba(0, 0, 0, 0.06);
@@ -1351,8 +1368,8 @@ h1 {
 
 .position-button {
   padding: 0;
-  width: 48px;
-  height: 48px;
+  width: var(--space-6);
+  height: var(--space-6);
   border: 1px solid rgba(0, 0, 0, 0.08);
   border-radius: 8px;
   background-color: white;
@@ -1420,12 +1437,12 @@ h1 {
 /* Overlay type toggle */
 .overlay-type-toggle {
   display: flex;
-  gap: 8px;
+  gap: var(--space-1);
 }
 
 .overlay-type-button {
   flex: 1;
-  padding: 12px;
+  padding: var(--space-1-5);
   border: 1px solid var(--border-primary);
   border-radius: 4px;
   background-color: var(--bg-secondary);
@@ -1448,7 +1465,8 @@ h1 {
 .overlay-type-button .type-label {
   font-weight: 500;
   display: block;
-  margin-bottom: 4px;
+  margin-bottom: var(--space-0-5);
+  line-height: var(--line-height-tight);
 }
 
 .overlay-type-button .type-description {
@@ -1459,7 +1477,7 @@ h1 {
 /* Model Manager section */
 .model-manager-section {
   border-top: 1px solid var(--border-secondary);
-  padding-top: 24px;
+  padding-top: var(--space-3);
 }
 
 /* Drag and drop styles */
@@ -1501,7 +1519,8 @@ h1 {
 }
 
 .search-input {
-  padding: 6px 10px;
+  padding: var(--space-0-5) var(--space-1);
+  height: var(--input-height-sm);
   border: 1px solid var(--border-primary);
   border-radius: 4px;
   font-size: 13px;
