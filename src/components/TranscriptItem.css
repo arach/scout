@@ -90,21 +90,21 @@
     text-align: right;
 }
 
-/* Duration column */
-.transcript-duration {
+/* Duration column - removed to improve layout alignment */
+/* .transcript-duration {
     font-size: 12px;
     color: #6B7280;
     font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
     flex-shrink: 0;
     min-width: 25px;
     text-align: right;
-}
+} */
 
 /* Text Content */
 .transcript-text-container {
     flex: 1;
     min-width: 0;
-    padding: 0 12px;
+    padding: 0 16px; /* Increased left padding for better spacing */
     padding-right: 0; /* Remove right padding so text extends full width */
 }
 
