@@ -266,8 +266,18 @@ impl ProcessingQueue {
                                                 
                                                 let _ = status_tx.send(ProcessingStatus::Complete { 
                                                     filename: job.filename.clone(),
-                                                    transcript,
+                                                    transcript: transcript.clone(),
                                                 }).await;
+                                                
+                                                // Play success sound if processing took longer than threshold
+                                                let processing_duration_ms = job.queue_entry_time.elapsed().as_millis() as u64;
+                                                let settings_guard = settings.lock().await;
+                                                let threshold_ms = settings_guard.get().ui.completion_sound_threshold_ms;
+                                                drop(settings_guard);
+                                                
+                                                if processing_duration_ms > threshold_ms {
+                                                    crate::sound::SoundPlayer::play_success();
+                                                }
                                                 
                                                 // Clean up temporary WAV file if we converted
                                                 if AudioConverter::needs_conversion(&job.audio_path) {

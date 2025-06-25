@@ -84,6 +84,13 @@ function App() {
   const processingFileRef = useRef<string | null>(null); // Track file being processed to prevent duplicates
   const lastPushToTalkTimeRef = useRef(0);
   const isStartingRecording = useRef(false); // Prevent multiple simultaneous start attempts
+  
+  // Sound settings state
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [startSound, setStartSound] = useState('Glass');
+  const [stopSound, setStopSound] = useState('Glass');
+  const [successSound, setSuccessSound] = useState('Pop');
+  const [completionSoundThreshold, setCompletionSoundThreshold] = useState(1000);
 
   // Keep ref in sync with state
   useEffect(() => {
@@ -210,6 +217,24 @@ function App() {
     if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system') {
       setTheme(savedTheme);
     }
+    
+    // Load sound settings
+    invoke<boolean>('is_sound_enabled').then(enabled => {
+      setSoundEnabled(enabled);
+    }).catch(console.error);
+    
+    invoke<{ startSound: string; stopSound: string; successSound: string }>('get_sound_settings').then(settings => {
+      setStartSound(settings.startSound);
+      setStopSound(settings.stopSound);
+      setSuccessSound(settings.successSound);
+    }).catch(console.error);
+    
+    // Load completion sound threshold from settings
+    invoke<any>('get_settings').then(settings => {
+      if (settings?.ui?.completion_sound_threshold_ms) {
+        setCompletionSoundThreshold(settings.ui.completion_sound_threshold_ms);
+      }
+    }).catch(console.error);
     
     // Mark as initialized
     if (!localStorage.getItem('scout-initialized')) {
@@ -962,6 +987,59 @@ function App() {
     localStorage.setItem('scout-theme', newTheme);
   };
 
+  const toggleSoundEnabled = async () => {
+    try {
+      const newState = !soundEnabled;
+      await invoke("set_sound_enabled", { enabled: newState });
+      setSoundEnabled(newState);
+    } catch (error) {
+      console.error("Failed to toggle sound:", error);
+    }
+  };
+
+  const updateStartSound = async (sound: string) => {
+    try {
+      await invoke("set_start_sound", { sound });
+      setStartSound(sound);
+    } catch (error) {
+      console.error("Failed to update start sound:", error);
+    }
+  };
+
+  const updateStopSound = async (sound: string) => {
+    try {
+      await invoke("set_stop_sound", { sound });
+      setStopSound(sound);
+    } catch (error) {
+      console.error("Failed to update stop sound:", error);
+    }
+  };
+
+  const updateSuccessSound = async (sound: string) => {
+    try {
+      await invoke("set_success_sound", { sound });
+      setSuccessSound(sound);
+    } catch (error) {
+      console.error("Failed to update success sound:", error);
+    }
+  };
+
+  const updateCompletionSoundThreshold = async (threshold: number) => {
+    try {
+      // Update the settings with the new threshold
+      await invoke("update_settings", { 
+        settings: { 
+          ui: { 
+            completion_sound_threshold_ms: threshold 
+          } 
+        } 
+      });
+      setCompletionSoundThreshold(threshold);
+    } catch (error) {
+      console.error("Failed to update completion sound threshold:", error);
+    }
+  };
+
   
   const updateOverlayPosition = async (position: string) => {
     try {
@@ -1244,7 +1322,11 @@ function App() {
             autoPaste={autoPaste}
             visualMicPicker={visualMicPicker}
             theme={theme}
-            audioLevel={audioLevel}
+            soundEnabled={soundEnabled}
+            startSound={startSound}
+            stopSound={stopSound}
+            successSound={successSound}
+            completionSoundThreshold={completionSoundThreshold}
             stopCapturingHotkey={stopCapturingHotkey}
             startCapturingHotkey={startCapturingHotkey}
             startCapturingPushToTalkHotkey={startCapturingPushToTalkHotkey}
@@ -1255,6 +1337,11 @@ function App() {
             toggleAutoPaste={toggleAutoPaste}
             toggleVisualMicPicker={toggleVisualMicPicker}
             updateTheme={updateTheme}
+            toggleSoundEnabled={toggleSoundEnabled}
+            updateStartSound={updateStartSound}
+            updateStopSound={updateStopSound}
+            updateSuccessSound={updateSuccessSound}
+            updateCompletionSoundThreshold={updateCompletionSoundThreshold}
           />
         )}
         {isDragging && (

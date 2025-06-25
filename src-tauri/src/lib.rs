@@ -675,7 +675,8 @@ async fn get_available_sounds() -> Result<Vec<String>, String> {
 async fn get_sound_settings() -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({
         "startSound": sound::SoundPlayer::get_start_sound(),
-        "stopSound": sound::SoundPlayer::get_stop_sound()
+        "stopSound": sound::SoundPlayer::get_stop_sound(),
+        "successSound": sound::SoundPlayer::get_success_sound()
     }))
 }
 
@@ -688,6 +689,18 @@ async fn set_start_sound(sound: String) -> Result<(), String> {
 #[tauri::command]
 async fn set_stop_sound(sound: String) -> Result<(), String> {
     sound::SoundPlayer::set_stop_sound(sound);
+    Ok(())
+}
+
+#[tauri::command]
+async fn set_success_sound(sound: String) -> Result<(), String> {
+    sound::SoundPlayer::set_success_sound(sound);
+    Ok(())
+}
+
+#[tauri::command]
+async fn preview_sound_flow() -> Result<(), String> {
+    sound::SoundPlayer::preview_sound_flow().await;
     Ok(())
 }
 
@@ -1314,6 +1327,8 @@ pub fn run() {
             get_sound_settings,
             set_start_sound,
             set_stop_sound,
+            set_success_sound,
+            preview_sound_flow,
             get_current_shortcut,
             transcribe_file,
             get_available_models,

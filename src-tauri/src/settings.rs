@@ -48,6 +48,8 @@ pub struct UISettings {
     pub sound_enabled: bool,
     pub start_sound: String,
     pub stop_sound: String,
+    pub success_sound: String,
+    pub completion_sound_threshold_ms: u64,
     pub auto_copy: bool,
     pub auto_paste: bool,
 }
@@ -104,8 +106,10 @@ impl Default for UISettings {
             overlay_position: "top-center".to_string(),
             theme: "dark".to_string(),
             sound_enabled: true,
-            start_sound: "start".to_string(),
-            stop_sound: "stop".to_string(),
+            start_sound: "Glass".to_string(),
+            stop_sound: "Glass".to_string(),
+            success_sound: "Pop".to_string(),
+            completion_sound_threshold_ms: 1000,
             auto_copy: false,
             auto_paste: false,
         }
