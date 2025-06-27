@@ -110,15 +110,23 @@ impl RingBufferMonitor {
     
     /// Signal that recording is complete and collect all results
     pub async fn recording_complete(mut self) -> Result<Vec<String>, String> {
-        if let Some(chunked) = self.chunked_transcriber.take() {
+        if let Some(mut chunked) = self.chunked_transcriber.take() {
             let buffer_duration = self.ring_buffer.get_duration();
             let remaining_duration = buffer_duration.saturating_sub(self.last_chunk_time);
             
             // Process any remaining audio as a final chunk
-            if remaining_duration > Duration::ZERO {
-                println!("🏁 Processing final ring buffer chunk (duration: {:?})", remaining_duration);
-                // Note: We would need to submit this final chunk, but since we moved chunked,
-                // we need to handle this differently. Let's collect results first.
+            if remaining_duration > Duration::from_millis(500) { // Only process if > 500ms
+                println!("🏁 Processing final ring buffer chunk (start: {:?}, duration: {:?})", 
+                         self.last_chunk_time, remaining_duration);
+                
+                match chunked.process_chunk(self.last_chunk_time, remaining_duration).await {
+                    Ok(_) => {
+                        println!("✅ Final ring buffer chunk submitted successfully");
+                    }
+                    Err(e) => {
+                        eprintln!("❌ Failed to submit final ring buffer chunk: {}", e);
+                    }
+                }
             }
             
             // Collect all results
