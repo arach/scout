@@ -4,7 +4,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { ModelManager } from "./components/ModelManager";
 import { FirstRunSetup } from "./components/FirstRunSetup";
 import { Sidebar, useSidebarState } from "./components/Sidebar";
 import { RecordView } from "./components/RecordView";
@@ -23,29 +22,22 @@ interface Transcript {
   file_size?: number;
 }
 
-interface AudioDeviceInfo {
-  name: string;
-  index: number;
-  sample_rates: number[];
-  channels: number;
-}
 
 type View = 'record' | 'transcripts' | 'settings';
 
 function App() {
   const { isExpanded: isSidebarExpanded, toggleExpanded: toggleSidebar } = useSidebarState();
   const [isRecording, setIsRecording] = useState(false);
-  const [currentRecordingFile, setCurrentRecordingFile] = useState<string | null>(null);
+  const [, setCurrentRecordingFile] = useState<string | null>(null);
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
-  const [currentTranscript, setCurrentTranscript] = useState<string>("");
+  const [, setCurrentTranscript] = useState<string>("");
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [vadEnabled, setVadEnabled] = useState(false);
   const [selectedMic, setSelectedMic] = useState<string>('Default microphone');
   
   const [isProcessing, setIsProcessing] = useState(false);
-  const [showSuccess, setShowSuccess] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
+  const [, setShowSuccess] = useState(false);
   const [hotkey, setHotkey] = useState("CmdOrCtrl+Shift+Space");
   const [pushToTalkHotkey, setPushToTalkHotkey] = useState("CmdOrCtrl+Shift+P");
   const [isCapturingHotkey, setIsCapturingHotkey] = useState(false);
@@ -76,7 +68,6 @@ function App() {
   const [sessionStartTime] = useState(() => new Date().toISOString());
   const [autoCopy, setAutoCopy] = useState(false);
   const [autoPaste, setAutoPaste] = useState(false);
-  const [visualMicPicker, setVisualMicPicker] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
   const [audioLevel, setAudioLevel] = useState(0);
   const audioTargetRef = useRef(0);
@@ -206,11 +197,6 @@ function App() {
       setAutoPaste(enabled);
     }).catch(console.error);
     
-    // Load visual mic picker preference
-    const savedVisualMicPicker = localStorage.getItem('scout-visual-mic-picker');
-    if (savedVisualMicPicker === 'true') {
-      setVisualMicPicker(true);
-    }
     
     // Load theme preference
     const savedTheme = localStorage.getItem('scout-theme');
@@ -442,7 +428,7 @@ function App() {
                 progress: 0
               });
 
-              const queuedFilename = await invoke<string>('transcribe_file', { 
+              await invoke<string>('transcribe_file', { 
                 filePath: filePath 
               });
             } catch (error) {
@@ -520,7 +506,7 @@ function App() {
       const startTime = Date.now();
       interval = setInterval(() => {
         setRecordingDuration(Date.now() - startTime);
-      }, 100);
+      }, 100) as unknown as number;
     } else {
       setRecordingDuration(0);
     }
@@ -608,7 +594,7 @@ function App() {
             console.error('Audio level polling failed:', error);
             audioTargetRef.current = 0;
           }
-        }, 150);
+        }, 150) as unknown as number;
       } catch (error) {
         console.error('Failed to start audio monitoring:', error);
       }
@@ -930,7 +916,7 @@ function App() {
       });
 
       // Send file to backend for processing - filePath is already a string
-      const queuedFilename = await invoke<string>('transcribe_file', { 
+      await invoke<string>('transcribe_file', { 
         filePath: filePath 
       });
       
@@ -975,12 +961,6 @@ function App() {
     }
   };
 
-  const toggleVisualMicPicker = () => {
-    const newState = !visualMicPicker;
-    setVisualMicPicker(newState);
-    // Store preference in localStorage for persistence
-    localStorage.setItem('scout-visual-mic-picker', newState.toString());
-  };
   
   const updateTheme = (newTheme: 'light' | 'dark' | 'system') => {
     setTheme(newTheme);
@@ -1051,24 +1031,6 @@ function App() {
     }
   };
   
-  const updateOverlayType = async (type: 'tauri' | 'native') => {
-    try {
-      setOverlayType(type);
-      localStorage.setItem('scout-overlay-type', type);
-      // Notify backend about overlay type change
-      await invoke('set_overlay_type', { overlayType: type });
-      
-      // If switching to native, show the native overlay
-      if (type === 'native') {
-        await invoke('show_native_overlay');
-      } else {
-        // If switching away from native, hide it
-        await invoke('hide_native_overlay');
-      }
-    } catch (error) {
-      console.error("Failed to update overlay type:", error);
-    }
-  };
 
   const updateHotkey = async (newHotkey: string) => {
     try {
@@ -1280,7 +1242,6 @@ function App() {
               .slice(-10)}
             selectedMic={selectedMic}
             onMicChange={setSelectedMic}
-            visualMicPicker={visualMicPicker}
             audioLevel={audioLevel}
             startRecording={startRecording}
             stopRecording={stopRecording}
@@ -1320,7 +1281,6 @@ function App() {
             overlayPosition={overlayPosition}
             autoCopy={autoCopy}
             autoPaste={autoPaste}
-            visualMicPicker={visualMicPicker}
             theme={theme}
             soundEnabled={soundEnabled}
             startSound={startSound}
@@ -1335,7 +1295,6 @@ function App() {
             updateOverlayPosition={updateOverlayPosition}
             toggleAutoCopy={toggleAutoCopy}
             toggleAutoPaste={toggleAutoPaste}
-            toggleVisualMicPicker={toggleVisualMicPicker}
             updateTheme={updateTheme}
             toggleSoundEnabled={toggleSoundEnabled}
             updateStartSound={updateStartSound}

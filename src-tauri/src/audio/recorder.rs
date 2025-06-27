@@ -10,6 +10,14 @@ pub struct AudioRecorder {
     is_recording: Arc<Mutex<bool>>,
     vad_enabled: Arc<Mutex<bool>>,
     current_audio_level: Arc<Mutex<f32>>,
+    current_device_info: Arc<Mutex<Option<DeviceInfo>>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeviceInfo {
+    pub name: String,
+    pub sample_rate: u32,
+    pub channels: u16,
 }
 
 enum RecorderCommand {
@@ -27,7 +35,12 @@ impl AudioRecorder {
             is_recording: Arc::new(Mutex::new(false)),
             vad_enabled: Arc::new(Mutex::new(false)),
             current_audio_level: Arc::new(Mutex::new(0.0)),
+            current_device_info: Arc::new(Mutex::new(None)),
         }
+    }
+    
+    pub fn get_current_device_info(&self) -> Option<DeviceInfo> {
+        self.current_device_info.lock().unwrap().clone()
     }
     
     pub fn get_current_audio_level(&self) -> f32 {
@@ -40,9 +53,10 @@ impl AudioRecorder {
         let is_recording = self.is_recording.clone();
         let vad_enabled = self.vad_enabled.clone();
         let audio_level = self.current_audio_level.clone();
+        let device_info = self.current_device_info.clone();
 
         thread::spawn(move || {
-            let mut recorder = AudioRecorderWorker::new(is_recording, vad_enabled, audio_level);
+            let mut recorder = AudioRecorderWorker::new(is_recording, vad_enabled, audio_level, device_info);
             
             while let Ok(cmd) = rx.recv() {
                 match cmd {
@@ -160,10 +174,11 @@ struct AudioRecorderWorker {
     channels: u16,
     sample_format: Option<cpal::SampleFormat>,
     current_audio_level: Arc<Mutex<f32>>,
+    current_device_info: Arc<Mutex<Option<DeviceInfo>>>,
 }
 
 impl AudioRecorderWorker {
-    fn new(is_recording: Arc<Mutex<bool>>, vad_enabled: Arc<Mutex<bool>>, audio_level: Arc<Mutex<f32>>) -> Self {
+    fn new(is_recording: Arc<Mutex<bool>>, vad_enabled: Arc<Mutex<bool>>, audio_level: Arc<Mutex<f32>>, device_info: Arc<Mutex<Option<DeviceInfo>>>) -> Self {
         Self {
             stream: None,
             monitoring_stream: None,
@@ -176,6 +191,7 @@ impl AudioRecorderWorker {
             channels: 1, // default, will be updated when recording starts
             sample_format: None,
             current_audio_level: audio_level,
+            current_device_info: device_info,
         }
     }
 
@@ -194,18 +210,39 @@ impl AudioRecorderWorker {
         
         let device = match device_name {
             Some(name) => {
+                println!("🎤 Attempting to use specified device: '{}'", name);
+                
                 // Find device by name
                 let devices = host.input_devices()
                     .map_err(|e| format!("Failed to enumerate devices: {}", e))?;
                 
-                devices.into_iter()
+                // List all available devices for debugging
+                println!("🎤 Available input devices:");
+                let devices_vec: Vec<_> = devices.collect();
+                for (i, device) in devices_vec.iter().enumerate() {
+                    let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
+                    println!("  [{}] {}", i, device_name);
+                }
+                
+                // Find the requested device
+                let selected_device = devices_vec.into_iter()
                     .find(|d| d.name().map(|n| n == name).unwrap_or(false))
-                    .ok_or_else(|| format!("Device '{}' not found", name))?
+                    .ok_or_else(|| format!("Device '{}' not found", name))?;
+                
+                let actual_name = selected_device.name().unwrap_or_else(|_| "Unknown".to_string());
+                println!("✅ Selected device: '{}'", actual_name);
+                selected_device
             },
             None => {
+                println!("🎤 Using default input device");
+                
                 // Use default device
-                host.default_input_device()
-                    .ok_or("No input device available - please check microphone permissions")?
+                let default_device = host.default_input_device()
+                    .ok_or("No input device available - please check microphone permissions")?;
+                
+                let device_name = default_device.name().unwrap_or_else(|_| "Unknown".to_string());
+                println!("✅ Default device: '{}'", device_name);
+                default_device
             }
         };
 
@@ -213,6 +250,14 @@ impl AudioRecorderWorker {
         let default_config = device
             .default_input_config()
             .map_err(|e| format!("Failed to get input config: {}", e))?;
+
+        // Log detailed device information
+        let device_name_for_metadata = device.name().unwrap_or_else(|_| "Unknown".to_string());
+        println!("🎤 Device details:");
+        println!("  📱 Name: {}", device_name_for_metadata);
+        println!("  🎛️  Sample Rate: {} Hz", default_config.sample_rate().0);
+        println!("  🔊 Channels: {}", default_config.channels());
+        println!("  📊 Format: {:?}", default_config.sample_format());
 
         // Try stereo first, fallback to device capabilities if not supported
         let mut channels = 2; // Prefer stereo
@@ -245,6 +290,16 @@ impl AudioRecorderWorker {
         self.sample_rate = config.sample_rate.0;
         self.channels = channels;
         self.sample_format = Some(default_config.sample_format());
+        
+        // Store device info for metadata
+        let device_info = DeviceInfo {
+            name: device_name_for_metadata.clone(),
+            sample_rate: config.sample_rate.0,
+            channels,
+        };
+        *self.current_device_info.lock().unwrap() = Some(device_info);
+        
+        println!("✅ Recording started with device: {}", device_name_for_metadata);
         
         // Reset sample count
         *self.sample_count.lock().unwrap() = 0;

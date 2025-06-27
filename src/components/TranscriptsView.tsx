@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { TranscriptDetailPanel } from './TranscriptDetailPanel';
 import { TranscriptItem } from './TranscriptItem';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import { formatShortcut } from '../lib/formatShortcut';
 import './TranscriptsView.css';
 
@@ -336,8 +336,6 @@ export function TranscriptsView({
                                 {expandedGroups.has(group.title) && (
                                     <div className="transcript-group-items">
                                         {group.transcripts.map((transcript) => {
-                                            const isBlankAudio = transcript.text === "[BLANK_AUDIO]";
-                                            
                                             return (
                                                 <TranscriptItem
                                                     key={transcript.id}
@@ -378,7 +376,7 @@ export function TranscriptsView({
                 onClose={closeDetailPanel}
                 onCopy={copyTranscript}
                 onDelete={showDeleteConfirmation}
-                onExport={(transcripts, format) => exportTranscripts(format)}
+                onExport={(_, format) => exportTranscripts(format)}
                 formatDuration={formatDuration}
                 formatFileSize={formatFileSize}
             />

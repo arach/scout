@@ -1,7 +1,5 @@
 import { Fragment, useRef, useEffect, useState } from 'react';
 import { Settings } from 'lucide-react';
-import { MicrophoneSelector } from './MicrophoneSelector';
-import { MicrophoneVisualPicker } from './MicrophoneVisualPicker';
 import { MicrophoneQuickPicker } from './MicrophoneQuickPicker';
 import { SessionTranscripts } from './SessionTranscripts';
 import './RecordView.css';
@@ -34,7 +32,6 @@ interface RecordViewProps {
     sessionTranscripts?: Transcript[];
     selectedMic: string;
     onMicChange: (mic: string) => void;
-    visualMicPicker: boolean;
     audioLevel: number;
     startRecording: () => void;
     stopRecording: () => void;
@@ -79,7 +76,6 @@ export function RecordView({
     sessionTranscripts = [],
     selectedMic,
     onMicChange,
-    visualMicPicker,
     audioLevel,
     startRecording,
     stopRecording,
