@@ -1003,6 +1003,17 @@ async fn update_push_to_talk_shortcut(
     Ok(())
 }
 
+#[tauri::command]
+async fn paste_text() -> Result<(), String> {
+    clipboard::simulate_paste()
+}
+
+#[tauri::command]
+async fn play_success_sound() -> Result<(), String> {
+    sound::SoundPlayer::play_success();
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1373,7 +1384,9 @@ pub fn run() {
             set_auto_paste,
             is_auto_paste_enabled,
             get_push_to_talk_shortcut,
-            update_push_to_talk_shortcut
+            update_push_to_talk_shortcut,
+            paste_text,
+            play_success_sound
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

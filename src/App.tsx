@@ -112,6 +112,22 @@ function App() {
       }
     };
     checkAudioDevices();
+    
+    // Load auto-copy and auto-paste settings
+    const loadClipboardSettings = async () => {
+      try {
+        const [copyEnabled, pasteEnabled] = await Promise.all([
+          invoke<boolean>('is_auto_copy_enabled'),
+          invoke<boolean>('is_auto_paste_enabled')
+        ]);
+        setAutoCopy(copyEnabled);
+        setAutoPaste(pasteEnabled);
+        console.log('Clipboard settings loaded - auto-copy:', copyEnabled, 'auto-paste:', pasteEnabled);
+      } catch (error) {
+        console.error('Failed to load clipboard settings:', error);
+      }
+    };
+    loadClipboardSettings();
   }, []);
 
   useEffect(() => {
@@ -187,16 +203,6 @@ function App() {
     if (savedOverlayType === 'native' || savedOverlayType === 'tauri') {
       setOverlayType(savedOverlayType);
     }
-    
-    // Load auto-copy and auto-paste settings
-    invoke<boolean>('is_auto_copy_enabled').then(enabled => {
-      setAutoCopy(enabled);
-    }).catch(console.error);
-    
-    invoke<boolean>('is_auto_paste_enabled').then(enabled => {
-      setAutoPaste(enabled);
-    }).catch(console.error);
-    
     
     // Load theme preference
     const savedTheme = localStorage.getItem('scout-theme');
@@ -479,10 +485,43 @@ function App() {
         return [newTranscript, ...prev].slice(0, 100);
       });
       
-      // Clear processing state if this was from our current recording
+      // Clear processing state
       setIsProcessing(false);
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 2000);
+      
+      // Handle auto-copy if enabled
+      if (autoCopy && newTranscript.text) {
+        try {
+          await navigator.clipboard.writeText(newTranscript.text);
+          console.log('Transcript auto-copied to clipboard');
+        } catch (error) {
+          console.error('Failed to auto-copy transcript:', error);
+        }
+      }
+      
+      // Handle auto-paste if enabled
+      if (autoPaste && newTranscript.text) {
+        try {
+          // First copy to clipboard
+          await navigator.clipboard.writeText(newTranscript.text);
+          // Then paste using Tauri command
+          await invoke('paste_text');
+          console.log('Transcript auto-pasted');
+        } catch (error) {
+          console.error('Failed to auto-paste transcript:', error);
+        }
+      }
+      
+      // Play success sound if enabled and transcript meets threshold
+      const duration = newTranscript.duration_ms || 0;
+      if (soundEnabled && duration >= completionSoundThreshold) {
+        try {
+          await invoke('play_success_sound');
+        } catch (error) {
+          console.error('Failed to play success sound:', error);
+        }
+      }
     });
     
     // Listen for performance metrics events (for debugging)
