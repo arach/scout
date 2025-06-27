@@ -1058,6 +1058,8 @@ pub fn run() {
                 recordings_dir.clone(),
                 progress_tracker.clone(),
                 processing_queue_arc.clone(),
+                database_arc.clone(),
+                models_dir.clone(),
             ));
             
             // Initialize native NSPanel overlay

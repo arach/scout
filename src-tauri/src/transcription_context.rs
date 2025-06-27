@@ -8,6 +8,8 @@ use crate::transcription::{
     TranscriptionResult, 
     TranscriptionStrategySelector
 };
+use crate::db::Database;
+use crate::performance_logger::PerformanceLogger;
 
 /// Manages transcription strategy selection and execution
 pub struct TranscriptionContext {
@@ -15,6 +17,8 @@ pub struct TranscriptionContext {
     temp_dir: PathBuf,
     config: TranscriptionConfig,
     current_strategy: Option<Box<dyn TranscriptionStrategy>>,
+    performance_logger: Option<PerformanceLogger>,
+    recording_start_time: Option<std::time::Instant>,
 }
 
 impl TranscriptionContext {
@@ -28,6 +32,30 @@ impl TranscriptionContext {
             temp_dir,
             config: config.unwrap_or_default(),
             current_strategy: None,
+            performance_logger: None,
+            recording_start_time: None,
+        }
+    }
+    
+    /// Create a new TranscriptionContext from database and models directory
+    pub fn new_from_db(
+        database: Arc<Database>,
+        models_dir: PathBuf,
+    ) -> Self {
+        let transcriber = Arc::new(Mutex::new(
+            Transcriber::new(&models_dir)
+                .unwrap_or_else(|_| panic!("Failed to create transcriber"))
+        ));
+        
+        let performance_logger = PerformanceLogger::new(database);
+        
+        Self {
+            transcriber,
+            temp_dir: models_dir,
+            config: TranscriptionConfig::default(),
+            current_strategy: None,
+            performance_logger: Some(performance_logger),
+            recording_start_time: None,
         }
     }
     
@@ -42,6 +70,9 @@ impl TranscriptionContext {
         output_path: &Path,
         duration_estimate: Option<std::time::Duration>,
     ) -> Result<(), String> {
+        // Record start time for performance tracking
+        self.recording_start_time = Some(std::time::Instant::now());
+        
         // Select the appropriate strategy
         let mut strategy = TranscriptionStrategySelector::select_strategy(
             duration_estimate,
@@ -81,12 +112,32 @@ impl TranscriptionContext {
         if let Some(mut strategy) = self.current_strategy.take() {
             let result = strategy.finish_recording().await?;
             
+            // Log performance metrics if available
+            if let (Some(performance_logger), Some(start_time)) = (&self.performance_logger, self.recording_start_time) {
+                let recording_duration = start_time.elapsed();
+                
+                // Log comprehensive performance data
+                let _ = performance_logger.log_transcription_performance(
+                    None, // transcript_id - will be set later
+                    recording_duration,
+                    &result,
+                    None, // audio_file_size - could be added later
+                    Some("wav"), // audio_format
+                    None, // user_perceived_latency - could be calculated
+                    None, // processing_queue_time
+                    Some("ggml-tiny.en.bin"), // model_used - could get from config
+                ).await;
+            }
+            
             println!("✅ Transcription completed using '{}' strategy in {}ms", 
                      result.strategy_used, result.processing_time_ms);
             
             if result.chunks_processed > 1 {
                 println!("📊 Processed {} chunks", result.chunks_processed);
             }
+            
+            // Reset start time
+            self.recording_start_time = None;
             
             Ok(result)
         } else {
