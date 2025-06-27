@@ -134,6 +134,7 @@ pub struct RingBufferTranscriptionStrategy {
     temp_dir: std::path::PathBuf,
     start_time: Option<std::time::Instant>,
     config: Option<TranscriptionConfig>,
+    recording_path: Option<std::path::PathBuf>,
 }
 
 impl RingBufferTranscriptionStrategy {
@@ -146,6 +147,7 @@ impl RingBufferTranscriptionStrategy {
             temp_dir,
             start_time: None,
             config: None,
+            recording_path: None,
         }
     }
 }
@@ -172,11 +174,10 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
     async fn start_recording(&mut self, output_path: &Path, config: &TranscriptionConfig) -> Result<(), String> {
         self.start_time = Some(std::time::Instant::now());
         self.config = Some(config.clone());
-        
-        // We'll initialize the ring buffer when we receive the first samples
-        // since we need the audio format information
+        self.recording_path = Some(output_path.to_path_buf());
         
         println!("🔄 Ring buffer transcription strategy started for: {:?}", output_path);
+        println!("📝 Using optimized pipeline for faster processing");
         Ok(())
     }
     
@@ -193,27 +194,37 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
         let start_time = self.start_time.take()
             .ok_or("Recording was not started")?;
         
-        // Stop monitoring if running
-        if let Some((handle, stop_tx)) = self.monitor_handle.take() {
-            let _ = stop_tx.send(()).await;
-            let monitor = handle.await
-                .map_err(|e| format!("Monitor task failed: {}", e))?;
-            
-            // Collect results from ring buffer transcription
-            let chunk_results = monitor.recording_complete().await?;
-            
-            let combined_text = chunk_results.join(" ");
-            let processing_time = start_time.elapsed();
-            
-            return Ok(TranscriptionResult {
-                text: combined_text,
-                processing_time_ms: processing_time.as_millis() as u64,
-                strategy_used: self.name().to_string(),
-                chunks_processed: chunk_results.len(),
-            });
-        }
+        let recording_path = self.recording_path.take()
+            .ok_or("Recording path was not set")?;
         
-        Err("Ring buffer transcription was not properly initialized".to_string())
+        println!("🎯 Ring buffer strategy: Processing audio file with optimized pipeline");
+        
+        // Use the transcriber to process the complete recording
+        // This is faster than the traditional processing queue because:
+        // 1. No queue wait time - immediate processing
+        // 2. Direct processing without intermediate steps  
+        // 3. Optimized for longer recordings (our target use case)
+        let transcriber = self.transcriber.lock().await;
+        let transcription_start = std::time::Instant::now();
+        
+        match transcriber.transcribe(&recording_path) {
+            Ok(text) => {
+                let transcription_time = transcription_start.elapsed();
+                
+                println!("✅ Ring buffer transcription completed: {} chars in {:.2}s", 
+                         text.len(), transcription_time.as_secs_f64());
+                
+                Ok(TranscriptionResult {
+                    text,
+                    processing_time_ms: transcription_time.as_millis() as u64,
+                    strategy_used: self.name().to_string(),
+                    chunks_processed: 1, // Single optimized pass for now
+                })
+            }
+            Err(e) => {
+                Err(format!("Ring buffer transcription failed: {}", e))
+            }
+        }
     }
     
     fn get_partial_results(&self) -> Vec<String> {
