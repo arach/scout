@@ -1,6 +1,6 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 use std::path::PathBuf;
 use crate::audio::ring_buffer_recorder::RingBufferRecorder;
@@ -209,7 +209,7 @@ impl RingBufferTranscriber {
         
         // Transcribe the chunk
         let text = {
-            let transcriber = transcriber.lock().unwrap();
+            let transcriber = transcriber.lock().await;
             transcriber.transcribe_file(&chunk_path)
                 .map_err(|e| format!("Transcription failed: {}", e))?
         };

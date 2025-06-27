@@ -162,6 +162,21 @@ impl TranscriptionContext {
         self.current_strategy.as_ref().map(|s| s.name().to_string())
     }
     
+    pub fn get_ring_buffer(&self) -> Option<std::sync::Arc<crate::audio::ring_buffer_recorder::RingBufferRecorder>> {
+        if let Some(strategy) = &self.current_strategy {
+            if strategy.name() == "ring_buffer" {
+                // Try to downcast to RingBufferTranscriptionStrategy
+                // This is unsafe but necessary given the current trait design
+                let strategy_ptr = strategy.as_ref() as *const dyn crate::transcription::strategy::TranscriptionStrategy;
+                let ring_strategy_ptr = strategy_ptr as *const crate::transcription::strategy::RingBufferTranscriptionStrategy;
+                unsafe {
+                    return (*ring_strategy_ptr).get_ring_buffer();
+                }
+            }
+        }
+        None
+    }
+    
     /// Force a specific strategy for testing
     pub fn force_strategy(&mut self, strategy_name: &str) {
         self.config.force_strategy = Some(strategy_name.to_string());

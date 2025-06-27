@@ -150,6 +150,10 @@ impl RingBufferTranscriptionStrategy {
             recording_path: None,
         }
     }
+    
+    pub fn get_ring_buffer(&self) -> Option<Arc<crate::audio::ring_buffer_recorder::RingBufferRecorder>> {
+        self.ring_buffer.clone()
+    }
 }
 
 #[async_trait]
@@ -177,16 +181,49 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
         self.recording_path = Some(output_path.to_path_buf());
         
         println!("🔄 Ring buffer transcription strategy started for: {:?}", output_path);
-        println!("📝 Using optimized pipeline for faster processing");
+        println!("📝 Initializing ring buffer components for real-time processing");
+        
+        // Initialize ring buffer recorder with 5-minute capacity
+        let spec = hound::WavSpec {
+            channels: 2,     // Stereo recording
+            sample_rate: 48000, // 48kHz sample rate
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Float,
+        };
+        
+        let ring_buffer = Arc::new(crate::audio::ring_buffer_recorder::RingBufferRecorder::new(
+            spec,
+            output_path,
+        )?);
+        
+        // Initialize ring buffer transcriber
+        let ring_transcriber = crate::transcription::ring_buffer_transcriber::RingBufferTranscriber::new(
+            ring_buffer.clone(),
+            self.transcriber.clone(),
+            self.temp_dir.clone(),
+        );
+        
+        // Initialize and start monitor
+        let monitor = crate::ring_buffer_monitor::RingBufferMonitor::new(ring_buffer.clone());
+        let (monitor_handle, stop_sender) = monitor.start_monitoring(
+            ring_transcriber,
+        ).await;
+        
+        self.ring_buffer = Some(ring_buffer);
+        self.ring_transcriber = None; // Monitor owns the transcriber
+        self.monitor_handle = Some((monitor_handle, stop_sender));
+        
+        println!("✅ Ring buffer components initialized - ready for 5-second interval processing");
         Ok(())
     }
     
     async fn process_samples(&mut self, samples: &[f32]) -> Result<(), String> {
         if let Some(ref ring_buffer) = self.ring_buffer {
+            // Feed audio samples to ring buffer for real-time processing
             ring_buffer.add_samples(samples)?;
+        } else {
+            return Err("Ring buffer not initialized - this should not happen".to_string());
         }
-        // If ring_buffer is None, we need to initialize it first time we get samples
-        // This requires the audio format which we'll need to pass in somehow
         Ok(())
     }
     
@@ -197,52 +234,100 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
         let recording_path = self.recording_path.take()
             .ok_or("Recording path was not set")?;
         
-        println!("🎯 Ring buffer strategy: Processing audio file with optimized pipeline");
+        println!("🎯 Finishing ring buffer transcription with real-time chunks");
         
-        // Small delay to ensure audio file is fully written
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        // Stop the monitor and collect results
+        let mut final_chunks = Vec::new();
+        let mut chunks_processed = 0;
         
-        // Check if the file exists and has content
-        if !recording_path.exists() {
-            return Err("Recording file does not exist".to_string());
-        }
-        
-        let file_size = std::fs::metadata(&recording_path)
-            .map_err(|e| format!("Failed to read file metadata: {}", e))?
-            .len();
+        if let Some((monitor_handle, stop_sender)) = self.monitor_handle.take() {
+            println!("🛑 Stopping ring buffer monitor...");
             
-        if file_size < 1000 { // Less than 1KB is likely empty or corrupt
-            return Err(format!("Audio file is too small ({} bytes), likely contains no audio data", file_size));
+            // Signal monitor to stop
+            let _ = stop_sender.send(()).await;
+            
+            // Wait for monitor to finish and get it back
+            match monitor_handle.await {
+                Ok(monitor) => {
+                    println!("📊 Monitor stopped, collecting chunk results");
+                    
+                    // Collect all transcribed chunks
+                    match monitor.recording_complete().await {
+                        Ok(chunk_results) => {
+                            final_chunks = chunk_results;
+                            chunks_processed = final_chunks.len();
+                            println!("✅ Collected {} transcribed chunks from ring buffer", chunks_processed);
+                        }
+                        Err(e) => {
+                            println!("⚠️ Error collecting chunk results: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("⚠️ Error stopping monitor: {}", e);
+                }
+            }
+        } else {
+            println!("⚠️ No monitor handle found - this should not happen");
         }
         
-        println!("📁 Audio file validated: {} bytes", file_size);
-        
-        // Use the transcriber to process the complete recording
-        // This is faster than the traditional processing queue because:
-        // 1. No queue wait time - immediate processing
-        // 2. Direct processing without intermediate steps  
-        // 3. Optimized for longer recordings (our target use case)
-        let transcriber = self.transcriber.lock().await;
-        let transcription_start = std::time::Instant::now();
-        
-        match transcriber.transcribe(&recording_path) {
-            Ok(text) => {
-                let transcription_time = transcription_start.elapsed();
-                
-                println!("✅ Ring buffer transcription completed: {} chars in {:.2}s", 
-                         text.len(), transcription_time.as_secs_f64());
-                
-                Ok(TranscriptionResult {
-                    text,
-                    processing_time_ms: transcription_time.as_millis() as u64,
-                    strategy_used: self.name().to_string(),
-                    chunks_processed: 1, // Single optimized pass for now
-                })
-            }
-            Err(e) => {
-                Err(format!("Ring buffer transcription failed: {}", e))
+        // Finalize the main recording file
+        if let Some(ref ring_buffer) = self.ring_buffer {
+            println!("💾 Finalizing main recording file");
+            if let Err(e) = ring_buffer.finalize_recording() {
+                println!("⚠️ Error finalizing recording: {}", e);
             }
         }
+        
+        let total_time = start_time.elapsed();
+        
+        println!("🔍 Ring buffer processing complete - {} chunks collected", chunks_processed);
+        
+        // Combine all chunk transcriptions
+        let combined_text = if final_chunks.is_empty() {
+            // If no chunks were processed (no audio samples received), fall back to traditional transcription
+            println!("📝 No chunks processed - ring buffer didn't receive audio samples, using fallback transcription");
+            
+            // Wait for file to be fully written by the AudioRecorder
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            
+            // Check if file exists and has content
+            if !recording_path.exists() {
+                return Err("Recording file does not exist for fallback transcription".to_string());
+            }
+            
+            let file_size = std::fs::metadata(&recording_path)
+                .map_err(|e| format!("Failed to read file metadata: {}", e))?
+                .len();
+                
+            if file_size < 1000 { // Less than 1KB is likely empty
+                return Err(format!("Audio file too small for transcription ({} bytes)", file_size));
+            }
+            
+            println!("📁 Fallback: Processing {} byte audio file", file_size);
+            
+            let transcriber = self.transcriber.lock().await;
+            match transcriber.transcribe(&recording_path) {
+                Ok(text) => {
+                    println!("✅ Fallback transcription successful: {} chars", text.len());
+                    text
+                },
+                Err(e) => return Err(format!("Fallback transcription failed: {}", e)),
+            }
+        } else {
+            // Join all chunk results
+            final_chunks.join(" ")
+        };
+        
+        println!("✅ Ring buffer transcription completed: {} chars from {} chunks in {:.2}s", 
+                 combined_text.len(), chunks_processed, total_time.as_secs_f64());
+        
+        Ok(TranscriptionResult {
+            text: combined_text,
+            processing_time_ms: total_time.as_millis() as u64,
+            strategy_used: self.name().to_string(),
+            chunks_processed: chunks_processed,
+        })
     }
     
     fn get_partial_results(&self) -> Vec<String> {

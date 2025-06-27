@@ -12,6 +12,7 @@ mod clipboard;
 mod ring_buffer_monitor;
 mod transcription_context;
 mod performance_logger;
+mod keyboard_monitor;
 #[cfg(target_os = "macos")]
 mod macos;
 
@@ -21,6 +22,7 @@ use processing_queue::{ProcessingQueue, ProcessingStatus};
 use recording_progress::ProgressTracker;
 use recording_workflow::RecordingWorkflow;
 use settings::SettingsManager;
+use keyboard_monitor::KeyboardMonitor;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -51,6 +53,7 @@ pub struct AppState {
     pub progress_tracker: Arc<ProgressTracker>,
     pub recording_workflow: Arc<RecordingWorkflow>,
     pub processing_queue: Arc<ProcessingQueue>,
+    pub keyboard_monitor: Arc<KeyboardMonitor>,
     #[cfg(target_os = "macos")]
     pub native_overlay: Arc<Mutex<macos::MacOSOverlay>>,
     #[cfg(target_os = "macos")]
@@ -111,7 +114,7 @@ async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle, devi
             // Wait for recording to stabilize
             tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
             
-            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(50));
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(200)); // Reduced frequency to avoid lock contention
             let mut tick_count = 0;
             let mut consecutive_not_recording = 0;
             
@@ -208,7 +211,7 @@ async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Re
             // Verify file exists and has content
             let file_path = recordings_dir.join(&filename);
             match tokio::fs::metadata(&file_path).await {
-                Ok(metadata) => {
+                Ok(_metadata) => {
                 }
                 Err(e) => {
                     eprintln!("Failed to verify recording file: {}", e);
@@ -248,7 +251,7 @@ async fn is_recording(state: State<'_, AppState>) -> Result<bool, String> {
 }
 
 #[tauri::command]
-async fn log_from_overlay(message: String) -> Result<(), String> {
+async fn log_from_overlay(_message: String) -> Result<(), String> {
     Ok(())
 }
 
@@ -990,6 +993,9 @@ async fn update_push_to_talk_shortcut(
         app_handle.emit("push-to-talk-pressed", ()).unwrap();
     }).map_err(|e| format!("Failed to register push-to-talk shortcut '{}': {}", shortcut, e))?;
     
+    // Update keyboard monitor with new push-to-talk key
+    state.keyboard_monitor.set_push_to_talk_key(&shortcut);
+    
     // Update the stored shortcut
     settings.update(|s| s.ui.push_to_talk_hotkey = shortcut.clone())
         .map_err(|e| format!("Failed to save settings: {}", e))?;
@@ -1091,6 +1097,9 @@ pub fn run() {
                 Arc::new(Mutex::new(overlay))
             };
             
+            // Create keyboard monitor
+            let keyboard_monitor = Arc::new(KeyboardMonitor::new(app.handle().clone()));
+            
             let state = AppState {
                 recorder: recorder_arc,
                 database: database_arc,
@@ -1103,6 +1112,7 @@ pub fn run() {
                 progress_tracker,
                 recording_workflow,
                 processing_queue: processing_queue_arc,
+                keyboard_monitor: keyboard_monitor.clone(),
                 #[cfg(target_os = "macos")]
                 native_overlay: native_overlay.clone(),
                 #[cfg(target_os = "macos")]
@@ -1216,6 +1226,10 @@ pub fn run() {
                 eprintln!("Failed to register push-to-talk shortcut '{}': {:?}", push_to_talk_hotkey, e);
             }
             
+            // Initialize keyboard monitor for push-to-talk key release detection
+            keyboard_monitor.set_push_to_talk_key(&push_to_talk_hotkey);
+            keyboard_monitor.clone().start_monitoring();
+            
             // Set up system tray
             let toggle_recording_item = MenuItemBuilder::with_id("toggle_recording", "Start Recording")
                 .accelerator(&toggle_hotkey)
@@ -1243,7 +1257,6 @@ pub fn run() {
             let tray_icon = tauri::image::Image::from_path(&icon_path)
                 .unwrap_or_else(|_| {
                     // Fallback to default icon if tray icon not found
-;
                     app.default_window_icon().unwrap().clone()
                 });
             
