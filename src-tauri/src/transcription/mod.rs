@@ -1,6 +1,11 @@
 use std::path::Path;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
+pub mod strategy;
+pub mod ring_buffer_transcriber;
+
+pub use strategy::{TranscriptionStrategy, TranscriptionConfig, TranscriptionResult, TranscriptionStrategySelector};
+
 pub struct Transcriber {
     context: WhisperContext,
 }
@@ -33,6 +38,10 @@ impl Transcriber {
         };
 
         Ok(Self { context })
+    }
+
+    pub fn transcribe_file(&self, audio_path: &Path) -> Result<String, String> {
+        self.transcribe(audio_path)
     }
 
     pub fn transcribe(&self, audio_path: &Path) -> Result<String, String> {

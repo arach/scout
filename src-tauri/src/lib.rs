@@ -9,6 +9,9 @@ mod sound;
 mod models;
 mod settings;
 mod clipboard;
+mod ring_buffer_monitor;
+mod transcription_context;
+mod performance_logger;
 #[cfg(target_os = "macos")]
 mod macos;
 
@@ -467,7 +470,7 @@ async fn transcribe_file(
         user_stop_time: None, // File upload doesn't have user stop time
     };
     
-    state.processing_queue.queue_job(job).await;
+    let _ = state.processing_queue.queue_job(job).await;
     
     // Emit status update
     app.emit("file-upload-complete", serde_json::json!({
@@ -518,6 +521,14 @@ async fn get_performance_metrics(
     limit: i32,
 ) -> Result<Vec<db::PerformanceMetrics>, String> {
     state.database.get_recent_performance_metrics(limit).await
+}
+
+#[tauri::command]
+async fn get_performance_metrics_for_transcript(
+    state: State<'_, AppState>,
+    transcript_id: i64,
+) -> Result<Option<db::PerformanceMetrics>, String> {
+    state.database.get_performance_metrics_for_transcript(transcript_id).await
 }
 
 #[tauri::command]
@@ -1308,6 +1319,7 @@ pub fn run() {
             transcribe_audio,
             save_transcript,
             get_performance_metrics,
+            get_performance_metrics_for_transcript,
             get_recent_transcripts,
             search_transcripts,
             read_audio_file,
