@@ -61,11 +61,13 @@ impl RecordingWorkflow {
             while let Some(command) = command_rx.recv().await {
                 match command {
                     RecordingCommand::StartRecording { device_name, response } => {
+                        println!("📝 Starting recording workflow...");
                         // Generate filename
                         let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
                         let filename = format!("recording_{}.wav", timestamp);
                         let path = recordings_dir.join(&filename);
                         
+                        println!("🔧 Initializing transcription context for real-time chunking...");
                         // Initialize transcription context for real-time chunking
                         let transcription_context = match TranscriptionContext::new_from_db(
                             database.clone(),

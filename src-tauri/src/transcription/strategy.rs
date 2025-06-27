@@ -254,11 +254,19 @@ impl TranscriptionStrategySelector {
         let ring_buffer_strategy = RingBufferTranscriptionStrategy::new(transcriber.clone(), temp_dir);
         let classic_strategy = ClassicTranscriptionStrategy::new(transcriber);
         
-        if ring_buffer_strategy.can_handle(duration_estimate, config) {
-            println!("🔄 Auto-selected ring buffer strategy for long recording");
+        println!("🔍 Strategy selection debug:");
+        println!("  Duration estimate: {:?}", duration_estimate);
+        println!("  Enable chunking: {}", config.enable_chunking);
+        println!("  Threshold: {}s", config.chunking_threshold_secs);
+        
+        let can_handle_ring = ring_buffer_strategy.can_handle(duration_estimate, config);
+        println!("  Ring buffer can handle: {}", can_handle_ring);
+        
+        if can_handle_ring {
+            println!("🔄 Auto-selected ring buffer strategy");
             Box::new(ring_buffer_strategy)
         } else {
-            println!("🎯 Auto-selected classic strategy for short recording");
+            println!("🎯 Auto-selected classic strategy");
             Box::new(classic_strategy)
         }
     }
