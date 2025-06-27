@@ -145,7 +145,7 @@ impl PerformanceLogger {
         }
         
         if let (Some(classic), Some(ring_buffer)) = (classic_time, ring_buffer_time) {
-            let improvement = if ring_buffer < classic {
+            let _improvement = if ring_buffer < classic {
                 let speedup = classic.as_secs_f64() / ring_buffer.as_secs_f64();
                 println!("✅ Ring Buffer is {:.2}x FASTER", speedup);
             } else {

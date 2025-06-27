@@ -26,7 +26,7 @@ use keyboard_monitor::KeyboardMonitor;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::{Emitter, Manager, State, WindowEvent, AppHandle};
+use tauri::{Emitter, Manager, State, WindowEvent};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tauri::tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, MenuItemBuilder};
