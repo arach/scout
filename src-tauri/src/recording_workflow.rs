@@ -67,10 +67,40 @@ impl RecordingWorkflow {
                         let path = recordings_dir.join(&filename);
                         
                         // Initialize transcription context for real-time chunking
-                        let transcription_context = TranscriptionContext::new_from_db(
+                        let transcription_context = match TranscriptionContext::new_from_db(
                             database.clone(),
                             models_dir.clone(),
-                        );
+                        ) {
+                            Ok(ctx) => ctx,
+                            Err(e) => {
+                                println!("⚠️ Failed to create transcription context: {}", e);
+                                println!("📦 Falling back to traditional processing queue");
+                                // Continue with traditional recording workflow without strategy integration
+                                let recorder = recorder.lock().await;
+                                match recorder.start_recording(&path, device_name.as_deref()) {
+                                    Ok(_) => {
+                                        let start_time = std::time::Instant::now();
+                                        current_recording = Some(ActiveRecording {
+                                            filename: filename.clone(),
+                                            start_time,
+                                            transcription_context: None, // No transcription context
+                                        });
+                                        
+                                        progress_tracker.update(RecordingProgress::Recording { 
+                                            filename: filename.clone(),
+                                            start_time: chrono::Utc::now().timestamp_millis() as u64
+                                        });
+                                        
+                                        let _ = response.send(Ok(filename));
+                                    }
+                                    Err(e) => {
+                                        progress_tracker.update(RecordingProgress::Idle);
+                                        let _ = response.send(Err(e));
+                                    }
+                                }
+                                continue;
+                            }
+                        };
                         
                         // Start recording
                         let recorder = recorder.lock().await;

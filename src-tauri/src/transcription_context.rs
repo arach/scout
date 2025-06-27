@@ -41,22 +41,25 @@ impl TranscriptionContext {
     pub fn new_from_db(
         database: Arc<Database>,
         models_dir: PathBuf,
-    ) -> Self {
-        let transcriber = Arc::new(Mutex::new(
-            Transcriber::new(&models_dir)
-                .unwrap_or_else(|_| panic!("Failed to create transcriber"))
-        ));
+    ) -> Result<Self, String> {
+        let transcriber = match Transcriber::new(&models_dir) {
+            Ok(t) => Arc::new(Mutex::new(t)),
+            Err(e) => {
+                println!("⚠️ Failed to create transcriber: {}", e);
+                return Err(format!("Failed to create transcriber: {}", e));
+            }
+        };
         
         let performance_logger = PerformanceLogger::new(database);
         
-        Self {
+        Ok(Self {
             transcriber,
             temp_dir: models_dir,
             config: TranscriptionConfig::default(),
             current_strategy: None,
             performance_logger: Some(performance_logger),
             recording_start_time: None,
-        }
+        })
     }
     
     /// Update transcription configuration
