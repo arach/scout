@@ -252,8 +252,8 @@ impl RecordingWorkflow {
                                             &transcription_result.text,
                                             duration_ms,
                                             Some(&metadata),
-                                            device_info.as_ref().map(|d| d.name.as_str()),
-                                            Some(&recordings_dir.join(&active_recording.filename).to_string_lossy())
+                                            Some(&recordings_dir.join(&active_recording.filename).to_string_lossy()),
+                                            None // TODO: Calculate actual file size
                                         ).await {
                                             Ok(transcript) => {
                                                 println!("💾 Transcript saved to database with ID: {}", transcript.id);
