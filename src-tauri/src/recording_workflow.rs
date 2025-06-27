@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use chrono;
+use tauri::Emitter;
 
 use crate::audio::AudioRecorder;
 use crate::recording_progress::RecordingProgress;
@@ -52,6 +53,7 @@ impl RecordingWorkflow {
         processing_queue: Arc<ProcessingQueue>,
         database: Arc<Database>,
         models_dir: PathBuf,
+        app_handle: tauri::AppHandle,
     ) -> Self {
         let (command_tx, mut command_rx) = mpsc::channel::<RecordingCommand>(100);
         
@@ -239,17 +241,44 @@ impl RecordingWorkflow {
                                                 transcription_result.text.len(),
                                                 transcription_result.processing_time_ms as f64 / 1000.0);
                                         
-                                        // Skip traditional processing queue since we already have the result
-                                        progress_tracker.update(RecordingProgress::Idle);
+                                        // Save transcript to database
+                                        let metadata = serde_json::json!({
+                                            "model_used": transcription_result.strategy_used,
+                                            "chunks_processed": transcription_result.chunks_processed,
+                                            "processing_type": "ring_buffer"
+                                        }).to_string();
                                         
-                                        let _ = response.send(Ok(RecordingResult {
-                                            filename: active_recording.filename,
-                                            transcript: Some(transcription_result.text),
+                                        match database.save_transcript(
+                                            &transcription_result.text,
                                             duration_ms,
-                                            device_name: device_info.as_ref().map(|d| d.name.clone()),
-                                            sample_rate: device_info.as_ref().map(|d| d.sample_rate),
-                                            channels: device_info.as_ref().map(|d| d.channels),
-                                        }));
+                                            Some(&metadata),
+                                            device_info.as_ref().map(|d| d.name.as_str()),
+                                            Some(&recordings_dir.join(&active_recording.filename).to_string_lossy())
+                                        ).await {
+                                            Ok(transcript) => {
+                                                println!("💾 Transcript saved to database with ID: {}", transcript.id);
+                                                
+                                                // Emit transcript-created event
+                                                let _ = app_handle.emit("transcript-created", &transcript);
+                                                
+                                                // Update to idle state
+                                                progress_tracker.update(RecordingProgress::Idle);
+                                                
+                                                let _ = response.send(Ok(RecordingResult {
+                                                    filename: active_recording.filename,
+                                                    transcript: Some(transcription_result.text),
+                                                    duration_ms,
+                                                    device_name: device_info.as_ref().map(|d| d.name.clone()),
+                                                    sample_rate: device_info.as_ref().map(|d| d.sample_rate),
+                                                    channels: device_info.as_ref().map(|d| d.channels),
+                                                }));
+                                            }
+                                            Err(e) => {
+                                                eprintln!("❌ Failed to save transcript: {}", e);
+                                                progress_tracker.update(RecordingProgress::Idle);
+                                                let _ = response.send(Err(format!("Failed to save transcript: {}", e)));
+                                            }
+                                        }
                                         continue;
                                     }
                                     Err(e) => {
@@ -276,7 +305,7 @@ impl RecordingWorkflow {
                                 filename: active_recording.filename.clone(),
                                 audio_path,
                                 duration_ms,
-                                app_handle: None, // TODO: pass app handle for transcript-created events
+                                app_handle: Some(app_handle.clone()),
                                 queue_entry_time: tokio::time::Instant::now(),
                                 user_stop_time: Some(tokio::time::Instant::now()), // Recording just stopped
                             };
