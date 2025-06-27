@@ -5,12 +5,16 @@ use std::sync::mpsc;
 use std::any::TypeId;
 use super::vad::VoiceActivityDetector;
 
+// Type alias for sample callback
+pub type SampleCallback = Arc<dyn Fn(&[f32]) + Send + Sync>;
+
 pub struct AudioRecorder {
     control_tx: Option<mpsc::Sender<RecorderCommand>>,
     is_recording: Arc<Mutex<bool>>,
     vad_enabled: Arc<Mutex<bool>>,
     current_audio_level: Arc<Mutex<f32>>,
     current_device_info: Arc<Mutex<Option<DeviceInfo>>>,
+    sample_callback: Arc<Mutex<Option<SampleCallback>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -26,6 +30,7 @@ enum RecorderCommand {
     SetVadEnabled(bool),
     StartAudioLevelMonitoring(Option<String>), // device_name
     StopAudioLevelMonitoring,
+    SetSampleCallback(Option<SampleCallback>),
 }
 
 impl AudioRecorder {
@@ -36,6 +41,7 @@ impl AudioRecorder {
             vad_enabled: Arc::new(Mutex::new(false)),
             current_audio_level: Arc::new(Mutex::new(0.0)),
             current_device_info: Arc::new(Mutex::new(None)),
+            sample_callback: Arc::new(Mutex::new(None)),
         }
     }
     
@@ -54,9 +60,10 @@ impl AudioRecorder {
         let vad_enabled = self.vad_enabled.clone();
         let audio_level = self.current_audio_level.clone();
         let device_info = self.current_device_info.clone();
+        let sample_callback = self.sample_callback.clone();
 
         thread::spawn(move || {
-            let mut recorder = AudioRecorderWorker::new(is_recording, vad_enabled, audio_level, device_info);
+            let mut recorder = AudioRecorderWorker::new(is_recording, vad_enabled, audio_level, device_info, sample_callback);
             
             while let Ok(cmd) = rx.recv() {
                 match cmd {
@@ -82,6 +89,9 @@ impl AudioRecorder {
                         if let Err(e) = recorder.stop_audio_level_monitoring() {
                             eprintln!("Failed to stop audio level monitoring: {}", e);
                         }
+                    }
+                    RecorderCommand::SetSampleCallback(callback) => {
+                        *recorder.sample_callback.lock().unwrap() = callback;
                     }
                 }
             }
@@ -135,6 +145,18 @@ impl AudioRecorder {
         *self.vad_enabled.lock().unwrap()
     }
     
+    pub fn set_sample_callback(&self, callback: Option<SampleCallback>) -> Result<(), String> {
+        if self.control_tx.is_none() {
+            return Err("Recorder not initialized".to_string());
+        }
+
+        self.control_tx
+            .as_ref()
+            .unwrap()
+            .send(RecorderCommand::SetSampleCallback(callback))
+            .map_err(|e| format!("Failed to send sample callback command: {}", e))
+    }
+    
     pub fn start_audio_level_monitoring(&self, device_name: Option<&str>) -> Result<(), String> {
         if self.control_tx.is_none() {
             return Err("Recorder not initialized".to_string());
@@ -175,10 +197,11 @@ struct AudioRecorderWorker {
     sample_format: Option<cpal::SampleFormat>,
     current_audio_level: Arc<Mutex<f32>>,
     current_device_info: Arc<Mutex<Option<DeviceInfo>>>,
+    sample_callback: Arc<Mutex<Option<SampleCallback>>>,
 }
 
 impl AudioRecorderWorker {
-    fn new(is_recording: Arc<Mutex<bool>>, vad_enabled: Arc<Mutex<bool>>, audio_level: Arc<Mutex<f32>>, device_info: Arc<Mutex<Option<DeviceInfo>>>) -> Self {
+    fn new(is_recording: Arc<Mutex<bool>>, vad_enabled: Arc<Mutex<bool>>, audio_level: Arc<Mutex<f32>>, device_info: Arc<Mutex<Option<DeviceInfo>>>, sample_callback: Arc<Mutex<Option<SampleCallback>>>) -> Self {
         Self {
             stream: None,
             monitoring_stream: None,
@@ -192,6 +215,7 @@ impl AudioRecorderWorker {
             sample_format: None,
             current_audio_level: audio_level,
             current_device_info: device_info,
+            sample_callback,
         }
     }
 
@@ -343,6 +367,7 @@ impl AudioRecorderWorker {
                 is_recording.clone(),
                 self.sample_count.clone(),
                 self.current_audio_level.clone(),
+                self.sample_callback.clone(),
                 err_fn,
             ),
             cpal::SampleFormat::U16 => {
@@ -355,6 +380,7 @@ impl AudioRecorderWorker {
                 is_recording.clone(),
                 self.sample_count.clone(),
                 self.current_audio_level.clone(),
+                self.sample_callback.clone(),
                 err_fn,
             ),
             _ => return Err("Unsupported sample format".to_string()),
@@ -438,6 +464,7 @@ impl AudioRecorderWorker {
         is_recording: Arc<Mutex<bool>>,
         sample_count: Arc<Mutex<u64>>,
         audio_level: Arc<Mutex<f32>>,
+        sample_callback: Arc<Mutex<Option<SampleCallback>>>,
         err_fn: impl FnMut(cpal::StreamError) + Send + 'static,
     ) -> Result<cpal::Stream, String>
     where
@@ -490,6 +517,28 @@ impl AudioRecorderWorker {
                                 writer.write_sample(sample).ok();
                             }
                             *sample_count.lock().unwrap() += samples_written as u64;
+                        }
+                        
+                        // Call sample callback for ring buffer processing
+                        if let Some(ref callback) = *sample_callback.lock().unwrap() {
+                            // Convert samples to f32 for consistent callback interface
+                            let f32_samples: Vec<f32> = if TypeId::of::<T>() == TypeId::of::<f32>() {
+                                // Already f32 - just copy
+                                data.iter().map(|&sample| unsafe { *(&sample as *const T as *const f32) }).collect()
+                            } else if TypeId::of::<T>() == TypeId::of::<i16>() {
+                                // Convert i16 to f32
+                                data.iter().map(|&sample| {
+                                    let s = unsafe { *(&sample as *const T as *const i16) };
+                                    s as f32 / 32768.0
+                                }).collect()
+                            } else {
+                                // Fallback - should not happen with our current support
+                                Vec::new()
+                            };
+                            
+                            if !f32_samples.is_empty() {
+                                callback(&f32_samples);
+                            }
                         }
                     }
                 },

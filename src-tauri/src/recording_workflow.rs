@@ -41,6 +41,7 @@ struct ActiveRecording {
     filename: String,
     start_time: std::time::Instant,
     transcription_context: Option<TranscriptionContext>,
+    sample_channel: Option<tokio::sync::mpsc::UnboundedReceiver<Vec<f32>>>,
 }
 
 impl RecordingWorkflow {
@@ -86,6 +87,7 @@ impl RecordingWorkflow {
                                             filename: filename.clone(),
                                             start_time,
                                             transcription_context: None, // No transcription context
+                                            sample_channel: None,
                                         });
                                         
                                         progress_tracker.update(RecordingProgress::Recording { 
@@ -104,24 +106,82 @@ impl RecordingWorkflow {
                             }
                         };
                         
-                        // Start recording
-                        let recorder = recorder.lock().await;
-                        match recorder.start_recording(&path, device_name.as_deref()) {
+                        // Start transcription strategy first to get ring buffer setup
+                        let mut transcription_context = transcription_context;
+                        match transcription_context.start_recording(&path, None).await {
                             Ok(_) => {
-                                let start_time = std::time::Instant::now();
+                                // Set up sample callback to bridge AudioRecorder to RingBuffer
+                                let strategy_name = transcription_context.current_strategy_name()
+                                    .unwrap_or_else(|| "unknown".to_string());
                                 
-                                // Start transcription strategy with estimated duration (unknown at start)
-                                let mut transcription_context = transcription_context;
-                                match transcription_context.start_recording(&path, None).await {
+                                let sample_rx_option = if strategy_name == "ring_buffer" {
+                                    println!("🔗 Detected ring buffer strategy - connecting audio samples");
+                                    
+                                    // Create a channel to send samples from AudioRecorder thread to transcription context
+                                    let (sample_tx, sample_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<f32>>();
+                                    
+                                    // Create callback for AudioRecorder
+                                    let sample_callback = std::sync::Arc::new(move |samples: &[f32]| {
+                                        // Send samples to transcription context asynchronously
+                                        let samples_vec = samples.to_vec();
+                                        if let Err(_) = sample_tx.send(samples_vec) {
+                                            // Channel closed, probably shutting down
+                                        }
+                                    });
+                                    
+                                    // Set the callback on the recorder
+                                    let recorder = recorder.lock().await;
+                                    if let Err(e) = recorder.set_sample_callback(Some(sample_callback)) {
+                                        eprintln!("Failed to set sample callback: {}", e);
+                                        None
+                                    } else {
+                                        println!("✅ AudioRecorder callback set - samples will be captured");
+                                        drop(recorder);
+                                        println!("🔗 Connected AudioRecorder to RingBuffer via sample forwarding");
+                                        Some(sample_rx)
+                                    }
+                                } else {
+                                    None
+                                };
+                                
+                                // Start recording
+                                let recorder = recorder.lock().await;
+                                match recorder.start_recording(&path, device_name.as_deref()) {
                                     Ok(_) => {
+                                        let start_time = std::time::Instant::now();
                                         let strategy_name = transcription_context.current_strategy_name()
                                             .unwrap_or_else(|| "unknown".to_string());
                                         println!("🎙️ Started recording with transcription strategy: {}", strategy_name);
+                                        
+                                        // Create sample processing task if we have ring buffer
+                                        if let Some(mut sample_rx) = sample_rx_option {
+                                            if let Some(ring_buffer) = transcription_context.get_ring_buffer() {
+                                                let ring_buffer_clone = ring_buffer.clone();
+                                                tokio::spawn(async move {
+                                                    let mut sample_count = 0;
+                                                    while let Some(samples) = sample_rx.recv().await {
+                                                        sample_count += samples.len();
+                                                        
+                                                        // Feed samples directly to ring buffer
+                                                        if let Err(e) = ring_buffer_clone.add_samples(&samples) {
+                                                            eprintln!("Failed to add samples to ring buffer: {}", e);
+                                                        }
+                                                        
+                                                        if sample_count % 48000 == 0 { // Log every second of audio
+                                                            println!("🔊 Fed {} samples to ring buffer", sample_count);
+                                                        }
+                                                    }
+                                                    println!("🔊 Ring buffer feeding complete - {} samples processed", sample_count);
+                                                });
+                                                println!("📡 Ring buffer sample processing task started");
+                                            }
+                                        }
                                         
                                         current_recording = Some(ActiveRecording {
                                             filename: filename.clone(),
                                             start_time,
                                             transcription_context: Some(transcription_context),
+                                            sample_channel: None, // Sample processing is handled in spawned task
                                         });
                                         
                                         // Update progress to Recording state
@@ -195,6 +255,16 @@ impl RecordingWorkflow {
                                     Err(e) => {
                                         println!("❌ Transcription failed: {}", e);
                                         println!("📦 Falling back to traditional processing queue");
+                                        
+                                        // Log failure metrics for debugging
+                                        let fallback_duration = active_recording.start_time.elapsed();
+                                        println!("📊 === FALLBACK PERFORMANCE METRICS ===");
+                                        println!("🎙️  Recording Duration: {:.2}s", fallback_duration.as_secs_f64());
+                                        println!("❌ Strategy Failed: ring_buffer");
+                                        println!("🔄 Reason: {}", e);
+                                        println!("📦 Falling back to: traditional processing queue");
+                                        println!("=======================================");
+                                        
                                         // Fall back to traditional processing queue
                                     }
                                 }

@@ -21,8 +21,8 @@ impl RingBufferMonitor {
             ring_buffer,
             chunked_transcriber: None,
             last_chunk_time: Duration::ZERO,
-            chunk_duration: Duration::from_secs(10), // 10-second chunks
-            threshold_duration: Duration::from_secs(10), // Start chunking after 10 seconds
+            chunk_duration: Duration::from_secs(5), // 5-second chunks
+            threshold_duration: Duration::from_secs(5), // Start chunking after 5 seconds
             recording_start_time: Instant::now(),
         }
     }
@@ -30,13 +30,15 @@ impl RingBufferMonitor {
     /// Start monitoring the ring buffer recording
     pub async fn start_monitoring(
         mut self,
-        transcriber: Arc<tokio::sync::Mutex<crate::transcription::Transcriber>>,
-        temp_dir: std::path::PathBuf,
+        ring_transcriber: crate::transcription::ring_buffer_transcriber::RingBufferTranscriber,
     ) -> (tokio::task::JoinHandle<Self>, mpsc::Sender<()>) {
         let (stop_tx, mut stop_rx) = mpsc::channel::<()>(1);
         
         let handle = tokio::spawn(async move {
             println!("📊 Ring buffer monitor started");
+            
+            // Store the ring transcriber for later use
+            let mut ring_transcriber = Some(ring_transcriber);
             
             // Check every 2 seconds
             let mut interval = time::interval(Duration::from_secs(2));
@@ -54,22 +56,27 @@ impl RingBufferMonitor {
                 
                 let elapsed = self.recording_start_time.elapsed();
                 let buffer_duration = self.ring_buffer.get_duration();
+                let sample_count = self.ring_buffer.sample_count();
+                
+                // Debug ring buffer status
+                if elapsed.as_secs() % 2 == 0 { // Log every 2 seconds to avoid spam
+                    println!("📊 Ring buffer status: elapsed={:.1}s, buffer_duration={:.1}s, samples={}", 
+                             elapsed.as_secs_f64(), buffer_duration.as_secs_f64(), sample_count);
+                }
                 
                 // Check if we should start chunking
                 if elapsed > self.threshold_duration && self.chunked_transcriber.is_none() {
-                    println!("🚀 Recording exceeds {}s, initializing ring buffer transcription", 
+                    println!("🚀 Recording exceeds {}s, starting ring buffer transcription", 
                              self.threshold_duration.as_secs());
                     
-                    // Convert Arc<tokio::sync::Mutex<_>> to Arc<std::sync::Mutex<_>>
-                    let std_transcriber = {
-                        let transcriber_guard = transcriber.lock().await;
-                        // We need to extract the transcriber and wrap it in std::sync::Mutex
-                        // This is a bit tricky - we'll need to modify the approach
-                        
-                        // For now, let's create a placeholder - we'll fix this in integration
-                        println!("⚠️  TODO: Create transcriber adapter for ring buffer");
-                        continue;
-                    };
+                    if sample_count == 0 {
+                        println!("⚠️  Ring buffer has no samples - audio may not be flowing to ring buffer");
+                    }
+                    
+                    // Use the pre-created ring transcriber
+                    if let Some(transcriber) = ring_transcriber.take() {
+                        self.chunked_transcriber = Some(transcriber);
+                    }
                 }
                 
                 // Check if we should create a new chunk

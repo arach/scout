@@ -277,6 +277,21 @@ function App() {
       }
     });
     
+    // Listen for push-to-talk release events
+    const unsubscribePushToTalkRelease = listen('push-to-talk-released', async () => {
+      console.log('Push-to-talk key released');
+      
+      try {
+        const recording = await invoke<boolean>("is_recording");
+        if (recording) {
+          console.log('Stopping recording on push-to-talk release');
+          stopRecording();
+        }
+      } catch (error) {
+        console.error("Failed to handle push-to-talk release:", error);
+      }
+    });
+    
     // Listen for recording progress updates
     const unsubscribeProgress = listen('recording-progress', (event) => {
       const progress = event.payload as any;
@@ -485,6 +500,7 @@ function App() {
     return () => {
       unsubscribe.then(fn => fn());
       unsubscribePushToTalk.then(fn => fn());
+      unsubscribePushToTalkRelease.then(fn => fn());
       unsubscribeProgress.then(fn => fn());
       unsubscribeProcessing.then(fn => fn());
       unsubscribeFileUpload.then(fn => fn());
