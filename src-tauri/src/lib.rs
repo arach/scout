@@ -908,7 +908,9 @@ async fn update_global_shortcut(
     global_shortcut.on_shortcut(shortcut.as_str(), move |_app, _event, _shortcut| {
         // Note: Dynamic shortcuts currently always use toggle mode
         // TODO: Support recording mode in dynamic shortcuts
-        app_handle.emit("toggle-recording", ()).unwrap();
+        if let Err(e) = app_handle.emit("toggle-recording", ()) {
+            eprintln!("Failed to emit toggle-recording event: {}", e);
+        }
     }).map_err(|e| format!("Failed to register shortcut '{}': {}", shortcut, e))?;
     
     // Update the stored shortcut
@@ -990,7 +992,9 @@ async fn update_push_to_talk_shortcut(
     
     // Register the new push-to-talk shortcut
     global_shortcut.on_shortcut(shortcut.as_str(), move |_app, _event, _shortcut| {
-        app_handle.emit("push-to-talk-pressed", ()).unwrap();
+        if let Err(e) = app_handle.emit("push-to-talk-pressed", ()) {
+            eprintln!("Failed to emit push-to-talk-pressed event: {}", e);
+        }
     }).map_err(|e| format!("Failed to register push-to-talk shortcut '{}': {}", shortcut, e))?;
     
     // Update keyboard monitor with new push-to-talk key
@@ -1088,19 +1092,25 @@ pub fn run() {
                 
                 // Set up callback for when recording starts from overlay
                 overlay.set_on_start_recording(move || {
-                    app_handle.emit("native-overlay-start-recording", ()).unwrap();
+                    if let Err(e) = app_handle.emit("native-overlay-start-recording", ()) {
+                        eprintln!("Failed to emit native-overlay-start-recording event: {}", e);
+                    }
                 });
                 
                 let app_handle = app.handle().clone();
                 // Set up callback for when recording stops from overlay
                 overlay.set_on_stop_recording(move || {
-                    app_handle.emit("native-overlay-stop-recording", ()).unwrap();
+                    if let Err(e) = app_handle.emit("native-overlay-stop-recording", ()) {
+                        eprintln!("Failed to emit native-overlay-stop-recording event: {}", e);
+                    }
                 });
                 
                 let app_handle = app.handle().clone();
                 // Set up callback for when recording is cancelled from overlay
                 overlay.set_on_cancel_recording(move || {
-                    app_handle.emit("native-overlay-cancel-recording", ()).unwrap();
+                    if let Err(e) = app_handle.emit("native-overlay-cancel-recording", ()) {
+                        eprintln!("Failed to emit native-overlay-cancel-recording event: {}", e);
+                    }
                 });
                 
                 // Show the overlay at startup
@@ -1225,7 +1235,9 @@ pub fn run() {
             // Register toggle shortcut
             let app_handle_toggle = app_handle.clone();
             if let Err(e) = app.global_shortcut().on_shortcut(toggle_hotkey.as_str(), move |_app, _event, _shortcut| {
-                app_handle_toggle.emit("toggle-recording", ()).unwrap();
+                if let Err(e) = app_handle_toggle.emit("toggle-recording", ()) {
+                    eprintln!("Failed to emit toggle-recording event: {}", e);
+                }
             }) {
                 eprintln!("Failed to register toggle shortcut '{}': {:?}", toggle_hotkey, e);
             }
@@ -1233,7 +1245,9 @@ pub fn run() {
             // Register push-to-talk shortcut
             let app_handle_ptt = app_handle.clone();
             if let Err(e) = app.global_shortcut().on_shortcut(push_to_talk_hotkey.as_str(), move |_app, _event, _shortcut| {
-                app_handle_ptt.emit("push-to-talk-pressed", ()).unwrap();
+                if let Err(e) = app_handle_ptt.emit("push-to-talk-pressed", ()) {
+                    eprintln!("Failed to emit push-to-talk-pressed event: {}", e);
+                }
             }) {
                 eprintln!("Failed to register push-to-talk shortcut '{}': {:?}", push_to_talk_hotkey, e);
             }
@@ -1290,7 +1304,9 @@ pub fn run() {
                             }
                         }
                         "toggle_recording" => {
-                            app.emit("toggle-recording", ()).unwrap();
+                            if let Err(e) = app.emit("toggle-recording", ()) {
+                                eprintln!("Failed to emit toggle-recording event: {}", e);
+                            }
                         }
                         "quit" => {
                             app.exit(0);
@@ -1320,14 +1336,18 @@ pub fn run() {
                 .build(app)?;
             
             // Handle window events to hide instead of close
-            let window_for_events = app.get_webview_window("main").unwrap().clone();
-            app.get_webview_window("main").unwrap().on_window_event(move |event| {
+            if let Some(main_window) = app.get_webview_window("main") {
+                let window_for_events = main_window.clone();
+                main_window.on_window_event(move |event| {
                 if let WindowEvent::CloseRequested { api, .. } = &event {
                     // Hide window instead of closing
                     api.prevent_close();
                     let _ = window_for_events.hide();
                 }
             });
+            } else {
+                eprintln!("Warning: Could not find main window for event handling");
+            }
             
             Ok(())
         })

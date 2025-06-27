@@ -474,6 +474,11 @@ function App() {
     // Listen for transcript-created events (pub/sub for real-time updates)
     const unsubscribeTranscriptCreated = listen('transcript-created', async (event) => {
       const newTranscript = event.payload as Transcript;
+      console.log('📝 Transcript created event received:', {
+        id: newTranscript.id,
+        textLength: newTranscript.text?.length || 0,
+        duration: newTranscript.duration_ms
+      });
       
       // Add the new transcript to the list
       setTranscripts(prev => {
@@ -486,6 +491,7 @@ function App() {
       });
       
       // Clear processing state
+      console.log('🎯 Clearing processing state');
       setIsProcessing(false);
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 2000);
@@ -770,13 +776,19 @@ function App() {
     
     // Stop the backend recording and wait for result
     try {
+      console.log("🛑 Calling stop_recording...");
       const result = await invoke("stop_recording");
-      console.log("Recording stopped, result:", result);
+      console.log("✅ Recording stopped, result:", result);
       // The transcript-created event will handle updating the UI
       // If no transcript was immediately available, we'll stay in processing state
       // until the processing-status or transcript-created events fire
+      
+      // If we got a transcript immediately (ring buffer strategy), ensure UI updates
+      if (result && (result as any).transcript) {
+        console.log("📝 Got immediate transcript from ring buffer");
+      }
     } catch (error) {
-      console.error("Failed to stop recording:", error);
+      console.error("❌ Failed to stop recording:", error);
       setIsProcessing(false); // Reset processing state on error
     }
   };

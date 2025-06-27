@@ -1,6 +1,7 @@
 use rdev::{EventType, Key, Event};
 use std::sync::{Arc, Mutex};
 use std::collections::HashSet;
+use std::panic::AssertUnwindSafe;
 use tauri::{AppHandle, Emitter};
 
 pub struct KeyboardMonitor {
@@ -82,14 +83,29 @@ impl KeyboardMonitor {
     pub fn start_monitoring(self: Arc<Self>) {
         let monitor = self.clone();
         
-        // Spawn a thread to handle keyboard events
-        std::thread::spawn(move || {
-            if let Err(e) = rdev::listen(move |event: Event| {
-                monitor.handle_event(event);
-            }) {
-                eprintln!("❌ Failed to start keyboard monitoring: {:?}", e);
-            }
-        });
+        // Spawn a thread to handle keyboard events with panic catching
+        std::thread::Builder::new()
+            .name("keyboard-monitor".to_string())
+            .spawn(move || {
+                // Catch any panics to prevent app crash
+                let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                    if let Err(e) = rdev::listen(move |event: Event| {
+                        // Wrap event handling in panic catch as well
+                        let _ = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                            monitor.handle_event(event);
+                        }));
+                    }) {
+                        eprintln!("❌ Failed to start keyboard monitoring: {:?}", e);
+                    }
+                }));
+                
+                if let Err(e) = result {
+                    eprintln!("❌ Keyboard monitor thread panicked: {:?}", e);
+                }
+            })
+            .unwrap_or_else(|e| {
+                eprintln!("❌ Failed to spawn keyboard monitor thread: {}", e);
+            });
     }
 
     fn handle_event(&self, event: Event) {
