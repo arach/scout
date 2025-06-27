@@ -42,7 +42,11 @@ impl TranscriptionContext {
         database: Arc<Database>,
         models_dir: PathBuf,
     ) -> Result<Self, String> {
-        let transcriber = match Transcriber::new(&models_dir) {
+        // Find a suitable model file in the models directory
+        let model_path = Self::find_model_file(&models_dir)?;
+        println!("🔍 Using model file: {:?}", model_path);
+        
+        let transcriber = match Transcriber::new(&model_path) {
             Ok(t) => Arc::new(Mutex::new(t)),
             Err(e) => {
                 println!("⚠️ Failed to create transcriber: {}", e);
@@ -188,5 +192,38 @@ impl TranscriptionContext {
         config.force_strategy = force_strategy.map(|s| s.to_string());
         
         Self::new(transcriber, temp_dir, Some(config))
+    }
+    
+    /// Find the best available model file in the models directory
+    fn find_model_file(models_dir: &Path) -> Result<PathBuf, String> {
+        // Preferred model order (fastest to slowest, smallest to largest)
+        let preferred_models = [
+            "ggml-tiny.en.bin",
+            "ggml-base.en.bin", 
+            "ggml-small.en.bin",
+            "ggml-medium.en.bin",
+            "ggml-large.bin",
+        ];
+        
+        for model_name in &preferred_models {
+            let model_path = models_dir.join(model_name);
+            if model_path.exists() {
+                println!("✅ Found model: {}", model_name);
+                return Ok(model_path);
+            }
+        }
+        
+        // If no preferred models found, look for any .bin file
+        if let Ok(entries) = std::fs::read_dir(models_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|s| s.to_str()) == Some("bin") {
+                    println!("✅ Found fallback model: {:?}", path.file_name());
+                    return Ok(path);
+                }
+            }
+        }
+        
+        Err(format!("No whisper model files found in {:?}. Please download models first.", models_dir))
     }
 }
