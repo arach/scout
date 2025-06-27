@@ -84,7 +84,7 @@ impl KeyboardMonitor {
         let monitor = self.clone();
         
         // Spawn a thread to handle keyboard events with panic catching
-        std::thread::Builder::new()
+        match std::thread::Builder::new()
             .name("keyboard-monitor".to_string())
             .spawn(move || {
                 // Catch any panics to prevent app crash
@@ -102,10 +102,14 @@ impl KeyboardMonitor {
                 if let Err(e) = result {
                     eprintln!("❌ Keyboard monitor thread panicked: {:?}", e);
                 }
-            })
-            .unwrap_or_else(|e| {
+            }) {
+            Ok(_handle) => {
+                println!("✅ Keyboard monitor thread started successfully");
+            }
+            Err(e) => {
                 eprintln!("❌ Failed to spawn keyboard monitor thread: {}", e);
-            });
+            }
+        }
     }
 
     fn handle_event(&self, event: Event) {

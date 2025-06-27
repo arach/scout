@@ -71,7 +71,7 @@ impl ProcessingQueue {
                     let job = queue.remove(0);
                     
                     // Track when processing starts
-                    let processing_start_time = Instant::now();
+                    let _processing_start_time = Instant::now();
                     let queue_time_ms = job.queue_entry_time.elapsed().as_millis() as i32;
                     
                     // Update status
