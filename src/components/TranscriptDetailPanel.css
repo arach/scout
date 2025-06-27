@@ -115,6 +115,35 @@
     white-space: nowrap;
 }
 
+/* Performance metrics styling */
+.metadata-ratio {
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-weight: normal;
+}
+
+.metadata-badge {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 500;
+    margin-left: 6px;
+    white-space: nowrap;
+}
+
+.metadata-badge.success {
+    background-color: rgba(16, 185, 129, 0.1);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.metadata-badge.warning {
+    background-color: rgba(245, 158, 11, 0.1);
+    color: #f59e0b;
+    border: 1px solid rgba(245, 158, 11, 0.2);
+}
+
 /* Transcript section */
 .detail-transcript {
     margin-bottom: 24px;

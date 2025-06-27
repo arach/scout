@@ -195,6 +195,7 @@ impl ProcessingQueue {
                                                             user_perceived_latency_ms,
                                                             Some(queue_time_ms),
                                                             Some(model_name),
+                                                            Some("file_upload"), // Strategy for file uploads
                                                             file_size,
                                                             audio_format.as_deref(),
                                                             true,
