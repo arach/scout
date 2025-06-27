@@ -194,6 +194,7 @@ impl RecordingWorkflow {
                                     }
                                     Err(e) => {
                                         println!("❌ Transcription failed: {}", e);
+                                        println!("📦 Falling back to traditional processing queue");
                                         // Fall back to traditional processing queue
                                     }
                                 }
