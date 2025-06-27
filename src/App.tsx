@@ -726,15 +726,20 @@ function App() {
     });
     isRecordingRef.current = false;
     
-    // Stop the backend recording
-    invoke("stop_recording")
-      .then(() => {
-        // Set processing state
-        setIsProcessing(true);
-      })
-      .catch(error => {
-        console.error("Failed to stop recording:", error);
-      });
+    // Set processing state immediately
+    setIsProcessing(true);
+    
+    // Stop the backend recording and wait for result
+    try {
+      const result = await invoke("stop_recording");
+      console.log("Recording stopped, result:", result);
+      // The transcript-created event will handle updating the UI
+      // If no transcript was immediately available, we'll stay in processing state
+      // until the processing-status or transcript-created events fire
+    } catch (error) {
+      console.error("Failed to stop recording:", error);
+      setIsProcessing(false); // Reset processing state on error
+    }
   };
 
   const cancelRecording = async () => {
