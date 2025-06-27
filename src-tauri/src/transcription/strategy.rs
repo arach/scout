@@ -199,6 +199,24 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
         
         println!("🎯 Ring buffer strategy: Processing audio file with optimized pipeline");
         
+        // Small delay to ensure audio file is fully written
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        
+        // Check if the file exists and has content
+        if !recording_path.exists() {
+            return Err("Recording file does not exist".to_string());
+        }
+        
+        let file_size = std::fs::metadata(&recording_path)
+            .map_err(|e| format!("Failed to read file metadata: {}", e))?
+            .len();
+            
+        if file_size < 1000 { // Less than 1KB is likely empty or corrupt
+            return Err(format!("Audio file is too small ({} bytes), likely contains no audio data", file_size));
+        }
+        
+        println!("📁 Audio file validated: {} bytes", file_size);
+        
         // Use the transcriber to process the complete recording
         // This is faster than the traditional processing queue because:
         // 1. No queue wait time - immediate processing
