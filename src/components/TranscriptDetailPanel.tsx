@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { SimpleAudioPlayer } from './SimpleAudioPlayer';
 import './TranscriptDetailPanel.css';
 
@@ -51,7 +51,7 @@ export function TranscriptDetailPanel({
             // animations and React's StrictMode double-render in dev.
             timer = setTimeout(() => {
                 setCanRenderPlayer(true);
-            }, 200);
+            }, 200) as unknown as number;
         } else {
             setCanRenderPlayer(false);
         }

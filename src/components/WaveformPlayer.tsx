@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import WavesurferPlayer from '@wavesurfer/react';
 import './WaveformPlayer.css';
 import { useAudioBlob } from '../hooks/useAudioBlob';

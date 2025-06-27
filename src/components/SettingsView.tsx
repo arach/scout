@@ -1,9 +1,8 @@
-import { Fragment, useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Sparkles, FolderOpen, ArrowUpLeft, ArrowUp, ArrowUpRight, ArrowLeft, ArrowRight, ArrowDownLeft, ArrowDown, ArrowDownRight } from 'lucide-react';
 import { ModelManager } from './ModelManager';
 import { Dropdown } from './Dropdown';
 import { invoke } from '@tauri-apps/api/core';
-import { formatShortcut } from '../lib/formatShortcut';
 import { formatShortcutJSX } from '../lib/formatShortcutJSX';
 import './SettingsView.css';
 import './SettingsView-spacing.css';
@@ -18,7 +17,6 @@ interface SettingsViewProps {
     overlayPosition: string;
     autoCopy: boolean;
     autoPaste: boolean;
-    visualMicPicker: boolean;
     theme: 'light' | 'dark' | 'system';
     soundEnabled: boolean;
     startSound: string;
@@ -33,7 +31,6 @@ interface SettingsViewProps {
     updateOverlayPosition: (position: string) => void;
     toggleAutoCopy: () => void;
     toggleAutoPaste: () => void;
-    toggleVisualMicPicker: () => void;
     updateTheme: (theme: 'light' | 'dark' | 'system') => void;
     toggleSoundEnabled: () => void;
     updateStartSound: (sound: string) => void;
@@ -52,7 +49,6 @@ export function SettingsView({
     overlayPosition,
     autoCopy,
     autoPaste,
-    visualMicPicker,
     theme,
     soundEnabled,
     startSound,
@@ -67,7 +63,6 @@ export function SettingsView({
     updateOverlayPosition,
     toggleAutoCopy,
     toggleAutoPaste,
-    toggleVisualMicPicker,
     updateTheme,
     toggleSoundEnabled,
     updateStartSound,
@@ -478,19 +473,6 @@ export function SettingsView({
                             </p>
                         </div>
 
-                        <div className="setting-item">
-                            <label>
-                                <input
-                                    type="checkbox"
-                                    checked={visualMicPicker}
-                                    onChange={toggleVisualMicPicker}
-                                />
-                                Visual Microphone Picker (Experimental)
-                            </label>
-                            <p className="setting-hint">
-                                Use an enhanced visual interface for microphone selection with live audio visualization
-                            </p>
-                        </div>
                     </div>
                 </div>
 

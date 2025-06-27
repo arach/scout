@@ -26,6 +26,9 @@ pub struct RecordingResult {
     pub filename: String,
     pub transcript: Option<String>,
     pub duration_ms: i32,
+    pub device_name: Option<String>,
+    pub sample_rate: Option<u32>,
+    pub channels: Option<u16>,
 }
 
 pub struct RecordingWorkflow {
@@ -86,8 +89,9 @@ impl RecordingWorkflow {
                                 filename: filename.clone() 
                             });
                             
-                            // Stop recording
+                            // Get device info before stopping recording
                             let recorder = recorder.lock().await;
+                            let device_info = recorder.get_current_device_info();
                             if let Err(e) = recorder.stop_recording() {
                                 // Update to idle on error
                                 progress_tracker.update(RecordingProgress::Idle);
@@ -113,11 +117,14 @@ impl RecordingWorkflow {
                             // Update to idle state immediately - recording is done
                             progress_tracker.update(RecordingProgress::Idle);
                             
-                            // Send immediate response
+                            // Send immediate response with device metadata
                             let _ = response.send(Ok(RecordingResult {
                                 filename,
                                 transcript: None,
                                 duration_ms,
+                                device_name: device_info.as_ref().map(|d| d.name.clone()),
+                                sample_rate: device_info.as_ref().map(|d| d.sample_rate),
+                                channels: device_info.as_ref().map(|d| d.channels),
                             }));
                         } else {
                             let _ = response.send(Err("No recording in progress".to_string()));
