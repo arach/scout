@@ -82,69 +82,133 @@ impl KeyboardMonitor {
 
     pub fn start_monitoring(self: Arc<Self>) {
         let monitor = self.clone();
+        let app_handle_for_emit = self.app_handle.clone();
         
         // Spawn a thread to handle keyboard events with panic catching
         match std::thread::Builder::new()
             .name("keyboard-monitor".to_string())
             .spawn(move || {
+                // Small delay to let the app fully initialize
+                std::thread::sleep(std::time::Duration::from_millis(1000));
+                
+                println!("🎤 Keyboard monitor thread started");
+                
+                // Check if we're on macOS and might need accessibility permissions
+                #[cfg(target_os = "macos")]
+                {
+                    println!("ℹ️  Push-to-talk key release detection requires accessibility permissions on macOS.");
+                    println!("   If it doesn't work, grant permissions in System Settings > Privacy & Security > Accessibility");
+                }
+                
                 // Catch any panics to prevent app crash
                 let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                    if let Err(e) = rdev::listen(move |event: Event| {
+                    println!("🎤 Attempting to start keyboard event listener...");
+                    
+                    // Try to start the listener
+                    let monitor_for_listen = monitor.clone();
+                    match rdev::listen(move |event: Event| {
                         // Wrap event handling in panic catch as well
                         let _ = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                            monitor.handle_event(event);
+                            monitor_for_listen.handle_event(event);
                         }));
                     }) {
-                        eprintln!("❌ Failed to start keyboard monitoring: {:?}", e);
+                        Ok(_) => {
+                            println!("🎤 Keyboard event listener ended normally");
+                        }
+                        Err(e) => {
+                            eprintln!("⚠️  Keyboard monitoring not available: {:?}", e);
+                            #[cfg(target_os = "macos")]
+                            {
+                                eprintln!("   This is expected if accessibility permissions are not granted.");
+                                eprintln!("   To enable: System Settings > Privacy & Security > Accessibility > Add Scout");
+                            }
+                            eprintln!("   Push-to-talk will work but won't auto-stop on key release.");
+                            
+                            // Emit a warning event to the frontend
+                            let _ = app_handle_for_emit.emit("keyboard-monitor-unavailable", 
+                                "Push-to-talk key release detection is not available. Grant accessibility permissions to enable.");
+                        }
                     }
                 }));
                 
                 if let Err(e) = result {
-                    eprintln!("❌ Keyboard monitor thread panicked: {:?}", e);
+                    eprintln!("⚠️  Keyboard monitor error: {:?}", e);
+                    eprintln!("   Push-to-talk key release detection disabled.");
                 }
+                
+                println!("🎤 Keyboard monitor thread ending");
             }) {
-            Ok(_handle) => {
-                println!("✅ Keyboard monitor thread started successfully");
+            Ok(handle) => {
+                println!("✅ Keyboard monitor thread spawned successfully (ID: {:?})", handle.thread().id());
             }
             Err(e) => {
-                eprintln!("❌ Failed to spawn keyboard monitor thread: {}", e);
+                eprintln!("⚠️  Failed to spawn keyboard monitor thread: {}", e);
+                eprintln!("   Push-to-talk key release detection disabled.");
             }
         }
     }
 
     fn handle_event(&self, event: Event) {
+        // Add debug logging
+        #[cfg(debug_assertions)]
+        {
+            match &event.event_type {
+                EventType::KeyPress(key) => println!("🔍 Key press detected: {:?}", key),
+                EventType::KeyRelease(key) => println!("🔍 Key release detected: {:?}", key),
+                _ => {}
+            }
+        }
+        
         match event.event_type {
             EventType::KeyPress(key) => {
                 if let Ok(mut pressed) = self.pressed_keys.lock() {
                     pressed.insert(key);
+                } else {
+                    eprintln!("⚠️  Failed to lock pressed_keys for press");
+                    return;
                 }
                 
                 // Check if this is the push-to-talk key
-                if let (Ok(ptk), Ok(mut is_active)) = (self.push_to_talk_key.lock(), self.is_push_to_talk_active.lock()) {
-                    if let Some(push_key) = *ptk {
-                        if key == push_key && !*is_active {
-                            *is_active = true;
-                            println!("🎤 Push-to-talk key pressed: {:?}", key);
-                            // Note: The actual recording start is handled by the existing global shortcut
-                            // This just tracks the state for release detection
+                match (self.push_to_talk_key.lock(), self.is_push_to_talk_active.lock()) {
+                    (Ok(ptk), Ok(mut is_active)) => {
+                        if let Some(push_key) = *ptk {
+                            if key == push_key && !*is_active {
+                                *is_active = true;
+                                println!("🎤 Push-to-talk key pressed: {:?}", key);
+                                // Note: The actual recording start is handled by the existing global shortcut
+                                // This just tracks the state for release detection
+                            }
                         }
+                    }
+                    _ => {
+                        eprintln!("⚠️  Failed to lock push-to-talk state for press");
                     }
                 }
             }
             EventType::KeyRelease(key) => {
                 if let Ok(mut pressed) = self.pressed_keys.lock() {
                     pressed.remove(&key);
+                } else {
+                    eprintln!("⚠️  Failed to lock pressed_keys for release");
+                    return;
                 }
                 
                 // Check if this is the push-to-talk key being released
-                if let (Ok(ptk), Ok(mut is_active)) = (self.push_to_talk_key.lock(), self.is_push_to_talk_active.lock()) {
-                    if let Some(push_key) = *ptk {
-                        if key == push_key && *is_active {
-                            *is_active = false;
-                            println!("🎤 Push-to-talk key released: {:?}", key);
-                            // Emit event to stop recording
-                            let _ = self.app_handle.emit("push-to-talk-released", ());
+                match (self.push_to_talk_key.lock(), self.is_push_to_talk_active.lock()) {
+                    (Ok(ptk), Ok(mut is_active)) => {
+                        if let Some(push_key) = *ptk {
+                            if key == push_key && *is_active {
+                                *is_active = false;
+                                println!("🎤 Push-to-talk key released: {:?}", key);
+                                // Emit event to stop recording
+                                if let Err(e) = self.app_handle.emit("push-to-talk-released", ()) {
+                                    eprintln!("⚠️  Failed to emit push-to-talk-released event: {}", e);
+                                }
+                            }
                         }
+                    }
+                    _ => {
+                        eprintln!("⚠️  Failed to lock push-to-talk state for release");
                     }
                 }
             }

@@ -182,6 +182,47 @@ impl RingBufferTranscriber {
         println!("🔄 Ring buffer transcriber worker finished");
     }
     
+    /// Process a chunk synchronously and return the result immediately
+    pub async fn process_chunk_sync(
+        &self,
+        chunk_id: usize,
+        start_offset: Duration,
+        duration: Duration,
+    ) -> Result<String, String> {
+        println!("⚙️  Processing chunk {} (offset: {:?}, duration: {:?}) synchronously", 
+                 chunk_id, start_offset, duration);
+        
+        // Extract chunk data from ring buffer
+        let chunk_data = self.ring_buffer.extract_chunk(start_offset, duration)?;
+        println!("📊 Extracted {} samples for chunk {}", chunk_data.len(), chunk_id);
+        
+        if chunk_data.is_empty() {
+            return Ok(String::new());
+        }
+        
+        // Save chunk to temporary file
+        let chunk_filename = format!("ring_chunk_{}.wav", chunk_id);
+        let chunk_path = self.temp_dir.join(&chunk_filename);
+        
+        self.ring_buffer.save_chunk_to_file(&chunk_data, &chunk_path)?;
+        
+        // Transcribe the chunk
+        let text = {
+            let transcriber = self.transcriber.lock().await;
+            transcriber.transcribe_file(&chunk_path)
+                .map_err(|e| format!("Transcription failed: {}", e))?
+        };
+        
+        println!("✅ Chunk {} completed: \"{}\"", chunk_id, text);
+        
+        // Clean up temporary file
+        if let Err(e) = std::fs::remove_file(&chunk_path) {
+            eprintln!("⚠️  Failed to clean up chunk file: {}", e);
+        }
+        
+        Ok(text)
+    }
+
     /// Process a single chunk request
     async fn process_single_chunk(
         ring_buffer: &RingBufferRecorder,
