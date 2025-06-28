@@ -20,7 +20,7 @@ use audio::AudioRecorder;
 use db::Database;
 use processing_queue::{ProcessingQueue, ProcessingStatus};
 use recording_progress::ProgressTracker;
-use recording_workflow::RecordingWorkflow;
+use recording_workflow::{RecordingWorkflow, RecordingResult};
 use settings::SettingsManager;
 use keyboard_monitor::KeyboardMonitor;
 use std::path::PathBuf;
@@ -181,6 +181,7 @@ async fn cancel_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> 
     // Update native overlay to idle
     #[cfg(target_os = "macos")]
     {
+        println!("🎯 Setting native overlay to idle state after stop_recording");
         let overlay = state.native_panel_overlay.lock().await;
         overlay.set_idle_state();
     }
@@ -189,10 +190,10 @@ async fn cancel_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> 
 }
 
 #[tauri::command]
-async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<(), String> {
+async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<RecordingResult, String> {
     
     // Use the recording workflow to stop recording
-    let _result = state.recording_workflow.stop_recording().await?;
+    let result = state.recording_workflow.stop_recording().await?;
     
     // Play stop sound
     sound::SoundPlayer::play_stop();
@@ -241,13 +242,31 @@ async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Re
         "state": "stopped"
     }));
     
-    Ok(())
+    Ok(result)
 }
 
 #[tauri::command]
 async fn is_recording(state: State<'_, AppState>) -> Result<bool, String> {
-    let recorder = state.recorder.lock().await;
-    Ok(recorder.is_recording())
+    // Check progress tracker state first - it's the most authoritative source
+    let progress = state.progress_tracker.current_state();
+    match progress {
+        recording_progress::RecordingProgress::Recording { .. } => Ok(true),
+        recording_progress::RecordingProgress::Stopping { .. } => Ok(true),
+        recording_progress::RecordingProgress::Idle => {
+            // Only check recorder state if progress tracker is idle
+            // This prevents race conditions where recorder state hasn't been cleared yet
+            let recorder = state.recorder.lock().await;
+            let is_recording = recorder.is_recording();
+            drop(recorder);
+            
+            // Log if there's a mismatch for debugging
+            if is_recording {
+                println!("⚠️ is_recording mismatch: recorder says true but progress tracker is idle");
+            }
+            
+            Ok(is_recording)
+        }
+    }
 }
 
 #[tauri::command]
@@ -1253,8 +1272,23 @@ pub fn run() {
             }
             
             // Initialize keyboard monitor for push-to-talk key release detection
+            // This is optional - if it fails, push-to-talk will still work but won't auto-stop
             keyboard_monitor.set_push_to_talk_key(&push_to_talk_hotkey);
-            keyboard_monitor.clone().start_monitoring();
+            
+            // Only start monitoring if explicitly enabled
+            // Due to accessibility permission requirements, we'll disable by default
+            if std::env::var("SCOUT_ENABLE_KEYBOARD_MONITOR").is_ok() {
+                println!("🎯 Keyboard monitoring enabled via SCOUT_ENABLE_KEYBOARD_MONITOR");
+                keyboard_monitor.clone().start_monitoring();
+            } else {
+                println!("ℹ️  Keyboard monitoring disabled by default");
+                println!("   To enable: export SCOUT_ENABLE_KEYBOARD_MONITOR=1");
+                println!("   Note: Requires accessibility permissions on macOS");
+                
+                // Emit event to let frontend know keyboard monitoring is unavailable
+                let _ = app.handle().emit("keyboard-monitor-unavailable", 
+                    "Push-to-talk key release detection is disabled. Enable with SCOUT_ENABLE_KEYBOARD_MONITOR=1");
+            }
             
             // Set up system tray
             let toggle_recording_item = MenuItemBuilder::with_id("toggle_recording", "Start Recording")

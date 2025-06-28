@@ -13,6 +13,8 @@ pub struct RingBufferMonitor {
     chunk_duration: Duration,
     threshold_duration: Duration,
     recording_start_time: Instant,
+    completed_chunks: Vec<String>, // Store completed chunk texts
+    next_chunk_id: usize,
 }
 
 impl RingBufferMonitor {
@@ -24,6 +26,8 @@ impl RingBufferMonitor {
             chunk_duration: Duration::from_secs(5), // 5-second chunks
             threshold_duration: Duration::from_secs(5), // Start chunking after 5 seconds
             recording_start_time: Instant::now(),
+            completed_chunks: Vec::new(),
+            next_chunk_id: 0,
         }
     }
     
@@ -88,13 +92,22 @@ impl RingBufferMonitor {
                         
                         println!("✂️ Creating ring buffer chunk at {:?}", self.last_chunk_time);
                         
-                        match chunked.process_chunk(self.last_chunk_time, self.chunk_duration).await {
-                            Ok(_) => {
-                                println!("✅ Ring buffer chunk submitted successfully");
+                        // Process chunk synchronously and collect result immediately
+                        println!("🔍 Processing chunk {} at offset {:?} with duration {:?}", 
+                                 self.next_chunk_id, self.last_chunk_time, self.chunk_duration);
+                        match chunked.process_chunk_sync(self.next_chunk_id, self.last_chunk_time, self.chunk_duration).await {
+                            Ok(text) => {
+                                if !text.is_empty() {
+                                    println!("📝 Collected chunk {}: \"{}\"", self.next_chunk_id, text);
+                                    self.completed_chunks.push(text);
+                                } else {
+                                    println!("⚠️ Chunk {} was empty", self.next_chunk_id);
+                                }
                                 self.last_chunk_time += self.chunk_duration;
+                                self.next_chunk_id += 1;
                             }
                             Err(e) => {
-                                eprintln!("❌ Failed to submit ring buffer chunk: {}", e);
+                                eprintln!("❌ Failed to process ring buffer chunk: {}", e);
                             }
                         }
                     }
@@ -110,6 +123,9 @@ impl RingBufferMonitor {
     
     /// Signal that recording is complete and collect all results
     pub async fn recording_complete(mut self) -> Result<Vec<String>, String> {
+        println!("🏁 Recording complete, collecting all chunks...");
+        println!("📊 Already collected {} chunks during recording", self.completed_chunks.len());
+        
         if let Some(mut chunked) = self.chunked_transcriber.take() {
             let buffer_duration = self.ring_buffer.get_duration();
             let remaining_duration = buffer_duration.saturating_sub(self.last_chunk_time);
@@ -119,29 +135,47 @@ impl RingBufferMonitor {
                 println!("🏁 Processing final ring buffer chunk (start: {:?}, duration: {:?})", 
                          self.last_chunk_time, remaining_duration);
                 
-                match chunked.process_chunk(self.last_chunk_time, remaining_duration).await {
-                    Ok(_) => {
-                        println!("✅ Final ring buffer chunk submitted successfully");
+                // Adjust duration to ensure it aligns with channel boundaries
+                let sample_rate = 48000; // Default sample rate
+                let channels = 1; // Mono
+                let total_samples = (remaining_duration.as_secs_f32() * sample_rate as f32 * channels as f32) as usize;
+                let aligned_samples = (total_samples / channels) * channels;
+                let aligned_duration = Duration::from_secs_f32(aligned_samples as f32 / (sample_rate as f32 * channels as f32));
+                
+                println!("📐 Aligned final chunk duration from {:?} to {:?}", remaining_duration, aligned_duration);
+                
+                // Process final chunk synchronously
+                match chunked.process_chunk_sync(self.next_chunk_id, self.last_chunk_time, aligned_duration).await {
+                    Ok(text) => {
+                        if !text.is_empty() {
+                            println!("📝 Collected final chunk {}: \"{}\"", self.next_chunk_id, text);
+                            self.completed_chunks.push(text);
+                        }
                     }
                     Err(e) => {
-                        eprintln!("❌ Failed to submit final ring buffer chunk: {}", e);
+                        eprintln!("❌ Failed to process final ring buffer chunk: {}", e);
                     }
                 }
             }
             
-            // Collect all results
-            let results = chunked.finish_and_collect_results().await?;
+            // No need to wait for async results - we already have everything
+            println!("✅ Total chunks collected: {}", self.completed_chunks.len());
             
-            // Combine all chunk texts
-            let combined_text: Vec<String> = results
-                .into_iter()
-                .map(|r| r.text)
-                .collect();
+            // Debug: Show all collected chunks
+            for (i, chunk) in self.completed_chunks.iter().enumerate() {
+                println!("📝 Chunk {}: {}", i, chunk);
+            }
             
-            Ok(combined_text)
+            Ok(self.completed_chunks)
         } else {
-            // Recording was too short for chunking
-            Ok(vec![])
+            // Recording was too short for chunking, return any chunks we did collect
+            if !self.completed_chunks.is_empty() {
+                println!("📝 Returning {} chunks from short recording", self.completed_chunks.len());
+                Ok(self.completed_chunks)
+            } else {
+                println!("⚠️ No chunks were processed");
+                Ok(vec![])
+            }
         }
     }
 }

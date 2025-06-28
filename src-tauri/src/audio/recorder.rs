@@ -118,11 +118,29 @@ impl AudioRecorder {
             return Err("Recorder not initialized".to_string());
         }
 
+        // Clear the recording state immediately to prevent race conditions
+        // This ensures that any concurrent is_recording() calls will return false
+        println!("🛑 AudioRecorder::stop_recording - clearing state immediately");
+        *self.is_recording.lock().unwrap() = false;
+
+        // Send stop command to the worker thread
         self.control_tx
             .as_ref()
             .unwrap()
             .send(RecorderCommand::StopRecording)
-            .map_err(|e| format!("Failed to send stop command: {}", e))
+            .map_err(|e| {
+                // If we fail to send the command, restore the state
+                *self.is_recording.lock().unwrap() = true;
+                format!("Failed to send stop command: {}", e)
+            })?;
+            
+        // Wait a bit for the command to be processed
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        
+        // The worker thread will also clear the state, but we've already done it
+        // to prevent race conditions with concurrent state queries
+        
+        Ok(())
     }
 
     pub fn is_recording(&self) -> bool {
@@ -266,6 +284,13 @@ impl AudioRecorderWorker {
                 
                 let device_name = default_device.name().unwrap_or_else(|_| "Unknown".to_string());
                 println!("✅ Default device: '{}'", device_name);
+                
+                // Log if this looks like AirPods
+                if device_name.to_lowercase().contains("airpod") {
+                    println!("⚠️  AirPods detected - may experience audio quality issues");
+                    println!("💡 Recommendation: Use a wired microphone for best results");
+                }
+                
                 default_device
             }
         };
@@ -397,7 +422,9 @@ impl AudioRecorderWorker {
     }
 
     fn stop_recording(&mut self) -> Result<(), String> {
+        println!("🛑 AudioRecorder::stop_recording called at {}", chrono::Local::now().format("%H:%M:%S%.3f"));
         *self.is_recording.lock().unwrap() = false;
+        println!("🎯 Set is_recording to false");
         
         // Reset audio level only after recording stops
         *self.current_audio_level.lock().unwrap() = 0.0;

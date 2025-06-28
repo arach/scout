@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use chrono;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 use crate::audio::AudioRecorder;
 use crate::recording_progress::RecordingProgress;
@@ -122,11 +122,34 @@ impl RecordingWorkflow {
                                     // Create a channel to send samples from AudioRecorder thread to transcription context
                                     let (sample_tx, sample_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<f32>>();
                                     
+                                    // Get audio device info to check channels
+                                    let recorder_guard = recorder.lock().await;
+                                    let device_info = recorder_guard.get_current_device_info();
+                                    let audio_channels = device_info.as_ref().map(|d| d.channels).unwrap_or(2) as usize;
+                                    drop(recorder_guard);
+                                    
+                                    println!("🔊 Audio device has {} channels, ring buffer expects 1 channel", audio_channels);
+                                    
                                     // Create callback for AudioRecorder
                                     let sample_callback = std::sync::Arc::new(move |samples: &[f32]| {
+                                        // Convert stereo to mono if needed
+                                        let mono_samples = if audio_channels == 2 {
+                                            // Convert stereo to mono by averaging left and right channels
+                                            let mut mono = Vec::with_capacity(samples.len() / 2);
+                                            for i in (0..samples.len()).step_by(2) {
+                                                if i + 1 < samples.len() {
+                                                    // Average left and right channels
+                                                    mono.push((samples[i] + samples[i + 1]) / 2.0);
+                                                }
+                                            }
+                                            mono
+                                        } else {
+                                            // Already mono, just copy
+                                            samples.to_vec()
+                                        };
+                                        
                                         // Send samples to transcription context asynchronously
-                                        let samples_vec = samples.to_vec();
-                                        if let Err(_) = sample_tx.send(samples_vec) {
+                                        if let Err(_) = sample_tx.send(mono_samples) {
                                             // Channel closed, probably shutting down
                                         }
                                     });
@@ -157,25 +180,60 @@ impl RecordingWorkflow {
                                         
                                         // Create sample processing task if we have ring buffer
                                         if let Some(mut sample_rx) = sample_rx_option {
+                                            println!("🔍 Attempting to get ring buffer reference from transcription context");
                                             if let Some(ring_buffer) = transcription_context.get_ring_buffer() {
+                                                println!("✅ Got ring buffer reference successfully");
                                                 let ring_buffer_clone = ring_buffer.clone();
                                                 tokio::spawn(async move {
                                                     let mut sample_count = 0;
+                                                    let mut batch_count = 0;
+                                                    println!("🎯 Ring buffer sample processor task starting");
                                                     while let Some(samples) = sample_rx.recv().await {
+                                                        batch_count += 1;
                                                         sample_count += samples.len();
+                                                        
+                                                        // Debug: Check ring buffer state before adding
+                                                        let before_count = ring_buffer_clone.sample_count();
                                                         
                                                         // Feed samples directly to ring buffer
                                                         if let Err(e) = ring_buffer_clone.add_samples(&samples) {
                                                             eprintln!("Failed to add samples to ring buffer: {}", e);
                                                         }
                                                         
+                                                        // Debug: Check ring buffer state after adding
+                                                        let after_count = ring_buffer_clone.sample_count();
+                                                        
+                                                        // Log first few batches to verify audio is flowing
+                                                        if batch_count <= 5 {
+                                                            println!("🎵 Batch {}: {} samples received, buffer: {} -> {}", 
+                                                                     batch_count, samples.len(), before_count, after_count);
+                                                        }
+                                                        
                                                         if sample_count % 48000 == 0 { // Log every second of audio
-                                                            println!("🔊 Fed {} samples to ring buffer", sample_count);
+                                                            println!("🔊 Fed {} samples to ring buffer (buffer: {} -> {} samples)", 
+                                                                     sample_count, before_count, after_count);
                                                         }
                                                     }
-                                                    println!("🔊 Ring buffer feeding complete - {} samples processed", sample_count);
+                                                    println!("🔊 Ring buffer feeding complete - {} samples processed in {} batches", 
+                                                             sample_count, batch_count);
+                                                    
+                                                    // Force flush any remaining samples to ring buffer
+                                                    if let Err(e) = ring_buffer_clone.finalize_recording() {
+                                                        eprintln!("⚠️ Error finalizing ring buffer during sample feed completion: {}", e);
+                                                    }
                                                 });
                                                 println!("📡 Ring buffer sample processing task started");
+                                            } else {
+                                                println!("❌ Failed to get ring buffer reference from transcription context");
+                                                println!("🔍 Current strategy: {:?}", transcription_context.current_strategy_name());
+                                                // Process samples without ring buffer - they'll be lost
+                                                tokio::spawn(async move {
+                                                    let mut sample_count = 0;
+                                                    while let Some(samples) = sample_rx.recv().await {
+                                                        sample_count += samples.len();
+                                                    }
+                                                    println!("⚠️ Discarded {} samples - no ring buffer available", sample_count);
+                                                });
                                             }
                                         }
                                         
@@ -211,8 +269,10 @@ impl RecordingWorkflow {
                     }
                     
                     RecordingCommand::StopRecording { response } => {
+                        println!("🎵 RecordingWorkflow: StopRecording command received");
                         if let Some(mut active_recording) = current_recording.take() {
                             let duration_ms = active_recording.start_time.elapsed().as_millis() as i32;
+                            println!("🕒 Recording duration: {}ms", duration_ms);
                             
                             // Update to Stopping state briefly
                             progress_tracker.update(RecordingProgress::Stopping { 
@@ -222,12 +282,15 @@ impl RecordingWorkflow {
                             // Get device info before stopping recording
                             let recorder = recorder.lock().await;
                             let device_info = recorder.get_current_device_info();
+                            println!("🛑 Calling recorder.stop_recording()...");
                             if let Err(e) = recorder.stop_recording() {
+                                println!("❌ Failed to stop recording: {}", e);
                                 // Update to idle on error
                                 progress_tracker.update(RecordingProgress::Idle);
                                 let _ = response.send(Err(e));
                                 continue;
                             }
+                            println!("✅ recorder.stop_recording() succeeded");
                             drop(recorder); // Release lock
                             
                             // Finish transcription strategy if available
@@ -235,8 +298,15 @@ impl RecordingWorkflow {
                                 let strategy_name = transcription_context.current_strategy_name()
                                     .unwrap_or_else(|| "unknown".to_string());
                                 println!("🎯 Finishing transcription with strategy: {}", strategy_name);
-                                match transcription_context.finish_recording().await {
-                                    Ok(transcription_result) => {
+                                
+                                // Add timeout to prevent hanging
+                                let finish_timeout = tokio::time::timeout(
+                                    tokio::time::Duration::from_secs(45), // 45 second timeout
+                                    transcription_context.finish_recording()
+                                ).await;
+                                
+                                match finish_timeout {
+                                    Ok(Ok(transcription_result)) => {
                                         println!("✅ Transcription completed: {} chars in {:.2}s", 
                                                 transcription_result.text.len(),
                                                 transcription_result.processing_time_ms as f64 / 1000.0);
@@ -258,12 +328,75 @@ impl RecordingWorkflow {
                                             Ok(transcript) => {
                                                 println!("💾 Transcript saved to database with ID: {}", transcript.id);
                                                 
-                                                // Emit transcript-created event
-                                                let _ = app_handle.emit("transcript-created", &transcript);
-                                                
-                                                // Update to idle state
+                                                // Update to idle state first
                                                 progress_tracker.update(RecordingProgress::Idle);
                                                 
+                                                // The progress tracker update will automatically notify the overlay
+                                                println!("✅ Updated progress tracker to Idle state");
+                                                
+                                                // Emit processing-status complete for native overlay
+                                                // since we're not going through the processing queue
+                                                let processing_complete = crate::processing_queue::ProcessingStatus::Complete {
+                                                    filename: active_recording.filename.clone(),
+                                                    transcript: transcription_result.text.clone(),
+                                                };
+                                                if let Err(e) = app_handle.emit("processing-status", &processing_complete) {
+                                                    eprintln!("❌ Failed to emit processing-status complete: {:?}", e);
+                                                } else {
+                                                    println!("✅ Emitted processing-status complete for native overlay");
+                                                }
+                                                
+                                                // Emit transcript-created event
+                                                println!("📤 Emitting transcript-created event for transcript ID: {}", transcript.id);
+                                                println!("📊 Transcript details: {} chars, {}ms duration", 
+                                                        transcript.text.len(), transcript.duration_ms);
+                                                if let Err(e) = app_handle.emit("transcript-created", &transcript) {
+                                                    eprintln!("❌ Failed to emit transcript-created event: {:?}", e);
+                                                } else {
+                                                    println!("✅ transcript-created event emitted successfully");
+                                                }
+                                                
+                                                // Also emit directly to overlay window
+                                                if let Some(overlay_window) = app_handle.get_webview_window("overlay") {
+                                                    let _ = overlay_window.emit("transcript-created", &transcript);
+                                                    println!("✅ Emitted transcript-created to overlay window");
+                                                }
+                                                
+                                                // Give the event system time to process
+                                                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                                                
+                                                // Emit multiple completion events to ensure at least one is caught
+                                                println!("📤 Emitting processing-complete event");
+                                                if let Err(e) = app_handle.emit("processing-complete", &transcript) {
+                                                    eprintln!("❌ Failed to emit processing-complete event: {:?}", e);
+                                                } else {
+                                                    println!("✅ processing-complete event emitted successfully");
+                                                }
+                                                
+                                                // Also emit directly to overlay window
+                                                if let Some(overlay_window) = app_handle.get_webview_window("overlay") {
+                                                    let _ = overlay_window.emit("processing-complete", &transcript);
+                                                    println!("✅ Emitted processing-complete to overlay window");
+                                                }
+                                                
+                                                // Small delay between events
+                                                tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                                                
+                                                // Also emit recording-completed as backup
+                                                println!("📤 Emitting recording-completed event");
+                                                if let Err(e) = app_handle.emit("recording-completed", &transcript.id) {
+                                                    eprintln!("❌ Failed to emit recording-completed event: {:?}", e);
+                                                } else {
+                                                    println!("✅ recording-completed event emitted successfully");
+                                                }
+                                                
+                                                // Also emit directly to overlay window
+                                                if let Some(overlay_window) = app_handle.get_webview_window("overlay") {
+                                                    let _ = overlay_window.emit("recording-completed", &transcript.id);
+                                                    println!("✅ Emitted recording-completed to overlay window");
+                                                }
+                                                
+                                                // Send response with transcript
                                                 let _ = response.send(Ok(RecordingResult {
                                                     filename: active_recording.filename,
                                                     transcript: Some(transcription_result.text),
@@ -281,7 +414,7 @@ impl RecordingWorkflow {
                                         }
                                         continue;
                                     }
-                                    Err(e) => {
+                                    Ok(Err(e)) => {
                                         println!("❌ Transcription failed: {}", e);
                                         println!("📦 Falling back to traditional processing queue");
                                         
@@ -293,6 +426,15 @@ impl RecordingWorkflow {
                                         println!("🔄 Reason: {}", e);
                                         println!("📦 Falling back to: traditional processing queue");
                                         println!("=======================================");
+                                        
+                                        // Fall back to traditional processing queue
+                                    }
+                                    Err(_) => {
+                                        println!("⏰ Transcription timeout after 45 seconds!");
+                                        println!("📦 Falling back to traditional processing queue");
+                                        
+                                        // Update to idle state on timeout
+                                        progress_tracker.update(RecordingProgress::Idle);
                                         
                                         // Fall back to traditional processing queue
                                     }

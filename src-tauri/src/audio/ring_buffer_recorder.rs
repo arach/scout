@@ -28,6 +28,9 @@ impl RingBufferRecorder {
         // Calculate max samples for 5 minutes of audio
         let max_samples = (spec.sample_rate as usize * spec.channels as usize) * 300;
         
+        println!("🎯 RingBufferRecorder created with spec: channels={}, sample_rate={}, max_samples={}",
+                 spec.channels, spec.sample_rate, max_samples);
+        
         Ok(Self {
             samples: Arc::new(Mutex::new(VecDeque::new())),
             spec,
@@ -39,16 +42,32 @@ impl RingBufferRecorder {
     
     /// Add new audio samples to both the ring buffer and the WAV file
     pub fn add_samples(&self, new_samples: &[f32]) -> Result<(), String> {
+        let new_sample_count = new_samples.len();
+        
         // Add to ring buffer first
         {
             let mut samples = self.samples.lock().unwrap();
+            let before_size = samples.len();
+            
             for &sample in new_samples {
                 samples.push_back(sample);
             }
             
+            let after_push = samples.len();
+            
             // Maintain maximum buffer size
+            let mut removed = 0;
             while samples.len() > self.max_samples {
                 samples.pop_front();
+                removed += 1;
+            }
+            
+            let final_size = samples.len();
+            
+            // Debug logging for troubleshooting
+            if new_sample_count > 0 && (before_size + new_sample_count - removed != final_size) {
+                println!("⚠️ Ring buffer math issue: before={}, added={}, removed={}, final={}, max={}",
+                         before_size, new_sample_count, removed, final_size, self.max_samples);
             }
         }
         
@@ -67,6 +86,7 @@ impl RingBufferRecorder {
     pub fn extract_chunk(&self, start_offset: Duration, chunk_duration: Duration) -> Result<Vec<f32>, String> {
         let samples = self.samples.lock().unwrap();
         
+        let channels = self.spec.channels as usize;
         let start_sample = (start_offset.as_secs_f32() * self.spec.sample_rate as f32 * self.spec.channels as f32) as usize;
         let chunk_samples = (chunk_duration.as_secs_f32() * self.spec.sample_rate as f32 * self.spec.channels as f32) as usize;
         
@@ -74,10 +94,25 @@ impl RingBufferRecorder {
             return Err("Start offset beyond available audio".to_string());
         }
         
+        // Ensure start is aligned to channel boundaries
+        let start_sample_aligned = (start_sample / channels) * channels;
         let end_sample = (start_sample + chunk_samples).min(samples.len());
         
+        // Ensure end is aligned to channel boundaries
+        let end_sample_aligned = (end_sample / channels) * channels;
+        
+        // Make sure we have at least one full frame
+        if end_sample_aligned <= start_sample_aligned {
+            return Ok(Vec::new());
+        }
+        
         // Convert VecDeque range to Vec
-        let chunk: Vec<f32> = samples.range(start_sample..end_sample).copied().collect();
+        let chunk: Vec<f32> = samples.range(start_sample_aligned..end_sample_aligned).copied().collect();
+        
+        // Verify the chunk size is a multiple of channels
+        if chunk.len() % channels != 0 {
+            eprintln!("⚠️  Warning: Chunk size {} is not a multiple of channels {}", chunk.len(), channels);
+        }
         
         Ok(chunk)
     }
@@ -95,6 +130,20 @@ impl RingBufferRecorder {
         chunk_data: &[f32],
         output_path: &Path,
     ) -> Result<(), String> {
+        // Validate chunk data
+        if chunk_data.is_empty() {
+            return Err("Cannot save empty chunk".to_string());
+        }
+        
+        let channels = self.spec.channels as usize;
+        if chunk_data.len() % channels != 0 {
+            return Err(format!(
+                "Chunk size {} is not a multiple of channels {}. Samples must be aligned to channel boundaries.",
+                chunk_data.len(),
+                channels
+            ));
+        }
+        
         let mut writer = WavWriter::create(output_path, self.spec)
             .map_err(|e| format!("Failed to create chunk WAV file: {}", e))?;
         
@@ -105,6 +154,11 @@ impl RingBufferRecorder {
         
         writer.finalize()
             .map_err(|e| format!("Failed to finalize chunk WAV file: {}", e))?;
+        
+        println!("💾 Saved chunk with {} samples ({} frames) to {:?}", 
+                 chunk_data.len(), 
+                 chunk_data.len() / channels,
+                 output_path);
         
         Ok(())
     }
@@ -131,6 +185,14 @@ impl RingBufferRecorder {
                 .map_err(|e| format!("Failed to finalize recording: {}", e))?;
         }
         Ok(())
+    }
+    
+    /// Clear all samples from the ring buffer
+    pub fn clear(&self) {
+        let mut samples = self.samples.lock().unwrap();
+        let count = samples.len();
+        samples.clear();
+        println!("🧹 Ring buffer cleared - {} samples removed", count);
     }
 }
 

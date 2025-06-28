@@ -56,6 +56,11 @@ pub trait TranscriptionStrategy: Send + Sync {
     
     /// Get intermediate results if available (for chunked strategies)
     fn get_partial_results(&self) -> Vec<String>;
+    
+    /// Get ring buffer if this strategy uses one (for ring buffer strategies)
+    fn get_ring_buffer(&self) -> Option<Arc<crate::audio::ring_buffer_recorder::RingBufferRecorder>> {
+        None
+    }
 }
 
 /// Classic transcription strategy - transcribe entire file after recording completes
@@ -184,8 +189,9 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
         println!("📝 Initializing ring buffer components for real-time processing");
         
         // Initialize ring buffer recorder with 5-minute capacity
+        // Match the audio recorder's configuration (mono, 48kHz)
         let spec = hound::WavSpec {
-            channels: 2,     // Stereo recording
+            channels: 1,     // Mono recording to match AudioRecorder
             sample_rate: 48000, // 48kHz sample rate
             bits_per_sample: 32,
             sample_format: hound::SampleFormat::Float,
@@ -228,13 +234,14 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
     }
     
     async fn finish_recording(&mut self) -> Result<TranscriptionResult, String> {
-        let start_time = self.start_time.take()
+        let _recording_start_time = self.start_time.take()
             .ok_or("Recording was not started")?;
         
         let recording_path = self.recording_path.take()
             .ok_or("Recording path was not set")?;
         
         println!("🎯 Finishing ring buffer transcription with real-time chunks");
+        let transcription_start = std::time::Instant::now();
         
         // Stop the monitor and collect results
         let mut final_chunks = Vec::new();
@@ -246,7 +253,7 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
             // Signal monitor to stop
             let _ = stop_sender.send(()).await;
             
-            // Wait for monitor to finish and get it back
+            // Wait for monitor to finish
             match monitor_handle.await {
                 Ok(monitor) => {
                     println!("📊 Monitor stopped, collecting chunk results");
@@ -260,6 +267,7 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
                         }
                         Err(e) => {
                             println!("⚠️ Error collecting chunk results: {}", e);
+                            // Continue with fallback instead of failing
                         }
                     }
                 }
@@ -279,20 +287,28 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
             }
         }
         
-        let total_time = start_time.elapsed();
+        let transcription_time = transcription_start.elapsed();
         
         println!("🔍 Ring buffer processing complete - {} chunks collected", chunks_processed);
         
         // Combine all chunk transcriptions
         let combined_text = if final_chunks.is_empty() {
-            // If no chunks were processed (no audio samples received), fall back to traditional transcription
-            println!("📝 No chunks processed - ring buffer didn't receive audio samples, using fallback transcription");
+            // If no chunks were collected from the monitor, try fallback
+            println!("📝 No chunks collected from ring buffer - checking if fallback is needed");
+            
+            // Check if the recording was too short for chunking
+            let total_recording_time = transcription_start.elapsed();
+            if total_recording_time < std::time::Duration::from_secs(5) {
+                println!("⏱️ Recording was too short for chunking ({:.1}s) - using full file transcription", 
+                         total_recording_time.as_secs_f64());
+            }
             
             // Wait for file to be fully written by the AudioRecorder
             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
             
             // Check if file exists and has content
             if !recording_path.exists() {
+                println!("⚠️ Recording file does not exist at: {:?}", recording_path);
                 return Err("Recording file does not exist for fallback transcription".to_string());
             }
             
@@ -315,16 +331,20 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
                 Err(e) => return Err(format!("Fallback transcription failed: {}", e)),
             }
         } else {
-            // Join all chunk results
-            final_chunks.join(" ")
+            // Join all chunk results with spaces
+            println!("🔗 Joining {} chunks into final transcript", final_chunks.len());
+            let combined = final_chunks.join(" ");
+            println!("📝 Combined transcript: {} chars", combined.len());
+            println!("📝 First 100 chars: {}", combined.chars().take(100).collect::<String>());
+            combined
         };
         
         println!("✅ Ring buffer transcription completed: {} chars from {} chunks in {:.2}s", 
-                 combined_text.len(), chunks_processed, total_time.as_secs_f64());
+                 combined_text.len(), chunks_processed, transcription_time.as_secs_f64());
         
         Ok(TranscriptionResult {
             text: combined_text,
-            processing_time_ms: total_time.as_millis() as u64,
+            processing_time_ms: transcription_time.as_millis() as u64,
             strategy_used: self.name().to_string(),
             chunks_processed: chunks_processed,
         })
@@ -333,6 +353,10 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
     fn get_partial_results(&self) -> Vec<String> {
         // TODO: Get partial results from ring transcriber
         vec![]
+    }
+    
+    fn get_ring_buffer(&self) -> Option<Arc<crate::audio::ring_buffer_recorder::RingBufferRecorder>> {
+        self.ring_buffer.clone()
     }
 }
 
