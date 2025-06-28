@@ -198,6 +198,27 @@ async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Re
     // Play stop sound
     sound::SoundPlayer::play_stop();
     
+    // Ensure native overlay is set to idle state
+    #[cfg(target_os = "macos")]
+    {
+        println!("🎯 Forcing native overlay to idle state after stop_recording");
+        
+        // Try multiple times to ensure it sticks
+        for i in 0..3 {
+            let overlay = state.native_panel_overlay.lock().await;
+            overlay.set_idle_state();
+            drop(overlay);
+            
+            if i < 2 {
+                // Small delay between attempts
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                println!("🔄 Retry {} - setting overlay to idle", i + 1);
+            }
+        }
+        
+        println!("✅ Overlay idle state set (tried 3 times)");
+    }
+    
     // Get the filename for background processing
     let filename = state.current_recording_file.lock().await.take();
     
@@ -229,13 +250,8 @@ async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Re
     // Stop recording overlay updates
     state.is_recording_overlay_active.store(false, Ordering::Relaxed);
     
-    // Use native NSPanel overlay
-    #[cfg(target_os = "macos")]
-    {
-        let overlay = state.native_panel_overlay.lock().await;
-        overlay.set_processing_state(true);  // Set to processing, not idle
-        drop(overlay);
-    }
+    // Native overlay state will be managed by the progress tracker and processing status events
+    // Don't set it to processing here - let the workflow handle state transitions
     
     // Broadcast recording state change to ALL windows
     let _ = app.emit("recording-state-changed", serde_json::json!({
@@ -1201,8 +1217,11 @@ pub fn run() {
                             match &status {
                                 ProcessingStatus::Complete { .. } | ProcessingStatus::Failed { .. } => {
                                     // Processing is done, update native overlay
+                                    println!("🎯 Processing complete/failed - setting native overlay to idle");
                                     let overlay = native_overlay_clone.lock().await;
-                                    overlay.set_processing_state(false);
+                                    // Just call set_idle_state directly - no need to call set_processing_state(false)
+                                    // as the Swift implementation of setProcessingState(false) already calls setIdleState
+                                    overlay.set_idle_state();
                                     drop(overlay);
                                 }
                                 _ => {
