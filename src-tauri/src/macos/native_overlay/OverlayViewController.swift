@@ -156,14 +156,25 @@ class OverlayViewController: NSViewController {
     }
     
     func setIdleState() {
+        print("🔍 [OverlayViewController] setIdleState() called")
+        print("  📊 Current state: \(currentState)")
+        print("  📐 isExpanded: \(isExpanded), isHovering: \(isHovering)")
+        
         currentState = .idle
         isExpanded = false
         isHovering = false
         // Cancel any pending hover timer
         hoverTimer?.invalidate()
         hoverTimer = nil
+        
+        print("  🔄 State changed to: \(currentState)")
+        print("  📞 Calling updateState()...")
         updateState()
+        
+        print("  📞 Calling minimize()...")
         minimize()
+        
+        print("  ✅ setIdleState() completed")
         
         // Force update tracking areas and ensure panel accepts mouse events
         DispatchQueue.main.async { [weak self] in

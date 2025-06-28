@@ -37,9 +37,17 @@ public func nativeOverlaySetProcessingState(_ processing: Bool) {
 
 @_cdecl("native_overlay_set_idle_state")
 public func nativeOverlaySetIdleState() {
+    print("🔍 [Swift] native_overlay_set_idle_state called from Rust")
+    print("  📍 [Swift] Current thread: \(Thread.current)")
+    print("  ⏰ [Swift] Dispatching to main queue...")
+    
     DispatchQueue.main.async {
+        print("  ✅ [Swift] Now on main queue, calling setIdleState()")
         NativeOverlayManager.shared.setIdleState()
+        print("  ✅ [Swift] setIdleState() completed")
     }
+    
+    print("  📤 [Swift] native_overlay_set_idle_state function returning")
 }
 
 @_cdecl("native_overlay_set_start_recording_callback")

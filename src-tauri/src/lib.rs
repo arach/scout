@@ -205,14 +205,23 @@ async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Re
         
         // Try multiple times to ensure it sticks
         for i in 0..3 {
+            println!("🔍 Attempt {} to set overlay to idle state", i + 1);
+            let start = std::time::Instant::now();
+            
             let overlay = state.native_panel_overlay.lock().await;
+            println!("  📌 Got overlay lock after {:?}", start.elapsed());
+            
             overlay.set_idle_state();
+            println!("  📤 Called set_idle_state() at attempt {}", i + 1);
+            
             drop(overlay);
+            println!("  🔓 Released overlay lock after {:?}", start.elapsed());
             
             if i < 2 {
                 // Small delay between attempts
+                println!("  ⏳ Waiting 100ms before retry...");
                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                println!("🔄 Retry {} - setting overlay to idle", i + 1);
+                println!("  ⏰ Wait complete, total time for attempt {}: {:?}", i + 1, start.elapsed());
             }
         }
         
