@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::path::Path;
 use async_trait::async_trait;
 use crate::transcription::Transcriber;
+use crate::logger::{info, debug, warn, error, Component};
 
 /// Result of transcription containing the text and metadata
 #[derive(Debug, Clone)]
@@ -93,7 +94,7 @@ impl TranscriptionStrategy for ClassicTranscriptionStrategy {
     async fn start_recording(&mut self, output_path: &Path, _config: &TranscriptionConfig) -> Result<(), String> {
         self.recording_path = Some(output_path.to_path_buf());
         self.start_time = Some(std::time::Instant::now());
-        println!("🎯 Classic transcription strategy started for: {:?}", output_path);
+        info(Component::Transcription, &format!("Classic transcription strategy started for: {:?}", output_path));
         Ok(())
     }
     
@@ -109,7 +110,7 @@ impl TranscriptionStrategy for ClassicTranscriptionStrategy {
         let recording_path = self.recording_path.take()
             .ok_or("Recording path not set")?;
         
-        println!("🎯 Classic transcription processing: {:?}", recording_path);
+        info(Component::Transcription, &format!("Classic transcription processing: {:?}", recording_path));
         
         let transcriber = self.transcriber.lock().await;
         let text = transcriber.transcribe_file(&recording_path)
@@ -185,8 +186,8 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
         self.config = Some(config.clone());
         self.recording_path = Some(output_path.to_path_buf());
         
-        println!("🔄 Ring buffer transcription strategy started for: {:?}", output_path);
-        println!("📝 Initializing ring buffer components for real-time processing");
+        info(Component::RingBuffer, &format!("Ring buffer transcription strategy started for: {:?}", output_path));
+        info(Component::RingBuffer, "Initializing ring buffer components for real-time processing");
         
         // Initialize ring buffer recorder with 5-minute capacity
         // Match the audio recorder's configuration (mono, 48kHz)

@@ -9,6 +9,7 @@ use crate::recording_progress::RecordingProgress;
 use crate::processing_queue::{ProcessingQueue, ProcessingJob};
 use crate::transcription_context::TranscriptionContext;
 use crate::db::Database;
+use crate::logger::{info, debug, warn, error, Component};
 
 #[derive(Debug)]
 pub enum RecordingCommand {
@@ -64,13 +65,13 @@ impl RecordingWorkflow {
             while let Some(command) = command_rx.recv().await {
                 match command {
                     RecordingCommand::StartRecording { device_name, response } => {
-                        println!("📝 Starting recording workflow...");
+                        info(Component::Recording, "Starting recording workflow...");
                         // Generate filename
                         let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
                         let filename = format!("recording_{}.wav", timestamp);
                         let path = recordings_dir.join(&filename);
                         
-                        println!("🔧 Initializing transcription context for real-time chunking...");
+                        info(Component::Recording, "Initializing transcription context for real-time chunking...");
                         // Initialize transcription context for real-time chunking
                         let transcription_context = match TranscriptionContext::new_from_db(
                             database.clone(),
@@ -78,8 +79,8 @@ impl RecordingWorkflow {
                         ) {
                             Ok(ctx) => ctx,
                             Err(e) => {
-                                println!("⚠️ Failed to create transcription context: {}", e);
-                                println!("📦 Falling back to traditional processing queue");
+                                warn(Component::Recording, &format!("Failed to create transcription context: {}", e));
+                                info(Component::Recording, "Falling back to traditional processing queue");
                                 // Continue with traditional recording workflow without strategy integration
                                 let recorder = recorder.lock().await;
                                 match recorder.start_recording(&path, device_name.as_deref()) {
@@ -117,7 +118,7 @@ impl RecordingWorkflow {
                                     .unwrap_or_else(|| "unknown".to_string());
                                 
                                 let sample_rx_option = if strategy_name == "ring_buffer" {
-                                    println!("🔗 Detected ring buffer strategy - connecting audio samples");
+                                    info(Component::RingBuffer, "Detected ring buffer strategy - connecting audio samples");
                                     
                                     // Create a channel to send samples from AudioRecorder thread to transcription context
                                     let (sample_tx, sample_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<f32>>();
@@ -128,7 +129,7 @@ impl RecordingWorkflow {
                                     let audio_channels = device_info.as_ref().map(|d| d.channels).unwrap_or(2) as usize;
                                     drop(recorder_guard);
                                     
-                                    println!("🔊 Audio device has {} channels, ring buffer expects 1 channel", audio_channels);
+                                    info(Component::RingBuffer, &format!("Audio device has {} channels, ring buffer expects 1 channel", audio_channels));
                                     
                                     // Create callback for AudioRecorder
                                     let sample_callback = std::sync::Arc::new(move |samples: &[f32]| {

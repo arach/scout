@@ -4,6 +4,7 @@ use tokio::sync::mpsc;
 use tokio::time;
 use crate::audio::ring_buffer_recorder::RingBufferRecorder;
 use crate::transcription::ring_buffer_transcriber::RingBufferTranscriber;
+use crate::logger::{info, debug, warn, error, Component};
 
 /// Monitors ring buffer recording and triggers chunking when appropriate
 pub struct RingBufferMonitor {
@@ -39,7 +40,7 @@ impl RingBufferMonitor {
         let (stop_tx, mut stop_rx) = mpsc::channel::<()>(1);
         
         let handle = tokio::spawn(async move {
-            println!("📊 Ring buffer monitor started");
+            info(Component::RingBuffer, "Ring buffer monitor started");
             
             // Store the ring transcriber for later use
             let mut ring_transcriber = Some(ring_transcriber);
