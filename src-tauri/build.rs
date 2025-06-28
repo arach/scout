@@ -88,6 +88,7 @@ fn main() {
         println!("cargo:rustc-link-lib=dylib=swiftFoundation");
         
         // Compile Native NSPanel overlay
+        println!("cargo:rerun-if-changed=src/macos/native_overlay/Logger.swift");
         println!("cargo:rerun-if-changed=src/macos/native_overlay/NativeOverlayPanel.swift");
         println!("cargo:rerun-if-changed=src/macos/native_overlay/OverlayViewController.swift");
         println!("cargo:rerun-if-changed=src/macos/native_overlay/OverlayBridge.swift");
@@ -102,6 +103,7 @@ fn main() {
             .args(&[
                 "-c",
                 "-module-name", "NativeOverlay",
+                &format!("{}/src/macos/native_overlay/Logger.swift", env!("CARGO_MANIFEST_DIR")),
                 &format!("{}/src/macos/native_overlay/NativeOverlayPanel.swift", env!("CARGO_MANIFEST_DIR")),
                 &format!("{}/src/macos/native_overlay/OverlayViewController.swift", env!("CARGO_MANIFEST_DIR")),
                 &format!("{}/src/macos/native_overlay/OverlayBridge.swift", env!("CARGO_MANIFEST_DIR"))
@@ -127,7 +129,8 @@ fn main() {
                 let path = entry.path();
                 if path.extension()?.to_str()? == "o" && 
                    (path.file_name()?.to_str()?.contains("NativeOverlay") ||
-                    path.file_name()?.to_str()?.contains("Overlay")) {
+                    path.file_name()?.to_str()?.contains("Overlay") ||
+                    path.file_name()?.to_str()?.contains("Logger")) {
                     println!("cargo:warning=Found object file: {}", path.display());
                     Some(path)
                 } else {

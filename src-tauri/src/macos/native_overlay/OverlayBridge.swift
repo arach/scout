@@ -103,5 +103,5 @@ public func nativeOverlaySetPosition(_ position: UnsafePointer<CChar>) {
 @_cdecl("native_overlay_get_current_state")
 public func nativeOverlayGetCurrentState() -> UnsafePointer<CChar>? {
     let state = NativeOverlayManager.shared.getCurrentState()
-    return strdup(state)
+    return UnsafePointer(strdup(state))
 }
