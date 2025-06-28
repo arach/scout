@@ -156,9 +156,8 @@ class OverlayViewController: NSViewController {
     }
     
     func setIdleState() {
-        print("🔍 [OverlayViewController] setIdleState() called")
-        print("  📊 Current state: \(currentState)")
-        print("  📐 isExpanded: \(isExpanded), isHovering: \(isHovering)")
+        Logger.debug(.overlay, "setIdleState() called")
+        Logger.info(.overlay, "Current state: \(currentState), isExpanded: \(isExpanded)")
         
         currentState = .idle
         isExpanded = false
@@ -167,14 +166,11 @@ class OverlayViewController: NSViewController {
         hoverTimer?.invalidate()
         hoverTimer = nil
         
-        print("  🔄 State changed to: \(currentState)")
-        print("  📞 Calling updateState()...")
+        Logger.debug(.overlay, "State changed to: \(currentState)")
         updateState()
-        
-        print("  📞 Calling minimize()...")
         minimize()
         
-        print("  ✅ setIdleState() completed")
+        Logger.info(.overlay, "setIdleState() completed")
         
         // Force update tracking areas and ensure panel accepts mouse events
         DispatchQueue.main.async { [weak self] in
@@ -193,6 +189,17 @@ class OverlayViewController: NSViewController {
     
     func setVolumeLevel(_ level: CGFloat) {
         overlayView.setVolumeLevel(level)
+    }
+    
+    func getCurrentState() -> String {
+        switch currentState {
+        case .idle:
+            return "idle"
+        case .recording:
+            return "recording"
+        case .processing:
+            return "processing"
+        }
     }
     
     private func updateState() {
@@ -295,6 +302,10 @@ class OverlayViewController: NSViewController {
     
     @objc func setVolumeLevel(_ level: CGFloat) {
         controller?.setVolumeLevel(level)
+    }
+    
+    @objc func getCurrentState() -> String {
+        return controller?.getCurrentState() ?? "unknown"
     }
     
     @objc func setPosition(_ position: String) {

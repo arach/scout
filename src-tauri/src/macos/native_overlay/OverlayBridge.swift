@@ -37,17 +37,16 @@ public func nativeOverlaySetProcessingState(_ processing: Bool) {
 
 @_cdecl("native_overlay_set_idle_state")
 public func nativeOverlaySetIdleState() {
-    print("🔍 [Swift] native_overlay_set_idle_state called from Rust")
-    print("  📍 [Swift] Current thread: \(Thread.current)")
-    print("  ⏰ [Swift] Dispatching to main queue...")
+    Logger.debug(.ffi, "native_overlay_set_idle_state called from Rust")
+    Logger.debug(.ffi, "Current thread: \(Thread.current)")
     
     DispatchQueue.main.async {
-        print("  ✅ [Swift] Now on main queue, calling setIdleState()")
+        Logger.debug(.ffi, "Now on main queue, calling setIdleState()")
         NativeOverlayManager.shared.setIdleState()
-        print("  ✅ [Swift] setIdleState() completed")
+        Logger.debug(.ffi, "setIdleState() completed")
     }
     
-    print("  📤 [Swift] native_overlay_set_idle_state function returning")
+    Logger.debug(.ffi, "native_overlay_set_idle_state function returning")
 }
 
 @_cdecl("native_overlay_set_start_recording_callback")
@@ -99,4 +98,10 @@ public func nativeOverlaySetPosition(_ position: UnsafePointer<CChar>) {
     DispatchQueue.main.async {
         NativeOverlayManager.shared.setPosition(positionString)
     }
+}
+
+@_cdecl("native_overlay_get_current_state")
+public func nativeOverlayGetCurrentState() -> UnsafePointer<CChar>? {
+    let state = NativeOverlayManager.shared.getCurrentState()
+    return strdup(state)
 }
