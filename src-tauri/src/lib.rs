@@ -13,6 +13,7 @@ mod ring_buffer_monitor;
 mod transcription_context;
 mod performance_logger;
 mod keyboard_monitor;
+mod logger;
 #[cfg(target_os = "macos")]
 mod macos;
 
@@ -201,31 +202,56 @@ async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Re
     // Ensure native overlay is set to idle state
     #[cfg(target_os = "macos")]
     {
-        println!("🎯 Forcing native overlay to idle state after stop_recording");
+        use crate::logger::{info, debug, Component};
+        
+        info(Component::Overlay, "Forcing native overlay to idle state after stop_recording");
+        
+        // Capture initial progress tracker state
+        let progress_state = state.progress_tracker.current_state();
+        debug(Component::Overlay, &format!("Progress tracker state: {:?}", progress_state));
         
         // Try multiple times to ensure it sticks
         for i in 0..3 {
-            println!("🔍 Attempt {} to set overlay to idle state", i + 1);
+            debug(Component::Overlay, &format!("Attempt {} to set overlay to idle state", i + 1));
             let start = std::time::Instant::now();
             
+            // Capture overlay state before attempting change
             let overlay = state.native_panel_overlay.lock().await;
-            println!("  📌 Got overlay lock after {:?}", start.elapsed());
+            let state_before = overlay.get_current_state();
+            debug(Component::Overlay, &format!("Overlay state BEFORE attempt {}: {}", i + 1, state_before));
             
             overlay.set_idle_state();
-            println!("  📤 Called set_idle_state() at attempt {}", i + 1);
+            debug(Component::Overlay, &format!("Called set_idle_state() at attempt {}", i + 1));
             
             drop(overlay);
-            println!("  🔓 Released overlay lock after {:?}", start.elapsed());
+            debug(Component::Overlay, &format!("Released overlay lock after {:?}", start.elapsed()));
+            
+            // Small delay to let the UI update
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            
+            // Capture overlay state after attempting change
+            let overlay = state.native_panel_overlay.lock().await;
+            let state_after = overlay.get_current_state();
+            debug(Component::Overlay, &format!("Overlay state AFTER attempt {}: {}", i + 1, state_after));
+            drop(overlay);
+            
+            if state_after == "idle" {
+                info(Component::Overlay, &format!("Overlay successfully set to idle on attempt {}", i + 1));
+                break;
+            }
             
             if i < 2 {
-                // Small delay between attempts
-                println!("  ⏳ Waiting 100ms before retry...");
+                // Delay between attempts
+                debug(Component::Overlay, "Waiting 100ms before retry...");
                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                println!("  ⏰ Wait complete, total time for attempt {}: {:?}", i + 1, start.elapsed());
+                debug(Component::Overlay, &format!("Wait complete, total time for attempt {}: {:?}", i + 1, start.elapsed()));
             }
         }
         
-        println!("✅ Overlay idle state set (tried 3 times)");
+        // Final state check
+        let overlay = state.native_panel_overlay.lock().await;
+        let final_state = overlay.get_current_state();
+        info(Component::Overlay, &format!("Final overlay state: {}", final_state));
     }
     
     // Get the filename for background processing

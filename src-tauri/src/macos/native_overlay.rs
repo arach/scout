@@ -15,6 +15,7 @@ extern "C" {
     fn native_overlay_set_cancel_recording_callback(callback: extern "C" fn());
     fn native_overlay_set_volume_level(level: f32);
     fn native_overlay_set_position(position: *const std::os::raw::c_char);
+    fn native_overlay_get_current_state() -> *const std::os::raw::c_char;
 }
 
 // Global callbacks storage
@@ -162,6 +163,23 @@ impl NativeOverlay {
             let c_string = std::ffi::CString::new(position).unwrap();
             native_overlay_set_position(c_string.as_ptr());
         }
+    }
+    
+    pub fn get_current_state(&self) -> String {
+        #[cfg(target_os = "macos")]
+        unsafe {
+            let state_ptr = native_overlay_get_current_state();
+            if state_ptr.is_null() {
+                return "unknown".to_string();
+            }
+            let c_str = std::ffi::CStr::from_ptr(state_ptr);
+            let state = c_str.to_string_lossy().to_string();
+            // Free the memory allocated by strdup
+            libc::free(state_ptr as *mut libc::c_void);
+            state
+        }
+        #[cfg(not(target_os = "macos"))]
+        "unknown".to_string()
     }
 }
 
