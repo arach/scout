@@ -346,6 +346,9 @@ impl RecordingWorkflow {
                                                     println!("✅ Emitted processing-status complete for native overlay");
                                                 }
                                                 
+                                                // Add a small delay to ensure the event is processed
+                                                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                                                
                                                 // Emit transcript-created event
                                                 println!("📤 Emitting transcript-created event for transcript ID: {}", transcript.id);
                                                 println!("📊 Transcript details: {} chars, {}ms duration", 
