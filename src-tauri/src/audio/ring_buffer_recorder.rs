@@ -5,6 +5,7 @@ use std::path::Path;
 use hound::{WavSpec, WavWriter};
 use std::io::BufWriter;
 use std::fs::File;
+use crate::logger::{info, debug, warn, error, Component};
 
 /// A ring buffer that captures audio samples in real-time for chunked processing
 pub struct RingBufferRecorder {
@@ -28,8 +29,8 @@ impl RingBufferRecorder {
         // Calculate max samples for 5 minutes of audio
         let max_samples = (spec.sample_rate as usize * spec.channels as usize) * 300;
         
-        println!("🎯 RingBufferRecorder created with spec: channels={}, sample_rate={}, max_samples={}",
-                 spec.channels, spec.sample_rate, max_samples);
+        info(Component::RingBuffer, &format!("RingBufferRecorder created with spec: channels={}, sample_rate={}, max_samples={}",
+                 spec.channels, spec.sample_rate, max_samples));
         
         Ok(Self {
             samples: Arc::new(Mutex::new(VecDeque::new())),
@@ -66,8 +67,8 @@ impl RingBufferRecorder {
             
             // Debug logging for troubleshooting
             if new_sample_count > 0 && (before_size + new_sample_count - removed != final_size) {
-                println!("⚠️ Ring buffer math issue: before={}, added={}, removed={}, final={}, max={}",
-                         before_size, new_sample_count, removed, final_size, self.max_samples);
+                warn(Component::RingBuffer, &format!("Ring buffer math issue: before={}, added={}, removed={}, final={}, max={}",
+                         before_size, new_sample_count, removed, final_size, self.max_samples));
             }
         }
         
@@ -111,7 +112,7 @@ impl RingBufferRecorder {
         
         // Verify the chunk size is a multiple of channels
         if chunk.len() % channels != 0 {
-            eprintln!("⚠️  Warning: Chunk size {} is not a multiple of channels {}", chunk.len(), channels);
+            warn(Component::RingBuffer, &format!("Chunk size {} is not a multiple of channels {}", chunk.len(), channels));
         }
         
         Ok(chunk)
@@ -155,10 +156,10 @@ impl RingBufferRecorder {
         writer.finalize()
             .map_err(|e| format!("Failed to finalize chunk WAV file: {}", e))?;
         
-        println!("💾 Saved chunk with {} samples ({} frames) to {:?}", 
+        debug(Component::RingBuffer, &format!("Saved chunk with {} samples ({} frames) to {:?}", 
                  chunk_data.len(), 
                  chunk_data.len() / channels,
-                 output_path);
+                 output_path));
         
         Ok(())
     }
@@ -192,7 +193,7 @@ impl RingBufferRecorder {
         let mut samples = self.samples.lock().unwrap();
         let count = samples.len();
         samples.clear();
-        println!("🧹 Ring buffer cleared - {} samples removed", count);
+        debug(Component::RingBuffer, &format!("Ring buffer cleared - {} samples removed", count));
     }
 }
 

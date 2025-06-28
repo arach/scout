@@ -10,6 +10,7 @@ use crate::transcription::Transcriber;
 use crate::audio::AudioConverter;
 use crate::clipboard;
 use crate::settings::SettingsManager;
+use crate::logger::{info, debug, warn, error, Component};
 
 #[derive(Clone)]
 pub struct ProcessingJob {
@@ -140,7 +141,7 @@ impl ProcessingQueue {
                             let model_path = match read_settings_and_get_model_path(&app_data_dir, &models_dir) {
                                 Ok(path) => path,
                                 Err(e) => {
-                                    eprintln!("Failed to get model path from settings: {}", e);
+                                    error(Component::Processing, &format!("Failed to get model path from settings: {}", e));
                                     // Fallback to any available model
                                     find_any_available_model(&models_dir).unwrap_or_else(|| models_dir.join("ggml-tiny.en.bin"))
                                 }
@@ -216,7 +217,7 @@ impl ProcessingQueue {
                                                                 }
                                                             }
                                                             Err(e) => {
-                                                                eprintln!("Failed to save performance metrics: {}", e);
+                                                                error(Component::Processing, &format!("Failed to save performance metrics: {}", e));
                                                             }
                                                         }
                                                         
@@ -226,7 +227,7 @@ impl ProcessingQueue {
                                                         }
                                                     }
                                                     Err(e) => {
-                                                        eprintln!("Failed to save transcript to database: {}", e);
+                                                        error(Component::Processing, &format!("Failed to save transcript to database: {}", e));
                                                     }
                                                 }
                                                 
@@ -238,7 +239,7 @@ impl ProcessingQueue {
                                                 
                                                 if auto_copy {
                                                     if let Err(e) = clipboard::copy_to_clipboard(&transcript) {
-                                                        eprintln!("Failed to copy transcript to clipboard: {}", e);
+                                                        error(Component::Processing, &format!("Failed to copy transcript to clipboard: {}", e));
                                                     }
                                                 }
                                                 
@@ -246,13 +247,13 @@ impl ProcessingQueue {
                                                     // Copy to clipboard first (required for paste)
                                                     if !auto_copy {
                                                         if let Err(e) = clipboard::copy_to_clipboard(&transcript) {
-                                                            eprintln!("Failed to copy transcript for auto-paste: {}", e);
+                                                            error(Component::Processing, &format!("Failed to copy transcript for auto-paste: {}", e));
                                                         } else {
                                                             // Small delay to ensure clipboard is ready
                                                             sleep(Duration::from_millis(100)).await;
                                                             
                                                             if let Err(e) = clipboard::simulate_paste() {
-                                                                eprintln!("Failed to auto-paste transcript: {}", e);
+                                                                error(Component::Processing, &format!("Failed to auto-paste transcript: {}", e));
                                                             }
                                                         }
                                                     } else {
@@ -260,7 +261,7 @@ impl ProcessingQueue {
                                                         sleep(Duration::from_millis(100)).await;
                                                         
                                                         if let Err(e) = clipboard::simulate_paste() {
-                                                            eprintln!("Failed to auto-paste transcript: {}", e);
+                                                            error(Component::Processing, &format!("Failed to auto-paste transcript: {}", e));
                                                         }
                                                     }
                                                 }
@@ -289,7 +290,7 @@ impl ProcessingQueue {
                                                 }
                                             }
                                             Err(e) => {
-                                                eprintln!("Transcription failed: {}", e);
+                                                error(Component::Processing, &format!("Transcription failed: {}", e));
                                                 let _ = status_tx.send(ProcessingStatus::Failed { 
                                                     filename: job.filename.clone(),
                                                     error: format!("Transcription failed: {}", e),
@@ -298,7 +299,7 @@ impl ProcessingQueue {
                                         }
                                     }
                                     Err(e) => {
-                                        eprintln!("Failed to create transcriber: {}", e);
+                                        error(Component::Processing, &format!("Failed to create transcriber: {}", e));
                                         let _ = status_tx.send(ProcessingStatus::Failed { 
                                             filename: job.filename.clone(),
                                             error: format!("Failed to create transcriber: {}", e),
@@ -306,7 +307,7 @@ impl ProcessingQueue {
                                     }
                                 }
                             } else {
-                                eprintln!("Model file not found at: {:?}", model_path);
+                                error(Component::Processing, &format!("Model file not found at: {:?}", model_path));
                                 let _ = status_tx.send(ProcessingStatus::Failed { 
                                     filename: job.filename.clone(),
                                     error: "Whisper model not found".to_string(),

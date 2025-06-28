@@ -4,6 +4,7 @@ use std::thread;
 use std::sync::mpsc;
 use std::any::TypeId;
 use super::vad::VoiceActivityDetector;
+use crate::logger::{info, debug, warn, error, Component};
 
 // Type alias for sample callback
 pub type SampleCallback = Arc<dyn Fn(&[f32]) + Send + Sync>;
@@ -69,12 +70,12 @@ impl AudioRecorder {
                 match cmd {
                     RecorderCommand::StartRecording(path, device_name) => {
                         if let Err(e) = recorder.start_recording(&path, device_name.as_deref()) {
-                            eprintln!("Failed to start recording: {}", e);
+                            error(Component::Recording, &format!("Failed to start recording: {}", e));
                         }
                     }
                     RecorderCommand::StopRecording => {
                         if let Err(e) = recorder.stop_recording() {
-                            eprintln!("Failed to stop recording: {}", e);
+                            error(Component::Recording, &format!("Failed to stop recording: {}", e));
                         }
                     }
                     RecorderCommand::SetVadEnabled(enabled) => {
@@ -82,12 +83,12 @@ impl AudioRecorder {
                     }
                     RecorderCommand::StartAudioLevelMonitoring(device_name) => {
                         if let Err(e) = recorder.start_audio_level_monitoring(device_name.as_deref()) {
-                            eprintln!("Failed to start audio level monitoring: {}", e);
+                            error(Component::Recording, &format!("Failed to start audio level monitoring: {}", e));
                         }
                     }
                     RecorderCommand::StopAudioLevelMonitoring => {
                         if let Err(e) = recorder.stop_audio_level_monitoring() {
-                            eprintln!("Failed to stop audio level monitoring: {}", e);
+                            error(Component::Recording, &format!("Failed to stop audio level monitoring: {}", e));
                         }
                     }
                     RecorderCommand::SetSampleCallback(callback) => {
@@ -120,7 +121,7 @@ impl AudioRecorder {
 
         // Clear the recording state immediately to prevent race conditions
         // This ensures that any concurrent is_recording() calls will return false
-        println!("🛑 AudioRecorder::stop_recording - clearing state immediately");
+        info(Component::Recording, "AudioRecorder::stop_recording - clearing state immediately");
         *self.is_recording.lock().unwrap() = false;
 
         // Send stop command to the worker thread
@@ -252,18 +253,18 @@ impl AudioRecorderWorker {
         
         let device = match device_name {
             Some(name) => {
-                println!("🎤 Attempting to use specified device: '{}'", name);
+                info(Component::Recording, &format!("Attempting to use specified device: '{}'", name));
                 
                 // Find device by name
                 let devices = host.input_devices()
                     .map_err(|e| format!("Failed to enumerate devices: {}", e))?;
                 
                 // List all available devices for debugging
-                println!("🎤 Available input devices:");
+                info(Component::Recording, "Available input devices:");
                 let devices_vec: Vec<_> = devices.collect();
                 for (i, device) in devices_vec.iter().enumerate() {
                     let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
-                    println!("  [{}] {}", i, device_name);
+                    info(Component::Recording, &format!("  [{}] {}", i, device_name));
                 }
                 
                 // Find the requested device
@@ -272,23 +273,23 @@ impl AudioRecorderWorker {
                     .ok_or_else(|| format!("Device '{}' not found", name))?;
                 
                 let actual_name = selected_device.name().unwrap_or_else(|_| "Unknown".to_string());
-                println!("✅ Selected device: '{}'", actual_name);
+                info(Component::Recording, &format!("Selected device: '{}'", actual_name));
                 selected_device
             },
             None => {
-                println!("🎤 Using default input device");
+                info(Component::Recording, "Using default input device");
                 
                 // Use default device
                 let default_device = host.default_input_device()
                     .ok_or("No input device available - please check microphone permissions")?;
                 
                 let device_name = default_device.name().unwrap_or_else(|_| "Unknown".to_string());
-                println!("✅ Default device: '{}'", device_name);
+                info(Component::Recording, &format!("Default device: '{}'", device_name));
                 
                 // Log if this looks like AirPods
                 if device_name.to_lowercase().contains("airpod") {
-                    println!("⚠️  AirPods detected - may experience audio quality issues");
-                    println!("💡 Recommendation: Use a wired microphone for best results");
+                    warn(Component::Recording, "AirPods detected - may experience audio quality issues");
+                    info(Component::Recording, "Recommendation: Use a wired microphone for best results");
                 }
                 
                 default_device
@@ -302,11 +303,11 @@ impl AudioRecorderWorker {
 
         // Log detailed device information
         let device_name_for_metadata = device.name().unwrap_or_else(|_| "Unknown".to_string());
-        println!("🎤 Device details:");
-        println!("  📱 Name: {}", device_name_for_metadata);
-        println!("  🎛️  Sample Rate: {} Hz", default_config.sample_rate().0);
-        println!("  🔊 Channels: {}", default_config.channels());
-        println!("  📊 Format: {:?}", default_config.sample_format());
+        info(Component::Recording, "Device details:");
+        info(Component::Recording, &format!("  Name: {}", device_name_for_metadata));
+        info(Component::Recording, &format!("  Sample Rate: {} Hz", default_config.sample_rate().0));
+        info(Component::Recording, &format!("  Channels: {}", default_config.channels()));
+        info(Component::Recording, &format!("  Format: {:?}", default_config.sample_format()));
 
         // Try stereo first, fallback to device capabilities if not supported
         let mut channels = 2; // Prefer stereo
@@ -321,11 +322,11 @@ impl AudioRecorderWorker {
                 });
             
             if !stereo_supported {
-                println!("Device doesn't support stereo input, falling back to mono");
+                info(Component::Recording, "Device doesn't support stereo input, falling back to mono");
                 channels = default_config.channels();
             }
         } else {
-            println!("Couldn't check device capabilities, using device default");
+            info(Component::Recording, "Couldn't check device capabilities, using device default");
             channels = default_config.channels();
         }
 
@@ -348,7 +349,7 @@ impl AudioRecorderWorker {
         };
         *self.current_device_info.lock().unwrap() = Some(device_info);
         
-        println!("✅ Recording started with device: {}", device_name_for_metadata);
+        info(Component::Recording, &format!("Recording started with device: {}", device_name_for_metadata));
         
         // Reset sample count
         *self.sample_count.lock().unwrap() = 0;
@@ -382,7 +383,7 @@ impl AudioRecorderWorker {
         let is_recording = self.is_recording.clone();
         *is_recording.lock().unwrap() = true;
 
-        let err_fn = |err| eprintln!("An error occurred on the audio stream: {}", err);
+        let err_fn = |err| error(Component::Recording, &format!("An error occurred on the audio stream: {}", err));
 
         let stream = match default_config.sample_format() {
             cpal::SampleFormat::I16 => self.build_input_stream::<i16>(
@@ -422,9 +423,9 @@ impl AudioRecorderWorker {
     }
 
     fn stop_recording(&mut self) -> Result<(), String> {
-        println!("🛑 AudioRecorder::stop_recording called at {}", chrono::Local::now().format("%H:%M:%S%.3f"));
+        info(Component::Recording, &format!("AudioRecorder::stop_recording called at {}", chrono::Local::now().format("%H:%M:%S%.3f")));
         *self.is_recording.lock().unwrap() = false;
-        println!("🎯 Set is_recording to false");
+        debug(Component::Recording, "Set is_recording to false");
         
         // Reset audio level only after recording stops
         *self.current_audio_level.lock().unwrap() = 0.0;
@@ -608,7 +609,7 @@ impl AudioRecorderWorker {
             
         let audio_level = self.current_audio_level.clone();
         
-        let err_fn = |err| eprintln!("Audio level monitoring error: {}", err);
+        let err_fn = |err| error(Component::Recording, &format!("Audio level monitoring error: {}", err));
         
         // Build monitoring stream based on sample format
         let monitoring_stream = match config.sample_format() {

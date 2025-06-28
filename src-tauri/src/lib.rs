@@ -66,7 +66,7 @@ pub struct AppState {
 async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle, device_name: Option<String>) -> Result<String, String> {
     // Check if already recording
     if state.progress_tracker.is_busy() {
-        println!("WARNING: Attempted to start recording while already recording");
+        warn(Component::Recording, "Attempted to start recording while already recording");
         return Err("Recording already in progress".to_string());
     }
     
@@ -74,7 +74,7 @@ async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle, devi
     let recorder = state.recorder.lock().await;
     if recorder.is_recording() {
         drop(recorder);
-        println!("WARNING: Audio recorder is already recording");
+        warn(Component::Recording, "Audio recorder is already recording");
         return Err("Audio recorder is already active".to_string());
     }
     drop(recorder);
@@ -182,7 +182,7 @@ async fn cancel_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> 
     // Update native overlay to idle
     #[cfg(target_os = "macos")]
     {
-        println!("🎯 Setting native overlay to idle state after stop_recording");
+        debug(Component::Overlay, "Setting native overlay to idle state after stop_recording");
         let overlay = state.native_panel_overlay.lock().await;
         overlay.set_idle_state();
     }
@@ -271,7 +271,7 @@ async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Re
                 Ok(_metadata) => {
                 }
                 Err(e) => {
-                    eprintln!("Failed to verify recording file: {}", e);
+                    error(Component::Recording, &format!("Failed to verify recording file: {}", e));
                 }
             }
         });
@@ -312,7 +312,7 @@ async fn is_recording(state: State<'_, AppState>) -> Result<bool, String> {
             
             // Log if there's a mismatch for debugging
             if is_recording {
-                println!("⚠️ is_recording mismatch: recorder says true but progress tracker is idle");
+                warn(Component::Recording, "is_recording mismatch: recorder says true but progress tracker is idle");
             }
             
             Ok(is_recording)
