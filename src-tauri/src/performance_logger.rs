@@ -1,7 +1,8 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use crate::db::Database;
 use crate::transcription::TranscriptionResult;
 use std::sync::Arc;
+use crate::logger::{info, debug, warn, Component};
 
 /// Comprehensive performance logging for transcription strategies
 pub struct PerformanceLogger {
@@ -46,12 +47,12 @@ impl PerformanceLogger {
         });
         
         // Log comprehensive performance information
-        println!("📊 === TRANSCRIPTION PERFORMANCE METRICS ===");
-        println!("🎙️  Recording Duration: {:.2}s", recording_duration.as_secs_f64());
-        println!("⚡ Transcription Time: {:.2}s", transcription_result.processing_time_ms as f64 / 1000.0);
-        println!("🚀 Strategy Used: {}", transcription_result.strategy_used);
-        println!("🔢 Chunks Processed: {}", transcription_result.chunks_processed);
-        println!("📝 Text Length: {} characters", transcription_result.text.len());
+        info(Component::Transcription, "=== TRANSCRIPTION PERFORMANCE METRICS ===");
+        info(Component::Transcription, &format!("Recording Duration: {:.2}s", recording_duration.as_secs_f64()));
+        info(Component::Transcription, &format!("Transcription Time: {:.2}s", transcription_result.processing_time_ms as f64 / 1000.0));
+        info(Component::Transcription, &format!("Strategy Used: {}", transcription_result.strategy_used));
+        info(Component::Transcription, &format!("Chunks Processed: {}", transcription_result.chunks_processed));
+        info(Component::Transcription, &format!("Text Length: {} characters", transcription_result.text.len()));
         
         // Calculate performance ratios
         let transcription_ratio = transcription_result.processing_time_ms as f64 / recording_duration.as_millis() as f64;
