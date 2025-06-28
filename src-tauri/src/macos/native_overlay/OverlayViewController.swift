@@ -199,6 +199,10 @@ class OverlayViewController: NSViewController {
             return "recording"
         case .processing:
             return "processing"
+        case .hovered:
+            return "hovered"
+        case .complete:
+            return "complete"
         }
     }
     
@@ -314,7 +318,6 @@ class OverlayViewController: NSViewController {
         let screenFrame = screen.visibleFrame
         let panelWidth = panel.frame.width
         let panelHeight = panel.frame.height
-        let padding: CGFloat = 20
         
         var x: CGFloat = 0
         var y: CGFloat = 0
@@ -353,8 +356,6 @@ class OverlayViewController: NSViewController {
         panel.setFrameOrigin(NSPoint(x: x, y: y))
         
         // Update the panel's position for proper anchor-based expansion
-        if let overlayPanel = panel as? NativeOverlayPanel {
-            overlayPanel.setPosition(position)
-        }
+        panel.setPosition(position)
     }
 }

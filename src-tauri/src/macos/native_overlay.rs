@@ -200,4 +200,5 @@ impl NativeOverlay {
     pub fn set_on_cancel_recording<F>(&self, _callback: F) where F: Fn() + Send + Sync + 'static {}
     pub fn set_volume_level(&self, _level: f32) {}
     pub fn set_position(&self, _position: &str) {}
+    pub fn get_current_state(&self) -> String { "unknown".to_string() }
 }

@@ -4502,6 +4502,7 @@ dependencies = [
  "dirs 5.0.1",
  "futures-util",
  "hound",
+ "libc",
  "log",
  "objc",
  "once_cell",
