@@ -4,7 +4,7 @@ use tokio::sync::mpsc;
 use tokio::time;
 use crate::audio::ring_buffer_recorder::RingBufferRecorder;
 use crate::transcription::ring_buffer_transcriber::RingBufferTranscriber;
-use crate::logger::{info, debug, warn, error, Component};
+use crate::logger::{info, Component};
 
 /// Monitors ring buffer recording and triggers chunking when appropriate
 pub struct RingBufferMonitor {
@@ -127,7 +127,7 @@ impl RingBufferMonitor {
         println!("🏁 Recording complete, collecting all chunks...");
         println!("📊 Already collected {} chunks during recording", self.completed_chunks.len());
         
-        if let Some(mut chunked) = self.chunked_transcriber.take() {
+        if let Some(chunked) = self.chunked_transcriber.take() {
             let buffer_duration = self.ring_buffer.get_duration();
             let remaining_duration = buffer_duration.saturating_sub(self.last_chunk_time);
             

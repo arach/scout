@@ -35,6 +35,7 @@ use tokio::sync::Mutex;
 use chrono;
 use audio::converter::AudioConverter;
 use std::path::Path;
+use crate::logger::{info, debug, warn, error, Component};
 
 // Overlay dimensions configuration
 const OVERLAY_EXPANDED_WIDTH: f64 = 220.0;

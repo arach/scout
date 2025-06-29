@@ -5,7 +5,7 @@ use std::path::Path;
 use hound::{WavSpec, WavWriter};
 use std::io::BufWriter;
 use std::fs::File;
-use crate::logger::{info, debug, warn, error, Component};
+use crate::logger::{info, debug, warn, Component};
 
 /// A ring buffer that captures audio samples in real-time for chunked processing
 pub struct RingBufferRecorder {
@@ -54,7 +54,7 @@ impl RingBufferRecorder {
                 samples.push_back(sample);
             }
             
-            let after_push = samples.len();
+            let _after_push = samples.len();
             
             // Maintain maximum buffer size
             let mut removed = 0;

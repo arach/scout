@@ -2,7 +2,7 @@ use std::time::Duration;
 use crate::db::Database;
 use crate::transcription::TranscriptionResult;
 use std::sync::Arc;
-use crate::logger::{info, debug, warn, Component};
+use crate::logger::{info, Component};
 
 /// Comprehensive performance logging for transcription strategies
 pub struct PerformanceLogger {
