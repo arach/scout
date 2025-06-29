@@ -4,7 +4,7 @@ use tokio::sync::mpsc;
 use tokio::time;
 use crate::audio::ring_buffer_recorder::RingBufferRecorder;
 use crate::transcription::ring_buffer_transcriber::RingBufferTranscriber;
-use crate::logger::{info, Component};
+use crate::logger::{info, debug, warn, Component};
 
 /// Monitors ring buffer recording and triggers chunking when appropriate
 pub struct RingBufferMonitor {
@@ -54,7 +54,7 @@ impl RingBufferMonitor {
                         // Continue with monitoring logic
                     }
                     _ = stop_rx.recv() => {
-                        println!("📊 Ring buffer monitor stopping");
+                        info(Component::RingBuffer, "Ring buffer monitor stopping");
                         break;
                     }
                 }
@@ -65,17 +65,17 @@ impl RingBufferMonitor {
                 
                 // Debug ring buffer status
                 if elapsed.as_secs() % 2 == 0 { // Log every 2 seconds to avoid spam
-                    println!("📊 Ring buffer status: elapsed={:.1}s, buffer_duration={:.1}s, samples={}", 
-                             elapsed.as_secs_f64(), buffer_duration.as_secs_f64(), sample_count);
+                    info(Component::RingBuffer, &format!("Ring buffer status: elapsed={:.1}s, buffer_duration={:.1}s, samples={}", 
+                             elapsed.as_secs_f64(), buffer_duration.as_secs_f64(), sample_count));
                 }
                 
                 // Check if we should start chunking
                 if elapsed > self.threshold_duration && self.chunked_transcriber.is_none() {
-                    println!("🚀 Recording exceeds {}s, starting ring buffer transcription", 
-                             self.threshold_duration.as_secs());
+                    info(Component::RingBuffer, &format!("Recording exceeds {}s, starting ring buffer transcription", 
+                             self.threshold_duration.as_secs()));
                     
                     if sample_count == 0 {
-                        println!("⚠️  Ring buffer has no samples - audio may not be flowing to ring buffer");
+                        warn(Component::RingBuffer, "Ring buffer has no samples - audio may not be flowing to ring buffer");
                     }
                     
                     // Use the pre-created ring transcriber
@@ -91,18 +91,18 @@ impl RingBufferMonitor {
                     if time_since_last_chunk >= self.chunk_duration && 
                        buffer_duration > self.last_chunk_time + self.chunk_duration {
                         
-                        println!("✂️ Creating ring buffer chunk at {:?}", self.last_chunk_time);
+                        info(Component::RingBuffer, &format!("Creating ring buffer chunk at {:?}", self.last_chunk_time));
                         
                         // Process chunk synchronously and collect result immediately
-                        println!("🔍 Processing chunk {} at offset {:?} with duration {:?}", 
-                                 self.next_chunk_id, self.last_chunk_time, self.chunk_duration);
+                        debug(Component::RingBuffer, &format!("Processing chunk {} at offset {:?} with duration {:?}", 
+                                 self.next_chunk_id, self.last_chunk_time, self.chunk_duration));
                         match chunked.process_chunk_sync(self.next_chunk_id, self.last_chunk_time, self.chunk_duration).await {
                             Ok(text) => {
                                 if !text.is_empty() {
-                                    println!("📝 Collected chunk {}: \"{}\"", self.next_chunk_id, text);
+                                    info(Component::RingBuffer, &format!("Collected chunk {}: \"{}\"", self.next_chunk_id, text));
                                     self.completed_chunks.push(text);
                                 } else {
-                                    println!("⚠️ Chunk {} was empty", self.next_chunk_id);
+                                    warn(Component::RingBuffer, &format!("Chunk {} was empty", self.next_chunk_id));
                                 }
                                 self.last_chunk_time += self.chunk_duration;
                                 self.next_chunk_id += 1;
@@ -115,7 +115,7 @@ impl RingBufferMonitor {
                 }
             }
             
-            println!("📊 Ring buffer monitor finished");
+            info(Component::RingBuffer, "Ring buffer monitor finished");
             self
         });
         
@@ -124,8 +124,8 @@ impl RingBufferMonitor {
     
     /// Signal that recording is complete and collect all results
     pub async fn recording_complete(mut self) -> Result<Vec<String>, String> {
-        println!("🏁 Recording complete, collecting all chunks...");
-        println!("📊 Already collected {} chunks during recording", self.completed_chunks.len());
+        info(Component::RingBuffer, "Recording complete, collecting all chunks...");
+        info(Component::RingBuffer, &format!("Already collected {} chunks during recording", self.completed_chunks.len()));
         
         if let Some(chunked) = self.chunked_transcriber.take() {
             let buffer_duration = self.ring_buffer.get_duration();
@@ -133,8 +133,8 @@ impl RingBufferMonitor {
             
             // Process any remaining audio as a final chunk
             if remaining_duration > Duration::from_millis(500) { // Only process if > 500ms
-                println!("🏁 Processing final ring buffer chunk (start: {:?}, duration: {:?})", 
-                         self.last_chunk_time, remaining_duration);
+                info(Component::RingBuffer, &format!("Processing final ring buffer chunk (start: {:?}, duration: {:?})", 
+                         self.last_chunk_time, remaining_duration));
                 
                 // Adjust duration to ensure it aligns with channel boundaries
                 let sample_rate = 48000; // Default sample rate
@@ -143,13 +143,13 @@ impl RingBufferMonitor {
                 let aligned_samples = (total_samples / channels) * channels;
                 let aligned_duration = Duration::from_secs_f32(aligned_samples as f32 / (sample_rate as f32 * channels as f32));
                 
-                println!("📐 Aligned final chunk duration from {:?} to {:?}", remaining_duration, aligned_duration);
+                debug(Component::RingBuffer, &format!("Aligned final chunk duration from {:?} to {:?}", remaining_duration, aligned_duration));
                 
                 // Process final chunk synchronously
                 match chunked.process_chunk_sync(self.next_chunk_id, self.last_chunk_time, aligned_duration).await {
                     Ok(text) => {
                         if !text.is_empty() {
-                            println!("📝 Collected final chunk {}: \"{}\"", self.next_chunk_id, text);
+                            info(Component::RingBuffer, &format!("Collected final chunk {}: \"{}\"", self.next_chunk_id, text));
                             self.completed_chunks.push(text);
                         }
                     }
@@ -160,21 +160,21 @@ impl RingBufferMonitor {
             }
             
             // No need to wait for async results - we already have everything
-            println!("✅ Total chunks collected: {}", self.completed_chunks.len());
+            info(Component::RingBuffer, &format!("Total chunks collected: {}", self.completed_chunks.len()));
             
             // Debug: Show all collected chunks
             for (i, chunk) in self.completed_chunks.iter().enumerate() {
-                println!("📝 Chunk {}: {}", i, chunk);
+                debug(Component::RingBuffer, &format!("Chunk {}: {}", i, chunk));
             }
             
             Ok(self.completed_chunks)
         } else {
             // Recording was too short for chunking, return any chunks we did collect
             if !self.completed_chunks.is_empty() {
-                println!("📝 Returning {} chunks from short recording", self.completed_chunks.len());
+                info(Component::RingBuffer, &format!("Returning {} chunks from short recording", self.completed_chunks.len()));
                 Ok(self.completed_chunks)
             } else {
-                println!("⚠️ No chunks were processed");
+                warn(Component::RingBuffer, "No chunks were processed");
                 Ok(vec![])
             }
         }

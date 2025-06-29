@@ -5,6 +5,7 @@ use tokio::task::JoinHandle;
 use std::path::PathBuf;
 use crate::audio::ring_buffer_recorder::RingBufferRecorder;
 use crate::transcription::Transcriber;
+use crate::logger::{info, debug, warn, error, Component};
 
 #[derive(Debug)]
 pub struct ChunkRequest {
@@ -69,8 +70,8 @@ impl RingBufferTranscriber {
             duration,
         };
         
-        println!("📤 Submitting chunk {} for transcription (offset: {:?}, duration: {:?})", 
-                 chunk_request.chunk_id, start_offset, duration);
+        debug(Component::RingBuffer, &format!("Submitting chunk {} for transcription (offset: {:?}, duration: {:?})", 
+                 chunk_request.chunk_id, start_offset, duration));
         
         self.chunk_tx.send(chunk_request).await
             .map_err(|e| format!("Failed to send chunk request: {}", e))?;
@@ -141,11 +142,11 @@ impl RingBufferTranscriber {
         result_tx: mpsc::Sender<ChunkResult>,
         temp_dir: PathBuf,
     ) {
-        println!("🔄 Ring buffer transcriber worker started");
+        info(Component::RingBuffer, "Ring buffer transcriber worker started");
         
         while let Some(chunk_request) = chunk_rx.recv().await {
-            println!("⚙️  Processing chunk {} (offset: {:?}, duration: {:?})", 
-                     chunk_request.chunk_id, chunk_request.start_offset, chunk_request.duration);
+            debug(Component::RingBuffer, &format!("Processing chunk {} (offset: {:?}, duration: {:?})", 
+                     chunk_request.chunk_id, chunk_request.start_offset, chunk_request.duration));
             
             match Self::process_single_chunk(
                 &ring_buffer,
@@ -154,14 +155,14 @@ impl RingBufferTranscriber {
                 &temp_dir,
             ).await {
                 Ok(result) => {
-                    println!("✅ Chunk {} completed: \"{}\"", chunk_request.chunk_id, result.text);
+                    info(Component::RingBuffer, &format!("Chunk {} completed: \"{}\"", chunk_request.chunk_id, result.text));
                     if let Err(e) = result_tx.send(result).await {
-                        eprintln!("❌ Failed to send chunk result: {}", e);
+                        error(Component::RingBuffer, &format!("Failed to send chunk result: {}", e));
                         break;
                     }
                 }
                 Err(e) => {
-                    eprintln!("❌ Failed to process chunk {}: {}", chunk_request.chunk_id, e);
+                    error(Component::RingBuffer, &format!("Failed to process chunk {}: {}", chunk_request.chunk_id, e));
                     
                     // Send empty result to maintain order
                     let error_result = ChunkResult {
@@ -172,14 +173,14 @@ impl RingBufferTranscriber {
                     };
                     
                     if let Err(e) = result_tx.send(error_result).await {
-                        eprintln!("❌ Failed to send error result: {}", e);
+                        error(Component::RingBuffer, &format!("Failed to send error result: {}", e));
                         break;
                     }
                 }
             }
         }
         
-        println!("🔄 Ring buffer transcriber worker finished");
+        info(Component::RingBuffer, "Ring buffer transcriber worker finished");
     }
     
     /// Process a chunk synchronously and return the result immediately
@@ -189,12 +190,12 @@ impl RingBufferTranscriber {
         start_offset: Duration,
         duration: Duration,
     ) -> Result<String, String> {
-        println!("⚙️  Processing chunk {} (offset: {:?}, duration: {:?}) synchronously", 
-                 chunk_id, start_offset, duration);
+        debug(Component::RingBuffer, &format!("Processing chunk {} (offset: {:?}, duration: {:?}) synchronously", 
+                 chunk_id, start_offset, duration));
         
         // Extract chunk data from ring buffer
         let chunk_data = self.ring_buffer.extract_chunk(start_offset, duration)?;
-        println!("📊 Extracted {} samples for chunk {}", chunk_data.len(), chunk_id);
+        debug(Component::RingBuffer, &format!("Extracted {} samples for chunk {}", chunk_data.len(), chunk_id));
         
         if chunk_data.is_empty() {
             return Ok(String::new());
@@ -213,11 +214,11 @@ impl RingBufferTranscriber {
                 .map_err(|e| format!("Transcription failed: {}", e))?
         };
         
-        println!("✅ Chunk {} completed: \"{}\"", chunk_id, text);
+        info(Component::RingBuffer, &format!("Chunk {} completed: \"{}\"", chunk_id, text));
         
         // Clean up temporary file
         if let Err(e) = std::fs::remove_file(&chunk_path) {
-            eprintln!("⚠️  Failed to clean up chunk file: {}", e);
+            warn(Component::RingBuffer, &format!("Failed to clean up chunk file: {}", e));
         }
         
         Ok(text)
@@ -257,7 +258,7 @@ impl RingBufferTranscriber {
         
         // Clean up temporary file
         if let Err(e) = std::fs::remove_file(&chunk_path) {
-            eprintln!("⚠️  Failed to clean up chunk file: {}", e);
+            warn(Component::RingBuffer, &format!("Failed to clean up chunk file: {}", e));
         }
         
         Ok(ChunkResult {
