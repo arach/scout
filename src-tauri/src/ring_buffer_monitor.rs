@@ -4,7 +4,7 @@ use tokio::sync::mpsc;
 use tokio::time;
 use crate::audio::ring_buffer_recorder::RingBufferRecorder;
 use crate::transcription::ring_buffer_transcriber::RingBufferTranscriber;
-use crate::logger::{info, debug, warn, Component};
+use crate::logger::{info, debug, warn, error, Component};
 
 /// Monitors ring buffer recording and triggers chunking when appropriate
 pub struct RingBufferMonitor {
@@ -108,7 +108,7 @@ impl RingBufferMonitor {
                                 self.next_chunk_id += 1;
                             }
                             Err(e) => {
-                                eprintln!("❌ Failed to process ring buffer chunk: {}", e);
+                                error(Component::RingBuffer, &format!("Failed to process ring buffer chunk: {}", e));
                             }
                         }
                     }
@@ -154,7 +154,7 @@ impl RingBufferMonitor {
                         }
                     }
                     Err(e) => {
-                        eprintln!("❌ Failed to process final ring buffer chunk: {}", e);
+                        error(Component::RingBuffer, &format!("Failed to process final ring buffer chunk: {}", e));
                     }
                 }
             }

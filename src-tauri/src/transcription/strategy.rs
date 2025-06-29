@@ -290,18 +290,18 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
         
         let transcription_time = transcription_start.elapsed();
         
-        println!("🔍 Ring buffer processing complete - {} chunks collected", chunks_processed);
+        info(Component::RingBuffer, &format!("Ring buffer processing complete - {} chunks collected", chunks_processed));
         
         // Combine all chunk transcriptions
         let combined_text = if final_chunks.is_empty() {
             // If no chunks were collected from the monitor, try fallback
-            println!("📝 No chunks collected from ring buffer - checking if fallback is needed");
+            debug(Component::RingBuffer, "No chunks collected from ring buffer - checking if fallback is needed");
             
             // Check if the recording was too short for chunking
             let total_recording_time = transcription_start.elapsed();
             if total_recording_time < std::time::Duration::from_secs(5) {
-                println!("⏱️ Recording was too short for chunking ({:.1}s) - using full file transcription", 
-                         total_recording_time.as_secs_f64());
+                info(Component::RingBuffer, &format!("Recording was too short for chunking ({:.1}s) - using full file transcription", 
+                         total_recording_time.as_secs_f64()));
             }
             
             // Wait for file to be fully written by the AudioRecorder
@@ -309,7 +309,7 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
             
             // Check if file exists and has content
             if !recording_path.exists() {
-                println!("⚠️ Recording file does not exist at: {:?}", recording_path);
+                warn(Component::RingBuffer, &format!("Recording file does not exist at: {:?}", recording_path));
                 return Err("Recording file does not exist for fallback transcription".to_string());
             }
             
@@ -321,27 +321,27 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
                 return Err(format!("Audio file too small for transcription ({} bytes)", file_size));
             }
             
-            println!("📁 Fallback: Processing {} byte audio file", file_size);
+            info(Component::RingBuffer, &format!("Fallback: Processing {} byte audio file", file_size));
             
             let transcriber = self.transcriber.lock().await;
             match transcriber.transcribe(&recording_path) {
                 Ok(text) => {
-                    println!("✅ Fallback transcription successful: {} chars", text.len());
+                    info(Component::RingBuffer, &format!("Fallback transcription successful: {} chars", text.len()));
                     text
                 },
                 Err(e) => return Err(format!("Fallback transcription failed: {}", e)),
             }
         } else {
             // Join all chunk results with spaces
-            println!("🔗 Joining {} chunks into final transcript", final_chunks.len());
+            debug(Component::RingBuffer, &format!("Joining {} chunks into final transcript", final_chunks.len()));
             let combined = final_chunks.join(" ");
-            println!("📝 Combined transcript: {} chars", combined.len());
-            println!("📝 First 100 chars: {}", combined.chars().take(100).collect::<String>());
+            debug(Component::RingBuffer, &format!("Combined transcript: {} chars", combined.len()));
+            debug(Component::RingBuffer, &format!("First 100 chars: {}", combined.chars().take(100).collect::<String>()));
             combined
         };
         
-        println!("✅ Ring buffer transcription completed: {} chars from {} chunks in {:.2}s", 
-                 combined_text.len(), chunks_processed, transcription_time.as_secs_f64());
+        info(Component::RingBuffer, &format!("Ring buffer transcription completed: {} chars from {} chunks in {:.2}s", 
+                 combined_text.len(), chunks_processed, transcription_time.as_secs_f64()));
         
         Ok(TranscriptionResult {
             text: combined_text,
@@ -376,15 +376,15 @@ impl TranscriptionStrategySelector {
         if let Some(ref forced) = config.force_strategy {
             match forced.as_str() {
                 "classic" => {
-                    println!("🎯 Using forced classic strategy");
+                    info(Component::Transcription, "Using forced classic strategy");
                     return Box::new(ClassicTranscriptionStrategy::new(transcriber));
                 }
                 "ring_buffer" => {
-                    println!("🔄 Using forced ring buffer strategy");
+                    info(Component::Transcription, "Using forced ring buffer strategy");
                     return Box::new(RingBufferTranscriptionStrategy::new(transcriber, temp_dir));
                 }
                 _ => {
-                    println!("⚠️  Unknown forced strategy '{}', falling back to auto-selection", forced);
+                    warn(Component::Transcription, &format!("Unknown forced strategy '{}', falling back to auto-selection", forced));
                 }
             }
         }
@@ -393,19 +393,19 @@ impl TranscriptionStrategySelector {
         let ring_buffer_strategy = RingBufferTranscriptionStrategy::new(transcriber.clone(), temp_dir);
         let classic_strategy = ClassicTranscriptionStrategy::new(transcriber);
         
-        println!("🔍 Strategy selection debug:");
-        println!("  Duration estimate: {:?}", duration_estimate);
-        println!("  Enable chunking: {}", config.enable_chunking);
-        println!("  Threshold: {}s", config.chunking_threshold_secs);
+        debug(Component::Transcription, "Strategy selection debug:");
+        debug(Component::Transcription, &format!("  Duration estimate: {:?}", duration_estimate));
+        debug(Component::Transcription, &format!("  Enable chunking: {}", config.enable_chunking));
+        debug(Component::Transcription, &format!("  Threshold: {}s", config.chunking_threshold_secs));
         
         let can_handle_ring = ring_buffer_strategy.can_handle(duration_estimate, config);
-        println!("  Ring buffer can handle: {}", can_handle_ring);
+        debug(Component::Transcription, &format!("  Ring buffer can handle: {}", can_handle_ring));
         
         if can_handle_ring {
-            println!("🔄 Auto-selected ring buffer strategy");
+            info(Component::Transcription, "Auto-selected ring buffer strategy");
             Box::new(ring_buffer_strategy)
         } else {
-            println!("🎯 Auto-selected classic strategy");
+            info(Component::Transcription, "Auto-selected classic strategy");
             Box::new(classic_strategy)
         }
     }

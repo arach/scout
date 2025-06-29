@@ -35,7 +35,7 @@ use tokio::sync::Mutex;
 use chrono;
 use audio::converter::AudioConverter;
 use std::path::Path;
-use crate::logger::{debug, warn, error, Component};
+use crate::logger::{info, debug, warn, error, Component};
 
 // Overlay dimensions configuration
 const OVERLAY_EXPANDED_WIDTH: f64 = 220.0;
@@ -1164,7 +1164,7 @@ pub fn run() {
                 // Set up callback for when recording starts from overlay
                 overlay.set_on_start_recording(move || {
                     if let Err(e) = app_handle.emit("native-overlay-start-recording", ()) {
-                        eprintln!("Failed to emit native-overlay-start-recording event: {}", e);
+                        error(Component::UI, &format!("Failed to emit native-overlay-start-recording event: {}", e));
                     }
                 });
                 
@@ -1172,7 +1172,7 @@ pub fn run() {
                 // Set up callback for when recording stops from overlay
                 overlay.set_on_stop_recording(move || {
                     if let Err(e) = app_handle.emit("native-overlay-stop-recording", ()) {
-                        eprintln!("Failed to emit native-overlay-stop-recording event: {}", e);
+                        error(Component::UI, &format!("Failed to emit native-overlay-stop-recording event: {}", e));
                     }
                 });
                 
@@ -1180,7 +1180,7 @@ pub fn run() {
                 // Set up callback for when recording is cancelled from overlay
                 overlay.set_on_cancel_recording(move || {
                     if let Err(e) = app_handle.emit("native-overlay-cancel-recording", ()) {
-                        eprintln!("Failed to emit native-overlay-cancel-recording event: {}", e);
+                        error(Component::UI, &format!("Failed to emit native-overlay-cancel-recording event: {}", e));
                     }
                 });
                 
@@ -1253,7 +1253,7 @@ pub fn run() {
                             match &status {
                                 ProcessingStatus::Complete { .. } | ProcessingStatus::Failed { .. } => {
                                     // Processing is done, update native overlay
-                                    println!("🎯 Processing complete/failed - setting native overlay to idle");
+                                    debug(Component::UI, "Processing complete/failed - setting native overlay to idle");
                                     let overlay = native_overlay_clone.lock().await;
                                     // Just call set_idle_state directly - no need to call set_processing_state(false)
                                     // as the Swift implementation of setProcessingState(false) already calls setIdleState
@@ -1275,13 +1275,13 @@ pub fn run() {
                             ProcessingStatus::Converting { filename: _ } => {
                             }
                             ProcessingStatus::Transcribing { filename } => {
-                                println!("Transcribing file: {}", filename);
+                                info(Component::Transcription, &format!("Transcribing file: {}", filename));
                             }
                             ProcessingStatus::Complete { filename, transcript } => {
-                                println!("Transcription complete for {}: {} chars", filename, transcript.len());
+                                info(Component::Transcription, &format!("Transcription complete for {}: {} chars", filename, transcript.len()));
                             }
-                            ProcessingStatus::Failed { filename, error } => {
-                                eprintln!("Processing failed for {}: {}", filename, error);
+                            ProcessingStatus::Failed { filename, error: err_msg } => {
+                                error(Component::Processing, &format!("Processing failed for {}: {}", filename, err_msg));
                             }
                         }
                     }
@@ -1313,7 +1313,7 @@ pub fn run() {
                     error(Component::UI, &format!("Failed to emit toggle-recording event: {}", e));
                 }
             }) {
-                eprintln!("Failed to register toggle shortcut '{}': {:?}", toggle_hotkey, e);
+                error(Component::UI, &format!("Failed to register toggle shortcut '{}': {:?}", toggle_hotkey, e));
             }
             
             // Register push-to-talk shortcut
@@ -1323,7 +1323,7 @@ pub fn run() {
                     error(Component::UI, &format!("Failed to emit push-to-talk-pressed event: {}", e));
                 }
             }) {
-                eprintln!("Failed to register push-to-talk shortcut '{}': {:?}", push_to_talk_hotkey, e);
+                error(Component::UI, &format!("Failed to register push-to-talk shortcut '{}': {:?}", push_to_talk_hotkey, e));
             }
             
             // Initialize keyboard monitor for push-to-talk key release detection
@@ -1333,12 +1333,12 @@ pub fn run() {
             // Only start monitoring if explicitly enabled
             // Due to accessibility permission requirements, we'll disable by default
             if std::env::var("SCOUT_ENABLE_KEYBOARD_MONITOR").is_ok() {
-                println!("🎯 Keyboard monitoring enabled via SCOUT_ENABLE_KEYBOARD_MONITOR");
+                info(Component::UI, "Keyboard monitoring enabled via SCOUT_ENABLE_KEYBOARD_MONITOR");
                 keyboard_monitor.clone().start_monitoring();
             } else {
-                println!("ℹ️  Keyboard monitoring disabled by default");
-                println!("   To enable: export SCOUT_ENABLE_KEYBOARD_MONITOR=1");
-                println!("   Note: Requires accessibility permissions on macOS");
+                info(Component::UI, "Keyboard monitoring disabled by default");
+                info(Component::UI, "To enable: export SCOUT_ENABLE_KEYBOARD_MONITOR=1");
+                info(Component::UI, "Note: Requires accessibility permissions on macOS");
                 
                 // Emit event to let frontend know keyboard monitoring is unavailable
                 let _ = app.handle().emit("keyboard-monitor-unavailable", 
@@ -1435,7 +1435,7 @@ pub fn run() {
                 }
             });
             } else {
-                eprintln!("Warning: Could not find main window for event handling");
+                warn(Component::UI, "Could not find main window for event handling");
             }
             
             Ok(())

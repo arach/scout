@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::path::{Path, PathBuf};
 use tokio::sync::Mutex;
+use crate::logger::{info, debug, warn, Component};
 use crate::transcription::{
     Transcriber, 
     TranscriptionStrategy, 
@@ -44,12 +45,12 @@ impl TranscriptionContext {
     ) -> Result<Self, String> {
         // Find a suitable model file in the models directory
         let model_path = Self::find_model_file(&models_dir)?;
-        println!("🔍 Using model file: {:?}", model_path);
+        info(Component::Transcription, &format!("Using model file: {:?}", model_path));
         
         let transcriber = match Transcriber::new(&model_path) {
             Ok(t) => Arc::new(Mutex::new(t)),
             Err(e) => {
-                println!("⚠️ Failed to create transcriber: {}", e);
+                warn(Component::Transcription, &format!("Failed to create transcriber: {}", e));
                 return Err(format!("Failed to create transcriber: {}", e));
             }
         };
@@ -91,7 +92,7 @@ impl TranscriptionContext {
         // Start recording with the selected strategy
         strategy.start_recording(output_path, &self.config).await?;
         
-        println!("🎙️  Started recording with '{}' strategy", strategy.name());
+        info(Component::Transcription, &format!("Started recording with '{}' strategy", strategy.name()));
         
         self.current_strategy = Some(strategy);
         Ok(())
@@ -136,11 +137,11 @@ impl TranscriptionContext {
                 ).await;
             }
             
-            println!("✅ Transcription completed using '{}' strategy in {}ms", 
-                     result.strategy_used, result.processing_time_ms);
+            info(Component::Transcription, &format!("Transcription completed using '{}' strategy in {}ms", 
+                     result.strategy_used, result.processing_time_ms));
             
             if result.chunks_processed > 1 {
-                println!("📊 Processed {} chunks", result.chunks_processed);
+                debug(Component::Transcription, &format!("Processed {} chunks", result.chunks_processed));
             }
             
             // Reset start time
@@ -216,7 +217,7 @@ impl TranscriptionContext {
         for model_name in &preferred_models {
             let model_path = models_dir.join(model_name);
             if model_path.exists() {
-                println!("✅ Found model: {}", model_name);
+                debug(Component::Transcription, &format!("Found model: {}", model_name));
                 return Ok(model_path);
             }
         }
@@ -226,7 +227,7 @@ impl TranscriptionContext {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.extension().and_then(|s| s.to_str()) == Some("bin") {
-                    println!("✅ Found fallback model: {:?}", path.file_name());
+                    debug(Component::Transcription, &format!("Found fallback model: {:?}", path.file_name()));
                     return Ok(path);
                 }
             }

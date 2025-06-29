@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::collections::HashSet;
 use std::panic::AssertUnwindSafe;
 use tauri::{AppHandle, Emitter};
+use crate::logger::{info, debug, warn, error, Component};
 
 pub struct KeyboardMonitor {
     app_handle: AppHandle,
@@ -27,7 +28,7 @@ impl KeyboardMonitor {
         let key = Self::parse_shortcut_to_key(shortcut);
         if let Ok(mut ptk) = self.push_to_talk_key.lock() {
             *ptk = key;
-            println!("🎯 Push-to-talk key set to: {:?}", key);
+            info(Component::UI, &format!("Push-to-talk key set to: {:?}", key));
         }
     }
 
@@ -91,18 +92,18 @@ impl KeyboardMonitor {
                 // Small delay to let the app fully initialize
                 std::thread::sleep(std::time::Duration::from_millis(1000));
                 
-                println!("🎤 Keyboard monitor thread started");
+                info(Component::UI, "Keyboard monitor thread started");
                 
                 // Check if we're on macOS and might need accessibility permissions
                 #[cfg(target_os = "macos")]
                 {
-                    println!("ℹ️  Push-to-talk key release detection requires accessibility permissions on macOS.");
-                    println!("   If it doesn't work, grant permissions in System Settings > Privacy & Security > Accessibility");
+                    info(Component::UI, "Push-to-talk key release detection requires accessibility permissions on macOS.");
+                    info(Component::UI, "If it doesn't work, grant permissions in System Settings > Privacy & Security > Accessibility");
                 }
                 
                 // Catch any panics to prevent app crash
                 let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                    println!("🎤 Attempting to start keyboard event listener...");
+                    debug(Component::UI, "Attempting to start keyboard event listener...");
                     
                     // Try to start the listener
                     let monitor_for_listen = monitor.clone();
@@ -113,16 +114,16 @@ impl KeyboardMonitor {
                         }));
                     }) {
                         Ok(_) => {
-                            println!("🎤 Keyboard event listener ended normally");
+                            info(Component::UI, "Keyboard event listener ended normally");
                         }
                         Err(e) => {
-                            eprintln!("⚠️  Keyboard monitoring not available: {:?}", e);
+                            warn(Component::UI, &format!("Keyboard monitoring not available: {:?}", e));
                             #[cfg(target_os = "macos")]
                             {
-                                eprintln!("   This is expected if accessibility permissions are not granted.");
-                                eprintln!("   To enable: System Settings > Privacy & Security > Accessibility > Add Scout");
+                                info(Component::UI, "This is expected if accessibility permissions are not granted.");
+                                info(Component::UI, "To enable: System Settings > Privacy & Security > Accessibility > Add Scout");
                             }
-                            eprintln!("   Push-to-talk will work but won't auto-stop on key release.");
+                            warn(Component::UI, "Push-to-talk will work but won't auto-stop on key release.");
                             
                             // Emit a warning event to the frontend
                             let _ = app_handle_for_emit.emit("keyboard-monitor-unavailable", 
@@ -132,18 +133,18 @@ impl KeyboardMonitor {
                 }));
                 
                 if let Err(e) = result {
-                    eprintln!("⚠️  Keyboard monitor error: {:?}", e);
-                    eprintln!("   Push-to-talk key release detection disabled.");
+                    error(Component::UI, &format!("Keyboard monitor error: {:?}", e));
+                    warn(Component::UI, "Push-to-talk key release detection disabled.");
                 }
                 
-                println!("🎤 Keyboard monitor thread ending");
+                info(Component::UI, "Keyboard monitor thread ending");
             }) {
             Ok(handle) => {
-                println!("✅ Keyboard monitor thread spawned successfully (ID: {:?})", handle.thread().id());
+                info(Component::UI, &format!("Keyboard monitor thread spawned successfully (ID: {:?})", handle.thread().id()));
             }
             Err(e) => {
-                eprintln!("⚠️  Failed to spawn keyboard monitor thread: {}", e);
-                eprintln!("   Push-to-talk key release detection disabled.");
+                error(Component::UI, &format!("Failed to spawn keyboard monitor thread: {}", e));
+                warn(Component::UI, "Push-to-talk key release detection disabled.");
             }
         }
     }
@@ -153,8 +154,8 @@ impl KeyboardMonitor {
         #[cfg(debug_assertions)]
         {
             match &event.event_type {
-                EventType::KeyPress(key) => println!("🔍 Key press detected: {:?}", key),
-                EventType::KeyRelease(key) => println!("🔍 Key release detected: {:?}", key),
+                EventType::KeyPress(key) => debug(Component::UI, &format!("Key press detected: {:?}", key)),
+                EventType::KeyRelease(key) => debug(Component::UI, &format!("Key release detected: {:?}", key)),
                 _ => {}
             }
         }
@@ -164,7 +165,7 @@ impl KeyboardMonitor {
                 if let Ok(mut pressed) = self.pressed_keys.lock() {
                     pressed.insert(key);
                 } else {
-                    eprintln!("⚠️  Failed to lock pressed_keys for press");
+                    error(Component::UI, "Failed to lock pressed_keys for press");
                     return;
                 }
                 
@@ -174,14 +175,14 @@ impl KeyboardMonitor {
                         if let Some(push_key) = *ptk {
                             if key == push_key && !*is_active {
                                 *is_active = true;
-                                println!("🎤 Push-to-talk key pressed: {:?}", key);
+                                info(Component::UI, &format!("Push-to-talk key pressed: {:?}", key));
                                 // Note: The actual recording start is handled by the existing global shortcut
                                 // This just tracks the state for release detection
                             }
                         }
                     }
                     _ => {
-                        eprintln!("⚠️  Failed to lock push-to-talk state for press");
+                        error(Component::UI, "Failed to lock push-to-talk state for press");
                     }
                 }
             }
@@ -189,7 +190,7 @@ impl KeyboardMonitor {
                 if let Ok(mut pressed) = self.pressed_keys.lock() {
                     pressed.remove(&key);
                 } else {
-                    eprintln!("⚠️  Failed to lock pressed_keys for release");
+                    error(Component::UI, "Failed to lock pressed_keys for release");
                     return;
                 }
                 
@@ -199,16 +200,16 @@ impl KeyboardMonitor {
                         if let Some(push_key) = *ptk {
                             if key == push_key && *is_active {
                                 *is_active = false;
-                                println!("🎤 Push-to-talk key released: {:?}", key);
+                                info(Component::UI, &format!("Push-to-talk key released: {:?}", key));
                                 // Emit event to stop recording
                                 if let Err(e) = self.app_handle.emit("push-to-talk-released", ()) {
-                                    eprintln!("⚠️  Failed to emit push-to-talk-released event: {}", e);
+                                    error(Component::UI, &format!("Failed to emit push-to-talk-released event: {}", e));
                                 }
                             }
                         }
                     }
                     _ => {
-                        eprintln!("⚠️  Failed to lock push-to-talk state for release");
+                        error(Component::UI, "Failed to lock push-to-talk state for release");
                     }
                 }
             }
