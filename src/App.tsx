@@ -654,7 +654,7 @@ function App() {
     });
     
     // Listen for recording-completed event as another backup
-    const unsubscribeRecordingCompleted = listen('recording-completed', async (event) => {
+    const unsubscribeRecordingCompleted = listen('recording-completed', async (_event) => {
       console.log('🏁 Recording-completed event received at', new Date().toISOString());
       
       // Clear processing state immediately

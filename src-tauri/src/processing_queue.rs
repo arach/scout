@@ -20,6 +20,10 @@ pub struct ProcessingJob {
     pub app_handle: Option<tauri::AppHandle>,
     pub queue_entry_time: Instant,
     pub user_stop_time: Option<Instant>,
+    #[cfg(target_os = "macos")]
+    pub app_context: Option<crate::macos::AppContext>,
+    #[cfg(not(target_os = "macos"))]
+    pub app_context: Option<()>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -167,15 +171,27 @@ impl ProcessingQueue {
                                                     .map(|m| m.len() as i64)
                                                     .ok();
                                                 
+                                                // Build metadata with app context if available
+                                                let mut metadata_json = serde_json::json!({
+                                                    "filename": job.filename,
+                                                    "model_used": model_name,
+                                                    "processing_type": "file_upload"
+                                                });
+                                                
+                                                // Add app context to metadata if available
+                                                #[cfg(target_os = "macos")]
+                                                if let Some(ref ctx) = job.app_context {
+                                                    metadata_json["app_context"] = serde_json::json!({
+                                                        "name": ctx.name,
+                                                        "bundle_id": ctx.bundle_id,
+                                                    });
+                                                }
+                                                
                                                 // Save to database with model information and audio path
                                                 match database.save_transcript(
                                                     &transcript,
                                                     job.duration_ms,
-                                                    Some(&serde_json::json!({
-                                                        "filename": job.filename,
-                                                        "model_used": model_name,
-                                                        "processing_type": "file_upload"
-                                                    }).to_string()),
+                                                    Some(&metadata_json.to_string()),
                                                     Some(job.audio_path.to_str().unwrap_or("")),
                                                     file_size
                                                 ).await {

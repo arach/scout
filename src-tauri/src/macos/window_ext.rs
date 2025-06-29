@@ -1,6 +1,6 @@
 #[cfg(target_os = "macos")]
 use cocoa::base::{id, nil, YES, NO};
-use cocoa::appkit::{NSWindow, NSWindowCollectionBehavior};
+use cocoa::appkit::NSWindowCollectionBehavior;
 use cocoa::foundation::NSUInteger;
 use objc::{msg_send, sel, sel_impl};
 use tauri::{Runtime, WebviewWindow};

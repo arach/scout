@@ -20,6 +20,7 @@ pub struct TranscriptionContext {
     current_strategy: Option<Box<dyn TranscriptionStrategy>>,
     performance_logger: Option<PerformanceLogger>,
     recording_start_time: Option<std::time::Instant>,
+    model_name: String,
 }
 
 impl TranscriptionContext {
@@ -35,6 +36,7 @@ impl TranscriptionContext {
             current_strategy: None,
             performance_logger: None,
             recording_start_time: None,
+            model_name: "unknown".to_string(),
         }
     }
     
@@ -45,6 +47,10 @@ impl TranscriptionContext {
     ) -> Result<Self, String> {
         // Find a suitable model file in the models directory
         let model_path = Self::find_model_file(&models_dir)?;
+        let model_name = model_path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("unknown")
+            .to_string();
         info(Component::Transcription, &format!("Using model file: {:?}", model_path));
         
         let transcriber = match Transcriber::new(&model_path) {
@@ -64,6 +70,7 @@ impl TranscriptionContext {
             current_strategy: None,
             performance_logger: Some(performance_logger),
             recording_start_time: None,
+            model_name,
         })
     }
     
@@ -133,7 +140,7 @@ impl TranscriptionContext {
                     Some("wav"), // audio_format
                     None, // user_perceived_latency - could be calculated
                     None, // processing_queue_time
-                    Some("ggml-tiny.en.bin"), // model_used - could get from config
+                    Some(&self.model_name), // model_used
                 ).await;
             }
             
@@ -161,6 +168,11 @@ impl TranscriptionContext {
     /// Get the name of the currently active strategy
     pub fn current_strategy_name(&self) -> Option<String> {
         self.current_strategy.as_ref().map(|s| s.name().to_string())
+    }
+    
+    /// Get the name of the model being used
+    pub fn get_model_name(&self) -> &str {
+        &self.model_name
     }
     
     pub fn get_ring_buffer(&self) -> Option<std::sync::Arc<crate::audio::ring_buffer_recorder::RingBufferRecorder>> {

@@ -3,6 +3,9 @@ mod window_ext;
 mod native_overlay;
 pub use native_overlay::NativeOverlay;
 
+mod app_context;
+pub use app_context::{AppContext, get_active_app_context};
+
 #[cfg(target_os = "macos")]
 use std::ffi::c_void;
 

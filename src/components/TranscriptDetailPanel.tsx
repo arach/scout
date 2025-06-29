@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { SimpleAudioPlayer } from './SimpleAudioPlayer';
 import { invoke } from '@tauri-apps/api/core';
+import { parseTranscriptMetadata } from '../types/transcript';
 import './TranscriptDetailPanel.css';
 
 interface Transcript {
@@ -124,12 +125,7 @@ export function TranscriptDetailPanel({
     if (!isOpen || !transcript) return null;
 
     // Parse metadata if available
-    let metadata: any = {};
-    try {
-        metadata = transcript.metadata ? JSON.parse(transcript.metadata) : {};
-    } catch (e) {
-        // Invalid JSON, ignore
-    }
+    const metadata = parseTranscriptMetadata(transcript.metadata) || {};
 
     return (
         <>
@@ -184,6 +180,14 @@ export function TranscriptDetailPanel({
                                 <span className="metadata-label">Source</span>
                                 <span className="metadata-value" title={metadata.filename}>
                                     {metadata.filename.split('/').pop()}
+                                </span>
+                            </div>
+                        )}
+                        {metadata.app_context && (
+                            <div className="metadata-item">
+                                <span className="metadata-label">App</span>
+                                <span className="metadata-value" title={metadata.app_context.bundle_id}>
+                                    {metadata.app_context.name}
                                 </span>
                             </div>
                         )}
