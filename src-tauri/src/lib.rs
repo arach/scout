@@ -14,6 +14,8 @@ mod transcription_context;
 mod performance_logger;
 mod keyboard_monitor;
 mod logger;
+mod lazy_model;
+mod env;
 #[cfg(target_os = "macos")]
 mod macos;
 
