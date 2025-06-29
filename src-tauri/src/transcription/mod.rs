@@ -1,5 +1,6 @@
 use std::path::Path;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+use crate::logger::{warn, Component};
 
 pub mod strategy;
 pub mod ring_buffer_transcriber;
@@ -23,7 +24,7 @@ impl Transcriber {
                 ctx
             }
             Err(core_ml_error) => {
-                println!("Core ML initialization failed: {}, falling back to CPU mode", core_ml_error);
+                warn(Component::Transcription, &format!("Core ML initialization failed: {}, falling back to CPU mode", core_ml_error));
                 
                 // Fallback to CPU-only mode
                 let mut params = WhisperContextParameters::default();
