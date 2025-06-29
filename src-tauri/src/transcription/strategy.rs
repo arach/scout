@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::path::Path;
 use async_trait::async_trait;
 use crate::transcription::Transcriber;
-use crate::logger::{info, debug, warn, error, Component};
+use crate::logger::{info, Component};
 
 /// Result of transcription containing the text and metadata
 #[derive(Debug, Clone)]

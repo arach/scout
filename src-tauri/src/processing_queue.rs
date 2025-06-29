@@ -10,7 +10,7 @@ use crate::transcription::Transcriber;
 use crate::audio::AudioConverter;
 use crate::clipboard;
 use crate::settings::SettingsManager;
-use crate::logger::{info, debug, warn, error, Component};
+use crate::logger::{error, Component};
 
 #[derive(Clone)]
 pub struct ProcessingJob {

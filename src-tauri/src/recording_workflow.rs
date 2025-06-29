@@ -9,7 +9,7 @@ use crate::recording_progress::RecordingProgress;
 use crate::processing_queue::{ProcessingQueue, ProcessingJob};
 use crate::transcription_context::TranscriptionContext;
 use crate::db::Database;
-use crate::logger::{info, debug, warn, error, Component};
+use crate::logger::{info, warn, Component};
 
 #[derive(Debug)]
 pub enum RecordingCommand {

@@ -1,6 +1,6 @@
 use std::sync::{OnceLock, Mutex};
 use std::path::PathBuf;
-use crate::logger::{info, debug, warn, error, Component};
+use crate::logger::{warn, Component};
 
 // Simple beep/notification sounds using system commands
 pub struct SoundPlayer;
