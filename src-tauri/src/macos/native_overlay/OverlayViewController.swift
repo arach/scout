@@ -156,14 +156,21 @@ class OverlayViewController: NSViewController {
     }
     
     func setIdleState() {
+        Logger.debug(.overlay, "setIdleState() called")
+        Logger.info(.overlay, "Current state: \(currentState), isExpanded: \(isExpanded)")
+        
         currentState = .idle
         isExpanded = false
         isHovering = false
         // Cancel any pending hover timer
         hoverTimer?.invalidate()
         hoverTimer = nil
+        
+        Logger.debug(.overlay, "State changed to: \(currentState)")
         updateState()
         minimize()
+        
+        Logger.info(.overlay, "setIdleState() completed")
         
         // Force update tracking areas and ensure panel accepts mouse events
         DispatchQueue.main.async { [weak self] in
@@ -182,6 +189,21 @@ class OverlayViewController: NSViewController {
     
     func setVolumeLevel(_ level: CGFloat) {
         overlayView.setVolumeLevel(level)
+    }
+    
+    func getCurrentState() -> String {
+        switch currentState {
+        case .idle:
+            return "idle"
+        case .recording:
+            return "recording"
+        case .processing:
+            return "processing"
+        case .hovered:
+            return "hovered"
+        case .complete:
+            return "complete"
+        }
     }
     
     private func updateState() {
@@ -286,13 +308,16 @@ class OverlayViewController: NSViewController {
         controller?.setVolumeLevel(level)
     }
     
+    @objc func getCurrentState() -> String {
+        return controller?.getCurrentState() ?? "unknown"
+    }
+    
     @objc func setPosition(_ position: String) {
         guard let panel = self.panel, let screen = NSScreen.main else { return }
         
         let screenFrame = screen.visibleFrame
         let panelWidth = panel.frame.width
         let panelHeight = panel.frame.height
-        let padding: CGFloat = 20
         
         var x: CGFloat = 0
         var y: CGFloat = 0
@@ -331,8 +356,6 @@ class OverlayViewController: NSViewController {
         panel.setFrameOrigin(NSPoint(x: x, y: y))
         
         // Update the panel's position for proper anchor-based expansion
-        if let overlayPanel = panel as? NativeOverlayPanel {
-            overlayPanel.setPosition(position)
-        }
+        panel.setPosition(position)
     }
 }

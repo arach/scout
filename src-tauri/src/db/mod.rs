@@ -22,6 +22,7 @@ pub struct PerformanceMetrics {
     pub user_perceived_latency_ms: Option<i32>,
     pub processing_queue_time_ms: Option<i32>,
     pub model_used: Option<String>,
+    pub transcription_strategy: Option<String>,
     pub audio_file_size_bytes: Option<i64>,
     pub audio_format: Option<String>,
     pub success: bool,
@@ -83,34 +84,70 @@ impl Database {
             .execute(&pool)
             .await;
 
-        // Create performance metrics table
+        // Check if performance_metrics table exists and handle migration properly
+        let table_exists = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='performance_metrics'"
+        )
+        .fetch_one(&pool)
+        .await
+        .map_err(|e| format!("Failed to check table existence: {}", e))?;
+
+        if table_exists == 0 {
+            // Create new table with all columns
+            sqlx::query(
+                r#"
+                CREATE TABLE performance_metrics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    transcript_id INTEGER,
+                    recording_duration_ms INTEGER NOT NULL,
+                    transcription_time_ms INTEGER NOT NULL,
+                    user_perceived_latency_ms INTEGER,
+                    processing_queue_time_ms INTEGER,
+                    model_used TEXT,
+                    transcription_strategy TEXT,
+                    audio_file_size_bytes INTEGER,
+                    audio_format TEXT,
+                    success BOOLEAN NOT NULL DEFAULT 1,
+                    error_message TEXT,
+                    created_at TEXT DEFAULT (datetime('now')),
+                    metadata TEXT,
+                    FOREIGN KEY (transcript_id) REFERENCES transcripts(id) ON DELETE CASCADE
+                );
+                "#
+            )
+            .execute(&pool)
+            .await
+            .map_err(|e| format!("Failed to create performance_metrics table: {}", e))?;
+        } else {
+            // Table exists, check if transcription_strategy column exists
+            let column_exists = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM pragma_table_info('performance_metrics') WHERE name='transcription_strategy'"
+            )
+            .fetch_one(&pool)
+            .await
+            .map_err(|e| format!("Failed to check column existence: {}", e))?;
+
+            if column_exists == 0 {
+                // Add missing column
+                sqlx::query("ALTER TABLE performance_metrics ADD COLUMN transcription_strategy TEXT")
+                    .execute(&pool)
+                    .await
+                    .map_err(|e| format!("Failed to add transcription_strategy column: {}", e))?;
+            }
+        }
+
+        // Create indexes (these are safe to run multiple times)
         sqlx::query(
             r#"
-            CREATE TABLE IF NOT EXISTS performance_metrics (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                transcript_id INTEGER,
-                recording_duration_ms INTEGER NOT NULL,
-                transcription_time_ms INTEGER NOT NULL,
-                user_perceived_latency_ms INTEGER,
-                processing_queue_time_ms INTEGER,
-                model_used TEXT,
-                audio_file_size_bytes INTEGER,
-                audio_format TEXT,
-                success BOOLEAN NOT NULL DEFAULT 1,
-                error_message TEXT,
-                created_at TEXT DEFAULT (datetime('now')),
-                metadata TEXT,
-                FOREIGN KEY (transcript_id) REFERENCES transcripts(id) ON DELETE CASCADE
-            );
-            
             CREATE INDEX IF NOT EXISTS idx_performance_metrics_created_at ON performance_metrics(created_at);
             CREATE INDEX IF NOT EXISTS idx_performance_metrics_transcript_id ON performance_metrics(transcript_id);
             CREATE INDEX IF NOT EXISTS idx_performance_metrics_success ON performance_metrics(success);
+            CREATE INDEX IF NOT EXISTS idx_performance_metrics_strategy ON performance_metrics(transcription_strategy);
             "#
         )
         .execute(&pool)
         .await
-        .map_err(|e| format!("Failed to create performance_metrics table: {}", e))?;
+        .map_err(|e| format!("Failed to create performance_metrics indexes: {}", e))?;
 
         Ok(Self { pool })
     }
@@ -237,6 +274,7 @@ impl Database {
         user_perceived_latency_ms: Option<i32>,
         processing_queue_time_ms: Option<i32>,
         model_used: Option<&str>,
+        transcription_strategy: Option<&str>,
         audio_file_size_bytes: Option<i64>,
         audio_format: Option<&str>,
         success: bool,
@@ -248,9 +286,10 @@ impl Database {
             INSERT INTO performance_metrics (
                 transcript_id, recording_duration_ms, transcription_time_ms,
                 user_perceived_latency_ms, processing_queue_time_ms, model_used,
-                audio_file_size_bytes, audio_format, success, error_message, metadata
+                transcription_strategy, audio_file_size_bytes, audio_format, 
+                success, error_message, metadata
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
             "#
         )
         .bind(transcript_id)
@@ -259,6 +298,7 @@ impl Database {
         .bind(user_perceived_latency_ms)
         .bind(processing_queue_time_ms)
         .bind(model_used)
+        .bind(transcription_strategy)
         .bind(audio_file_size_bytes)
         .bind(audio_format)
         .bind(success)
@@ -283,6 +323,23 @@ impl Database {
         .fetch_all(&self.pool)
         .await
         .map_err(|e| format!("Failed to get performance metrics: {}", e))?;
+
+        Ok(metrics)
+    }
+
+    pub async fn get_performance_metrics_for_transcript(&self, transcript_id: i64) -> Result<Option<PerformanceMetrics>, String> {
+        let metrics = sqlx::query_as::<_, PerformanceMetrics>(
+            r#"
+            SELECT * FROM performance_metrics
+            WHERE transcript_id = ?1
+            ORDER BY created_at DESC
+            LIMIT 1
+            "#
+        )
+        .bind(transcript_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to get performance metrics for transcript: {}", e))?;
 
         Ok(metrics)
     }

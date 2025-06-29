@@ -1,5 +1,11 @@
 use std::path::Path;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+use crate::logger::{warn, Component};
+
+pub mod strategy;
+pub mod ring_buffer_transcriber;
+
+pub use strategy::{TranscriptionStrategy, TranscriptionConfig, TranscriptionResult, TranscriptionStrategySelector};
 
 pub struct Transcriber {
     context: WhisperContext,
@@ -18,7 +24,7 @@ impl Transcriber {
                 ctx
             }
             Err(core_ml_error) => {
-                println!("Core ML initialization failed: {}, falling back to CPU mode", core_ml_error);
+                warn(Component::Transcription, &format!("Core ML initialization failed: {}, falling back to CPU mode", core_ml_error));
                 
                 // Fallback to CPU-only mode
                 let mut params = WhisperContextParameters::default();
@@ -33,6 +39,10 @@ impl Transcriber {
         };
 
         Ok(Self { context })
+    }
+
+    pub fn transcribe_file(&self, audio_path: &Path) -> Result<String, String> {
+        self.transcribe(audio_path)
     }
 
     pub fn transcribe(&self, audio_path: &Path) -> Result<String, String> {
