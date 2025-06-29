@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::fs;
+use crate::logger::{error, Component};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -141,7 +142,7 @@ impl SettingsManager {
             Ok(contents) => {
                 serde_json::from_str(&contents)
                     .unwrap_or_else(|e| {
-                        eprintln!("Failed to parse settings.json: {}, using defaults", e);
+                        error(Component::UI, &format!("Failed to parse settings.json: {}, using defaults", e));
                         AppSettings::default()
                     })
             }

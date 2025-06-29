@@ -1,12 +1,13 @@
 use arboard::Clipboard;
 use std::sync::Mutex;
 use once_cell::sync::Lazy;
+use crate::logger::{info, error, Component};
 
 static CLIPBOARD: Lazy<Mutex<Option<Clipboard>>> = Lazy::new(|| {
     match Clipboard::new() {
         Ok(clipboard) => Mutex::new(Some(clipboard)),
         Err(e) => {
-            eprintln!("Failed to initialize clipboard: {}", e);
+            error(Component::UI, &format!("Failed to initialize clipboard: {}", e));
             Mutex::new(None)
         }
     }
@@ -17,7 +18,7 @@ pub fn copy_to_clipboard(text: &str) -> Result<(), String> {
     
     if let Some(ref mut clipboard) = clipboard_guard.as_mut() {
         clipboard.set_text(text).map_err(|e| format!("Failed to copy to clipboard: {}", e))?;
-        println!("Copied to clipboard: {} characters", text.len());
+        info(Component::UI, &format!("Copied to clipboard: {} characters", text.len()));
         Ok(())
     } else {
         Err("Clipboard not available".to_string())
@@ -51,7 +52,7 @@ pub fn simulate_paste() -> Result<(), String> {
         return Err(format!("AppleScript failed: {}", error));
     }
     
-    println!("Simulated paste command");
+    info(Component::UI, "Simulated paste command");
     Ok(())
 }
 

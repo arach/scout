@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { SimpleAudioPlayer } from './SimpleAudioPlayer';
+import { invoke } from '@tauri-apps/api/core';
 import './TranscriptDetailPanel.css';
 
 interface Transcript {
@@ -10,6 +11,23 @@ interface Transcript {
     metadata?: string;
     audio_path?: string;
     file_size?: number;
+}
+
+interface PerformanceMetrics {
+    id: number;
+    transcript_id: number | null;
+    recording_duration_ms: number;
+    transcription_time_ms: number;
+    user_perceived_latency_ms: number | null;
+    processing_queue_time_ms: number | null;
+    model_used: string | null;
+    transcription_strategy: string | null;
+    audio_file_size_bytes: number | null;
+    audio_format: string | null;
+    success: boolean;
+    error_message: string | null;
+    created_at: string;
+    metadata: string | null;
 }
 
 interface TranscriptDetailPanelProps {
@@ -35,6 +53,8 @@ export function TranscriptDetailPanel({
 }: TranscriptDetailPanelProps) {
     const [canRenderPlayer, setCanRenderPlayer] = useState(false);
     const [showExportMenu, setShowExportMenu] = useState(false);
+    const [performanceMetrics, setPerformanceMetrics] = useState<PerformanceMetrics | null>(null);
+    const [loadingMetrics, setLoadingMetrics] = useState(false);
 
     // Handle ESC key to close panel and manage player rendering
     useEffect(() => {
@@ -78,6 +98,24 @@ export function TranscriptDetailPanel({
             };
         }
     }, [showExportMenu]);
+
+    // Fetch performance metrics when transcript changes
+    useEffect(() => {
+        if (isOpen && transcript) {
+            setLoadingMetrics(true);
+            setPerformanceMetrics(null);
+            
+            invoke<PerformanceMetrics | null>('get_performance_metrics_for_transcript', {
+                transcriptId: transcript.id
+            }).then((metrics) => {
+                setPerformanceMetrics(metrics);
+            }).catch((error) => {
+                console.error('Failed to fetch performance metrics:', error);
+            }).finally(() => {
+                setLoadingMetrics(false);
+            });
+        }
+    }, [isOpen, transcript?.id]);
 
     const handleExport = (format: 'json' | 'markdown' | 'text') => {
         onExport([transcript!], format);
@@ -156,6 +194,65 @@ export function TranscriptDetailPanel({
                                     {formatFileSize(transcript.file_size)}
                                 </span>
                             </div>
+                        )}
+                        
+                        {/* Performance Metrics */}
+                        {loadingMetrics && (
+                            <div className="metadata-item">
+                                <span className="metadata-label">Performance</span>
+                                <span className="metadata-value">Loading metrics...</span>
+                            </div>
+                        )}
+                        
+                        {performanceMetrics && (
+                            <>
+                                <div className="metadata-item">
+                                    <span className="metadata-label">Transcription Time</span>
+                                    <span className="metadata-value">
+                                        {formatDuration(performanceMetrics.transcription_time_ms)}
+                                        <span className="metadata-ratio">
+                                            {` (${(performanceMetrics.transcription_time_ms / transcript.duration_ms).toFixed(2)}x speed)`}
+                                        </span>
+                                    </span>
+                                </div>
+                                
+                                {performanceMetrics.transcription_strategy && (
+                                    <div className="metadata-item">
+                                        <span className="metadata-label">Strategy</span>
+                                        <span className="metadata-value">
+                                            {performanceMetrics.transcription_strategy}
+                                            {performanceMetrics.transcription_strategy === 'ring_buffer' && ' (Chunked)'}
+                                            {performanceMetrics.transcription_strategy === 'classic' && ' (Single-pass)'}
+                                        </span>
+                                    </div>
+                                )}
+                                
+                                {performanceMetrics.user_perceived_latency_ms && (
+                                    <div className="metadata-item">
+                                        <span className="metadata-label">Processing Latency</span>
+                                        <span className="metadata-value">
+                                            {formatDuration(performanceMetrics.user_perceived_latency_ms)}
+                                            {performanceMetrics.user_perceived_latency_ms < 300 && (
+                                                <span className="metadata-badge success"> ⚡ Fast</span>
+                                            )}
+                                            {performanceMetrics.user_perceived_latency_ms >= 1000 && (
+                                                <span className="metadata-badge warning"> ⚠️ Slow</span>
+                                            )}
+                                        </span>
+                                    </div>
+                                )}
+                                
+                                {performanceMetrics.transcription_time_ms < transcript.duration_ms && (
+                                    <div className="metadata-item">
+                                        <span className="metadata-label">Efficiency</span>
+                                        <span className="metadata-value">
+                                            <span className="metadata-badge success">
+                                                ✅ Faster than real-time
+                                            </span>
+                                        </span>
+                                    </div>
+                                )}
+                            </>
                         )}
                     </div>
 

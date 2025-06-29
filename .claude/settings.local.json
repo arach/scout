@@ -46,7 +46,8 @@
       "WebFetch(domain:www.npmjs.com)",
       "Bash(pnpm install:*)",
       "Bash(python3:*)",
-      "Bash(pnpm dev:*)"
+      "Bash(pnpm dev:*)",
+      "Bash(timeout:*)"
     ],
     "deny": []
   }

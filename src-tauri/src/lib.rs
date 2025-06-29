@@ -9,6 +9,11 @@ mod sound;
 mod models;
 mod settings;
 mod clipboard;
+mod ring_buffer_monitor;
+mod transcription_context;
+mod performance_logger;
+mod keyboard_monitor;
+mod logger;
 #[cfg(target_os = "macos")]
 mod macos;
 
@@ -16,12 +21,13 @@ use audio::AudioRecorder;
 use db::Database;
 use processing_queue::{ProcessingQueue, ProcessingStatus};
 use recording_progress::ProgressTracker;
-use recording_workflow::RecordingWorkflow;
+use recording_workflow::{RecordingWorkflow, RecordingResult};
 use settings::SettingsManager;
+use keyboard_monitor::KeyboardMonitor;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::{Emitter, Manager, State, WindowEvent, AppHandle};
+use tauri::{Emitter, Manager, State, WindowEvent};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tauri::tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, MenuItemBuilder};
@@ -29,6 +35,7 @@ use tokio::sync::Mutex;
 use chrono;
 use audio::converter::AudioConverter;
 use std::path::Path;
+use crate::logger::{info, debug, warn, error, Component};
 
 // Overlay dimensions configuration
 const OVERLAY_EXPANDED_WIDTH: f64 = 220.0;
@@ -48,6 +55,7 @@ pub struct AppState {
     pub progress_tracker: Arc<ProgressTracker>,
     pub recording_workflow: Arc<RecordingWorkflow>,
     pub processing_queue: Arc<ProcessingQueue>,
+    pub keyboard_monitor: Arc<KeyboardMonitor>,
     #[cfg(target_os = "macos")]
     pub native_overlay: Arc<Mutex<macos::MacOSOverlay>>,
     #[cfg(target_os = "macos")]
@@ -59,7 +67,7 @@ pub struct AppState {
 async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle, device_name: Option<String>) -> Result<String, String> {
     // Check if already recording
     if state.progress_tracker.is_busy() {
-        println!("WARNING: Attempted to start recording while already recording");
+        warn(Component::Recording, "Attempted to start recording while already recording");
         return Err("Recording already in progress".to_string());
     }
     
@@ -67,7 +75,7 @@ async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle, devi
     let recorder = state.recorder.lock().await;
     if recorder.is_recording() {
         drop(recorder);
-        println!("WARNING: Audio recorder is already recording");
+        warn(Component::Recording, "Audio recorder is already recording");
         return Err("Audio recorder is already active".to_string());
     }
     drop(recorder);
@@ -108,7 +116,7 @@ async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle, devi
             // Wait for recording to stabilize
             tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
             
-            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(50));
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(200)); // Reduced frequency to avoid lock contention
             let mut tick_count = 0;
             let mut consecutive_not_recording = 0;
             
@@ -175,6 +183,7 @@ async fn cancel_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> 
     // Update native overlay to idle
     #[cfg(target_os = "macos")]
     {
+        debug(Component::Overlay, "Setting native overlay to idle state after stop_recording");
         let overlay = state.native_panel_overlay.lock().await;
         overlay.set_idle_state();
     }
@@ -183,13 +192,68 @@ async fn cancel_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> 
 }
 
 #[tauri::command]
-async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<(), String> {
+async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<RecordingResult, String> {
     
     // Use the recording workflow to stop recording
-    let _result = state.recording_workflow.stop_recording().await?;
+    let result = state.recording_workflow.stop_recording().await?;
     
     // Play stop sound
     sound::SoundPlayer::play_stop();
+    
+    // Ensure native overlay is set to idle state
+    #[cfg(target_os = "macos")]
+    {
+        use crate::logger::{info, debug, Component};
+        
+        info(Component::Overlay, "Forcing native overlay to idle state after stop_recording");
+        
+        // Capture initial progress tracker state
+        let progress_state = state.progress_tracker.current_state();
+        debug(Component::Overlay, &format!("Progress tracker state: {:?}", progress_state));
+        
+        // Try multiple times to ensure it sticks
+        for i in 0..3 {
+            debug(Component::Overlay, &format!("Attempt {} to set overlay to idle state", i + 1));
+            let start = std::time::Instant::now();
+            
+            // Capture overlay state before attempting change
+            let overlay = state.native_panel_overlay.lock().await;
+            let state_before = overlay.get_current_state();
+            debug(Component::Overlay, &format!("Overlay state BEFORE attempt {}: {}", i + 1, state_before));
+            
+            overlay.set_idle_state();
+            debug(Component::Overlay, &format!("Called set_idle_state() at attempt {}", i + 1));
+            
+            drop(overlay);
+            debug(Component::Overlay, &format!("Released overlay lock after {:?}", start.elapsed()));
+            
+            // Small delay to let the UI update
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            
+            // Capture overlay state after attempting change
+            let overlay = state.native_panel_overlay.lock().await;
+            let state_after = overlay.get_current_state();
+            debug(Component::Overlay, &format!("Overlay state AFTER attempt {}: {}", i + 1, state_after));
+            drop(overlay);
+            
+            if state_after == "idle" {
+                info(Component::Overlay, &format!("Overlay successfully set to idle on attempt {}", i + 1));
+                break;
+            }
+            
+            if i < 2 {
+                // Delay between attempts
+                debug(Component::Overlay, "Waiting 100ms before retry...");
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                debug(Component::Overlay, &format!("Wait complete, total time for attempt {}: {:?}", i + 1, start.elapsed()));
+            }
+        }
+        
+        // Final state check
+        let overlay = state.native_panel_overlay.lock().await;
+        let final_state = overlay.get_current_state();
+        info(Component::Overlay, &format!("Final overlay state: {}", final_state));
+    }
     
     // Get the filename for background processing
     let filename = state.current_recording_file.lock().await.take();
@@ -205,10 +269,10 @@ async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Re
             // Verify file exists and has content
             let file_path = recordings_dir.join(&filename);
             match tokio::fs::metadata(&file_path).await {
-                Ok(metadata) => {
+                Ok(_metadata) => {
                 }
                 Err(e) => {
-                    eprintln!("Failed to verify recording file: {}", e);
+                    error(Component::Recording, &format!("Failed to verify recording file: {}", e));
                 }
             }
         });
@@ -222,30 +286,43 @@ async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Re
     // Stop recording overlay updates
     state.is_recording_overlay_active.store(false, Ordering::Relaxed);
     
-    // Use native NSPanel overlay
-    #[cfg(target_os = "macos")]
-    {
-        let overlay = state.native_panel_overlay.lock().await;
-        overlay.set_processing_state(true);  // Set to processing, not idle
-        drop(overlay);
-    }
+    // Native overlay state will be managed by the progress tracker and processing status events
+    // Don't set it to processing here - let the workflow handle state transitions
     
     // Broadcast recording state change to ALL windows
     let _ = app.emit("recording-state-changed", serde_json::json!({
         "state": "stopped"
     }));
     
-    Ok(())
+    Ok(result)
 }
 
 #[tauri::command]
 async fn is_recording(state: State<'_, AppState>) -> Result<bool, String> {
-    let recorder = state.recorder.lock().await;
-    Ok(recorder.is_recording())
+    // Check progress tracker state first - it's the most authoritative source
+    let progress = state.progress_tracker.current_state();
+    match progress {
+        recording_progress::RecordingProgress::Recording { .. } => Ok(true),
+        recording_progress::RecordingProgress::Stopping { .. } => Ok(true),
+        recording_progress::RecordingProgress::Idle => {
+            // Only check recorder state if progress tracker is idle
+            // This prevents race conditions where recorder state hasn't been cleared yet
+            let recorder = state.recorder.lock().await;
+            let is_recording = recorder.is_recording();
+            drop(recorder);
+            
+            // Log if there's a mismatch for debugging
+            if is_recording {
+                warn(Component::Recording, "is_recording mismatch: recorder says true but progress tracker is idle");
+            }
+            
+            Ok(is_recording)
+        }
+    }
 }
 
 #[tauri::command]
-async fn log_from_overlay(message: String) -> Result<(), String> {
+async fn log_from_overlay(_message: String) -> Result<(), String> {
     Ok(())
 }
 
@@ -266,7 +343,7 @@ async fn get_audio_devices() -> Result<Vec<String>, String> {
                 device_names.push(name);
             },
             Err(e) => {
-                eprintln!("Failed to get device name: {}", e);
+                error(Component::Recording, &format!("Failed to get device name: {}", e));
             }
         }
     }
@@ -383,11 +460,11 @@ async fn transcribe_audio(
     drop(settings); // Release the lock early
     
     if !model_path.exists() {
-        eprintln!("Model file does not exist at: {:?}", model_path);
-        eprintln!("Models directory contents:");
+        error(Component::Transcription, &format!("Model file does not exist at: {:?}", model_path));
+        debug(Component::Transcription, "Models directory contents:");
         if let Ok(entries) = std::fs::read_dir(&state.models_dir) {
             for entry in entries.filter_map(Result::ok) {
-                eprintln!("  - {:?}", entry.path());
+                debug(Component::Transcription, &format!("  - {:?}", entry.path()));
             }
         }
         return Err("No Whisper model found. Please download a model from Settings.".to_string());
@@ -467,7 +544,7 @@ async fn transcribe_file(
         user_stop_time: None, // File upload doesn't have user stop time
     };
     
-    state.processing_queue.queue_job(job).await;
+    let _ = state.processing_queue.queue_job(job).await;
     
     // Emit status update
     app.emit("file-upload-complete", serde_json::json!({
@@ -518,6 +595,14 @@ async fn get_performance_metrics(
     limit: i32,
 ) -> Result<Vec<db::PerformanceMetrics>, String> {
     state.database.get_recent_performance_metrics(limit).await
+}
+
+#[tauri::command]
+async fn get_performance_metrics_for_transcript(
+    state: State<'_, AppState>,
+    transcript_id: i64,
+) -> Result<Option<db::PerformanceMetrics>, String> {
+    state.database.get_performance_metrics_for_transcript(transcript_id).await
 }
 
 #[tauri::command]
@@ -741,7 +826,7 @@ async fn has_any_model(state: State<'_, AppState>) -> Result<bool, String> {
             found_models
         }
         Err(e) => {
-            eprintln!("Error reading models directory: {}", e);
+            error(Component::Transcription, &format!("Error reading models directory: {}", e));
             false
         }
     };
@@ -813,7 +898,7 @@ async fn download_file(
         // Verify directory was created
         if parent.exists() && parent.is_dir() {
         } else {
-            eprintln!("✗ Parent directory was not created properly!");
+            error(Component::Transcription, "Parent directory was not created properly!");
         }
     }
     
@@ -867,7 +952,7 @@ async fn download_file(
         let _metadata = std::fs::metadata(&dest_path)
             .map_err(|e| format!("Failed to get file metadata: {}", e))?;
     } else {
-        eprintln!("✗ File does not exist after download!");
+        error(Component::Transcription, "File does not exist after download!");
     }
     
     Ok(())
@@ -894,7 +979,9 @@ async fn update_global_shortcut(
     global_shortcut.on_shortcut(shortcut.as_str(), move |_app, _event, _shortcut| {
         // Note: Dynamic shortcuts currently always use toggle mode
         // TODO: Support recording mode in dynamic shortcuts
-        app_handle.emit("toggle-recording", ()).unwrap();
+        if let Err(e) = app_handle.emit("toggle-recording", ()) {
+            error(Component::UI, &format!("Failed to emit toggle-recording event: {}", e));
+        }
     }).map_err(|e| format!("Failed to register shortcut '{}': {}", shortcut, e))?;
     
     // Update the stored shortcut
@@ -976,13 +1063,29 @@ async fn update_push_to_talk_shortcut(
     
     // Register the new push-to-talk shortcut
     global_shortcut.on_shortcut(shortcut.as_str(), move |_app, _event, _shortcut| {
-        app_handle.emit("push-to-talk-pressed", ()).unwrap();
+        if let Err(e) = app_handle.emit("push-to-talk-pressed", ()) {
+            error(Component::UI, &format!("Failed to emit push-to-talk-pressed event: {}", e));
+        }
     }).map_err(|e| format!("Failed to register push-to-talk shortcut '{}': {}", shortcut, e))?;
+    
+    // Update keyboard monitor with new push-to-talk key
+    state.keyboard_monitor.set_push_to_talk_key(&shortcut);
     
     // Update the stored shortcut
     settings.update(|s| s.ui.push_to_talk_hotkey = shortcut.clone())
         .map_err(|e| format!("Failed to save settings: {}", e))?;
     
+    Ok(())
+}
+
+#[tauri::command]
+async fn paste_text() -> Result<(), String> {
+    clipboard::simulate_paste()
+}
+
+#[tauri::command]
+async fn play_success_sound() -> Result<(), String> {
+    sound::SoundPlayer::play_success();
     Ok(())
 }
 
@@ -1015,7 +1118,7 @@ pub fn run() {
             // Verify the directory was created
             if models_dir.exists() && models_dir.is_dir() {
             } else {
-                eprintln!("✗ Models directory was not created properly!");
+                error(Component::Transcription, "Models directory was not created properly!");
             }
             
             // Initialize settings manager
@@ -1047,6 +1150,9 @@ pub fn run() {
                 recordings_dir.clone(),
                 progress_tracker.clone(),
                 processing_queue_arc.clone(),
+                database_arc.clone(),
+                models_dir.clone(),
+                app.handle().clone(),
             ));
             
             // Initialize native NSPanel overlay
@@ -1057,19 +1163,25 @@ pub fn run() {
                 
                 // Set up callback for when recording starts from overlay
                 overlay.set_on_start_recording(move || {
-                    app_handle.emit("native-overlay-start-recording", ()).unwrap();
+                    if let Err(e) = app_handle.emit("native-overlay-start-recording", ()) {
+                        error(Component::UI, &format!("Failed to emit native-overlay-start-recording event: {}", e));
+                    }
                 });
                 
                 let app_handle = app.handle().clone();
                 // Set up callback for when recording stops from overlay
                 overlay.set_on_stop_recording(move || {
-                    app_handle.emit("native-overlay-stop-recording", ()).unwrap();
+                    if let Err(e) = app_handle.emit("native-overlay-stop-recording", ()) {
+                        error(Component::UI, &format!("Failed to emit native-overlay-stop-recording event: {}", e));
+                    }
                 });
                 
                 let app_handle = app.handle().clone();
                 // Set up callback for when recording is cancelled from overlay
                 overlay.set_on_cancel_recording(move || {
-                    app_handle.emit("native-overlay-cancel-recording", ()).unwrap();
+                    if let Err(e) = app_handle.emit("native-overlay-cancel-recording", ()) {
+                        error(Component::UI, &format!("Failed to emit native-overlay-cancel-recording event: {}", e));
+                    }
                 });
                 
                 // Show the overlay at startup
@@ -1077,6 +1189,9 @@ pub fn run() {
                 
                 Arc::new(Mutex::new(overlay))
             };
+            
+            // Create keyboard monitor
+            let keyboard_monitor = Arc::new(KeyboardMonitor::new(app.handle().clone()));
             
             let state = AppState {
                 recorder: recorder_arc,
@@ -1090,6 +1205,7 @@ pub fn run() {
                 progress_tracker,
                 recording_workflow,
                 processing_queue: processing_queue_arc,
+                keyboard_monitor: keyboard_monitor.clone(),
                 #[cfg(target_os = "macos")]
                 native_overlay: native_overlay.clone(),
                 #[cfg(target_os = "macos")]
@@ -1137,8 +1253,11 @@ pub fn run() {
                             match &status {
                                 ProcessingStatus::Complete { .. } | ProcessingStatus::Failed { .. } => {
                                     // Processing is done, update native overlay
+                                    debug(Component::UI, "Processing complete/failed - setting native overlay to idle");
                                     let overlay = native_overlay_clone.lock().await;
-                                    overlay.set_processing_state(false);
+                                    // Just call set_idle_state directly - no need to call set_processing_state(false)
+                                    // as the Swift implementation of setProcessingState(false) already calls setIdleState
+                                    overlay.set_idle_state();
                                     drop(overlay);
                                 }
                                 _ => {
@@ -1156,13 +1275,13 @@ pub fn run() {
                             ProcessingStatus::Converting { filename: _ } => {
                             }
                             ProcessingStatus::Transcribing { filename } => {
-                                println!("Transcribing file: {}", filename);
+                                info(Component::Transcription, &format!("Transcribing file: {}", filename));
                             }
                             ProcessingStatus::Complete { filename, transcript } => {
-                                println!("Transcription complete for {}: {} chars", filename, transcript.len());
+                                info(Component::Transcription, &format!("Transcription complete for {}: {} chars", filename, transcript.len()));
                             }
-                            ProcessingStatus::Failed { filename, error } => {
-                                eprintln!("Processing failed for {}: {}", filename, error);
+                            ProcessingStatus::Failed { filename, error: err_msg } => {
+                                error(Component::Processing, &format!("Processing failed for {}: {}", filename, err_msg));
                             }
                         }
                     }
@@ -1190,17 +1309,40 @@ pub fn run() {
             // Register toggle shortcut
             let app_handle_toggle = app_handle.clone();
             if let Err(e) = app.global_shortcut().on_shortcut(toggle_hotkey.as_str(), move |_app, _event, _shortcut| {
-                app_handle_toggle.emit("toggle-recording", ()).unwrap();
+                if let Err(e) = app_handle_toggle.emit("toggle-recording", ()) {
+                    error(Component::UI, &format!("Failed to emit toggle-recording event: {}", e));
+                }
             }) {
-                eprintln!("Failed to register toggle shortcut '{}': {:?}", toggle_hotkey, e);
+                error(Component::UI, &format!("Failed to register toggle shortcut '{}': {:?}", toggle_hotkey, e));
             }
             
             // Register push-to-talk shortcut
             let app_handle_ptt = app_handle.clone();
             if let Err(e) = app.global_shortcut().on_shortcut(push_to_talk_hotkey.as_str(), move |_app, _event, _shortcut| {
-                app_handle_ptt.emit("push-to-talk-pressed", ()).unwrap();
+                if let Err(e) = app_handle_ptt.emit("push-to-talk-pressed", ()) {
+                    error(Component::UI, &format!("Failed to emit push-to-talk-pressed event: {}", e));
+                }
             }) {
-                eprintln!("Failed to register push-to-talk shortcut '{}': {:?}", push_to_talk_hotkey, e);
+                error(Component::UI, &format!("Failed to register push-to-talk shortcut '{}': {:?}", push_to_talk_hotkey, e));
+            }
+            
+            // Initialize keyboard monitor for push-to-talk key release detection
+            // This is optional - if it fails, push-to-talk will still work but won't auto-stop
+            keyboard_monitor.set_push_to_talk_key(&push_to_talk_hotkey);
+            
+            // Only start monitoring if explicitly enabled
+            // Due to accessibility permission requirements, we'll disable by default
+            if std::env::var("SCOUT_ENABLE_KEYBOARD_MONITOR").is_ok() {
+                info(Component::UI, "Keyboard monitoring enabled via SCOUT_ENABLE_KEYBOARD_MONITOR");
+                keyboard_monitor.clone().start_monitoring();
+            } else {
+                info(Component::UI, "Keyboard monitoring disabled by default");
+                info(Component::UI, "To enable: export SCOUT_ENABLE_KEYBOARD_MONITOR=1");
+                info(Component::UI, "Note: Requires accessibility permissions on macOS");
+                
+                // Emit event to let frontend know keyboard monitoring is unavailable
+                let _ = app.handle().emit("keyboard-monitor-unavailable", 
+                    "Push-to-talk key release detection is disabled. Enable with SCOUT_ENABLE_KEYBOARD_MONITOR=1");
             }
             
             // Set up system tray
@@ -1230,7 +1372,6 @@ pub fn run() {
             let tray_icon = tauri::image::Image::from_path(&icon_path)
                 .unwrap_or_else(|_| {
                     // Fallback to default icon if tray icon not found
-;
                     app.default_window_icon().unwrap().clone()
                 });
             
@@ -1252,7 +1393,9 @@ pub fn run() {
                             }
                         }
                         "toggle_recording" => {
-                            app.emit("toggle-recording", ()).unwrap();
+                            if let Err(e) = app.emit("toggle-recording", ()) {
+                                error(Component::UI, &format!("Failed to emit toggle-recording event: {}", e));
+                            }
                         }
                         "quit" => {
                             app.exit(0);
@@ -1282,14 +1425,18 @@ pub fn run() {
                 .build(app)?;
             
             // Handle window events to hide instead of close
-            let window_for_events = app.get_webview_window("main").unwrap().clone();
-            app.get_webview_window("main").unwrap().on_window_event(move |event| {
+            if let Some(main_window) = app.get_webview_window("main") {
+                let window_for_events = main_window.clone();
+                main_window.on_window_event(move |event| {
                 if let WindowEvent::CloseRequested { api, .. } = &event {
                     // Hide window instead of closing
                     api.prevent_close();
                     let _ = window_for_events.hide();
                 }
             });
+            } else {
+                warn(Component::UI, "Could not find main window for event handling");
+            }
             
             Ok(())
         })
@@ -1308,6 +1455,7 @@ pub fn run() {
             transcribe_audio,
             save_transcript,
             get_performance_metrics,
+            get_performance_metrics_for_transcript,
             get_recent_transcripts,
             search_transcripts,
             read_audio_file,
@@ -1345,7 +1493,9 @@ pub fn run() {
             set_auto_paste,
             is_auto_paste_enabled,
             get_push_to_talk_shortcut,
-            update_push_to_talk_shortcut
+            update_push_to_talk_shortcut,
+            paste_text,
+            play_success_sound
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

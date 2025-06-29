@@ -1,5 +1,6 @@
 use std::sync::{OnceLock, Mutex};
 use std::path::PathBuf;
+use crate::logger::{warn, Component};
 
 // Simple beep/notification sounds using system commands
 pub struct SoundPlayer;
@@ -63,7 +64,7 @@ impl SoundPlayer {
             }
             
             // Fallback to system sound
-            println!("Warning: Custom sound {} not found, falling back to system sound", sound_name);
+            warn(Component::UI, &format!("Custom sound {} not found, falling back to system sound", sound_name));
             return "/System/Library/Sounds/Tink.aiff".to_string();
         }
         
