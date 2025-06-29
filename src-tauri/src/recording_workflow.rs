@@ -44,6 +44,10 @@ struct ActiveRecording {
     start_time: std::time::Instant,
     transcription_context: Option<TranscriptionContext>,
     sample_channel: Option<tokio::sync::mpsc::UnboundedReceiver<Vec<f32>>>,
+    #[cfg(target_os = "macos")]
+    app_context: Option<crate::macos::AppContext>,
+    #[cfg(not(target_os = "macos"))]
+    app_context: Option<()>,
 }
 
 impl RecordingWorkflow {
@@ -66,6 +70,17 @@ impl RecordingWorkflow {
                 match command {
                     RecordingCommand::StartRecording { device_name, response } => {
                         info(Component::Recording, "Starting recording workflow...");
+                        
+                        // Capture active app context on macOS
+                        #[cfg(target_os = "macos")]
+                        let app_context = crate::macos::get_active_app_context();
+                        #[cfg(not(target_os = "macos"))]
+                        let app_context: Option<crate::macos::AppContext> = None;
+                        
+                        if let Some(ref ctx) = app_context {
+                            info(Component::Recording, &format!("Recording started in app: {} ({})", ctx.name, ctx.bundle_id));
+                        }
+                        
                         // Generate filename
                         let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
                         let filename = format!("recording_{}.wav", timestamp);
@@ -91,6 +106,7 @@ impl RecordingWorkflow {
                                             start_time,
                                             transcription_context: None, // No transcription context
                                             sample_channel: None,
+                                            app_context,
                                         });
                                         
                                         progress_tracker.update(RecordingProgress::Recording { 
@@ -243,6 +259,7 @@ impl RecordingWorkflow {
                                             start_time,
                                             transcription_context: Some(transcription_context),
                                             sample_channel: None, // Sample processing is handled in spawned task
+                                            app_context,
                                         });
                                         
                                         // Update progress to Recording state
@@ -298,7 +315,8 @@ impl RecordingWorkflow {
                             if let Some(mut transcription_context) = active_recording.transcription_context.take() {
                                 let strategy_name = transcription_context.current_strategy_name()
                                     .unwrap_or_else(|| "unknown".to_string());
-                                info(Component::Transcription, &format!("Finishing transcription with strategy: {}", strategy_name));
+                                let model_name = transcription_context.get_model_name().to_string();
+                                info(Component::Transcription, &format!("Finishing transcription with strategy: {} using model: {}", strategy_name, model_name));
                                 
                                 // Add timeout to prevent hanging
                                 let finish_timeout = tokio::time::timeout(
@@ -313,11 +331,23 @@ impl RecordingWorkflow {
                                                 transcription_result.processing_time_ms as f64 / 1000.0));
                                         
                                         // Save transcript to database
-                                        let metadata = serde_json::json!({
-                                            "model_used": transcription_result.strategy_used,
+                                        let mut metadata_json = serde_json::json!({
+                                            "model_used": model_name,
+                                            "strategy_used": transcription_result.strategy_used,
                                             "chunks_processed": transcription_result.chunks_processed,
                                             "processing_type": "ring_buffer"
-                                        }).to_string();
+                                        });
+                                        
+                                        // Add app context to metadata if available
+                                        #[cfg(target_os = "macos")]
+                                        if let Some(ref ctx) = active_recording.app_context {
+                                            metadata_json["app_context"] = serde_json::json!({
+                                                "name": ctx.name,
+                                                "bundle_id": ctx.bundle_id,
+                                            });
+                                        }
+                                        
+                                        let metadata = metadata_json.to_string();
                                         
                                         match database.save_transcript(
                                             &transcription_result.text,
@@ -454,6 +484,7 @@ impl RecordingWorkflow {
                                 app_handle: Some(app_handle.clone()),
                                 queue_entry_time: tokio::time::Instant::now(),
                                 user_stop_time: Some(tokio::time::Instant::now()), // Recording just stopped
+                                app_context: active_recording.app_context.clone(),
                             };
                             
                             // Queue the job for processing

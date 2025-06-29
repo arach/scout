@@ -542,6 +542,10 @@ async fn transcribe_file(
         app_handle: Some(app.clone()),
         queue_entry_time: tokio::time::Instant::now(),
         user_stop_time: None, // File upload doesn't have user stop time
+        #[cfg(target_os = "macos")]
+        app_context: None, // No app context for file uploads
+        #[cfg(not(target_os = "macos"))]
+        app_context: None,
     };
     
     let _ = state.processing_queue.queue_job(job).await;
@@ -603,6 +607,14 @@ async fn get_performance_metrics_for_transcript(
     transcript_id: i64,
 ) -> Result<Option<db::PerformanceMetrics>, String> {
     state.database.get_performance_metrics_for_transcript(transcript_id).await
+}
+
+#[tauri::command]
+async fn get_transcript(
+    state: State<'_, AppState>,
+    transcript_id: i64,
+) -> Result<Option<db::Transcript>, String> {
+    state.database.get_transcript(transcript_id).await
 }
 
 #[tauri::command]
@@ -1456,6 +1468,7 @@ pub fn run() {
             save_transcript,
             get_performance_metrics,
             get_performance_metrics_for_transcript,
+            get_transcript,
             get_recent_transcripts,
             search_transcripts,
             read_audio_file,
