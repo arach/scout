@@ -7,7 +7,11 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "tauri:build": "tauri build",
+    "tauri:build:universal": "tauri build --target universal-apple-darwin",
+    "tauri:build:prod": "tauri build -c tauri.prod.conf.json",
+    "analyze": "vite build --mode analyze"
   },
   "dependencies": {
     "@base-ui-components/react": "1.0.0-beta.0",

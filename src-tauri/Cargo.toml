@@ -55,5 +55,22 @@ libc = "0.2"
 tempfile = "3.20"
 
 [features]
-# ... existing code ...
+# by default Tauri runs in production mode
+# when `tauri dev` runs it is executed with `cargo run --no-default-features` if `devPath` is an URL
+default = [ "custom-protocol" ]
+# this feature is used for production builds where `devPath` points to the filesystem
+# DO NOT remove this
+custom-protocol = [ "tauri/custom-protocol" ]
+
+[profile.release]
+# Enable maximum optimizations
+opt-level = 3
+# Enable Link Time Optimization (LTO) for smaller binaries
+lto = true
+# Reduce binary size
+codegen-units = 1
+# Strip debug symbols
+strip = true
+# Panic = abort saves ~10% binary size
+panic = "abort"
 

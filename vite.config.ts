@@ -32,10 +32,29 @@ export default defineConfig(async () => ({
   },
   // Configure entry points
   build: {
+    // Enable minification
+    minify: 'terser',
+    terserOptions: {
+      compress: {
+        drop_console: true, // Remove console logs in production
+        drop_debugger: true,
+      },
+    },
+    // Optimize chunk size
+    chunkSizeWarningLimit: 1000,
     rollupOptions: {
       input: {
         main: resolve(__dirname, "index.html"),
       },
+      output: {
+        // Manual chunk splitting for better caching
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom'],
+          'tauri-vendor': ['@tauri-apps/api'],
+        },
+      },
     },
+    // Enable source maps for production debugging
+    sourcemap: false, // Set to true if you need production debugging
   },
 }));
