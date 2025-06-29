@@ -2,7 +2,7 @@ use std::time::Duration;
 use crate::db::Database;
 use crate::transcription::TranscriptionResult;
 use std::sync::Arc;
-use crate::logger::{info, Component};
+use crate::logger::{info, warn, Component};
 
 /// Comprehensive performance logging for transcription strategies
 pub struct PerformanceLogger {
@@ -56,46 +56,46 @@ impl PerformanceLogger {
         
         // Calculate performance ratios
         let transcription_ratio = transcription_result.processing_time_ms as f64 / recording_duration.as_millis() as f64;
-        println!("⚖️  Transcription Ratio: {:.3}x (lower is better)", transcription_ratio);
+        info(Component::Transcription, &format!("Transcription Ratio: {:.3}x (lower is better)", transcription_ratio));
         
         if transcription_ratio < 1.0 {
-            println!("✅ FASTER THAN REAL-TIME: {:.1}% of recording time", transcription_ratio * 100.0);
+            info(Component::Transcription, &format!("FASTER THAN REAL-TIME: {:.1}% of recording time", transcription_ratio * 100.0));
         } else {
-            println!("⚠️  SLOWER THAN REAL-TIME: {:.1}x recording time", transcription_ratio);
+            warn(Component::Transcription, &format!("SLOWER THAN REAL-TIME: {:.1}x recording time", transcription_ratio));
         }
         
         // User-perceived latency
         if let Some(latency) = user_perceived_latency {
-            println!("👤 User Perceived Latency: {:.2}s", latency.as_secs_f64());
+            info(Component::Transcription, &format!("User Perceived Latency: {:.2}s", latency.as_secs_f64()));
             if latency.as_millis() < 300 {
-                println!("🎯 EXCELLENT: Under 300ms target");
+                info(Component::Transcription, "EXCELLENT: Under 300ms target");
             } else if latency.as_millis() < 1000 {
-                println!("✅ GOOD: Under 1s");
+                info(Component::Transcription, "GOOD: Under 1s");
             } else {
-                println!("⚠️  SLOW: Over 1s latency");
+                warn(Component::Transcription, "SLOW: Over 1s latency");
             }
         }
         
         // Strategy-specific insights
         match transcription_result.strategy_used.as_str() {
             "classic" => {
-                println!("📋 Classic Strategy: Single-pass transcription");
+                info(Component::Transcription, "Classic Strategy: Single-pass transcription");
                 if recording_duration.as_secs() > 10 {
-                    println!("💡 SUGGESTION: Long recording detected - ring buffer strategy might be faster");
+                    info(Component::Transcription, "SUGGESTION: Long recording detected - ring buffer strategy might be faster");
                 }
             }
             "ring_buffer" => {
-                println!("🔄 Ring Buffer Strategy: Chunked transcription");
+                info(Component::Transcription, "Ring Buffer Strategy: Chunked transcription");
                 if transcription_result.chunks_processed > 1 {
                     let avg_chunk_time = transcription_result.processing_time_ms / transcription_result.chunks_processed as u64;
-                    println!("⏱️  Average Chunk Time: {:.2}s", avg_chunk_time as f64 / 1000.0);
+                    info(Component::Transcription, &format!("Average Chunk Time: {:.2}s", avg_chunk_time as f64 / 1000.0));
                 }
                 if recording_duration.as_secs() <= 10 {
-                    println!("💡 SUGGESTION: Short recording - classic strategy might be more efficient");
+                    info(Component::Transcription, "SUGGESTION: Short recording - classic strategy might be more efficient");
                 }
             }
             strategy => {
-                println!("🔧 Strategy: {}", strategy);
+                info(Component::Transcription, &format!("Strategy: {}", strategy));
             }
         }
         
@@ -103,11 +103,11 @@ impl PerformanceLogger {
         if let Some(file_size) = audio_file_size {
             let mb_size = file_size as f64 / (1024.0 * 1024.0);
             let transcription_speed_mbps = mb_size / (transcription_result.processing_time_ms as f64 / 1000.0);
-            println!("💾 File Size: {:.2} MB", mb_size);
-            println!("🏃 Processing Speed: {:.2} MB/s", transcription_speed_mbps);
+            info(Component::Transcription, &format!("File Size: {:.2} MB", mb_size));
+            info(Component::Transcription, &format!("Processing Speed: {:.2} MB/s", transcription_speed_mbps));
         }
         
-        println!("================================================");
+        info(Component::Transcription, "================================================");
         
         // Save to database
         self.database.save_performance_metrics(
@@ -134,28 +134,28 @@ impl PerformanceLogger {
         classic_time: Option<Duration>,
         ring_buffer_time: Option<Duration>,
     ) {
-        println!("📈 === STRATEGY PERFORMANCE COMPARISON ===");
-        println!("🎙️  Recording: {:.2}s", recording_duration.as_secs_f64());
+        info(Component::Transcription, "=== STRATEGY PERFORMANCE COMPARISON ===");
+        info(Component::Transcription, &format!("Recording: {:.2}s", recording_duration.as_secs_f64()));
         
         if let Some(classic) = classic_time {
-            println!("🎯 Classic Strategy: {:.2}s", classic.as_secs_f64());
+            info(Component::Transcription, &format!("Classic Strategy: {:.2}s", classic.as_secs_f64()));
         }
         
         if let Some(ring_buffer) = ring_buffer_time {
-            println!("🔄 Ring Buffer Strategy: {:.2}s", ring_buffer.as_secs_f64());
+            info(Component::Transcription, &format!("Ring Buffer Strategy: {:.2}s", ring_buffer.as_secs_f64()));
         }
         
         if let (Some(classic), Some(ring_buffer)) = (classic_time, ring_buffer_time) {
             let _improvement = if ring_buffer < classic {
                 let speedup = classic.as_secs_f64() / ring_buffer.as_secs_f64();
-                println!("✅ Ring Buffer is {:.2}x FASTER", speedup);
+                info(Component::Transcription, &format!("Ring Buffer is {:.2}x FASTER", speedup));
             } else {
                 let slowdown = ring_buffer.as_secs_f64() / classic.as_secs_f64();
-                println!("⚠️  Classic is {:.2}x faster", slowdown);
+                warn(Component::Transcription, &format!("Classic is {:.2}x faster", slowdown));
             };
         }
         
-        println!("=============================================");
+        info(Component::Transcription, "=============================================");
     }
     
     /// Log real-time performance during chunked transcription
@@ -167,13 +167,13 @@ impl PerformanceLogger {
     ) {
         let efficiency = chunk_duration.as_secs_f64() / processing_time.as_secs_f64();
         
-        println!("📦 Chunk {} | Duration: {:.1}s | Processed: {:.2}s | Efficiency: {:.2}x | Text: \"{}...\"",
+        info(Component::RingBuffer, &format!("Chunk {} | Duration: {:.1}s | Processed: {:.2}s | Efficiency: {:.2}x | Text: \"{}...\"",
                  chunk_id,
                  chunk_duration.as_secs_f64(),
                  processing_time.as_secs_f64(),
                  efficiency,
                  current_text.chars().take(50).collect::<String>()
-        );
+        ));
     }
 }
 

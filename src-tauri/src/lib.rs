@@ -35,7 +35,7 @@ use tokio::sync::Mutex;
 use chrono;
 use audio::converter::AudioConverter;
 use std::path::Path;
-use crate::logger::{info, debug, warn, error, Component};
+use crate::logger::{debug, warn, error, Component};
 
 // Overlay dimensions configuration
 const OVERLAY_EXPANDED_WIDTH: f64 = 220.0;
@@ -343,7 +343,7 @@ async fn get_audio_devices() -> Result<Vec<String>, String> {
                 device_names.push(name);
             },
             Err(e) => {
-                eprintln!("Failed to get device name: {}", e);
+                error(Component::Recording, &format!("Failed to get device name: {}", e));
             }
         }
     }
@@ -460,11 +460,11 @@ async fn transcribe_audio(
     drop(settings); // Release the lock early
     
     if !model_path.exists() {
-        eprintln!("Model file does not exist at: {:?}", model_path);
-        eprintln!("Models directory contents:");
+        error(Component::Transcription, &format!("Model file does not exist at: {:?}", model_path));
+        debug(Component::Transcription, "Models directory contents:");
         if let Ok(entries) = std::fs::read_dir(&state.models_dir) {
             for entry in entries.filter_map(Result::ok) {
-                eprintln!("  - {:?}", entry.path());
+                debug(Component::Transcription, &format!("  - {:?}", entry.path()));
             }
         }
         return Err("No Whisper model found. Please download a model from Settings.".to_string());
@@ -826,7 +826,7 @@ async fn has_any_model(state: State<'_, AppState>) -> Result<bool, String> {
             found_models
         }
         Err(e) => {
-            eprintln!("Error reading models directory: {}", e);
+            error(Component::Transcription, &format!("Error reading models directory: {}", e));
             false
         }
     };
@@ -898,7 +898,7 @@ async fn download_file(
         // Verify directory was created
         if parent.exists() && parent.is_dir() {
         } else {
-            eprintln!("✗ Parent directory was not created properly!");
+            error(Component::Transcription, "Parent directory was not created properly!");
         }
     }
     
@@ -952,7 +952,7 @@ async fn download_file(
         let _metadata = std::fs::metadata(&dest_path)
             .map_err(|e| format!("Failed to get file metadata: {}", e))?;
     } else {
-        eprintln!("✗ File does not exist after download!");
+        error(Component::Transcription, "File does not exist after download!");
     }
     
     Ok(())
@@ -980,7 +980,7 @@ async fn update_global_shortcut(
         // Note: Dynamic shortcuts currently always use toggle mode
         // TODO: Support recording mode in dynamic shortcuts
         if let Err(e) = app_handle.emit("toggle-recording", ()) {
-            eprintln!("Failed to emit toggle-recording event: {}", e);
+            error(Component::UI, &format!("Failed to emit toggle-recording event: {}", e));
         }
     }).map_err(|e| format!("Failed to register shortcut '{}': {}", shortcut, e))?;
     
@@ -1064,7 +1064,7 @@ async fn update_push_to_talk_shortcut(
     // Register the new push-to-talk shortcut
     global_shortcut.on_shortcut(shortcut.as_str(), move |_app, _event, _shortcut| {
         if let Err(e) = app_handle.emit("push-to-talk-pressed", ()) {
-            eprintln!("Failed to emit push-to-talk-pressed event: {}", e);
+            error(Component::UI, &format!("Failed to emit push-to-talk-pressed event: {}", e));
         }
     }).map_err(|e| format!("Failed to register push-to-talk shortcut '{}': {}", shortcut, e))?;
     
@@ -1118,7 +1118,7 @@ pub fn run() {
             // Verify the directory was created
             if models_dir.exists() && models_dir.is_dir() {
             } else {
-                eprintln!("✗ Models directory was not created properly!");
+                error(Component::Transcription, "Models directory was not created properly!");
             }
             
             // Initialize settings manager
@@ -1310,7 +1310,7 @@ pub fn run() {
             let app_handle_toggle = app_handle.clone();
             if let Err(e) = app.global_shortcut().on_shortcut(toggle_hotkey.as_str(), move |_app, _event, _shortcut| {
                 if let Err(e) = app_handle_toggle.emit("toggle-recording", ()) {
-                    eprintln!("Failed to emit toggle-recording event: {}", e);
+                    error(Component::UI, &format!("Failed to emit toggle-recording event: {}", e));
                 }
             }) {
                 eprintln!("Failed to register toggle shortcut '{}': {:?}", toggle_hotkey, e);
@@ -1320,7 +1320,7 @@ pub fn run() {
             let app_handle_ptt = app_handle.clone();
             if let Err(e) = app.global_shortcut().on_shortcut(push_to_talk_hotkey.as_str(), move |_app, _event, _shortcut| {
                 if let Err(e) = app_handle_ptt.emit("push-to-talk-pressed", ()) {
-                    eprintln!("Failed to emit push-to-talk-pressed event: {}", e);
+                    error(Component::UI, &format!("Failed to emit push-to-talk-pressed event: {}", e));
                 }
             }) {
                 eprintln!("Failed to register push-to-talk shortcut '{}': {:?}", push_to_talk_hotkey, e);
@@ -1394,7 +1394,7 @@ pub fn run() {
                         }
                         "toggle_recording" => {
                             if let Err(e) = app.emit("toggle-recording", ()) {
-                                eprintln!("Failed to emit toggle-recording event: {}", e);
+                                error(Component::UI, &format!("Failed to emit toggle-recording event: {}", e));
                             }
                         }
                         "quit" => {

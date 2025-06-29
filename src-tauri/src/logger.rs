@@ -24,13 +24,13 @@ pub enum Component {
 impl Component {
     fn as_str(&self) -> &'static str {
         match self {
-            Component::Overlay => "OVERLAY",
-            Component::Recording => "RECORDING",
-            Component::Transcription => "TRANSCRIPTION",
-            Component::RingBuffer => "RINGBUFFER",
-            Component::Processing => "PROCESSING",
-            Component::FFI => "FFI",
-            Component::UI => "UI",
+            Component::Overlay => "OVLY",
+            Component::Recording => "RCRD",
+            Component::Transcription => "TRNS",
+            Component::RingBuffer => "RING",
+            Component::Processing => "PROC",
+            Component::FFI => "FFI ",  // Extra space for alignment
+            Component::UI => "UI  ",   // Extra spaces for alignment
         }
     }
 }

@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::path::Path;
 use async_trait::async_trait;
 use crate::transcription::Transcriber;
-use crate::logger::{info, Component};
+use crate::logger::{info, debug, warn, Component};
 
 /// Result of transcription containing the text and metadata
 #[derive(Debug, Clone)]
@@ -220,7 +220,7 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
         self.ring_transcriber = None; // Monitor owns the transcriber
         self.monitor_handle = Some((monitor_handle, stop_sender));
         
-        println!("✅ Ring buffer components initialized - ready for 5-second interval processing");
+        info(Component::RingBuffer, "Ring buffer components initialized - ready for 5-second interval processing");
         Ok(())
     }
     
@@ -241,7 +241,7 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
         let recording_path = self.recording_path.take()
             .ok_or("Recording path was not set")?;
         
-        println!("🎯 Finishing ring buffer transcription with real-time chunks");
+        info(Component::RingBuffer, "Finishing ring buffer transcription with real-time chunks");
         let transcription_start = std::time::Instant::now();
         
         // Stop the monitor and collect results
@@ -249,7 +249,7 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
         let mut chunks_processed = 0;
         
         if let Some((monitor_handle, stop_sender)) = self.monitor_handle.take() {
-            println!("🛑 Stopping ring buffer monitor...");
+            debug(Component::RingBuffer, "Stopping ring buffer monitor...");
             
             // Signal monitor to stop
             let _ = stop_sender.send(()).await;
@@ -257,34 +257,34 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
             // Wait for monitor to finish
             match monitor_handle.await {
                 Ok(monitor) => {
-                    println!("📊 Monitor stopped, collecting chunk results");
+                    info(Component::RingBuffer, "Monitor stopped, collecting chunk results");
                     
                     // Collect all transcribed chunks
                     match monitor.recording_complete().await {
                         Ok(chunk_results) => {
                             final_chunks = chunk_results;
                             chunks_processed = final_chunks.len();
-                            println!("✅ Collected {} transcribed chunks from ring buffer", chunks_processed);
+                            info(Component::RingBuffer, &format!("Collected {} transcribed chunks from ring buffer", chunks_processed));
                         }
                         Err(e) => {
-                            println!("⚠️ Error collecting chunk results: {}", e);
+                            warn(Component::RingBuffer, &format!("Error collecting chunk results: {}", e));
                             // Continue with fallback instead of failing
                         }
                     }
                 }
                 Err(e) => {
-                    println!("⚠️ Error stopping monitor: {}", e);
+                    warn(Component::RingBuffer, &format!("Error stopping monitor: {}", e));
                 }
             }
         } else {
-            println!("⚠️ No monitor handle found - this should not happen");
+            warn(Component::RingBuffer, "No monitor handle found - this should not happen");
         }
         
         // Finalize the main recording file
         if let Some(ref ring_buffer) = self.ring_buffer {
-            println!("💾 Finalizing main recording file");
+            debug(Component::RingBuffer, "Finalizing main recording file");
             if let Err(e) = ring_buffer.finalize_recording() {
-                println!("⚠️ Error finalizing recording: {}", e);
+                warn(Component::RingBuffer, &format!("Error finalizing recording: {}", e));
             }
         }
         
