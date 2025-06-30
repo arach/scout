@@ -1,82 +1,87 @@
 # Scout Landing Page
 
-A fast, SEO-optimized landing page for Scout - the local-first voice recording and transcription app.
+A modern, responsive landing page for Scout built with Next.js 15, React, TailwindCSS, and shadcn/ui.
 
 ## Features
 
-- **🚀 Fast & Lightweight** - Pure HTML/CSS/JS, no framework overhead
-- **📱 Fully Responsive** - Works perfectly on all devices
-- **🔍 SEO Optimized** - Meta tags, structured data, semantic HTML
-- **♿ Accessible** - WCAG compliant with proper focus management
-- **🎨 Modern Design** - Clean, professional interface with smooth animations
+- ⚡ Next.js 15 with App Router
+- 🎨 TailwindCSS for styling
+- 🧩 shadcn/ui components
+- 📱 Fully responsive design
+- 🌙 Dark mode optimized
+- 🚀 Static export ready
+- 🔍 SEO optimized
+
+## Development
+
+```bash
+# Install dependencies
+pnpm install
+
+# Run development server
+pnpm dev
+
+# Build for production
+pnpm build
+
+# Preview production build
+pnpm start
+```
+
+## Deployment
+
+The site is configured for static export and can be deployed to any static hosting service:
+
+### GitHub Pages (Automatic)
+The repository includes a GitHub Actions workflow that automatically deploys to GitHub Pages when you push to the main branch. 
+
+To enable:
+1. Go to Settings → Pages in your GitHub repository
+2. Under "Source", select "GitHub Actions"
+3. Push to main branch or manually trigger the workflow
+
+### GitHub Pages (Manual)
+```bash
+pnpm deploy:gh-pages
+# Then push the `out` directory to the `gh-pages` branch
+```
+
+### Vercel
+```bash
+vercel
+```
+
+### Netlify
+```bash
+netlify deploy
+```
 
 ## Structure
 
 ```
 landing/
-├── index.html          # Main landing page
-├── styles.css          # All styles with CSS custom properties
-├── script.js           # Interactive behavior and animations
-├── README.md           # This file
-└── package.json        # Dependencies and deployment scripts
+├── app/
+│   ├── globals.css      # Global styles and Tailwind config
+│   ├── layout.tsx       # Root layout with metadata
+│   └── page.tsx         # Home page component
+├── components/
+│   └── ui/              # shadcn/ui components
+│       ├── badge.tsx
+│       ├── button.tsx
+│       └── card.tsx
+├── lib/
+│   └── utils.ts         # Utility functions
+└── public/              # Static assets
+    ├── favicon.ico
+    └── scout-logo.png
 ```
-
-## Deployment Options
-
-### Vercel (Recommended)
-1. Connect your GitHub repo to Vercel
-2. Set build directory to `landing`
-3. Deploy automatically on push
-
-### Netlify
-1. Drag and drop the `landing` folder to Netlify
-2. Or connect via GitHub and set publish directory to `landing`
-
-### GitHub Pages
-1. Enable GitHub Pages in repo settings
-2. Set source to `main` branch, `/landing` folder
-
-### Manual Hosting
-Simply upload all files to any web server that serves static files.
 
 ## Customization
 
-### Colors
-Edit CSS custom properties in `styles.css`:
-```css
-:root {
-    --primary: #4F46E5;
-    --background: #0F172A;
-    /* ... more variables */
-}
-```
-
-### Content
-Edit `index.html` to update:
-- Hero text and messaging
-- Feature descriptions
-- Download links
-- Contact information
-
-### SEO
-Update meta tags in `<head>`:
-- Page title and description
-- Open Graph tags
-- Structured data
-
-## Performance
-
-- **Lighthouse Score**: 95+ on all metrics
-- **Core Web Vitals**: Optimized for LCP, FID, and CLS
-- **File Size**: < 100KB total (HTML + CSS + JS)
-- **Load Time**: < 1 second on 3G
-
-## Browser Support
-
-- Chrome/Edge 88+
-- Firefox 78+
-- Safari 14+
-- Mobile browsers (iOS Safari 14+, Chrome Mobile 88+)
+- Update colors in `app/globals.css`
+- Modify content in `app/page.tsx`
+- Add new pages in the `app` directory
+- Install additional shadcn/ui components as needed
 
 ## License
 
