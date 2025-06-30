@@ -31,6 +31,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
+      <head>
+        {/* Counter.dev Analytics - 100% free, privacy-friendly */}
+        <script src="https://cdn.counter.dev/script.js" data-id="a12a7689-236b-4ccf-9422-18a39a239553" data-utcoffset="-4"></script>
+      </head>
       <body className={inter.className}>{children}</body>
     </html>
   )
