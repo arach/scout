@@ -16,7 +16,7 @@ export const metadata: Metadata = {
     title: "Scout - Local-First Voice Recording & Transcription",
     description: "Privacy-focused voice recording and transcription app for Mac. Local processing with Whisper AI, no cloud required.",
     images: [{ 
-      url: "https://arach.github.io/scout/og-image",
+      url: "https://arach.github.io/scout/og-image.png",
       width: 1200,
       height: 630,
       alt: "Scout - Local-First Voice Transcription"
@@ -28,7 +28,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Scout - Local-First Voice Recording & Transcription",
     description: "Privacy-focused voice recording and transcription app for Mac. Local processing with Whisper AI, no cloud required.",
-    images: ["https://arach.github.io/scout/og-image"],
+    images: ["https://arach.github.io/scout/og-image.png"],
     creator: "@arach",
   },
   robots: {
