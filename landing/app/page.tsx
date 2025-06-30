@@ -174,7 +174,7 @@ export default function Home() {
         <div className="container mx-auto max-w-4xl text-center">
           <h2 className="text-3xl font-bold mb-4">Ready to Start?</h2>
           <p className="text-muted-foreground mb-8">
-            Download Scout v0.1.0 and experience the future of voice transcription.
+            Download Scout v0.1.0 and experience the future of voice transcription
           </p>
           <div className="mb-8">
             <Button size="lg" onClick={handleDownload} className="gap-2">
