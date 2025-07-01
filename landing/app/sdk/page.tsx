@@ -84,19 +84,20 @@ fn main() {
     <>
       <SDKNav />
       {/* Hero Section */}
-      <section className="relative overflow-hidden bg-background pt-20 pb-32">
-        <div className="absolute inset-0 bg-gradient-to-br from-violet-600/10 via-transparent to-purple-600/10 opacity-50" />
+      <section className="relative overflow-hidden bg-background pt-24 pb-32">
+        <div className="absolute inset-0 bg-gradient-to-br from-violet-600/5 via-transparent to-purple-600/5" />
+        <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent" />
         
         <div className="container relative mx-auto px-6 max-w-6xl">
           <div className="text-center space-y-6">
-            <Badge variant="secondary" className="mb-4">
+            <Badge variant="secondary" className="mb-4 animate-pulse">
               <Sparkles className="w-3 h-3 mr-1" />
               Developer Preview
             </Badge>
             
-            <h1 className="text-5xl md:text-7xl font-bold leading-tight">
+            <h1 className="text-5xl md:text-7xl font-bold leading-tight animate-fade-in">
               Add Voice to Your App{" "}
-              <span className="bg-gradient-to-r from-violet-600 to-purple-600 bg-clip-text text-transparent">
+              <span className="bg-gradient-to-r from-violet-600 to-purple-600 bg-clip-text text-transparent animate-gradient">
                 in Minutes
               </span>
             </h1>
@@ -108,9 +109,9 @@ fn main() {
             
             <div className="flex flex-col items-center gap-4 pt-4">
               <div className="flex items-center justify-center gap-4">
-                <div className="bg-card border rounded-lg px-6 py-3">
+                <div className="bg-card border border-primary/20 rounded-lg px-6 py-3 shadow-sm hover:shadow-md transition-all duration-200 hover:border-primary/40">
                   <PrismCode 
-                    code="npx @scout/create-app" 
+                    code="npx scout init" 
                     language="bash"
                     className="text-xs !m-0 !p-0 !bg-transparent"
                   />
@@ -121,17 +122,17 @@ fn main() {
                   </Link>
                 </Button>
               </div>
-              <div className="flex items-center gap-6 text-sm text-muted-foreground">
-                <span className="flex items-center gap-1">
-                  <Zap className="w-4 h-4" />
+              <div className="flex flex-wrap items-center justify-center gap-6 text-sm text-muted-foreground">
+                <span className="flex items-center gap-1.5 hover:text-foreground transition-colors">
+                  <Zap className="w-4 h-4 text-yellow-500" />
                   3-4x faster than typing
                 </span>
-                <span className="flex items-center gap-1">
-                  <Lock className="w-4 h-4" />
+                <span className="flex items-center gap-1.5 hover:text-foreground transition-colors">
+                  <Lock className="w-4 h-4 text-green-500" />
                   100% on-device
                 </span>
-                <span className="flex items-center gap-1">
-                  <Package className="w-4 h-4" />
+                <span className="flex items-center gap-1.5 hover:text-foreground transition-colors">
+                  <Package className="w-4 h-4 text-blue-500" />
                   ~5MB binary
                 </span>
               </div>
@@ -152,27 +153,31 @@ fn main() {
           </div>
           
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <Card className="border-2 border-primary/20">
-              <CardContent className="p-6">
-                <div className="text-3xl font-bold mb-2">~5MB</div>
+            <Card className="border-2 border-primary/20 hover:border-primary/40 transition-all duration-200 hover:shadow-lg group">
+              <CardContent className="p-6 text-center">
+                <Package className="w-8 h-8 text-primary/40 mx-auto mb-3 group-hover:text-primary/60 transition-colors" />
+                <div className="text-3xl font-bold mb-2 group-hover:text-primary transition-colors">~5MB</div>
                 <p className="text-sm text-muted-foreground">Tiny binary footprint</p>
               </CardContent>
             </Card>
-            <Card className="border-2 border-primary/20">
-              <CardContent className="p-6">
-                <div className="text-3xl font-bold mb-2">&lt;300ms</div>
+            <Card className="border-2 border-primary/20 hover:border-primary/40 transition-all duration-200 hover:shadow-lg group">
+              <CardContent className="p-6 text-center">
+                <Zap className="w-8 h-8 text-primary/40 mx-auto mb-3 group-hover:text-primary/60 transition-colors" />
+                <div className="text-3xl font-bold mb-2 group-hover:text-primary transition-colors">&lt;300ms</div>
                 <p className="text-sm text-muted-foreground">End-to-end latency</p>
               </CardContent>
             </Card>
-            <Card className="border-2 border-primary/20">
-              <CardContent className="p-6">
-                <div className="text-3xl font-bold mb-2">100%</div>
+            <Card className="border-2 border-primary/20 hover:border-primary/40 transition-all duration-200 hover:shadow-lg group">
+              <CardContent className="p-6 text-center">
+                <Lock className="w-8 h-8 text-primary/40 mx-auto mb-3 group-hover:text-primary/60 transition-colors" />
+                <div className="text-3xl font-bold mb-2 group-hover:text-primary transition-colors">100%</div>
                 <p className="text-sm text-muted-foreground">Local processing</p>
               </CardContent>
             </Card>
-            <Card className="border-2 border-primary/20">
-              <CardContent className="p-6">
-                <div className="text-3xl font-bold mb-2">0</div>
+            <Card className="border-2 border-primary/20 hover:border-primary/40 transition-all duration-200 hover:shadow-lg group">
+              <CardContent className="p-6 text-center">
+                <Brain className="w-8 h-8 text-primary/40 mx-auto mb-3 group-hover:text-primary/60 transition-colors" />
+                <div className="text-3xl font-bold mb-2 group-hover:text-primary transition-colors">0</div>
                 <p className="text-sm text-muted-foreground">Cloud dependencies</p>
               </CardContent>
             </Card>
@@ -181,7 +186,7 @@ fn main() {
       </section>
 
       {/* How It Works Section */}
-      <section className="py-20 px-6 bg-secondary/20">
+      <section className="py-24 px-6 bg-gradient-to-b from-secondary/10 to-secondary/5">
         <div className="container mx-auto max-w-6xl">
           <div className="text-center mb-12">
             <h2 className="text-3xl font-bold mb-4">How It Works</h2>
@@ -191,31 +196,34 @@ fn main() {
           </div>
           
           <div className="grid md:grid-cols-3 gap-8">
-            <div className="text-center">
-              <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
-                <span className="text-2xl font-bold text-primary">1</span>
+            <div className="text-center group">
+              <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4 group-hover:bg-primary/20 transition-colors duration-200 relative">
+                <Mic className="w-8 h-8 text-primary/60 absolute group-hover:scale-110 transition-transform" />
+                <span className="text-2xl font-bold text-primary relative z-10">1</span>
               </div>
-              <h3 className="font-semibold mb-2">User Activates Voice</h3>
+              <h3 className="font-semibold mb-2 group-hover:text-primary transition-colors">User Activates Voice</h3>
               <p className="text-sm text-muted-foreground">
                 Press hotkey or click button to start recording. Ring buffer captures audio before activation.
               </p>
             </div>
             
-            <div className="text-center">
-              <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
-                <span className="text-2xl font-bold text-primary">2</span>
+            <div className="text-center group">
+              <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4 group-hover:bg-primary/20 transition-colors duration-200 relative">
+                <Brain className="w-8 h-8 text-primary/60 absolute group-hover:scale-110 transition-transform" />
+                <span className="text-2xl font-bold text-primary relative z-10">2</span>
               </div>
-              <h3 className="font-semibold mb-2">Scout Processes Audio</h3>
+              <h3 className="font-semibold mb-2 group-hover:text-primary transition-colors">Scout Processes Audio</h3>
               <p className="text-sm text-muted-foreground">
                 Local transcription with Whisper or stream to your preferred ASR service.
               </p>
             </div>
             
-            <div className="text-center">
-              <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
-                <span className="text-2xl font-bold text-primary">3</span>
+            <div className="text-center group">
+              <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4 group-hover:bg-primary/20 transition-colors duration-200 relative">
+                <Code className="w-8 h-8 text-primary/60 absolute group-hover:scale-110 transition-transform" />
+                <span className="text-2xl font-bold text-primary relative z-10">3</span>
               </div>
-              <h3 className="font-semibold mb-2">Your App Handles Text</h3>
+              <h3 className="font-semibold mb-2 group-hover:text-primary transition-colors">Your App Handles Text</h3>
               <p className="text-sm text-muted-foreground">
                 Receive transcribed text via callback. Process commands or send to your LLM.
               </p>
@@ -225,8 +233,8 @@ fn main() {
           <div className="mt-12 space-y-6">
             <h3 className="text-xl font-semibold text-center">Key Features</h3>
             <div className="grid md:grid-cols-3 gap-6 max-w-4xl mx-auto">
-              <div className="flex items-start gap-4">
-                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+              <div className="flex items-start gap-4 p-4 rounded-lg hover:bg-secondary/50 transition-colors duration-200">
+                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0 group-hover:bg-primary/20 transition-colors">
                   <Command className="w-5 h-5 text-primary" />
                 </div>
                 <div>
@@ -237,8 +245,8 @@ fn main() {
                 </div>
               </div>
               
-              <div className="flex items-start gap-4">
-                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+              <div className="flex items-start gap-4 p-4 rounded-lg hover:bg-secondary/50 transition-colors duration-200">
+                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0 group-hover:bg-primary/20 transition-colors">
                   <Palette className="w-5 h-5 text-primary" />
                 </div>
                 <div>
@@ -249,8 +257,8 @@ fn main() {
                 </div>
               </div>
               
-              <div className="flex items-start gap-4">
-                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+              <div className="flex items-start gap-4 p-4 rounded-lg hover:bg-secondary/50 transition-colors duration-200">
+                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0 group-hover:bg-primary/20 transition-colors">
                   <Lock className="w-5 h-5 text-primary" />
                 </div>
                 <div>
@@ -266,7 +274,7 @@ fn main() {
       </section>
 
       {/* Features Grid */}
-      <section className="py-20 px-6">
+      <section className="py-24 px-6">
         <div className="container mx-auto max-w-6xl">
           <div className="text-center mb-12">
             <h2 className="text-3xl font-bold mb-4">Everything You Need</h2>
@@ -311,7 +319,7 @@ fn main() {
       </section>
 
       {/* Code Examples */}
-      <section id="get-started" className="py-20 px-6 bg-secondary/20">
+      <section id="get-started" className="py-24 px-6 bg-gradient-to-b from-secondary/20 to-secondary/10">
         <div className="container mx-auto max-w-6xl">
           <div className="text-center mb-12">
             <h2 className="text-3xl font-bold mb-4">Integrate in Minutes</h2>
@@ -321,33 +329,36 @@ fn main() {
           </div>
           
           <div className="max-w-4xl mx-auto">
-            <div className="flex gap-2 mb-6">
+            <div className="inline-flex gap-1 mb-8 p-1 bg-muted rounded-lg">
               <Button
-                variant={activeTab === 'react' ? 'default' : 'outline'}
+                variant={activeTab === 'react' ? 'default' : 'ghost'}
                 onClick={() => setActiveTab('react')}
                 size="sm"
+                className="transition-all duration-200"
               >
                 React
               </Button>
               <Button
-                variant={activeTab === 'swift' ? 'default' : 'outline'}
+                variant={activeTab === 'swift' ? 'default' : 'ghost'}
                 onClick={() => setActiveTab('swift')}
                 size="sm"
+                className="transition-all duration-200"
               >
                 Swift
               </Button>
               <Button
-                variant={activeTab === 'tauri' ? 'default' : 'outline'}
+                variant={activeTab === 'tauri' ? 'default' : 'ghost'}
                 onClick={() => setActiveTab('tauri')}
                 size="sm"
+                className="transition-all duration-200"
               >
                 Tauri
               </Button>
             </div>
             
-            <Card>
+            <Card className="shadow-lg border-2">
               <CardContent className="p-0">
-                <div className="p-6 overflow-x-auto">
+                <div className="p-6 overflow-x-auto bg-gradient-to-br from-secondary/20 to-secondary/10 rounded-lg">
                   <PrismCode 
                     code={codeExamples[activeTab]} 
                     language={activeTab === 'react' ? 'typescript' : activeTab === 'swift' ? 'swift' : 'rust'}
@@ -370,7 +381,7 @@ fn main() {
       </section>
 
       {/* Use Cases Section */}
-      <section className="py-20 px-6">
+      <section className="py-24 px-6">
         <div className="container mx-auto max-w-6xl">
           <div className="text-center mb-12">
             <h2 className="text-3xl font-bold mb-4">Perfect For</h2>
@@ -409,8 +420,10 @@ fn main() {
       </section>
 
       {/* CTA Section */}
-      <section className="py-20 px-6 bg-gradient-to-r from-violet-600/10 to-purple-600/10">
-        <div className="container mx-auto max-w-4xl text-center">
+      <section className="py-24 px-6 relative overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-r from-violet-600/10 via-purple-600/5 to-violet-600/10" />
+        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-background/50 to-background" />
+        <div className="container relative mx-auto max-w-4xl text-center">
           <h2 className="text-3xl font-bold mb-4">
             Ship Voice Today
           </h2>
@@ -419,7 +432,7 @@ fn main() {
           </p>
           
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <div className="bg-card border rounded-lg px-6 py-3">
+            <div className="bg-card border border-primary/20 rounded-lg px-6 py-3 shadow-sm hover:shadow-md transition-all duration-200 hover:border-primary/40">
               <PrismCode 
                 code="npm install @scout/sdk" 
                 language="bash"
@@ -440,12 +453,14 @@ fn main() {
 
 function FeatureCard({ icon, title, description }: { icon: React.ReactNode; title: string; description: string }) {
   return (
-    <Card className="border hover:border-primary/50 transition-colors">
+    <Card className="border hover:border-primary/50 transition-all duration-200 hover:shadow-lg group h-full">
       <CardContent className="p-6">
-        <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center mb-4">
-          {icon}
+        <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition-colors">
+          <div className="group-hover:scale-110 transition-transform">
+            {icon}
+          </div>
         </div>
-        <h3 className="font-semibold mb-2">{title}</h3>
+        <h3 className="font-semibold mb-2 group-hover:text-primary transition-colors">{title}</h3>
         <p className="text-sm text-muted-foreground">{description}</p>
       </CardContent>
     </Card>
@@ -464,17 +479,24 @@ function UseCaseCard({
   icon: React.ReactNode;
 }) {
   return (
-    <Card className="border hover:border-primary/50 transition-colors">
+    <Card className="border hover:border-primary/50 transition-all duration-200 hover:shadow-lg group h-full">
       <CardContent className="p-6">
-        <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center mb-4">
-          {icon}
+        <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition-colors">
+          <div className="group-hover:scale-110 transition-transform">
+            {icon}
+          </div>
         </div>
-        <h3 className="font-semibold mb-2">{category}</h3>
+        <h3 className="font-semibold mb-2 group-hover:text-primary transition-colors">{category}</h3>
         <p className="text-sm text-muted-foreground mb-4">{description}</p>
         <div className="space-y-1">
           <p className="text-xs text-muted-foreground font-medium">Examples:</p>
           <p className="text-xs text-muted-foreground">
-            {examples.join(", ")}
+            {examples.map((example, i) => (
+              <span key={example}>
+                <span className="hover:text-foreground transition-colors cursor-default">{example}</span>
+                {i < examples.length - 1 && ", "}
+              </span>
+            ))}
           </p>
         </div>
       </CardContent>
