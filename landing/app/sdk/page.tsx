@@ -18,6 +18,7 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 import { SDKNav } from "@/components/sdk-nav"
+import { PrismCode } from "@/components/prism-code"
 
 export default function SDKPage() {
   const [activeTab, setActiveTab] = useState<'react' | 'swift' | 'tauri'>('react')
@@ -106,8 +107,12 @@ fn main() {
             </p>
             
             <div className="flex items-center justify-center gap-4 pt-4">
-              <div className="bg-card border rounded-lg px-6 py-3 font-mono text-sm">
-                npx @scout/create-app
+              <div className="bg-card border rounded-lg px-6 py-3">
+                <PrismCode 
+                  code="npx @scout/create-app" 
+                  language="bash"
+                  className="text-sm !m-0 !p-0 !bg-transparent"
+                />
               </div>
               <Button size="lg" asChild>
                 <Link href="#get-started">
@@ -259,9 +264,13 @@ fn main() {
             
             <Card>
               <CardContent className="p-0">
-                <pre className="p-6 overflow-x-auto">
-                  <code className="text-sm">{codeExamples[activeTab]}</code>
-                </pre>
+                <div className="p-6 overflow-x-auto">
+                  <PrismCode 
+                    code={codeExamples[activeTab]} 
+                    language={activeTab === 'react' ? 'typescript' : activeTab === 'swift' ? 'swift' : 'rust'}
+                    className="text-sm"
+                  />
+                </div>
               </CardContent>
             </Card>
             
@@ -321,8 +330,12 @@ fn main() {
           </p>
           
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <div className="bg-card border rounded-lg px-6 py-3 font-mono text-sm">
-              npm install @scout/sdk
+            <div className="bg-card border rounded-lg px-6 py-3">
+              <PrismCode 
+                code="npm install @scout/sdk" 
+                language="bash"
+                className="text-sm !m-0 !p-0 !bg-transparent"
+              />
             </div>
             <Button size="lg" variant="outline" asChild>
               <Link href="https://github.com/arach/scout-sdk" target="_blank">
@@ -351,11 +364,30 @@ function FeatureCard({ icon, title, description }: { icon: React.ReactNode; titl
 }
 
 function PartnerCard({ name, description, useCase }: { name: string; description: string; useCase: string }) {
+  const logoMap = {
+    'Claude': '/logos/claude.svg',
+    'Cursor': '/logos/cursor.svg',
+    'Raycast': '/logos/raycast.svg',
+    'Reflect': '/logos/reflect.svg'
+  }
+  
+  const logoPath = logoMap[name as keyof typeof logoMap]
+  
   return (
     <Card className="border">
       <CardContent className="p-6 text-center">
-        <div className="w-16 h-16 rounded-lg bg-secondary flex items-center justify-center mx-auto mb-4">
-          <span className="text-2xl font-bold">{name[0]}</span>
+        <div className="w-16 h-16 rounded-lg flex items-center justify-center mx-auto mb-4">
+          {logoPath ? (
+            <img 
+              src={logoPath} 
+              alt={`${name} logo`} 
+              className="w-12 h-12"
+            />
+          ) : (
+            <div className="w-16 h-16 rounded-lg bg-secondary flex items-center justify-center">
+              <span className="text-2xl font-bold">{name[0]}</span>
+            </div>
+          )}
         </div>
         <h3 className="font-semibold mb-1">{name}</h3>
         <p className="text-sm text-muted-foreground mb-3">{description}</p>
