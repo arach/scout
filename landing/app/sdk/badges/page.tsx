@@ -71,7 +71,7 @@ export default function BadgesPage() {
                   <Download className="w-4 h-4" />
                   Download SVG
                 </Button>
-                <code className="text-sm bg-secondary px-3 py-2 rounded">
+                <code className="text-xs bg-secondary px-3 py-2 rounded">
                   /badges/{badge.file}
                 </code>
               </div>
@@ -111,7 +111,7 @@ export default function BadgesPage() {
         <h2 className="text-2xl font-bold mb-4">React Component</h2>
         <Card>
           <CardContent className="p-0">
-            <pre className="p-6 overflow-x-auto text-sm">
+            <pre className="p-6 overflow-x-auto text-xs">
               <code>{`import { PoweredByScout } from '@scout/react';
 
 // In your component

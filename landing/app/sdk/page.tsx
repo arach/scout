@@ -111,7 +111,7 @@ fn main() {
                 <PrismCode 
                   code="npx @scout/create-app" 
                   language="bash"
-                  className="text-sm !m-0 !p-0 !bg-transparent"
+                  className="text-xs !m-0 !p-0 !bg-transparent"
                 />
               </div>
               <Button size="lg" asChild>
@@ -268,16 +268,18 @@ fn main() {
                   <PrismCode 
                     code={codeExamples[activeTab]} 
                     language={activeTab === 'react' ? 'typescript' : activeTab === 'swift' ? 'swift' : 'rust'}
-                    className="text-sm"
+                    className="text-xs"
                   />
                 </div>
               </CardContent>
             </Card>
             
             <div className="mt-8 text-center">
-              <Button size="lg" className="gap-2">
-                <Terminal className="w-4 h-4" />
-                View Documentation
+              <Button size="lg" className="gap-2" asChild>
+                <Link href="/docs">
+                  <Terminal className="w-4 h-4" />
+                  View Documentation
+                </Link>
               </Button>
             </div>
           </div>
@@ -334,7 +336,7 @@ fn main() {
               <PrismCode 
                 code="npm install @scout/sdk" 
                 language="bash"
-                className="text-sm !m-0 !p-0 !bg-transparent"
+                className="text-xs !m-0 !p-0 !bg-transparent"
               />
             </div>
             <Button size="lg" variant="outline" asChild>
