@@ -84,7 +84,7 @@ export default function DocsPage() {
       <SDKNav />
       <div className="flex min-h-screen bg-background">
         {/* Sidebar Navigation */}
-        <div className="w-64 border-r bg-card/50 p-6 hidden lg:block">
+        <div className="w-64 border-r bg-card/50 p-6 pt-8 hidden lg:block">
           <div className="space-y-6">
             {navSections.map((section) => (
               <div key={section.title}>
