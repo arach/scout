@@ -54,7 +54,7 @@ export function PrismCode({ code, language, className = '' }: PrismCodeProps) {
           <Copy className="h-4 w-4" />
         )}
       </Button>
-      <pre className={`language-${language} bg-gray-900/95 border border-gray-800 rounded-lg overflow-x-auto ${className}`}>
+      <pre className={`language-${language} overflow-x-auto ${className}`}>
         <code className={`language-${language}`}>
           {code}
         </code>
