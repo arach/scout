@@ -1,0 +1,16 @@
+<svg width="200" height="48" viewBox="0 0 200 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="200" height="48" rx="8" fill="#F8FAFC"/>
+  <rect x="0.5" y="0.5" width="199" height="47" rx="7.5" stroke="#E2E8F0"/>
+  
+  <!-- Icon -->
+  <rect x="12" y="12" width="24" height="24" rx="6" fill="#7C3AED"/>
+  <text x="24" y="29" font-family="Inter, system-ui, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="white">S</text>
+  
+  <!-- Text -->
+  <text x="46" y="21" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#64748B">POWERED BY</text>
+  <text x="46" y="34" font-family="Inter, system-ui, sans-serif" font-size="16" font-weight="600" fill="#1E293B">Scout</text>
+  
+  <!-- Mic icon -->
+  <path d="M168 20C168 18.8954 168.895 18 170 18C171.105 18 172 18.8954 172 20V24C172 25.1046 171.105 26 170 26C168.895 26 168 25.1046 168 24V20Z" fill="#7C3AED"/>
+  <path d="M166 24C166 26.2091 167.791 28 170 28C172.209 28 174 26.2091 174 24M170 28V30M168 30H172" stroke="#7C3AED" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
