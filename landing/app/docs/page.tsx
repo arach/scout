@@ -82,9 +82,9 @@ export default function DocsPage() {
   return (
     <>
       <SDKNav />
-      <div className="flex min-h-screen bg-background">
+      <div className="flex min-h-screen bg-background pt-16">
         {/* Sidebar Navigation */}
-        <div className="w-64 border-r bg-card/50 p-6 pt-8 hidden lg:block">
+        <div className="w-64 border-r bg-card/50 p-6 pt-8 hidden lg:block fixed h-full top-16">
           <div className="space-y-6">
             {navSections.map((section) => (
               <div key={section.title}>
@@ -112,7 +112,7 @@ export default function DocsPage() {
         </div>
 
         {/* Main Content */}
-        <div className="flex-1 p-6 lg:p-12 max-w-4xl">
+        <div className="flex-1 p-6 lg:p-12 max-w-4xl lg:ml-64">
           <DocSection activeSection={activeSection} />
         </div>
       </div>
