@@ -95,87 +95,170 @@ fn main() {
             </Badge>
             
             <h1 className="text-5xl md:text-7xl font-bold leading-tight">
-              Your Voice,{" "}
+              Add Voice to Your App{" "}
               <span className="bg-gradient-to-r from-violet-600 to-purple-600 bg-clip-text text-transparent">
-                Built In
+                in Minutes
               </span>
             </h1>
             
             <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
-              Scout lets apps like Claude, Cursor, and Raycast ship native voice UX with zero friction. 
-              Local-first, model-agnostic, and beautifully integrated.
+              Scout SDK is a local-first, white-label voice interface for desktop apps. 
+              Drop in voice commands and dictation with just a few lines of code.
             </p>
             
-            <div className="flex items-center justify-center gap-4 pt-4">
-              <div className="bg-card border rounded-lg px-6 py-3">
-                <PrismCode 
-                  code="npx @scout/create-app" 
-                  language="bash"
-                  className="text-xs !m-0 !p-0 !bg-transparent"
-                />
+            <div className="flex flex-col items-center gap-4 pt-4">
+              <div className="flex items-center justify-center gap-4">
+                <div className="bg-card border rounded-lg px-6 py-3">
+                  <PrismCode 
+                    code="npx @scout/create-app" 
+                    language="bash"
+                    className="text-xs !m-0 !p-0 !bg-transparent"
+                  />
+                </div>
+                <Button size="lg" asChild>
+                  <Link href="#get-started">
+                    Get Started
+                  </Link>
+                </Button>
               </div>
-              <Button size="lg" asChild>
-                <Link href="#get-started">
-                  Get Started
-                </Link>
-              </Button>
+              <div className="flex items-center gap-6 text-sm text-muted-foreground">
+                <span className="flex items-center gap-1">
+                  <Zap className="w-4 h-4" />
+                  3-4x faster than typing
+                </span>
+                <span className="flex items-center gap-1">
+                  <Lock className="w-4 h-4" />
+                  100% on-device
+                </span>
+                <span className="flex items-center gap-1">
+                  <Package className="w-4 h-4" />
+                  ~5MB binary
+                </span>
+              </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Visual Demo Section */}
-      <section className="py-20 px-6 bg-secondary/20">
+      {/* What is Scout SDK Section */}
+      <section className="py-20 px-6">
         <div className="container mx-auto max-w-6xl">
           <div className="text-center mb-12">
-            <h2 className="text-3xl font-bold mb-4">See Scout in Action</h2>
-            <p className="text-muted-foreground">
-              One SDK. Native voice input. Any app.
+            <h2 className="text-3xl font-bold mb-4">What is Scout SDK?</h2>
+            <p className="text-muted-foreground max-w-2xl mx-auto">
+              Scout SDK is a white-label voice interface that integrates seamlessly into your desktop app. 
+              Handle voice commands, dictation, and natural language input without building audio infrastructure from scratch.
             </p>
           </div>
           
-          <div className="grid md:grid-cols-2 gap-8 items-center">
-            <div className="space-y-6">
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <Card className="border-2 border-primary/20">
+              <CardContent className="p-6">
+                <div className="text-3xl font-bold mb-2">~5MB</div>
+                <p className="text-sm text-muted-foreground">Tiny binary footprint</p>
+              </CardContent>
+            </Card>
+            <Card className="border-2 border-primary/20">
+              <CardContent className="p-6">
+                <div className="text-3xl font-bold mb-2">&lt;300ms</div>
+                <p className="text-sm text-muted-foreground">End-to-end latency</p>
+              </CardContent>
+            </Card>
+            <Card className="border-2 border-primary/20">
+              <CardContent className="p-6">
+                <div className="text-3xl font-bold mb-2">100%</div>
+                <p className="text-sm text-muted-foreground">Local processing</p>
+              </CardContent>
+            </Card>
+            <Card className="border-2 border-primary/20">
+              <CardContent className="p-6">
+                <div className="text-3xl font-bold mb-2">0</div>
+                <p className="text-sm text-muted-foreground">Cloud dependencies</p>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </section>
+
+      {/* How It Works Section */}
+      <section className="py-20 px-6 bg-secondary/20">
+        <div className="container mx-auto max-w-6xl">
+          <div className="text-center mb-12">
+            <h2 className="text-3xl font-bold mb-4">How It Works</h2>
+            <p className="text-muted-foreground">
+              Voice-enable your app in three simple steps
+            </p>
+          </div>
+          
+          <div className="grid md:grid-cols-3 gap-8">
+            <div className="text-center">
+              <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
+                <span className="text-2xl font-bold text-primary">1</span>
+              </div>
+              <h3 className="font-semibold mb-2">User Activates Voice</h3>
+              <p className="text-sm text-muted-foreground">
+                Press hotkey or click button to start recording. Ring buffer captures audio before activation.
+              </p>
+            </div>
+            
+            <div className="text-center">
+              <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
+                <span className="text-2xl font-bold text-primary">2</span>
+              </div>
+              <h3 className="font-semibold mb-2">Scout Processes Audio</h3>
+              <p className="text-sm text-muted-foreground">
+                Local transcription with Whisper or stream to your preferred ASR service.
+              </p>
+            </div>
+            
+            <div className="text-center">
+              <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
+                <span className="text-2xl font-bold text-primary">3</span>
+              </div>
+              <h3 className="font-semibold mb-2">Your App Handles Text</h3>
+              <p className="text-sm text-muted-foreground">
+                Receive transcribed text via callback. Process commands or send to your LLM.
+              </p>
+            </div>
+          </div>
+          
+          <div className="mt-12 space-y-6">
+            <h3 className="text-xl font-semibold text-center">Key Features</h3>
+            <div className="grid md:grid-cols-3 gap-6 max-w-4xl mx-auto">
               <div className="flex items-start gap-4">
                 <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
                   <Command className="w-5 h-5 text-primary" />
                 </div>
                 <div>
-                  <h3 className="font-semibold mb-1">Global Hotkey Activation</h3>
+                  <h4 className="font-semibold mb-1">Never Miss a Word</h4>
                   <p className="text-sm text-muted-foreground">
-                    User presses Cmd+Shift+Space anywhere in your app
+                    Ring buffer recording captures audio before you hit record
                   </p>
                 </div>
               </div>
               
               <div className="flex items-start gap-4">
                 <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-                  <Mic className="w-5 h-5 text-primary" />
+                  <Palette className="w-5 h-5 text-primary" />
                 </div>
                 <div>
-                  <h3 className="font-semibold mb-1">Beautiful Native Overlay</h3>
+                  <h4 className="font-semibold mb-1">White-Label UI</h4>
                   <p className="text-sm text-muted-foreground">
-                    Themed to match your app's design language
+                    Fully customizable interface that matches your app's design
                   </p>
                 </div>
               </div>
               
               <div className="flex items-start gap-4">
                 <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-                  <Sparkles className="w-5 h-5 text-primary" />
+                  <Lock className="w-5 h-5 text-primary" />
                 </div>
                 <div>
-                  <h3 className="font-semibold mb-1">Instant Transcription</h3>
+                  <h4 className="font-semibold mb-1">100% On-Device</h4>
                   <p className="text-sm text-muted-foreground">
-                    Real-time Whisper processing with callbacks to your app
+                    Complete privacy with local processing. No cloud required.
                   </p>
                 </div>
-              </div>
-            </div>
-            
-            <div className="bg-card rounded-lg p-8 border">
-              <div className="aspect-video bg-secondary/50 rounded-lg flex items-center justify-center">
-                <span className="text-muted-foreground">Demo Video Coming Soon</span>
               </div>
             </div>
           </div>
@@ -186,9 +269,9 @@ fn main() {
       <section className="py-20 px-6">
         <div className="container mx-auto max-w-6xl">
           <div className="text-center mb-12">
-            <h2 className="text-3xl font-bold mb-4">Built for Modern Apps</h2>
+            <h2 className="text-3xl font-bold mb-4">Everything You Need</h2>
             <p className="text-muted-foreground">
-              Everything you need to add voice to your desktop app
+              A complete voice OS for your desktop app
             </p>
           </div>
           
@@ -200,13 +283,13 @@ fn main() {
             />
             <FeatureCard
               icon={<Lock className="w-5 h-5" />}
-              title="Local-First Processing"
-              description="Ring buffer recording + Whisper transcription. No cloud required."
+              title="Never Miss a Word"
+              description="Ring buffer recording captures audio before users hit record."
             />
             <FeatureCard
               icon={<Palette className="w-5 h-5" />}
-              title="Themeable UI"
-              description="Match your app's design. Custom overlays, sounds, and animations."
+              title="White-Label UI"
+              description="Fully customizable voice interface that matches your app's brand."
             />
             <FeatureCard
               icon={<Brain className="w-5 h-5" />}
@@ -215,8 +298,8 @@ fn main() {
             />
             <FeatureCard
               icon={<Zap className="w-5 h-5" />}
-              title="Native Performance"
-              description="Built on Tauri with Swift bindings. Small footprint, zero lag."
+              title="3-4x Faster Than Typing"
+              description="~5MB binary with <300ms latency. Ships directly with your app."
             />
             <FeatureCard
               icon={<Package className="w-5 h-5" />}
@@ -286,36 +369,40 @@ fn main() {
         </div>
       </section>
 
-      {/* Partner Showcase */}
+      {/* Use Cases Section */}
       <section className="py-20 px-6">
         <div className="container mx-auto max-w-6xl">
           <div className="text-center mb-12">
             <h2 className="text-3xl font-bold mb-4">Perfect For</h2>
             <p className="text-muted-foreground">
-              Apps that want native voice without the complexity
+              Scout SDK powers voice experiences across categories
             </p>
           </div>
           
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <PartnerCard
-              name="Claude"
-              description="Voice-powered AI conversations"
-              useCase="Natural dialogue input"
+            <UseCaseCard
+              category="AI Assistants"
+              description="Natural voice conversations with LLMs"
+              examples={["Claude", "ChatGPT Desktop", "Perplexity"]}
+              icon={<Brain className="w-5 h-5" />}
             />
-            <PartnerCard
-              name="Cursor"
-              description="Code with voice commands"
-              useCase="'Generate a React component'"
+            <UseCaseCard
+              category="Coding Copilots"
+              description="Voice commands for code generation"
+              examples={["Cursor", "GitHub Copilot", "Codeium"]}
+              icon={<Code className="w-5 h-5" />}
             />
-            <PartnerCard
-              name="Raycast"
-              description="Voice-driven launcher"
-              useCase="'Open Slack and message team'"
+            <UseCaseCard
+              category="Productivity Tools"
+              description="Hands-free app control and navigation"
+              examples={["Raycast", "Alfred", "Notion"]}
+              icon={<Zap className="w-5 h-5" />}
             />
-            <PartnerCard
-              name="Reflect"
-              description="Think out loud"
-              useCase="Voice notes & journaling"
+            <UseCaseCard
+              category="Note-Taking Apps"
+              description="Voice memos and dictation"
+              examples={["Obsidian", "Reflect", "Bear"]}
+              icon={<Terminal className="w-5 h-5" />}
             />
           </div>
         </div>
@@ -325,10 +412,10 @@ fn main() {
       <section className="py-20 px-6 bg-gradient-to-r from-violet-600/10 to-purple-600/10">
         <div className="container mx-auto max-w-4xl text-center">
           <h2 className="text-3xl font-bold mb-4">
-            Ready to Add Voice to Your App?
+            Ship Voice Today
           </h2>
           <p className="text-muted-foreground mb-8">
-            Join the developer preview and ship voice UX your users will love
+            Your UI, your experience — just with better ears. Join leading apps using Scout.
           </p>
           
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
@@ -365,37 +452,31 @@ function FeatureCard({ icon, title, description }: { icon: React.ReactNode; titl
   )
 }
 
-function PartnerCard({ name, description, useCase }: { name: string; description: string; useCase: string }) {
-  const logoMap = {
-    'Claude': '/logos/claude.svg',
-    'Cursor': '/logos/cursor.svg',
-    'Raycast': '/logos/raycast.svg',
-    'Reflect': '/logos/reflect.svg'
-  }
-  
-  const logoPath = logoMap[name as keyof typeof logoMap]
-  
+function UseCaseCard({ 
+  category, 
+  description, 
+  examples, 
+  icon 
+}: { 
+  category: string; 
+  description: string; 
+  examples: string[];
+  icon: React.ReactNode;
+}) {
   return (
-    <Card className="border">
-      <CardContent className="p-6 text-center">
-        <div className="w-16 h-16 rounded-lg flex items-center justify-center mx-auto mb-4">
-          {logoPath ? (
-            <img 
-              src={logoPath} 
-              alt={`${name} logo`} 
-              className="w-12 h-12"
-            />
-          ) : (
-            <div className="w-16 h-16 rounded-lg bg-secondary flex items-center justify-center">
-              <span className="text-2xl font-bold">{name[0]}</span>
-            </div>
-          )}
+    <Card className="border hover:border-primary/50 transition-colors">
+      <CardContent className="p-6">
+        <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center mb-4">
+          {icon}
         </div>
-        <h3 className="font-semibold mb-1">{name}</h3>
-        <p className="text-sm text-muted-foreground mb-3">{description}</p>
-        <Badge variant="secondary" className="text-xs">
-          {useCase}
-        </Badge>
+        <h3 className="font-semibold mb-2">{category}</h3>
+        <p className="text-sm text-muted-foreground mb-4">{description}</p>
+        <div className="space-y-1">
+          <p className="text-xs text-muted-foreground font-medium">Examples:</p>
+          <p className="text-xs text-muted-foreground">
+            {examples.join(", ")}
+          </p>
+        </div>
       </CardContent>
     </Card>
   )
