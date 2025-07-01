@@ -27,8 +27,8 @@ export function PrismCode({ code, language, className = '' }: PrismCodeProps) {
   }, [code, language])
 
   return (
-    <pre className={`language-${language} ${className}`}>
-      <code className={`language-${language}`}>
+    <pre className={`language-${language} text-xs ${className}`}>
+      <code className={`language-${language} text-xs`}>
         {code}
       </code>
     </pre>

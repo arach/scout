@@ -15,6 +15,9 @@ export function SDKNav() {
             <Link href="/sdk" className="text-muted-foreground hover:text-foreground transition-colors">
               Overview
             </Link>
+            <Link href="/docs" className="text-muted-foreground hover:text-foreground transition-colors">
+              Docs
+            </Link>
             <Link href="/sdk/badges" className="text-muted-foreground hover:text-foreground transition-colors">
               Badges
             </Link>
