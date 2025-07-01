@@ -1,0 +1,124 @@
+/* Custom Prism theme with subtle colors for dark background */
+code[class*="language-"],
+pre[class*="language-"] {
+  color: #a0a8b7;
+  background: none;
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+  font-weight: 300;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  text-align: left;
+  white-space: pre;
+  word-spacing: normal;
+  word-break: normal;
+  word-wrap: normal;
+  tab-size: 2;
+  hyphens: none;
+}
+
+/* Code blocks */
+pre[class*="language-"] {
+  padding: 1.25rem;
+  margin: 0;
+  overflow: auto;
+  background: rgba(17, 24, 39, 0.95);
+}
+
+/* Inline code */
+:not(pre) > code[class*="language-"] {
+  padding: 0.1em 0.3em;
+  border-radius: 0.3em;
+  white-space: normal;
+  background: rgba(17, 24, 39, 0.95);
+}
+
+/* Subtle color scheme */
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+  color: #5c6370;
+  font-style: italic;
+}
+
+.token.punctuation {
+  color: #7f8491;
+}
+
+.token.namespace {
+  opacity: 0.7;
+}
+
+.token.property,
+.token.tag,
+.token.boolean,
+.token.number,
+.token.constant,
+.token.symbol,
+.token.deleted {
+  color: #98a6bf;
+}
+
+.token.selector,
+.token.attr-name,
+.token.string,
+.token.char,
+.token.builtin,
+.token.inserted {
+  color: #7c9082;
+}
+
+.token.operator,
+.token.entity,
+.token.url,
+.language-css .token.string,
+.style .token.string {
+  color: #8b94a3;
+}
+
+.token.atrule,
+.token.attr-value,
+.token.keyword {
+  color: #8990b3;
+}
+
+.token.function,
+.token.class-name {
+  color: #86a0bf;
+}
+
+.token.regex,
+.token.important,
+.token.variable {
+  color: #9ca8b8;
+}
+
+.token.important,
+.token.bold {
+  font-weight: 500;
+}
+
+.token.italic {
+  font-style: italic;
+}
+
+.token.entity {
+  cursor: help;
+}
+
+/* Selection */
+pre[class*="language-"]::-moz-selection,
+pre[class*="language-"] ::-moz-selection,
+code[class*="language-"]::-moz-selection,
+code[class*="language-"] ::-moz-selection {
+  text-shadow: none;
+  background: rgba(139, 148, 163, 0.2);
+}
+
+pre[class*="language-"]::selection,
+pre[class*="language-"] ::selection,
+code[class*="language-"]::selection,
+code[class*="language-"] ::selection {
+  text-shadow: none;
+  background: rgba(139, 148, 163, 0.2);
+}
