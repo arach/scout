@@ -1168,6 +1168,7 @@ pub fn run() {
                 database_arc.clone(),
                 models_dir.clone(),
                 app.handle().clone(),
+                settings_arc.clone(),
             ));
             
             // Initialize native NSPanel overlay

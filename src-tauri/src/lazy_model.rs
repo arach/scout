@@ -2,7 +2,7 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, OnceCell};
 use std::path::PathBuf;
 use crate::transcription::Transcriber;
-use crate::logger::{info, warn, error, Component};
+use crate::logger::{info, error, Component};
 
 /// Lazy-loaded Whisper model to reduce startup time and memory usage
 pub struct LazyModel {
