@@ -9,6 +9,7 @@ use crate::recording_progress::RecordingProgress;
 use crate::processing_queue::{ProcessingQueue, ProcessingJob};
 use crate::transcription_context::TranscriptionContext;
 use crate::db::Database;
+use crate::settings::SettingsManager;
 use crate::logger::{info, debug, warn, error, Component};
 
 #[derive(Debug)]
