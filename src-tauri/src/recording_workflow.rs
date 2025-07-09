@@ -59,6 +59,7 @@ impl RecordingWorkflow {
         database: Arc<Database>,
         models_dir: PathBuf,
         app_handle: tauri::AppHandle,
+        settings: Arc<tokio::sync::Mutex<SettingsManager>>,
     ) -> Self {
         let (command_tx, mut command_rx) = mpsc::channel::<RecordingCommand>(100);
         

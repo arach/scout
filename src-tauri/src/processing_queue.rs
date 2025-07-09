@@ -8,7 +8,6 @@ use tauri::Emitter;
 use crate::db::Database;
 use crate::transcription::Transcriber;
 use crate::audio::AudioConverter;
-use crate::clipboard;
 use crate::settings::SettingsManager;
 use crate::logger::{error, info, Component};
 
