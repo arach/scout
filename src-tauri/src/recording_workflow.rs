@@ -351,19 +351,20 @@ impl RecordingWorkflow {
                                         
                                         let metadata = metadata_json.to_string();
                                         
+                                        // Execute post-processing hooks (profanity filter, auto-copy, auto-paste, etc.)
+                                        let post_processing = crate::post_processing::PostProcessingHooks::new(settings.clone());
+                                        let filtered_transcript = post_processing.execute_hooks(&transcription_result.text, "Ring Buffer", Some(duration_ms)).await;
+                                        
+                                        // Save filtered transcript to database
                                         match database.save_transcript(
-                                            &transcription_result.text,
+                                            &filtered_transcript,
                                             duration_ms,
                                             Some(&metadata),
                                             Some(&recordings_dir.join(&active_recording.filename).to_string_lossy()),
                                             None // TODO: Calculate actual file size
                                         ).await {
                                             Ok(transcript) => {
-                                                info(Component::Processing, &format!("Transcript saved to database with ID: {}", transcript.id));
-                                                
-                                                // Execute post-processing hooks (auto-copy, auto-paste, etc.)
-                                                let post_processing = crate::post_processing::PostProcessingHooks::new(settings.clone());
-                                                post_processing.execute_hooks(&transcription_result.text, "Ring Buffer").await;
+                                                info(Component::Processing, &format!("Filtered transcript saved to database with ID: {}", transcript.id));
                                                 
                                                 // Update to idle state first
                                                 progress_tracker.update(RecordingProgress::Idle);
@@ -375,7 +376,7 @@ impl RecordingWorkflow {
                                                 // since we're not going through the processing queue
                                                 let processing_complete = crate::processing_queue::ProcessingStatus::Complete {
                                                     filename: active_recording.filename.clone(),
-                                                    transcript: transcription_result.text.clone(),
+                                                    transcript: filtered_transcript.clone(),
                                                 };
                                                 if let Err(e) = app_handle.emit("processing-status", &processing_complete) {
                                                     error(Component::UI, &format!("Failed to emit processing-status complete: {:?}", e));
@@ -436,10 +437,10 @@ impl RecordingWorkflow {
                                                     debug(Component::UI, "Emitted recording-completed to overlay window");
                                                 }
                                                 
-                                                // Send response with transcript
+                                                // Send response with filtered transcript
                                                 let _ = response.send(Ok(RecordingResult {
                                                     filename: active_recording.filename,
-                                                    transcript: Some(transcription_result.text),
+                                                    transcript: Some(filtered_transcript),
                                                     duration_ms,
                                                     device_name: device_info.as_ref().map(|d| d.name.clone()),
                                                     sample_rate: device_info.as_ref().map(|d| d.sample_rate),

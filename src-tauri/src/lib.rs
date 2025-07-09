@@ -17,6 +17,7 @@ mod logger;
 mod lazy_model;
 mod env;
 mod post_processing;
+mod profanity_filter;
 #[cfg(target_os = "macos")]
 mod macos;
 

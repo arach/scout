@@ -53,6 +53,8 @@ pub struct UISettings {
     pub completion_sound_threshold_ms: u64,
     pub auto_copy: bool,
     pub auto_paste: bool,
+    pub profanity_filter_enabled: bool,
+    pub profanity_filter_aggressive: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -113,6 +115,8 @@ impl Default for UISettings {
             completion_sound_threshold_ms: 1000,
             auto_copy: false,
             auto_paste: false,
+            profanity_filter_enabled: true,
+            profanity_filter_aggressive: false,
         }
     }
 }
