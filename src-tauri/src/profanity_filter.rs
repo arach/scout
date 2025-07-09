@@ -148,7 +148,7 @@ impl ProfanityFilter {
     fn remove_profanity(&self, text: &str) -> String {
         let mut result = text.to_string();
         
-        // Remove known hallucination phrases
+        // Remove known hallucination phrases completely
         for phrase in &self.hallucination_phrases {
             let phrase_variations = vec![
                 phrase.clone(),
@@ -157,7 +157,12 @@ impl ProfanityFilter {
             ];
             
             for variation in phrase_variations {
-                result = result.replace(&variation, "[filtered]");
+                // Simple replacement - remove the phrase and clean up
+                result = result.replace(&variation, "");
+                // Also handle common patterns with punctuation
+                result = result.replace(&format!("{}.", &variation), "");
+                result = result.replace(&format!("{}!", &variation), "");
+                result = result.replace(&format!("{}?", &variation), "");
             }
         }
         
@@ -170,25 +175,37 @@ impl ProfanityFilter {
                 .trim_matches(|c: char| !c.is_alphabetic())
                 .to_string();
                 
-            if self.hallucination_words.contains(&clean_word) {
-                // Preserve punctuation but replace the word
-                let punctuation: String = word.chars()
-                    .filter(|c| !c.is_alphabetic())
-                    .collect();
-                filtered_words.push(format!("[filtered]{}", punctuation));
-            } else {
+            if !self.hallucination_words.contains(&clean_word) {
+                // Keep non-profanity words
                 filtered_words.push(word.to_string());
             }
+            // Skip profanity words completely (don't add anything)
         }
         
         let filtered_result = filtered_words.join(" ");
         
-        // Clean up multiple spaces and empty brackets
-        filtered_result
-            .replace("[filtered] [filtered]", "[filtered]")
+        // Clean up multiple spaces and stray punctuation
+        let cleaned = filtered_result
             .replace("  ", " ")
             .trim()
-            .to_string()
+            .to_string();
+            
+        // Remove stray punctuation at the start or standalone punctuation
+        let cleaned = cleaned
+            .trim_matches(|c: char| c == ',' || c == '.' || c == '!' || c == '?' || c.is_whitespace())
+            .to_string();
+            
+        // Fix sentence structure - if we end with incomplete punctuation, clean it up
+        let final_result = if cleaned.is_empty() {
+            String::new()
+        } else if cleaned.ends_with("?") || cleaned.ends_with(".") || cleaned.ends_with("!") {
+            cleaned
+        } else {
+            // Add period if we have content but no ending punctuation
+            format!("{}.", cleaned)
+        };
+        
+        final_result
     }
     
     /// Capitalize the first letter of a string
@@ -213,7 +230,7 @@ mod tests {
         let result = filter.filter_transcript("Oh fuck", Some(1000));
         assert!(result.likely_hallucination);
         assert!(result.profanity_detected);
-        assert_eq!(result.filtered_text, "[filtered]");
+        assert_eq!(result.filtered_text, "");
         
         // Test longer recording with context (likely intentional)
         let result = filter.filter_transcript("I can't believe I forgot my fucking keys again", Some(5000));
@@ -228,6 +245,6 @@ mod tests {
         
         let result = filter.filter_transcript("Oh my god, what the hell", Some(2000));
         assert!(result.likely_hallucination);
-        assert_eq!(result.filtered_text, "[filtered], [filtered]");
+        assert_eq!(result.filtered_text, "");
     }
 }

@@ -2,7 +2,7 @@ use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 use crate::settings::SettingsManager;
 use crate::profanity_filter::ProfanityFilter;
-use crate::logger::{info, error, Component};
+use crate::logger::{info, error, debug, Component};
 
 /// Post-processing hooks that run after successful transcription
 pub struct PostProcessingHooks {
@@ -15,8 +15,11 @@ impl PostProcessingHooks {
     }
 
     /// Execute all post-processing hooks for a completed transcription
-    pub async fn execute_hooks(&self, transcript: &str, source: &str, recording_duration_ms: Option<i32>) -> String {
+    /// Returns (filtered_transcript, original_transcript)
+    pub async fn execute_hooks(&self, transcript: &str, source: &str, recording_duration_ms: Option<i32>) -> (String, String) {
         info(Component::Processing, &format!("🎯 {} transcription successful - executing post-processing hooks", source));
+        
+        let original_transcript = transcript.to_string();
         
         // Execute profanity filtering first
         let filtered_transcript = self.execute_profanity_filter(transcript, recording_duration_ms).await;
@@ -26,7 +29,7 @@ impl PostProcessingHooks {
         
         // Future: Add more hooks here (e.g., webhooks, integrations, etc.)
         
-        filtered_transcript
+        (filtered_transcript, original_transcript)
     }
 
     /// Execute profanity filtering on the transcript
@@ -48,10 +51,14 @@ impl PostProcessingHooks {
         
         if result.profanity_detected {
             if result.likely_hallucination {
-                info(Component::Processing, &format!("🚫 Profanity detected and filtered as likely hallucination: {:?}", result.flagged_words));
-                info(Component::Processing, &format!("📝 Original: '{}' → Filtered: '{}'", transcript, result.filtered_text));
+                info(Component::Processing, &format!("🚫 Filtered likely hallucination: {} items removed", result.flagged_words.len()));
+                // Keep detailed comparison in debug logs only
+                debug(Component::Processing, &format!(
+                    "Profanity filter details - Original: '{}' → Filtered: '{}' | Flagged: {:?}",
+                    transcript, result.filtered_text, result.flagged_words
+                ));
             } else {
-                info(Component::Processing, &format!("✅ Profanity detected but kept as likely intentional: {:?}", result.flagged_words));
+                info(Component::Processing, &format!("✅ Preserved intentional profanity: {} items detected", result.flagged_words.len()));
                 if profanity_filter_aggressive {
                     info(Component::Processing, "🚫 Aggressive filtering enabled - filtering anyway");
                     return result.filtered_text;
