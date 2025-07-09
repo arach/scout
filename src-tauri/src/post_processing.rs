@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 use crate::settings::SettingsManager;
+use crate::profanity_filter::ProfanityFilter;
 use crate::logger::{info, error, Component};
 
 /// Post-processing hooks that run after successful transcription
@@ -14,13 +15,53 @@ impl PostProcessingHooks {
     }
 
     /// Execute all post-processing hooks for a completed transcription
-    pub async fn execute_hooks(&self, transcript: &str, source: &str) {
+    pub async fn execute_hooks(&self, transcript: &str, source: &str, recording_duration_ms: Option<i32>) -> String {
         info(Component::Processing, &format!("🎯 {} transcription successful - executing post-processing hooks", source));
         
-        // Execute auto-copy/paste hooks
-        self.execute_clipboard_hooks(transcript).await;
+        // Execute profanity filtering first
+        let filtered_transcript = self.execute_profanity_filter(transcript, recording_duration_ms).await;
+        
+        // Execute auto-copy/paste hooks with filtered transcript
+        self.execute_clipboard_hooks(&filtered_transcript).await;
         
         // Future: Add more hooks here (e.g., webhooks, integrations, etc.)
+        
+        filtered_transcript
+    }
+
+    /// Execute profanity filtering on the transcript
+    async fn execute_profanity_filter(&self, transcript: &str, recording_duration_ms: Option<i32>) -> String {
+        let settings_guard = self.settings.lock().await;
+        let profanity_filter_enabled = settings_guard.get().ui.profanity_filter_enabled;
+        let profanity_filter_aggressive = settings_guard.get().ui.profanity_filter_aggressive;
+        drop(settings_guard);
+        
+        if !profanity_filter_enabled {
+            info(Component::Processing, "🔍 Profanity filter is disabled");
+            return transcript.to_string();
+        }
+        
+        info(Component::Processing, &format!("🔍 Profanity filter enabled (aggressive: {}) - scanning transcript", profanity_filter_aggressive));
+        
+        let filter = ProfanityFilter::new();
+        let result = filter.filter_transcript(transcript, recording_duration_ms);
+        
+        if result.profanity_detected {
+            if result.likely_hallucination {
+                info(Component::Processing, &format!("🚫 Profanity detected and filtered as likely hallucination: {:?}", result.flagged_words));
+                info(Component::Processing, &format!("📝 Original: '{}' → Filtered: '{}'", transcript, result.filtered_text));
+            } else {
+                info(Component::Processing, &format!("✅ Profanity detected but kept as likely intentional: {:?}", result.flagged_words));
+                if profanity_filter_aggressive {
+                    info(Component::Processing, "🚫 Aggressive filtering enabled - filtering anyway");
+                    return result.filtered_text;
+                }
+            }
+        } else {
+            info(Component::Processing, "✅ No profanity detected in transcript");
+        }
+        
+        result.filtered_text
     }
 
     /// Handle auto-copy and auto-paste functionality

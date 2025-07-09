@@ -250,13 +250,13 @@ impl ProcessingQueue {
                                                     }
                                                 }
                                                 
-                                                // Execute post-processing hooks (auto-copy, auto-paste, etc.)
+                                                // Execute post-processing hooks (profanity filter, auto-copy, auto-paste, etc.)
                                                 let post_processing = crate::post_processing::PostProcessingHooks::new(settings.clone());
-                                                post_processing.execute_hooks(&transcript, "Processing Queue").await;
+                                                let filtered_transcript = post_processing.execute_hooks(&transcript, "Processing Queue", Some(job.duration_ms)).await;
                                                 
                                                 let _ = status_tx.send(ProcessingStatus::Complete { 
                                                     filename: job.filename.clone(),
-                                                    transcript: transcript.clone(),
+                                                    transcript: filtered_transcript.clone(),
                                                 }).await;
                                                 
                                                 // Play success sound if processing took longer than threshold
