@@ -174,11 +174,16 @@ impl ProcessingQueue {
                                                     .map(|m| m.len() as i64)
                                                     .ok();
                                                 
+                                                // Execute post-processing hooks (profanity filter, auto-copy, auto-paste, etc.)
+                                                let post_processing = crate::post_processing::PostProcessingHooks::new(settings.clone());
+                                                let (filtered_transcript, original_transcript) = post_processing.execute_hooks(&transcript, "Processing Queue", Some(job.duration_ms)).await;
+                                                
                                                 // Build metadata with app context if available
                                                 let mut metadata_json = serde_json::json!({
                                                     "filename": job.filename,
                                                     "model_used": model_name,
-                                                    "processing_type": "file_upload"
+                                                    "processing_type": "file_upload",
+                                                    "original_transcript": original_transcript
                                                 });
                                                 
                                                 // Add app context to metadata if available
@@ -190,9 +195,9 @@ impl ProcessingQueue {
                                                     });
                                                 }
                                                 
-                                                // Save to database with model information and audio path
+                                                // Save to database with model information and audio path  
                                                 match database.save_transcript(
-                                                    &transcript,
+                                                    &filtered_transcript,
                                                     job.duration_ms,
                                                     Some(&metadata_json.to_string()),
                                                     Some(job.audio_path.to_str().unwrap_or("")),
@@ -249,10 +254,6 @@ impl ProcessingQueue {
                                                         error(Component::Processing, &format!("Failed to save transcript to database: {}", e));
                                                     }
                                                 }
-                                                
-                                                // Execute post-processing hooks (profanity filter, auto-copy, auto-paste, etc.)
-                                                let post_processing = crate::post_processing::PostProcessingHooks::new(settings.clone());
-                                                let filtered_transcript = post_processing.execute_hooks(&transcript, "Processing Queue", Some(job.duration_ms)).await;
                                                 
                                                 let _ = status_tx.send(ProcessingStatus::Complete { 
                                                     filename: job.filename.clone(),

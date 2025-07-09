@@ -332,12 +332,17 @@ impl RecordingWorkflow {
                                                 transcription_result.text.len(),
                                                 transcription_result.processing_time_ms as f64 / 1000.0));
                                         
+                                        // Execute post-processing hooks (profanity filter, auto-copy, auto-paste, etc.)
+                                        let post_processing = crate::post_processing::PostProcessingHooks::new(settings.clone());
+                                        let (filtered_transcript, original_transcript) = post_processing.execute_hooks(&transcription_result.text, "Ring Buffer", Some(duration_ms)).await;
+                                        
                                         // Save transcript to database
                                         let mut metadata_json = serde_json::json!({
                                             "model_used": model_name,
                                             "strategy_used": transcription_result.strategy_used,
                                             "chunks_processed": transcription_result.chunks_processed,
-                                            "processing_type": "ring_buffer"
+                                            "processing_type": "ring_buffer",
+                                            "original_transcript": original_transcript
                                         });
                                         
                                         // Add app context to metadata if available
@@ -350,10 +355,6 @@ impl RecordingWorkflow {
                                         }
                                         
                                         let metadata = metadata_json.to_string();
-                                        
-                                        // Execute post-processing hooks (profanity filter, auto-copy, auto-paste, etc.)
-                                        let post_processing = crate::post_processing::PostProcessingHooks::new(settings.clone());
-                                        let filtered_transcript = post_processing.execute_hooks(&transcription_result.text, "Ring Buffer", Some(duration_ms)).await;
                                         
                                         // Save filtered transcript to database
                                         match database.save_transcript(
