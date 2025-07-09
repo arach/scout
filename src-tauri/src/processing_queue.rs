@@ -10,7 +10,7 @@ use crate::transcription::Transcriber;
 use crate::audio::AudioConverter;
 use crate::clipboard;
 use crate::settings::SettingsManager;
-use crate::logger::{error, Component};
+use crate::logger::{error, info, Component};
 
 #[derive(Clone)]
 pub struct ProcessingJob {
@@ -74,6 +74,7 @@ impl ProcessingQueue {
                 if !processing && !queue.is_empty() {
                     processing = true;
                     let job = queue.remove(0);
+                    info(Component::Processing, &format!("📥 Processing queue starting job: {} (auto-copy/paste check will happen after transcription)", job.filename));
                     
                     // Track when processing starts
                     let _processing_start_time = Instant::now();
@@ -141,6 +142,8 @@ impl ProcessingQueue {
                             }).await;
                             
                             // File is valid, proceed with transcription
+                            info(Component::Processing, &format!("🚀 Starting transcription for file: {}", job.filename));
+                            
                             // Read settings to get the active model
                             let model_path = match read_settings_and_get_model_path(&app_data_dir, &models_dir) {
                                 Ok(path) => path,
@@ -164,6 +167,7 @@ impl ProcessingQueue {
                                         match transcriber.transcribe(&audio_path_for_transcription) {
                                             Ok(transcript) => {
                                                 let transcription_time_ms = transcription_start.elapsed().as_millis() as i32;
+                                                info(Component::Processing, &format!("🎤 Transcription completed: '{}' ({} chars)", transcript.trim(), transcript.len()));
                                                 
                                                 // Get file size
                                                 let file_size = tokio::fs::metadata(&job.audio_path)
@@ -247,40 +251,9 @@ impl ProcessingQueue {
                                                     }
                                                 }
                                                 
-                                                // Handle auto-copy and auto-paste
-                                                let settings_guard = settings.lock().await;
-                                                let auto_copy = settings_guard.get().ui.auto_copy;
-                                                let auto_paste = settings_guard.get().ui.auto_paste;
-                                                drop(settings_guard);
-                                                
-                                                if auto_copy {
-                                                    if let Err(e) = clipboard::copy_to_clipboard(&transcript) {
-                                                        error(Component::Processing, &format!("Failed to copy transcript to clipboard: {}", e));
-                                                    }
-                                                }
-                                                
-                                                if auto_paste {
-                                                    // Copy to clipboard first (required for paste)
-                                                    if !auto_copy {
-                                                        if let Err(e) = clipboard::copy_to_clipboard(&transcript) {
-                                                            error(Component::Processing, &format!("Failed to copy transcript for auto-paste: {}", e));
-                                                        } else {
-                                                            // Small delay to ensure clipboard is ready
-                                                            sleep(Duration::from_millis(100)).await;
-                                                            
-                                                            if let Err(e) = clipboard::simulate_paste() {
-                                                                error(Component::Processing, &format!("Failed to auto-paste transcript: {}", e));
-                                                            }
-                                                        }
-                                                    } else {
-                                                        // Auto-copy already happened, just paste
-                                                        sleep(Duration::from_millis(100)).await;
-                                                        
-                                                        if let Err(e) = clipboard::simulate_paste() {
-                                                            error(Component::Processing, &format!("Failed to auto-paste transcript: {}", e));
-                                                        }
-                                                    }
-                                                }
+                                                // Execute post-processing hooks (auto-copy, auto-paste, etc.)
+                                                let post_processing = crate::post_processing::PostProcessingHooks::new(settings.clone());
+                                                post_processing.execute_hooks(&transcript, "Processing Queue").await;
                                                 
                                                 let _ = status_tx.send(ProcessingStatus::Complete { 
                                                     filename: job.filename.clone(),
@@ -364,6 +337,7 @@ impl ProcessingQueue {
     }
     
     pub async fn queue_job(&self, job: ProcessingJob) -> Result<(), String> {
+        info(Component::Processing, &format!("➕ Adding job to processing queue: {}", job.filename));
         self.sender.send(job).await
             .map_err(|_| "Failed to queue processing job".to_string())
     }

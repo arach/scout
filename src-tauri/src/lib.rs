@@ -16,6 +16,7 @@ mod keyboard_monitor;
 mod logger;
 mod lazy_model;
 mod env;
+mod post_processing;
 #[cfg(target_os = "macos")]
 mod macos;
 

@@ -359,6 +359,10 @@ impl RecordingWorkflow {
                                             Ok(transcript) => {
                                                 info(Component::Processing, &format!("Transcript saved to database with ID: {}", transcript.id));
                                                 
+                                                // Execute post-processing hooks (auto-copy, auto-paste, etc.)
+                                                let post_processing = crate::post_processing::PostProcessingHooks::new(settings.clone());
+                                                post_processing.execute_hooks(&transcription_result.text, "Ring Buffer").await;
+                                                
                                                 // Update to idle state first
                                                 progress_tracker.update(RecordingProgress::Idle);
                                                 
