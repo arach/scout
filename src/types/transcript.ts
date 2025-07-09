@@ -11,6 +11,7 @@ export interface TranscriptMetadata {
   filename?: string;
   chunks_processed?: number;
   app_context?: AppContext;
+  original_transcript?: string;
 }
 
 export interface Transcript {
