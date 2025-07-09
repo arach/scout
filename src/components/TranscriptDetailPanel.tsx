@@ -56,6 +56,7 @@ export function TranscriptDetailPanel({
     const [showExportMenu, setShowExportMenu] = useState(false);
     const [performanceMetrics, setPerformanceMetrics] = useState<PerformanceMetrics | null>(null);
     const [loadingMetrics, setLoadingMetrics] = useState(false);
+    const [metricsError, setMetricsError] = useState<string | null>(null);
     const [showOriginalTranscript, setShowOriginalTranscript] = useState(false);
 
     // Handle ESC key to close panel and manage player rendering
@@ -106,14 +107,18 @@ export function TranscriptDetailPanel({
         if (isOpen && transcript) {
             setLoadingMetrics(true);
             setPerformanceMetrics(null);
+            setMetricsError(null);
             setShowOriginalTranscript(false); // Reset to filtered view
             
             invoke<PerformanceMetrics | null>('get_performance_metrics_for_transcript', {
                 transcriptId: transcript.id
             }).then((metrics) => {
                 setPerformanceMetrics(metrics);
+                setMetricsError(null);
             }).catch((error) => {
                 console.error('Failed to fetch performance metrics:', error);
+                setMetricsError(error.toString());
+                setPerformanceMetrics(null);
             }).finally(() => {
                 setLoadingMetrics(false);
             });
@@ -248,7 +253,25 @@ export function TranscriptDetailPanel({
                             </div>
                         )}
                         
-                        {performanceMetrics && (
+                        {!loadingMetrics && !performanceMetrics && !metricsError && (
+                            <div className="metadata-item">
+                                <span className="metadata-label">Performance</span>
+                                <span className="metadata-value">
+                                    <span className="metadata-badge info">📊 No metrics available</span>
+                                </span>
+                            </div>
+                        )}
+                        
+                        {!loadingMetrics && metricsError && (
+                            <div className="metadata-item">
+                                <span className="metadata-label">Performance</span>
+                                <span className="metadata-value">
+                                    <span className="metadata-badge warning">⚠️ Error loading metrics</span>
+                                </span>
+                            </div>
+                        )}
+                        
+                        {!loadingMetrics && performanceMetrics && (
                             <>
                                 <div className="metadata-item">
                                     <span className="metadata-label">Transcription Time</span>
