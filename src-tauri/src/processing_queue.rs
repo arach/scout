@@ -9,7 +9,7 @@ use crate::db::Database;
 use crate::transcription::Transcriber;
 use crate::audio::AudioConverter;
 use crate::settings::SettingsManager;
-use crate::logger::{error, info, Component};
+use crate::logger::{error, info, warn, Component};
 
 #[derive(Clone)]
 pub struct ProcessingJob {
@@ -166,7 +166,17 @@ impl ProcessingQueue {
                                         match transcriber.transcribe(&audio_path_for_transcription) {
                                             Ok(transcript) => {
                                                 let transcription_time_ms = transcription_start.elapsed().as_millis() as i32;
+                                                let speed_ratio = job.duration_ms as f64 / transcription_time_ms as f64;
                                                 info(Component::Processing, &format!("🎤 Transcription completed: '{}' ({} chars)", transcript.trim(), transcript.len()));
+                                                info(Component::Processing, &format!("⚡ Performance: {}ms transcription for {}ms audio ({:.2}x speed) using {}", 
+                                                    transcription_time_ms, job.duration_ms, speed_ratio, model_name));
+                                                
+                                                // Performance warnings
+                                                if speed_ratio < 1.0 {
+                                                    warn(Component::Processing, &format!("⚠️ Slow transcription: {:.2}x speed (slower than real-time)", speed_ratio));
+                                                } else if speed_ratio > 5.0 {
+                                                    info(Component::Processing, &format!("🚀 Fast transcription: {:.2}x speed", speed_ratio));
+                                                }
                                                 
                                                 // Get file size
                                                 let file_size = tokio::fs::metadata(&job.audio_path)
