@@ -211,12 +211,32 @@ export function TranscriptDetailPanel({
                                         <span className="metadata-badge warning">
                                             🚫 Filtered
                                         </span>
+                                    ) : metadata.filter_analysis && metadata.filter_analysis.length > 0 ? (
+                                        <span className="metadata-badge info">
+                                            ✅ Clean with notes
+                                        </span>
                                     ) : (
                                         <span className="metadata-badge success">
                                             ✅ Clean
                                         </span>
                                     )}
                                 </span>
+                            </div>
+                        )}
+                        
+                        {/* Filter Analysis */}
+                        {metadata.filter_analysis && metadata.filter_analysis.length > 0 && (
+                            <div className="metadata-item filter-analysis">
+                                <span className="metadata-label">Filter Notes</span>
+                                <div className="metadata-value">
+                                    <div className="filter-analysis-logs">
+                                        {metadata.filter_analysis.map((log, index) => (
+                                            <div key={index} className="filter-log">
+                                                {log}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
                             </div>
                         )}
                         

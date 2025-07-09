@@ -176,14 +176,15 @@ impl ProcessingQueue {
                                                 
                                                 // Execute post-processing hooks (profanity filter, auto-copy, auto-paste, etc.)
                                                 let post_processing = crate::post_processing::PostProcessingHooks::new(settings.clone());
-                                                let (filtered_transcript, original_transcript) = post_processing.execute_hooks(&transcript, "Processing Queue", Some(job.duration_ms)).await;
+                                                let (filtered_transcript, original_transcript, analysis_logs) = post_processing.execute_hooks(&transcript, "Processing Queue", Some(job.duration_ms)).await;
                                                 
                                                 // Build metadata with app context if available
                                                 let mut metadata_json = serde_json::json!({
                                                     "filename": job.filename,
                                                     "model_used": model_name,
                                                     "processing_type": "file_upload",
-                                                    "original_transcript": original_transcript
+                                                    "original_transcript": original_transcript,
+                                                    "filter_analysis": analysis_logs
                                                 });
                                                 
                                                 // Add app context to metadata if available

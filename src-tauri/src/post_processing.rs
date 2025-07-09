@@ -15,25 +15,25 @@ impl PostProcessingHooks {
     }
 
     /// Execute all post-processing hooks for a completed transcription
-    /// Returns (filtered_transcript, original_transcript)
-    pub async fn execute_hooks(&self, transcript: &str, source: &str, recording_duration_ms: Option<i32>) -> (String, String) {
+    /// Returns (filtered_transcript, original_transcript, analysis_logs)
+    pub async fn execute_hooks(&self, transcript: &str, source: &str, recording_duration_ms: Option<i32>) -> (String, String, Vec<String>) {
         info(Component::Processing, &format!("🎯 {} transcription successful - executing post-processing hooks", source));
         
         let original_transcript = transcript.to_string();
         
         // Execute profanity filtering first
-        let filtered_transcript = self.execute_profanity_filter(transcript, recording_duration_ms).await;
+        let (filtered_transcript, analysis_logs) = self.execute_profanity_filter(transcript, recording_duration_ms).await;
         
         // Execute auto-copy/paste hooks with filtered transcript
         self.execute_clipboard_hooks(&filtered_transcript).await;
         
         // Future: Add more hooks here (e.g., webhooks, integrations, etc.)
         
-        (filtered_transcript, original_transcript)
+        (filtered_transcript, original_transcript, analysis_logs)
     }
 
     /// Execute profanity filtering on the transcript
-    async fn execute_profanity_filter(&self, transcript: &str, recording_duration_ms: Option<i32>) -> String {
+    async fn execute_profanity_filter(&self, transcript: &str, recording_duration_ms: Option<i32>) -> (String, Vec<String>) {
         let settings_guard = self.settings.lock().await;
         let profanity_filter_enabled = settings_guard.get().ui.profanity_filter_enabled;
         let profanity_filter_aggressive = settings_guard.get().ui.profanity_filter_aggressive;
@@ -41,7 +41,7 @@ impl PostProcessingHooks {
         
         if !profanity_filter_enabled {
             info(Component::Processing, "🔍 Profanity filter is disabled");
-            return transcript.to_string();
+            return (transcript.to_string(), vec![]);
         }
         
         info(Component::Processing, &format!("🔍 Profanity filter enabled (aggressive: {}) - scanning transcript", profanity_filter_aggressive));
@@ -61,14 +61,14 @@ impl PostProcessingHooks {
                 info(Component::Processing, &format!("✅ Preserved intentional profanity: {} items detected", result.flagged_words.len()));
                 if profanity_filter_aggressive {
                     info(Component::Processing, "🚫 Aggressive filtering enabled - filtering anyway");
-                    return result.filtered_text;
+                    return (result.filtered_text, result.analysis_logs);
                 }
             }
         } else {
             info(Component::Processing, "✅ No profanity detected in transcript");
         }
         
-        result.filtered_text
+        (result.filtered_text, result.analysis_logs)
     }
 
     /// Handle auto-copy and auto-paste functionality

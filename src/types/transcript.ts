@@ -12,6 +12,7 @@ export interface TranscriptMetadata {
   chunks_processed?: number;
   app_context?: AppContext;
   original_transcript?: string;
+  filter_analysis?: string[];
 }
 
 export interface Transcript {

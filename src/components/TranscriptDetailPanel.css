@@ -144,6 +144,36 @@
     border: 1px solid rgba(245, 158, 11, 0.2);
 }
 
+.metadata-badge.info {
+    background-color: rgba(59, 130, 246, 0.1);
+    color: #3b82f6;
+    border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+/* Filter analysis logs */
+.filter-analysis .metadata-value {
+    max-width: 100%;
+    white-space: normal;
+}
+
+.filter-analysis-logs {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 4px;
+}
+
+.filter-log {
+    font-size: 11px;
+    padding: 4px 8px;
+    background-color: rgba(99, 102, 241, 0.1);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-family: "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", monospace;
+    line-height: 1.4;
+}
+
 /* Transcript section */
 .detail-transcript {
     margin-bottom: 24px;
