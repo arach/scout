@@ -47,11 +47,21 @@ impl AudioRecorder {
     }
     
     pub fn get_current_device_info(&self) -> Option<DeviceInfo> {
-        self.current_device_info.lock().unwrap().clone()
+        self.current_device_info.lock()
+            .map(|guard| guard.clone())
+            .unwrap_or_else(|_| {
+                error(Component::Recording, "Failed to acquire device info lock - returning None");
+                None
+            })
     }
     
     pub fn get_current_audio_level(&self) -> f32 {
-        *self.current_audio_level.lock().unwrap()
+        self.current_audio_level.lock()
+            .map(|guard| *guard)
+            .unwrap_or_else(|_| {
+                error(Component::Recording, "Failed to acquire audio level lock - returning 0.0");
+                0.0
+            })
     }
 
     pub fn init(&mut self) {

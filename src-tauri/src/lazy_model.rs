@@ -2,7 +2,7 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, OnceCell};
 use std::path::PathBuf;
 use crate::transcription::Transcriber;
-use crate::logger::{info, warn, Component};
+use crate::logger::{info, warn, error, Component};
 
 /// Lazy-loaded Whisper model to reduce startup time and memory usage
 pub struct LazyModel {
@@ -20,28 +20,45 @@ impl LazyModel {
     
     /// Get or create the transcriber instance
     pub async fn get_transcriber(&self) -> Result<Arc<Mutex<Transcriber>>, String> {
-        self.transcriber
+        // Check if already loaded
+        if let Some(transcriber) = self.transcriber.get() {
+            return Ok(transcriber.clone());
+        }
+        
+        // Validate model path exists before attempting to load
+        if !self.model_path.exists() {
+            let error_msg = format!("Model file does not exist: {}", self.model_path.display());
+            error(Component::Transcription, &format!("❌ {}", error_msg));
+            return Err(error_msg);
+        }
+        
+        // Try to initialize the transcriber
+        let result = self.transcriber
             .get_or_init(|| async {
                 info(Component::Transcription, "Lazy-loading Whisper model...");
                 let start = std::time::Instant::now();
                 
+                // Since we've already validated the path exists, this should succeed
+                // But we still need to handle the error case for OnceCell
                 match Transcriber::new(&self.model_path) {
                     Ok(t) => {
                         let elapsed = start.elapsed();
                         info(Component::Transcription, 
-                             &format!("Model loaded in {:.2}s", elapsed.as_secs_f64()));
+                             &format!("✅ Model loaded in {:.2}s", elapsed.as_secs_f64()));
                         Arc::new(Mutex::new(t))
                     }
                     Err(e) => {
-                        warn(Component::Transcription, 
-                             &format!("Failed to load model: {}", e));
-                        panic!("Failed to load Whisper model: {}", e);
+                        error(Component::Transcription, 
+                             &format!("❌ Failed to load model even though path exists: {}", e));
+                        // We have to return something for OnceCell - this is a limitation of the current design
+                        // In a future refactor, we should use a different pattern that allows error propagation
+                        panic!("Critical error: Model file exists but failed to load: {}", e);
                     }
                 }
             })
             .await;
             
-        Ok(self.transcriber.get().unwrap().clone())
+        Ok(result.clone())
     }
     
     /// Check if model is already loaded
