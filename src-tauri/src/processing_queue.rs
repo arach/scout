@@ -185,7 +185,7 @@ impl ProcessingQueue {
                                                     .ok();
                                                 
                                                 // Execute post-processing hooks (profanity filter, auto-copy, auto-paste, etc.)
-                                                let post_processing = crate::post_processing::PostProcessingHooks::new(settings.clone());
+                                                let post_processing = crate::post_processing::PostProcessingHooks::new(settings.clone(), database.clone());
                                                 let (filtered_transcript, original_transcript, analysis_logs) = post_processing.execute_hooks(&transcript, "Processing Queue", Some(job.duration_ms)).await;
                                                 
                                                 // Build metadata with app context if available
@@ -219,25 +219,23 @@ impl ProcessingQueue {
                                                         let user_perceived_latency_ms = job.user_stop_time
                                                             .map(|stop_time| stop_time.elapsed().as_millis() as i32);
                                                         
-                                                        // Save performance metrics
+                                                        // Save performance metrics using consolidated service
                                                         let audio_format = job.audio_path.extension()
                                                             .and_then(|ext| ext.to_str())
                                                             .map(|s| s.to_string());
                                                         
-                                                        match database.save_performance_metrics(
-                                                            Some(saved_transcript.id),
+                                                        let performance_data = crate::performance_metrics_service::PerformanceDataBuilder::new(
                                                             job.duration_ms,
                                                             transcription_time_ms,
-                                                            user_perceived_latency_ms,
-                                                            Some(queue_time_ms),
-                                                            Some(model_name),
-                                                            Some("file_upload"), // Strategy for file uploads
-                                                            file_size,
-                                                            audio_format.as_deref(),
-                                                            true,
-                                                            None,
-                                                            None,
-                                                        ).await {
+                                                            model_name.to_string(),
+                                                            "processing_queue".to_string()
+                                                        )
+                                                        .with_user_latency(user_perceived_latency_ms.unwrap_or(0))
+                                                        .with_queue_time(queue_time_ms)
+                                                        .with_audio_info(file_size, audio_format)
+                                                        .build();
+                                                        
+                                                        match post_processing.save_performance_metrics(saved_transcript.id, performance_data).await {
                                                             Ok(_metrics_id) => {
                                                                 // Emit performance metrics event
                                                                 if let Some(app) = &job.app_handle {

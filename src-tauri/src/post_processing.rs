@@ -2,16 +2,22 @@ use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 use crate::settings::SettingsManager;
 use crate::profanity_filter::ProfanityFilter;
+use crate::performance_metrics_service::{PerformanceMetricsService, TranscriptionPerformanceData};
+use crate::db::Database;
 use crate::logger::{info, error, debug, Component};
 
 /// Post-processing hooks that run after successful transcription
 pub struct PostProcessingHooks {
     settings: Arc<tokio::sync::Mutex<SettingsManager>>,
+    performance_service: PerformanceMetricsService,
 }
 
 impl PostProcessingHooks {
-    pub fn new(settings: Arc<tokio::sync::Mutex<SettingsManager>>) -> Self {
-        Self { settings }
+    pub fn new(settings: Arc<tokio::sync::Mutex<SettingsManager>>, database: Arc<Database>) -> Self {
+        Self { 
+            settings,
+            performance_service: PerformanceMetricsService::new(database),
+        }
     }
 
     /// Execute all post-processing hooks for a completed transcription
@@ -152,5 +158,18 @@ impl PostProcessingHooks {
         } else {
             info(Component::Processing, "🖱️ Auto-paste is disabled");
         }
+    }
+
+    /// Save performance metrics for a completed transcription
+    pub async fn save_performance_metrics(
+        &self, 
+        transcript_id: i64,
+        performance_data: TranscriptionPerformanceData
+    ) -> Result<i64, String> {
+        // Log performance analysis
+        self.performance_service.log_performance_analysis(&performance_data);
+        
+        // Save to database
+        self.performance_service.save_transcription_metrics(transcript_id, performance_data).await
     }
 }
