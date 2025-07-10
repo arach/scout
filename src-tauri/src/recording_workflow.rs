@@ -343,7 +343,7 @@ impl RecordingWorkflow {
                                         }
                                         
                                         // Execute post-processing hooks (profanity filter, auto-copy, auto-paste, etc.)
-                                        let post_processing = crate::post_processing::PostProcessingHooks::new(settings.clone());
+                                        let post_processing = crate::post_processing::PostProcessingHooks::new(settings.clone(), database.clone());
                                         let (filtered_transcript, original_transcript, analysis_logs) = post_processing.execute_hooks(&transcription_result.text, "Ring Buffer", Some(duration_ms)).await;
                                         
                                         // Save transcript to database
@@ -377,6 +377,24 @@ impl RecordingWorkflow {
                                         ).await {
                                             Ok(transcript) => {
                                                 info(Component::Processing, &format!("Filtered transcript saved to database with ID: {}", transcript.id));
+                                                
+                                                // Save performance metrics using the consolidated service
+                                                let performance_data = crate::performance_metrics_service::PerformanceDataBuilder::new(
+                                                    duration_ms,
+                                                    transcription_result.processing_time_ms as i32,
+                                                    model_name.clone(),
+                                                    "ring_buffer".to_string()
+                                                )
+                                                .with_chunks(transcription_result.chunks_processed)
+                                                .with_audio_info(None, Some("wav".to_string()))
+                                                .with_strategy_metadata(serde_json::json!({
+                                                    "strategy_used": transcription_result.strategy_used
+                                                }))
+                                                .build();
+                                                
+                                                if let Err(e) = post_processing.save_performance_metrics(transcript.id, performance_data).await {
+                                                    error(Component::Processing, &format!("Failed to save performance metrics: {}", e));
+                                                }
                                                 
                                                 // Update to idle state first
                                                 progress_tracker.update(RecordingProgress::Idle);
