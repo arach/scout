@@ -24,60 +24,12 @@ name = "benchmark"
 path = "src/bin/benchmark.rs"
 
 [[bin]]
-name = "bakeoff"
-path = "src/bin/bakeoff.rs"
-
-[[bin]]
-name = "quickoff"
-path = "src/bin/quickoff.rs"
-
-[[bin]]
-name = "detailed_quickoff"
-path = "src/bin/detailed_quickoff.rs"
-
-[[bin]]
-name = "chunk_size_benchmark"
-path = "src/bin/chunk_size_benchmark.rs"
-
-[[bin]]
-name = "core_ml_vs_cpu_benchmark"
-path = "src/bin/core_ml_vs_cpu_benchmark.rs"
-
-[[bin]]
 name = "test_singleton"
 path = "src/bin/test_singleton.rs"
 
 [[bin]]
 name = "create_benchmark_corpus"
 path = "src/bin/create_benchmark_corpus.rs"
-
-[[bin]]
-name = "real_transcription_comparison"
-path = "src/bin/real_transcription_comparison.rs"
-
-[[bin]]
-name = "real_audio_chunking_analysis"
-path = "src/bin/real_audio_chunking_analysis.rs"
-
-[[bin]]
-name = "generate_gold_standard_transcriptions"
-path = "src/bin/generate_gold_standard_transcriptions.rs"
-
-[[bin]]
-name = "create_comprehensive_benchmark_corpus"
-path = "src/bin/create_comprehensive_benchmark_corpus.rs"
-
-[[bin]]
-name = "comprehensive_chunking_analysis"
-path = "src/bin/comprehensive_chunking_analysis.rs"
-
-[[bin]]
-name = "generate_comprehensive_gold_standard_transcriptions"
-path = "src/bin/generate_comprehensive_gold_standard_transcriptions.rs"
-
-[[bin]]
-name = "comprehensive_chunking_analysis_v2"
-path = "src/bin/comprehensive_chunking_analysis_v2.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
