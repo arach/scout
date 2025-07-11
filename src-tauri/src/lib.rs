@@ -1053,6 +1053,122 @@ async fn update_settings(state: State<'_, AppState>, new_settings: serde_json::V
     Ok(())
 }
 
+// LLM Commands
+
+#[tauri::command]
+async fn get_available_llm_models(state: State<'_, AppState>) -> Result<Vec<llm::models::LLMModel>, String> {
+    let models_dir = state.models_dir.join("llm");
+    let settings = state.settings.lock().await;
+    let active_model_id = &settings.get().llm.model_id;
+    let model_manager = llm::models::ModelManager::new(models_dir);
+    Ok(model_manager.list_models(active_model_id))
+}
+
+#[tauri::command]
+async fn get_llm_model_info(state: State<'_, AppState>, model_id: String) -> Result<Option<llm::models::LLMModel>, String> {
+    let models_dir = state.models_dir.join("llm");
+    let model_manager = llm::models::ModelManager::new(models_dir);
+    Ok(model_manager.list_models(&model_id).into_iter().find(|m| m.id == model_id))
+}
+
+#[tauri::command]
+async fn download_llm_model(
+    state: State<'_, AppState>,
+    model_id: String,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let models_dir = state.models_dir.join("llm");
+    let model_manager = llm::models::ModelManager::new(models_dir);
+    
+    // Find the model
+    let models = model_manager.list_models(&model_id);
+    let model = models.into_iter()
+        .find(|m| m.id == model_id)
+        .ok_or_else(|| format!("Model {} not found", model_id))?;
+    
+    // Download the model with progress updates
+    model_manager.download_model_with_progress(&model, Some(&app)).await
+        .map_err(|e| format!("Failed to download model: {}", e))?;
+    
+    // Emit success event
+    app.emit("llm-model-downloaded", serde_json::json!({
+        "model_id": model_id
+    })).map_err(|e| format!("Failed to emit event: {}", e))?;
+    
+    Ok(())
+}
+
+#[tauri::command]
+async fn set_active_llm_model(state: State<'_, AppState>, model_id: String) -> Result<(), String> {
+    let mut settings = state.settings.lock().await;
+    settings.update(|s| s.llm.model_id = model_id.clone())
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_llm_outputs_for_transcript(
+    state: State<'_, AppState>,
+    transcript_id: i64,
+) -> Result<Vec<db::LLMOutput>, String> {
+    state.database.get_llm_outputs_for_transcript(transcript_id).await
+}
+
+#[tauri::command]
+async fn get_llm_prompt_templates(
+    state: State<'_, AppState>,
+) -> Result<Vec<db::LLMPromptTemplate>, String> {
+    state.database.get_llm_prompt_templates().await
+}
+
+#[tauri::command]
+async fn save_llm_prompt_template(
+    state: State<'_, AppState>,
+    id: String,
+    name: String,
+    description: Option<String>,
+    template: String,
+    category: String,
+    enabled: bool,
+) -> Result<(), String> {
+    state.database.save_llm_prompt_template(
+        &id,
+        &name,
+        description.as_deref(),
+        &template,
+        &category,
+        enabled,
+    ).await
+}
+
+#[tauri::command]
+async fn delete_llm_prompt_template(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<(), String> {
+    state.database.delete_llm_prompt_template(&id).await
+}
+
+#[tauri::command]
+async fn update_llm_settings(
+    state: State<'_, AppState>,
+    enabled: bool,
+    model_id: String,
+    temperature: f32,
+    max_tokens: u32,
+    enabled_prompts: Vec<String>,
+) -> Result<(), String> {
+    let mut settings = state.settings.lock().await;
+    settings.update(|s| {
+        s.llm.enabled = enabled;
+        s.llm.model_id = model_id;
+        s.llm.temperature = temperature;
+        s.llm.max_tokens = max_tokens;
+        s.llm.enabled_prompts = enabled_prompts;
+    }).map_err(|e| format!("Failed to save settings: {}", e))?;
+    Ok(())
+}
+
 #[tauri::command]
 async fn set_auto_copy(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
     let mut settings = state.settings.lock().await;
@@ -1538,6 +1654,16 @@ pub fn run() {
             download_file,
             get_settings,
             update_settings,
+            // LLM commands
+            get_available_llm_models,
+            get_llm_model_info,
+            download_llm_model,
+            set_active_llm_model,
+            get_llm_outputs_for_transcript,
+            get_llm_prompt_templates,
+            save_llm_prompt_template,
+            delete_llm_prompt_template,
+            update_llm_settings,
             get_current_model,
             set_auto_copy,
             is_auto_copy_enabled,

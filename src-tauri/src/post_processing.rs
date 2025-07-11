@@ -6,7 +6,7 @@ use crate::performance_metrics_service::{PerformanceMetricsService, Transcriptio
 use crate::db::Database;
 use crate::logger::{info, error, debug, Component};
 use crate::llm::{CandleEngine, LLMEngine, GenerationOptions, ModelManager, PromptManager};
-use crate::llm::pipeline::{LLMPipeline, LLMOutput};
+use crate::llm::pipeline::LLMPipeline;
 use std::path::PathBuf;
 
 /// Post-processing hooks that run after successful transcription
@@ -38,7 +38,7 @@ impl PostProcessingHooks {
 
     /// Execute all post-processing hooks for a completed transcription
     /// Returns (filtered_transcript, original_transcript, analysis_logs)
-    pub async fn execute_hooks(&self, transcript: &str, source: &str, recording_duration_ms: Option<i32>) -> (String, String, Vec<String>) {
+    pub async fn execute_hooks(&self, transcript: &str, source: &str, recording_duration_ms: Option<i32>, transcript_id: Option<i64>) -> (String, String, Vec<String>) {
         info(Component::Processing, &format!("🎯 {} transcription successful - executing post-processing hooks", source));
         
         let original_transcript = transcript.to_string();
@@ -51,7 +51,9 @@ impl PostProcessingHooks {
         
         // Execute LLM processing if enabled
         // Note: This is async and non-blocking - results will be stored in database
-        self.execute_llm_processing(&filtered_transcript).await;
+        if let Some(transcript_id) = transcript_id {
+            self.execute_llm_processing(&filtered_transcript, transcript_id).await;
+        }
         
         (filtered_transcript, original_transcript, analysis_logs)
     }
@@ -192,7 +194,7 @@ impl PostProcessingHooks {
     }
     
     /// Execute LLM processing on the transcript
-    async fn execute_llm_processing(&self, transcript: &str) {
+    pub async fn execute_llm_processing(&self, transcript: &str, transcript_id: i64) {
         let settings_guard = self.settings.lock().await;
         let llm_enabled = settings_guard.get().llm.enabled;
         let model_id = settings_guard.get().llm.model_id.clone();
@@ -247,11 +249,29 @@ impl PostProcessingHooks {
                 };
                 
                 // Process transcript with LLM
-                // TODO: Get transcript_id from caller
-                match pipeline.process_transcript(0, transcript, &templates, options).await {
+                match pipeline.process_transcript(transcript_id, transcript, &templates, options).await {
                     Ok(outputs) => {
                         info(Component::Processing, &format!("✅ LLM processing completed with {} outputs", outputs.len()));
-                        // TODO: Save outputs to database
+                        
+                        // Save outputs to database
+                        for output in outputs {
+                            if let Err(e) = self.database.save_llm_output(
+                                output.transcript_id,
+                                &output.prompt_id,
+                                &output.prompt_name,
+                                &templates.iter().find(|t| t.id == output.prompt_id)
+                                    .map(|t| t.template.as_str()).unwrap_or(""),
+                                &output.input_text,
+                                &output.output_text,
+                                &output.model_used,
+                                output.processing_time_ms as i32,
+                                self.settings.lock().await.get().llm.temperature,
+                                self.settings.lock().await.get().llm.max_tokens as i32,
+                                None,
+                            ).await {
+                                error(Component::Processing, &format!("Failed to save LLM output: {}", e));
+                            }
+                        }
                     }
                     Err(e) => {
                         error(Component::Processing, &format!("❌ LLM processing failed: {}", e));

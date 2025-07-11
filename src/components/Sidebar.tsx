@@ -52,7 +52,7 @@ export function Sidebar({ currentView, onViewChange, isExpanded }: SidebarProps)
   return (
     <div className={`sidebar ${isExpanded ? 'expanded' : 'collapsed'}`}>
       <button
-        className={`sidebar-button ${currentView === 'record' ? 'active' : ''}`}
+        className={`sidebar-button sidebar-button-record ${currentView === 'record' ? 'active' : ''}`}
         onClick={() => onViewChange('record')}
         aria-label="Record"
       >
@@ -64,7 +64,7 @@ export function Sidebar({ currentView, onViewChange, isExpanded }: SidebarProps)
         <span className="sidebar-tooltip">Record</span>
       </button>
       <button
-        className={`sidebar-button ${currentView === 'transcripts' ? 'active' : ''}`}
+        className={`sidebar-button sidebar-button-transcripts ${currentView === 'transcripts' ? 'active' : ''}`}
         onClick={() => onViewChange('transcripts')}
         aria-label="Transcripts"
       >
@@ -78,7 +78,7 @@ export function Sidebar({ currentView, onViewChange, isExpanded }: SidebarProps)
         <span className="sidebar-tooltip">Transcripts</span>
       </button>
       <button
-        className={`sidebar-button ${currentView === 'settings' ? 'active' : ''}`}
+        className={`sidebar-button sidebar-button-settings ${currentView === 'settings' ? 'active' : ''}`}
         onClick={() => onViewChange('settings')}
         aria-label="Settings"
       >

@@ -1,0 +1,220 @@
+.llm-model-manager {
+  padding: 0;
+}
+
+.llm-model-manager-loading {
+  text-align: center;
+  padding: 40px;
+  color: var(--text-muted);
+}
+
+.llm-models-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  width: 100%;
+}
+
+.llm-model-card {
+  background: white;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+}
+
+.llm-model-card:hover {
+  border-color: rgba(0, 0, 0, 0.12);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.llm-model-card.active {
+  border-color: var(--accent-primary);
+  background: rgba(79, 70, 229, 0.02);
+}
+
+.llm-model-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.llm-model-header h4 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.active-indicator {
+  color: var(--success);
+  background: rgba(22, 130, 93, 0.1);
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.llm-model-description {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.llm-model-specs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.llm-spec {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.llm-spec svg {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.llm-download-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: var(--accent-primary);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  width: auto;
+  justify-content: center;
+}
+
+.llm-download-button:hover {
+  background: var(--accent-hover);
+}
+
+.llm-download-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.llm-model-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  margin-top: auto;
+  gap: 8px;
+}
+
+.llm-select-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--text-primary);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  width: auto;
+  justify-content: center;
+}
+
+.llm-select-button:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--border-secondary);
+}
+
+.llm-select-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.llm-download-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.llm-progress-bar {
+  height: 6px;
+  background: var(--background-primary);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.llm-progress-fill {
+  height: 100%;
+  background: var(--accent-primary);
+  transition: width 0.3s ease;
+}
+
+.llm-progress-text {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.llm-no-models {
+  text-align: center;
+  padding: 40px;
+  color: var(--text-secondary);
+}
+
+.llm-models-hint {
+  font-size: 13px;
+  margin-top: 8px;
+  color: var(--text-muted);
+}
+
+/* Dark mode adjustments */
+@media (prefers-color-scheme: dark) {
+  .llm-model-card {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.08);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  }
+  
+  .llm-model-card:hover {
+    border-color: rgba(255, 255, 255, 0.12);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+  
+  .llm-model-card.active {
+    border-color: var(--accent-primary);
+    background: rgba(79, 70, 229, 0.1);
+  }
+  
+  .llm-select-button {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+  
+  .llm-select-button:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.15);
+  }
+  
+  .active-indicator {
+    color: #22c55e;
+    background: rgba(34, 197, 94, 0.15);
+  }
+}

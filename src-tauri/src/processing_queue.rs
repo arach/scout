@@ -9,7 +9,7 @@ use crate::db::Database;
 use crate::transcription::Transcriber;
 use crate::audio::AudioConverter;
 use crate::settings::SettingsManager;
-use crate::logger::{error, info, warn, Component};
+use crate::logger::{debug, error, info, warn, Component};
 
 #[derive(Clone)]
 pub struct ProcessingJob {
@@ -227,7 +227,7 @@ impl ProcessingQueue {
                                         
                                         // Execute post-processing hooks (profanity filter, auto-copy, auto-paste, etc.)
                                         let post_processing = crate::post_processing::PostProcessingHooks::new(settings.clone(), database.clone());
-                                        let (filtered_transcript, original_transcript, analysis_logs) = post_processing.execute_hooks(&transcript, "Processing Queue", Some(job.duration_ms)).await;
+                                        let (filtered_transcript, original_transcript, analysis_logs) = post_processing.execute_hooks(&transcript, "Processing Queue", Some(job.duration_ms), None).await;
                                         
                                         // Build metadata with app context if available
                                         let mut metadata_json = serde_json::json!({
@@ -278,6 +278,8 @@ impl ProcessingQueue {
                                                 
                                                 match post_processing.save_performance_metrics(saved_transcript.id, performance_data).await {
                                                     Ok(_metrics_id) => {
+                                                        debug(Component::Processing, "Performance metrics saved successfully");
+                                                        
                                                         // Emit performance metrics event
                                                         if let Some(app) = &job.app_handle {
                                                             let _ = app.emit("performance-metrics-recorded", serde_json::json!({
@@ -294,6 +296,9 @@ impl ProcessingQueue {
                                                         error(Component::Processing, &format!("Failed to save performance metrics: {}", e));
                                                     }
                                                 }
+                                                
+                                                // Execute LLM processing with the saved transcript ID
+                                                post_processing.execute_llm_processing(&filtered_transcript, saved_transcript.id).await;
                                                 
                                                 // Emit transcript-created event
                                                 if let Some(app) = &job.app_handle {

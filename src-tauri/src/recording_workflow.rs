@@ -344,7 +344,7 @@ impl RecordingWorkflow {
                                         
                                         // Execute post-processing hooks (profanity filter, auto-copy, auto-paste, etc.)
                                         let post_processing = crate::post_processing::PostProcessingHooks::new(settings.clone(), database.clone());
-                                        let (filtered_transcript, original_transcript, analysis_logs) = post_processing.execute_hooks(&transcription_result.text, "Ring Buffer", Some(duration_ms)).await;
+                                        let (filtered_transcript, original_transcript, analysis_logs) = post_processing.execute_hooks(&transcription_result.text, "Ring Buffer", Some(duration_ms), None).await;
                                         
                                         // Save transcript to database
                                         let mut metadata_json = serde_json::json!({
@@ -395,6 +395,9 @@ impl RecordingWorkflow {
                                                 if let Err(e) = post_processing.save_performance_metrics(transcript.id, performance_data).await {
                                                     error(Component::Processing, &format!("Failed to save performance metrics: {}", e));
                                                 }
+                                                
+                                                // Execute LLM processing with the saved transcript ID
+                                                post_processing.execute_llm_processing(&filtered_transcript, transcript.id).await;
                                                 
                                                 // Update to idle state first
                                                 progress_tracker.update(RecordingProgress::Idle);

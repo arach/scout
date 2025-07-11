@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { SimpleAudioPlayer } from './SimpleAudioPlayer';
+import { TranscriptAIInsights } from './TranscriptAIInsights';
 import { invoke } from '@tauri-apps/api/core';
 import { parseTranscriptMetadata } from '../types/transcript';
 import './TranscriptDetailPanel.css';
@@ -58,6 +59,7 @@ export function TranscriptDetailPanel({
     const [loadingMetrics, setLoadingMetrics] = useState(false);
     const [metricsError, setMetricsError] = useState<string | null>(null);
     const [showOriginalTranscript, setShowOriginalTranscript] = useState(false);
+    const [activeTab, setActiveTab] = useState<'transcript' | 'insights'>('transcript');
 
     // Handle ESC key to close panel and manage player rendering
     useEffect(() => {
@@ -331,6 +333,23 @@ export function TranscriptDetailPanel({
                         />
                     )}
 
+                    {/* Tabs */}
+                    <div className="detail-tabs">
+                        <button
+                            className={`tab-button ${activeTab === 'transcript' ? 'active' : ''}`}
+                            onClick={() => setActiveTab('transcript')}
+                        >
+                            Transcript
+                        </button>
+                        <button
+                            className={`tab-button ${activeTab === 'insights' ? 'active' : ''}`}
+                            onClick={() => setActiveTab('insights')}
+                        >
+                            AI Insights
+                        </button>
+                    </div>
+
+                    {activeTab === 'transcript' && (
                     <div className="detail-transcript">
                         <div className="transcript-header">
                             <h3>Transcript</h3>
@@ -374,6 +393,13 @@ export function TranscriptDetailPanel({
                             )}
                         </div>
                     </div>
+                    )}
+
+                    {activeTab === 'insights' && (
+                        <div className="detail-insights">
+                            <TranscriptAIInsights transcriptId={transcript.id} />
+                        </div>
+                    )}
 
                     <div className="detail-actions">
                         <button 
