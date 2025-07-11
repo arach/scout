@@ -20,6 +20,7 @@ mod post_processing;
 mod profanity_filter;
 mod performance_metrics_service;
 pub mod benchmarking;
+mod llm;
 #[cfg(target_os = "macos")]
 mod macos;
 

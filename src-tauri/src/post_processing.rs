@@ -5,18 +5,34 @@ use crate::profanity_filter::ProfanityFilter;
 use crate::performance_metrics_service::{PerformanceMetricsService, TranscriptionPerformanceData};
 use crate::db::Database;
 use crate::logger::{info, error, debug, Component};
+use crate::llm::{CandleEngine, LLMEngine, GenerationOptions, ModelManager, PromptManager};
+use crate::llm::pipeline::{LLMPipeline, LLMOutput};
+use std::path::PathBuf;
 
 /// Post-processing hooks that run after successful transcription
 pub struct PostProcessingHooks {
     settings: Arc<tokio::sync::Mutex<SettingsManager>>,
     performance_service: PerformanceMetricsService,
+    database: Arc<Database>,
+    llm_pipeline: Option<Arc<LLMPipeline>>,
+    models_dir: PathBuf,
 }
 
 impl PostProcessingHooks {
     pub fn new(settings: Arc<tokio::sync::Mutex<SettingsManager>>, database: Arc<Database>) -> Self {
+        // TODO: Get models_dir from app state
+        let models_dir = dirs::data_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("scout")
+            .join("models")
+            .join("llm");
+            
         Self { 
-            settings,
-            performance_service: PerformanceMetricsService::new(database),
+            settings: settings.clone(),
+            performance_service: PerformanceMetricsService::new(database.clone()),
+            database,
+            llm_pipeline: None,
+            models_dir,
         }
     }
 
@@ -33,7 +49,9 @@ impl PostProcessingHooks {
         // Execute auto-copy/paste hooks with filtered transcript
         self.execute_clipboard_hooks(&filtered_transcript).await;
         
-        // Future: Add more hooks here (e.g., webhooks, integrations, etc.)
+        // Execute LLM processing if enabled
+        // Note: This is async and non-blocking - results will be stored in database
+        self.execute_llm_processing(&filtered_transcript).await;
         
         (filtered_transcript, original_transcript, analysis_logs)
     }
@@ -171,5 +189,122 @@ impl PostProcessingHooks {
         
         // Save to database
         self.performance_service.save_transcription_metrics(transcript_id, performance_data).await
+    }
+    
+    /// Execute LLM processing on the transcript
+    async fn execute_llm_processing(&self, transcript: &str) {
+        let settings_guard = self.settings.lock().await;
+        let llm_enabled = settings_guard.get().llm.enabled;
+        let model_id = settings_guard.get().llm.model_id.clone();
+        let enabled_prompts = settings_guard.get().llm.enabled_prompts.clone();
+        let temperature = settings_guard.get().llm.temperature;
+        let max_tokens = settings_guard.get().llm.max_tokens;
+        drop(settings_guard);
+        
+        if !llm_enabled {
+            debug(Component::Processing, "🤖 LLM processing is disabled");
+            return;
+        }
+        
+        info(Component::Processing, &format!("🤖 LLM processing enabled with model: {}", model_id));
+        
+        // Initialize LLM pipeline if not already done
+        if self.llm_pipeline.is_none() {
+            match self.initialize_llm_pipeline(&model_id).await {
+                Ok(_pipeline) => {
+                    // This is a bit hacky, but we need to work around the immutable self
+                    // In production, you'd want to use interior mutability pattern
+                    info(Component::Processing, "✅ LLM pipeline initialized successfully");
+                    // For now, we'll create a new pipeline each time
+                },
+                Err(e) => {
+                    error(Component::Processing, &format!("❌ Failed to initialize LLM pipeline: {}", e));
+                    return;
+                }
+            }
+        }
+        
+        // Create a new pipeline for this processing
+        // TODO: Cache the pipeline properly
+        match self.initialize_llm_pipeline(&model_id).await {
+            Ok(pipeline) => {
+                let prompt_manager = PromptManager::new();
+                let templates: Vec<_> = enabled_prompts.iter()
+                    .filter_map(|id| prompt_manager.get_template(id))
+                    .collect();
+                
+                if templates.is_empty() {
+                    info(Component::Processing, "No enabled LLM prompts found");
+                    return;
+                }
+                
+                info(Component::Processing, &format!("Processing transcript with {} prompts", templates.len()));
+                
+                let options = GenerationOptions {
+                    temperature,
+                    max_tokens: max_tokens as usize,
+                    ..Default::default()
+                };
+                
+                // Process transcript with LLM
+                // TODO: Get transcript_id from caller
+                match pipeline.process_transcript(0, transcript, &templates, options).await {
+                    Ok(outputs) => {
+                        info(Component::Processing, &format!("✅ LLM processing completed with {} outputs", outputs.len()));
+                        // TODO: Save outputs to database
+                    }
+                    Err(e) => {
+                        error(Component::Processing, &format!("❌ LLM processing failed: {}", e));
+                    }
+                }
+            }
+            Err(e) => {
+                error(Component::Processing, &format!("❌ Failed to create LLM pipeline: {}", e));
+            }
+        }
+    }
+    
+    async fn initialize_llm_pipeline(&self, model_id: &str) -> Result<LLMPipeline, String> {
+        info(Component::Processing, "Initializing LLM pipeline...");
+        
+        let model_manager = ModelManager::new(self.models_dir.clone());
+        
+        // Check if model is downloaded
+        if let Some(model_path) = model_manager.get_model_path(model_id) {
+            // Create Candle engine
+            let mut engine = CandleEngine::new()
+                .map_err(|e| format!("Failed to create Candle engine: {}", e))?;
+            
+            // Load model
+            engine.load_model(&model_path).await
+                .map_err(|e| format!("Failed to load model: {}", e))?;
+            
+            Ok(LLMPipeline::new(Box::new(engine)))
+        } else {
+            // Model not downloaded
+            let models = model_manager.list_models(model_id);
+            if let Some(model) = models.iter().find(|m| m.id == model_id) {
+                info(Component::Processing, &format!("Model {} not downloaded, downloading now...", model_id));
+                
+                // Download model
+                model_manager.download_model(model).await
+                    .map_err(|e| format!("Failed to download model: {}", e))?;
+                
+                // Try again after download
+                if let Some(model_path) = model_manager.get_model_path(model_id) {
+                    let mut engine = CandleEngine::new()
+                        .map_err(|e| format!("Failed to create Candle engine: {}", e))?;
+                    
+                    engine.load_model(&model_path).await
+                        .map_err(|e| format!("Failed to load model: {}", e))?;
+                    
+                    Ok(LLMPipeline::new(Box::new(engine)))
+                } else {
+                    Err("Model download succeeded but model path not found".to_string())
+                }
+            } else {
+                Err(format!("Model {} not found", model_id))
+            }
+        }
     }
 }

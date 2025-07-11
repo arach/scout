@@ -17,6 +17,9 @@ pub struct AppSettings {
     
     // Processing settings
     pub processing: ProcessingSettings,
+    
+    // LLM settings
+    pub llm: LLMSettings,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,6 +69,17 @@ pub struct ProcessingSettings {
     pub auto_cleanup_temp_files: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LLMSettings {
+    pub enabled: bool,
+    pub model_id: String,
+    pub temperature: f32,
+    pub max_tokens: u32,
+    pub auto_download_model: bool,
+    pub enabled_prompts: Vec<String>,
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
@@ -73,6 +87,7 @@ impl Default for AppSettings {
             models: ModelSettings::default(),
             ui: UISettings::default(),
             processing: ProcessingSettings::default(),
+            llm: LLMSettings::default(),
         }
     }
 }
@@ -128,6 +143,23 @@ impl Default for ProcessingSettings {
             max_retries: 30,
             retry_delay_ms: 100,
             auto_cleanup_temp_files: true,
+        }
+    }
+}
+
+impl Default for LLMSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            model_id: "tinyllama-1.1b".to_string(),
+            temperature: 0.7,
+            max_tokens: 500,
+            auto_download_model: true,
+            enabled_prompts: vec![
+                "summarize".to_string(),
+                "bullet_points".to_string(),
+                "action_items".to_string(),
+            ],
         }
     }
 }
