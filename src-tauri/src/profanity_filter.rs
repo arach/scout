@@ -1,4 +1,4 @@
-use crate::logger::{info, warn, error, Component};
+use crate::logger::{info, warn, Component};
 use std::collections::HashSet;
 
 /// Profanity filtering system for transcription post-processing
@@ -20,6 +20,8 @@ pub struct FilterResult {
     pub likely_hallucination: bool,
     /// Original words that were filtered/flagged
     pub flagged_words: Vec<String>,
+    /// Analysis logs describing the filter's decisions
+    pub analysis_logs: Vec<String>,
 }
 
 impl ProfanityFilter {
@@ -62,10 +64,13 @@ impl ProfanityFilter {
         let mut likely_hallucination = false;
         let mut flagged_words = Vec::new();
         let mut profanity_detected = false;
+        let mut analysis_logs = Vec::new();
         
         for phrase in &self.hallucination_phrases {
             if lower_text.contains(phrase) {
-                info(Component::Processing, &format!("🚫 Detected hallucination phrase: '{}'", phrase));
+                let log_msg = format!("🚫 Detected hallucination phrase: '{}'", phrase);
+                info(Component::Processing, &log_msg);
+                analysis_logs.push(log_msg);
                 likely_hallucination = true;
                 profanity_detected = true;
                 flagged_words.push(phrase.clone());
@@ -86,7 +91,9 @@ impl ProfanityFilter {
                 
                 // Heuristics to determine if it's likely a hallucination
                 if !likely_hallucination {
-                    likely_hallucination = self.is_likely_hallucination(&original_text, &clean_word, recording_duration_ms);
+                    let (is_hallucination, mut logs) = self.is_likely_hallucination(&original_text, &clean_word, recording_duration_ms);
+                    likely_hallucination = is_hallucination;
+                    analysis_logs.append(&mut logs);
                 }
             }
         }
@@ -104,44 +111,56 @@ impl ProfanityFilter {
             profanity_detected,
             likely_hallucination,
             flagged_words,
+            analysis_logs,
         }
     }
     
     /// Determine if profanity is likely a hallucination based on context
-    fn is_likely_hallucination(&self, text: &str, profanity_word: &str, recording_duration_ms: Option<i32>) -> bool {
+    fn is_likely_hallucination(&self, text: &str, profanity_word: &str, recording_duration_ms: Option<i32>) -> (bool, Vec<String>) {
         let text_lower = text.to_lowercase();
         let word_count = text.split_whitespace().count();
+        let mut analysis_logs = Vec::new();
         
         // Heuristic 1: Very short recordings with profanity are often hallucinations
         if let Some(duration) = recording_duration_ms {
             if duration < 2000 && word_count <= 3 {
-                warn(Component::Processing, &format!("🚫 Short recording ({} words, {}ms) with profanity '{}' - likely hallucination", word_count, duration, profanity_word));
-                return true;
+                let log_msg = format!("🚫 Short recording ({} words, {}ms) with profanity '{}' - likely hallucination", word_count, duration, profanity_word);
+                warn(Component::Processing, &log_msg);
+                analysis_logs.push(log_msg);
+                return (true, analysis_logs);
             }
         }
         
         // Heuristic 2: Profanity at the very beginning of transcripts is often hallucination
         if text_lower.starts_with(profanity_word) || text_lower.starts_with(&format!("oh {}", profanity_word)) {
-            warn(Component::Processing, &format!("🚫 Profanity '{}' at start of transcript - likely hallucination", profanity_word));
-            return true;
+            let log_msg = format!("🚫 Profanity '{}' at start of transcript - likely hallucination", profanity_word);
+            warn(Component::Processing, &log_msg);
+            analysis_logs.push(log_msg);
+            return (true, analysis_logs);
         }
         
         // Heuristic 3: Single profanity word with no context
         if word_count == 1 && self.hallucination_words.contains(profanity_word) {
-            warn(Component::Processing, &format!("🚫 Single profanity word '{}' - likely hallucination", profanity_word));
-            return true;
+            let log_msg = format!("🚫 Single profanity word '{}' - likely hallucination", profanity_word);
+            warn(Component::Processing, &log_msg);
+            analysis_logs.push(log_msg);
+            return (true, analysis_logs);
         }
         
         // Heuristic 4: Common hallucination patterns
         if text_lower.contains("oh, fuck") || text_lower.contains("oh fuck") || 
            text_lower.contains("oh, shit") || text_lower.contains("oh shit") {
-            warn(Component::Processing, &format!("🚫 Common hallucination pattern detected with '{}' - likely hallucination", profanity_word));
-            return true;
+            let log_msg = format!("🚫 Common hallucination pattern detected with '{}' - likely hallucination", profanity_word);
+            warn(Component::Processing, &log_msg);
+            analysis_logs.push(log_msg);
+            return (true, analysis_logs);
         }
         
         // If none of the hallucination heuristics match, it's likely intentional
-        info(Component::Processing, &format!("✅ Profanity '{}' appears intentional based on context", profanity_word));
-        false
+        let log_msg = format!("✅ Profanity '{}' appears intentional based on context", profanity_word);
+        info(Component::Processing, &log_msg);
+        analysis_logs.push(log_msg);
+        (false, analysis_logs)
     }
     
     /// Remove profanity from text while preserving sentence structure
@@ -231,12 +250,14 @@ mod tests {
         assert!(result.likely_hallucination);
         assert!(result.profanity_detected);
         assert_eq!(result.filtered_text, "");
+        assert!(!result.analysis_logs.is_empty());
         
         // Test longer recording with context (likely intentional)
         let result = filter.filter_transcript("I can't believe I forgot my fucking keys again", Some(5000));
         assert!(!result.likely_hallucination);
         assert!(result.profanity_detected);
         assert_eq!(result.filtered_text, "I can't believe I forgot my fucking keys again");
+        assert!(!result.analysis_logs.is_empty());
     }
     
     #[test]
@@ -246,5 +267,6 @@ mod tests {
         let result = filter.filter_transcript("Oh my god, what the hell", Some(2000));
         assert!(result.likely_hallucination);
         assert_eq!(result.filtered_text, "");
+        assert!(!result.analysis_logs.is_empty());
     }
 }

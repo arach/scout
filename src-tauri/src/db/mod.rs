@@ -152,6 +152,10 @@ impl Database {
         Ok(Self { pool })
     }
 
+    pub fn get_pool(&self) -> &Pool<Sqlite> {
+        &self.pool
+    }
+
     pub async fn save_transcript(
         &self,
         text: &str,

@@ -144,6 +144,36 @@
     border: 1px solid rgba(245, 158, 11, 0.2);
 }
 
+.metadata-badge.info {
+    background-color: rgba(59, 130, 246, 0.1);
+    color: #3b82f6;
+    border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+/* Filter analysis logs */
+.filter-analysis .metadata-value {
+    max-width: 100%;
+    white-space: normal;
+}
+
+.filter-analysis-logs {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 4px;
+}
+
+.filter-log {
+    font-size: 11px;
+    padding: 4px 8px;
+    background-color: rgba(99, 102, 241, 0.1);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-family: "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", monospace;
+    line-height: 1.4;
+}
+
 /* Transcript section */
 .detail-transcript {
     margin-bottom: 24px;
@@ -280,6 +310,75 @@
 
 .export-dropdown-menu button:not(:last-child) {
     border-bottom: 1px solid var(--border-primary);
+}
+
+/* Transcript header and toggle */
+.transcript-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.transcript-toggle {
+    display: flex;
+    border: 1px solid var(--border-primary);
+    border-radius: 4px;
+    overflow: hidden;
+    background-color: var(--bg-secondary);
+}
+
+.toggle-button {
+    padding: 4px 8px;
+    border: none;
+    background: none;
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.1s ease;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.toggle-button:hover {
+    background-color: var(--bg-hover);
+}
+
+.toggle-button.active {
+    background-color: var(--accent-primary);
+    color: white;
+}
+
+.toggle-button:not(:last-child) {
+    border-right: 1px solid var(--border-primary);
+}
+
+/* Transcript content styling */
+.transcript-content {
+    position: relative;
+}
+
+.transcript-original {
+    position: relative;
+}
+
+.transcript-diff-note {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+    padding: 8px;
+    background-color: rgba(245, 158, 11, 0.1);
+    border: 1px solid rgba(245, 158, 11, 0.2);
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.diff-icon {
+    font-size: 14px;
+    flex-shrink: 0;
 }
 
 /* Dark mode adjustments */
