@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
-import { Sparkles, FolderOpen, ArrowUpLeft, ArrowUp, ArrowUpRight, ArrowLeft, ArrowRight, ArrowDownLeft, ArrowDown, ArrowDownRight } from 'lucide-react';
+import { Sparkles, FolderOpen, ArrowUpLeft, ArrowUp, ArrowUpRight, ArrowLeft, ArrowRight, ArrowDownLeft, ArrowDown, ArrowDownRight, Brain } from 'lucide-react';
 import { ModelManager } from './ModelManager';
+import { LLMSettings } from './LLMSettings';
 import { Dropdown } from './Dropdown';
 import { invoke } from '@tauri-apps/api/core';
 import { formatShortcutJSX } from '../lib/formatShortcutJSX';
+import { LLMSettings as LLMSettingsType } from '../types/llm';
 import './SettingsView.css';
 import './SettingsView-spacing.css';
 
@@ -23,6 +25,7 @@ interface SettingsViewProps {
     stopSound: string;
     successSound: string;
     completionSoundThreshold: number;
+    llmSettings: LLMSettingsType;
     stopCapturingHotkey: () => void;
     startCapturingHotkey: () => void;
     startCapturingPushToTalkHotkey: () => void;
@@ -37,6 +40,7 @@ interface SettingsViewProps {
     updateStopSound: (sound: string) => void;
     updateSuccessSound: (sound: string) => void;
     updateCompletionSoundThreshold: (threshold: number) => void;
+    updateLLMSettings: (settings: Partial<LLMSettingsType>) => void;
 }
 
 export function SettingsView({
@@ -55,6 +59,7 @@ export function SettingsView({
     stopSound,
     successSound,
     completionSoundThreshold,
+    llmSettings,
     stopCapturingHotkey,
     startCapturingHotkey,
     startCapturingPushToTalkHotkey,
@@ -69,9 +74,12 @@ export function SettingsView({
     updateStopSound,
     updateSuccessSound,
     updateCompletionSoundThreshold,
+    updateLLMSettings,
 }: SettingsViewProps) {
     const [isModelManagerExpanded, setIsModelManagerExpanded] = useState(false);
+    const [isLLMSettingsExpanded, setIsLLMSettingsExpanded] = useState(false);
     const modelSectionRef = useRef<HTMLDivElement>(null);
+    const llmSectionRef = useRef<HTMLDivElement>(null);
     const [availableSounds, setAvailableSounds] = useState<string[]>([]);
     const [isPreviewingSound, setIsPreviewingSound] = useState(false);
 
@@ -93,6 +101,18 @@ export function SettingsView({
             }, 100);
         }
     }, [isModelManagerExpanded]);
+
+    useEffect(() => {
+        if (isLLMSettingsExpanded && llmSectionRef.current) {
+            // Small delay to ensure the content is rendered
+            setTimeout(() => {
+                llmSectionRef.current?.scrollIntoView({ 
+                    behavior: 'smooth', 
+                    block: 'nearest'
+                });
+            }, 100);
+        }
+    }, [isLLMSettingsExpanded]);
 
     const openModelsFolder = async () => {
         try {
@@ -513,6 +533,41 @@ export function SettingsView({
                     {isModelManagerExpanded && (
                         <div className="collapsible-content">
                             <ModelManager />
+                        </div>
+                    )}
+                </div>
+
+                {/* LLM Settings - Full Width Collapsible */}
+                <div className="settings-section model-manager-full-width" ref={llmSectionRef}>
+                    <div className="collapsible-section">
+                        <div className="collapsible-header-wrapper">
+                            <div 
+                                className="collapsible-header"
+                                onClick={() => setIsLLMSettingsExpanded(!isLLMSettingsExpanded)}
+                            >
+                                <div>
+                                    <h3>
+                                        <span className={`collapse-arrow ${isLLMSettingsExpanded ? 'expanded' : ''}`}>
+                                            ▶
+                                        </span>
+                                        AI Post-Processing
+                                        <span className="ai-badge">
+                                            <Brain size={16} className="sparkle-icon" />
+                                        </span>
+                                    </h3>
+                                    <p className="collapsible-subtitle">
+                                        Process transcripts with AI to summarize, extract action items, and more
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {isLLMSettingsExpanded && (
+                        <div className="collapsible-content">
+                            <LLMSettings 
+                                settings={llmSettings}
+                                onUpdateSettings={updateLLMSettings}
+                            />
                         </div>
                     )}
                 </div>

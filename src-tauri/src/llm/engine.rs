@@ -39,10 +39,15 @@ impl CandleEngine {
     async fn load_tinyllama_model(&mut self, model_path: &Path) -> Result<()> {
         info(Component::Processing, "Loading TinyLlama model...");
         
-        // Load tokenizer
-        let tokenizer_path = model_path.parent()
-            .ok_or_else(|| anyhow!("Invalid model path"))?
-            .join("tokenizer.json");
+        // Load tokenizer - try both naming conventions
+        let parent_dir = model_path.parent()
+            .ok_or_else(|| anyhow!("Invalid model path"))?;
+        
+        let tokenizer_path = if parent_dir.join("tinyllama-1.1b_tokenizer.json").exists() {
+            parent_dir.join("tinyllama-1.1b_tokenizer.json")
+        } else {
+            parent_dir.join("tokenizer.json")
+        };
             
         let tokenizer = Tokenizer::from_file(&tokenizer_path)
             .map_err(|e| anyhow!("Failed to load tokenizer: {}", e))?;

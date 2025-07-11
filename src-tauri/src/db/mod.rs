@@ -31,6 +31,36 @@ pub struct PerformanceMetrics {
     pub metadata: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct LLMOutput {
+    pub id: i64,
+    pub transcript_id: i64,
+    pub prompt_id: String,
+    pub prompt_name: String,
+    pub prompt_template: String,
+    pub input_text: String,
+    pub output_text: String,
+    pub model_used: String,
+    pub processing_time_ms: i32,
+    pub temperature: f32,
+    pub max_tokens: i32,
+    pub created_at: String,
+    pub metadata: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct LLMPromptTemplate {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub template: String,
+    pub category: String,
+    pub enabled: bool,
+    pub is_custom: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 pub struct Database {
     pool: Pool<Sqlite>,
 }
@@ -148,6 +178,75 @@ impl Database {
         .execute(&pool)
         .await
         .map_err(|e| format!("Failed to create performance_metrics indexes: {}", e))?;
+
+        // Create LLM tables
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS llm_outputs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                transcript_id INTEGER NOT NULL,
+                prompt_id TEXT NOT NULL,
+                prompt_name TEXT NOT NULL,
+                prompt_template TEXT NOT NULL,
+                input_text TEXT NOT NULL,
+                output_text TEXT NOT NULL,
+                model_used TEXT NOT NULL,
+                processing_time_ms INTEGER NOT NULL,
+                temperature REAL NOT NULL,
+                max_tokens INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                metadata TEXT,
+                FOREIGN KEY (transcript_id) REFERENCES transcripts(id) ON DELETE CASCADE
+            );
+            
+            CREATE INDEX IF NOT EXISTS idx_llm_outputs_transcript_id ON llm_outputs(transcript_id);
+            CREATE INDEX IF NOT EXISTS idx_llm_outputs_prompt_id ON llm_outputs(prompt_id);
+            CREATE INDEX IF NOT EXISTS idx_llm_outputs_created_at ON llm_outputs(created_at);
+            
+            CREATE TABLE IF NOT EXISTS llm_prompt_templates (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT,
+                template TEXT NOT NULL,
+                category TEXT NOT NULL,
+                enabled BOOLEAN DEFAULT 1,
+                is_custom BOOLEAN DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            "#
+        )
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("Failed to create LLM tables: {}", e))?;
+
+        // Insert default prompt templates
+        sqlx::query(
+            r#"
+            INSERT OR IGNORE INTO llm_prompt_templates (id, name, description, template, category, enabled, is_custom) VALUES
+                ('summarize', 'Summarize', 'Create a concise summary of the transcript', 'Please provide a concise summary of the following transcript in 2-3 sentences:
+
+{transcript}', 'summarization', 1, 0),
+                ('bullet_points', 'Bullet Points', 'Convert transcript to bullet points', 'Convert the following transcript into clear bullet points:
+
+{transcript}', 'formatting', 1, 0),
+                ('action_items', 'Extract Action Items', 'Extract actionable tasks from the transcript', 'Extract all action items and tasks from the following transcript. List each one as a checkbox:
+
+{transcript}', 'extraction', 1, 0),
+                ('fix_grammar', 'Fix Grammar', 'Correct grammar and punctuation errors', 'Please correct any grammar, spelling, and punctuation errors in the following transcript while preserving the original meaning:
+
+{transcript}', 'formatting', 1, 0),
+                ('meeting_notes', 'Meeting Notes', 'Format as structured meeting notes', 'Format the following transcript as structured meeting notes with sections for: Key Topics, Decisions Made, Action Items, and Next Steps:
+
+{transcript}', 'formatting', 0, 0),
+                ('key_points', 'Key Points', 'Extract the most important points', 'Identify and list the 3-5 most important points from the following transcript:
+
+{transcript}', 'extraction', 0, 0);
+            "#
+        )
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("Failed to insert default prompt templates: {}", e))?;
 
         Ok(Self { pool })
     }
@@ -346,5 +445,137 @@ impl Database {
         .map_err(|e| format!("Failed to get performance metrics for transcript: {}", e))?;
 
         Ok(metrics)
+    }
+
+    // LLM Output methods
+    pub async fn save_llm_output(
+        &self,
+        transcript_id: i64,
+        prompt_id: &str,
+        prompt_name: &str,
+        prompt_template: &str,
+        input_text: &str,
+        output_text: &str,
+        model_used: &str,
+        processing_time_ms: i32,
+        temperature: f32,
+        max_tokens: i32,
+        metadata: Option<&str>,
+    ) -> Result<i64, String> {
+        let result = sqlx::query(
+            r#"
+            INSERT INTO llm_outputs (
+                transcript_id, prompt_id, prompt_name, prompt_template,
+                input_text, output_text, model_used, processing_time_ms,
+                temperature, max_tokens, metadata
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            "#
+        )
+        .bind(transcript_id)
+        .bind(prompt_id)
+        .bind(prompt_name)
+        .bind(prompt_template)
+        .bind(input_text)
+        .bind(output_text)
+        .bind(model_used)
+        .bind(processing_time_ms)
+        .bind(temperature)
+        .bind(max_tokens)
+        .bind(metadata)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to save LLM output: {}", e))?;
+
+        Ok(result.last_insert_rowid())
+    }
+
+    pub async fn get_llm_outputs_for_transcript(&self, transcript_id: i64) -> Result<Vec<LLMOutput>, String> {
+        let outputs = sqlx::query_as::<_, LLMOutput>(
+            r#"
+            SELECT * FROM llm_outputs
+            WHERE transcript_id = ?1
+            ORDER BY created_at ASC
+            "#
+        )
+        .bind(transcript_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to get LLM outputs: {}", e))?;
+
+        Ok(outputs)
+    }
+
+    pub async fn get_llm_prompt_templates(&self) -> Result<Vec<LLMPromptTemplate>, String> {
+        let templates = sqlx::query_as::<_, LLMPromptTemplate>(
+            r#"
+            SELECT * FROM llm_prompt_templates
+            ORDER BY category, name
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to get LLM prompt templates: {}", e))?;
+
+        Ok(templates)
+    }
+
+    pub async fn get_enabled_llm_prompt_templates(&self) -> Result<Vec<LLMPromptTemplate>, String> {
+        let templates = sqlx::query_as::<_, LLMPromptTemplate>(
+            r#"
+            SELECT * FROM llm_prompt_templates
+            WHERE enabled = 1
+            ORDER BY category, name
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to get enabled LLM prompt templates: {}", e))?;
+
+        Ok(templates)
+    }
+
+    pub async fn save_llm_prompt_template(
+        &self,
+        id: &str,
+        name: &str,
+        description: Option<&str>,
+        template: &str,
+        category: &str,
+        enabled: bool,
+    ) -> Result<(), String> {
+        sqlx::query(
+            r#"
+            INSERT OR REPLACE INTO llm_prompt_templates 
+            (id, name, description, template, category, enabled, is_custom, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, CURRENT_TIMESTAMP)
+            "#
+        )
+        .bind(id)
+        .bind(name)
+        .bind(description)
+        .bind(template)
+        .bind(category)
+        .bind(enabled)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to save LLM prompt template: {}", e))?;
+
+        Ok(())
+    }
+
+    pub async fn delete_llm_prompt_template(&self, id: &str) -> Result<(), String> {
+        sqlx::query(
+            r#"
+            DELETE FROM llm_prompt_templates 
+            WHERE id = ?1 AND is_custom = 1
+            "#
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to delete LLM prompt template: {}", e))?;
+
+        Ok(())
     }
 }

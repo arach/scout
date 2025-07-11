@@ -10,6 +10,7 @@ import { RecordView } from "./components/RecordView";
 import { TranscriptsView } from "./components/TranscriptsView";
 import { SettingsView } from "./components/SettingsView";
 import { ChevronRight, PanelLeftClose } from 'lucide-react';
+import { LLMSettings as LLMSettingsType } from './types/llm';
 import "./App.css";
 
 interface Transcript {
@@ -87,6 +88,23 @@ function App() {
   const [stopSound, setStopSound] = useState('Glass');
   const [successSound, setSuccessSound] = useState('Pop');
   const [completionSoundThreshold, setCompletionSoundThreshold] = useState(1000);
+
+  // LLM settings state
+  const [llmSettings, setLLMSettings] = useState<{
+    enabled: boolean;
+    model_id: string;
+    temperature: number;
+    max_tokens: number;
+    auto_download_model: boolean;
+    enabled_prompts: string[];
+  }>({
+    enabled: false,
+    model_id: 'tinyllama-1.1b',
+    temperature: 0.7,
+    max_tokens: 200,
+    auto_download_model: false,
+    enabled_prompts: ['summarize', 'bullet_points', 'action_items', 'fix_grammar']
+  });
 
   // Keep ref in sync with state
   useEffect(() => {
@@ -226,10 +244,20 @@ function App() {
       setSuccessSound(settings.successSound);
     }).catch(console.error);
     
-    // Load completion sound threshold from settings
+    // Load settings from backend
     invoke<any>('get_settings').then(settings => {
       if (settings?.ui?.completion_sound_threshold_ms) {
         setCompletionSoundThreshold(settings.ui.completion_sound_threshold_ms);
+      }
+      if (settings?.llm) {
+        setLLMSettings({
+          enabled: settings.llm.enabled || false,
+          model_id: settings.llm.model_id || 'tinyllama-1.1b',
+          temperature: settings.llm.temperature || 0.7,
+          max_tokens: settings.llm.max_tokens || 200,
+          auto_download_model: settings.llm.auto_download_model || false,
+          enabled_prompts: settings.llm.enabled_prompts || ['summarize', 'bullet_points', 'action_items', 'fix_grammar']
+        });
       }
     }).catch(console.error);
     
@@ -1282,6 +1310,25 @@ function App() {
     }
   };
 
+  const updateLLMSettings = async (updates: Partial<LLMSettingsType>) => {
+    try {
+      const newSettings = { ...llmSettings, ...updates };
+      
+      // Update backend with all LLM settings
+      await invoke('update_llm_settings', {
+        enabled: newSettings.enabled,
+        modelId: newSettings.model_id,
+        temperature: newSettings.temperature,
+        maxTokens: newSettings.max_tokens,
+        enabledPrompts: newSettings.enabled_prompts
+      });
+      
+      // Update state
+      setLLMSettings(newSettings);
+    } catch (error) {
+      console.error("Failed to update LLM settings:", error);
+    }
+  };
   
   const updateOverlayPosition = async (position: string) => {
     try {
@@ -1549,6 +1596,7 @@ function App() {
             stopSound={stopSound}
             successSound={successSound}
             completionSoundThreshold={completionSoundThreshold}
+            llmSettings={llmSettings}
             stopCapturingHotkey={stopCapturingHotkey}
             startCapturingHotkey={startCapturingHotkey}
             startCapturingPushToTalkHotkey={startCapturingPushToTalkHotkey}
@@ -1563,6 +1611,7 @@ function App() {
             updateStopSound={updateStopSound}
             updateSuccessSound={updateSuccessSound}
             updateCompletionSoundThreshold={updateCompletionSoundThreshold}
+            updateLLMSettings={updateLLMSettings}
           />
         )}
         {isDragging && (
