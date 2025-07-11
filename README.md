@@ -34,6 +34,8 @@ Scout is a privacy-focused, cross-platform voice transcription application built
 
 ## Project Structure
 
+See [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md) for detailed directory layout.
+
 ```
 scout/
 ├── src/                    # React frontend
@@ -48,6 +50,8 @@ scout/
 │   │   ├── db/             # SQLite database layer
 │   │   ├── models/         # Model management and downloads
 │   │   ├── settings/       # Settings system
+├── docs/                   # Technical documentation
+├── marketing/              # Business and partnership materials
 │   │   ├── processing_queue/ # Background file processing
 │   │   └── macos/          # macOS-specific overlay implementation
 │   └── Cargo.toml          # Rust dependencies
