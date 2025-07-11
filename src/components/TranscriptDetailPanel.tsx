@@ -56,6 +56,8 @@ export function TranscriptDetailPanel({
     const [showExportMenu, setShowExportMenu] = useState(false);
     const [performanceMetrics, setPerformanceMetrics] = useState<PerformanceMetrics | null>(null);
     const [loadingMetrics, setLoadingMetrics] = useState(false);
+    const [metricsError, setMetricsError] = useState<string | null>(null);
+    const [showOriginalTranscript, setShowOriginalTranscript] = useState(false);
 
     // Handle ESC key to close panel and manage player rendering
     useEffect(() => {
@@ -105,13 +107,18 @@ export function TranscriptDetailPanel({
         if (isOpen && transcript) {
             setLoadingMetrics(true);
             setPerformanceMetrics(null);
+            setMetricsError(null);
+            setShowOriginalTranscript(false); // Reset to filtered view
             
             invoke<PerformanceMetrics | null>('get_performance_metrics_for_transcript', {
                 transcriptId: transcript.id
             }).then((metrics) => {
                 setPerformanceMetrics(metrics);
+                setMetricsError(null);
             }).catch((error) => {
                 console.error('Failed to fetch performance metrics:', error);
+                setMetricsError(error.toString());
+                setPerformanceMetrics(null);
             }).finally(() => {
                 setLoadingMetrics(false);
             });
@@ -200,6 +207,44 @@ export function TranscriptDetailPanel({
                             </div>
                         )}
                         
+                        {/* Profanity Filter Status */}
+                        {metadata.original_transcript && (
+                            <div className="metadata-item">
+                                <span className="metadata-label">Content Filter</span>
+                                <span className="metadata-value">
+                                    {metadata.original_transcript !== transcript.text ? (
+                                        <span className="metadata-badge warning">
+                                            🚫 Filtered
+                                        </span>
+                                    ) : metadata.filter_analysis && metadata.filter_analysis.length > 0 ? (
+                                        <span className="metadata-badge info">
+                                            ✅ Clean with notes
+                                        </span>
+                                    ) : (
+                                        <span className="metadata-badge success">
+                                            ✅ Clean
+                                        </span>
+                                    )}
+                                </span>
+                            </div>
+                        )}
+                        
+                        {/* Filter Analysis */}
+                        {metadata.filter_analysis && metadata.filter_analysis.length > 0 && (
+                            <div className="metadata-item filter-analysis">
+                                <span className="metadata-label">Filter Notes</span>
+                                <div className="metadata-value">
+                                    <div className="filter-analysis-logs">
+                                        {metadata.filter_analysis.map((log, index) => (
+                                            <div key={index} className="filter-log">
+                                                {log}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                        
                         {/* Performance Metrics */}
                         {loadingMetrics && (
                             <div className="metadata-item">
@@ -208,7 +253,25 @@ export function TranscriptDetailPanel({
                             </div>
                         )}
                         
-                        {performanceMetrics && (
+                        {!loadingMetrics && !performanceMetrics && !metricsError && (
+                            <div className="metadata-item">
+                                <span className="metadata-label">Performance</span>
+                                <span className="metadata-value">
+                                    <span className="metadata-badge info">📊 No metrics available</span>
+                                </span>
+                            </div>
+                        )}
+                        
+                        {!loadingMetrics && metricsError && (
+                            <div className="metadata-item">
+                                <span className="metadata-label">Performance</span>
+                                <span className="metadata-value">
+                                    <span className="metadata-badge warning">⚠️ Error loading metrics</span>
+                                </span>
+                            </div>
+                        )}
+                        
+                        {!loadingMetrics && performanceMetrics && (
                             <>
                                 <div className="metadata-item">
                                     <span className="metadata-label">Transcription Time</span>
@@ -269,12 +332,45 @@ export function TranscriptDetailPanel({
                     )}
 
                     <div className="detail-transcript">
-                        <h3>Transcript</h3>
+                        <div className="transcript-header">
+                            <h3>Transcript</h3>
+                            {metadata.original_transcript && metadata.original_transcript !== transcript.text && (
+                                <div className="transcript-toggle">
+                                    <button 
+                                        className={`toggle-button ${!showOriginalTranscript ? 'active' : ''}`}
+                                        onClick={() => setShowOriginalTranscript(false)}
+                                    >
+                                        Filtered
+                                    </button>
+                                    <button 
+                                        className={`toggle-button ${showOriginalTranscript ? 'active' : ''}`}
+                                        onClick={() => setShowOriginalTranscript(true)}
+                                    >
+                                        Original
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                        
                         <div className="transcript-full-text">
                             {transcript.text === "[BLANK_AUDIO]" ? (
                                 <p className="transcript-empty">No speech detected in this recording.</p>
                             ) : (
-                                <p>{transcript.text}</p>
+                                <div className="transcript-content">
+                                    {showOriginalTranscript && metadata.original_transcript ? (
+                                        <div className="transcript-original">
+                                            <p>{metadata.original_transcript}</p>
+                                            {metadata.original_transcript !== transcript.text && (
+                                                <div className="transcript-diff-note">
+                                                    <span className="diff-icon">🚫</span>
+                                                    <span>This version contains content that was filtered from the final transcript</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <p>{transcript.text}</p>
+                                    )}
+                                </div>
                             )}
                         </div>
                     </div>
@@ -282,7 +378,7 @@ export function TranscriptDetailPanel({
                     <div className="detail-actions">
                         <button 
                             className="action-button primary"
-                            onClick={() => onCopy(transcript.text)}
+                            onClick={() => onCopy(showOriginalTranscript && metadata.original_transcript ? metadata.original_transcript : transcript.text)}
                         >
                             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
                                 <rect x="3" y="3" width="8" height="8" stroke="currentColor" strokeWidth="1" rx="1"/>

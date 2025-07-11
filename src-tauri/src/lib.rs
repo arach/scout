@@ -1,6 +1,6 @@
 mod audio;
-mod db;
-mod transcription;
+pub mod db;
+pub mod transcription;
 mod recording_progress;
 mod recording_workflow;
 mod processing_queue;
@@ -18,6 +18,8 @@ mod lazy_model;
 mod env;
 mod post_processing;
 mod profanity_filter;
+mod performance_metrics_service;
+pub mod benchmarking;
 #[cfg(target_os = "macos")]
 mod macos;
 
@@ -40,6 +42,7 @@ use chrono;
 use audio::converter::AudioConverter;
 use std::path::Path;
 use crate::logger::{info, debug, warn, error, Component};
+use crate::transcription::Transcriber;
 
 // Overlay dimensions configuration
 const OVERLAY_EXPANDED_WIDTH: f64 = 220.0;
@@ -60,6 +63,8 @@ pub struct AppState {
     pub recording_workflow: Arc<RecordingWorkflow>,
     pub processing_queue: Arc<ProcessingQueue>,
     pub keyboard_monitor: Arc<KeyboardMonitor>,
+    pub transcriber: Arc<Mutex<Option<Transcriber>>>,
+    pub current_model_path: Arc<Mutex<Option<PathBuf>>>,
     #[cfg(target_os = "macos")]
     pub native_overlay: Arc<Mutex<macos::MacOSOverlay>>,
     #[cfg(target_os = "macos")]
@@ -480,13 +485,32 @@ async fn transcribe_audio(
             .unwrap_or("unknown");
     }
     
-    // Create transcriber and transcribe
-    let _model_name = model_path.file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("unknown");
-    
-    let transcriber = transcription::Transcriber::new(&model_path)?;
-    let result = transcriber.transcribe(&audio_path)?;
+    // Get or create singleton transcriber for this model
+    let result = {
+        let mut current_model = state.current_model_path.lock().await;
+        let mut transcriber_opt = state.transcriber.lock().await;
+        
+        // Check if we need to create a new transcriber (model changed or first time)
+        let needs_new_transcriber = match (&*current_model, &*transcriber_opt) {
+            (Some(current_path), Some(_)) if current_path == &model_path => false,
+            _ => true
+        };
+        
+        if needs_new_transcriber {
+            info(Component::Transcription, &format!("Creating new singleton transcriber for model: {:?}", model_path));
+            match transcription::Transcriber::new(&model_path) {
+                Ok(new_transcriber) => {
+                    *transcriber_opt = Some(new_transcriber);
+                    *current_model = Some(model_path.clone());
+                }
+                Err(e) => return Err(e)
+            }
+        }
+        
+        // Use the singleton transcriber
+        let transcriber = transcriber_opt.as_ref().unwrap();
+        transcriber.transcribe(&audio_path)?
+    };
     
     Ok(result)
 }
@@ -1152,12 +1176,18 @@ pub fn run() {
             let progress_tracker = Arc::new(ProgressTracker::new());
             let progress_tracker_clone = progress_tracker.clone();
             
-            // Create the processing queue
+            // Create shared singleton transcriber instances
+            let transcriber = Arc::new(Mutex::new(None::<Transcriber>));
+            let current_model_path = Arc::new(Mutex::new(None::<PathBuf>));
+            
+            // Create the processing queue with shared transcriber
             let (processing_queue, mut processing_status_rx) = ProcessingQueue::new(
                 database_arc.clone(),
                 models_dir.clone(),
                 app_data_dir.clone(),
                 settings_arc.clone(),
+                transcriber.clone(),
+                current_model_path.clone(),
             );
             let processing_queue_arc = Arc::new(processing_queue);
             
@@ -1223,6 +1253,8 @@ pub fn run() {
                 recording_workflow,
                 processing_queue: processing_queue_arc,
                 keyboard_monitor: keyboard_monitor.clone(),
+                transcriber,
+                current_model_path,
                 #[cfg(target_os = "macos")]
                 native_overlay: native_overlay.clone(),
                 #[cfg(target_os = "macos")]

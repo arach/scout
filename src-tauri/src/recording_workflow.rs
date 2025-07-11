@@ -328,13 +328,23 @@ impl RecordingWorkflow {
                                 
                                 match finish_timeout {
                                     Ok(Ok(transcription_result)) => {
+                                        let speed_ratio = duration_ms as f64 / transcription_result.processing_time_ms as f64;
                                         info(Component::Transcription, &format!("Transcription completed: {} chars in {:.2}s", 
                                                 transcription_result.text.len(),
                                                 transcription_result.processing_time_ms as f64 / 1000.0));
+                                        info(Component::Transcription, &format!("⚡ Performance: {}ms transcription for {}ms audio ({:.2}x speed) using ring buffer strategy", 
+                                                transcription_result.processing_time_ms, duration_ms, speed_ratio));
+                                        
+                                        // Performance warnings
+                                        if speed_ratio < 1.0 {
+                                            warn(Component::Transcription, &format!("⚠️ Slow transcription: {:.2}x speed (slower than real-time)", speed_ratio));
+                                        } else if speed_ratio > 5.0 {
+                                            info(Component::Transcription, &format!("🚀 Fast transcription: {:.2}x speed", speed_ratio));
+                                        }
                                         
                                         // Execute post-processing hooks (profanity filter, auto-copy, auto-paste, etc.)
-                                        let post_processing = crate::post_processing::PostProcessingHooks::new(settings.clone());
-                                        let (filtered_transcript, original_transcript) = post_processing.execute_hooks(&transcription_result.text, "Ring Buffer", Some(duration_ms)).await;
+                                        let post_processing = crate::post_processing::PostProcessingHooks::new(settings.clone(), database.clone());
+                                        let (filtered_transcript, original_transcript, analysis_logs) = post_processing.execute_hooks(&transcription_result.text, "Ring Buffer", Some(duration_ms)).await;
                                         
                                         // Save transcript to database
                                         let mut metadata_json = serde_json::json!({
@@ -342,7 +352,8 @@ impl RecordingWorkflow {
                                             "strategy_used": transcription_result.strategy_used,
                                             "chunks_processed": transcription_result.chunks_processed,
                                             "processing_type": "ring_buffer",
-                                            "original_transcript": original_transcript
+                                            "original_transcript": original_transcript,
+                                            "filter_analysis": analysis_logs
                                         });
                                         
                                         // Add app context to metadata if available
@@ -366,6 +377,24 @@ impl RecordingWorkflow {
                                         ).await {
                                             Ok(transcript) => {
                                                 info(Component::Processing, &format!("Filtered transcript saved to database with ID: {}", transcript.id));
+                                                
+                                                // Save performance metrics using the consolidated service
+                                                let performance_data = crate::performance_metrics_service::PerformanceDataBuilder::new(
+                                                    duration_ms,
+                                                    transcription_result.processing_time_ms as i32,
+                                                    model_name.clone(),
+                                                    "ring_buffer".to_string()
+                                                )
+                                                .with_chunks(transcription_result.chunks_processed)
+                                                .with_audio_info(None, Some("wav".to_string()))
+                                                .with_strategy_metadata(serde_json::json!({
+                                                    "strategy_used": transcription_result.strategy_used
+                                                }))
+                                                .build();
+                                                
+                                                if let Err(e) = post_processing.save_performance_metrics(transcript.id, performance_data).await {
+                                                    error(Component::Processing, &format!("Failed to save performance metrics: {}", e));
+                                                }
                                                 
                                                 // Update to idle state first
                                                 progress_tracker.update(RecordingProgress::Idle);
