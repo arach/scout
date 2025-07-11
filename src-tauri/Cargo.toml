@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Scout - Cross-platform local-first dictation app"
 authors = ["Scout Team"]
 edition = "2021"
+default-run = "scout"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -13,6 +14,42 @@ edition = "2021"
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "scout_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "scout"
+path = "src/main.rs"
+
+[[bin]]
+name = "benchmark"
+path = "src/bin/benchmark.rs"
+
+[[bin]]
+name = "bakeoff"
+path = "src/bin/bakeoff.rs"
+
+[[bin]]
+name = "quickoff"
+path = "src/bin/quickoff.rs"
+
+[[bin]]
+name = "detailed_quickoff"
+path = "src/bin/detailed_quickoff.rs"
+
+[[bin]]
+name = "chunk_size_benchmark"
+path = "src/bin/chunk_size_benchmark.rs"
+
+[[bin]]
+name = "core_ml_vs_cpu_benchmark"
+path = "src/bin/core_ml_vs_cpu_benchmark.rs"
+
+[[bin]]
+name = "test_singleton"
+path = "src/bin/test_singleton.rs"
+
+[[bin]]
+name = "create_benchmark_corpus"
+path = "src/bin/create_benchmark_corpus.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -45,6 +82,7 @@ log = "0.4.22"
 arboard = "3.4"
 async-trait = "0.1"
 rdev = "0.5"
+clap = { version = "4.0", features = ["derive"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 cocoa = "0.25"

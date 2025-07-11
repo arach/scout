@@ -37,6 +37,8 @@ pub enum ProcessingStatus {
 
 pub struct ProcessingQueue {
     sender: mpsc::Sender<ProcessingJob>,
+    transcriber: Arc<tokio::sync::Mutex<Option<Transcriber>>>,
+    current_model_path: Arc<tokio::sync::Mutex<Option<PathBuf>>>,
 }
 
 impl ProcessingQueue {
@@ -45,9 +47,14 @@ impl ProcessingQueue {
         models_dir: PathBuf,
         app_data_dir: PathBuf,
         settings: Arc<tokio::sync::Mutex<SettingsManager>>,
+        transcriber: Arc<tokio::sync::Mutex<Option<Transcriber>>>,
+        current_model_path: Arc<tokio::sync::Mutex<Option<PathBuf>>>,
     ) -> (Self, mpsc::Receiver<ProcessingStatus>) {
         let (job_tx, mut job_rx) = mpsc::channel::<ProcessingJob>(100);
         let (status_tx, status_rx) = mpsc::channel::<ProcessingStatus>(100);
+        
+        let transcriber_clone = transcriber.clone();
+        let model_path_clone = current_model_path.clone();
         
         // Spawn the processing worker using Tauri's runtime
         tauri::async_runtime::spawn(async move {
@@ -159,148 +166,173 @@ impl ProcessingQueue {
                                     .and_then(|name| name.to_str())
                                     .unwrap_or("unknown");
                                 
-                                match Transcriber::new(&model_path) {
-                                    Ok(transcriber) => {
-                                        // Track transcription time
-                                        let transcription_start = Instant::now();
-                                        match transcriber.transcribe(&audio_path_for_transcription) {
-                                            Ok(transcript) => {
-                                                let transcription_time_ms = transcription_start.elapsed().as_millis() as i32;
-                                                let speed_ratio = job.duration_ms as f64 / transcription_time_ms as f64;
-                                                info(Component::Processing, &format!("🎤 Transcription completed: '{}' ({} chars)", transcript.trim(), transcript.len()));
-                                                info(Component::Processing, &format!("⚡ Performance: {}ms transcription for {}ms audio ({:.2}x speed) using {}", 
-                                                    transcription_time_ms, job.duration_ms, speed_ratio, model_name));
-                                                
-                                                // Performance warnings
-                                                if speed_ratio < 1.0 {
-                                                    warn(Component::Processing, &format!("⚠️ Slow transcription: {:.2}x speed (slower than real-time)", speed_ratio));
-                                                } else if speed_ratio > 5.0 {
-                                                    info(Component::Processing, &format!("🚀 Fast transcription: {:.2}x speed", speed_ratio));
-                                                }
-                                                
-                                                // Get file size
-                                                let file_size = tokio::fs::metadata(&job.audio_path)
-                                                    .await
-                                                    .map(|m| m.len() as i64)
-                                                    .ok();
-                                                
-                                                // Execute post-processing hooks (profanity filter, auto-copy, auto-paste, etc.)
-                                                let post_processing = crate::post_processing::PostProcessingHooks::new(settings.clone(), database.clone());
-                                                let (filtered_transcript, original_transcript, analysis_logs) = post_processing.execute_hooks(&transcript, "Processing Queue", Some(job.duration_ms)).await;
-                                                
-                                                // Build metadata with app context if available
-                                                let mut metadata_json = serde_json::json!({
-                                                    "filename": job.filename,
-                                                    "model_used": model_name,
-                                                    "processing_type": "file_upload",
-                                                    "original_transcript": original_transcript,
-                                                    "filter_analysis": analysis_logs
-                                                });
-                                                
-                                                // Add app context to metadata if available
-                                                #[cfg(target_os = "macos")]
-                                                if let Some(ref ctx) = job.app_context {
-                                                    metadata_json["app_context"] = serde_json::json!({
-                                                        "name": ctx.name,
-                                                        "bundle_id": ctx.bundle_id,
-                                                    });
-                                                }
-                                                
-                                                // Save to database with model information and audio path  
-                                                match database.save_transcript(
-                                                    &filtered_transcript,
-                                                    job.duration_ms,
-                                                    Some(&metadata_json.to_string()),
-                                                    Some(job.audio_path.to_str().unwrap_or("")),
-                                                    file_size
-                                                ).await {
-                                                    Ok(saved_transcript) => {
-                                                        // Calculate user-perceived latency if we have stop time
-                                                        let user_perceived_latency_ms = job.user_stop_time
-                                                            .map(|stop_time| stop_time.elapsed().as_millis() as i32);
-                                                        
-                                                        // Save performance metrics using consolidated service
-                                                        let audio_format = job.audio_path.extension()
-                                                            .and_then(|ext| ext.to_str())
-                                                            .map(|s| s.to_string());
-                                                        
-                                                        let performance_data = crate::performance_metrics_service::PerformanceDataBuilder::new(
-                                                            job.duration_ms,
-                                                            transcription_time_ms,
-                                                            model_name.to_string(),
-                                                            "processing_queue".to_string()
-                                                        )
-                                                        .with_user_latency(user_perceived_latency_ms.unwrap_or(0))
-                                                        .with_queue_time(queue_time_ms)
-                                                        .with_audio_info(file_size, audio_format)
-                                                        .build();
-                                                        
-                                                        match post_processing.save_performance_metrics(saved_transcript.id, performance_data).await {
-                                                            Ok(_metrics_id) => {
-                                                                // Emit performance metrics event
-                                                                if let Some(app) = &job.app_handle {
-                                                                    let _ = app.emit("performance-metrics-recorded", serde_json::json!({
-                                                                        "transcript_id": saved_transcript.id,
-                                                                        "recording_duration_ms": job.duration_ms,
-                                                                        "transcription_time_ms": transcription_time_ms,
-                                                                        "user_perceived_latency_ms": user_perceived_latency_ms,
-                                                                        "processing_queue_time_ms": queue_time_ms,
-                                                                        "model_used": model_name,
-                                                                    }));
-                                                                }
-                                                            }
-                                                            Err(e) => {
-                                                                error(Component::Processing, &format!("Failed to save performance metrics: {}", e));
-                                                            }
-                                                        }
-                                                        
-                                                        // Emit transcript-created event
-                                                        if let Some(app) = &job.app_handle {
-                                                            let _ = app.emit("transcript-created", &saved_transcript);
-                                                        }
-                                                    }
-                                                    Err(e) => {
-                                                        error(Component::Processing, &format!("Failed to save transcript to database: {}", e));
-                                                    }
-                                                }
-                                                
-                                                let _ = status_tx.send(ProcessingStatus::Complete { 
-                                                    filename: job.filename.clone(),
-                                                    transcript: filtered_transcript.clone(),
-                                                }).await;
-                                                
-                                                // Play success sound if processing took longer than threshold
-                                                let processing_duration_ms = job.queue_entry_time.elapsed().as_millis() as u64;
-                                                let settings_guard = settings.lock().await;
-                                                let threshold_ms = settings_guard.get().ui.completion_sound_threshold_ms;
-                                                drop(settings_guard);
-                                                
-                                                if processing_duration_ms > threshold_ms {
-                                                    crate::sound::SoundPlayer::play_success();
-                                                }
-                                                
-                                                // Clean up temporary WAV file if we converted
-                                                if AudioConverter::needs_conversion(&job.audio_path) {
-                                                    let wav_path = AudioConverter::get_wav_path(&job.audio_path);
-                                                    if wav_path.exists() {
-                                                        let _ = std::fs::remove_file(&wav_path);
-                                                    }
-                                                }
+                                // Get or create singleton transcriber for this model
+                                let transcription_result = {
+                                    let mut current_model = model_path_clone.lock().await;
+                                    let mut transcriber_opt = transcriber_clone.lock().await;
+                                    
+                                    // Check if we need to create a new transcriber (model changed or first time)
+                                    let needs_new_transcriber = match (&*current_model, &*transcriber_opt) {
+                                        (Some(current_path), Some(_)) if current_path == &model_path => false,
+                                        _ => true
+                                    };
+                                    
+                                    if needs_new_transcriber {
+                                        info(Component::Processing, &format!("Creating new singleton transcriber for model: {:?}", model_path));
+                                        match Transcriber::new(&model_path) {
+                                            Ok(new_transcriber) => {
+                                                *transcriber_opt = Some(new_transcriber);
+                                                *current_model = Some(model_path.clone());
                                             }
                                             Err(e) => {
-                                                error(Component::Processing, &format!("Transcription failed: {}", e));
+                                                error(Component::Processing, &format!("Failed to create transcriber: {}", e));
                                                 let _ = status_tx.send(ProcessingStatus::Failed { 
                                                     filename: job.filename.clone(),
-                                                    error: format!("Transcription failed: {}", e),
+                                                    error: format!("Failed to create transcriber: {}", e),
                                                 }).await;
+                                                processing = false;
+                                                continue;
                                             }
                                         }
                                     }
-                                    Err(e) => {
-                                        error(Component::Processing, &format!("Failed to create transcriber: {}", e));
+                                    
+                                    // Use the singleton transcriber
+                                    let transcriber = transcriber_opt.as_ref().unwrap();
+                                    let transcription_start = Instant::now();
+                                    let result = transcriber.transcribe(&audio_path_for_transcription);
+                                    let transcription_time = transcription_start.elapsed();
+                                    (result, transcription_time)
+                                };
+                                
+                                match transcription_result {
+                                    (Ok(transcript), transcription_time) => {
+                                        let transcription_time_ms = transcription_time.as_millis() as i32;
+                                        let speed_ratio = job.duration_ms as f64 / transcription_time_ms as f64;
+                                        info(Component::Processing, &format!("🎤 Transcription completed: '{}' ({} chars)", transcript.trim(), transcript.len()));
+                                        info(Component::Processing, &format!("⚡ Performance: {}ms transcription for {}ms audio ({:.2}x speed) using {}", 
+                                            transcription_time_ms, job.duration_ms, speed_ratio, model_name));
+                                        
+                                        // Performance warnings
+                                        if speed_ratio < 1.0 {
+                                            warn(Component::Processing, &format!("⚠️ Slow transcription: {:.2}x speed (slower than real-time)", speed_ratio));
+                                        } else if speed_ratio > 5.0 {
+                                            info(Component::Processing, &format!("🚀 Fast transcription: {:.2}x speed", speed_ratio));
+                                        }
+                                        
+                                        // Get file size
+                                        let file_size = tokio::fs::metadata(&job.audio_path)
+                                            .await
+                                            .map(|m| m.len() as i64)
+                                            .ok();
+                                        
+                                        // Execute post-processing hooks (profanity filter, auto-copy, auto-paste, etc.)
+                                        let post_processing = crate::post_processing::PostProcessingHooks::new(settings.clone(), database.clone());
+                                        let (filtered_transcript, original_transcript, analysis_logs) = post_processing.execute_hooks(&transcript, "Processing Queue", Some(job.duration_ms)).await;
+                                        
+                                        // Build metadata with app context if available
+                                        let mut metadata_json = serde_json::json!({
+                                            "filename": job.filename,
+                                            "model_used": model_name,
+                                            "processing_type": "file_upload",
+                                            "original_transcript": original_transcript,
+                                            "filter_analysis": analysis_logs
+                                        });
+                                        
+                                        // Add app context to metadata if available
+                                        #[cfg(target_os = "macos")]
+                                        if let Some(ref ctx) = job.app_context {
+                                            metadata_json["app_context"] = serde_json::json!({
+                                                "name": ctx.name,
+                                                "bundle_id": ctx.bundle_id,
+                                            });
+                                        }
+                                        
+                                        // Save to database with model information and audio path  
+                                        match database.save_transcript(
+                                            &filtered_transcript,
+                                            job.duration_ms,
+                                            Some(&metadata_json.to_string()),
+                                            Some(job.audio_path.to_str().unwrap_or("")),
+                                            file_size
+                                        ).await {
+                                            Ok(saved_transcript) => {
+                                                // Calculate user-perceived latency if we have stop time
+                                                let user_perceived_latency_ms = job.user_stop_time
+                                                    .map(|stop_time| stop_time.elapsed().as_millis() as i32);
+                                                
+                                                // Save performance metrics using consolidated service
+                                                let audio_format = job.audio_path.extension()
+                                                    .and_then(|ext| ext.to_str())
+                                                    .map(|s| s.to_string());
+                                                
+                                                let performance_data = crate::performance_metrics_service::PerformanceDataBuilder::new(
+                                                    job.duration_ms,
+                                                    transcription_time_ms,
+                                                    model_name.to_string(),
+                                                    "processing_queue".to_string()
+                                                )
+                                                .with_user_latency(user_perceived_latency_ms.unwrap_or(0))
+                                                .with_queue_time(queue_time_ms)
+                                                .with_audio_info(file_size, audio_format)
+                                                .build();
+                                                
+                                                match post_processing.save_performance_metrics(saved_transcript.id, performance_data).await {
+                                                    Ok(_metrics_id) => {
+                                                        // Emit performance metrics event
+                                                        if let Some(app) = &job.app_handle {
+                                                            let _ = app.emit("performance-metrics-recorded", serde_json::json!({
+                                                                "transcript_id": saved_transcript.id,
+                                                                "recording_duration_ms": job.duration_ms,
+                                                                "transcription_time_ms": transcription_time_ms,
+                                                                "user_perceived_latency_ms": user_perceived_latency_ms,
+                                                                "processing_queue_time_ms": queue_time_ms,
+                                                                "model_used": model_name,
+                                                            }));
+                                                        }
+                                                    }
+                                                    Err(e) => {
+                                                        error(Component::Processing, &format!("Failed to save performance metrics: {}", e));
+                                                    }
+                                                }
+                                                
+                                                // Emit transcript-created event
+                                                if let Some(app) = &job.app_handle {
+                                                    let _ = app.emit("transcript-created", &saved_transcript);
+                                                }
+                                            }
+                                            Err(e) => {
+                                                error(Component::Processing, &format!("Failed to save transcript to database: {}", e));
+                                            }
+                                        }
+                                        
+                                        let _ = status_tx.send(ProcessingStatus::Complete { 
+                                            filename: job.filename.clone(),
+                                            transcript: filtered_transcript.clone(),
+                                        }).await;
+                                        
+                                        // Play success sound if processing took longer than threshold
+                                        let processing_duration_ms = job.queue_entry_time.elapsed().as_millis() as u64;
+                                        let settings_guard = settings.lock().await;
+                                        let threshold_ms = settings_guard.get().ui.completion_sound_threshold_ms;
+                                        drop(settings_guard);
+                                        
+                                        if processing_duration_ms > threshold_ms {
+                                            crate::sound::SoundPlayer::play_success();
+                                        }
+                                        
+                                        // Clean up temporary WAV file if we converted
+                                        if AudioConverter::needs_conversion(&job.audio_path) {
+                                            let wav_path = AudioConverter::get_wav_path(&job.audio_path);
+                                            if wav_path.exists() {
+                                                let _ = std::fs::remove_file(&wav_path);
+                                            }
+                                        }
+                                    }
+                                    (Err(e), _) => {
+                                        error(Component::Processing, &format!("Transcription failed: {}", e));
                                         let _ = status_tx.send(ProcessingStatus::Failed { 
                                             filename: job.filename.clone(),
-                                            error: format!("Failed to create transcriber: {}", e),
+                                            error: format!("Transcription failed: {}", e),
                                         }).await;
                                     }
                                 }
@@ -342,7 +374,11 @@ impl ProcessingQueue {
             }
         });
         
-        (ProcessingQueue { sender: job_tx }, status_rx)
+        (ProcessingQueue { 
+            sender: job_tx,
+            transcriber,
+            current_model_path,
+        }, status_rx)
     }
     
     pub async fn queue_job(&self, job: ProcessingJob) -> Result<(), String> {
