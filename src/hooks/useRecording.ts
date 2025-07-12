@@ -77,7 +77,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
   // Start recording
   const startRecording = useCallback(async () => {
     if (isStartingRecording.current) {
-      // console.log('Already starting recording, ignoring');
+      console.log('Already starting recording, ignoring duplicate request');
       return;
     }
 
@@ -85,7 +85,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
     try {
       const backendIsRecording = await invoke<boolean>('is_recording');
       if (backendIsRecording) {
-        // console.log('Backend is already recording, syncing frontend state');
+        console.log('Backend is already recording, syncing frontend state');
         setIsRecording(true);
         isRecordingRef.current = true;
         return;
@@ -95,7 +95,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
     }
 
     if (isRecordingRef.current) {
-      // console.log('Frontend thinks we are already recording');
+      console.log('Frontend already recording, ignoring duplicate request');
       return;
     }
 
