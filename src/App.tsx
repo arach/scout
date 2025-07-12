@@ -435,7 +435,7 @@ function App() {
       });
       
       // Clear processing state when transcript is created
-      console.log('📝 Transcript created - clearing processing state');
+      console.log('📝 Transcript created - clearing processing state. Current isProcessing:', isProcessing);
       setIsProcessing(false);
       if (processingTimeoutRef.current) {
         clearTimeout(processingTimeoutRef.current);

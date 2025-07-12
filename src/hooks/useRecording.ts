@@ -188,6 +188,9 @@ export function useRecording(options: UseRecordingOptions = {}) {
       }
       
       onRecordingComplete?.();
+      
+      // For ring buffer recordings, transcript-created event fires immediately
+      // so we don't need a processing state
     } catch (error) {
       console.error('Failed to stop recording:', error);
       // Don't change state on error - let the backend state sync handle it
