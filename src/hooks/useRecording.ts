@@ -39,6 +39,24 @@ export function useRecording(options: UseRecordingOptions = {}) {
   const audioCurrentRef = useRef(0);
   const animationFrameRef = useRef<number>();
 
+  // Sync with backend state on mount
+  useEffect(() => {
+    const checkBackendState = async () => {
+      try {
+        const backendIsRecording = await invoke<boolean>('is_recording');
+        if (backendIsRecording !== isRecordingRef.current) {
+          console.log('Syncing initial recording state with backend:', backendIsRecording);
+          setIsRecording(backendIsRecording);
+          isRecordingRef.current = backendIsRecording;
+        }
+      } catch (error) {
+        console.error('Failed to check initial recording state:', error);
+      }
+    };
+    
+    checkBackendState();
+  }, []);
+
   // Audio level animation
   const animateAudioLevel = useCallback(() => {
     const diff = audioTargetRef.current - audioCurrentRef.current;
@@ -201,8 +219,9 @@ export function useRecording(options: UseRecordingOptions = {}) {
   // Set up event listeners
   useEffect(() => {
     const setupListeners = async () => {
-      // Listen for recording state changes from backend
-      const unsubscribeRecordingState = await listen("recording-state-changed", (event: any) => {
+      try {
+        // Listen for recording state changes from backend
+        const unsubscribeRecordingState = await listen("recording-state-changed", (event: any) => {
         const { state } = event.payload;
         
         if (state === "recording") {
@@ -248,22 +267,41 @@ export function useRecording(options: UseRecordingOptions = {}) {
       });
 
       return () => {
-        unsubscribeRecordingState();
-        unsubscribeProgress();
-        unsubscribeAudioLevel();
-        unsubscribePushToTalkPressed();
-        unsubscribePushToTalkReleased();
-        unsubscribeProcessingComplete();
+        // Safely call unsubscribe functions
+        try {
+          unsubscribeRecordingState?.();
+          unsubscribeProgress?.();
+          unsubscribeAudioLevel?.();
+          unsubscribePushToTalkPressed?.();
+          unsubscribePushToTalkReleased?.();
+          unsubscribeProcessingComplete?.();
+        } catch (error) {
+          console.error('Error during listener cleanup:', error);
+        }
         
         if (animationFrameRef.current) {
           cancelAnimationFrame(animationFrameRef.current);
         }
       };
+      } catch (error) {
+        console.error('Failed to set up recording event listeners:', error);
+        // Return a no-op cleanup function
+        return () => {};
+      }
     };
 
-    const cleanup = setupListeners();
+    let cleanupFn: (() => void) | null = null;
+    
+    setupListeners().then(fn => {
+      cleanupFn = fn;
+    }).catch(error => {
+      console.error('Failed to setup recording listeners:', error);
+    });
+
     return () => {
-      cleanup.then(fn => fn());
+      if (cleanupFn) {
+        cleanupFn();
+      }
     };
   }, [animateAudioLevel, handlePushToTalkPressed, handlePushToTalkReleased, onTranscriptCreated]);
 
