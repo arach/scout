@@ -109,8 +109,11 @@ export function useRecording(options: UseRecordingOptions = {}) {
       if (soundEnabled) {
         try {
           await invoke('play_start_sound');
-        } catch (error) {
-          console.error('Failed to play start sound:', error);
+        } catch (error: any) {
+          // Only log if it's not a "command not found" error
+          if (!error.includes || !error.includes('not found')) {
+            console.error('Failed to play start sound:', error);
+          }
         }
       }
     } catch (error: any) {
@@ -131,9 +134,25 @@ export function useRecording(options: UseRecordingOptions = {}) {
 
   // Stop recording
   const stopRecording = useCallback(async () => {
+    // Check backend state first
+    try {
+      const backendIsRecording = await invoke<boolean>('is_recording');
+      if (!backendIsRecording) {
+        console.log('Backend is not recording, syncing frontend state');
+        setIsRecording(false);
+        isRecordingRef.current = false;
+        setRecordingDuration(0);
+        audioTargetRef.current = 0;
+        audioCurrentRef.current = 0;
+        setAudioLevel(0);
+        return;
+      }
+    } catch (error) {
+      console.error('Failed to check recording state:', error);
+    }
+
     if (!isRecordingRef.current) {
-      console.log('Not recording, nothing to stop');
-      return;
+      console.log('Frontend not recording, but backend might be - attempting stop');
     }
 
     try {
@@ -147,8 +166,11 @@ export function useRecording(options: UseRecordingOptions = {}) {
       if (soundEnabled) {
         try {
           await invoke('play_stop_sound');
-        } catch (error) {
-          console.error('Failed to play stop sound:', error);
+        } catch (error: any) {
+          // Only log if it's not a "command not found" error
+          if (!error.includes || !error.includes('not found')) {
+            console.error('Failed to play stop sound:', error);
+          }
         }
       }
       
