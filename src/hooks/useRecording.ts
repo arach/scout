@@ -33,7 +33,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
 
   // State
   const [isRecording, setIsRecording] = useState(false);
-  const [recordingDuration, setRecordingDuration] = useState(0);
+  const [recordingStartTime, setRecordingStartTime] = useState<number | null>(null);
   const [audioLevel, setAudioLevel] = useState(0);
   
   // Refs
@@ -100,7 +100,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
       setIsRecording(true);
       isRecordingRef.current = true;
       recordingManager.setRecording(true);
-      setRecordingDuration(0);
+      setRecordingStartTime(Date.now());
       
       console.log('Starting recording with device:', selectedMic);
       const result = await invoke<string>('start_recording', { 
@@ -145,7 +145,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
         // console.log('Backend is not recording, syncing frontend state');
         setIsRecording(false);
         isRecordingRef.current = false;
-        setRecordingDuration(0);
+        setRecordingStartTime(null);
         audioTargetRef.current = 0;
         audioCurrentRef.current = 0;
         setAudioLevel(0);
@@ -170,7 +170,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
       isRecordingRef.current = false;
       setIsRecording(false);
       recordingManager.setRecording(false);
-      setRecordingDuration(0);
+      setRecordingStartTime(null);
       audioTargetRef.current = 0;
       audioCurrentRef.current = 0;
       setAudioLevel(0);
@@ -291,7 +291,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
             setIsRecording(true);
             isRecordingRef.current = true;
             recordingManager.setRecording(true);
-            setRecordingDuration(0);
+            setRecordingStartTime(null);
           }
         } else if (state === "stopped" || state === "idle") {
           // Backend says we've stopped or are idle
@@ -300,7 +300,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
             setIsRecording(false);
             isRecordingRef.current = false;
             recordingManager.setRecording(false);
-            setRecordingDuration(0);
+            setRecordingStartTime(null);
             audioTargetRef.current = 0;
             audioCurrentRef.current = 0;
             setAudioLevel(0);
@@ -308,37 +308,14 @@ export function useRecording(options: UseRecordingOptions = {}) {
         }
       });
 
-      // Set up recording duration tracking
-      let recordingStartTime: number | null = null;
-      let durationInterval: NodeJS.Timeout | null = null;
-
       const unsubscribeProgress = await listen<RecordingProgress>('recording-progress', (event) => {
         if (!mounted) return;
         if (event.payload.Recording) {
-          // Start tracking duration from the backend's start_time
-          if (!recordingStartTime) {
-            recordingStartTime = event.payload.Recording.start_time;
-            
-            // Set initial duration immediately
-            const now = Date.now();
-            const duration = now - recordingStartTime;
-            setRecordingDuration(duration);
-            
-            // Update duration every 1000ms to avoid jumpy display
-            durationInterval = setInterval(() => {
-              const now = Date.now();
-              const duration = now - recordingStartTime!;
-              setRecordingDuration(duration);
-            }, 1000);
-          }
+          // Update start time from backend
+          setRecordingStartTime(event.payload.Recording.start_time);
         } else if (event.payload.Idle || event.payload.Stopping) {
-          // Stop tracking duration
-          if (durationInterval) {
-            clearInterval(durationInterval);
-            durationInterval = null;
-          }
-          recordingStartTime = null;
-          setRecordingDuration(0);
+          // Clear start time
+          setRecordingStartTime(null);
         }
       });
 
@@ -374,11 +351,6 @@ export function useRecording(options: UseRecordingOptions = {}) {
         unsubscribePushToTalkReleased,
         unsubscribeProcessingComplete
       );
-      
-      // Also store the interval cleanup
-      if (durationInterval) {
-        unsubscribers.push(() => clearInterval(durationInterval));
-      }
       } catch (error) {
         console.error('Failed to set up recording event listeners:', error);
       }
@@ -437,7 +409,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
 
   return {
     isRecording,
-    recordingDuration,
+    recordingStartTime,
     audioLevel,
     toggleRecording,
     startRecording,

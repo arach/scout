@@ -1,4 +1,4 @@
-use sqlx::{migrate::MigrateDatabase, Pool, Sqlite, SqlitePool};
+use sqlx::{migrate::MigrateDatabase, Pool, Sqlite, SqlitePool, Row};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -247,6 +247,40 @@ impl Database {
         .execute(&pool)
         .await
         .map_err(|e| format!("Failed to insert default prompt templates: {}", e))?;
+
+        // Create whisper_logs table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS whisper_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                transcript_id INTEGER,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                level TEXT NOT NULL CHECK (level IN ('DEBUG', 'INFO', 'WARN', 'ERROR')),
+                component TEXT NOT NULL,
+                message TEXT NOT NULL,
+                metadata TEXT, -- JSON field for additional data
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (transcript_id) REFERENCES transcripts(id) ON DELETE CASCADE
+            );
+            "#
+        )
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("Failed to create whisper_logs table: {}", e))?;
+
+        // Create indexes for whisper_logs
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_whisper_logs_session_id ON whisper_logs(session_id);
+            CREATE INDEX IF NOT EXISTS idx_whisper_logs_transcript_id ON whisper_logs(transcript_id);
+            CREATE INDEX IF NOT EXISTS idx_whisper_logs_timestamp ON whisper_logs(timestamp);
+            CREATE INDEX IF NOT EXISTS idx_whisper_logs_level ON whisper_logs(level);
+            "#
+        )
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("Failed to create whisper_logs indexes: {}", e))?;
 
         Ok(Self { pool })
     }
@@ -516,11 +550,11 @@ impl Database {
                 "id": row.get::<i64, _>("id"),
                 "session_id": row.get::<String, _>("session_id"),
                 "transcript_id": row.get::<Option<i64>, _>("transcript_id"),
-                "timestamp": row.get::<chrono::DateTime<chrono::Local>, _>("timestamp").to_rfc3339(),
+                "timestamp": row.get::<String, _>("timestamp"),
                 "level": row.get::<String, _>("level"),
                 "component": row.get::<String, _>("component"),
                 "message": row.get::<String, _>("message"),
-                "metadata": row.get::<Option<String>, _>("metadata").and_then(|s| serde_json::from_str(&s).ok()),
+                "metadata": row.get::<Option<String>, _>("metadata").and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()),
             })
         }).collect();
 

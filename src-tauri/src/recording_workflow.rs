@@ -2,11 +2,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use chrono;
-use tauri::{Emitter, Manager};
+use tauri::Emitter;
 
 use crate::audio::AudioRecorder;
 use crate::recording_progress::RecordingProgress;
-use crate::processing_queue::{ProcessingQueue, ProcessingJob};
+use crate::processing_queue::ProcessingQueue;
 use crate::transcription_context::TranscriptionContext;
 use crate::db::Database;
 use crate::settings::SettingsManager;
@@ -72,6 +72,13 @@ impl RecordingWorkflow {
             let mut current_recording: Option<ActiveRecording> = None;
             
             while let Some(command) = command_rx.recv().await {
+                // Clone for this iteration
+                let app_handle_for_iter = app_handle.clone();
+                let settings_for_iter = settings.clone();
+                let database_for_iter = database.clone();
+                let recordings_dir_for_iter = recordings_dir.clone();
+                let progress_tracker_for_iter = progress_tracker.clone();
+                
                 match command {
                     RecordingCommand::StartRecording { device_name, response } => {
                         info(Component::Recording, "Starting recording workflow...");
@@ -90,7 +97,7 @@ impl RecordingWorkflow {
                         let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
                         let session_id = timestamp.clone();
                         let filename = format!("recording_{}.wav", timestamp);
-                        let path = recordings_dir.join(&filename);
+                        let path = recordings_dir_for_iter.join(&filename);
                         
                         // Start whisper logging session
                         let whisper_log_path = match whisper_logger::start_whisper_session(&session_id) {
@@ -107,7 +114,7 @@ impl RecordingWorkflow {
                         info(Component::Recording, "Initializing transcription context for real-time chunking...");
                         // Initialize transcription context for real-time chunking
                         let transcription_context = match TranscriptionContext::new_from_db(
-                            database.clone(),
+                            database_for_iter.clone(),
                             models_dir.clone(),
                         ) {
                             Ok(ctx) => ctx,
@@ -129,7 +136,7 @@ impl RecordingWorkflow {
                                             app_context,
                                         });
                                         
-                                        progress_tracker.update(RecordingProgress::Recording { 
+                                        progress_tracker_for_iter.update(RecordingProgress::Recording { 
                                             filename: filename.clone(),
                                             start_time: chrono::Utc::now().timestamp_millis() as u64
                                         });
@@ -137,7 +144,7 @@ impl RecordingWorkflow {
                                         let _ = response.send(Ok(filename));
                                     }
                                     Err(e) => {
-                                        progress_tracker.update(RecordingProgress::Idle);
+                                        progress_tracker_for_iter.update(RecordingProgress::Idle);
                                         let _ = response.send(Err(e));
                                     }
                                 }
@@ -285,7 +292,7 @@ impl RecordingWorkflow {
                                         });
                                         
                                         // Update progress to Recording state
-                                        progress_tracker.update(RecordingProgress::Recording { 
+                                        progress_tracker_for_iter.update(RecordingProgress::Recording { 
                                             filename: filename.clone(),
                                             start_time: chrono::Utc::now().timestamp_millis() as u64
                                         });
@@ -295,14 +302,14 @@ impl RecordingWorkflow {
                                     Err(e) => {
                                         // Stop recording if transcription setup failed
                                         let _ = recorder.stop_recording();
-                                        progress_tracker.update(RecordingProgress::Idle);
+                                        progress_tracker_for_iter.update(RecordingProgress::Idle);
                                         let _ = response.send(Err(format!("Failed to setup transcription: {}", e)));
                                     }
                                 }
                             }
                             Err(e) => {
                                 // Go back to idle on error
-                                progress_tracker.update(RecordingProgress::Idle);
+                                progress_tracker_for_iter.update(RecordingProgress::Idle);
                                 let _ = response.send(Err(e));
                             }
                         }
@@ -314,10 +321,8 @@ impl RecordingWorkflow {
                             let duration_ms = active_recording.start_time.elapsed().as_millis() as i32;
                             info(Component::Recording, &format!("Recording duration: {}ms", duration_ms));
                             
-                            // Update to Stopping state briefly
-                            progress_tracker.update(RecordingProgress::Stopping { 
-                                filename: active_recording.filename.clone() 
-                            });
+                            // Update to Idle state immediately for better UI responsiveness
+                            progress_tracker_for_iter.update(RecordingProgress::Idle);
                             
                             // Get device info before stopping recording
                             let recorder = recorder.lock().await;
@@ -326,25 +331,49 @@ impl RecordingWorkflow {
                             if let Err(e) = recorder.stop_recording() {
                                 error(Component::Recording, &format!("Failed to stop recording: {}", e));
                                 // Update to idle on error
-                                progress_tracker.update(RecordingProgress::Idle);
+                                progress_tracker_for_iter.update(RecordingProgress::Idle);
                                 let _ = response.send(Err(e));
                                 continue;
                             }
                             info(Component::Recording, "recorder.stop_recording() succeeded");
                             drop(recorder); // Release lock
                             
-                            // Finish transcription strategy if available
+                            // Send immediate response for UI responsiveness
+                            let immediate_result = RecordingResult {
+                                filename: active_recording.filename.clone(),
+                                transcript: None, // Will be filled in later
+                                duration_ms,
+                                device_name: device_info.as_ref().map(|d| d.name.clone()),
+                                sample_rate: device_info.as_ref().map(|d| d.sample_rate),
+                                channels: device_info.as_ref().map(|d| d.channels),
+                            };
+                            let _ = response.send(Ok(immediate_result));
+                            
+                            // Process transcription asynchronously for better UI responsiveness
                             if let Some(mut transcription_context) = active_recording.transcription_context.take() {
                                 let strategy_name = transcription_context.current_strategy_name()
                                     .unwrap_or_else(|| "unknown".to_string());
                                 let model_name = transcription_context.get_model_name().to_string();
-                                info(Component::Transcription, &format!("Finishing transcription with strategy: {} using model: {}", strategy_name, model_name));
+                                info(Component::Transcription, &format!("Processing transcription asynchronously with strategy: {} using model: {}", strategy_name, model_name));
                                 
-                                // Add timeout to prevent hanging
-                                let finish_timeout = tokio::time::timeout(
-                                    tokio::time::Duration::from_secs(45), // 45 second timeout
-                                    transcription_context.finish_recording()
-                                ).await;
+                                // Clone what we need for async processing
+                                let app_handle_clone = app_handle_for_iter.clone();
+                                let database_clone = database_for_iter.clone();
+                                let settings_clone = settings_for_iter.clone();
+                                let recordings_dir_clone = recordings_dir_for_iter.clone();
+                                let filename_clone = active_recording.filename.clone();
+                                let session_id_clone = active_recording.session_id.clone();
+                                let whisper_log_path_clone = active_recording.whisper_log_path.clone();
+                                let app_context_clone = active_recording.app_context.clone();
+                                let recording_start_time = active_recording.start_time;
+                                
+                                // Spawn async task for transcription
+                                tokio::spawn(async move {
+                                    // Add timeout to prevent hanging
+                                    let finish_timeout = tokio::time::timeout(
+                                        tokio::time::Duration::from_secs(45), // 45 second timeout
+                                        transcription_context.finish_recording()
+                                    ).await;
                                 
                                 match finish_timeout {
                                     Ok(Ok(transcription_result)) => {
@@ -363,7 +392,7 @@ impl RecordingWorkflow {
                                         }
                                         
                                         // Execute post-processing hooks (profanity filter, auto-copy, auto-paste, etc.)
-                                        let post_processing = crate::post_processing::PostProcessingHooks::new(settings.clone(), database.clone());
+                                        let post_processing = crate::post_processing::PostProcessingHooks::new(settings_clone.clone(), database_clone.clone());
                                         let (filtered_transcript, original_transcript, analysis_logs) = post_processing.execute_hooks(&transcription_result.text, "Ring Buffer", Some(duration_ms), None).await;
                                         
                                         // Save transcript to database
@@ -388,11 +417,11 @@ impl RecordingWorkflow {
                                         let metadata = metadata_json.to_string();
                                         
                                         // Save filtered transcript to database
-                                        match database.save_transcript(
+                                        match database_clone.save_transcript(
                                             &filtered_transcript,
                                             duration_ms,
                                             Some(&metadata),
-                                            Some(&recordings_dir.join(&active_recording.filename).to_string_lossy()),
+                                            Some(&recordings_dir_clone.join(&filename_clone).to_string_lossy()),
                                             None // TODO: Calculate actual file size
                                         ).await {
                                             Ok(transcript) => {
@@ -420,7 +449,7 @@ impl RecordingWorkflow {
                                                 post_processing.execute_llm_processing(&filtered_transcript, transcript.id).await;
                                                 
                                                 // Update to idle state first
-                                                progress_tracker.update(RecordingProgress::Idle);
+                                                progress_tracker_for_iter.update(RecordingProgress::Idle);
                                                 
                                                 // The progress tracker update will automatically notify the overlay
                                                 info(Component::Processing, "Updated progress tracker to Idle state");
@@ -431,7 +460,7 @@ impl RecordingWorkflow {
                                                     filename: active_recording.filename.clone(),
                                                     transcript: filtered_transcript.clone(),
                                                 };
-                                                if let Err(e) = app_handle.emit("processing-status", &processing_complete) {
+                                                if let Err(e) = app_handle_clone.emit("processing-status", &processing_complete) {
                                                     error(Component::UI, &format!("Failed to emit processing-status complete: {:?}", e));
                                                 } else {
                                                     info(Component::UI, "Emitted processing-status complete for native overlay");
@@ -444,67 +473,46 @@ impl RecordingWorkflow {
                                                 debug(Component::UI, &format!("Emitting transcript-created event for transcript ID: {}", transcript.id));
                                                 debug(Component::UI, &format!("Transcript details: {} chars, {}ms duration", 
                                                         transcript.text.len(), transcript.duration_ms));
-                                                if let Err(e) = app_handle.emit("transcript-created", &transcript) {
+                                                if let Err(e) = app_handle_clone.emit("transcript-created", &transcript) {
                                                     error(Component::UI, &format!("Failed to emit transcript-created event: {:?}", e));
                                                 } else {
                                                     info(Component::UI, "transcript-created event emitted successfully");
                                                 }
                                                 
-                                                // Also emit directly to overlay window
-                                                if let Some(overlay_window) = app_handle.get_webview_window("overlay") {
-                                                    let _ = overlay_window.emit("transcript-created", &transcript);
-                                                    debug(Component::UI, "Emitted transcript-created to overlay window");
-                                                }
+                                                // Note: Native overlay is updated via progress tracker listener
                                                 
                                                 // Give the event system time to process
                                                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                                                 
                                                 // Emit multiple completion events to ensure at least one is caught
                                                 debug(Component::UI, "Emitting processing-complete event");
-                                                if let Err(e) = app_handle.emit("processing-complete", &transcript) {
+                                                if let Err(e) = app_handle_clone.emit("processing-complete", &transcript) {
                                                     error(Component::UI, &format!("Failed to emit processing-complete event: {:?}", e));
                                                 } else {
                                                     info(Component::UI, "processing-complete event emitted successfully");
                                                 }
                                                 
-                                                // Also emit directly to overlay window
-                                                if let Some(overlay_window) = app_handle.get_webview_window("overlay") {
-                                                    let _ = overlay_window.emit("processing-complete", &transcript);
-                                                    debug(Component::UI, "Emitted processing-complete to overlay window");
-                                                }
                                                 
                                                 // Small delay between events
                                                 tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
                                                 
                                                 // Also emit recording-completed as backup
                                                 debug(Component::UI, "Emitting recording-completed event");
-                                                if let Err(e) = app_handle.emit("recording-completed", &transcript.id) {
+                                                if let Err(e) = app_handle_clone.emit("recording-completed", &transcript.id) {
                                                     error(Component::UI, &format!("Failed to emit recording-completed event: {:?}", e));
                                                 } else {
                                                     info(Component::UI, "recording-completed event emitted successfully");
                                                 }
                                                 
-                                                // Also emit directly to overlay window
-                                                if let Some(overlay_window) = app_handle.get_webview_window("overlay") {
-                                                    let _ = overlay_window.emit("recording-completed", &transcript.id);
-                                                    debug(Component::UI, "Emitted recording-completed to overlay window");
-                                                }
                                                 
                                                 // Send response with filtered transcript
-                                                let _ = response.send(Ok(RecordingResult {
-                                                    filename: active_recording.filename,
-                                                    transcript: Some(filtered_transcript),
-                                                    duration_ms,
-                                                    device_name: device_info.as_ref().map(|d| d.name.clone()),
-                                                    sample_rate: device_info.as_ref().map(|d| d.sample_rate),
-                                                    channels: device_info.as_ref().map(|d| d.channels),
-                                                }));
+                                                // Response was already sent at the beginning
                                                 
                                                 // Fire-and-forget: Process whisper logs to database (development convenience)
-                                                if let Some(log_path) = active_recording.whisper_log_path {
-                                                    let session_id = active_recording.session_id.clone();
+                                                if let Some(_log_path) = whisper_log_path_clone {
+                                                    let session_id = session_id_clone.clone();
                                                     let transcript_id = transcript.id;
-                                                    let db_clone = database.clone();
+                                                    let db_clone = database_clone.clone();
                                                     
                                                     tokio::spawn(async move {
                                                         debug(Component::Recording, &format!("Processing whisper logs for session {} in background", session_id));
@@ -526,71 +534,38 @@ impl RecordingWorkflow {
                                                     });
                                                 } else {
                                                     // Just end the session if we have one
-                                                    whisper_logger::end_whisper_session(&active_recording.session_id);
+                                                    whisper_logger::end_whisper_session(&session_id_clone);
                                                 }
                                             }
                                             Err(e) => {
                                                 error(Component::Processing, &format!("Failed to save transcript: {}", e));
-                                                progress_tracker.update(RecordingProgress::Idle);
-                                                let _ = response.send(Err(format!("Failed to save transcript: {}", e)));
+                                                // Response was already sent at the beginning
                                             }
                                         }
-                                        continue;
                                     }
                                     Ok(Err(e)) => {
                                         error(Component::Transcription, &format!("Transcription failed: {}", e));
-                                        info(Component::Transcription, "Falling back to traditional processing queue");
+                                        info(Component::Transcription, "Would fall back to processing queue, but we already sent response");
                                         
                                         // Log failure metrics for debugging
-                                        let fallback_duration = active_recording.start_time.elapsed();
+                                        let fallback_duration = recording_start_time.elapsed();
                                         info(Component::Transcription, "=== FALLBACK PERFORMANCE METRICS ===");
                                         info(Component::Transcription, &format!("Recording Duration: {:.2}s", fallback_duration.as_secs_f64()));
                                         error(Component::Transcription, "Strategy Failed: ring_buffer");
                                         error(Component::Transcription, &format!("Reason: {}", e));
                                         info(Component::Transcription, "Falling back to: traditional processing queue");
                                         info(Component::Transcription, "=======================================");
-                                        
-                                        // Fall back to traditional processing queue
                                     }
                                     Err(_) => {
                                         error(Component::Transcription, "Transcription timeout after 45 seconds!");
-                                        info(Component::Transcription, "Falling back to traditional processing queue");
-                                        
-                                        // Update to idle state on timeout
-                                        progress_tracker.update(RecordingProgress::Idle);
-                                        
-                                        // Fall back to traditional processing queue
+                                        info(Component::Transcription, "Would fall back to processing queue, but we already sent response");
                                     }
-                                }
+                                    }
+                                });
+                            } else {
+                                // No transcription context - just end whisper session if we have one
+                                whisper_logger::end_whisper_session(&active_recording.session_id);
                             }
-                            
-                            // Fallback: Use traditional processing queue
-                            let audio_path = recordings_dir.join(&active_recording.filename);
-                            let job = ProcessingJob {
-                                filename: active_recording.filename.clone(),
-                                audio_path,
-                                duration_ms,
-                                app_handle: Some(app_handle.clone()),
-                                queue_entry_time: tokio::time::Instant::now(),
-                                user_stop_time: Some(tokio::time::Instant::now()), // Recording just stopped
-                                app_context: active_recording.app_context.clone(),
-                            };
-                            
-                            // Queue the job for processing
-                            let _ = processing_queue.queue_job(job).await;
-                            
-                            // Update to idle state immediately - recording is done
-                            progress_tracker.update(RecordingProgress::Idle);
-                            
-                            // Send immediate response with device metadata
-                            let _ = response.send(Ok(RecordingResult {
-                                filename: active_recording.filename,
-                                transcript: None,
-                                duration_ms,
-                                device_name: device_info.as_ref().map(|d| d.name.clone()),
-                                sample_rate: device_info.as_ref().map(|d| d.sample_rate),
-                                channels: device_info.as_ref().map(|d| d.channels),
-                            }));
                         } else {
                             let _ = response.send(Err("No recording in progress".to_string()));
                         }
@@ -613,13 +588,13 @@ impl RecordingWorkflow {
                             }
                             
                             // Delete the recording file
-                            let audio_path = recordings_dir.join(&active_recording.filename);
+                            let audio_path = recordings_dir_for_iter.join(&active_recording.filename);
                             if let Err(e) = tokio::fs::remove_file(&audio_path).await {
                                 error(Component::Recording, &format!("Failed to delete cancelled recording: {}", e));
                             }
                             
                             // Update to idle state
-                            progress_tracker.update(RecordingProgress::Idle);
+                            progress_tracker_for_iter.update(RecordingProgress::Idle);
                             
                             let _ = response.send(Ok(()));
                         } else {

@@ -2,11 +2,11 @@ use std::fs::{File, OpenOptions, create_dir_all};
 use std::io::{Write, BufWriter};
 use std::sync::{Arc, Mutex};
 use std::path::{Path, PathBuf};
-use chrono::{Local, DateTime};
+use chrono::{Local, DateTime, Timelike};
 use once_cell::sync::Lazy;
 use serde::{Serialize, Deserialize};
 
-use crate::logger::{info, debug, warn, error, Component};
+use crate::logger::{info, debug, Component};
 
 // Global whisper session logger
 static WHISPER_SESSION_LOGGER: Lazy<Arc<Mutex<WhisperSessionLogger>>> = Lazy::new(|| {
@@ -15,7 +15,7 @@ static WHISPER_SESSION_LOGGER: Lazy<Arc<Mutex<WhisperSessionLogger>>> = Lazy::ne
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WhisperLogEntry {
-    pub timestamp: DateTime<Local>,
+    pub timestamp: String,  // Store as RFC3339 string for SQLite compatibility
     pub level: String,
     pub component: String,
     pub message: String,
@@ -83,10 +83,14 @@ pub fn start_whisper_session(session_id: &str) -> Result<PathBuf, String> {
     writeln!(writer, "=== Whisper Session '{}' Started at {} ===", 
              session_id, start_time.format("%Y-%m-%d %H:%M:%S"))
         .map_err(|e| format!("Failed to write header: {}", e))?;
-    writeln!(writer, "Session ID: {}", session_id)?;
-    writeln!(writer, "Log Format: [timestamp] [level] [component] message")?;
-    writeln!(writer, "===\n")?;
-    writer.flush()?;
+    writeln!(writer, "Session ID: {}", session_id)
+        .map_err(|e| e.to_string())?;
+    writeln!(writer, "Log Format: [timestamp] [level] [component] message")
+        .map_err(|e| e.to_string())?;
+    writeln!(writer, "===\n")
+        .map_err(|e| e.to_string())?;
+    writer.flush()
+        .map_err(|e| e.to_string())?;
     
     let session = WhisperSession {
         session_id: session_id.to_string(),
@@ -131,8 +135,9 @@ pub fn end_whisper_session(session_id: &str) -> Option<PathBuf> {
 }
 
 pub fn write_whisper_log(session_id: &str, level: &str, component: &str, message: &str, metadata: Option<serde_json::Value>) {
+    let now = Local::now();
     let entry = WhisperLogEntry {
-        timestamp: Local::now(),
+        timestamp: now.to_rfc3339(),
         level: level.to_string(),
         component: component.to_string(),
         message: message.to_string(),
@@ -144,7 +149,7 @@ pub fn write_whisper_log(session_id: &str, level: &str, component: &str, message
             // Format: [HH:MM:SS.mmm] [LEVEL] [COMPONENT] message
             let formatted = format!(
                 "[{}] [{}] [{}] {}",
-                entry.timestamp.format("%H:%M:%S%.3f"),
+                now.format("%H:%M:%S%.3f"),
                 entry.level,
                 entry.component,
                 entry.message
@@ -184,7 +189,7 @@ pub fn capture_whisper_output(session_id: &str, output: &str) {
 }
 
 pub fn close_all_sessions() {
-    if let Ok(mut logger) = WHISPER_SESSION_LOGGER.lock() {
+    if let Ok(logger) = WHISPER_SESSION_LOGGER.lock() {
         let session_ids: Vec<String> = logger.active_sessions.keys().cloned().collect();
         
         for session_id in session_ids {
@@ -226,6 +231,8 @@ pub async fn process_whisper_logs_to_db(
     // Batch insert into database
     if !entries.is_empty() {
         db.insert_whisper_logs(entries).await?;
+    } else {
+        debug(Component::Recording, "No whisper log entries to process");
     }
     
     // Optionally delete the log file after processing
@@ -241,17 +248,31 @@ fn parse_log_line(line: &str) -> Option<WhisperLogEntry> {
         return None;
     }
     
-    let timestamp_str = parts[0].trim_start_matches('[');
-    let level = parts[1].trim().trim_start_matches('[');
+    let _timestamp_str = parts[0].trim_start_matches('[');
+    let level_raw = parts[1].trim().trim_start_matches('[');
     let component = parts[2].trim().trim_start_matches('[');
     let message = parts[3].trim();
+    
+    // Validate and normalize log level to match DB constraint
+    let level = match level_raw.to_uppercase().as_str() {
+        "DEBUG" => "DEBUG",
+        "INFO" => "INFO",
+        "WARN" | "WARNING" => "WARN",
+        "ERROR" | "ERR" => "ERROR",
+        _ => return None, // Skip entries with invalid log levels
+    };
+    
+    // Skip header/footer lines
+    if line.starts_with("===") || line.starts_with("Session ID:") || line.starts_with("Log Format:") {
+        return None;
+    }
     
     // For now, use current date with parsed time
     let now = Local::now();
     let timestamp = now.with_hour(0)?.with_minute(0)?.with_second(0)?;
     
     Some(WhisperLogEntry {
-        timestamp,
+        timestamp: timestamp.to_rfc3339(),
         level: level.to_string(),
         component: component.to_string(),
         message: message.to_string(),

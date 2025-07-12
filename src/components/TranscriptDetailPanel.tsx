@@ -59,7 +59,9 @@ export function TranscriptDetailPanel({
     const [loadingMetrics, setLoadingMetrics] = useState(false);
     const [metricsError, setMetricsError] = useState<string | null>(null);
     const [showOriginalTranscript, setShowOriginalTranscript] = useState(false);
-    const [activeTab, setActiveTab] = useState<'transcript' | 'insights'>('transcript');
+    const [activeTab, setActiveTab] = useState<'transcript' | 'insights' | 'logs'>('transcript');
+    const [whisperLogs, setWhisperLogs] = useState<any[]>([]);
+    const [loadingLogs, setLoadingLogs] = useState(false);
 
     // Handle ESC key to close panel and manage player rendering
     useEffect(() => {
@@ -126,6 +128,37 @@ export function TranscriptDetailPanel({
             });
         }
     }, [isOpen, transcript?.id]);
+
+    // Fetch whisper logs when logs tab is active
+    useEffect(() => {
+        if (isOpen && transcript && activeTab === 'logs') {
+            // Extract session ID from created_at timestamp
+            // Convert ISO timestamp to session ID format: YYYYMMDD_HHMMSS
+            const date = new Date(transcript.created_at);
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const seconds = String(date.getSeconds()).padStart(2, '0');
+            const sessionId = `${year}${month}${day}_${hours}${minutes}${seconds}`;
+            
+            setLoadingLogs(true);
+            setWhisperLogs([]);
+            
+            invoke<any[]>('get_whisper_logs_for_session', {
+                sessionId: sessionId,
+                limit: 1000
+            }).then((logs) => {
+                setWhisperLogs(logs);
+            }).catch((error) => {
+                console.error('Failed to fetch whisper logs:', error);
+                setWhisperLogs([]);
+            }).finally(() => {
+                setLoadingLogs(false);
+            });
+        }
+    }, [isOpen, transcript?.id, activeTab]);
 
     const handleExport = (format: 'json' | 'markdown' | 'text') => {
         onExport([transcript!], format);
@@ -347,6 +380,12 @@ export function TranscriptDetailPanel({
                         >
                             AI Insights
                         </button>
+                        <button
+                            className={`tab-button ${activeTab === 'logs' ? 'active' : ''}`}
+                            onClick={() => setActiveTab('logs')}
+                        >
+                            Whisper Logs
+                        </button>
                     </div>
 
                     {activeTab === 'transcript' && (
@@ -398,6 +437,42 @@ export function TranscriptDetailPanel({
                     {activeTab === 'insights' && (
                         <div className="detail-insights">
                             <TranscriptAIInsights transcriptId={transcript.id} />
+                        </div>
+                    )}
+
+                    {activeTab === 'logs' && (
+                        <div className="detail-logs">
+                            <div className="logs-header">
+                                <h3>Whisper Transcription Logs</h3>
+                                <p className="logs-description">Detailed logs from the Whisper transcription process</p>
+                            </div>
+                            
+                            {loadingLogs ? (
+                                <div className="logs-loading">Loading logs...</div>
+                            ) : whisperLogs.length === 0 ? (
+                                <div className="logs-empty">
+                                    <p>No whisper logs found for this transcript.</p>
+                                    <p className="logs-hint">Logs are only available for recent recordings with whisper logging enabled.</p>
+                                </div>
+                            ) : (
+                                <div className="logs-content">
+                                    {whisperLogs.map((log, index) => (
+                                        <div key={index} className={`log-entry log-${log.level.toLowerCase()}`}>
+                                            <div className="log-header">
+                                                <span className="log-timestamp">{new Date(log.timestamp).toLocaleTimeString()}</span>
+                                                <span className="log-level">{log.level}</span>
+                                                <span className="log-component">{log.component}</span>
+                                            </div>
+                                            <div className="log-message">{log.message}</div>
+                                            {log.metadata && (
+                                                <div className="log-metadata">
+                                                    <pre>{JSON.stringify(log.metadata, null, 2)}</pre>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     )}
 
