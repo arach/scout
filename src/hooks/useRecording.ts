@@ -294,12 +294,17 @@ export function useRecording(options: UseRecordingOptions = {}) {
           if (!recordingStartTime) {
             recordingStartTime = event.payload.Recording.start_time;
             
-            // Update duration every 100ms
+            // Set initial duration immediately
+            const now = Date.now();
+            const duration = now - recordingStartTime;
+            setRecordingDuration(duration);
+            
+            // Update duration every 1000ms to avoid jumpy display
             durationInterval = setInterval(() => {
               const now = Date.now();
               const duration = now - recordingStartTime!;
               setRecordingDuration(duration);
-            }, 100);
+            }, 1000);
           }
         } else if (event.payload.Idle || event.payload.Stopping) {
           // Stop tracking duration
