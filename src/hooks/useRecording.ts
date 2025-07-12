@@ -52,8 +52,26 @@ export function useRecording(options: UseRecordingOptions = {}) {
 
   // Start recording
   const startRecording = useCallback(async () => {
-    if (isStartingRecording.current || isRecordingRef.current) {
-      console.log('Recording already in progress or starting');
+    if (isStartingRecording.current) {
+      console.log('Already starting recording, ignoring');
+      return;
+    }
+
+    // Check backend state first
+    try {
+      const backendIsRecording = await invoke<boolean>('is_recording');
+      if (backendIsRecording) {
+        console.log('Backend is already recording, syncing frontend state');
+        setIsRecording(true);
+        isRecordingRef.current = true;
+        return;
+      }
+    } catch (error) {
+      console.error('Failed to check recording state:', error);
+    }
+
+    if (isRecordingRef.current) {
+      console.log('Frontend thinks we are already recording');
       return;
     }
 
@@ -77,10 +95,17 @@ export function useRecording(options: UseRecordingOptions = {}) {
           console.error('Failed to play start sound:', error);
         }
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to start recording:', error);
-      setIsRecording(false);
-      isRecordingRef.current = false;
+      // If the error is "Recording already in progress", sync our state
+      if (error.includes && error.includes('already in progress')) {
+        console.log('Backend says recording in progress, syncing state');
+        setIsRecording(true);
+        isRecordingRef.current = true;
+      } else {
+        setIsRecording(false);
+        isRecordingRef.current = false;
+      }
     } finally {
       isStartingRecording.current = false;
     }
@@ -176,6 +201,32 @@ export function useRecording(options: UseRecordingOptions = {}) {
   // Set up event listeners
   useEffect(() => {
     const setupListeners = async () => {
+      // Listen for recording state changes from backend
+      const unsubscribeRecordingState = await listen("recording-state-changed", (event: any) => {
+        const { state } = event.payload;
+        
+        if (state === "recording") {
+          // Backend says we're recording
+          if (!isRecordingRef.current) {
+            console.log('Backend started recording, updating frontend state');
+            setIsRecording(true);
+            isRecordingRef.current = true;
+            setRecordingDuration(0);
+          }
+        } else if (state === "stopped") {
+          // Backend says we've stopped
+          if (isRecordingRef.current) {
+            console.log('Backend stopped recording, updating frontend state');
+            setIsRecording(false);
+            isRecordingRef.current = false;
+            setRecordingDuration(0);
+            audioTargetRef.current = 0;
+            audioCurrentRef.current = 0;
+            setAudioLevel(0);
+          }
+        }
+      });
+
       const unsubscribeProgress = await listen<RecordingProgress>('recording-progress', (event) => {
         if (event.payload.status === 'recording') {
           setRecordingDuration(event.payload.duration);
@@ -197,6 +248,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
       });
 
       return () => {
+        unsubscribeRecordingState();
         unsubscribeProgress();
         unsubscribeAudioLevel();
         unsubscribePushToTalkPressed();
