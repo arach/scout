@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from "react";
-import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -11,6 +10,7 @@ import { TranscriptsView } from "./components/TranscriptsView";
 import { SettingsView } from "./components/SettingsView";
 import { ChevronRight, PanelLeftClose } from 'lucide-react';
 import { LLMSettings as LLMSettingsType } from './types/llm';
+import { useRecording } from './hooks/useRecording';
 import "./App.css";
 
 interface Transcript {
@@ -28,17 +28,12 @@ type View = 'record' | 'transcripts' | 'settings';
 
 function App() {
   const { isExpanded: isSidebarExpanded, toggleExpanded: toggleSidebar } = useSidebarState();
-  const [isRecording, setIsRecording] = useState(false);
-  const [, setCurrentRecordingFile] = useState<string | null>(null);
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
-  const [, setCurrentTranscript] = useState<string>("");
-  const [recordingDuration, setRecordingDuration] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [vadEnabled, setVadEnabled] = useState(false);
   const [selectedMic, setSelectedMic] = useState<string>('Default microphone');
   
   const [isProcessing, setIsProcessing] = useState(false);
-  const [, setShowSuccess] = useState(false);
   const [hotkey, setHotkey] = useState("CmdOrCtrl+Shift+Space");
   const [pushToTalkHotkey, setPushToTalkHotkey] = useState("CmdOrCtrl+Shift+P");
   const [isCapturingHotkey, setIsCapturingHotkey] = useState(false);
@@ -51,9 +46,7 @@ function App() {
     transcriptText: string;
     isBulk: boolean;
   }>({ show: false, transcriptId: null, transcriptText: "", isBulk: false });
-  const lastToggleTimeRef = useRef(0);
   const [hotkeyUpdateStatus, setHotkeyUpdateStatus] = useState<'idle' | 'success' | 'error'>('idle');
-  const isRecordingRef = useRef(false); // Add ref to track recording state
   const [overlayPosition, setOverlayPosition] = useState<string>('top-center');
   const [isDragging, setIsDragging] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{
@@ -64,20 +57,12 @@ function App() {
     progress?: number;
   }>({ status: 'idle' });
   const [showFirstRun, setShowFirstRun] = useState(false);
-  const [overlayType, setOverlayType] = useState<'tauri' | 'native'>('tauri');
   const [currentView, setCurrentView] = useState<View>('record');
   const [sessionStartTime] = useState(() => new Date().toISOString());
   const [autoCopy, setAutoCopy] = useState(false);
   const [autoPaste, setAutoPaste] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
-  const [audioLevel, setAudioLevel] = useState(0);
-  const audioTargetRef = useRef(0);
-  const audioCurrentRef = useRef(0);
   const processingFileRef = useRef<string | null>(null); // Track file being processed to prevent duplicates
-  const lastPushToTalkTimeRef = useRef(0);
-  const isStartingRecording = useRef(false); // Prevent multiple simultaneous start attempts
-  const pushToTalkTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const pushToTalkStartTimeRef = useRef<number>(0);
   const keyboardMonitorAvailable = useRef(true);
   const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const processingStartTimeRef = useRef<number>(0);
@@ -106,10 +91,30 @@ function App() {
     enabled_prompts: ['summarize', 'bullet_points', 'action_items', 'fix_grammar']
   });
 
-  // Keep ref in sync with state
-  useEffect(() => {
-    isRecordingRef.current = isRecording;
-  }, [isRecording]);
+  // Use the recording hook
+  const { 
+    isRecording, 
+    recordingDuration, 
+    audioLevel, 
+    toggleRecording,
+    startRecording,
+    stopRecording,
+    cancelRecording 
+  } = useRecording({
+    onTranscriptCreated: () => {
+      if (currentView === 'record') {
+        loadRecentTranscripts();
+      }
+    },
+    onRecordingComplete: () => {
+      setIsProcessing(true);
+      // Reset processing timeout tracking
+      processingStartTimeRef.current = Date.now();
+    },
+    soundEnabled,
+    selectedMic,
+    vadEnabled
+  });
 
   useEffect(() => {
     // Check if we have any models
@@ -180,10 +185,8 @@ function App() {
       // Check the actual recording state from backend
       const isCurrentlyRecording = await invoke<boolean>("is_recording");
       if (isCurrentlyRecording) {
-        // Cancel the recording without processing
-        setIsRecording(false);
-        isRecordingRef.current = false;
-        await invoke('cancel_recording');
+        // Cancel the recording using the hook
+        await cancelRecording();
       }
     });
     
@@ -221,11 +224,7 @@ function App() {
       setPushToTalkHotkey(savedHotkey);
     });
     
-    // Load overlay type preference
-    const savedOverlayType = localStorage.getItem('scout-overlay-type');
-    if (savedOverlayType === 'native' || savedOverlayType === 'tauri') {
-      setOverlayType(savedOverlayType);
-    }
+    // Overlay type preference removed - now handled by backend
     
     // Load theme preference
     const savedTheme = localStorage.getItem('scout-theme');
@@ -268,143 +267,11 @@ function App() {
     
     // Listen for global hotkey events
     const unsubscribe = listen('toggle-recording', async () => {
-      // Debounce to prevent rapid toggles
-      const now = Date.now();
-      if (now - lastToggleTimeRef.current < 300) {
-        return;
-      }
-      lastToggleTimeRef.current = now;
-      
-      // Check the actual recording state from the backend
-      try {
-        const recording = await invoke<boolean>("is_recording");
-        if (recording) {
-          stopRecording();
-        } else {
-          startRecording();
-        }
-      } catch (error) {
-        console.error("Failed to check recording state:", error);
-      }
+      await toggleRecording();
     });
     
-    // Listen for push-to-talk events
-    const unsubscribePushToTalk = listen('push-to-talk-pressed', async () => {
-      // Debounce to prevent rapid push-to-talk triggers
-      const now = Date.now();
-      if (now - lastPushToTalkTimeRef.current < 500) { // 500ms debounce for push-to-talk
-        console.log('Push-to-talk ignored due to debouncing');
-        return;
-      }
-      lastPushToTalkTimeRef.current = now;
-      
-      try {
-        const recording = await invoke<boolean>("is_recording");
-        console.log('Push-to-talk triggered, currently recording:', recording);
-        
-        if (recording) {
-          // If already recording, stop immediately (second press)
-          console.log('Stopping push-to-talk recording (manual stop)');
-          stopRecording();
-        } else {
-          // Start recording
-          console.log('Starting push-to-talk recording');
-          startRecording();
-          
-          // Track when push-to-talk started
-          pushToTalkStartTimeRef.current = Date.now();
-          
-          // If keyboard monitor is not available, use a fallback timer
-          if (!keyboardMonitorAvailable.current) {
-            console.log('Using fallback timer for push-to-talk (30 seconds max)');
-            
-            // Clear any existing timeout
-            if (pushToTalkTimeoutRef.current) {
-              clearTimeout(pushToTalkTimeoutRef.current);
-            }
-            
-            // Set a maximum recording time of 30 seconds for push-to-talk without key release detection
-            pushToTalkTimeoutRef.current = setTimeout(() => {
-              console.log('Push-to-talk timeout reached, stopping recording');
-              stopRecording();
-              pushToTalkTimeoutRef.current = null;
-            }, 30000);
-          }
-        }
-      } catch (error) {
-        console.error("Failed to handle push-to-talk:", error);
-      }
-    });
     
-    // Listen for push-to-talk release events
-    const unsubscribePushToTalkRelease = listen('push-to-talk-released', async () => {
-      console.log('🔔 Push-to-talk key released at', new Date().toISOString());
-      
-      // Clear any fallback timeout
-      if (pushToTalkTimeoutRef.current) {
-        clearTimeout(pushToTalkTimeoutRef.current);
-        pushToTalkTimeoutRef.current = null;
-      }
-      
-      try {
-        const recording = await invoke<boolean>("is_recording");
-        console.log('🎯 Is recording check:', recording);
-        if (recording || isRecordingRef.current) {
-          const recordingDuration = Date.now() - pushToTalkStartTimeRef.current;
-          console.log(`🛍️ Stopping recording on push-to-talk release (duration: ${recordingDuration}ms)`);
-          stopRecording();
-        } else {
-          console.log('🔍 Not recording, ignoring key release');
-        }
-      } catch (error) {
-        console.error("❌ Failed to handle push-to-talk release:", error);
-        // Try to stop anyway if we think we're recording
-        if (isRecordingRef.current) {
-          console.log('🆘 Attempting emergency stop due to error');
-          stopRecording();
-        }
-      }
-    });
     
-    // Listen for recording progress updates
-    const unsubscribeProgress = listen('recording-progress', (event) => {
-      const progress = event.payload as any;
-      console.log('Recording progress update:', progress);
-      
-      // Update UI based on progress
-      if (progress.Complete) {
-        // Recording complete, transcript available
-        console.log('🎯 Clearing processing state from recording-progress Complete');
-        if (processingTimeoutRef.current) {
-          clearTimeout(processingTimeoutRef.current);
-          processingTimeoutRef.current = null;
-        }
-        setIsProcessing(false);
-        loadRecentTranscripts();
-      } else if (progress.Failed) {
-        // Recording failed
-        console.log('❌ Clearing processing state from recording-progress Failed');
-        if (processingTimeoutRef.current) {
-          clearTimeout(processingTimeoutRef.current);
-          processingTimeoutRef.current = null;
-        }
-        setIsProcessing(false);
-        console.error("Recording failed:", progress.Failed);
-      } else if (progress.Processing || progress.Transcribing) {
-        // Still processing
-        setIsProcessing(true);
-      } else if (progress.Idle) {
-        // Recording has stopped, but processing might continue in background
-        console.log('Recording workflow is idle');
-        // For Idle state after Stopping, also clear processing  
-        console.log('🎯 Clearing processing state from recording-progress Idle');
-        if (processingTimeoutRef.current) {
-          clearTimeout(processingTimeoutRef.current);
-          processingTimeoutRef.current = null;
-        }
-        setIsProcessing(false);
-      }
-    });
     
     // Listen for processing status updates from the background queue
     const unsubscribeProcessing = listen('processing-status', (event) => {
@@ -438,8 +305,6 @@ function App() {
       } else if (status.Complete) {
         // Transcription complete, refresh the transcript list
         loadRecentTranscripts();
-        setShowSuccess(true);
-        setTimeout(() => setShowSuccess(false), 2000);
         setUploadProgress({ status: 'idle' });
         if (processingTimeoutRef.current) {
           clearTimeout(processingTimeoutRef.current);
@@ -479,27 +344,7 @@ function App() {
       }));
     });
     
-    // Listen for recording state changes from backend
-    const unsubscribeRecordingState = listen("recording-state-changed", (event: any) => {
-      const { state, filename } = event.payload;
-      
-      if (state === "recording") {
-        // Only update if not already recording (avoid unnecessary re-renders)
-        if (!isRecordingRef.current) {
-          setIsRecording(true);
-          isRecordingRef.current = true;
-          setCurrentTranscript("");
-          setCurrentRecordingFile(filename || null);
-          (window as any).__recordingStartTime = Date.now();
-        }
-      } else if (state === "stopped") {
-        // Only update if currently recording (avoid unnecessary re-renders)
-        if (isRecordingRef.current) {
-          setIsRecording(false);
-          isRecordingRef.current = false;
-        }
-      }
-    });
+    // Recording state is now managed by the useRecording hook
     
     // Set up Tauri file drop handling for the entire window
     let unsubscribeFileDrop: (() => void) | undefined;
@@ -537,7 +382,6 @@ function App() {
               // Mark this file as being processed
               processingFileRef.current = filePath;
               setIsProcessing(true);
-              setShowSuccess(false);
               
               const filename = filePath.split('/').pop() || 'audio file';
               setUploadProgress({
@@ -596,8 +440,6 @@ function App() {
         processingTimeoutRef.current = null;
       }
       setIsProcessing(false);
-      setShowSuccess(true);
-      setTimeout(() => setShowSuccess(false), 2000);
       
       // Handle auto-copy if enabled
       if (autoCopy && newTranscript.text) {
@@ -666,7 +508,6 @@ function App() {
         processingTimeoutRef.current = null;
       }
       setIsProcessing(false);
-      setShowSuccess(true);
       
       // Ensure transcript is in the list
       setTranscripts(prev => {
@@ -700,12 +541,8 @@ function App() {
 
     return () => {
       unsubscribe.then(fn => fn());
-      unsubscribePushToTalk.then(fn => fn());
-      unsubscribePushToTalkRelease.then(fn => fn());
-      unsubscribeProgress.then(fn => fn());
       unsubscribeProcessing.then(fn => fn());
       unsubscribeFileUpload.then(fn => fn());
-      unsubscribeRecordingState.then(fn => fn());
       unsubscribeNativeStart.then(fn => fn());
       unsubscribeNativeStop.then(fn => fn());
       unsubscribeNativeCancel.then(fn => fn());
@@ -720,21 +557,7 @@ function App() {
     };
   }, []); // Empty dependency array since we're checking state from backend
 
-  useEffect(() => {
-    let interval: number;
-    if (isRecording) {
-      const startTime = Date.now();
-      interval = setInterval(() => {
-        setRecordingDuration(Date.now() - startTime);
-      }, 100) as unknown as number;
-    } else {
-      setRecordingDuration(0);
-    }
-    
-    return () => {
-      clearInterval(interval);
-    };
-  }, [isRecording]);
+  // Recording duration is now managed by the useRecording hook
 
   // Load appropriate transcripts based on current view
   useEffect(() => {
@@ -745,129 +568,8 @@ function App() {
     }
   }, [currentView]);
 
-  // Smooth audio level monitoring with organic motion
-  useEffect(() => {
-    if (currentView !== 'record') return;
-    
-    let interval: number;
-    let animationFrame: number;
-    let isActive = true;
-    
-    // Smooth interpolation with organic random motion
-    const animate = () => {
-      if (!isActive) return;
-      
-      const target = audioTargetRef.current;
-      const current = audioCurrentRef.current;
-      const diff = target - current;
-      
-      // Very fast movement toward target for immediate response
-      const speed = 0.3; // Much faster for more direct, immediate feel
-      let newLevel = current + (diff * speed);
-      
-      // Add organic motion when there's audio - more vibrant
-      if (target > 0.02) {
-        // Layered organic motion for more natural feel
-        const flutter = (Math.random() - 0.5) * target * 0.12; // Increased flutter
-        const shimmer = Math.sin(Date.now() * 0.007) * target * 0.04; // Fast shimmer
-        const pulse = Math.sin(Date.now() * 0.003) * target * 0.06; // Slower pulse
-        newLevel += flutter + shimmer + pulse;
-      }
-      
-      // More pronounced breathing when silent - makes it feel alive
-      const breathingMotion = Math.sin(Date.now() * 0.0015) * 0.015; // Slightly stronger
-      newLevel += breathingMotion;
-      
-      // Natural capping at 1.0, no artificial bounds
-      audioCurrentRef.current = Math.max(0, Math.min(newLevel, 1.0));
-      setAudioLevel(audioCurrentRef.current);
-      animationFrame = requestAnimationFrame(animate);
-    };
-    
-    const startMonitoring = async () => {
-      try {
-        // Start monitoring first
-        await invoke('start_audio_level_monitoring', { 
-          deviceName: selectedMic === 'Default microphone' ? null : selectedMic 
-        });
-        
-        // Start smooth animation
-        animate();
-        
-        // Sample every 150ms for maximum responsiveness - let it rip!
-        interval = setInterval(async () => {
-          try {
-            const level = await invoke<number>('get_current_audio_level');
-            
-            // More voracious processing like before
-            let processed = 0;
-            if (level > 0.12) {
-              processed = (level - 0.12) * 1.5; // More amplification
-            }
-            
-            // Add bit of raw signal for organic movement
-            processed += level * 0.08; // More jitter for liveliness
-            
-            // Set target - animation will smoothly move toward it
-            audioTargetRef.current = Math.min(processed, 1.0);
-          } catch (error) {
-            console.error('Audio level polling failed:', error);
-            audioTargetRef.current = 0;
-          }
-        }, 150) as unknown as number;
-      } catch (error) {
-        console.error('Failed to start audio monitoring:', error);
-      }
-    };
-    
-    startMonitoring();
-    
-    return () => {
-      isActive = false;
-      if (interval) clearInterval(interval);
-      if (animationFrame) cancelAnimationFrame(animationFrame);
-      invoke('stop_audio_level_monitoring').catch(() => {});
-      audioTargetRef.current = 0;
-      audioCurrentRef.current = 0;
-      setAudioLevel(0);
-    };
-  }, [currentView, selectedMic]);
 
 
-  // Periodically sync recording state with backend to ensure consistency
-  useEffect(() => {
-    const syncInterval = setInterval(async () => {
-      try {
-        // Skip sync if we're in the middle of processing or starting/stopping
-        if (isProcessing || isStartingRecording.current) {
-          return;
-        }
-        
-        const backendIsRecording = await invoke<boolean>("is_recording");
-        
-        // Only sync if there's a real mismatch and we're not in a transitional state
-        if (backendIsRecording !== isRecordingRef.current && !isProcessing) {
-          console.log(`📊 State sync: backend=${backendIsRecording}, frontend=${isRecordingRef.current}`);
-          
-          // Only sync from backend to frontend, never restart recording automatically
-          if (!backendIsRecording && isRecordingRef.current) {
-            // Backend stopped but frontend still thinks it's recording
-            setIsRecording(false);
-            isRecordingRef.current = false;
-            setIsProcessing(false); // Clear any stuck processing state
-          } else if (backendIsRecording && !isRecordingRef.current) {
-            // Backend is recording but frontend doesn't know - this is OK during transitions
-            // Don't automatically sync this case as it could cause loops
-            console.log('⚠️ Backend recording but frontend not aware - skipping auto-sync to prevent loops');
-          }
-        }
-      } catch (error) {
-        // Silent fail - state sync is not critical
-      }
-    }, 2000); // Check every 2 seconds to reduce overhead
-    
-    return () => clearInterval(syncInterval);
-  }, [isProcessing]); // Add isProcessing dependency
 
   const loadRecentTranscripts = async () => {
     try {
@@ -888,147 +590,8 @@ function App() {
     }
   };
 
-  const startRecording = async () => {
-    // Prevent starting if already recording or in the process of starting
-    if (isRecordingRef.current || isStartingRecording.current) {
-      console.log('Start recording blocked - already recording or starting');
-      return;
-    }
-    
-    isStartingRecording.current = true;
-    
-    // IMMEDIATELY update UI for instant feedback - using flushSync to force synchronous update
-    flushSync(() => {
-      setIsRecording(true);
-      setCurrentTranscript("");
-    });
-    
-    isRecordingRef.current = true;
-    (window as any).__recordingStartTime = Date.now();
-    
-    // Start the backend recording asynchronously
-    try {
-      const filename = await invoke<string>("start_recording", { 
-        deviceName: selectedMic === 'Default microphone' ? null : selectedMic 
-      });
-      setCurrentRecordingFile(filename);
-      isStartingRecording.current = false; // Reset flag on success
-      
-      // Native overlay state is managed by the backend
-      if (overlayType === 'native') {
-        
-      }
-    } catch (error) {
-      console.error("Failed to start recording:", error);
-      // Revert UI state on error
-      flushSync(() => {
-        setIsRecording(false);
-      });
-      isRecordingRef.current = false;
-      isStartingRecording.current = false; // Reset flag on error
-    }
-  };
 
-  const stopRecording = async () => {
-    // Prevent stopping if not recording
-    if (!isRecordingRef.current) {
-      return;
-    }
-    
-    // Clear any push-to-talk timeout
-    if (pushToTalkTimeoutRef.current) {
-      clearTimeout(pushToTalkTimeoutRef.current);
-      pushToTalkTimeoutRef.current = null;
-    }
-    
-    // Clear the starting flag to prevent any race conditions
-    isStartingRecording.current = false;
-    
-    // IMMEDIATELY update UI for instant feedback - using flushSync for synchronous update
-    flushSync(() => {
-      setIsRecording(false);
-    });
-    isRecordingRef.current = false;
-    
-    // Set processing state immediately
-    setIsProcessing(true);
-    processingStartTimeRef.current = Date.now();
-    console.log("🎬 Set processing state to true at", new Date().toISOString());
-    
-    // Add a timeout to prevent getting stuck in processing state
-    processingTimeoutRef.current = setTimeout(() => {
-      console.warn("⚠️ Processing timeout - clearing processing state after 10 seconds");
-      setIsProcessing(false);
-      processingTimeoutRef.current = null;
-    }, 10000); // 10 second timeout
-    
-    // Stop the backend recording and wait for result
-    try {
-      console.log("🛑 Calling stop_recording...");
-      const result = await invoke("stop_recording");
-      console.log("✅ Recording stopped, result:", result);
-      console.log("📊 Result type:", typeof result);
-      console.log("📊 Result keys:", result ? Object.keys(result) : 'null');
-      
-      // If we got a transcript immediately (ring buffer strategy), handle it
-      if (result && (result as any).transcript) {
-        console.log("📝 Got immediate transcript from ring buffer:", {
-          transcript: (result as any).transcript?.substring(0, 100) + '...',
-          transcriptLength: (result as any).transcript?.length,
-          filename: (result as any).filename,
-          duration_ms: (result as any).duration_ms
-        });
-        // Clear the processing state immediately since transcription is done
-        if (processingTimeoutRef.current) {
-          clearTimeout(processingTimeoutRef.current);
-          processingTimeoutRef.current = null;
-        }
-        setIsProcessing(false);
-        setShowSuccess(true);
-        
-        // Force refresh transcripts in case event was missed
-        setTimeout(() => {
-          console.log('🔄 Force refreshing transcripts after immediate result');
-          loadRecentTranscripts();
-        }, 100);
-        // Clear processing state immediately - transcription is done
-        console.log("🎯 Clearing processing state immediately at", new Date().toISOString());
-        setIsProcessing(false);
-        setShowSuccess(true);
-        // The transcript-created event will update the transcript list
-      } else {
-        console.log("⏳ No immediate transcript, waiting for processing events...");
-        // We'll stay in processing state until we get a transcript-created or processing-status event
-        // The timeout will clear the state if we don't get an event within 10 seconds
-      }
-    } catch (error) {
-      console.error("❌ Failed to stop recording:", error);
-      if (processingTimeoutRef.current) {
-        clearTimeout(processingTimeoutRef.current);
-        processingTimeoutRef.current = null;
-      }
-      setIsProcessing(false); // Reset processing state on error
-    }
-  };
 
-  const cancelRecording = async () => {
-    // Prevent canceling if not recording
-    if (!isRecordingRef.current) {
-      return;
-    }
-    
-    
-    // IMMEDIATELY update UI for instant feedback
-    flushSync(() => {
-      setIsRecording(false);
-    });
-    isRecordingRef.current = false;
-    
-    // Cancel the backend recording without processing
-    invoke("cancel_recording").catch(error => {
-      console.error("Failed to cancel recording:", error);
-    });
-  };
 
   const searchTranscripts = async () => {
     try {
@@ -1193,7 +756,6 @@ function App() {
       if (!filePath) return;
 
       setIsProcessing(true);
-      setShowSuccess(false);
 
       // Get filename from path
       const filename = filePath.split('/').pop() || 'audio file';
