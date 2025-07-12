@@ -12,8 +12,12 @@ export function useNativeOverlay(options: UseNativeOverlayOptions) {
   const { startRecording, stopRecording, cancelRecording } = options;
 
   useEffect(() => {
+    let mounted = true;
+    
     // Listen for recording requests from native overlay
     const unsubscribeNativeStart = listen('native-overlay-start-recording', async () => {
+      if (!mounted) return;
+      
       // Check the actual recording state from backend to avoid stale closure
       const isCurrentlyRecording = await invoke<boolean>("is_recording");
       if (!isCurrentlyRecording) {
@@ -22,6 +26,8 @@ export function useNativeOverlay(options: UseNativeOverlayOptions) {
     });
 
     const unsubscribeNativeStop = listen('native-overlay-stop-recording', async () => {
+      if (!mounted) return;
+      
       // Check the actual recording state from backend
       const isCurrentlyRecording = await invoke<boolean>("is_recording");
       if (isCurrentlyRecording) {
@@ -30,6 +36,8 @@ export function useNativeOverlay(options: UseNativeOverlayOptions) {
     });
 
     const unsubscribeNativeCancel = listen('native-overlay-cancel-recording', async () => {
+      if (!mounted) return;
+      
       // Check the actual recording state from backend
       const isCurrentlyRecording = await invoke<boolean>("is_recording");
       if (isCurrentlyRecording) {
@@ -38,6 +46,7 @@ export function useNativeOverlay(options: UseNativeOverlayOptions) {
     });
 
     return () => {
+      mounted = false;
       unsubscribeNativeStart.then(fn => fn());
       unsubscribeNativeStop.then(fn => fn());
       unsubscribeNativeCancel.then(fn => fn());
