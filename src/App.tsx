@@ -94,7 +94,7 @@ function App() {
   // Use the recording hook
   const { 
     isRecording, 
-    recordingDuration, 
+    recordingStartTime, 
     audioLevel, 
     toggleRecording,
     startRecording,
@@ -318,6 +318,17 @@ function App() {
       }
       return `${seconds}s`;
     }
+  };
+
+  // Consistent timer format for recording - always show MM:SS.CS format (centiseconds)
+  const formatRecordingTimer = (ms: number) => {
+    const totalSeconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    const centiseconds = Math.floor((ms % 1000) / 10); // Get centiseconds (00-99)
+    
+    // Always show MM:SS.CS format with leading zeros
+    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${centiseconds.toString().padStart(2, '0')}`;
   };
 
   const formatFileSize = (bytes: number) => {
@@ -698,7 +709,7 @@ function App() {
           <RecordView
             isRecording={isRecording}
             isProcessing={isProcessing}
-            recordingDuration={recordingDuration}
+            recordingStartTime={recordingStartTime}
             hotkey={hotkey}
             pushToTalkHotkey={pushToTalkHotkey}
             uploadProgress={uploadProgress}
@@ -713,6 +724,7 @@ function App() {
             cancelRecording={cancelRecording}
             handleFileUpload={handleFileUpload}
             formatDuration={formatDuration}
+            formatRecordingTimer={formatRecordingTimer}
             showDeleteConfirmation={showDeleteConfirmation}
           />
         )}

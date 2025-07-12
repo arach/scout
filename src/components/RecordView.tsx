@@ -2,6 +2,7 @@ import { Fragment, useRef, useEffect, useState } from 'react';
 import { Settings } from 'lucide-react';
 import { MicrophoneQuickPicker } from './MicrophoneQuickPicker';
 import { SessionTranscripts } from './SessionTranscripts';
+import { RecordingTimer } from './RecordingTimer';
 import './RecordView.css';
 
 interface UploadProgress {
@@ -25,7 +26,7 @@ interface Transcript {
 interface RecordViewProps {
     isRecording: boolean;
     isProcessing: boolean;
-    recordingDuration: number;
+    recordingStartTime: number | null;
     hotkey: string;
     pushToTalkHotkey: string;
     uploadProgress: UploadProgress;
@@ -38,6 +39,7 @@ interface RecordViewProps {
     cancelRecording: () => void;
     handleFileUpload: () => void;
     formatDuration: (ms: number) => string;
+    formatRecordingTimer?: (ms: number) => string;
     showDeleteConfirmation: (id: number, text: string) => void;
 }
 
@@ -69,7 +71,7 @@ function formatKey(key: string): string {
 export function RecordView({
     isRecording,
     isProcessing,
-    recordingDuration,
+    recordingStartTime,
     hotkey,
     pushToTalkHotkey,
     uploadProgress,
@@ -82,6 +84,7 @@ export function RecordView({
     cancelRecording,
     handleFileUpload,
     formatDuration,
+    formatRecordingTimer,
     showDeleteConfirmation,
 }: RecordViewProps) {
     const [showSuccessHint, setShowSuccessHint] = useState(false);
@@ -141,7 +144,10 @@ export function RecordView({
                                     <span className="status-text">Recording</span>
                                 </div>
                                 <div className="recording-timer">
-                                    {formatDuration(recordingDuration)}
+                                    <RecordingTimer 
+                                        startTime={recordingStartTime} 
+                                        formatTimer={formatRecordingTimer || formatDuration} 
+                                    />
                                 </div>
                             </div>
                             

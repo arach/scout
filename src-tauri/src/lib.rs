@@ -107,12 +107,11 @@ async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle, devi
         let _ = menu_item.set_text("Stop Recording");
     }
 
-    // Use native NSPanel overlay
+    // Show native NSPanel overlay (state will be updated by progress tracker)
     #[cfg(target_os = "macos")]
     {
         let overlay = state.native_panel_overlay.lock().await;
         overlay.show();
-        overlay.set_recording_state(true);
         drop(overlay);
         
         // Start audio level monitoring for native overlay AFTER recording has started
@@ -191,13 +190,7 @@ async fn cancel_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> 
     // Stop recording overlay updates
     state.is_recording_overlay_active.store(false, Ordering::Relaxed);
     
-    // Update native overlay to idle
-    #[cfg(target_os = "macos")]
-    {
-        debug(Component::Overlay, "Setting native overlay to idle state after stop_recording");
-        let overlay = state.native_panel_overlay.lock().await;
-        overlay.set_idle_state();
-    }
+    // Native overlay will be updated to idle by progress tracker listener
     
     Ok(())
 }
@@ -1116,6 +1109,15 @@ async fn get_llm_outputs_for_transcript(
 }
 
 #[tauri::command]
+async fn get_whisper_logs_for_session(
+    state: State<'_, AppState>,
+    session_id: String,
+    limit: Option<i32>,
+) -> Result<Vec<serde_json::Value>, String> {
+    state.database.get_whisper_logs_for_session(&session_id, limit).await
+}
+
+#[tauri::command]
 async fn get_llm_prompt_templates(
     state: State<'_, AppState>,
 ) -> Result<Vec<db::LLMPromptTemplate>, String> {
@@ -1279,6 +1281,11 @@ pub fn run() {
                 error(Component::Transcription, "Models directory was not created properly!");
             }
             
+            // Initialize whisper logger
+            if let Err(e) = whisper_logger::init_whisper_logger(&app_data_dir) {
+                error(Component::Transcription, &format!("Failed to initialize whisper logger: {}", e));
+            }
+            
             // Initialize settings manager
             let settings_manager = SettingsManager::new(&app_data_dir)
                 .expect("Failed to initialize settings manager");
@@ -1381,18 +1388,35 @@ pub fn run() {
             
             app.manage(state);
             
-            // Set up progress tracking listener for overlay window
+            // Set up progress tracking listener to update native panel overlay
             {
-                let app_handle = app.handle().clone();
                 let mut receiver = progress_tracker_clone.subscribe();
+                #[cfg(target_os = "macos")]
+                let native_panel_clone = native_panel_overlay.clone();
                 
                 tauri::async_runtime::spawn(async move {
                     while receiver.changed().await.is_ok() {
                         let progress = receiver.borrow().clone();
                         
-                        // Send progress to overlay window specifically
-                        if let Some(overlay_window) = app_handle.get_webview_window("overlay") {
-                            let _ = overlay_window.emit("recording-progress", &progress);
+                        // Update native panel overlay based on progress state
+                        #[cfg(target_os = "macos")]
+                        {
+                            let overlay = native_panel_clone.lock().await;
+                            match &progress {
+                                recording_progress::RecordingProgress::Idle => {
+                                    debug(Component::Overlay, "Progress tracker → Idle: updating native overlay");
+                                    overlay.set_idle_state();
+                                }
+                                recording_progress::RecordingProgress::Recording { .. } => {
+                                    debug(Component::Overlay, "Progress tracker → Recording: updating native overlay");
+                                    overlay.set_recording_state(true);
+                                }
+                                recording_progress::RecordingProgress::Stopping { .. } => {
+                                    debug(Component::Overlay, "Progress tracker → Stopping: keeping native overlay in recording state");
+                                    // Keep showing recording state during stopping
+                                }
+                            }
+                            drop(overlay);
                         }
                     }
                 });
@@ -1402,30 +1426,21 @@ pub fn run() {
             {
                 let app_handle = app.handle().clone();
                 #[cfg(target_os = "macos")]
-                let native_overlay_clone = native_panel_overlay.clone();
+                let _native_overlay_clone = native_panel_overlay.clone();
                 
                 tauri::async_runtime::spawn(async move {
                     while let Some(status) = processing_status_rx.recv().await {
                         // Emit processing status to frontend and overlay
                         let _ = app_handle.emit("processing-status", &status);
                         
-                        // Also emit to overlay window specifically
-                        if let Some(overlay_window) = app_handle.get_webview_window("overlay") {
-                            let _ = overlay_window.emit("processing-status", &status);
-                        }
                         
                         // Update native overlay based on processing status
                         #[cfg(target_os = "macos")]
                         {
                             match &status {
                                 ProcessingStatus::Complete { .. } | ProcessingStatus::Failed { .. } => {
-                                    // Processing is done, update native overlay
-                                    debug(Component::UI, "Processing complete/failed - setting native overlay to idle");
-                                    let overlay = native_overlay_clone.lock().await;
-                                    // Just call set_idle_state directly - no need to call set_processing_state(false)
-                                    // as the Swift implementation of setProcessingState(false) already calls setIdleState
-                                    overlay.set_idle_state();
-                                    drop(overlay);
+                                    // Processing is done - native overlay will be updated by progress tracker
+                                    debug(Component::UI, "Processing complete/failed - native overlay will be updated by progress tracker");
                                 }
                                 _ => {
                                     // Still processing, ensure overlay shows processing state
@@ -1661,6 +1676,7 @@ pub fn run() {
             download_llm_model,
             set_active_llm_model,
             get_llm_outputs_for_transcript,
+            get_whisper_logs_for_session,
             get_llm_prompt_templates,
             save_llm_prompt_template,
             delete_llm_prompt_template,
