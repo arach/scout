@@ -447,6 +447,86 @@ impl Database {
         Ok(metrics)
     }
 
+    // Whisper log methods
+    pub async fn insert_whisper_logs(&self, entries: Vec<(String, Option<i64>, crate::whisper_logger::WhisperLogEntry)>) -> Result<(), String> {
+        let mut tx = self.pool.begin()
+            .await
+            .map_err(|e| format!("Failed to begin transaction: {}", e))?;
+
+        for (session_id, transcript_id, entry) in entries {
+            let metadata_json = entry.metadata.map(|m| serde_json::to_string(&m).ok()).flatten();
+            
+            sqlx::query(
+                r#"
+                INSERT INTO whisper_logs (session_id, transcript_id, timestamp, level, component, message, metadata)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                "#
+            )
+            .bind(&session_id)
+            .bind(transcript_id)
+            .bind(entry.timestamp)
+            .bind(&entry.level)
+            .bind(&entry.component)
+            .bind(&entry.message)
+            .bind(metadata_json)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("Failed to insert whisper log: {}", e))?;
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| format!("Failed to commit transaction: {}", e))?;
+
+        Ok(())
+    }
+
+    pub async fn get_whisper_logs_for_session(&self, session_id: &str, limit: Option<i32>) -> Result<Vec<serde_json::Value>, String> {
+        let query = if let Some(limit) = limit {
+            sqlx::query(
+                r#"
+                SELECT id, session_id, transcript_id, timestamp, level, component, message, metadata
+                FROM whisper_logs
+                WHERE session_id = ?1
+                ORDER BY timestamp DESC
+                LIMIT ?2
+                "#
+            )
+            .bind(session_id)
+            .bind(limit)
+        } else {
+            sqlx::query(
+                r#"
+                SELECT id, session_id, transcript_id, timestamp, level, component, message, metadata
+                FROM whisper_logs
+                WHERE session_id = ?1
+                ORDER BY timestamp DESC
+                "#
+            )
+            .bind(session_id)
+        };
+
+        let rows = query
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| format!("Failed to get whisper logs: {}", e))?;
+
+        let logs: Vec<serde_json::Value> = rows.into_iter().map(|row| {
+            serde_json::json!({
+                "id": row.get::<i64, _>("id"),
+                "session_id": row.get::<String, _>("session_id"),
+                "transcript_id": row.get::<Option<i64>, _>("transcript_id"),
+                "timestamp": row.get::<chrono::DateTime<chrono::Local>, _>("timestamp").to_rfc3339(),
+                "level": row.get::<String, _>("level"),
+                "component": row.get::<String, _>("component"),
+                "message": row.get::<String, _>("message"),
+                "metadata": row.get::<Option<String>, _>("metadata").and_then(|s| serde_json::from_str(&s).ok()),
+            })
+        }).collect();
+
+        Ok(logs)
+    }
+
     // LLM Output methods
     pub async fn save_llm_output(
         &self,

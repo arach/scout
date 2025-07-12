@@ -21,6 +21,7 @@ mod profanity_filter;
 mod performance_metrics_service;
 pub mod benchmarking;
 mod llm;
+mod whisper_logger;
 #[cfg(target_os = "macos")]
 mod macos;
 
