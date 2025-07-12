@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { FirstRunSetup } from "./components/FirstRunSetup";
 import { Sidebar, useSidebarState } from "./components/Sidebar";
 import { RecordView } from "./components/RecordView";
@@ -11,6 +10,9 @@ import { SettingsView } from "./components/SettingsView";
 import { ChevronRight, PanelLeftClose } from 'lucide-react';
 import { LLMSettings as LLMSettingsType } from './types/llm';
 import { useRecording } from './hooks/useRecording';
+import { useSettings } from './hooks/useSettings';
+import { useFileDrop } from './hooks/useFileDrop';
+import { useTranscriptEvents } from './hooks/useTranscriptEvents';
 import "./App.css";
 
 interface Transcript {
@@ -34,8 +36,6 @@ function App() {
   const [selectedMic, setSelectedMic] = useState<string>('Default microphone');
   
   const [isProcessing, setIsProcessing] = useState(false);
-  const [hotkey, setHotkey] = useState("CmdOrCtrl+Shift+Space");
-  const [pushToTalkHotkey, setPushToTalkHotkey] = useState("CmdOrCtrl+Shift+P");
   const [isCapturingHotkey, setIsCapturingHotkey] = useState(false);
   const [isCapturingPushToTalkHotkey, setIsCapturingPushToTalkHotkey] = useState(false);
   const [capturedKeys, setCapturedKeys] = useState<string[]>([]);
@@ -47,8 +47,6 @@ function App() {
     isBulk: boolean;
   }>({ show: false, transcriptId: null, transcriptText: "", isBulk: false });
   const [hotkeyUpdateStatus, setHotkeyUpdateStatus] = useState<'idle' | 'success' | 'error'>('idle');
-  const [overlayPosition, setOverlayPosition] = useState<string>('top-center');
-  const [isDragging, setIsDragging] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{
     filename?: string;
     fileSize?: number;
@@ -59,37 +57,37 @@ function App() {
   const [showFirstRun, setShowFirstRun] = useState(false);
   const [currentView, setCurrentView] = useState<View>('record');
   const [sessionStartTime] = useState(() => new Date().toISOString());
-  const [autoCopy, setAutoCopy] = useState(false);
-  const [autoPaste, setAutoPaste] = useState(false);
-  const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
   const processingFileRef = useRef<string | null>(null); // Track file being processed to prevent duplicates
   const keyboardMonitorAvailable = useRef(true);
-  const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const processingStartTimeRef = useRef<number>(0);
   
-  // Sound settings state
-  const [soundEnabled, setSoundEnabled] = useState(true);
-  const [startSound, setStartSound] = useState('Glass');
-  const [stopSound, setStopSound] = useState('Glass');
-  const [successSound, setSuccessSound] = useState('Pop');
-  const [completionSoundThreshold, setCompletionSoundThreshold] = useState(1000);
-
-  // LLM settings state
-  const [llmSettings, setLLMSettings] = useState<{
-    enabled: boolean;
-    model_id: string;
-    temperature: number;
-    max_tokens: number;
-    auto_download_model: boolean;
-    enabled_prompts: string[];
-  }>({
-    enabled: false,
-    model_id: 'tinyllama-1.1b',
-    temperature: 0.7,
-    max_tokens: 200,
-    auto_download_model: false,
-    enabled_prompts: ['summarize', 'bullet_points', 'action_items', 'fix_grammar']
-  });
+  // Use the settings hook
+  const {
+    overlayPosition,
+    hotkey,
+    pushToTalkHotkey,
+    theme,
+    soundEnabled,
+    startSound,
+    stopSound,
+    successSound,
+    completionSoundThreshold,
+    llmSettings,
+    autoCopy,
+    autoPaste,
+    setHotkey,
+    setPushToTalkHotkey,
+    updateOverlayPosition,
+    updateTheme,
+    toggleSoundEnabled,
+    updateStartSound,
+    updateStopSound,
+    updateSuccessSound,
+    updateCompletionSoundThreshold,
+    updateLLMSettings,
+    toggleAutoCopy,
+    toggleAutoPaste,
+  } = useSettings();
 
   // Use the recording hook
   const { 
@@ -117,6 +115,58 @@ function App() {
     vadEnabled
   });
 
+  // Use the file drop hook
+  const { isDragging } = useFileDrop({
+    isProcessing,
+    onFileDropped: async (filePath) => {
+      try {
+        setIsProcessing(true);
+        const filename = filePath.split('/').pop() || 'audio file';
+        setUploadProgress({
+          filename: filename,
+          status: 'uploading',
+          progress: 0
+        });
+
+        await invoke<string>('transcribe_file', { 
+          filePath: filePath 
+        });
+      } catch (error) {
+        console.error('Failed to process dropped file:', error);
+        alert(`Failed to process file: ${error}`);
+        setIsProcessing(false);
+        processingFileRef.current = null;
+      }
+    }
+  });
+
+  // Use the transcript events hook
+  const { processingTimeoutRef } = useTranscriptEvents({
+    autoCopy,
+    autoPaste,
+    soundEnabled,
+    completionSoundThreshold,
+    setIsProcessing,
+    setTranscripts,
+    onTranscriptCreated: () => {
+      if (currentView === 'record') {
+        loadRecentTranscripts();
+      }
+    },
+    onProcessingComplete: () => {
+      // Force refresh to ensure UI is updated
+      setTimeout(() => {
+        loadRecentTranscripts();
+      }, 50);
+    },
+    onRecordingCompleted: () => {
+      // Force refresh
+      setTimeout(() => {
+        loadRecentTranscripts();
+      }, 50);
+    }
+  });
+
   useEffect(() => {
     // Check if we have any models
     const checkModels = async () => {
@@ -142,21 +192,7 @@ function App() {
     };
     checkAudioDevices();
     
-    // Load auto-copy and auto-paste settings
-    const loadClipboardSettings = async () => {
-      try {
-        const [copyEnabled, pasteEnabled] = await Promise.all([
-          invoke<boolean>('is_auto_copy_enabled'),
-          invoke<boolean>('is_auto_paste_enabled')
-        ]);
-        setAutoCopy(copyEnabled);
-        setAutoPaste(pasteEnabled);
-        console.log('Clipboard settings loaded - auto-copy:', copyEnabled, 'auto-paste:', pasteEnabled);
-      } catch (error) {
-        console.error('Failed to load clipboard settings:', error);
-      }
-    };
-    loadClipboardSettings();
+    // Clipboard settings are now loaded by useSettings hook
   }, []);
 
   useEffect(() => {
@@ -194,77 +230,7 @@ function App() {
     // Subscribe to recording progress updates
     invoke('subscribe_to_progress').catch(console.error);
     
-    // Load saved overlay position
-    const savedPosition = localStorage.getItem('scout-overlay-position');
-    if (savedPosition) {
-      setOverlayPosition(savedPosition);
-      invoke('set_overlay_position', { position: savedPosition }).catch(console.error);
-    } else {
-      // Get current position from backend
-      invoke<string>('get_overlay_position').then(pos => {
-        setOverlayPosition(pos);
-      }).catch(console.error);
-    }
-    
-    // Get the current shortcuts from backend (source of truth)
-    invoke<string>('get_current_shortcut').then(backendShortcut => {
-      setHotkey(backendShortcut);
-      localStorage.setItem('scout-hotkey', backendShortcut);
-    }).catch(err => {
-      console.error('Failed to get current shortcut:', err);
-      const savedHotkey = localStorage.getItem('scout-hotkey') || 'CmdOrCtrl+Shift+Space';
-      setHotkey(savedHotkey);
-    });
-    
-    invoke<string>('get_push_to_talk_shortcut').then(backendShortcut => {
-      setPushToTalkHotkey(backendShortcut);
-      localStorage.setItem('scout-push-to-talk-hotkey', backendShortcut);
-    }).catch(err => {
-      console.error('Failed to get push-to-talk shortcut:', err);
-      const savedHotkey = localStorage.getItem('scout-push-to-talk-hotkey') || 'CmdOrCtrl+Shift+P';
-      setPushToTalkHotkey(savedHotkey);
-    });
-    
-    // Overlay type preference removed - now handled by backend
-    
-    // Load theme preference
-    const savedTheme = localStorage.getItem('scout-theme');
-    if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system') {
-      setTheme(savedTheme);
-    }
-    
-    // Load sound settings
-    invoke<boolean>('is_sound_enabled').then(enabled => {
-      setSoundEnabled(enabled);
-    }).catch(console.error);
-    
-    invoke<{ startSound: string; stopSound: string; successSound: string }>('get_sound_settings').then(settings => {
-      setStartSound(settings.startSound);
-      setStopSound(settings.stopSound);
-      setSuccessSound(settings.successSound);
-    }).catch(console.error);
-    
-    // Load settings from backend
-    invoke<any>('get_settings').then(settings => {
-      if (settings?.ui?.completion_sound_threshold_ms) {
-        setCompletionSoundThreshold(settings.ui.completion_sound_threshold_ms);
-      }
-      if (settings?.llm) {
-        setLLMSettings({
-          enabled: settings.llm.enabled || false,
-          model_id: settings.llm.model_id || 'tinyllama-1.1b',
-          temperature: settings.llm.temperature || 0.7,
-          max_tokens: settings.llm.max_tokens || 200,
-          auto_download_model: settings.llm.auto_download_model || false,
-          enabled_prompts: settings.llm.enabled_prompts || ['summarize', 'bullet_points', 'action_items', 'fix_grammar']
-        });
-      }
-    }).catch(console.error);
-    
-    // Mark as initialized
-    if (!localStorage.getItem('scout-initialized')) {
-      localStorage.setItem('scout-initialized', 'true');
-    }
+    // All settings are now loaded by the useSettings hook
     
     // Listen for global hotkey events
     const unsubscribe = listen('toggle-recording', async () => {
@@ -345,148 +311,7 @@ function App() {
       }));
     });
     
-    // Recording state is now managed by the useRecording hook
-    
-    // Set up Tauri file drop handling for the entire window
-    let unsubscribeFileDrop: (() => void) | undefined;
-    const setupFileDrop = async () => {
-      const webview = getCurrentWebview();
-      unsubscribeFileDrop = await webview.onDragDropEvent(async (event) => {
-        // Check the event type from the event name
-        if (event.event === 'tauri://drag-over') {
-          setIsDragging(true);
-        } else if (event.event === 'tauri://drag-drop') {
-          setIsDragging(false);
-          
-          const files = (event.payload as any).paths;
-          
-          // Check if we're already processing to prevent duplicates
-          if (isProcessing) {
-            return;
-          }
-          
-          const audioFiles = files.filter((filePath: string) => {
-            const extension = filePath.split('.').pop()?.toLowerCase();
-            return ['wav', 'mp3', 'm4a', 'flac', 'ogg', 'webm'].includes(extension || '');
-          });
-
-          if (audioFiles.length > 0) {
-            // Process the first audio file
-            const filePath = audioFiles[0];
-            
-            // Check if we're already processing this specific file
-            if (processingFileRef.current === filePath) {
-              return;
-            }
-            
-            try {
-              // Mark this file as being processed
-              processingFileRef.current = filePath;
-              setIsProcessing(true);
-              
-              const filename = filePath.split('/').pop() || 'audio file';
-              setUploadProgress({
-                filename: filename,
-                status: 'uploading',
-                progress: 0
-              });
-
-              await invoke<string>('transcribe_file', { 
-                filePath: filePath 
-              });
-            } catch (error) {
-              console.error('Failed to process dropped file:', error);
-              alert(`Failed to process file: ${error}`);
-              setIsProcessing(false);
-              processingFileRef.current = null;
-            }
-          } else if (files.length > 0) {
-            // Non-audio files were dropped
-            alert('Please drop audio files only (wav, mp3, m4a, flac, ogg, webm)');
-            setIsProcessing(false);
-          }
-        } else if (event.event === 'tauri://drag-leave') {
-          setIsDragging(false);
-        }
-      });
-    };
-    
-    setupFileDrop();
-    
-    console.log('🔔 Setting up transcript-created listener at', new Date().toISOString());
-    
-    // Listen for transcript-created events (pub/sub for real-time updates)
-    const unsubscribeTranscriptCreated = listen('transcript-created', async (event) => {
-      const newTranscript = event.payload as Transcript;
-      console.log('📝 Transcript created event received at', new Date().toISOString(), ':', {
-        id: newTranscript.id,
-        textLength: newTranscript.text?.length || 0,
-        duration: newTranscript.duration_ms
-      });
-      
-      // Add the new transcript to the list
-      setTranscripts(prev => {
-        // Check if transcript already exists (by id)
-        const exists = prev.some(t => t.id === newTranscript.id);
-        if (exists) return prev;
-        
-        // Add new transcript at the beginning and keep only recent ones
-        return [newTranscript, ...prev].slice(0, 100);
-      });
-      
-      // Clear processing state when transcript is created
-      console.log('📝 Transcript created - clearing processing state. Current isProcessing:', isProcessing);
-      setIsProcessing(false);
-      if (processingTimeoutRef.current) {
-        clearTimeout(processingTimeoutRef.current);
-        processingTimeoutRef.current = null;
-      }
-      
-      // Handle auto-copy if enabled
-      if (autoCopy && newTranscript.text) {
-        try {
-          await navigator.clipboard.writeText(newTranscript.text);
-          console.log('Transcript auto-copied to clipboard');
-        } catch (error) {
-          console.error('Failed to auto-copy transcript:', error);
-        }
-      }
-      
-      // Handle auto-paste if enabled
-      if (autoPaste && newTranscript.text) {
-        try {
-          // First copy to clipboard
-          await navigator.clipboard.writeText(newTranscript.text);
-          // Then paste using Tauri command
-          await invoke('paste_text');
-          console.log('Transcript auto-pasted');
-        } catch (error) {
-          console.error('Failed to auto-paste transcript:', error);
-        }
-      }
-      
-      // Play success sound if enabled and transcript meets threshold
-      const duration = newTranscript.duration_ms || 0;
-      if (soundEnabled && duration >= completionSoundThreshold) {
-        try {
-          await invoke('play_success_sound');
-        } catch (error) {
-          console.error('Failed to play success sound:', error);
-        }
-      }
-    });
-    
-    // Listen for performance metrics events (for debugging)
-    const unsubscribePerformanceMetrics = listen('performance-metrics-recorded', async (event) => {
-      const metrics = event.payload as any;
-      console.log('Performance Metrics:', {
-        recording_duration: `${metrics.recording_duration_ms}ms`,
-        transcription_time: `${metrics.transcription_time_ms}ms`, 
-        user_perceived_latency: metrics.user_perceived_latency_ms ? `${metrics.user_perceived_latency_ms}ms` : 'N/A',
-        queue_time: `${metrics.processing_queue_time_ms}ms`,
-        model: metrics.model_used,
-      });
-    });
+    // Transcript events are now handled by the useTranscriptEvents hook
     
     // Listen for keyboard monitor unavailable event
     const unsubscribeKeyboardMonitor = listen('keyboard-monitor-unavailable', async (event) => {
@@ -496,49 +321,6 @@ function App() {
       // Optionally show a notification to the user
       // You could add a toast notification here if you have a notification system
     });
-    
-    // Listen for processing-complete event as a backup to transcript-created
-    const unsubscribeProcessingComplete = listen('processing-complete', async (event) => {
-      const transcript = event.payload as Transcript;
-      console.log('🏁 Processing complete event received at', new Date().toISOString(), 'transcript:', transcript.id);
-      
-      // Clear processing state immediately
-      console.log('🎯 Clearing processing state from processing-complete at', new Date().toISOString());
-      if (processingTimeoutRef.current) {
-        clearTimeout(processingTimeoutRef.current);
-        processingTimeoutRef.current = null;
-      }
-      setIsProcessing(false);
-      
-      // Ensure transcript is in the list
-      setTranscripts(prev => {
-        const exists = prev.some(t => t.id === transcript.id);
-        if (exists) return prev;
-        return [transcript, ...prev].slice(0, 100);
-      });
-      
-      // Force refresh to ensure UI is updated
-      setTimeout(() => {
-        loadRecentTranscripts();
-      }, 50);
-    });
-    
-    // Listen for recording-completed event as another backup
-    const unsubscribeRecordingCompleted = listen('recording-completed', async (_event) => {
-      console.log('🏁 Recording-completed event received at', new Date().toISOString());
-      
-      // Clear processing state immediately
-      if (processingTimeoutRef.current) {
-        clearTimeout(processingTimeoutRef.current);
-        processingTimeoutRef.current = null;
-      }
-      setIsProcessing(false);
-      
-      // Force refresh
-      setTimeout(() => {
-        loadRecentTranscripts();
-      }, 50);
-    });
 
     return () => {
       unsubscribe.then(fn => fn());
@@ -547,14 +329,7 @@ function App() {
       unsubscribeNativeStart.then(fn => fn());
       unsubscribeNativeStop.then(fn => fn());
       unsubscribeNativeCancel.then(fn => fn());
-      unsubscribeTranscriptCreated.then(fn => fn());
-      unsubscribePerformanceMetrics.then(fn => fn());
       unsubscribeKeyboardMonitor.then(fn => fn());
-      unsubscribeProcessingComplete.then(fn => fn());
-      unsubscribeRecordingCompleted.then(fn => fn());
-      if (unsubscribeFileDrop) {
-        unsubscribeFileDrop();
-      }
     };
   }, []); // Empty dependency array since we're checking state from backend
 
@@ -802,114 +577,7 @@ function App() {
     }
   };
 
-  const toggleAutoCopy = async () => {
-    try {
-      const newState = !autoCopy;
-      await invoke("set_auto_copy", { enabled: newState });
-      setAutoCopy(newState);
-    } catch (error) {
-      console.error("Failed to toggle auto-copy:", error);
-    }
-  };
-
-  const toggleAutoPaste = async () => {
-    try {
-      const newState = !autoPaste;
-      await invoke("set_auto_paste", { enabled: newState });
-      setAutoPaste(newState);
-    } catch (error) {
-      console.error("Failed to toggle auto-paste:", error);
-    }
-  };
-
-  
-  const updateTheme = (newTheme: 'light' | 'dark' | 'system') => {
-    setTheme(newTheme);
-    localStorage.setItem('scout-theme', newTheme);
-  };
-
-  const toggleSoundEnabled = async () => {
-    try {
-      const newState = !soundEnabled;
-      await invoke("set_sound_enabled", { enabled: newState });
-      setSoundEnabled(newState);
-    } catch (error) {
-      console.error("Failed to toggle sound:", error);
-    }
-  };
-
-  const updateStartSound = async (sound: string) => {
-    try {
-      await invoke("set_start_sound", { sound });
-      setStartSound(sound);
-    } catch (error) {
-      console.error("Failed to update start sound:", error);
-    }
-  };
-
-  const updateStopSound = async (sound: string) => {
-    try {
-      await invoke("set_stop_sound", { sound });
-      setStopSound(sound);
-    } catch (error) {
-      console.error("Failed to update stop sound:", error);
-    }
-  };
-
-  const updateSuccessSound = async (sound: string) => {
-    try {
-      await invoke("set_success_sound", { sound });
-      setSuccessSound(sound);
-    } catch (error) {
-      console.error("Failed to update success sound:", error);
-    }
-  };
-
-  const updateCompletionSoundThreshold = async (threshold: number) => {
-    try {
-      // Update the settings with the new threshold
-      await invoke("update_settings", { 
-        settings: { 
-          ui: { 
-            completion_sound_threshold_ms: threshold 
-          } 
-        } 
-      });
-      setCompletionSoundThreshold(threshold);
-    } catch (error) {
-      console.error("Failed to update completion sound threshold:", error);
-    }
-  };
-
-  const updateLLMSettings = async (updates: Partial<LLMSettingsType>) => {
-    try {
-      const newSettings = { ...llmSettings, ...updates };
-      
-      // Update backend with all LLM settings
-      await invoke('update_llm_settings', {
-        enabled: newSettings.enabled,
-        modelId: newSettings.model_id,
-        temperature: newSettings.temperature,
-        maxTokens: newSettings.max_tokens,
-        enabledPrompts: newSettings.enabled_prompts
-      });
-      
-      // Update state
-      setLLMSettings(newSettings);
-    } catch (error) {
-      console.error("Failed to update LLM settings:", error);
-    }
-  };
-  
-  const updateOverlayPosition = async (position: string) => {
-    try {
-      await invoke('set_overlay_position', { position });
-      setOverlayPosition(position);
-      localStorage.setItem('scout-overlay-position', position);
-    } catch (error) {
-      console.error("Failed to update overlay position:", error);
-    }
-  };
+  // All settings update functions are now handled by the useSettings hook
   
 
   const updateHotkey = async (newHotkey: string) => {
