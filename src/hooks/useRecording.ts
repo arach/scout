@@ -3,8 +3,14 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
 interface RecordingProgress {
-  duration: number;
-  status: string;
+  Idle?: any;
+  Recording?: {
+    filename: string;
+    start_time: number;
+  };
+  Stopping?: {
+    filename: string;
+  };
 }
 
 interface UseRecordingOptions {
@@ -268,9 +274,31 @@ export function useRecording(options: UseRecordingOptions = {}) {
         }
       });
 
+      // Set up recording duration tracking
+      let recordingStartTime: number | null = null;
+      let durationInterval: NodeJS.Timeout | null = null;
+
       const unsubscribeProgress = await listen<RecordingProgress>('recording-progress', (event) => {
-        if (event.payload.status === 'recording') {
-          setRecordingDuration(event.payload.duration);
+        if (event.payload.Recording) {
+          // Start tracking duration from the backend's start_time
+          if (!recordingStartTime) {
+            recordingStartTime = event.payload.Recording.start_time;
+            
+            // Update duration every 100ms
+            durationInterval = setInterval(() => {
+              const now = Date.now();
+              const duration = now - recordingStartTime!;
+              setRecordingDuration(duration);
+            }, 100);
+          }
+        } else if (event.payload.Idle || event.payload.Stopping) {
+          // Stop tracking duration
+          if (durationInterval) {
+            clearInterval(durationInterval);
+            durationInterval = null;
+          }
+          recordingStartTime = null;
+          setRecordingDuration(0);
         }
       });
 
@@ -303,6 +331,11 @@ export function useRecording(options: UseRecordingOptions = {}) {
         
         if (animationFrameRef.current) {
           cancelAnimationFrame(animationFrameRef.current);
+        }
+        
+        // Clean up duration tracking interval
+        if (durationInterval) {
+          clearInterval(durationInterval);
         }
       };
       } catch (error) {
