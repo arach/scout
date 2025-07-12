@@ -108,8 +108,14 @@ function App() {
     },
     onRecordingComplete: () => {
       setIsProcessing(true);
-      // Reset processing timeout tracking
       processingStartTimeRef.current = Date.now();
+      
+      // Set a timeout to clear processing state if no events are received
+      // Ring buffer strategy completes very quickly, so 5 seconds should be plenty
+      processingTimeoutRef.current = setTimeout(() => {
+        console.log('Processing timeout - clearing processing state');
+        setIsProcessing(false);
+      }, 5000);
     },
     soundEnabled,
     selectedMic,
@@ -433,13 +439,13 @@ function App() {
         return [newTranscript, ...prev].slice(0, 100);
       });
       
-      // Clear processing state immediately - transcription is done
-      console.log('🎯 Clearing processing state from transcript-created at', new Date().toISOString());
+      // Clear processing state when transcript is created
+      console.log('📝 Transcript created - clearing processing state');
+      setIsProcessing(false);
       if (processingTimeoutRef.current) {
         clearTimeout(processingTimeoutRef.current);
         processingTimeoutRef.current = null;
       }
-      setIsProcessing(false);
       
       // Handle auto-copy if enabled
       if (autoCopy && newTranscript.text) {
