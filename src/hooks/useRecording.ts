@@ -163,11 +163,18 @@ export function useRecording(options: UseRecordingOptions = {}) {
 
     try {
       console.log('Stopping recording...');
-      isRecordingRef.current = false;
-      setIsRecording(false);
       
+      // Call backend FIRST, then update frontend state
       await invoke('stop_recording');
       console.log('Recording stopped successfully');
+      
+      // Only update frontend state after backend confirms stop
+      isRecordingRef.current = false;
+      setIsRecording(false);
+      setRecordingDuration(0);
+      audioTargetRef.current = 0;
+      audioCurrentRef.current = 0;
+      setAudioLevel(0);
       
       if (soundEnabled) {
         try {
@@ -183,8 +190,8 @@ export function useRecording(options: UseRecordingOptions = {}) {
       onRecordingComplete?.();
     } catch (error) {
       console.error('Failed to stop recording:', error);
-      setIsRecording(false);
-      isRecordingRef.current = false;
+      // Don't change state on error - let the backend state sync handle it
+      // The recording-state-changed event will update our state
     }
   }, [soundEnabled, onRecordingComplete]);
 
@@ -260,9 +267,9 @@ export function useRecording(options: UseRecordingOptions = {}) {
             isRecordingRef.current = true;
             setRecordingDuration(0);
           }
-        } else if (state === "stopped") {
-          // Backend says we've stopped
-          if (isRecordingRef.current) {
+        } else if (state === "stopped" || state === "idle") {
+          // Backend says we've stopped or are idle
+          if (isRecordingRef.current || isRecording) {
             console.log('Backend stopped recording, updating frontend state');
             setIsRecording(false);
             isRecordingRef.current = false;
