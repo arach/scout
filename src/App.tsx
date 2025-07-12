@@ -232,19 +232,21 @@ function App() {
     
     // Listen for global hotkey events
     const unsubscribe = listen('toggle-recording', async () => {
+      if (!mounted) return;
       await toggleRecording();
     });
     
     // Listen for keyboard monitor unavailable event
     const unsubscribeKeyboardMonitor = listen('keyboard-monitor-unavailable', async (event) => {
+      if (!mounted) return;
       console.warn('Keyboard monitor unavailable:', event.payload);
       keyboardMonitorAvailable.current = false;
     });
 
     return () => {
       mounted = false;
-      unsubscribe.then(fn => fn());
-      unsubscribeKeyboardMonitor.then(fn => fn());
+      unsubscribe.then(fn => fn()).catch(console.error);
+      unsubscribeKeyboardMonitor.then(fn => fn()).catch(console.error);
     };
   }, []); // Empty dependency array since we're checking state from backend
 

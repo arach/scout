@@ -37,8 +37,11 @@ export function useProcessingStatus(options: UseProcessingStatusOptions) {
   const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
+    let mounted = true;
+    
     // Listen for processing status updates from the background queue
     const unsubscribeProcessing = listen<ProcessingStatus>('processing-status', (event) => {
+      if (!mounted) return;
       const status = event.payload;
       
       // Update UI based on processing status
@@ -97,6 +100,7 @@ export function useProcessingStatus(options: UseProcessingStatusOptions) {
     
     // Listen for file upload complete events
     const unsubscribeFileUpload = listen('file-upload-complete', (event) => {
+      if (!mounted) return;
       const data = event.payload as any;
       
       // Update upload progress with file info
@@ -109,8 +113,9 @@ export function useProcessingStatus(options: UseProcessingStatusOptions) {
     });
 
     return () => {
-      unsubscribeProcessing.then(fn => fn());
-      unsubscribeFileUpload.then(fn => fn());
+      mounted = false;
+      unsubscribeProcessing.then(fn => fn()).catch(console.error);
+      unsubscribeFileUpload.then(fn => fn()).catch(console.error);
     };
   }, [setUploadProgress, setIsProcessing, onProcessingComplete, onProcessingFailed]);
 
