@@ -77,7 +77,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
   // Start recording
   const startRecording = useCallback(async () => {
     if (isStartingRecording.current) {
-      console.log('Already starting recording, ignoring');
+      // console.log('Already starting recording, ignoring');
       return;
     }
 
@@ -85,7 +85,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
     try {
       const backendIsRecording = await invoke<boolean>('is_recording');
       if (backendIsRecording) {
-        console.log('Backend is already recording, syncing frontend state');
+        // console.log('Backend is already recording, syncing frontend state');
         setIsRecording(true);
         isRecordingRef.current = true;
         return;
@@ -95,19 +95,19 @@ export function useRecording(options: UseRecordingOptions = {}) {
     }
 
     if (isRecordingRef.current) {
-      console.log('Frontend thinks we are already recording');
+      // console.log('Frontend thinks we are already recording');
       return;
     }
 
     try {
       isStartingRecording.current = true;
-      console.log('Starting recording...');
+      // console.log('Starting recording...');
       
       const result = await invoke<string>('start_recording', { 
         deviceName: selectedMic !== 'Default microphone' ? selectedMic : null 
       });
       
-      console.log('Recording started successfully:', result);
+      // console.log('Recording started successfully:', result);
       setIsRecording(true);
       isRecordingRef.current = true;
       setRecordingDuration(0);
@@ -126,7 +126,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
       console.error('Failed to start recording:', error);
       // If the error is "Recording already in progress", sync our state
       if (error.includes && error.includes('already in progress')) {
-        console.log('Backend says recording in progress, syncing state');
+        // console.log('Backend says recording in progress, syncing state');
         setIsRecording(true);
         isRecordingRef.current = true;
       } else {
@@ -144,7 +144,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
     try {
       const backendIsRecording = await invoke<boolean>('is_recording');
       if (!backendIsRecording) {
-        console.log('Backend is not recording, syncing frontend state');
+        // console.log('Backend is not recording, syncing frontend state');
         setIsRecording(false);
         isRecordingRef.current = false;
         setRecordingDuration(0);
@@ -158,15 +158,15 @@ export function useRecording(options: UseRecordingOptions = {}) {
     }
 
     if (!isRecordingRef.current) {
-      console.log('Frontend not recording, but backend might be - attempting stop');
+      // console.log('Frontend not recording, but backend might be - attempting stop');
     }
 
     try {
-      console.log('Stopping recording...');
+      // console.log('Stopping recording...');
       
       // Call backend FIRST, then update frontend state
       await invoke('stop_recording');
-      console.log('Recording stopped successfully');
+      // console.log('Recording stopped successfully');
       
       // Only update frontend state after backend confirms stop
       isRecordingRef.current = false;
@@ -262,7 +262,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
         if (state === "recording") {
           // Backend says we're recording
           if (!isRecordingRef.current) {
-            console.log('Backend started recording, updating frontend state');
+            // console.log('Backend started recording, updating frontend state');
             setIsRecording(true);
             isRecordingRef.current = true;
             setRecordingDuration(0);
@@ -270,7 +270,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
         } else if (state === "stopped" || state === "idle") {
           // Backend says we've stopped or are idle
           if (isRecordingRef.current || isRecording) {
-            console.log('Backend stopped recording, updating frontend state');
+            // console.log('Backend stopped recording, updating frontend state');
             setIsRecording(false);
             isRecordingRef.current = false;
             setRecordingDuration(0);
