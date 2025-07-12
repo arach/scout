@@ -550,13 +550,14 @@ export function SettingsView({
                                         <span className={`collapse-arrow ${isLLMSettingsExpanded ? 'expanded' : ''}`}>
                                             ▶
                                         </span>
-                                        AI Post-Processing
+                                        AI Processing
                                         <span className="ai-badge">
+                                            (AI)
                                             <Brain size={16} className="sparkle-icon" />
                                         </span>
                                     </h3>
                                     <p className="collapsible-subtitle">
-                                        Process transcripts with AI to summarize, extract action items, and more
+                                        Enhance transcripts with summaries and insights
                                     </p>
                                 </div>
                             </div>

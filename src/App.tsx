@@ -611,11 +611,19 @@ function App() {
     const minutes = Math.floor((totalSeconds % 3600) / 60);
     const seconds = totalSeconds % 60;
 
-    if (hours > 0) {
+    // For very short durations, show milliseconds
+    if (ms < 1000) {
+      return `${ms}ms`;
+    } else if (hours > 0) {
       return `${hours}h ${minutes}m`;
     } else if (minutes > 0) {
       return `${minutes}m ${seconds}s`;
     } else {
+      // For 1-59 seconds, show decimal if there are significant milliseconds
+      const decimal = ((ms % 1000) / 1000).toFixed(1).substring(1);
+      if (ms % 1000 >= 100) {
+        return `${seconds}${decimal}s`;
+      }
       return `${seconds}s`;
     }
   };
