@@ -107,15 +107,10 @@ function App() {
       }
     },
     onRecordingComplete: () => {
-      setIsProcessing(true);
-      processingStartTimeRef.current = Date.now();
-      
-      // Set a timeout to clear processing state if no events are received
-      // Ring buffer strategy completes very quickly, so 5 seconds should be plenty
-      processingTimeoutRef.current = setTimeout(() => {
-        console.log('Processing timeout - clearing processing state');
-        setIsProcessing(false);
-      }, 5000);
+      // Don't show processing state for normal recording
+      // Ring buffer transcribes in real-time, so transcription is already done
+      // The transcript-created event will fire immediately
+      // Only file uploads need the processing state
     },
     soundEnabled,
     selectedMic,
