@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { recordingManager } from './recordingManager';
 
 interface RecordingProgress {
   Idle?: any;
@@ -38,7 +39,6 @@ export function useRecording(options: UseRecordingOptions = {}) {
   // Refs
   const isRecordingRef = useRef(false);
   const lastToggleTimeRef = useRef(0);
-  const isStartingRecording = useRef(false);
   const pushToTalkTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pushToTalkStartTimeRef = useRef<number>(0);
   const audioTargetRef = useRef(0);
@@ -76,14 +76,13 @@ export function useRecording(options: UseRecordingOptions = {}) {
 
   // Start recording
   const startRecording = useCallback(async () => {
-    // Prevent concurrent start attempts
-    if (isStartingRecording.current) {
-      console.log('Already starting recording, ignoring duplicate request');
+    // Use global singleton to prevent multiple instances
+    if (!recordingManager.canStartRecording()) {
+      console.log('RecordingManager prevented duplicate recording');
       return;
     }
 
-    // Set flag immediately to prevent race conditions
-    isStartingRecording.current = true;
+    recordingManager.setStarting(true);
 
     try {
       // Check backend state first
@@ -92,18 +91,15 @@ export function useRecording(options: UseRecordingOptions = {}) {
         console.log('Backend is already recording, syncing frontend state');
         setIsRecording(true);
         isRecordingRef.current = true;
-        return;
-      }
-
-      // Double-check frontend state
-      if (isRecordingRef.current) {
-        console.log('Frontend already recording, ignoring duplicate request');
+        recordingManager.setRecording(true);
+        recordingManager.setStarting(false);
         return;
       }
 
       // Set frontend state optimistically before calling backend
       setIsRecording(true);
       isRecordingRef.current = true;
+      recordingManager.setRecording(true);
       setRecordingDuration(0);
       
       console.log('Starting recording with device:', selectedMic);
@@ -128,17 +124,15 @@ export function useRecording(options: UseRecordingOptions = {}) {
       // If the error is "Recording already in progress", keep our state as recording
       if (error.includes && error.includes('already in progress')) {
         console.log('Backend says recording in progress, keeping recording state');
-        // State is already set, just keep it
+        recordingManager.setRecording(true);
       } else {
         // Only reset state on actual errors
         setIsRecording(false);
         isRecordingRef.current = false;
+        recordingManager.setRecording(false);
       }
     } finally {
-      // Small delay before clearing flag to handle rapid calls
-      setTimeout(() => {
-        isStartingRecording.current = false;
-      }, 100);
+      recordingManager.setStarting(false);
     }
   }, [selectedMic, soundEnabled]);
 
@@ -175,6 +169,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
       // Only update frontend state after backend confirms stop
       isRecordingRef.current = false;
       setIsRecording(false);
+      recordingManager.setRecording(false);
       setRecordingDuration(0);
       audioTargetRef.current = 0;
       audioCurrentRef.current = 0;
@@ -223,12 +218,18 @@ export function useRecording(options: UseRecordingOptions = {}) {
     console.log('Push-to-talk pressed');
     const now = Date.now();
     
+    // Prevent multiple push-to-talk presses in quick succession
+    if (now - pushToTalkStartTimeRef.current < 100) {
+      console.log('Ignoring rapid push-to-talk press');
+      return;
+    }
+    
     if (pushToTalkTimeoutRef.current) {
       clearTimeout(pushToTalkTimeoutRef.current);
       pushToTalkTimeoutRef.current = null;
     }
     
-    if (!isRecordingRef.current) {
+    if (!isRecordingRef.current && !recordingManager.getState().isRecording) {
       pushToTalkStartTimeRef.current = now;
       console.log('Starting recording from push-to-talk');
       await startRecording();
@@ -246,13 +247,15 @@ export function useRecording(options: UseRecordingOptions = {}) {
     
     const minimumRecordingTime = vadEnabled ? 50 : 300;
     
-    console.log(`Recording time: ${recordingTime}ms, minimum: ${minimumRecordingTime}ms, isRecording: ${isRecordingRef.current}`);
+    const currentlyRecording = isRecordingRef.current || recordingManager.getState().isRecording;
+    console.log(`Recording time: ${recordingTime}ms, minimum: ${minimumRecordingTime}ms, isRecording: ${currentlyRecording}`);
     
-    if (isRecordingRef.current && recordingTime >= minimumRecordingTime) {
+    if (currentlyRecording && recordingTime >= minimumRecordingTime) {
       if (vadEnabled) {
         console.log('VAD enabled, setting timeout to stop recording');
         pushToTalkTimeoutRef.current = setTimeout(async () => {
-          if (isRecordingRef.current) {
+          const stillRecording = isRecordingRef.current || recordingManager.getState().isRecording;
+          if (stillRecording) {
             console.log('Stopping recording after VAD timeout');
             await stopRecording();
           }
@@ -261,7 +264,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
         console.log('VAD disabled, stopping recording immediately');
         await stopRecording();
       }
-    } else if (isRecordingRef.current) {
+    } else if (currentlyRecording) {
       console.log('Recording time too short, stopping anyway');
       await stopRecording();
     }
@@ -287,6 +290,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
             // console.log('Backend started recording, updating frontend state');
             setIsRecording(true);
             isRecordingRef.current = true;
+            recordingManager.setRecording(true);
             setRecordingDuration(0);
           }
         } else if (state === "stopped" || state === "idle") {
@@ -295,6 +299,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
             // console.log('Backend stopped recording, updating frontend state');
             setIsRecording(false);
             isRecordingRef.current = false;
+            recordingManager.setRecording(false);
             setRecordingDuration(0);
             audioTargetRef.current = 0;
             audioCurrentRef.current = 0;
