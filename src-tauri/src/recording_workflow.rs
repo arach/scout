@@ -11,6 +11,7 @@ use crate::transcription_context::TranscriptionContext;
 use crate::db::Database;
 use crate::settings::SettingsManager;
 use crate::logger::{info, debug, warn, error, Component};
+use crate::whisper_logger;
 
 #[derive(Debug)]
 pub enum RecordingCommand {
@@ -45,6 +46,8 @@ struct ActiveRecording {
     start_time: std::time::Instant,
     transcription_context: Option<TranscriptionContext>,
     sample_channel: Option<tokio::sync::mpsc::UnboundedReceiver<Vec<f32>>>,
+    session_id: String,
+    whisper_log_path: Option<PathBuf>,
     #[cfg(target_os = "macos")]
     app_context: Option<crate::macos::AppContext>,
     #[cfg(not(target_os = "macos"))]
@@ -83,10 +86,23 @@ impl RecordingWorkflow {
                             info(Component::Recording, &format!("Recording started in app: {} ({})", ctx.name, ctx.bundle_id));
                         }
                         
-                        // Generate filename
+                        // Generate filename and session ID
                         let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
+                        let session_id = timestamp.clone();
                         let filename = format!("recording_{}.wav", timestamp);
                         let path = recordings_dir.join(&filename);
+                        
+                        // Start whisper logging session
+                        let whisper_log_path = match whisper_logger::start_whisper_session(&session_id) {
+                            Ok(path) => {
+                                debug(Component::Recording, &format!("Started whisper log session: {}", session_id));
+                                Some(path)
+                            },
+                            Err(e) => {
+                                warn(Component::Recording, &format!("Failed to start whisper logging: {}", e));
+                                None
+                            }
+                        };
                         
                         info(Component::Recording, "Initializing transcription context for real-time chunking...");
                         // Initialize transcription context for real-time chunking
@@ -108,6 +124,8 @@ impl RecordingWorkflow {
                                             start_time,
                                             transcription_context: None, // No transcription context
                                             sample_channel: None,
+                                            session_id: session_id.clone(),
+                                            whisper_log_path: whisper_log_path.clone(),
                                             app_context,
                                         });
                                         
@@ -261,6 +279,8 @@ impl RecordingWorkflow {
                                             start_time,
                                             transcription_context: Some(transcription_context),
                                             sample_channel: None, // Sample processing is handled in spawned task
+                                            session_id: session_id.clone(),
+                                            whisper_log_path: whisper_log_path.clone(),
                                             app_context,
                                         });
                                         
@@ -479,6 +499,35 @@ impl RecordingWorkflow {
                                                     sample_rate: device_info.as_ref().map(|d| d.sample_rate),
                                                     channels: device_info.as_ref().map(|d| d.channels),
                                                 }));
+                                                
+                                                // Fire-and-forget: Process whisper logs to database (development convenience)
+                                                if let Some(log_path) = active_recording.whisper_log_path {
+                                                    let session_id = active_recording.session_id.clone();
+                                                    let transcript_id = transcript.id;
+                                                    let db_clone = database.clone();
+                                                    
+                                                    tokio::spawn(async move {
+                                                        debug(Component::Recording, &format!("Processing whisper logs for session {} in background", session_id));
+                                                        
+                                                        // End the whisper session to flush logs
+                                                        if let Some(final_log_path) = whisper_logger::end_whisper_session(&session_id) {
+                                                            // Process logs to database
+                                                            if let Err(e) = whisper_logger::process_whisper_logs_to_db(
+                                                                final_log_path,
+                                                                session_id.clone(),
+                                                                Some(transcript_id),
+                                                                db_clone
+                                                            ).await {
+                                                                debug(Component::Recording, &format!("Failed to process whisper logs to db: {}", e));
+                                                            } else {
+                                                                debug(Component::Recording, &format!("Successfully processed whisper logs for session {}", session_id));
+                                                            }
+                                                        }
+                                                    });
+                                                } else {
+                                                    // Just end the session if we have one
+                                                    whisper_logger::end_whisper_session(&active_recording.session_id);
+                                                }
                                             }
                                             Err(e) => {
                                                 error(Component::Processing, &format!("Failed to save transcript: {}", e));
