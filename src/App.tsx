@@ -13,6 +13,8 @@ import { useRecording } from './hooks/useRecording';
 import { useSettings } from './hooks/useSettings';
 import { useFileDrop } from './hooks/useFileDrop';
 import { useTranscriptEvents } from './hooks/useTranscriptEvents';
+import { useProcessingStatus } from './hooks/useProcessingStatus';
+import { useNativeOverlay } from './hooks/useNativeOverlay';
 import "./App.css";
 
 interface Transcript {
@@ -167,6 +169,22 @@ function App() {
     }
   });
 
+  // Use the processing status hook
+  useProcessingStatus({
+    setUploadProgress,
+    setIsProcessing,
+    onProcessingComplete: () => {
+      loadRecentTranscripts();
+    }
+  });
+
+  // Use the native overlay hook
+  useNativeOverlay({
+    startRecording,
+    stopRecording,
+    cancelRecording
+  });
+
   useEffect(() => {
     // Check if we have any models
     const checkModels = async () => {
@@ -196,139 +214,36 @@ function App() {
   }, []);
 
   useEffect(() => {
-    loadRecentTranscripts();
+    let mounted = true;
     
-    // Check current model on startup
-    invoke<string>('get_current_model').catch(console.error);
+    const init = async () => {
+      if (!mounted) return;
+      
+      loadRecentTranscripts();
+      
+      // Check current model on startup
+      invoke<string>('get_current_model').catch(console.error);
+      
+      // Subscribe to recording progress updates
+      invoke('subscribe_to_progress').catch(console.error);
+    };
     
-    // Listen for recording requests from native overlay
-    const unsubscribeNativeStart = listen('native-overlay-start-recording', async () => {
-      // Check the actual recording state from backend to avoid stale closure
-      const isCurrentlyRecording = await invoke<boolean>("is_recording");
-      if (!isCurrentlyRecording) {
-        await startRecording();
-      }
-    });
-
-    const unsubscribeNativeStop = listen('native-overlay-stop-recording', async () => {
-      // Check the actual recording state from backend
-      const isCurrentlyRecording = await invoke<boolean>("is_recording");
-      if (isCurrentlyRecording) {
-        await stopRecording();
-      }
-    });
-
-    const unsubscribeNativeCancel = listen('native-overlay-cancel-recording', async () => {
-      // Check the actual recording state from backend
-      const isCurrentlyRecording = await invoke<boolean>("is_recording");
-      if (isCurrentlyRecording) {
-        // Cancel the recording using the hook
-        await cancelRecording();
-      }
-    });
-    
-    // Subscribe to recording progress updates
-    invoke('subscribe_to_progress').catch(console.error);
-    
-    // All settings are now loaded by the useSettings hook
+    init();
     
     // Listen for global hotkey events
     const unsubscribe = listen('toggle-recording', async () => {
       await toggleRecording();
     });
     
-    
-    
-    
-    // Listen for processing status updates from the background queue
-    const unsubscribeProcessing = listen('processing-status', (event) => {
-      const status = event.payload as any;
-      
-      // Update UI based on processing status
-      if (status.Queued) {
-        setUploadProgress(prev => ({
-          ...prev,
-          status: 'queued',
-          queuePosition: status.Queued.position
-        }));
-      } else if (status.Processing) {
-        setUploadProgress(prev => ({
-          ...prev,
-          status: 'processing',
-          filename: status.Processing.filename
-        }));
-      } else if (status.Converting) {
-        setUploadProgress(prev => ({
-          ...prev,
-          status: 'converting',
-          filename: status.Converting.filename
-        }));
-      } else if (status.Transcribing) {
-        setUploadProgress(prev => ({
-          ...prev,
-          status: 'transcribing',
-          filename: status.Transcribing.filename
-        }));
-      } else if (status.Complete) {
-        // Transcription complete, refresh the transcript list
-        loadRecentTranscripts();
-        setUploadProgress({ status: 'idle' });
-        if (processingTimeoutRef.current) {
-          clearTimeout(processingTimeoutRef.current);
-          processingTimeoutRef.current = null;
-        }
-        setIsProcessing(false);
-        processingFileRef.current = null; // Clear the processing file reference
-        
-        // Native overlay state is managed by the backend
-      } else if (status.Failed) {
-        console.error("Processing failed:", status.Failed);
-        if (processingTimeoutRef.current) {
-          clearTimeout(processingTimeoutRef.current);
-          processingTimeoutRef.current = null;
-        }
-        setIsProcessing(false);
-        processingFileRef.current = null; // Clear the processing file reference
-        setUploadProgress({ status: 'idle' });
-        // Show error message to user
-        alert(`Failed to process audio file: ${status.Failed.error || 'Unknown error'}`);
-        
-        // Native overlay state is managed by the backend
-      }
-    });
-    
-    // Listen for file upload complete events
-    const unsubscribeFileUpload = listen('file-upload-complete', (event) => {
-      const data = event.payload as any;
-      // File upload complete
-      
-      // Update upload progress with file info
-      setUploadProgress(prev => ({
-        ...prev,
-        filename: data.originalName || data.filename,
-        fileSize: data.size,
-        status: 'queued'
-      }));
-    });
-    
-    // Transcript events are now handled by the useTranscriptEvents hook
-    
     // Listen for keyboard monitor unavailable event
     const unsubscribeKeyboardMonitor = listen('keyboard-monitor-unavailable', async (event) => {
       console.warn('Keyboard monitor unavailable:', event.payload);
       keyboardMonitorAvailable.current = false;
-      
-      // Optionally show a notification to the user
-      // You could add a toast notification here if you have a notification system
     });
 
     return () => {
+      mounted = false;
       unsubscribe.then(fn => fn());
-      unsubscribeProcessing.then(fn => fn());
-      unsubscribeFileUpload.then(fn => fn());
-      unsubscribeNativeStart.then(fn => fn());
-      unsubscribeNativeStop.then(fn => fn());
-      unsubscribeNativeCancel.then(fn => fn());
       unsubscribeKeyboardMonitor.then(fn => fn());
     };
   }, []); // Empty dependency array since we're checking state from backend
