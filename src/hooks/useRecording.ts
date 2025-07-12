@@ -76,13 +76,17 @@ export function useRecording(options: UseRecordingOptions = {}) {
 
   // Start recording
   const startRecording = useCallback(async () => {
+    // Prevent concurrent start attempts
     if (isStartingRecording.current) {
       console.log('Already starting recording, ignoring duplicate request');
       return;
     }
 
-    // Check backend state first
+    // Set flag immediately to prevent race conditions
+    isStartingRecording.current = true;
+
     try {
+      // Check backend state first
       const backendIsRecording = await invoke<boolean>('is_recording');
       if (backendIsRecording) {
         console.log('Backend is already recording, syncing frontend state');
@@ -90,27 +94,24 @@ export function useRecording(options: UseRecordingOptions = {}) {
         isRecordingRef.current = true;
         return;
       }
-    } catch (error) {
-      console.error('Failed to check recording state:', error);
-    }
 
-    if (isRecordingRef.current) {
-      console.log('Frontend already recording, ignoring duplicate request');
-      return;
-    }
+      // Double-check frontend state
+      if (isRecordingRef.current) {
+        console.log('Frontend already recording, ignoring duplicate request');
+        return;
+      }
 
-    try {
-      isStartingRecording.current = true;
-      // console.log('Starting recording...');
+      // Set frontend state optimistically before calling backend
+      setIsRecording(true);
+      isRecordingRef.current = true;
+      setRecordingDuration(0);
       
+      console.log('Starting recording with device:', selectedMic);
       const result = await invoke<string>('start_recording', { 
         deviceName: selectedMic !== 'Default microphone' ? selectedMic : null 
       });
       
-      // console.log('Recording started successfully:', result);
-      setIsRecording(true);
-      isRecordingRef.current = true;
-      setRecordingDuration(0);
+      console.log('Recording started successfully:', result);
       
       if (soundEnabled) {
         try {
@@ -124,17 +125,20 @@ export function useRecording(options: UseRecordingOptions = {}) {
       }
     } catch (error: any) {
       console.error('Failed to start recording:', error);
-      // If the error is "Recording already in progress", sync our state
+      // If the error is "Recording already in progress", keep our state as recording
       if (error.includes && error.includes('already in progress')) {
-        // console.log('Backend says recording in progress, syncing state');
-        setIsRecording(true);
-        isRecordingRef.current = true;
+        console.log('Backend says recording in progress, keeping recording state');
+        // State is already set, just keep it
       } else {
+        // Only reset state on actual errors
         setIsRecording(false);
         isRecordingRef.current = false;
       }
     } finally {
-      isStartingRecording.current = false;
+      // Small delay before clearing flag to handle rapid calls
+      setTimeout(() => {
+        isStartingRecording.current = false;
+      }, 100);
     }
   }, [selectedMic, soundEnabled]);
 
@@ -216,6 +220,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
 
   // Push-to-talk handlers
   const handlePushToTalkPressed = useCallback(async () => {
+    console.log('Push-to-talk pressed');
     const now = Date.now();
     
     if (pushToTalkTimeoutRef.current) {
@@ -225,11 +230,13 @@ export function useRecording(options: UseRecordingOptions = {}) {
     
     if (!isRecordingRef.current) {
       pushToTalkStartTimeRef.current = now;
+      console.log('Starting recording from push-to-talk');
       await startRecording();
     }
   }, [startRecording]);
 
   const handlePushToTalkReleased = useCallback(async () => {
+    console.log('Push-to-talk released');
     const now = Date.now();
     const recordingTime = now - pushToTalkStartTimeRef.current;
     
@@ -239,27 +246,39 @@ export function useRecording(options: UseRecordingOptions = {}) {
     
     const minimumRecordingTime = vadEnabled ? 50 : 300;
     
+    console.log(`Recording time: ${recordingTime}ms, minimum: ${minimumRecordingTime}ms, isRecording: ${isRecordingRef.current}`);
+    
     if (isRecordingRef.current && recordingTime >= minimumRecordingTime) {
       if (vadEnabled) {
+        console.log('VAD enabled, setting timeout to stop recording');
         pushToTalkTimeoutRef.current = setTimeout(async () => {
           if (isRecordingRef.current) {
+            console.log('Stopping recording after VAD timeout');
             await stopRecording();
           }
         }, 500);
       } else {
+        console.log('VAD disabled, stopping recording immediately');
         await stopRecording();
       }
     } else if (isRecordingRef.current) {
+      console.log('Recording time too short, stopping anyway');
       await stopRecording();
     }
   }, [stopRecording, vadEnabled]);
 
   // Set up event listeners
   useEffect(() => {
+    let mounted = true;
+    const unsubscribers: Array<() => void> = [];
+    
     const setupListeners = async () => {
+      if (!mounted) return;
+      
       try {
         // Listen for recording state changes from backend
         const unsubscribeRecordingState = await listen("recording-state-changed", (event: any) => {
+          if (!mounted) return;
         const { state } = event.payload;
         
         if (state === "recording") {
@@ -289,6 +308,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
       let durationInterval: NodeJS.Timeout | null = null;
 
       const unsubscribeProgress = await listen<RecordingProgress>('recording-progress', (event) => {
+        if (!mounted) return;
         if (event.payload.Recording) {
           // Start tracking duration from the backend's start_time
           if (!recordingStartTime) {
@@ -318,60 +338,74 @@ export function useRecording(options: UseRecordingOptions = {}) {
       });
 
       const unsubscribeAudioLevel = await listen<number>('audio-level', (event) => {
+        if (!mounted) return;
         audioTargetRef.current = event.payload;
         if (!animationFrameRef.current) {
           animationFrameRef.current = requestAnimationFrame(animateAudioLevel);
         }
       });
 
-      const unsubscribePushToTalkPressed = await listen('push-to-talk-pressed', handlePushToTalkPressed);
-      const unsubscribePushToTalkReleased = await listen('push-to-talk-released', handlePushToTalkReleased);
+      const unsubscribePushToTalkPressed = await listen('push-to-talk-pressed', async () => {
+        if (!mounted) return;
+        await handlePushToTalkPressed();
+      });
+      
+      const unsubscribePushToTalkReleased = await listen('push-to-talk-released', async () => {
+        if (!mounted) return;
+        await handlePushToTalkReleased();
+      });
 
       const unsubscribeProcessingComplete = await listen('processing-complete', () => {
+        if (!mounted) return;
         onTranscriptCreated?.();
       });
 
-      return () => {
-        // Safely call unsubscribe functions
-        try {
-          unsubscribeRecordingState?.();
-          unsubscribeProgress?.();
-          unsubscribeAudioLevel?.();
-          unsubscribePushToTalkPressed?.();
-          unsubscribePushToTalkReleased?.();
-          unsubscribeProcessingComplete?.();
-        } catch (error) {
-          console.error('Error during listener cleanup:', error);
-        }
-        
-        if (animationFrameRef.current) {
-          cancelAnimationFrame(animationFrameRef.current);
-        }
-        
-        // Clean up duration tracking interval
-        if (durationInterval) {
-          clearInterval(durationInterval);
-        }
-      };
+      // Store all unsubscribe functions
+      unsubscribers.push(
+        unsubscribeRecordingState,
+        unsubscribeProgress,
+        unsubscribeAudioLevel,
+        unsubscribePushToTalkPressed,
+        unsubscribePushToTalkReleased,
+        unsubscribeProcessingComplete
+      );
+      
+      // Also store the interval cleanup
+      if (durationInterval) {
+        unsubscribers.push(() => clearInterval(durationInterval));
+      }
       } catch (error) {
         console.error('Failed to set up recording event listeners:', error);
-        // Return a no-op cleanup function
-        return () => {};
       }
     };
 
-    let cleanupFn: (() => void) | null = null;
-    
-    setupListeners().then(fn => {
-      cleanupFn = fn;
-    }).catch(error => {
+    setupListeners().catch(error => {
       console.error('Failed to setup recording listeners:', error);
     });
 
     return () => {
-      if (cleanupFn) {
-        cleanupFn();
+      mounted = false;
+      
+      // Cancel any pending timeouts
+      if (pushToTalkTimeoutRef.current) {
+        clearTimeout(pushToTalkTimeoutRef.current);
+        pushToTalkTimeoutRef.current = null;
       }
+      
+      // Cancel animation frame
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = undefined;
+      }
+      
+      // Call all unsubscribe functions
+      unsubscribers.forEach(unsubscribe => {
+        try {
+          unsubscribe?.();
+        } catch (error) {
+          console.error('Error during listener cleanup:', error);
+        }
+      });
     };
   }, [animateAudioLevel, handlePushToTalkPressed, handlePushToTalkReleased, onTranscriptCreated]);
 

@@ -40,10 +40,12 @@ export function useTranscriptEvents(options: UseTranscriptEventsOptions) {
   const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
+    let mounted = true;
     console.log('🔔 Setting up transcript-created listener at', new Date().toISOString());
     
     // Listen for transcript-created events (pub/sub for real-time updates)
     const unsubscribeTranscriptCreated = listen('transcript-created', async (event) => {
+      if (!mounted) return;
       const newTranscript = event.payload as Transcript;
       console.log('📝 Transcript created event received at', new Date().toISOString(), ':', {
         id: newTranscript.id,
@@ -107,6 +109,7 @@ export function useTranscriptEvents(options: UseTranscriptEventsOptions) {
     
     // Listen for performance metrics events (for debugging)
     const unsubscribePerformanceMetrics = listen('performance-metrics-recorded', async (event) => {
+      if (!mounted) return;
       const metrics = event.payload as any;
       console.log('Performance Metrics:', {
         recording_duration: `${metrics.recording_duration_ms}ms`,
@@ -119,6 +122,7 @@ export function useTranscriptEvents(options: UseTranscriptEventsOptions) {
     
     // Listen for processing-complete event as a backup to transcript-created
     const unsubscribeProcessingComplete = listen('processing-complete', async (event) => {
+      if (!mounted) return;
       const transcript = event.payload as Transcript;
       console.log('🏁 Processing complete event received at', new Date().toISOString(), 'transcript:', transcript.id);
       
@@ -142,6 +146,7 @@ export function useTranscriptEvents(options: UseTranscriptEventsOptions) {
     
     // Listen for recording-completed event as another backup
     const unsubscribeRecordingCompleted = listen('recording-completed', async (_event) => {
+      if (!mounted) return;
       console.log('🏁 Recording-completed event received at', new Date().toISOString());
       
       // Clear processing state immediately
@@ -155,10 +160,11 @@ export function useTranscriptEvents(options: UseTranscriptEventsOptions) {
     });
 
     return () => {
-      unsubscribeTranscriptCreated.then(fn => fn());
-      unsubscribePerformanceMetrics.then(fn => fn());
-      unsubscribeProcessingComplete.then(fn => fn());
-      unsubscribeRecordingCompleted.then(fn => fn());
+      mounted = false;
+      unsubscribeTranscriptCreated.then(fn => fn()).catch(console.error);
+      unsubscribePerformanceMetrics.then(fn => fn()).catch(console.error);
+      unsubscribeProcessingComplete.then(fn => fn()).catch(console.error);
+      unsubscribeRecordingCompleted.then(fn => fn()).catch(console.error);
     };
   }, [autoCopy, autoPaste, soundEnabled, completionSoundThreshold, onTranscriptCreated, onProcessingComplete, onRecordingCompleted, setIsProcessing, setTranscripts]);
 
