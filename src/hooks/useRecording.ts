@@ -362,7 +362,12 @@ export function useRecording(options: UseRecordingOptions = {}) {
 
       const unsubscribeAudioLevel = await listen<number>('audio-level', (event) => {
         if (!mounted) return;
-        console.log('Received audio-level event:', event.payload);
+        
+        // Only log significant audio levels to reduce console noise
+        if (event.payload > 0.1) {
+          console.log('Significant audio level:', event.payload.toFixed(3));
+        }
+        
         audioTargetRef.current = event.payload;
         
         // Always restart animation when we get a new value
