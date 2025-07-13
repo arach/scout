@@ -1383,7 +1383,7 @@ pub fn run() {
             let app_handle = app.handle().clone();
             let recorder_for_monitoring = recorder_arc.clone();
             tauri::async_runtime::spawn(async move {
-                let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(100)); // 10Hz update rate - more reasonable
+                let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(100)); // Simple 10Hz polling
                 loop {
                     interval.tick().await;
                     
@@ -1392,11 +1392,8 @@ pub fn run() {
                         recorder.get_current_audio_level()
                     };
                     
-                    // Only emit if there's actual audio activity or if level is dropping
-                    // This reduces unnecessary updates while still showing the decay
-                    if audio_level > 0.02 || (audio_level > 0.001 && audio_level < 0.02) {
-                        let _ = app_handle.emit("audio-level", audio_level);
-                    }
+                    // Just emit the level - no fancy thresholds
+                    let _ = app_handle.emit("audio-level", audio_level);
                 }
             });
             
