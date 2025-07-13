@@ -515,6 +515,52 @@ impl Database {
         Ok(())
     }
 
+    pub async fn get_whisper_logs_for_transcript(&self, transcript_id: i64, limit: Option<i32>) -> Result<Vec<serde_json::Value>, String> {
+        let query = if let Some(limit) = limit {
+            sqlx::query(
+                r#"
+                SELECT id, session_id, transcript_id, timestamp, level, component, message, metadata
+                FROM whisper_logs
+                WHERE transcript_id = ?1
+                ORDER BY timestamp ASC
+                LIMIT ?2
+                "#
+            )
+            .bind(transcript_id)
+            .bind(limit)
+        } else {
+            sqlx::query(
+                r#"
+                SELECT id, session_id, transcript_id, timestamp, level, component, message, metadata
+                FROM whisper_logs
+                WHERE transcript_id = ?1
+                ORDER BY timestamp ASC
+                "#
+            )
+            .bind(transcript_id)
+        };
+        
+        let rows = query
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| format!("Failed to get whisper logs: {}", e))?;
+        
+        let logs: Vec<serde_json::Value> = rows.into_iter().map(|row| {
+            serde_json::json!({
+                "id": row.get::<i64, _>("id"),
+                "session_id": row.get::<String, _>("session_id"),
+                "transcript_id": row.get::<Option<i64>, _>("transcript_id"),
+                "timestamp": row.get::<String, _>("timestamp"),
+                "level": row.get::<String, _>("level"),
+                "component": row.get::<String, _>("component"),
+                "message": row.get::<String, _>("message"),
+                "metadata": row.get::<Option<String>, _>("metadata").and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()),
+            })
+        }).collect();
+        
+        Ok(logs)
+    }
+    
     pub async fn get_whisper_logs_for_session(&self, session_id: &str, limit: Option<i32>) -> Result<Vec<serde_json::Value>, String> {
         let query = if let Some(limit) = limit {
             sqlx::query(
@@ -561,6 +607,69 @@ impl Database {
         Ok(logs)
     }
 
+    // Performance Timeline methods
+    pub async fn save_performance_timeline_events(
+        &self,
+        transcript_id: i64,
+        session_id: &str,
+        events: Vec<(String, String, String, Option<i64>)>, // (timestamp, event_type, details, duration_from_start_ms)
+    ) -> Result<(), String> {
+        let mut tx = self.pool.begin()
+            .await
+            .map_err(|e| format!("Failed to begin transaction: {}", e))?;
+        
+        for (timestamp, event_type, details, duration_from_start_ms) in events {
+            sqlx::query(
+                r#"
+                INSERT INTO performance_timeline_events (transcript_id, session_id, timestamp, event_type, details, duration_from_start_ms)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                "#
+            )
+            .bind(transcript_id)
+            .bind(session_id)
+            .bind(&timestamp)
+            .bind(&event_type)
+            .bind(&details)
+            .bind(duration_from_start_ms)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("Failed to insert performance event: {}", e))?;
+        }
+        
+        tx.commit()
+            .await
+            .map_err(|e| format!("Failed to commit transaction: {}", e))?;
+        
+        Ok(())
+    }
+    
+    pub async fn get_performance_timeline_for_transcript(&self, transcript_id: i64) -> Result<Vec<serde_json::Value>, String> {
+        let rows = sqlx::query(
+            r#"
+            SELECT session_id, timestamp, event_type, details, duration_from_start_ms
+            FROM performance_timeline_events
+            WHERE transcript_id = ?1
+            ORDER BY timestamp ASC
+            "#
+        )
+        .bind(transcript_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to get performance timeline: {}", e))?;
+        
+        let events: Vec<serde_json::Value> = rows.into_iter().map(|row| {
+            serde_json::json!({
+                "session_id": row.get::<String, _>("session_id"),
+                "timestamp": row.get::<String, _>("timestamp"),
+                "event_type": row.get::<String, _>("event_type"),
+                "details": row.get::<String, _>("details"),
+                "duration_from_start_ms": row.get::<Option<i64>, _>("duration_from_start_ms"),
+            })
+        }).collect();
+        
+        Ok(events)
+    }
+    
     // LLM Output methods
     pub async fn save_llm_output(
         &self,

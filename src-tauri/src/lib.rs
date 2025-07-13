@@ -22,6 +22,8 @@ mod performance_metrics_service;
 pub mod benchmarking;
 mod llm;
 mod whisper_logger;
+mod whisper_log_interceptor;
+mod performance_tracker;
 #[cfg(target_os = "macos")]
 mod macos;
 
@@ -45,6 +47,7 @@ use audio::converter::AudioConverter;
 use std::path::Path;
 use crate::logger::{info, debug, warn, error, Component};
 use crate::transcription::Transcriber;
+use crate::performance_tracker::PerformanceTracker;
 
 // Overlay dimensions configuration
 const OVERLAY_EXPANDED_WIDTH: f64 = 220.0;
@@ -67,6 +70,7 @@ pub struct AppState {
     pub keyboard_monitor: Arc<KeyboardMonitor>,
     pub transcriber: Arc<Mutex<Option<Transcriber>>>,
     pub current_model_path: Arc<Mutex<Option<PathBuf>>>,
+    pub performance_tracker: Arc<PerformanceTracker>,
     #[cfg(target_os = "macos")]
     pub native_overlay: Arc<Mutex<macos::MacOSOverlay>>,
     #[cfg(target_os = "macos")]
@@ -633,6 +637,13 @@ async fn get_performance_metrics_for_transcript(
 }
 
 #[tauri::command]
+async fn get_performance_timeline(
+    state: State<'_, AppState>,
+) -> Result<Option<performance_tracker::PerformanceTimeline>, String> {
+    Ok(state.performance_tracker.get_current_timeline().await)
+}
+
+#[tauri::command]
 async fn get_transcript(
     state: State<'_, AppState>,
     transcript_id: i64,
@@ -1118,6 +1129,23 @@ async fn get_whisper_logs_for_session(
 }
 
 #[tauri::command]
+async fn get_whisper_logs_for_transcript(
+    state: State<'_, AppState>,
+    transcript_id: i64,
+    limit: Option<i32>,
+) -> Result<Vec<serde_json::Value>, String> {
+    state.database.get_whisper_logs_for_transcript(transcript_id, limit).await
+}
+
+#[tauri::command]
+async fn get_performance_timeline_for_transcript(
+    state: State<'_, AppState>,
+    transcript_id: i64,
+) -> Result<Vec<serde_json::Value>, String> {
+    state.database.get_performance_timeline_for_transcript(transcript_id).await
+}
+
+#[tauri::command]
 async fn get_llm_prompt_templates(
     state: State<'_, AppState>,
 ) -> Result<Vec<db::LLMPromptTemplate>, String> {
@@ -1251,6 +1279,27 @@ async fn play_success_sound() -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Initialize env_logger with our custom interceptor to capture whisper logs
+    // Set RUST_LOG to capture whisper output at debug level
+    std::env::set_var("RUST_LOG", "scout=info,whisper=debug,whisper_rs=debug");
+    
+    // Initialize env_logger as the base logger
+    let env_logger = env_logger::Builder::from_default_env()
+        .target(env_logger::Target::Stdout)
+        .build();
+    
+    // Wrap it with our WhisperLogInterceptor
+    let interceptor = whisper_log_interceptor::WhisperLogInterceptor::new(Box::new(env_logger));
+    
+    // Set the interceptor as the global logger
+    log::set_boxed_logger(Box::new(interceptor))
+        .expect("Failed to set logger");
+    log::set_max_level(log::LevelFilter::Debug);
+    
+    // Install whisper-rs log trampoline to capture whisper.cpp logs
+    whisper_rs::install_whisper_log_trampoline();
+    info(Component::Transcription, "Installed whisper log trampoline for capturing whisper.cpp output");
+    
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -1316,6 +1365,8 @@ pub fn run() {
             );
             let processing_queue_arc = Arc::new(processing_queue);
             
+            let performance_tracker = Arc::new(PerformanceTracker::new());
+            
             let recording_workflow = Arc::new(RecordingWorkflow::new(
                 recorder_arc.clone(),
                 recordings_dir.clone(),
@@ -1325,6 +1376,7 @@ pub fn run() {
                 models_dir.clone(),
                 app.handle().clone(),
                 settings_arc.clone(),
+                performance_tracker.clone(),
             ));
             
             // Initialize native NSPanel overlay
@@ -1380,6 +1432,7 @@ pub fn run() {
                 keyboard_monitor: keyboard_monitor.clone(),
                 transcriber,
                 current_model_path,
+                performance_tracker,
                 #[cfg(target_os = "macos")]
                 native_overlay: native_overlay.clone(),
                 #[cfg(target_os = "macos")]
@@ -1638,6 +1691,7 @@ pub fn run() {
             save_transcript,
             get_performance_metrics,
             get_performance_metrics_for_transcript,
+            get_performance_timeline,
             get_transcript,
             get_recent_transcripts,
             search_transcripts,
@@ -1677,6 +1731,8 @@ pub fn run() {
             set_active_llm_model,
             get_llm_outputs_for_transcript,
             get_whisper_logs_for_session,
+            get_whisper_logs_for_transcript,
+            get_performance_timeline_for_transcript,
             get_llm_prompt_templates,
             save_llm_prompt_template,
             delete_llm_prompt_template,

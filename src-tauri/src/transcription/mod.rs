@@ -57,9 +57,14 @@ impl Transcriber {
         params.set_translate(false);
         params.set_language(Some("en"));
         params.set_print_special(false);
-        params.set_print_progress(false);
+        params.set_print_progress(true);  // Enable to capture whisper logs
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
+        
+        // Set up progress callback to capture whisper output
+        params.set_progress_callback_safe(|progress| {
+            log::info!(target: "whisper", "Progress: {}%", progress);
+        });
         
         // Suppress non-speech tokens (music, background noise descriptions)
         params.set_suppress_non_speech_tokens(true);
@@ -67,9 +72,15 @@ impl Transcriber {
         // Run the transcription
         let mut state = self.context.create_state().map_err(|e| format!("Failed to create state: {}", e))?;
         
+        // Log transcription start
+        log::info!(target: "whisper", "Starting transcription of {} samples", audio_data.len());
+        
         state
             .full(params, &audio_data)
             .map_err(|e| format!("Failed to transcribe: {}", e))?;
+            
+        // Log transcription complete
+        log::info!(target: "whisper", "Transcription complete");
 
         // Get the transcribed text
         let num_segments = state.full_n_segments().map_err(|e| format!("Failed to get segments: {}", e))?;

@@ -12,6 +12,8 @@ use crate::db::Database;
 use crate::settings::SettingsManager;
 use crate::logger::{info, debug, warn, error, Component};
 use crate::whisper_logger;
+use crate::whisper_log_interceptor::WhisperLogInterceptor;
+use crate::performance_tracker::PerformanceTracker;
 
 #[derive(Debug)]
 pub enum RecordingCommand {
@@ -64,6 +66,7 @@ impl RecordingWorkflow {
         models_dir: PathBuf,
         app_handle: tauri::AppHandle,
         settings: Arc<tokio::sync::Mutex<SettingsManager>>,
+        performance_tracker: Arc<PerformanceTracker>,
     ) -> Self {
         let (command_tx, mut command_rx) = mpsc::channel::<RecordingCommand>(100);
         
@@ -78,12 +81,19 @@ impl RecordingWorkflow {
                 let database_for_iter = database.clone();
                 let recordings_dir_for_iter = recordings_dir.clone();
                 let progress_tracker_for_iter = progress_tracker.clone();
+                let performance_tracker_for_iter = performance_tracker.clone();
                 
                 match command {
                     RecordingCommand::StartRecording { device_name, response } => {
                         info(Component::Recording, "Starting recording workflow...");
                         
+                        // Start performance tracking
+                        let session_id = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
+                        performance_tracker_for_iter.start_session(session_id.clone()).await;
+                        performance_tracker_for_iter.track_event("recording_command", "StartRecording command received").await;
+                        
                         // Capture active app context on macOS
+                        performance_tracker_for_iter.track_event("app_context", "Capturing active app context").await;
                         #[cfg(target_os = "macos")]
                         let app_context = crate::macos::get_active_app_context();
                         #[cfg(not(target_os = "macos"))]
@@ -93,13 +103,15 @@ impl RecordingWorkflow {
                             info(Component::Recording, &format!("Recording started in app: {} ({})", ctx.name, ctx.bundle_id));
                         }
                         
-                        // Generate filename and session ID
-                        let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
-                        let session_id = timestamp.clone();
+                        // Generate filename - reuse session ID from performance tracker
+                        let timestamp = session_id.clone();
                         let filename = format!("recording_{}.wav", timestamp);
                         let path = recordings_dir_for_iter.join(&filename);
                         
                         // Start whisper logging session
+                        performance_tracker_for_iter.track_event("whisper_logging", "Starting whisper log session").await;
+                        // Set the session ID for the log interceptor
+                        WhisperLogInterceptor::set_session_id(Some(session_id.clone()));
                         let whisper_log_path = match whisper_logger::start_whisper_session(&session_id) {
                             Ok(path) => {
                                 debug(Component::Recording, &format!("Started whisper log session: {}", session_id));
@@ -112,6 +124,7 @@ impl RecordingWorkflow {
                         };
                         
                         info(Component::Recording, "Initializing transcription context for real-time chunking...");
+                        performance_tracker_for_iter.track_event("transcription_init", "Creating transcription context").await;
                         // Initialize transcription context for real-time chunking
                         let transcription_context = match TranscriptionContext::new_from_db(
                             database_for_iter.clone(),
@@ -122,6 +135,7 @@ impl RecordingWorkflow {
                                 warn(Component::Recording, &format!("Failed to create transcription context: {}", e));
                                 info(Component::Recording, "Falling back to traditional processing queue");
                                 // Continue with traditional recording workflow without strategy integration
+                                performance_tracker_for_iter.track_event("fallback", "Using traditional recording without transcription context").await;
                                 let recorder = recorder.lock().await;
                                 match recorder.start_recording(&path, device_name.as_deref()) {
                                     Ok(_) => {
@@ -154,6 +168,7 @@ impl RecordingWorkflow {
                         
                         // Start transcription strategy first to get ring buffer setup
                         let mut transcription_context = transcription_context;
+                        performance_tracker_for_iter.track_event("strategy_start", "Starting transcription strategy").await;
                         match transcription_context.start_recording(&path, None).await {
                             Ok(_) => {
                                 // Set up sample callback to bridge AudioRecorder to RingBuffer
@@ -214,6 +229,7 @@ impl RecordingWorkflow {
                                 };
                                 
                                 // Start recording
+                                performance_tracker_for_iter.track_event("audio_start", "Starting audio recording").await;
                                 let recorder = recorder.lock().await;
                                 match recorder.start_recording(&path, device_name.as_deref()) {
                                     Ok(_) => {
@@ -292,6 +308,7 @@ impl RecordingWorkflow {
                                         });
                                         
                                         // Update progress to Recording state
+                                        performance_tracker_for_iter.track_event("state_change", "Updated to Recording state").await;
                                         progress_tracker_for_iter.update(RecordingProgress::Recording { 
                                             filename: filename.clone(),
                                             start_time: chrono::Utc::now().timestamp_millis() as u64
@@ -317,17 +334,20 @@ impl RecordingWorkflow {
                     
                     RecordingCommand::StopRecording { response } => {
                         info(Component::Recording, "RecordingWorkflow: StopRecording command received");
+                        performance_tracker_for_iter.track_event("recording_command", "StopRecording command received").await;
                         if let Some(mut active_recording) = current_recording.take() {
                             let duration_ms = active_recording.start_time.elapsed().as_millis() as i32;
                             info(Component::Recording, &format!("Recording duration: {}ms", duration_ms));
                             
                             // Update to Idle state immediately for better UI responsiveness
+                            performance_tracker_for_iter.track_event("state_change", "Updated to Idle state").await;
                             progress_tracker_for_iter.update(RecordingProgress::Idle);
                             
                             // Get device info before stopping recording
                             let recorder = recorder.lock().await;
                             let device_info = recorder.get_current_device_info();
                             debug(Component::Recording, "Calling recorder.stop_recording()...");
+                            performance_tracker_for_iter.track_event("audio_stop", "Stopping audio recorder").await;
                             if let Err(e) = recorder.stop_recording() {
                                 error(Component::Recording, &format!("Failed to stop recording: {}", e));
                                 // Update to idle on error
@@ -339,6 +359,7 @@ impl RecordingWorkflow {
                             drop(recorder); // Release lock
                             
                             // Send immediate response for UI responsiveness
+                            performance_tracker_for_iter.track_event("response_sent", "Sent immediate response to UI").await;
                             let immediate_result = RecordingResult {
                                 filename: active_recording.filename.clone(),
                                 transcript: None, // Will be filled in later
@@ -367,9 +388,14 @@ impl RecordingWorkflow {
                                 let app_context_clone = active_recording.app_context.clone();
                                 let recording_start_time = active_recording.start_time;
                                 
+                                // Clone performance tracker for async task
+                                let perf_tracker_clone = performance_tracker_for_iter.clone();
+                                
                                 // Spawn async task for transcription
                                 tokio::spawn(async move {
+                                    perf_tracker_clone.track_event("transcription_start", "Starting async transcription processing").await;
                                     // Add timeout to prevent hanging
+                                    perf_tracker_clone.track_event("transcription_finish", "Calling finish_recording on transcription context").await;
                                     let finish_timeout = tokio::time::timeout(
                                         tokio::time::Duration::from_secs(45), // 45 second timeout
                                         transcription_context.finish_recording()
@@ -377,6 +403,10 @@ impl RecordingWorkflow {
                                 
                                 match finish_timeout {
                                     Ok(Ok(transcription_result)) => {
+                                        perf_tracker_clone.track_event("transcription_complete", 
+                                            &format!("Transcription completed: {} chars, {} chunks", 
+                                                transcription_result.text.len(), 
+                                                transcription_result.chunks_processed)).await;
                                         let speed_ratio = duration_ms as f64 / transcription_result.processing_time_ms as f64;
                                         info(Component::Transcription, &format!("Transcription completed: {} chars in {:.2}s", 
                                                 transcription_result.text.len(),
@@ -392,6 +422,7 @@ impl RecordingWorkflow {
                                         }
                                         
                                         // Execute post-processing hooks (profanity filter, auto-copy, auto-paste, etc.)
+                                        perf_tracker_clone.track_event("post_processing", "Starting post-processing hooks").await;
                                         let post_processing = crate::post_processing::PostProcessingHooks::new(settings_clone.clone(), database_clone.clone());
                                         let (filtered_transcript, original_transcript, analysis_logs) = post_processing.execute_hooks(&transcription_result.text, "Ring Buffer", Some(duration_ms), None).await;
                                         
@@ -417,6 +448,7 @@ impl RecordingWorkflow {
                                         let metadata = metadata_json.to_string();
                                         
                                         // Save filtered transcript to database
+                                        perf_tracker_clone.track_event("db_save", "Saving transcript to database").await;
                                         match database_clone.save_transcript(
                                             &filtered_transcript,
                                             duration_ms,
@@ -426,6 +458,7 @@ impl RecordingWorkflow {
                                         ).await {
                                             Ok(transcript) => {
                                                 info(Component::Processing, &format!("Filtered transcript saved to database with ID: {}", transcript.id));
+                                                perf_tracker_clone.track_event("db_saved", &format!("Transcript saved with ID: {}", transcript.id)).await;
                                                 
                                                 // Save performance metrics using the consolidated service
                                                 let performance_data = crate::performance_metrics_service::PerformanceDataBuilder::new(
@@ -445,10 +478,24 @@ impl RecordingWorkflow {
                                                     error(Component::Processing, &format!("Failed to save performance metrics: {}", e));
                                                 }
                                                 
+                                                // Save performance timeline events to database
+                                                if let Some(timeline_events) = perf_tracker_clone.get_timeline_for_database(&session_id_clone).await {
+                                                    if let Err(e) = database_clone.save_performance_timeline_events(
+                                                        transcript.id,
+                                                        &session_id_clone,
+                                                        timeline_events
+                                                    ).await {
+                                                        error(Component::Processing, &format!("Failed to save performance timeline: {}", e));
+                                                    } else {
+                                                        info(Component::Processing, "Performance timeline saved to database");
+                                                    }
+                                                }
+                                                
                                                 // Execute LLM processing with the saved transcript ID
                                                 post_processing.execute_llm_processing(&filtered_transcript, transcript.id).await;
                                                 
                                                 // Update to idle state first
+                                                perf_tracker_clone.track_event("state_change", "Updated to Idle state (post-processing)").await;
                                                 progress_tracker_for_iter.update(RecordingProgress::Idle);
                                                 
                                                 // The progress tracker update will automatically notify the overlay
@@ -508,6 +555,11 @@ impl RecordingWorkflow {
                                                 // Send response with filtered transcript
                                                 // Response was already sent at the beginning
                                                 
+                                                // Get performance summary before ending session
+                                                if let Some(summary) = perf_tracker_clone.end_session().await {
+                                                    info(Component::Recording, &summary);
+                                                }
+                                                
                                                 // Fire-and-forget: Process whisper logs to database (development convenience)
                                                 if let Some(_log_path) = whisper_log_path_clone {
                                                     let session_id = session_id_clone.clone();
@@ -535,6 +587,8 @@ impl RecordingWorkflow {
                                                 } else {
                                                     // Just end the session if we have one
                                                     whisper_logger::end_whisper_session(&session_id_clone);
+                                                    // Clear the session ID from the log interceptor
+                                                    WhisperLogInterceptor::set_session_id(None);
                                                 }
                                             }
                                             Err(e) => {
@@ -565,6 +619,8 @@ impl RecordingWorkflow {
                             } else {
                                 // No transcription context - just end whisper session if we have one
                                 whisper_logger::end_whisper_session(&active_recording.session_id);
+                                // Clear the session ID from the log interceptor
+                                WhisperLogInterceptor::set_session_id(None);
                             }
                         } else {
                             let _ = response.send(Err("No recording in progress".to_string()));
