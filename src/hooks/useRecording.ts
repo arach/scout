@@ -93,8 +93,10 @@ export function useRecording(options: UseRecordingOptions = {}) {
     audioCurrentRef.current += diff * 0.3;
     setAudioLevel(audioCurrentRef.current);
     
-    if (Math.abs(diff) > 0.01) {
+    if (Math.abs(diff) > 0.001) {
       animationFrameRef.current = requestAnimationFrame(animateAudioLevel);
+    } else {
+      animationFrameRef.current = null;
     }
   }, []);
 
@@ -362,6 +364,8 @@ export function useRecording(options: UseRecordingOptions = {}) {
         if (!mounted) return;
         console.log('Received audio-level event:', event.payload);
         audioTargetRef.current = event.payload;
+        
+        // Always restart animation when we get a new value
         if (!animationFrameRef.current) {
           animationFrameRef.current = requestAnimationFrame(animateAudioLevel);
         }
