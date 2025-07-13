@@ -111,13 +111,13 @@ impl StrategyTester {
         .map_err(|e| format!("Transcription error: {}", e))?;
         
         let transcription_time = transcription_start.elapsed();
-        let total_time = start_time.elapsed();
+        let _total_time = start_time.elapsed();
 
         Ok(StrategyResult {
             text: transcribed_text,
             confidence: 0.95, // High confidence for single-pass full file
             time_to_first_result_ms: transcription_time.as_millis() as u32,
-            total_time_ms: total_time.as_millis() as u32,
+            total_time_ms: _total_time.as_millis() as u32,
             chunks_processed: 1,
         })
     }
@@ -139,7 +139,7 @@ impl StrategyTester {
         .map_err(|e| format!("Transcription error: {}", e))?;
         
         let transcription_time = transcription_start.elapsed();
-        let total_time = start_time.elapsed();
+        let _total_time = start_time.elapsed();
         
         // Ring buffer would deliver first results much faster than full transcription
         // Simulate first result time as a fraction of chunk size
@@ -177,7 +177,7 @@ impl StrategyTester {
         .map_err(|e| format!("Transcription error: {}", e))?;
         
         let transcription_time = transcription_start.elapsed();
-        let total_time = start_time.elapsed();
+        let _total_time = start_time.elapsed();
 
         Ok(StrategyResult {
             text: transcribed_text,

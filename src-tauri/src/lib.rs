@@ -1382,16 +1382,14 @@ pub fn run() {
             // Set up audio level monitoring
             let app_handle = app.handle().clone();
             let recorder_for_monitoring = recorder_arc.clone();
-            std::thread::spawn(move || {
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(50)); // 20Hz update rate
                 loop {
-                    std::thread::sleep(std::time::Duration::from_millis(50)); // 20Hz update rate
+                    interval.tick().await;
                     
                     let audio_level = {
-                        if let Ok(recorder) = recorder_for_monitoring.lock() {
-                            recorder.get_current_audio_level()
-                        } else {
-                            0.0
-                        }
+                        let recorder = recorder_for_monitoring.lock().await;
+                        recorder.get_current_audio_level()
                     };
                     
                     // Emit audio level
