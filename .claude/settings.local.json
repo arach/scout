@@ -50,7 +50,8 @@
       "Bash(timeout:*)",
       "Bash(VITE_PORT=1421 pnpm tauri dev)",
       "WebFetch(domain:huggingface.co)",
-      "Bash(pnpm typecheck:*)"
+      "Bash(pnpm typecheck:*)",
+      "WebFetch(domain:docs.rs)"
     ],
     "deny": []
   }
