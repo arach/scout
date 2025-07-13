@@ -115,6 +115,9 @@ export function RecordView({
                                 {/* Keep the visualizer ring but make it pulsing/animated for recording */}
                                 <div 
                                     className="audio-visualizer-ring recording-ring"
+                                    style={{
+                                        '--audio-level': audioLevel
+                                    } as React.CSSProperties}
                                 />
                                 
                                 {/* Same large button but now a stop button */}
@@ -185,7 +188,12 @@ export function RecordView({
                         <div className="recording-idle">
                             <div className="button-container">
                                 {/* Audio Visualizer Ring */}
-                                <div className="audio-visualizer-ring" />
+                                <div 
+                                    className="audio-visualizer-ring" 
+                                    style={{
+                                        '--audio-level': audioLevel
+                                    } as React.CSSProperties}
+                                />
                                 
                                 <button
                                     className="circular-record-button"
