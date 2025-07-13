@@ -63,15 +63,45 @@ export function useRecording(options: UseRecordingOptions = {}) {
     checkBackendState();
   }, []);
 
-  // Start audio level monitoring on mount
+  // Start audio level monitoring on mount - using polling like in master
   useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+    let isActive = true;
+
     const startMonitoring = async () => {
       try {
-        console.log('Starting audio level monitoring for mic:', selectedMic);
+        // Start monitoring first
         await invoke('start_audio_level_monitoring', { 
           deviceName: selectedMic !== 'Default microphone' ? selectedMic : null 
         });
-        console.log('Audio level monitoring started successfully');
+        
+        // Start animation
+        if (!animationFrameRef.current) {
+          animationFrameRef.current = requestAnimationFrame(animateAudioLevel);
+        }
+        
+        // Poll every 150ms like in master
+        interval = setInterval(async () => {
+          if (!isActive) return;
+          try {
+            const level = await invoke<number>('get_current_audio_level');
+            
+            // Same processing as master
+            let processed = 0;
+            if (level > 0.12) {
+              processed = (level - 0.12) * 1.5; // More amplification
+            } else if (level > 0.02) {
+              processed = level * 0.8; // Gentler for quiet sounds
+            } else {
+              processed = level * 0.3; // Very gentle for near-silence
+            }
+            
+            audioTargetRef.current = Math.min(processed, 1.0);
+          } catch (error) {
+            console.error('Failed to get audio level:', error);
+          }
+        }, 150);
+        
       } catch (error) {
         console.error('Failed to start audio level monitoring:', error);
       }
@@ -81,11 +111,14 @@ export function useRecording(options: UseRecordingOptions = {}) {
 
     // Cleanup on unmount
     return () => {
-      invoke('stop_audio_level_monitoring').catch(error => {
-        console.error('Failed to stop audio level monitoring:', error);
-      });
+      isActive = false;
+      if (interval) clearInterval(interval);
+      invoke('stop_audio_level_monitoring').catch(() => {});
+      audioTargetRef.current = 0;
+      audioCurrentRef.current = 0;
+      setAudioLevel(0);
     };
-  }, [selectedMic]);
+  }, [selectedMic, animateAudioLevel]);
 
   // Audio level animation
   const animateAudioLevel = useCallback(() => {
@@ -360,15 +393,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
         }
       });
 
-      const unsubscribeAudioLevel = await listen<number>('audio-level', (event) => {
-        if (!mounted) return;
-        audioTargetRef.current = event.payload;
-        
-        // Always restart animation when we get a new value
-        if (!animationFrameRef.current) {
-          animationFrameRef.current = requestAnimationFrame(animateAudioLevel);
-        }
-      });
+      // Audio level is now handled by polling in the monitoring effect above
 
       const unsubscribePushToTalkPressed = await listen('push-to-talk-pressed', async () => {
         if (!mounted) return;
