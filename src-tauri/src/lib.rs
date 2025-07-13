@@ -1382,7 +1382,7 @@ pub fn run() {
             // Set up audio level monitoring
             let app_handle = app.handle().clone();
             let recorder_for_monitoring = recorder_arc.clone();
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(50)); // 20Hz update rate
                 loop {
                     interval.tick().await;
