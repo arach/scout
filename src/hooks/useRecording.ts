@@ -63,6 +63,30 @@ export function useRecording(options: UseRecordingOptions = {}) {
     checkBackendState();
   }, []);
 
+  // Start audio level monitoring on mount
+  useEffect(() => {
+    const startMonitoring = async () => {
+      try {
+        console.log('Starting audio level monitoring for mic:', selectedMic);
+        await invoke('start_audio_level_monitoring', { 
+          deviceName: selectedMic !== 'Default microphone' ? selectedMic : null 
+        });
+        console.log('Audio level monitoring started successfully');
+      } catch (error) {
+        console.error('Failed to start audio level monitoring:', error);
+      }
+    };
+
+    startMonitoring();
+
+    // Cleanup on unmount
+    return () => {
+      invoke('stop_audio_level_monitoring').catch(error => {
+        console.error('Failed to stop audio level monitoring:', error);
+      });
+    };
+  }, [selectedMic]);
+
   // Audio level animation
   const animateAudioLevel = useCallback(() => {
     const diff = audioTargetRef.current - audioCurrentRef.current;
@@ -73,6 +97,21 @@ export function useRecording(options: UseRecordingOptions = {}) {
       animationFrameRef.current = requestAnimationFrame(animateAudioLevel);
     }
   }, []);
+
+  // Debug logging for audio level
+  useEffect(() => {
+    const interval = setInterval(() => {
+      console.log('Audio Level Debug:', {
+        audioLevel,
+        audioTargetRef: audioTargetRef.current,
+        audioCurrentRef: audioCurrentRef.current,
+        isRecording: isRecordingRef.current,
+        selectedMic
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [audioLevel, selectedMic]);
 
   // Start recording
   const startRecording = useCallback(async () => {
@@ -321,6 +360,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
 
       const unsubscribeAudioLevel = await listen<number>('audio-level', (event) => {
         if (!mounted) return;
+        console.log('Received audio-level event:', event.payload);
         audioTargetRef.current = event.payload;
         if (!animationFrameRef.current) {
           animationFrameRef.current = requestAnimationFrame(animateAudioLevel);

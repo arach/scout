@@ -122,6 +122,9 @@ export function RecordView({
                                     className="circular-record-button recording-button"
                                     onClick={stopRecording}
                                     title="Stop recording"
+                                    style={{
+                                        '--audio-level': audioLevel
+                                    } as React.CSSProperties}
                                 >
                                     {/* Audio level fill indicator - darker for recording state */}
                                     <div 
@@ -188,6 +191,9 @@ export function RecordView({
                                     className="circular-record-button"
                                     onClick={startRecording}
                                     disabled={isProcessing}
+                                    style={{
+                                        '--audio-level': audioLevel
+                                    } as React.CSSProperties}
                                 >
                                     {/* Audio level fill indicator */}
                                     <div 

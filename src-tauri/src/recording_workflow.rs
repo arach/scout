@@ -385,7 +385,7 @@ impl RecordingWorkflow {
                                 let filename_clone = active_recording.filename.clone();
                                 let session_id_clone = active_recording.session_id.clone();
                                 let whisper_log_path_clone = active_recording.whisper_log_path.clone();
-                                let app_context_clone = active_recording.app_context.clone();
+                                let _app_context_clone = active_recording.app_context.clone();
                                 let recording_start_time = active_recording.start_time;
                                 
                                 // Clone performance tracker for async task

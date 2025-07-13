@@ -1379,6 +1379,26 @@ pub fn run() {
                 performance_tracker.clone(),
             ));
             
+            // Set up audio level monitoring
+            let app_handle = app.handle().clone();
+            let recorder_for_monitoring = recorder_arc.clone();
+            std::thread::spawn(move || {
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(50)); // 20Hz update rate
+                    
+                    let audio_level = {
+                        if let Ok(recorder) = recorder_for_monitoring.lock() {
+                            recorder.get_current_audio_level()
+                        } else {
+                            0.0
+                        }
+                    };
+                    
+                    // Emit audio level
+                    let _ = app_handle.emit("audio-level", audio_level);
+                }
+            });
+            
             // Initialize native NSPanel overlay
             #[cfg(target_os = "macos")]
             let native_panel_overlay = {
