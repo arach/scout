@@ -1392,6 +1392,11 @@ pub fn run() {
                         recorder.get_current_audio_level()
                     };
                     
+                    // Log significant audio levels for debugging
+                    if audio_level > 0.01 {
+                        debug(Component::Recording, &format!("Audio level: {:.3}", audio_level));
+                    }
+                    
                     // Emit audio level
                     let _ = app_handle.emit("audio-level", audio_level);
                 }
