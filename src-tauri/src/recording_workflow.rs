@@ -61,7 +61,7 @@ impl RecordingWorkflow {
         recorder: Arc<tokio::sync::Mutex<AudioRecorder>>,
         recordings_dir: PathBuf,
         progress_tracker: Arc<crate::recording_progress::ProgressTracker>,
-        processing_queue: Arc<ProcessingQueue>,
+        _processing_queue: Arc<ProcessingQueue>,
         database: Arc<Database>,
         models_dir: PathBuf,
         app_handle: tauri::AppHandle,
