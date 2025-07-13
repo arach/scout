@@ -1379,23 +1379,8 @@ pub fn run() {
                 performance_tracker.clone(),
             ));
             
-            // Set up audio level monitoring
-            let app_handle = app.handle().clone();
-            let recorder_for_monitoring = recorder_arc.clone();
-            tauri::async_runtime::spawn(async move {
-                let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(100)); // Simple 10Hz polling
-                loop {
-                    interval.tick().await;
-                    
-                    let audio_level = {
-                        let recorder = recorder_for_monitoring.lock().await;
-                        recorder.get_current_audio_level()
-                    };
-                    
-                    // Just emit the level - no fancy thresholds
-                    let _ = app_handle.emit("audio-level", audio_level);
-                }
-            });
+            // Audio level monitoring is done via polling from frontend, not events
+            // This matches the original implementation in master branch
             
             // Initialize native NSPanel overlay
             #[cfg(target_os = "macos")]
