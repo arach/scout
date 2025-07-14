@@ -77,12 +77,15 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: transform 0.2s ease-out, box-shadow 0.3s ease-out;
+    transition: transform 0.2s ease-out, box-shadow 0.3s ease-out, opacity 0.1s ease-out;
+    /* Debug: vary opacity with audio level */
+    opacity: calc(0.8 + var(--audio-level, 0) * 0.2);
+    /* Simplified box-shadow for debugging */
     box-shadow: 
+        0 0 40px rgba(74, 158, 255, var(--audio-level, 0)),
         0 4px 20px rgba(74, 158, 255, calc(0.25 + var(--audio-level, 0) * 0.5)),
         0 2px 8px rgba(74, 158, 255, calc(0.15 + var(--audio-level, 0) * 0.4)),
-        inset 0 1px 0 rgba(255, 255, 255, 0.2),
-        0 0 calc(20px + var(--audio-level, 0) * 60px) rgba(74, 158, 255, calc(0.15 + var(--audio-level, 0) * 0.6));
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
     position: relative;
     overflow: hidden;
     z-index: 2;
