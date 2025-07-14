@@ -80,10 +80,15 @@ export function useRecording(options: UseRecordingOptions = {}) {
 
     const startMonitoring = async () => {
       try {
+        console.log('Attempting to start audio level monitoring...');
         // Start monitoring first
         await invoke('start_audio_level_monitoring', { 
           deviceName: selectedMic !== 'Default microphone' ? selectedMic : null 
         });
+        console.log('Audio level monitoring started successfully');
+        
+        // Small delay to ensure audio monitoring is ready
+        await new Promise(resolve => setTimeout(resolve, 100));
         
         // Start animation
         if (!animationFrameRef.current) {
@@ -117,11 +122,17 @@ export function useRecording(options: UseRecordingOptions = {}) {
       }
     };
 
-    startMonitoring();
+    // Delay start to ensure Tauri is ready
+    const timeoutId = setTimeout(() => {
+      if (isActive) {
+        startMonitoring();
+      }
+    }, 200);
 
     // Cleanup on unmount
     return () => {
       isActive = false;
+      clearTimeout(timeoutId);
       if (interval) clearInterval(interval);
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
