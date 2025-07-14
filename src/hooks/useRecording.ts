@@ -63,6 +63,19 @@ export function useRecording(options: UseRecordingOptions = {}) {
     checkBackendState();
   }, []);
 
+  // Audio level animation - define before use
+  const animateAudioLevel = useCallback(() => {
+    const diff = audioTargetRef.current - audioCurrentRef.current;
+    audioCurrentRef.current += diff * 0.3;
+    setAudioLevel(audioCurrentRef.current);
+    
+    if (Math.abs(diff) > 0.001) {
+      animationFrameRef.current = requestAnimationFrame(animateAudioLevel);
+    } else {
+      animationFrameRef.current = null;
+    }
+  }, []);
+
   // Start audio level monitoring on mount - using polling like in master
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
@@ -119,19 +132,6 @@ export function useRecording(options: UseRecordingOptions = {}) {
       setAudioLevel(0);
     };
   }, [selectedMic, animateAudioLevel]);
-
-  // Audio level animation
-  const animateAudioLevel = useCallback(() => {
-    const diff = audioTargetRef.current - audioCurrentRef.current;
-    audioCurrentRef.current += diff * 0.3;
-    setAudioLevel(audioCurrentRef.current);
-    
-    if (Math.abs(diff) > 0.001) {
-      animationFrameRef.current = requestAnimationFrame(animateAudioLevel);
-    } else {
-      animationFrameRef.current = null;
-    }
-  }, []);
 
   // Debug logging for audio level
   useEffect(() => {
