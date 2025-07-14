@@ -411,14 +411,16 @@ export function useRecording(options: UseRecordingOptions = {}) {
         onTranscriptCreated?.();
       });
 
-      // Store all unsubscribe functions
-      unsubscribers.push(
+      // Store all unsubscribe functions (filter out any undefined)
+      const validUnsubscribers = [
         unsubscribeRecordingState,
         unsubscribeProgress,
         unsubscribePushToTalkPressed,
         unsubscribePushToTalkReleased,
         unsubscribeProcessingComplete
-      );
+      ].filter(fn => typeof fn === 'function');
+      
+      unsubscribers.push(...validUnsubscribers);
       } catch (error) {
         console.error('Failed to set up recording event listeners:', error);
       }
@@ -446,11 +448,16 @@ export function useRecording(options: UseRecordingOptions = {}) {
       // Call all unsubscribe functions
       unsubscribers.forEach(unsubscribe => {
         try {
-          unsubscribe?.();
+          if (typeof unsubscribe === 'function') {
+            unsubscribe();
+          }
         } catch (error) {
           console.error('Error during listener cleanup:', error);
         }
       });
+      
+      // Clear the array to prevent double cleanup
+      unsubscribers.length = 0;
     };
   }, [animateAudioLevel, handlePushToTalkPressed, handlePushToTalkReleased, onTranscriptCreated]);
 
