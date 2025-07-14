@@ -69,11 +69,8 @@ export function useRecording(options: UseRecordingOptions = {}) {
     audioCurrentRef.current += diff * 0.3;
     setAudioLevel(audioCurrentRef.current);
     
-    if (Math.abs(diff) > 0.001) {
-      animationFrameRef.current = requestAnimationFrame(animateAudioLevel);
-    } else {
-      animationFrameRef.current = null;
-    }
+    // Keep animation running continuously
+    animationFrameRef.current = requestAnimationFrame(animateAudioLevel);
   }, []);
 
   // Start audio level monitoring on mount - using polling like in master
@@ -126,6 +123,10 @@ export function useRecording(options: UseRecordingOptions = {}) {
     return () => {
       isActive = false;
       if (interval) clearInterval(interval);
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
       invoke('stop_audio_level_monitoring').catch(() => {});
       audioTargetRef.current = 0;
       audioCurrentRef.current = 0;
