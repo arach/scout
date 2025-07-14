@@ -414,7 +414,6 @@ export function useRecording(options: UseRecordingOptions = {}) {
       unsubscribers.push(
         unsubscribeRecordingState,
         unsubscribeProgress,
-        unsubscribeAudioLevel,
         unsubscribePushToTalkPressed,
         unsubscribePushToTalkReleased,
         unsubscribeProcessingComplete
