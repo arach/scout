@@ -51,7 +51,8 @@
       "Bash(VITE_PORT=1421 pnpm tauri dev)",
       "WebFetch(domain:huggingface.co)",
       "Bash(pnpm typecheck:*)",
-      "WebFetch(domain:docs.rs)"
+      "WebFetch(domain:docs.rs)",
+      "Bash(git revert:*)"
     ],
     "deny": []
   }
