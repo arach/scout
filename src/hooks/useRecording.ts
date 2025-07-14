@@ -105,12 +105,12 @@ export function useRecording(options: UseRecordingOptions = {}) {
             let processed = 0;
             if (level > 0.12) {
               processed = (level - 0.12) * 1.5; // More amplification
-            } else if (level > 0.02) {
-              processed = level * 0.8; // Gentler for quiet sounds
-            } else {
-              processed = level * 0.3; // Very gentle for near-silence
             }
             
+            // Add bit of raw signal for organic movement
+            processed += level * 0.08; // More jitter for liveliness
+            
+            // Set target - animation will smoothly move toward it
             audioTargetRef.current = Math.min(processed, 1.0);
           } catch (error) {
             console.error('Failed to get audio level:', error);
