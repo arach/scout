@@ -1,0 +1,417 @@
+/* Dev Tools Button - Circular with Fancy Background */
+.dev-tools-button {
+  position: fixed;
+  bottom: 14px;
+  right: 14px;
+  width: 42px;
+  height: 42px;
+  background: #222;
+  color: #fff;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 10px;
+  font-weight: bold;
+  cursor: pointer;
+  z-index: 10000;
+  transition: background 0.2s, color 0.2s, border 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: none;
+}
+
+.dev-tools-button:hover {
+  /* No color change on hover if not active */
+}
+
+.dev-tools-button.active {
+  background: #fff;
+  color: #222;
+  border: 2px solid #fff;
+}
+
+/* Remove the ::before pseudo-element and any blur-related styles */
+.dev-tools-button::before {
+  display: none;
+}
+
+/* Rotation animations */
+.dev-tools-button.expanding {
+  animation: expandRotate 0.25s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.dev-tools-button.collapsing {
+  animation: collapseRotate 0.25s cubic-bezier(0.55, 0, 0.55, 0.85) forwards;
+}
+
+@keyframes expandRotate {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(-360deg); /* counter-clockwise */
+  }
+}
+
+@keyframes collapseRotate {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg); /* clockwise */
+  }
+}
+
+@keyframes devtools-wobble {
+  0% {
+    transform: scale(1) rotate(0deg);
+  }
+  30% {
+    transform: scale(1.1) rotate(-8deg);
+  }
+  60% {
+    transform: scale(1.08) rotate(6deg);
+  }
+  80% {
+    transform: scale(1.05) rotate(-3deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+.dev-tools-button:hover:not(.active):not(.expanding):not(.collapsing) {
+  animation: devtools-wobble 0.28s cubic-bezier(0.68, -0.55, 0.27, 1.55);
+}
+
+/* Dev Tools Panel */
+.dev-tools-panel {
+  position: fixed;
+  bottom: 12px;
+  right: 12px;
+  width: 300px;
+  max-height: 400px;
+  background: rgba(0, 0, 0, 0.95);
+  border: 1px solid #333;
+  border-radius: 8px;
+  backdrop-filter: blur(12px);
+  z-index: 9999;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.dev-tools-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: rgba(64, 64, 64, 0.3);
+  border-bottom: 1px solid #555;
+}
+
+.dev-tools-header h3 {
+  margin: 0;
+  color: #ddd;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 11px;
+  font-weight: bold;
+}
+
+.dev-tools-close {
+  background: none;
+  border: none;
+  color: #999;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.dev-tools-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.dev-tools-content {
+  padding: 16px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.dev-tool-item {
+  margin-bottom: 12px;
+}
+
+.dev-tool-checkbox {
+  display: flex;
+  align-items: center;
+  color: #ccc;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+}
+
+.dev-tool-checkbox input[type="checkbox"] {
+  margin-right: 8px;
+  accent-color: #999;
+}
+
+.checkbox-label {
+  user-select: none;
+}
+
+/* Primary item styling */
+.dev-tool-item.primary {
+  background: rgba(64, 64, 64, 0.3);
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  border-radius: 4px;
+  padding: 12px;
+  margin-bottom: 16px;
+}
+
+.dev-tool-item.primary .checkbox-label {
+  color: #eee;
+  font-weight: 500;
+}
+
+/* Status grid */
+.status-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 12px;
+  align-items: center;
+}
+
+.status-label {
+  color: #999;
+  font-size: 11px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  text-align: right;
+  padding-right: 4px;
+}
+
+.status-badge {
+  background: rgba(80, 80, 80, 0.4);
+  color: #aaa;
+  padding: 3px 6px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: bold;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border: 1px solid rgba(120, 120, 120, 0.3);
+}
+
+.status-badge.recording {
+  background: rgba(120, 40, 40, 0.6);
+  color: #ff8888;
+  border-color: rgba(160, 80, 80, 0.5);
+}
+
+.status-badge.idle {
+  background: rgba(80, 80, 80, 0.4);
+  color: #aaa;
+  border-color: rgba(120, 120, 120, 0.3);
+}
+
+.status-badge.processing {
+  background: rgba(100, 80, 40, 0.6);
+  color: #ccaa77;
+  border-color: rgba(140, 110, 70, 0.5);
+}
+
+.status-badge.ready {
+  background: rgba(80, 80, 80, 0.4);
+  color: #aaa;
+  border-color: rgba(120, 120, 120, 0.3);
+}
+
+.audio-level-mini {
+  background: rgba(48, 48, 48, 0.6);
+  color: #ccc;
+  padding: 3px 6px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  border: 1px solid rgba(120, 120, 120, 0.3);
+  min-width: 44px;
+  text-align: left;
+}
+
+.device-name-mini {
+  color: #aaa;
+  font-size: 10px;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  background: rgba(48, 48, 48, 0.4);
+  padding: 3px 6px;
+  border-radius: 3px;
+  border: 1px solid rgba(120, 120, 120, 0.2);
+}
+
+.status-value {
+  color: #ccc;
+  font-size: 10px;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  background: rgba(48, 48, 48, 0.3);
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid rgba(120, 120, 120, 0.2);
+}
+
+.dev-tool-section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #333;
+}
+
+.dev-tool-section h4 {
+  margin: 0 0 12px 0;
+  color: #bbb;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+}
+
+.dev-info-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 12px;
+  font-size: 12px;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+}
+
+.dev-info-grid span:nth-child(odd) {
+  color: #888;
+  text-align: right;
+}
+
+.dev-info-grid span:nth-child(even) {
+  color: #ccc;
+}
+
+.status-active {
+  color: #00ff00 !important;
+  font-weight: bold;
+}
+
+.status-inactive {
+  color: #666 !important;
+}
+
+.device-name {
+  color: #00aaff !important;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Mic Level Overlay */
+.mic-level-overlay {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  background: rgba(32, 32, 32, 0.95);
+  border: 1px solid rgba(120, 120, 120, 0.5);
+  border-radius: 4px;
+  padding: 10px;
+  z-index: 9998;
+  backdrop-filter: blur(8px);
+  min-width: 160px;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+}
+
+.mic-level-header {
+  color: #ddd;
+  font-size: 10px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.mic-level-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+  gap: 8px;
+}
+
+.mic-level-label {
+  color: #999;
+  font-size: 9px;
+  min-width: 40px;
+  text-align: right;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+}
+
+.mic-level-value {
+  color: #eee;
+  font-size: 12px;
+  font-weight: bold;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+}
+
+.mic-level-bar {
+  width: 100%;
+  height: 4px;
+  background: rgba(80, 80, 80, 0.6);
+  border-radius: 2px;
+  overflow: hidden;
+  margin: 6px 0;
+}
+
+.mic-level-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #666, #999, #ccc);
+  transition: width 0.1s ease;
+  border-radius: 2px;
+}
+
+.mic-level-device {
+  color: #aaa;
+  font-size: 9px;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.mic-level-status {
+  color: #999;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: bold;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+}
+
+/* Scrollbar styling for dev tools */
+.dev-tools-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.dev-tools-content::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 3px;
+}
+
+.dev-tools-content::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+}
+
+.dev-tools-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}

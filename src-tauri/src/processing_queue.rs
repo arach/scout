@@ -78,6 +78,7 @@ impl ProcessingQueue {
                 
                 // Process the next job if not currently processing
                 if !processing && !queue.is_empty() {
+                    let _ = processing; // Mark as read to avoid warning
                     processing = true;
                     let job = queue.remove(0);
                     info(Component::Processing, &format!("📥 Processing queue starting job: {} (auto-copy/paste check will happen after transcription)", job.filename));

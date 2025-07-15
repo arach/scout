@@ -2,6 +2,7 @@ import { Fragment, useRef, useEffect, useState } from 'react';
 import { Settings } from 'lucide-react';
 import { MicrophoneQuickPicker } from './MicrophoneQuickPicker';
 import { SessionTranscripts } from './SessionTranscripts';
+import { RecordingTimer } from './RecordingTimer';
 import './RecordView.css';
 
 interface UploadProgress {
@@ -25,7 +26,7 @@ interface Transcript {
 interface RecordViewProps {
     isRecording: boolean;
     isProcessing: boolean;
-    recordingDuration: number;
+    recordingStartTime: number | null;
     hotkey: string;
     pushToTalkHotkey: string;
     uploadProgress: UploadProgress;
@@ -38,6 +39,7 @@ interface RecordViewProps {
     cancelRecording: () => void;
     handleFileUpload: () => void;
     formatDuration: (ms: number) => string;
+    formatRecordingTimer?: (ms: number) => string;
     showDeleteConfirmation: (id: number, text: string) => void;
 }
 
@@ -69,7 +71,7 @@ function formatKey(key: string): string {
 export function RecordView({
     isRecording,
     isProcessing,
-    recordingDuration,
+    recordingStartTime,
     hotkey,
     pushToTalkHotkey,
     uploadProgress,
@@ -82,6 +84,7 @@ export function RecordView({
     cancelRecording,
     handleFileUpload,
     formatDuration,
+    formatRecordingTimer,
     showDeleteConfirmation,
 }: RecordViewProps) {
     const [showSuccessHint, setShowSuccessHint] = useState(false);
@@ -99,6 +102,14 @@ export function RecordView({
         transcriptCountRef.current = sessionTranscripts.length;
     }, [sessionTranscripts.length]);
 
+    // useEffect(() => {
+    //     console.log('[RecordView] Current audioLevel:', audioLevel.toFixed(6), {
+    //         timestamp: new Date().toISOString(),
+    //         isRecording,
+    //         isProcessing
+    //     });
+    // }, [audioLevel, isRecording, isProcessing]);
+
     return (
         <div className="record-view">
             <div className="record-view-content">
@@ -112,6 +123,9 @@ export function RecordView({
                                 {/* Keep the visualizer ring but make it pulsing/animated for recording */}
                                 <div 
                                     className="audio-visualizer-ring recording-ring"
+                                    style={{
+                                        '--audio-level': audioLevel
+                                    } as React.CSSProperties}
                                 />
                                 
                                 {/* Same large button but now a stop button */}
@@ -119,6 +133,9 @@ export function RecordView({
                                     className="circular-record-button recording-button"
                                     onClick={stopRecording}
                                     title="Stop recording"
+                                    style={{
+                                        '--audio-level': audioLevel
+                                    } as React.CSSProperties}
                                 >
                                     {/* Audio level fill indicator - darker for recording state */}
                                     <div 
@@ -141,7 +158,10 @@ export function RecordView({
                                     <span className="status-text">Recording</span>
                                 </div>
                                 <div className="recording-timer">
-                                    {formatDuration(recordingDuration)}
+                                    <RecordingTimer 
+                                        startTime={recordingStartTime} 
+                                        formatTimer={formatRecordingTimer || formatDuration} 
+                                    />
                                 </div>
                             </div>
                             
@@ -176,12 +196,20 @@ export function RecordView({
                         <div className="recording-idle">
                             <div className="button-container">
                                 {/* Audio Visualizer Ring */}
-                                <div className="audio-visualizer-ring" />
+                                <div 
+                                    className="audio-visualizer-ring" 
+                                    style={{
+                                        '--audio-level': audioLevel
+                                    } as React.CSSProperties}
+                                />
                                 
                                 <button
                                     className="circular-record-button"
                                     onClick={startRecording}
                                     disabled={isProcessing}
+                                    style={{
+                                        '--audio-level': audioLevel
+                                    } as React.CSSProperties}
                                 >
                                     {/* Audio level fill indicator */}
                                     <div 
@@ -300,6 +328,7 @@ export function RecordView({
                 onClose={() => setShowQuickMicPicker(false)}
                 anchorElement={gearButtonRef.current}
             />
+
         </div>
     );
 } 

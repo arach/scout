@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { SimpleAudioPlayer } from './SimpleAudioPlayer';
 import { TranscriptAIInsights } from './TranscriptAIInsights';
+import { PerformanceTimeline } from './PerformanceTimeline';
 import { invoke } from '@tauri-apps/api/core';
 import { parseTranscriptMetadata } from '../types/transcript';
+import { useResizable } from '../hooks/useResizable';
 import './TranscriptDetailPanel.css';
 
 interface Transcript {
@@ -59,7 +61,15 @@ export function TranscriptDetailPanel({
     const [loadingMetrics, setLoadingMetrics] = useState(false);
     const [metricsError, setMetricsError] = useState<string | null>(null);
     const [showOriginalTranscript, setShowOriginalTranscript] = useState(false);
-    const [activeTab, setActiveTab] = useState<'transcript' | 'insights'>('transcript');
+    const [activeTab, setActiveTab] = useState<'transcript' | 'insights' | 'logs' | 'performance'>('transcript');
+    const [whisperLogs, setWhisperLogs] = useState<any[]>([]);
+    const [loadingLogs, setLoadingLogs] = useState(false);
+    
+    const { width, isResizing, resizeHandleProps } = useResizable({
+        minWidth: 400,
+        maxWidth: 1200,
+        defaultWidth: 600
+    });
 
     // Handle ESC key to close panel and manage player rendering
     useEffect(() => {
@@ -127,6 +137,26 @@ export function TranscriptDetailPanel({
         }
     }, [isOpen, transcript?.id]);
 
+    // Fetch whisper logs when logs tab is active
+    useEffect(() => {
+        if (isOpen && transcript && activeTab === 'logs') {
+            setLoadingLogs(true);
+            setWhisperLogs([]);
+            
+            invoke<any[]>('get_whisper_logs_for_transcript', {
+                transcriptId: transcript.id,
+                limit: 1000
+            }).then((logs) => {
+                setWhisperLogs(logs);
+            }).catch((error) => {
+                console.error('Failed to fetch whisper logs:', error);
+                setWhisperLogs([]);
+            }).finally(() => {
+                setLoadingLogs(false);
+            });
+        }
+    }, [isOpen, transcript?.id, activeTab]);
+
     const handleExport = (format: 'json' | 'markdown' | 'text') => {
         onExport([transcript!], format);
     };
@@ -142,7 +172,12 @@ export function TranscriptDetailPanel({
                 e.stopPropagation();
                 onClose();
             }} />
-            <div className="transcript-detail-panel" onClick={(e) => e.stopPropagation()}>
+            <div 
+                className={`transcript-detail-panel ${isResizing ? 'resizing' : ''}`} 
+                onClick={(e) => e.stopPropagation()}
+                style={{ width: `${width}px` }}
+            >
+                <div className="resize-handle" {...resizeHandleProps} />
                 <div className="detail-panel-header">
                     <h2>Transcript Details</h2>
                     <button className="close-button" onClick={(e) => {
@@ -347,6 +382,18 @@ export function TranscriptDetailPanel({
                         >
                             AI Insights
                         </button>
+                        <button
+                            className={`tab-button ${activeTab === 'logs' ? 'active' : ''}`}
+                            onClick={() => setActiveTab('logs')}
+                        >
+                            Whisper Logs
+                        </button>
+                        <button
+                            className={`tab-button ${activeTab === 'performance' ? 'active' : ''}`}
+                            onClick={() => setActiveTab('performance')}
+                        >
+                            Performance
+                        </button>
                     </div>
 
                     {activeTab === 'transcript' && (
@@ -398,6 +445,58 @@ export function TranscriptDetailPanel({
                     {activeTab === 'insights' && (
                         <div className="detail-insights">
                             <TranscriptAIInsights transcriptId={transcript.id} />
+                        </div>
+                    )}
+
+                    {activeTab === 'logs' && (
+                        <div className="detail-logs">
+                            <div className="logs-header">
+                                <h3>Whisper Transcription Logs</h3>
+                                <p className="logs-description">Detailed logs from the Whisper transcription process</p>
+                            </div>
+                            
+                            {loadingLogs ? (
+                                <div className="logs-loading">Loading logs...</div>
+                            ) : whisperLogs.length === 0 ? (
+                                <div className="logs-empty">
+                                    <p>No whisper logs found for this transcript.</p>
+                                    <p className="logs-hint">Logs are only available for recent recordings with whisper logging enabled.</p>
+                                </div>
+                            ) : (
+                                <div className="logs-content">
+                                    {whisperLogs.map((log, index) => (
+                                        <div key={index} className={`log-entry log-${log.level.toLowerCase()}`}>
+                                            <div className="log-header">
+                                                <span className="log-timestamp">{new Date(log.timestamp).toLocaleTimeString()}</span>
+                                                <span className="log-level">{log.level}</span>
+                                                <span className="log-component">{log.component}</span>
+                                            </div>
+                                            <div className="log-message">{log.message}</div>
+                                            {log.metadata && (
+                                                <div className="log-metadata">
+                                                    <pre>{JSON.stringify(log.metadata, null, 2)}</pre>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {activeTab === 'performance' && (
+                        <div className="detail-performance">
+                            <div className="performance-header">
+                                <h3>Performance Timeline</h3>
+                                <p className="performance-description">Detailed timing breakdown of the recording and transcription process</p>
+                            </div>
+                            <div className="performance-content">
+                                <PerformanceTimeline 
+                                    isRecording={false}
+                                    transcriptId={transcript.id}
+                                    onClose={undefined}
+                                />
+                            </div>
                         </div>
                     )}
 
