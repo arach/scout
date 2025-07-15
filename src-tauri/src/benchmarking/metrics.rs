@@ -122,7 +122,7 @@ impl MetricsAnalyzer {
         }
     }
 
-    fn calculate_performance_for_cutoff(results: &[&BenchmarkResult], cutoff_ms: u32) -> PerformanceMetric {
+    fn calculate_performance_for_cutoff(results: &[&BenchmarkResult], _cutoff_ms: u32) -> PerformanceMetric {
         if results.is_empty() {
             return PerformanceMetric {
                 avg_latency_ms: 0.0,
