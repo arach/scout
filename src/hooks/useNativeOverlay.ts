@@ -47,9 +47,31 @@ export function useNativeOverlay(options: UseNativeOverlayOptions) {
 
     return () => {
       mounted = false;
-      unsubscribeNativeStart.then(fn => fn());
-      unsubscribeNativeStop.then(fn => fn());
-      unsubscribeNativeCancel.then(fn => fn());
+      
+      // Properly cleanup event listeners
+      unsubscribeNativeStart.then(fn => {
+        if (typeof fn === 'function') {
+          fn();
+        }
+      }).catch(error => {
+        console.error('Error unsubscribing from native start events:', error);
+      });
+      
+      unsubscribeNativeStop.then(fn => {
+        if (typeof fn === 'function') {
+          fn();
+        }
+      }).catch(error => {
+        console.error('Error unsubscribing from native stop events:', error);
+      });
+      
+      unsubscribeNativeCancel.then(fn => {
+        if (typeof fn === 'function') {
+          fn();
+        }
+      }).catch(error => {
+        console.error('Error unsubscribing from native cancel events:', error);
+      });
     };
   }, [startRecording, stopRecording, cancelRecording]);
 }

@@ -161,10 +161,39 @@ export function useTranscriptEvents(options: UseTranscriptEventsOptions) {
 
     return () => {
       mounted = false;
-      unsubscribeTranscriptCreated.then(fn => fn()).catch(console.error);
-      unsubscribePerformanceMetrics.then(fn => fn()).catch(console.error);
-      unsubscribeProcessingComplete.then(fn => fn()).catch(console.error);
-      unsubscribeRecordingCompleted.then(fn => fn()).catch(console.error);
+      
+      // Properly cleanup event listeners
+      unsubscribeTranscriptCreated.then(fn => {
+        if (typeof fn === 'function') {
+          fn();
+        }
+      }).catch(error => {
+        console.error('Error unsubscribing from transcript-created events:', error);
+      });
+      
+      unsubscribePerformanceMetrics.then(fn => {
+        if (typeof fn === 'function') {
+          fn();
+        }
+      }).catch(error => {
+        console.error('Error unsubscribing from performance metrics events:', error);
+      });
+      
+      unsubscribeProcessingComplete.then(fn => {
+        if (typeof fn === 'function') {
+          fn();
+        }
+      }).catch(error => {
+        console.error('Error unsubscribing from processing complete events:', error);
+      });
+      
+      unsubscribeRecordingCompleted.then(fn => {
+        if (typeof fn === 'function') {
+          fn();
+        }
+      }).catch(error => {
+        console.error('Error unsubscribing from recording completed events:', error);
+      });
     };
   }, [autoCopy, autoPaste, soundEnabled, completionSoundThreshold, onTranscriptCreated, onProcessingComplete, onRecordingCompleted, setIsProcessing, setTranscripts]);
 
