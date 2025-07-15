@@ -3,7 +3,6 @@ import { Settings } from 'lucide-react';
 import { MicrophoneQuickPicker } from './MicrophoneQuickPicker';
 import { SessionTranscripts } from './SessionTranscripts';
 import { RecordingTimer } from './RecordingTimer';
-import { DevTools } from './DevTools';
 import './RecordView.css';
 
 interface UploadProgress {
@@ -330,13 +329,6 @@ export function RecordView({
                 anchorElement={gearButtonRef.current}
             />
 
-            {/* Dev Tools */}
-            <DevTools
-                audioLevel={audioLevel}
-                selectedMic={selectedMic}
-                isRecording={isRecording}
-                isProcessing={isProcessing}
-            />
         </div>
     );
 } 
