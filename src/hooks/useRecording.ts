@@ -105,12 +105,12 @@ export function useRecording(options: UseRecordingOptions = {}) {
           audioCurrentRef.current = Math.max(0, Math.min(newLevel, 1.0));
           setAudioLevel(audioCurrentRef.current);
           
-          console.log('[useRecording] Animation frame:', {
-            target: target.toFixed(6),
-            current: current.toFixed(6),
-            newLevel: newLevel.toFixed(6),
-            final: audioCurrentRef.current.toFixed(6)
-          });
+          // console.log('[useRecording] Animation frame:', {
+          //   target: target.toFixed(6),
+          //   current: current.toFixed(6),
+          //   newLevel: newLevel.toFixed(6),
+          //   final: audioCurrentRef.current.toFixed(6)
+          // });
           
           animationFrame = requestAnimationFrame(animate);
         };
@@ -125,11 +125,11 @@ export function useRecording(options: UseRecordingOptions = {}) {
             const level = await invoke<number>('get_current_audio_level');
             
             // Log raw backend value
-            console.log('[useRecording] Backend audio level:', {
-              raw: level.toFixed(6),
-              timestamp: Date.now(),
-              device: selectedMic
-            });
+            // console.log('[useRecording] Backend audio level:', {
+            //   raw: level.toFixed(6),
+            //   timestamp: Date.now(),
+            //   device: selectedMic
+            // });
             
             // Same processing as master
             let processed = 0;
@@ -143,11 +143,11 @@ export function useRecording(options: UseRecordingOptions = {}) {
             // Set target - animation will smoothly move toward it
             audioTargetRef.current = Math.min(processed, 1.0);
             
-            console.log('[useRecording] Processed audio:', {
-              target: audioTargetRef.current.toFixed(6),
-              current: audioCurrentRef.current.toFixed(6),
-              frontendLevel: audioLevel.toFixed(6)
-            });
+            // console.log('[useRecording] Processed audio:', {
+            //   target: audioTargetRef.current.toFixed(6),
+            //   current: audioCurrentRef.current.toFixed(6),
+            //   frontendLevel: audioLevel.toFixed(6)
+            // });
           } catch (error) {
             console.error('Failed to get audio level:', error);
           }

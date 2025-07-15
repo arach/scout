@@ -114,8 +114,23 @@ export function useProcessingStatus(options: UseProcessingStatusOptions) {
 
     return () => {
       mounted = false;
-      unsubscribeProcessing.then(fn => fn()).catch(console.error);
-      unsubscribeFileUpload.then(fn => fn()).catch(console.error);
+      
+      // Properly cleanup event listeners
+      unsubscribeProcessing.then(fn => {
+        if (typeof fn === 'function') {
+          fn();
+        }
+      }).catch(error => {
+        console.error('Error unsubscribing from processing events:', error);
+      });
+      
+      unsubscribeFileUpload.then(fn => {
+        if (typeof fn === 'function') {
+          fn();
+        }
+      }).catch(error => {
+        console.error('Error unsubscribing from file upload events:', error);
+      });
     };
   }, [setUploadProgress, setIsProcessing, onProcessingComplete, onProcessingFailed]);
 
