@@ -102,8 +102,22 @@ export function RecordView({
         transcriptCountRef.current = sessionTranscripts.length;
     }, [sessionTranscripts.length]);
 
+    useEffect(() => {
+        console.log('[RecordView] Current audioLevel:', audioLevel.toFixed(6), {
+            timestamp: new Date().toISOString(),
+            isRecording,
+            isProcessing
+        });
+    }, [audioLevel, isRecording, isProcessing]);
+
     return (
         <div className="record-view">
+            {/* Debug: Show current audioLevel value */}
+            <div style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,0.7)', color: '#fff', padding: '4px 8px', borderRadius: 4, fontSize: 12, zIndex: 1000, fontFamily: 'monospace' }}>
+                <div>audioLevel: {audioLevel.toFixed(6)}</div>
+                <div>mic: {selectedMic}</div>
+                <div>{isRecording ? 'RECORDING' : 'IDLE'}</div>
+            </div>
             <div className="record-view-content">
                 
                 {/* Main Recording Zone */}

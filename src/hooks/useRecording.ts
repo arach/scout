@@ -63,19 +63,11 @@ export function useRecording(options: UseRecordingOptions = {}) {
     checkBackendState();
   }, []);
 
-  // Audio level animation - define before use
-  const animateAudioLevel = useCallback(() => {
-    const diff = audioTargetRef.current - audioCurrentRef.current;
-    audioCurrentRef.current += diff * 0.3;
-    setAudioLevel(audioCurrentRef.current);
-    
-    // Keep animation running continuously
-    animationFrameRef.current = requestAnimationFrame(animateAudioLevel);
-  }, []);
 
   // Start audio level monitoring on mount - using polling like in master
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
+    let animationFrame: number;
     let isActive = true;
 
     const startMonitoring = async () => {
@@ -87,19 +79,57 @@ export function useRecording(options: UseRecordingOptions = {}) {
         });
         console.log('Audio level monitoring started successfully');
         
-        // Small delay to ensure audio monitoring is ready
-        await new Promise(resolve => setTimeout(resolve, 100));
+        // Animation function - define inside effect to avoid stale closures
+        const animate = () => {
+          if (!isActive) return;
+          
+          const target = audioTargetRef.current;
+          const current = audioCurrentRef.current;
+          const diff = target - current;
+          const speed = 0.3;
+          let newLevel = current + (diff * speed);
+          
+          // Organic motion from master
+          if (target > 0.02) {
+            const flutter = (Math.random() - 0.5) * target * 0.12;
+            const shimmer = Math.sin(Date.now() * 0.007) * target * 0.04;
+            const pulse = Math.sin(Date.now() * 0.003) * target * 0.06;
+            newLevel += flutter + shimmer + pulse;
+          }
+          
+          // Breathing motion even when quiet
+          const breathingMotion = Math.sin(Date.now() * 0.0015) * 0.015;
+          newLevel += breathingMotion;
+          
+          // Clamp and update
+          audioCurrentRef.current = Math.max(0, Math.min(newLevel, 1.0));
+          setAudioLevel(audioCurrentRef.current);
+          
+          console.log('[useRecording] Animation frame:', {
+            target: target.toFixed(6),
+            current: current.toFixed(6),
+            newLevel: newLevel.toFixed(6),
+            final: audioCurrentRef.current.toFixed(6)
+          });
+          
+          animationFrame = requestAnimationFrame(animate);
+        };
         
-        // Start animation
-        if (!animationFrameRef.current) {
-          animationFrameRef.current = requestAnimationFrame(animateAudioLevel);
-        }
+        // Start the animation loop
+        animate();
         
         // Poll every 150ms like in master
         interval = setInterval(async () => {
           if (!isActive) return;
           try {
             const level = await invoke<number>('get_current_audio_level');
+            
+            // Log raw backend value
+            console.log('[useRecording] Backend audio level:', {
+              raw: level.toFixed(6),
+              timestamp: Date.now(),
+              device: selectedMic
+            });
             
             // Same processing as master
             let processed = 0;
@@ -112,6 +142,12 @@ export function useRecording(options: UseRecordingOptions = {}) {
             
             // Set target - animation will smoothly move toward it
             audioTargetRef.current = Math.min(processed, 1.0);
+            
+            console.log('[useRecording] Processed audio:', {
+              target: audioTargetRef.current.toFixed(6),
+              current: audioCurrentRef.current.toFixed(6),
+              frontendLevel: audioLevel.toFixed(6)
+            });
           } catch (error) {
             console.error('Failed to get audio level:', error);
           }
@@ -134,31 +170,14 @@ export function useRecording(options: UseRecordingOptions = {}) {
       isActive = false;
       clearTimeout(timeoutId);
       if (interval) clearInterval(interval);
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-        animationFrameRef.current = null;
-      }
+      if (animationFrame) cancelAnimationFrame(animationFrame);
       invoke('stop_audio_level_monitoring').catch(() => {});
       audioTargetRef.current = 0;
       audioCurrentRef.current = 0;
       setAudioLevel(0);
     };
-  }, [selectedMic, animateAudioLevel]);
+  }, [selectedMic]);
 
-  // Debug logging for audio level
-  useEffect(() => {
-    const interval = setInterval(() => {
-      console.log('Audio Level Debug:', {
-        audioLevel,
-        audioTargetRef: audioTargetRef.current,
-        audioCurrentRef: audioCurrentRef.current,
-        isRecording: isRecordingRef.current,
-        selectedMic
-      });
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [audioLevel, selectedMic]);
 
   // Start recording
   const startRecording = useCallback(async () => {
@@ -389,7 +408,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
             setRecordingStartTime(null);
             audioTargetRef.current = 0;
             audioCurrentRef.current = 0;
-            setAudioLevel(0);
+            setAudioLevel(audioCurrentRef.current);
           }
         }
       });
@@ -470,7 +489,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
       // Clear the array to prevent double cleanup
       unsubscribers.length = 0;
     };
-  }, [animateAudioLevel, handlePushToTalkPressed, handlePushToTalkReleased, onTranscriptCreated]);
+  }, [handlePushToTalkPressed, handlePushToTalkReleased, onTranscriptCreated]);
 
   // Cancel recording
   const cancelRecording = useCallback(async () => {
