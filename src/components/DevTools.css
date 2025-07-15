@@ -256,6 +256,16 @@
   border: 1px solid rgba(120, 120, 120, 0.2);
 }
 
+.status-value {
+  color: #ccc;
+  font-size: 10px;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  background: rgba(48, 48, 48, 0.3);
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid rgba(120, 120, 120, 0.2);
+}
+
 .dev-tool-section {
   margin-top: 20px;
   padding-top: 16px;

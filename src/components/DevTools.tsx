@@ -1,14 +1,55 @@
 import { useState, useEffect } from 'react';
 import './DevTools.css';
 
-interface DevToolsProps {
-  audioLevel: number;
-  selectedMic: string;
-  isRecording: boolean;
-  isProcessing: boolean;
+type View = 'record' | 'transcripts' | 'settings';
+
+interface Transcript {
+  id: number;
+  text: string;
+  duration_ms: number;
+  created_at: string;
+  metadata?: string;
+  audio_path?: string;
+  file_size?: number;
 }
 
-export function DevTools({ audioLevel, selectedMic, isRecording, isProcessing }: DevToolsProps) {
+interface DevToolsProps {
+  currentView: View;
+  // Recording context
+  audioLevel?: number;
+  selectedMic?: string;
+  isRecording?: boolean;
+  isProcessing?: boolean;
+  // Transcripts context
+  transcripts?: Transcript[];
+  searchQuery?: string;
+  selectedTranscripts?: Set<number>;
+  // Settings context  
+  vadEnabled?: boolean;
+  hotkey?: string;
+  pushToTalkHotkey?: string;
+  // Shared
+  currentUser?: string;
+  appVersion?: string;
+}
+
+export function DevTools(props: DevToolsProps) {
+  const {
+    currentView,
+    audioLevel = 0,
+    selectedMic = '',
+    isRecording = false,
+    isProcessing = false,
+    transcripts = [],
+    searchQuery = '',
+    selectedTranscripts = new Set(),
+    vadEnabled = false,
+    hotkey = '',
+    pushToTalkHotkey = '',
+    currentUser = 'Unknown',
+    appVersion = '0.1.0'
+  } = props;
+
   const [isOpen, setIsOpen] = useState(false);
   const [showMicLevel, setShowMicLevel] = useState(false);
   const [showConsoleLog, setShowConsoleLog] = useState(false);
@@ -37,18 +78,54 @@ export function DevTools({ audioLevel, selectedMic, isRecording, isProcessing }:
     return className;
   };
 
-  // Console logging effect
+  // Console logging effect - context aware
   useEffect(() => {
-    if (showConsoleLog) {
-      console.log('[DevTools] Audio Level:', {
-        level: audioLevel.toFixed(6),
+    if (!showConsoleLog) return;
+
+    const logData = {
+      view: currentView,
+      timestamp: new Date().toISOString()
+    };
+
+    if (currentView === 'record') {
+      Object.assign(logData, {
+        audioLevel: audioLevel.toFixed(6),
         device: selectedMic,
         recording: isRecording,
-        processing: isProcessing,
-        timestamp: new Date().toISOString()
+        processing: isProcessing
+      });
+    } else if (currentView === 'transcripts') {
+      Object.assign(logData, {
+        totalTranscripts: transcripts.length,
+        searchQuery,
+        selectedCount: selectedTranscripts.size
+      });
+    } else if (currentView === 'settings') {
+      Object.assign(logData, {
+        vadEnabled,
+        hotkey,
+        pushToTalkHotkey
       });
     }
-  }, [showConsoleLog, audioLevel, selectedMic, isRecording, isProcessing]);
+
+    console.log('[DevTools]', logData);
+  }, [
+    showConsoleLog,
+    currentView,
+    // Recording deps
+    audioLevel,
+    selectedMic,
+    isRecording,
+    isProcessing,
+    // Transcripts deps
+    transcripts.length,
+    searchQuery,
+    selectedTranscripts.size,
+    // Settings deps
+    vadEnabled,
+    hotkey,
+    pushToTalkHotkey
+  ]);
 
   return (
     <>
@@ -61,11 +138,11 @@ export function DevTools({ audioLevel, selectedMic, isRecording, isProcessing }:
         DEV
       </button>
 
-      {/* Dev Tools Panel - Simplified */}
+      {/* Dev Tools Panel - Context Aware */}
       {isOpen && (
         <div className="dev-tools-panel">
           <div className="dev-tools-header">
-            <h3>Dev Tools</h3>
+            <h3>Dev Tools - {currentView.charAt(0).toUpperCase() + currentView.slice(1)}</h3>
             <button 
               className="dev-tools-close"
               onClick={() => setIsOpen(false)}
@@ -75,17 +152,45 @@ export function DevTools({ audioLevel, selectedMic, isRecording, isProcessing }:
           </div>
           
           <div className="dev-tools-content">
-            {/* Primary Feature: Mic Level Toggle */}
-            <div className="dev-tool-item primary">
-              <label className="dev-tool-checkbox">
-                <input
-                  type="checkbox"
-                  checked={showMicLevel}
-                  onChange={(e) => setShowMicLevel(e.target.checked)}
-                />
-                <span className="checkbox-label">Show Mic Level Overlay</span>
-              </label>
-            </div>
+            {/* Context-specific primary features */}
+            {currentView === 'record' && (
+              <div className="dev-tool-item primary">
+                <label className="dev-tool-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={showMicLevel}
+                    onChange={(e) => setShowMicLevel(e.target.checked)}
+                  />
+                  <span className="checkbox-label">Show Mic Level Overlay</span>
+                </label>
+              </div>
+            )}
+
+            {currentView === 'transcripts' && (
+              <div className="dev-tool-item primary">
+                <label className="dev-tool-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={showConsoleLog}
+                    onChange={(e) => setShowConsoleLog(e.target.checked)}
+                  />
+                  <span className="checkbox-label">Log Transcript Operations</span>
+                </label>
+              </div>
+            )}
+
+            {currentView === 'settings' && (
+              <div className="dev-tool-item primary">
+                <label className="dev-tool-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={showConsoleLog}
+                    onChange={(e) => setShowConsoleLog(e.target.checked)}
+                  />
+                  <span className="checkbox-label">Log Settings Changes</span>
+                </label>
+              </div>
+            )}
 
             {/* Logging Controls */}
             <div className="dev-tool-section">
@@ -97,34 +202,84 @@ export function DevTools({ audioLevel, selectedMic, isRecording, isProcessing }:
                     checked={showConsoleLog}
                     onChange={(e) => setShowConsoleLog(e.target.checked)}
                   />
-                  <span className="checkbox-label">Enable Audio Level Console Logs</span>
+                  <span className="checkbox-label">
+                    {currentView === 'record' ? 'Audio Level Logging' :
+                     currentView === 'transcripts' ? 'Transcript Events' :
+                     'Settings Events'}
+                  </span>
                 </label>
               </div>
             </div>
 
-            {/* Quick Audio State */}
+            {/* Context-specific status */}
             <div className="dev-tool-section">
               <h4>Current Status</h4>
               <div className="status-grid">
-                <span className="status-label">State:</span>
-                <span className={`status-badge ${isRecording ? 'recording' : 'idle'}`}>
-                  {isRecording ? 'RECORDING' : 'IDLE'}
-                </span>
-                
-                <span className="status-label">Process:</span>
-                <span className={`status-badge ${isProcessing ? 'processing' : 'ready'}`}>
-                  {isProcessing ? 'PROCESSING' : 'READY'}
-                </span>
-                
-                <span className="status-label">Audio Level:</span>
-                <span className="audio-level-mini">
-                  {audioLevel.toFixed(3)}
-                </span>
+                {currentView === 'record' && (
+                  <>
+                    <span className="status-label">State:</span>
+                    <span className={`status-badge ${isRecording ? 'recording' : 'idle'}`}>
+                      {isRecording ? 'RECORDING' : 'IDLE'}
+                    </span>
+                    
+                    <span className="status-label">Process:</span>
+                    <span className={`status-badge ${isProcessing ? 'processing' : 'ready'}`}>
+                      {isProcessing ? 'PROCESSING' : 'READY'}
+                    </span>
+                    
+                    <span className="status-label">Audio Level:</span>
+                    <span className="audio-level-mini">
+                      {audioLevel.toFixed(3)}
+                    </span>
 
-                <span className="status-label">Device:</span>
-                <span className="device-name-mini">
-                  {selectedMic.length > 12 ? selectedMic.substring(0, 12) + '...' : selectedMic}
-                </span>
+                    <span className="status-label">Device:</span>
+                    <span className="device-name-mini">
+                      {selectedMic.length > 12 ? selectedMic.substring(0, 12) + '...' : selectedMic}
+                    </span>
+                  </>
+                )}
+
+                {currentView === 'transcripts' && (
+                  <>
+                    <span className="status-label">Total:</span>
+                    <span className="status-value">{transcripts.length}</span>
+                    
+                    <span className="status-label">Selected:</span>
+                    <span className="status-value">{selectedTranscripts.size}</span>
+                    
+                    <span className="status-label">Search:</span>
+                    <span className="status-value">
+                      {searchQuery ? `"${searchQuery.substring(0, 8)}..."` : 'None'}
+                    </span>
+                  </>
+                )}
+
+                {currentView === 'settings' && (
+                  <>
+                    <span className="status-label">VAD:</span>
+                    <span className={`status-badge ${vadEnabled ? 'ready' : 'idle'}`}>
+                      {vadEnabled ? 'ON' : 'OFF'}
+                    </span>
+                    
+                    <span className="status-label">Hotkey:</span>
+                    <span className="status-value">{hotkey || 'None'}</span>
+                    
+                    <span className="status-label">Push-to-talk:</span>
+                    <span className="status-value">{pushToTalkHotkey || 'None'}</span>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* App Info */}
+            <div className="dev-tool-section">
+              <h4>App Info</h4>
+              <div className="status-grid">
+                <span className="status-label">Version:</span>
+                <span className="status-value">{appVersion}</span>
+                
+                <span className="status-label">Mode:</span>
+                <span className="status-value">{import.meta.env.MODE}</span>
               </div>
             </div>
           </div>

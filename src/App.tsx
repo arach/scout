@@ -15,6 +15,7 @@ import { useFileDrop } from './hooks/useFileDrop';
 import { useTranscriptEvents } from './hooks/useTranscriptEvents';
 import { useProcessingStatus } from './hooks/useProcessingStatus';
 import { useNativeOverlay } from './hooks/useNativeOverlay';
+import { DevTools } from './components/DevTools';
 import "./App.css";
 
 interface Transcript {
@@ -843,6 +844,26 @@ function App() {
           </div>
         )}
       </main>
+
+      {/* Global Dev Tools - Context Aware */}
+      <DevTools
+        currentView={currentView}
+        // Recording context
+        audioLevel={audioLevel}
+        selectedMic={selectedMic}
+        isRecording={isRecording}
+        isProcessing={isProcessing}
+        // Transcripts context
+        transcripts={transcripts}
+        searchQuery={searchQuery}
+        selectedTranscripts={selectedTranscripts}
+        // Settings context
+        vadEnabled={vadEnabled}
+        hotkey={hotkey}
+        pushToTalkHotkey={pushToTalkHotkey}
+        // App info
+        appVersion="0.1.0"
+      />
     </div>
   );
 }
