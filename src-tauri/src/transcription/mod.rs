@@ -68,6 +68,16 @@ impl Transcriber {
         
         // Suppress non-speech tokens (music, background noise descriptions)
         params.set_suppress_non_speech_tokens(true);
+        
+        // Suppress blank tokens to prevent hallucinations at chunk boundaries
+        params.set_suppress_blank(true);
+        
+        // Set stricter decoding parameters to reduce hallucinations
+        params.set_temperature(0.0);
+        params.set_temperature_inc(0.2);
+        params.set_entropy_thold(2.4);
+        params.set_logprob_thold(-1.0);
+        params.set_no_speech_thold(0.6);
 
         // Run the transcription
         let mut state = self.context.create_state().map_err(|e| format!("Failed to create state: {}", e))?;

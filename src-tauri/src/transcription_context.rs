@@ -21,6 +21,7 @@ pub struct TranscriptionContext {
     performance_logger: Option<PerformanceLogger>,
     recording_start_time: Option<std::time::Instant>,
     model_name: String,
+    app_handle: Option<tauri::AppHandle>,
 }
 
 impl TranscriptionContext {
@@ -37,7 +38,13 @@ impl TranscriptionContext {
             performance_logger: None,
             recording_start_time: None,
             model_name: "unknown".to_string(),
+            app_handle: None,
         }
+    }
+    
+    pub fn with_app_handle(mut self, app_handle: tauri::AppHandle) -> Self {
+        self.app_handle = Some(app_handle);
+        self
     }
     
     /// Create a new TranscriptionContext from database and models directory
@@ -71,6 +78,7 @@ impl TranscriptionContext {
             performance_logger: Some(performance_logger),
             recording_start_time: None,
             model_name,
+            app_handle: None,
         })
     }
     
@@ -94,6 +102,7 @@ impl TranscriptionContext {
             &self.config,
             self.transcriber.clone(),
             self.temp_dir.clone(),
+            self.app_handle.clone(),
         );
         
         // Start recording with the selected strategy
