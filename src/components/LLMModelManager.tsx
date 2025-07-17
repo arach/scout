@@ -9,11 +9,11 @@ export const LLMModelManager: React.FC = () => {
   const [models, setModels] = useState<LLMModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState<{ [key: string]: LLMDownloadProgress }>({});
-  const [modelsDir, setModelsDir] = useState<string>('');
+  // const [modelsDir, setModelsDir] = useState<string>(''); // Unused variable
 
   useEffect(() => {
     loadModels();
-    getModelsDir();
+    // getModelsDir(); // Commented out since modelsDir is unused
 
     // Listen for download progress events
     const unlistenProgress = listen<{
@@ -72,14 +72,15 @@ export const LLMModelManager: React.FC = () => {
     }
   };
 
-  const getModelsDir = async () => {
-    try {
-      const dir = await invoke<string>('get_models_dir');
-      setModelsDir(dir);
-    } catch (error) {
-      console.error('Failed to get models directory:', error);
-    }
-  };
+  // Commented out since modelsDir is unused
+  // const getModelsDir = async () => {
+  //   try {
+  //     const dir = await invoke<string>('get_models_dir');
+  //     setModelsDir(dir);
+  //   } catch (error) {
+  //     console.error('Failed to get models directory:', error);
+  //   }
+  // };
 
   const downloadModel = async (modelId: string) => {
     try {
@@ -112,15 +113,16 @@ export const LLMModelManager: React.FC = () => {
     }
   };
 
-  const deleteModel = async (modelId: string) => {
-    try {
-      // For now, users can manually delete from the models folder
-      // We could add a delete command later if needed
-      console.log('Delete model:', modelId);
-    } catch (error) {
-      console.error('Failed to delete model:', error);
-    }
-  };
+  // Commented out unused function
+  // const deleteModel = async (modelId: string) => {
+  //   try {
+  //     // For now, users can manually delete from the models folder
+  //     // We could add a delete command later if needed
+  //     console.log('Delete model:', modelId);
+  //   } catch (error) {
+  //     console.error('Failed to delete model:', error);
+  //   }
+  // };
 
   if (loading) {
     return <div className="llm-model-manager-loading">Loading models...</div>;
