@@ -141,6 +141,7 @@ pub struct RingBufferTranscriptionStrategy {
     start_time: Option<std::time::Instant>,
     config: Option<TranscriptionConfig>,
     recording_path: Option<std::path::PathBuf>,
+    app_handle: Option<tauri::AppHandle>,
 }
 
 impl RingBufferTranscriptionStrategy {
@@ -154,7 +155,13 @@ impl RingBufferTranscriptionStrategy {
             start_time: None,
             config: None,
             recording_path: None,
+            app_handle: None,
         }
+    }
+    
+    pub fn with_app_handle(mut self, app_handle: tauri::AppHandle) -> Self {
+        self.app_handle = Some(app_handle);
+        self
     }
     
     pub fn get_ring_buffer(&self) -> Option<Arc<crate::audio::ring_buffer_recorder::RingBufferRecorder>> {
@@ -211,7 +218,10 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
         );
         
         // Initialize and start monitor
-        let monitor = crate::ring_buffer_monitor::RingBufferMonitor::new(ring_buffer.clone());
+        let mut monitor = crate::ring_buffer_monitor::RingBufferMonitor::new(ring_buffer.clone());
+        if let Some(ref app_handle) = self.app_handle {
+            monitor = monitor.with_app_handle(app_handle.clone());
+        }
         let (monitor_handle, stop_sender) = monitor.start_monitoring(
             ring_transcriber,
         ).await;
@@ -379,6 +389,7 @@ impl TranscriptionStrategySelector {
         config: &TranscriptionConfig,
         transcriber: Arc<tokio::sync::Mutex<Transcriber>>,
         temp_dir: std::path::PathBuf,
+        app_handle: Option<tauri::AppHandle>,
     ) -> Box<dyn TranscriptionStrategy> {
         // Check for forced strategy first
         if let Some(ref forced) = config.force_strategy {
@@ -389,7 +400,11 @@ impl TranscriptionStrategySelector {
                 }
                 "ring_buffer" => {
                     info(Component::Transcription, "Using forced ring buffer strategy");
-                    return Box::new(RingBufferTranscriptionStrategy::new(transcriber, temp_dir));
+                    let mut strategy = RingBufferTranscriptionStrategy::new(transcriber, temp_dir);
+                    if let Some(app_handle) = app_handle {
+                        strategy = strategy.with_app_handle(app_handle);
+                    }
+                    return Box::new(strategy);
                 }
                 _ => {
                     warn(Component::Transcription, &format!("Unknown forced strategy '{}', falling back to auto-selection", forced));
@@ -398,7 +413,10 @@ impl TranscriptionStrategySelector {
         }
         
         // Auto-select based on characteristics
-        let ring_buffer_strategy = RingBufferTranscriptionStrategy::new(transcriber.clone(), temp_dir);
+        let mut ring_buffer_strategy = RingBufferTranscriptionStrategy::new(transcriber.clone(), temp_dir.clone());
+        if let Some(ref app_handle) = app_handle {
+            ring_buffer_strategy = ring_buffer_strategy.with_app_handle(app_handle.clone());
+        }
         let classic_strategy = ClassicTranscriptionStrategy::new(transcriber);
         
         debug(Component::Transcription, "Strategy selection debug:");

@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
-import { invoke } from '@tauri-apps/api/core';
 
 interface UseFileDropOptions {
   onFileDropped?: (filePath: string) => void;

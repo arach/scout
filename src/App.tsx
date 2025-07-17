@@ -16,6 +16,7 @@ import { useTranscriptEvents } from './hooks/useTranscriptEvents';
 import { useProcessingStatus } from './hooks/useProcessingStatus';
 import { useNativeOverlay } from './hooks/useNativeOverlay';
 import { DevTools } from './components/DevTools';
+import { TranscriptionOverlay } from './components/TranscriptionOverlay';
 import "./App.css";
 
 interface Transcript {
@@ -43,6 +44,7 @@ function App() {
   const [isCapturingPushToTalkHotkey, setIsCapturingPushToTalkHotkey] = useState(false);
   const [capturedKeys, setCapturedKeys] = useState<string[]>([]);
   const [selectedTranscripts, setSelectedTranscripts] = useState<Set<number>>(new Set());
+  const [showTranscriptionOverlay, setShowTranscriptionOverlay] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{
     show: boolean;
     transcriptId: number | null;
@@ -863,6 +865,24 @@ function App() {
         pushToTalkHotkey={pushToTalkHotkey}
         // App info
         appVersion="0.1.0"
+        // Transcription overlay
+        showTranscriptionOverlay={showTranscriptionOverlay}
+        onToggleTranscriptionOverlay={setShowTranscriptionOverlay}
+      />
+
+      {/* Transcription Overlay */}
+      <TranscriptionOverlay
+        isVisible={showTranscriptionOverlay}
+        isRecording={isRecording}
+        audioLevel={audioLevel}
+        onClose={() => setShowTranscriptionOverlay(false)}
+        onSaveEdits={(editedText) => {
+          console.log('Saved edited transcript:', editedText);
+          // TODO: Save edited transcript
+        }}
+        onDiscardEdits={() => {
+          console.log('Discarded transcript edits');
+        }}
       />
     </div>
   );
