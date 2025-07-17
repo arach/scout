@@ -130,7 +130,7 @@ impl RecordingWorkflow {
                             database_for_iter.clone(),
                             models_dir.clone(),
                         ) {
-                            Ok(ctx) => ctx,
+                            Ok(ctx) => ctx.with_app_handle(app_handle_for_iter.clone()),
                             Err(e) => {
                                 warn(Component::Recording, &format!("Failed to create transcription context: {}", e));
                                 info(Component::Recording, "Falling back to traditional processing queue");

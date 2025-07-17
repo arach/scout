@@ -28,8 +28,10 @@ interface DevToolsProps {
   vadEnabled?: boolean;
   hotkey?: string;
   pushToTalkHotkey?: string;
+  // Transcription overlay
+  showTranscriptionOverlay?: boolean;
+  onToggleTranscriptionOverlay?: (show: boolean) => void;
   // Shared
-  currentUser?: string;
   appVersion?: string;
 }
 
@@ -154,16 +156,33 @@ export function DevTools(props: DevToolsProps) {
           <div className="dev-tools-content">
             {/* Context-specific primary features */}
             {currentView === 'record' && (
-              <div className="dev-tool-item primary">
-                <label className="dev-tool-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={showMicLevel}
-                    onChange={(e) => setShowMicLevel(e.target.checked)}
-                  />
-                  <span className="checkbox-label">Show Mic Level Overlay</span>
-                </label>
-              </div>
+              <>
+                <div className="dev-tool-item primary">
+                  <label className="dev-tool-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={showMicLevel}
+                      onChange={(e) => setShowMicLevel(e.target.checked)}
+                    />
+                    <span className="checkbox-label">Show Mic Level Overlay</span>
+                  </label>
+                </div>
+                
+                <div className="dev-tool-item primary">
+                  <label className="dev-tool-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={showTranscriptionOverlay}
+                      onChange={(e) => {
+                        if (onToggleTranscriptionOverlay) {
+                          onToggleTranscriptionOverlay(e.target.checked);
+                        }
+                      }}
+                    />
+                    <span className="checkbox-label">Show Transcription Overlay</span>
+                  </label>
+                </div>
+              </>
             )}
 
             {currentView === 'transcripts' && (
