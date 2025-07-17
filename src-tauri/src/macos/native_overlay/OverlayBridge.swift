@@ -105,3 +105,11 @@ public func nativeOverlayGetCurrentState() -> UnsafePointer<CChar>? {
     let state = NativeOverlayManager.shared.getCurrentState()
     return UnsafePointer(strdup(state))
 }
+
+@_cdecl("native_overlay_set_waveform_style")
+public func nativeOverlaySetWaveformStyle(_ stylePtr: UnsafePointer<CChar>) {
+    let style = String(cString: stylePtr)
+    DispatchQueue.main.async {
+        NativeOverlayManager.shared.setWaveformStyle(style)
+    }
+}
