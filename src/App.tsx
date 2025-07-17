@@ -147,8 +147,6 @@ function App() {
 
   // Use the transcript events hook
   useTranscriptEvents({
-    autoCopy,
-    autoPaste,
     soundEnabled,
     completionSoundThreshold,
     setIsProcessing,

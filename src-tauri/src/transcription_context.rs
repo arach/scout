@@ -11,6 +11,7 @@ use crate::transcription::{
 };
 use crate::db::Database;
 use crate::performance_logger::PerformanceLogger;
+use crate::models;
 
 /// Manages transcription strategy selection and execution
 pub struct TranscriptionContext {
@@ -48,38 +49,81 @@ impl TranscriptionContext {
     }
     
     /// Create a new TranscriptionContext from database and models directory
-    pub fn new_from_db(
+    pub async fn new_from_db(
         database: Arc<Database>,
         models_dir: PathBuf,
+        settings: &crate::settings::AppSettings,
     ) -> Result<Self, String> {
-        // Find a suitable model file in the models directory
-        let model_path = Self::find_model_file(&models_dir)?;
-        let model_name = model_path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("unknown")
-            .to_string();
-        info(Component::Transcription, &format!("Using model file: {:?}", model_path));
+        // Get the active model path from settings
+        let model_path = crate::models::WhisperModel::get_active_model_path(&models_dir, settings);
         
-        let transcriber = match Transcriber::new(&model_path) {
-            Ok(t) => Arc::new(Mutex::new(t)),
-            Err(e) => {
-                warn(Component::Transcription, &format!("Failed to create transcriber: {}", e));
-                return Err(format!("Failed to create transcriber: {}", e));
+        // Verify the model exists
+        if !model_path.exists() {
+            warn(Component::Transcription, &format!("Active model not found: {:?}, falling back to any available model", model_path));
+            // Fall back to finding any available model
+            let model_path = Self::find_model_file(&models_dir)?;
+            let model_name = model_path.file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+            info(Component::Transcription, &format!("Using fallback model file: {:?}", model_path));
+            
+            let transcriber = match Transcriber::get_or_create_cached(&model_path).await {
+                Ok(t) => t,
+                Err(e) => {
+                    warn(Component::Transcription, &format!("Failed to create transcriber: {}", e));
+                    return Err(format!("Failed to create transcriber: {}", e));
+                }
+            };
+            
+            let performance_logger = PerformanceLogger::new(database);
+            
+            Ok(Self {
+                transcriber,
+                temp_dir: models_dir,
+                config: TranscriptionConfig::default(),
+                current_strategy: None,
+                performance_logger: Some(performance_logger),
+                recording_start_time: None,
+                model_name,
+                app_handle: None,
+            })
+        } else {
+            let model_name = model_path.file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+            info(Component::Transcription, &format!("Using model file: {:?} (from settings: {})", model_path, settings.models.active_model_id));
+            
+            // Warn if using a slow model
+            if settings.models.active_model_id.contains("medium") || settings.models.active_model_id.contains("large") {
+                warn(Component::Transcription, &format!(
+                    "WARNING: Using {} model which is SLOW (~1x realtime). Consider switching to 'tiny.en' (10x realtime) or 'base.en' (5x realtime) for better performance.",
+                    settings.models.active_model_id
+                ));
             }
-        };
-        
-        let performance_logger = PerformanceLogger::new(database);
-        
-        Ok(Self {
-            transcriber,
-            temp_dir: models_dir,
-            config: TranscriptionConfig::default(),
-            current_strategy: None,
-            performance_logger: Some(performance_logger),
-            recording_start_time: None,
-            model_name,
-            app_handle: None,
-        })
+            
+            let transcriber = match Transcriber::get_or_create_cached(&model_path).await {
+                Ok(t) => t,
+                Err(e) => {
+                    warn(Component::Transcription, &format!("Failed to create transcriber: {}", e));
+                    return Err(format!("Failed to create transcriber: {}", e));
+                }
+            };
+            
+            let performance_logger = PerformanceLogger::new(database);
+            
+            Ok(Self {
+                transcriber,
+                temp_dir: models_dir,
+                config: TranscriptionConfig::default(),
+                current_strategy: None,
+                performance_logger: Some(performance_logger),
+                recording_start_time: None,
+                model_name,
+                app_handle: None,
+            })
+        }
     }
     
     /// Update transcription configuration
@@ -153,8 +197,8 @@ impl TranscriptionContext {
                 ).await;
             }
             
-            info(Component::Transcription, &format!("Transcription completed using '{}' strategy in {}ms", 
-                     result.strategy_used, result.processing_time_ms));
+            info(Component::Transcription, &format!("Transcription completed using '{}' strategy with '{}' model in {}ms", 
+                     result.strategy_used, self.model_name, result.processing_time_ms));
             
             if result.chunks_processed > 1 {
                 debug(Component::Transcription, &format!("Processed {} chunks", result.chunks_processed));

@@ -55,7 +55,10 @@
       "Bash(git revert:*)",
       "Bash(gh pr edit:*)",
       "Bash(npx tsc:*)",
-      "Bash(./scripts/download-models.sh:*)"
+      "Bash(./scripts/download-models.sh:*)",
+      "Bash(sed:*)",
+      "Bash(pnpm lint:*)",
+      "Bash(rustc:*)"
     ],
     "deny": []
   }

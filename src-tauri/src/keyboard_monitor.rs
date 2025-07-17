@@ -5,6 +5,9 @@ use std::panic::AssertUnwindSafe;
 use tauri::{AppHandle, Emitter};
 use crate::logger::{info, debug, warn, error, Component};
 
+#[cfg(not(target_os = "macos"))]
+use std::thread;
+
 pub struct KeyboardMonitor {
     app_handle: AppHandle,
     pressed_keys: Arc<Mutex<HashSet<Key>>>,
@@ -82,24 +85,46 @@ impl KeyboardMonitor {
     }
 
     pub fn start_monitoring(self: Arc<Self>) {
+        #[cfg(target_os = "macos")]
+        {
+            // On macOS, we need to handle keyboard events more carefully
+            // to avoid dispatch queue assertion failures
+            self.start_monitoring_macos();
+        }
+        
+        #[cfg(not(target_os = "macos"))]
+        {
+            // On other platforms, use the original implementation
+            self.start_monitoring_other();
+        }
+    }
+    
+    #[cfg(target_os = "macos")]
+    fn start_monitoring_macos(self: Arc<Self>) {
+        // On macOS, rdev has threading issues that can cause crashes
+        // For now, we'll disable keyboard monitoring and rely on global shortcuts only
+        warn(Component::UI, "Keyboard event monitoring temporarily disabled on macOS due to threading issues");
+        warn(Component::UI, "Push-to-talk will work but key release detection is not available");
+        warn(Component::UI, "You'll need to use the same shortcut or stop button to end recording");
+        
+        // Emit a warning event to the frontend
+        let _ = self.app_handle.emit("keyboard-monitor-unavailable", 
+            "Push-to-talk key release detection is temporarily disabled on macOS. Use the same shortcut or stop button to end recording.");
+    }
+    
+    #[cfg(not(target_os = "macos"))]
+    fn start_monitoring_other(self: Arc<Self>) {
         let monitor = self.clone();
         let app_handle_for_emit = self.app_handle.clone();
         
         // Spawn a thread to handle keyboard events with panic catching
-        match std::thread::Builder::new()
+        match thread::Builder::new()
             .name("keyboard-monitor".to_string())
             .spawn(move || {
                 // Small delay to let the app fully initialize
-                std::thread::sleep(std::time::Duration::from_millis(1000));
+                thread::sleep(std::time::Duration::from_millis(1000));
                 
                 info(Component::UI, "Keyboard monitor thread started");
-                
-                // Check if we're on macOS and might need accessibility permissions
-                #[cfg(target_os = "macos")]
-                {
-                    info(Component::UI, "Push-to-talk key release detection requires accessibility permissions on macOS.");
-                    info(Component::UI, "If it doesn't work, grant permissions in System Settings > Privacy & Security > Accessibility");
-                }
                 
                 // Catch any panics to prevent app crash
                 let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
@@ -118,11 +143,6 @@ impl KeyboardMonitor {
                         }
                         Err(e) => {
                             warn(Component::UI, &format!("Keyboard monitoring not available: {:?}", e));
-                            #[cfg(target_os = "macos")]
-                            {
-                                info(Component::UI, "This is expected if accessibility permissions are not granted.");
-                                info(Component::UI, "To enable: System Settings > Privacy & Security > Accessibility > Add Scout");
-                            }
                             warn(Component::UI, "Push-to-talk will work but won't auto-stop on key release.");
                             
                             // Emit a warning event to the frontend
@@ -150,12 +170,21 @@ impl KeyboardMonitor {
     }
 
     fn handle_event(&self, event: Event) {
-        // Add debug logging
-        #[cfg(debug_assertions)]
+        // Don't log the actual event details on macOS to avoid triggering the crash
+        #[cfg(all(debug_assertions, not(target_os = "macos")))]
         {
             match &event.event_type {
                 EventType::KeyPress(key) => debug(Component::UI, &format!("Key press detected: {:?}", key)),
                 EventType::KeyRelease(key) => debug(Component::UI, &format!("Key release detected: {:?}", key)),
+                _ => {}
+            }
+        }
+        
+        #[cfg(all(debug_assertions, target_os = "macos"))]
+        {
+            match &event.event_type {
+                EventType::KeyPress(_) => debug(Component::UI, "Key press detected"),
+                EventType::KeyRelease(_) => debug(Component::UI, "Key release detected"),
                 _ => {}
             }
         }
