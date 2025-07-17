@@ -1277,6 +1277,16 @@ async fn play_success_sound() -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+async fn set_overlay_waveform_style(state: State<'_, AppState>, style: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let overlay = state.native_panel_overlay.lock().await;
+        overlay.set_waveform_style(&style);
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Initialize env_logger with our custom interceptor to capture whisper logs
@@ -1748,7 +1758,8 @@ pub fn run() {
             get_push_to_talk_shortcut,
             update_push_to_talk_shortcut,
             paste_text,
-            play_success_sound
+            play_success_sound,
+            set_overlay_waveform_style
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -191,6 +191,10 @@ class OverlayViewController: NSViewController {
         overlayView.setVolumeLevel(level)
     }
     
+    func setWaveformStyle(_ style: WaveformStyle) {
+        overlayView.setWaveformStyle(style)
+    }
+    
     func getCurrentState() -> String {
         switch currentState {
         case .idle:
@@ -357,5 +361,21 @@ class OverlayViewController: NSViewController {
         
         // Update the panel's position for proper anchor-based expansion
         panel.setPosition(position)
+    }
+    
+    @objc func setWaveformStyle(_ style: String) {
+        guard let contentView = panel?.contentView as? OverlayContentView else { return }
+        
+        switch style.lowercased() {
+        case "classic":
+            contentView.setWaveformStyle(.classic)
+        case "enhanced":
+            contentView.setWaveformStyle(.enhanced)
+        case "particles":
+            contentView.setWaveformStyle(.particles)
+        default:
+            // Default to enhanced
+            contentView.setWaveformStyle(.enhanced)
+        }
     }
 }
