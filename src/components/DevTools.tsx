@@ -46,7 +46,7 @@ export function DevTools(props: DevToolsProps) {
     vadEnabled = false,
     hotkey = '',
     pushToTalkHotkey = '',
-    currentUser = 'Unknown',
+    // currentUser = 'Unknown', // Unused variable
     appVersion = '0.1.0'
   } = props;
 

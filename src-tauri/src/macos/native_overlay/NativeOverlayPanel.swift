@@ -209,6 +209,214 @@ class WaveformView: NSView {
     }
 }
 
+// MARK: - Enhanced Frequency Spectrum Waveform View
+
+class EnhancedWaveformView: NSView {
+    private var bars: [CGFloat] = []
+    private var targetBars: [CGFloat] = []
+    private var springVelocities: [CGFloat] = []
+    private let barCount = 24  // More bars for detailed spectrum
+    private var animationTimer: Timer?
+    private var volumeLevel: CGFloat = 0.0
+    private var lastUpdateTime: TimeInterval = 0
+    
+    // Visual configuration
+    private let gradientColors: [NSColor] = [
+        NSColor(calibratedRed: 0.2, green: 0.6, blue: 1.0, alpha: 1.0),   // Blue (low freq)
+        NSColor(calibratedRed: 0.3, green: 0.8, blue: 0.9, alpha: 1.0),   // Cyan
+        NSColor(calibratedRed: 0.5, green: 1.0, blue: 0.5, alpha: 1.0),   // Green (mid freq)
+        NSColor(calibratedRed: 1.0, green: 0.8, blue: 0.3, alpha: 1.0),   // Yellow
+        NSColor(calibratedRed: 1.0, green: 0.4, blue: 0.3, alpha: 1.0)    // Red (high freq)
+    ]
+    
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setupBars()
+    }
+    
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setupBars()
+    }
+    
+    private func setupBars() {
+        bars = Array(repeating: 0.05, count: barCount)
+        targetBars = Array(repeating: 0.05, count: barCount)
+        springVelocities = Array(repeating: 0.0, count: barCount)
+    }
+    
+    func startAnimating() {
+        stopAnimating()
+        
+        // Create timer for smooth animation (60fps)
+        lastUpdateTime = Date.timeIntervalSinceReferenceDate
+        animationTimer = Timer.scheduledTimer(withTimeInterval: 1.0/60.0, repeats: true) { [weak self] _ in
+            self?.updateAnimation()
+        }
+    }
+    
+    func stopAnimating() {
+        animationTimer?.invalidate()
+        animationTimer = nil
+        
+        // Smoothly animate bars down
+        NSAnimationContext.runAnimationGroup { _ in
+            for i in 0..<barCount {
+                targetBars[i] = 0.05
+            }
+        }
+    }
+    
+    func setVolumeLevel(_ level: CGFloat) {
+        volumeLevel = max(0, min(1, level))
+        updateTargetBars()
+    }
+    
+    private func updateTargetBars() {
+        // Simulate frequency spectrum based on volume
+        for i in 0..<barCount {
+            let frequencyBand = CGFloat(i) / CGFloat(barCount - 1)
+            
+            // Create a more realistic frequency response curve
+            let lowFreqBoost = exp(-pow(frequencyBand * 3, 2)) * 0.8
+            let midFreqBoost = exp(-pow((frequencyBand - 0.5) * 4, 2)) * 0.6
+            let highFreqRolloff = 1.0 - pow(frequencyBand, 2) * 0.5
+            
+            let baseHeight = (lowFreqBoost + midFreqBoost) * highFreqRolloff
+            
+            // Add natural variation
+            let variation = CGFloat.random(in: -0.2...0.2) * volumeLevel
+            let smoothedVariation = variation * (0.5 + 0.5 * sin(CGFloat(i) * 0.8))
+            
+            // Amplify the visual response
+            let amplifiedVolume = pow(volumeLevel * 1.5, 0.8)
+            let height = (baseHeight + smoothedVariation) * amplifiedVolume + 0.05
+            
+            targetBars[i] = min(1.0, max(0.05, height))
+        }
+    }
+    
+    @objc private func updateAnimation() {
+        let currentTime = Date.timeIntervalSinceReferenceDate
+        let deltaTime = currentTime - lastUpdateTime
+        lastUpdateTime = currentTime
+        
+        // Spring physics parameters
+        let springStiffness: CGFloat = 300.0
+        let springDamping: CGFloat = 20.0
+        
+        // Update each bar with spring physics
+        for i in 0..<barCount {
+            let targetHeight = targetBars[i]
+            let currentHeight = bars[i]
+            
+            // Calculate spring force
+            let springForce = (targetHeight - currentHeight) * springStiffness
+            let dampingForce = -springVelocities[i] * springDamping
+            
+            // Update velocity and position
+            let acceleration = springForce + dampingForce
+            springVelocities[i] += acceleration * CGFloat(deltaTime)
+            bars[i] += springVelocities[i] * CGFloat(deltaTime)
+            
+            // Clamp values
+            bars[i] = max(0.05, min(1.0, bars[i]))
+        }
+        
+        needsDisplay = true
+    }
+    
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        
+        // Glass-like background
+        let backgroundPath = NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), 
+                                         xRadius: 4, yRadius: 4)
+        NSColor(white: 0.0, alpha: 0.1).setFill()
+        backgroundPath.fill()
+        
+        let barWidth: CGFloat = 1.5
+        let spacing: CGFloat = 0.5
+        let totalWidth = CGFloat(barCount) * (barWidth + spacing) - spacing
+        let startX = (bounds.width - totalWidth) / 2
+        let maxBarHeight = bounds.height * 0.85
+        
+        // Draw reflection first (behind main bars)
+        for (index, height) in bars.enumerated() {
+            let x = startX + CGFloat(index) * (barWidth + spacing)
+            let barHeight = maxBarHeight * height
+            let reflectionHeight = barHeight * 0.3
+            let y = bounds.height / 2 + 2  // Start below center
+            
+            let reflectionRect = NSRect(x: x, y: y, 
+                                      width: barWidth, 
+                                      height: reflectionHeight)
+            let reflectionPath = NSBezierPath(roundedRect: reflectionRect, 
+                                             xRadius: barWidth / 2, 
+                                             yRadius: barWidth / 2)
+            
+            // Get gradient color for this frequency
+            let colorIndex = CGFloat(index) / CGFloat(barCount - 1)
+            let color = interpolateColor(at: colorIndex)
+            color.withAlphaComponent(0.2).setFill()
+            reflectionPath.fill()
+        }
+        
+        // Draw main bars
+        for (index, height) in bars.enumerated() {
+            let x = startX + CGFloat(index) * (barWidth + spacing)
+            let barHeight = maxBarHeight * height
+            let y = (bounds.height - barHeight) / 2
+            
+            let barRect = NSRect(x: x, y: y, width: barWidth, height: barHeight)
+            let barPath = NSBezierPath(roundedRect: barRect, 
+                                      xRadius: barWidth / 2, 
+                                      yRadius: barWidth / 2)
+            
+            // Create gradient for each bar
+            let gradient = NSGradient(colors: [
+                interpolateColor(at: CGFloat(index) / CGFloat(barCount - 1)),
+                interpolateColor(at: CGFloat(index) / CGFloat(barCount - 1)).blended(withFraction: 0.3, of: .white)!
+            ])
+            
+            // Draw with gradient
+            gradient?.draw(in: barPath, angle: 90)
+            
+            // Add glass-like highlight
+            if height > 0.5 {
+                let highlightPath = NSBezierPath(roundedRect: 
+                    NSRect(x: x, y: y, width: barWidth, height: barHeight * 0.3),
+                    xRadius: barWidth / 2, yRadius: barWidth / 2)
+                NSColor(white: 1.0, alpha: 0.3).setFill()
+                highlightPath.fill()
+            }
+            
+            // Add glow for active bars
+            if height > 0.7 && animationTimer != nil {
+                let glowColor = interpolateColor(at: CGFloat(index) / CGFloat(barCount - 1))
+                    .withAlphaComponent(0.5)
+                let glowPath = NSBezierPath(roundedRect: barRect.insetBy(dx: -2, dy: -2),
+                                           xRadius: barWidth / 2 + 2, 
+                                           yRadius: barWidth / 2 + 2)
+                glowPath.lineWidth = 2
+                glowColor.setStroke()
+                glowPath.stroke()
+            }
+        }
+    }
+    
+    private func interpolateColor(at position: CGFloat) -> NSColor {
+        let clampedPosition = max(0, min(1, position))
+        let scaledPosition = clampedPosition * CGFloat(gradientColors.count - 1)
+        let lowerIndex = Int(floor(scaledPosition))
+        let upperIndex = min(lowerIndex + 1, gradientColors.count - 1)
+        let fraction = scaledPosition - CGFloat(lowerIndex)
+        
+        return gradientColors[lowerIndex].blended(withFraction: fraction, 
+                                                 of: gradientColors[upperIndex]) ?? gradientColors[lowerIndex]
+    }
+}
+
 // MARK: - Cancel Button
 
 class CancelButton: NSButton {
@@ -602,8 +810,17 @@ class OverlayContentView: NSView {
     private let stopButton = SquareButton()
     private let statusLabel = NSTextField()
     private let activityIndicator = NSProgressIndicator()
-    private let waveformView = WaveformView()
+    private let classicWaveformView = WaveformView()
+    private let enhancedWaveformView = EnhancedWaveformView()
     private let processingDotsView = ProcessingDotsView()
+    
+    // Configuration
+    private var useEnhancedWaveform = true  // Toggle this to switch between styles
+    
+    // Computed property for current waveform view
+    private var waveformView: NSView {
+        return useEnhancedWaveform ? enhancedWaveformView : classicWaveformView
+    }
     
     // Callbacks
     var onStartRecording: (() -> Void)?
@@ -680,10 +897,15 @@ class OverlayContentView: NSView {
         activityIndicator.appearance = NSAppearance(named: .darkAqua)
         addSubview(activityIndicator)
         
-        // Waveform view
-        waveformView.isHidden = true
-        waveformView.wantsLayer = true
-        addSubview(waveformView)
+        // Classic waveform view
+        classicWaveformView.isHidden = true
+        classicWaveformView.wantsLayer = true
+        addSubview(classicWaveformView)
+        
+        // Enhanced waveform view
+        enhancedWaveformView.isHidden = true
+        enhancedWaveformView.wantsLayer = true
+        addSubview(enhancedWaveformView)
         
         // Processing dots view
         processingDotsView.isHidden = true
@@ -734,7 +956,8 @@ class OverlayContentView: NSView {
             recordButton.isHidden = true
             stopButton.isHidden = true
             activityIndicator.isHidden = true
-            waveformView.isHidden = true
+            classicWaveformView.isHidden = true
+            enhancedWaveformView.isHidden = true
             
             // Special handling for processing state
             if state == .processing {
@@ -763,8 +986,9 @@ class OverlayContentView: NSView {
                     height: buttonSize
                 )
                 
-                // Hide waveform when just hovering
-                waveformView.isHidden = true
+                // Hide both waveforms when just hovering
+                classicWaveformView.isHidden = true
+                enhancedWaveformView.isHidden = true
                 
             case .recording:
                 // Hide dot indicator when expanded
@@ -791,28 +1015,43 @@ class OverlayContentView: NSView {
                 )
                 
                 // Waveform in the middle between buttons
-                waveformView.frame = NSRect(
+                let waveformFrame = NSRect(
                     x: contentRect.minX + buttonSize + 4,
                     y: contentRect.minY,
                     width: contentRect.width - (buttonSize * 2) - 8,
                     height: contentRect.height
                 )
-                waveformView.isHidden = false
-                waveformView.startAnimating()
+                
+                // Show the selected waveform
+                if useEnhancedWaveform {
+                    enhancedWaveformView.frame = waveformFrame
+                    enhancedWaveformView.isHidden = false
+                    enhancedWaveformView.startAnimating()
+                    classicWaveformView.isHidden = true
+                } else {
+                    classicWaveformView.frame = waveformFrame
+                    classicWaveformView.isHidden = false
+                    classicWaveformView.startAnimating()
+                    enhancedWaveformView.isHidden = true
+                }
                 
                 statusLabel.isHidden = true
                 
             case .processing:
                 // Processing is handled in the minimized state
                 // This case shouldn't happen but handle it gracefully
-                waveformView.isHidden = true
-                waveformView.stopAnimating()
+                classicWaveformView.isHidden = true
+                classicWaveformView.stopAnimating()
+                enhancedWaveformView.isHidden = true
+                enhancedWaveformView.stopAnimating()
                 processingDotsView.isHidden = true
                 
             case .complete:
                 // Complete state transitions directly to idle
-                waveformView.isHidden = true
-                waveformView.stopAnimating()
+                classicWaveformView.isHidden = true
+                classicWaveformView.stopAnimating()
+                enhancedWaveformView.isHidden = true
+                enhancedWaveformView.stopAnimating()
                 processingDotsView.isHidden = true
             }
         }
@@ -855,6 +1094,11 @@ class OverlayContentView: NSView {
     
     // MARK: - State Management
     
+    func setWaveformStyle(enhanced: Bool) {
+        useEnhancedWaveform = enhanced
+        needsLayout = true
+    }
+    
     func updateCornerRadius(isExpanded: Bool) {
         NSAnimationContext.runAnimationGroup { context in
             context.duration = UIConfig.panelAnimationDuration
@@ -863,9 +1107,16 @@ class OverlayContentView: NSView {
     }
     
     func setVolumeLevel(_ level: CGFloat) {
-        waveformView.setVolumeLevel(level)
-        // Ensure waveform redraws immediately
-        waveformView.needsDisplay = true
+        // Pass volume level to both views
+        classicWaveformView.setVolumeLevel(level)
+        enhancedWaveformView.setVolumeLevel(level)
+        
+        // Ensure the active waveform redraws immediately
+        if useEnhancedWaveform {
+            enhancedWaveformView.needsDisplay = true
+        } else {
+            classicWaveformView.needsDisplay = true
+        }
     }
     
     func setState(_ newState: State, expanded: Bool) {
@@ -884,7 +1135,8 @@ class OverlayContentView: NSView {
         case .idle:
             statusLabel.stringValue = ""
             activityIndicator.stopAnimation(nil)
-            waveformView.stopAnimating()
+            classicWaveformView.stopAnimating()
+            enhancedWaveformView.stopAnimating()
             processingDotsView.stopAnimating()
             
         case .hovered:
@@ -895,19 +1147,21 @@ class OverlayContentView: NSView {
             statusLabel.stringValue = "Recording..."
             statusLabel.textColor = NSColor.systemRed
             activityIndicator.stopAnimation(nil)
-            waveformView.startAnimating()
+            // Animation is started in the layout method when views are shown
             processingDotsView.stopAnimating()
             
         case .processing:
             // Processing state only shows dots, no text
-            waveformView.stopAnimating()
+            classicWaveformView.stopAnimating()
+            enhancedWaveformView.stopAnimating()
             // processingDotsView animation is handled in layout
             
         case .complete:
             statusLabel.stringValue = "✓ Complete"
             statusLabel.textColor = NSColor.systemGreen
             activityIndicator.stopAnimation(nil)
-            waveformView.stopAnimating()
+            classicWaveformView.stopAnimating()
+            enhancedWaveformView.stopAnimating()
             processingDotsView.stopAnimating()
         }
         

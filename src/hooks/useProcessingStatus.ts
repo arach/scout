@@ -46,29 +46,41 @@ export function useProcessingStatus(options: UseProcessingStatusOptions) {
       
       // Update UI based on processing status
       if (status.Queued) {
-        setUploadProgress(prev => ({
-          ...prev,
-          status: 'queued',
-          queuePosition: status.Queued.position
-        }));
+        const queuedStatus = status.Queued;
+        if (queuedStatus.position !== undefined) {
+          setUploadProgress(prev => ({
+            ...prev,
+            status: 'queued',
+            queuePosition: queuedStatus.position
+          }));
+        }
       } else if (status.Processing) {
-        setUploadProgress(prev => ({
-          ...prev,
-          status: 'processing',
-          filename: status.Processing.filename
-        }));
+        const processingStatus = status.Processing;
+        if (processingStatus.filename) {
+          setUploadProgress(prev => ({
+            ...prev,
+            status: 'processing',
+            filename: processingStatus.filename
+          }));
+        }
       } else if (status.Converting) {
-        setUploadProgress(prev => ({
-          ...prev,
-          status: 'converting',
-          filename: status.Converting.filename
-        }));
+        const convertingStatus = status.Converting;
+        if (convertingStatus.filename) {
+          setUploadProgress(prev => ({
+            ...prev,
+            status: 'converting',
+            filename: convertingStatus.filename
+          }));
+        }
       } else if (status.Transcribing) {
-        setUploadProgress(prev => ({
-          ...prev,
-          status: 'transcribing',
-          filename: status.Transcribing.filename
-        }));
+        const transcribingStatus = status.Transcribing;
+        if (transcribingStatus.filename) {
+          setUploadProgress(prev => ({
+            ...prev,
+            status: 'transcribing',
+            filename: transcribingStatus.filename
+          }));
+        }
       } else if (status.Complete) {
         // Transcription complete
         setUploadProgress({ status: 'idle' });
@@ -90,7 +102,7 @@ export function useProcessingStatus(options: UseProcessingStatusOptions) {
         processingFileRef.current = null; // Clear the processing file reference
         setUploadProgress({ status: 'idle' });
         
-        const errorMsg = status.Failed.error || 'Unknown error';
+        const errorMsg = status.Failed?.error || 'Unknown error';
         onProcessingFailed?.(errorMsg);
         
         // Show error message to user
@@ -117,7 +129,7 @@ export function useProcessingStatus(options: UseProcessingStatusOptions) {
       
       // Properly cleanup event listeners
       unsubscribeProcessing.then(fn => {
-        if (typeof fn === 'function') {
+        if (fn && typeof fn === 'function') {
           fn();
         }
       }).catch(error => {
@@ -125,7 +137,7 @@ export function useProcessingStatus(options: UseProcessingStatusOptions) {
       });
       
       unsubscribeFileUpload.then(fn => {
-        if (typeof fn === 'function') {
+        if (fn && typeof fn === 'function') {
           fn();
         }
       }).catch(error => {
