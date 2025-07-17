@@ -1580,10 +1580,16 @@ pub fn run() {
             // This is optional - if it fails, push-to-talk will still work but won't auto-stop
             keyboard_monitor.set_push_to_talk_key(&push_to_talk_hotkey);
             
-            // Start keyboard monitoring for push-to-talk key release detection
-            // It will gracefully handle permission issues and won't crash if permissions are denied
-            info(Component::UI, "Starting keyboard monitor for push-to-talk support");
-            keyboard_monitor.clone().start_monitoring();
+            // Only start monitoring if explicitly enabled
+            // Due to accessibility permission requirements, we'll disable by default
+            if std::env::var("SCOUT_ENABLE_KEYBOARD_MONITOR").is_ok() {
+                info(Component::UI, "Keyboard monitoring enabled via SCOUT_ENABLE_KEYBOARD_MONITOR");
+                keyboard_monitor.clone().start_monitoring();
+            } else {
+                info(Component::UI, "Keyboard monitoring disabled by default");
+                info(Component::UI, "To enable: export SCOUT_ENABLE_KEYBOARD_MONITOR=1");
+                info(Component::UI, "Note: Requires accessibility permissions on macOS");
+            }
             
             // Set up system tray
             let toggle_recording_item = MenuItemBuilder::with_id("toggle_recording", "Start Recording")
