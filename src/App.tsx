@@ -116,7 +116,8 @@ function App() {
     },
     soundEnabled,
     selectedMic,
-    vadEnabled
+    vadEnabled,
+    pushToTalkShortcut: pushToTalkHotkey
   });
 
   // Use the file drop hook
