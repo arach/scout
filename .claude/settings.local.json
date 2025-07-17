@@ -52,7 +52,10 @@
       "WebFetch(domain:huggingface.co)",
       "Bash(pnpm typecheck:*)",
       "WebFetch(domain:docs.rs)",
-      "Bash(git revert:*)"
+      "Bash(git revert:*)",
+      "Bash(gh pr edit:*)",
+      "Bash(npx tsc:*)",
+      "Bash(./scripts/download-models.sh:*)"
     ],
     "deny": []
   }

@@ -5,6 +5,7 @@ use tokio::time;
 use crate::audio::ring_buffer_recorder::RingBufferRecorder;
 use crate::transcription::ring_buffer_transcriber::RingBufferTranscriber;
 use crate::logger::{info, debug, warn, error, Component};
+use tauri::{AppHandle, Emitter};
 
 /// Monitors ring buffer recording and triggers chunking when appropriate
 pub struct RingBufferMonitor {
@@ -16,6 +17,7 @@ pub struct RingBufferMonitor {
     recording_start_time: Instant,
     completed_chunks: Vec<String>, // Store completed chunk texts
     next_chunk_id: usize,
+    app_handle: Option<AppHandle>,
 }
 
 impl RingBufferMonitor {
@@ -29,7 +31,13 @@ impl RingBufferMonitor {
             recording_start_time: Instant::now(),
             completed_chunks: Vec::new(),
             next_chunk_id: 0,
+            app_handle: None,
         }
+    }
+    
+    pub fn with_app_handle(mut self, app_handle: AppHandle) -> Self {
+        self.app_handle = Some(app_handle);
+        self
     }
     
     /// Start monitoring the ring buffer recording
@@ -100,7 +108,22 @@ impl RingBufferMonitor {
                             Ok(text) => {
                                 if !text.is_empty() {
                                     info(Component::RingBuffer, &format!("Collected chunk {}: \"{}\"", self.next_chunk_id, text));
-                                    self.completed_chunks.push(text);
+                                    self.completed_chunks.push(text.clone());
+                                    
+                                    // Emit real-time transcription chunk event
+                                    if let Some(ref app) = self.app_handle {
+                                        let chunk_data = serde_json::json!({
+                                            "id": self.next_chunk_id,
+                                            "text": text,
+                                            "timestamp": chrono::Utc::now().timestamp_millis(),
+                                            "isPartial": false
+                                        });
+                                        if let Err(e) = app.emit("transcription-chunk", &chunk_data) {
+                                            warn(Component::RingBuffer, &format!("Failed to emit transcription chunk: {}", e));
+                                        } else {
+                                            debug(Component::RingBuffer, &format!("Emitted transcription chunk {}", self.next_chunk_id));
+                                        }
+                                    }
                                 } else {
                                     warn(Component::RingBuffer, &format!("Chunk {} was empty", self.next_chunk_id));
                                 }
