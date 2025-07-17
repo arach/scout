@@ -397,6 +397,29 @@
   font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
 }
 
+/* Select dropdown styling */
+.dev-tool-select {
+  background: rgba(48, 48, 48, 0.6);
+  color: #ccc;
+  padding: 4px 8px;
+  border: 1px solid rgba(120, 120, 120, 0.3);
+  border-radius: 3px;
+  font-size: 10px;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  cursor: pointer;
+  outline: none;
+  margin-left: 8px;
+}
+
+.dev-tool-select:hover {
+  border-color: rgba(120, 120, 120, 0.5);
+  background: rgba(60, 60, 60, 0.6);
+}
+
+.dev-tool-select:focus {
+  border-color: rgba(140, 140, 140, 0.6);
+}
+
 /* Scrollbar styling for dev tools */
 .dev-tools-content::-webkit-scrollbar {
   width: 6px;
