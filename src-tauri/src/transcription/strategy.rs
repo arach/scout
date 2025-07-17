@@ -322,8 +322,8 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
                          total_recording_time.as_secs_f64()));
             }
             
-            // Wait for file to be fully written by the AudioRecorder
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            // Note: Removed 500ms sleep that was causing 9-10s transcription delays
+            // The file should already be written by the time we get here
             
             // Check if file exists and has content
             if !recording_path.exists() {

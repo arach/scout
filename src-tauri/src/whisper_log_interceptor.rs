@@ -30,17 +30,10 @@ impl Log for WhisperLogInterceptor {
         // First, pass through to the inner logger
         self.inner.log(record);
         
-        // Debug: log all targets to see what we're getting
-        if record.target().contains("whisper") || record.target() == "whisper_rs" {
-            eprintln!("[INTERCEPTOR] Whisper log detected - target: {}, level: {:?}, message: {}", 
-                     record.target(), record.level(), record.args());
-        }
-        
         // Then check if this is a whisper log
         if record.target().starts_with("whisper") || record.target() == "whisper_rs" {
             if let Ok(current) = CURRENT_SESSION_ID.lock() {
                 if let Some(ref session_id) = *current {
-                    eprintln!("[INTERCEPTOR] Writing to session: {}", session_id);
                     let level = match record.level() {
                         Level::Error => "ERROR",
                         Level::Warn => "WARN",

@@ -121,65 +121,8 @@ export function TranscriptionOverlay({
   };
 
   // Enhanced text reveal animation with mio.xyz-style effects
-  const revealTextAnimation = (text: string, containerId: string, options?: {
-    delay?: number;
-    duration?: number;
-    wordByWord?: boolean;
-    fadeIn?: boolean;
-  }) => {
-    const { delay = 0, duration = 2000, wordByWord = false, fadeIn = true } = options || {};
-    const container = document.querySelector(`[data-reveal-id="${containerId}"]`);
-    if (!container) return;
-
-    // Clear container and prepare for animation
-    container.innerHTML = '';
-    
-    if (wordByWord) {
-      // Word-by-word reveal
-      const words = text.split(' ');
-      words.forEach((word, index) => {
-        const span = document.createElement('span');
-        span.textContent = word + (index < words.length - 1 ? ' ' : '');
-        span.className = 'reveal-word';
-        span.style.opacity = '0';
-        span.style.transform = 'translateY(10px)';
-        span.style.display = 'inline-block';
-        span.style.transition = `all 0.6s cubic-bezier(0.22, 1, 0.36, 1) ${delay + (index * (duration / words.length))}ms`;
-        container.appendChild(span);
-        
-        // Trigger animation
-        requestAnimationFrame(() => {
-          span.style.opacity = '1';
-          span.style.transform = 'translateY(0)';
-        });
-      });
-    } else {
-      // Character-by-character reveal
-      const chars = text.split('');
-      chars.forEach((char, index) => {
-        const span = document.createElement('span');
-        span.textContent = char;
-        span.className = 'reveal-char';
-        span.style.opacity = '0';
-        span.style.transform = fadeIn ? 'translateY(5px)' : 'none';
-        span.style.display = 'inline-block';
-        span.style.transition = `all 0.4s cubic-bezier(0.22, 1, 0.36, 1) ${delay + (index * (duration / chars.length))}ms`;
-        if (char === ' ') span.style.width = '0.25em';
-        container.appendChild(span);
-        
-        // Trigger animation
-        requestAnimationFrame(() => {
-          span.style.opacity = '1';
-          span.style.transform = 'translateY(0)';
-        });
-      });
-    }
-  };
 
   // Split text into sentences
-  const splitIntoSentences = (text: string): string[] => {
-    return text.split(/([.!?]+\s*)/).filter(s => s.trim().length > 0);
-  };
 
   // Combine all text for editor mode
   const fullText = transcriptionState.completedText + 
@@ -251,43 +194,56 @@ export function TranscriptionOverlay({
 
   // Enhanced chunk animation with mio.xyz-style text reveal
   const animateChunkDecryption = (chunkId: string, originalText: string) => {
-    // Option 1: Elegant fade-in reveal (no scrambling)
-    const useElegantReveal = true;
+    // TODO: Get animation type from settings
+    const animationType = 'scramble' as 'scramble' | 'typewriter';
+    if (animationType === 'typewriter') {
+      // Character-by-character reveal animation
+      const chars = originalText.split('');
+      const revealDuration = Math.min(2000, chars.length * 30); // 30ms per char, max 2s
+      const charDelay = revealDuration / chars.length;
     
-    if (useElegantReveal) {
-      // Add chunk immediately but mark for animation
+    // Add chunk with empty text initially
+    setTranscriptionState(prev => ({
+      ...prev,
+      decryptingChunks: [...prev.decryptingChunks, {
+        id: chunkId,
+        originalText,
+        scrambledText: '',
+        progress: 0,
+        timestamp: Date.now()
+      }],
+      anticipatedText: '' // Clear anticipated text when real transcription arrives
+    }));
+
+    // Reveal characters one by one
+    let revealedCount = 0;
+    const revealInterval = setInterval(() => {
+      revealedCount++;
+      const revealedText = originalText.slice(0, revealedCount);
+      const progress = revealedCount / chars.length;
+      
       setTranscriptionState(prev => ({
         ...prev,
-        decryptingChunks: [...prev.decryptingChunks, {
-          id: chunkId,
-          originalText,
-          scrambledText: originalText,
-          progress: 0,
-          timestamp: Date.now()
-        }],
-        anticipatedText: '' // Clear anticipated text when real transcription arrives
+        decryptingChunks: prev.decryptingChunks.map(chunk => 
+          chunk.id === chunkId 
+            ? { ...chunk, scrambledText: revealedText, progress }
+            : chunk
+        )
       }));
-
-      // Use CSS animation for reveal
-      setTimeout(() => {
-        setTranscriptionState(prev => ({
-          ...prev,
-          decryptingChunks: prev.decryptingChunks.map(chunk => 
-            chunk.id === chunkId 
-              ? { ...chunk, progress: 1 }
-              : chunk
-          )
-        }));
-      }, 50);
-
-      // Move to completed after animation
-      setTimeout(() => {
-        setTranscriptionState(prev => ({
-          ...prev,
-          completedText: prev.completedText + (prev.completedText ? ' ' : '') + originalText,
-          decryptingChunks: prev.decryptingChunks.filter(chunk => chunk.id !== chunkId)
-        }));
-      }, 2000);
+      
+      if (revealedCount >= chars.length) {
+        clearInterval(revealInterval);
+        
+        // Move to completed after a brief pause
+        setTimeout(() => {
+          setTranscriptionState(prev => ({
+            ...prev,
+            completedText: prev.completedText + (prev.completedText ? ' ' : '') + originalText,
+            decryptingChunks: prev.decryptingChunks.filter(chunk => chunk.id !== chunkId)
+          }));
+        }, 300);
+      }
+    }, charDelay);
     } else {
       // Original scramble effect
       const scrambled = scrambleText(originalText);
@@ -710,3 +666,4 @@ export function TranscriptionOverlay({
     </div>
   );
 }
+

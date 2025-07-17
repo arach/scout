@@ -449,8 +449,11 @@ export function useRecording(options: UseRecordingOptions = {}) {
         await handlePushToTalkPressed();
       });
       
+      // Listen for push-to-talk release from keyboard monitor (if available)
+      // This is a backup - our frontend monitor handles most cases
       const unsubscribePushToTalkReleased = await listen('push-to-talk-released', async () => {
         if (!mounted) return;
+        console.log('[Backend] Push-to-talk released event received');
         await handlePushToTalkReleased();
       });
 

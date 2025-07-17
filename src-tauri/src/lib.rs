@@ -1580,10 +1580,16 @@ pub fn run() {
             // This is optional - if it fails, push-to-talk will still work but won't auto-stop
             keyboard_monitor.set_push_to_talk_key(&push_to_talk_hotkey);
             
-            // Start keyboard monitoring for push-to-talk key release detection
-            // The monitor handles permission issues gracefully without crashing
-            info(Component::UI, "Starting keyboard monitor for push-to-talk support");
-            keyboard_monitor.clone().start_monitoring();
+            // Disable keyboard monitor to prevent crashes
+            // The frontend-based solution will handle key release detection
+            info(Component::UI, "Keyboard monitoring disabled - using frontend key detection");
+            info(Component::UI, "Push-to-talk will work when Scout window has focus");
+            
+            // Only start if explicitly requested via environment variable
+            if std::env::var("SCOUT_ENABLE_KEYBOARD_MONITOR").is_ok() {
+                info(Component::UI, "Keyboard monitoring force-enabled via SCOUT_ENABLE_KEYBOARD_MONITOR");
+                keyboard_monitor.clone().start_monitoring();
+            }
             
             // Set up system tray
             let toggle_recording_item = MenuItemBuilder::with_id("toggle_recording", "Start Recording")
