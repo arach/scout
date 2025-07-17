@@ -1287,6 +1287,7 @@ async fn set_overlay_waveform_style(state: State<'_, AppState>, style: String) -
     Ok(())
 }
 
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Initialize env_logger with our custom interceptor to capture whisper logs
