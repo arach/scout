@@ -19,6 +19,8 @@ pub struct RingBufferRecorder {
     writer: Arc<Mutex<Option<WavWriter<BufWriter<File>>>>>,
     /// Maximum buffer size (5 minutes of audio to prevent unbounded growth)
     max_samples: usize,
+    /// Whether recording has been finalized
+    is_finalized: Arc<Mutex<bool>>,
 }
 
 impl RingBufferRecorder {
@@ -38,6 +40,7 @@ impl RingBufferRecorder {
             start_time: Instant::now(),
             writer: Arc::new(Mutex::new(Some(writer))),
             max_samples,
+            is_finalized: Arc::new(Mutex::new(false)),
         })
     }
     
@@ -185,6 +188,7 @@ impl RingBufferRecorder {
             writer.finalize()
                 .map_err(|e| format!("Failed to finalize recording: {}", e))?;
         }
+        *self.is_finalized.lock().unwrap() = true;
         Ok(())
     }
     
@@ -195,6 +199,45 @@ impl RingBufferRecorder {
         samples.clear();
         debug(Component::RingBuffer, &format!("Ring buffer cleared - {} samples removed", count));
     }
+    
+    /// Check if recording has been finalized
+    pub fn is_finalized(&self) -> bool {
+        *self.is_finalized.lock().unwrap()
+    }
+    
+    /// Get total number of samples currently in the buffer
+    pub fn get_total_samples(&self) -> usize {
+        self.samples.lock().unwrap().len()
+    }
+    
+    /// Get samples within a specific range
+    pub fn get_samples_range(&self, range: std::ops::Range<usize>) -> Result<Vec<f32>, String> {
+        let samples = self.samples.lock().unwrap();
+        
+        if range.start > samples.len() || range.end > samples.len() {
+            return Err(format!("Range {:?} out of bounds for buffer size {}", range, samples.len()));
+        }
+        
+        // Convert VecDeque range to Vec
+        let result: Vec<f32> = samples.range(range.clone()).cloned().collect();
+        Ok(result)
+    }
+}
+
+/// Helper function to save samples to a WAV file
+pub fn save_samples_to_wav(samples: &[f32], path: &Path, spec: WavSpec) -> Result<(), String> {
+    let mut writer = WavWriter::create(path, spec)
+        .map_err(|e| format!("Failed to create WAV writer: {}", e))?;
+    
+    for &sample in samples {
+        writer.write_sample(sample)
+            .map_err(|e| format!("Failed to write sample: {}", e))?;
+    }
+    
+    writer.finalize()
+        .map_err(|e| format!("Failed to finalize WAV file: {}", e))?;
+    
+    Ok(())
 }
 
 #[cfg(test)]

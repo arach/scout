@@ -61,7 +61,8 @@
       "Bash(pnpm lint:*)",
       "Bash(rustc:*)",
       "Bash(chmod:*)",
-      "Bash(./scripts/download-coreml-models.sh:*)"
+      "Bash(./scripts/download-coreml-models.sh:*)",
+      "Bash(RUST_LOG=scout=debug pnpm tauri dev)"
     ],
     "deny": []
   }

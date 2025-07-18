@@ -96,6 +96,23 @@ export function useTranscriptEvents(options: UseTranscriptEventsOptions) {
       });
     });
     
+    // Listen for transcript-refined events from progressive transcription
+    const unsubscribeTranscriptRefined = listen('transcript-refined', async (event) => {
+      if (!mounted) return;
+      const refinement = event.payload as { chunk_start: number; chunk_end: number; text: string };
+      console.log('🔄 Transcript refinement received:', {
+        range: `${refinement.chunk_start}-${refinement.chunk_end}`,
+        textLength: refinement.text.length,
+      });
+      
+      // TODO: Update the transcript text with the refined version
+      // For now, just log it
+      if (onTranscriptCreated) {
+        // We'll need to implement smart merging logic here
+        console.log('📝 Would update transcript with refined text (not implemented yet)');
+      }
+    });
+    
     // Listen for processing-complete event as a backup to transcript-created
     const unsubscribeProcessingComplete = listen('processing-complete', async (event) => {
       if (!mounted) return;
@@ -153,6 +170,14 @@ export function useTranscriptEvents(options: UseTranscriptEventsOptions) {
         }
       }).catch(error => {
         console.error('Error unsubscribing from performance metrics events:', error);
+      });
+      
+      unsubscribeTranscriptRefined.then(fn => {
+        if (typeof fn === 'function') {
+          fn();
+        }
+      }).catch(error => {
+        console.error('Error unsubscribing from transcript refined events:', error);
       });
       
       unsubscribeProcessingComplete.then(fn => {
