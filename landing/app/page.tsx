@@ -46,6 +46,9 @@ export default function Home() {
               <Link href="/sdk" className="text-muted-foreground hover:text-foreground transition-colors">
                 SDK
               </Link>
+              <Link href="/blog" className="text-muted-foreground hover:text-foreground transition-colors">
+                Blog
+              </Link>
               <Link href="https://github.com/arach/scout" target="_blank" className="text-muted-foreground hover:text-foreground transition-colors">
                 GitHub
               </Link>
