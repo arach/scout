@@ -35,6 +35,10 @@ path = "src/bin/create_benchmark_corpus.rs"
 name = "benchmark_progressive"
 path = "src/bin/benchmark_progressive.rs"
 
+[[bin]]
+name = "test_progressive_real"
+path = "src/bin/test_progressive_real.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 cc = "1.0"
