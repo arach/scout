@@ -25,6 +25,8 @@ pub struct TranscriptionConfig {
     pub chunk_duration_secs: u64,
     /// Force a specific strategy (for testing)
     pub force_strategy: Option<String>,
+    /// Duration of refinement chunks in seconds (for progressive strategy)
+    pub refinement_chunk_secs: Option<u64>,
 }
 
 impl Default for TranscriptionConfig {
@@ -34,6 +36,7 @@ impl Default for TranscriptionConfig {
             chunking_threshold_secs: 10,
             chunk_duration_secs: 10,
             force_strategy: None,
+            refinement_chunk_secs: Some(15), // Default to 15 seconds for refinement
         }
     }
 }
@@ -448,7 +451,7 @@ impl ProgressiveTranscriptionStrategy {
         self
     }
     
-    /// Start the background refinement task that processes 30-second chunks with Medium model
+    /// Start the background refinement task that processes chunks with Medium model
     fn start_refinement_task(
         &mut self,
         ring_buffer: Arc<crate::audio::ring_buffer_recorder::RingBufferRecorder>,
@@ -459,18 +462,29 @@ impl ProgressiveTranscriptionStrategy {
         let refined_chunks = self.refined_chunks.clone();
         let app_handle = self.app_handle.clone();
         
+        // Get chunk size from config or use 15 seconds as default
+        let chunk_seconds = self.config.as_ref()
+            .and_then(|c| c.refinement_chunk_secs)
+            .unwrap_or(15);
+        
         let handle = tokio::spawn(async move {
-            info(Component::Transcription, "Starting background refinement task (30-second chunks with Medium model)");
+            info(Component::Transcription, &format!("Starting background refinement task ({}-second chunks with Medium model)", chunk_seconds));
             let mut last_processed_samples = 0;
-            let thirty_seconds_samples = 48000 * 30; // 30 seconds at 48kHz
+            let chunk_samples = 48000 * chunk_seconds as usize; // chunk_seconds at 48kHz
             
             loop {
-                // Wait a bit before checking for new data
-                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                // Check if recording is finalized first - exit immediately if so
+                if ring_buffer.is_finalized() {
+                    info(Component::Transcription, "Recording finalized, stopping refinement task to minimize latency");
+                    break;
+                }
                 
-                // Check if we have enough new samples for a 30-second chunk
+                // Wait a bit before checking for new data
+                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                
+                // Check if we have enough new samples for a chunk
                 let current_samples = ring_buffer.get_total_samples();
-                if current_samples < last_processed_samples + thirty_seconds_samples {
+                if current_samples < last_processed_samples + chunk_samples {
                     // Check if recording is complete
                     if ring_buffer.is_finalized() && current_samples > last_processed_samples {
                         // Process final chunk even if less than 30 seconds
@@ -517,8 +531,8 @@ impl ProgressiveTranscriptionStrategy {
                     continue; // Not enough samples yet
                 }
                 
-                // Process a 30-second chunk
-                let chunk_end = last_processed_samples + thirty_seconds_samples;
+                // Process a chunk
+                let chunk_end = last_processed_samples + chunk_samples;
                 let chunk_range = last_processed_samples..chunk_end;
                 
                 if let Ok(samples) = ring_buffer.get_samples_range(chunk_range.clone()) {
@@ -686,13 +700,10 @@ impl TranscriptionStrategy for ProgressiveTranscriptionStrategy {
             }
         }
         
-        // Wait a moment for any final refinement chunks
+        // Cancel refinement task immediately to minimize latency
         if let Some(handle) = self.refinement_handle.take() {
-            info(Component::Transcription, "Waiting for background refinement to complete...");
-            let _ = tokio::time::timeout(
-                tokio::time::Duration::from_secs(5),
-                handle
-            ).await;
+            info(Component::Transcription, "Canceling background refinement to minimize latency");
+            handle.abort(); // Cancel the task immediately
         }
         
         // Get all refined chunks

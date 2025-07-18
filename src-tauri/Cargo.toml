@@ -31,6 +31,10 @@ path = "src/bin/test_singleton.rs"
 name = "create_benchmark_corpus"
 path = "src/bin/create_benchmark_corpus.rs"
 
+[[bin]]
+name = "benchmark_progressive"
+path = "src/bin/benchmark_progressive.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 cc = "1.0"
