@@ -64,7 +64,8 @@
       "Bash(./scripts/download-coreml-models.sh:*)",
       "Bash(RUST_LOG=scout=debug pnpm tauri dev)",
       "Bash(RUST_LOG=scout=info cargo run --bin test_progressive_real)",
-      "Bash(mv:*)"
+      "Bash(mv:*)",
+      "Bash(./quick_test.sh:*)"
     ],
     "deny": []
   }

@@ -36,7 +36,7 @@ impl Default for TranscriptionConfig {
             chunking_threshold_secs: 10,
             chunk_duration_secs: 10,
             force_strategy: None,
-            refinement_chunk_secs: Some(15), // Default to 15 seconds for refinement
+            refinement_chunk_secs: Some(10), // Engineering decision: 10s optimal balance
         }
     }
 }
