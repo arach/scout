@@ -147,7 +147,7 @@ impl TranscriptionContext {
             self.transcriber.clone(),
             self.temp_dir.clone(),
             self.app_handle.clone(),
-        );
+        ).await;
         
         // Start recording with the selected strategy
         strategy.start_recording(output_path, &self.config).await?;
