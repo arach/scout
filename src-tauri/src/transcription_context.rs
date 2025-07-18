@@ -11,7 +11,6 @@ use crate::transcription::{
 };
 use crate::db::Database;
 use crate::performance_logger::PerformanceLogger;
-use crate::models;
 
 /// Manages transcription strategy selection and execution
 pub struct TranscriptionContext {

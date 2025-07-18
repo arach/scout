@@ -793,29 +793,37 @@ impl TranscriptionStrategySelector {
         debug(Component::Transcription, &format!("  Enable chunking: {}", config.enable_chunking));
         debug(Component::Transcription, &format!("  Threshold: {}s", config.chunking_threshold_secs));
         
-        // Try progressive strategy first if chunking is enabled
+        // Try progressive strategy first if chunking is enabled AND both models exist
         if config.enable_chunking {
-            info(Component::Transcription, "Chunking enabled, attempting to create progressive strategy");
+            info(Component::Transcription, "Chunking enabled, checking model availability for progressive strategy");
             let models_dir = temp_dir.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| temp_dir.clone());
             info(Component::Transcription, &format!("Models directory: {:?}", models_dir));
             
-            // Check if models exist
+            // Check if both required models exist
             let tiny_path = models_dir.join("ggml-tiny.en.bin");
             let medium_path = models_dir.join("ggml-medium.en.bin");
-            info(Component::Transcription, &format!("Tiny model exists: {}", tiny_path.exists()));
-            info(Component::Transcription, &format!("Medium model exists: {}", medium_path.exists()));
+            let tiny_exists = tiny_path.exists();
+            let medium_exists = medium_path.exists();
             
-            match ProgressiveTranscriptionStrategy::new(&models_dir, temp_dir.clone()).await {
-                Ok(mut strategy) => {
-                    if let Some(ref app_handle) = app_handle {
-                        strategy = strategy.with_app_handle(app_handle.clone());
+            info(Component::Transcription, &format!("Tiny model exists: {}", tiny_exists));
+            info(Component::Transcription, &format!("Medium model exists: {}", medium_exists));
+            
+            // Only attempt progressive strategy if BOTH models are available
+            if tiny_exists && medium_exists {
+                match ProgressiveTranscriptionStrategy::new(&models_dir, temp_dir.clone()).await {
+                    Ok(mut strategy) => {
+                        if let Some(ref app_handle) = app_handle {
+                            strategy = strategy.with_app_handle(app_handle.clone());
+                        }
+                        info(Component::Transcription, "Auto-selected progressive strategy (Tiny + Medium)");
+                        return Box::new(strategy);
                     }
-                    info(Component::Transcription, "Auto-selected progressive strategy (Tiny + Medium)");
-                    return Box::new(strategy);
+                    Err(e) => {
+                        warn(Component::Transcription, &format!("Failed to create progressive strategy: {}, trying ring buffer", e));
+                    }
                 }
-                Err(e) => {
-                    warn(Component::Transcription, &format!("Failed to create progressive strategy: {}, trying ring buffer", e));
-                }
+            } else {
+                info(Component::Transcription, "Progressive strategy requires both Tiny and Medium models, falling back to ring buffer");
             }
         } else {
             info(Component::Transcription, "Chunking disabled, skipping progressive strategy");
