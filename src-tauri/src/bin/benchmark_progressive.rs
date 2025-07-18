@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::time::Instant;
-use scout::transcription::{TranscriptionConfig, TranscriptionStrategySelector, Transcriber};
-use scout::logger::{init_logger, info, Component};
+use scout_lib::transcription::{TranscriptionConfig, TranscriptionStrategySelector, Transcriber};
+use scout_lib::logger::{init_logger, info, Component};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
