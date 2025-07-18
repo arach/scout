@@ -16,6 +16,7 @@ extern "C" {
     fn native_overlay_set_volume_level(level: f32);
     fn native_overlay_set_position(position: *const std::os::raw::c_char);
     fn native_overlay_get_current_state() -> *const std::os::raw::c_char;
+    fn native_overlay_set_waveform_style(style: *const std::os::raw::c_char);
 }
 
 // Global callbacks storage
@@ -181,6 +182,14 @@ impl NativeOverlay {
         #[cfg(not(target_os = "macos"))]
         "unknown".to_string()
     }
+    
+    pub fn set_waveform_style(&self, style: &str) {
+        #[cfg(target_os = "macos")]
+        unsafe {
+            let c_string = std::ffi::CString::new(style).unwrap();
+            native_overlay_set_waveform_style(c_string.as_ptr());
+        }
+    }
 }
 
 // Stub implementation for non-macOS platforms
@@ -201,4 +210,5 @@ impl NativeOverlay {
     pub fn set_volume_level(&self, _level: f32) {}
     pub fn set_position(&self, _position: &str) {}
     pub fn get_current_state(&self) -> String { "unknown".to_string() }
+    pub fn set_waveform_style(&self, _style: &str) {}
 }

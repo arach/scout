@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { TranscriptionOverlay } from './TranscriptionOverlay';
 import './DevTools.css';
 
 type View = 'record' | 'transcripts' | 'settings';
@@ -48,8 +50,7 @@ export function DevTools(props: DevToolsProps) {
     vadEnabled = false,
     hotkey = '',
     pushToTalkHotkey = '',
-    showTranscriptionOverlay = false,
-    onToggleTranscriptionOverlay,
+    // currentUser = 'Unknown', // Unused variable
     appVersion = '0.1.0'
   } = props;
 
@@ -57,6 +58,8 @@ export function DevTools(props: DevToolsProps) {
   const [showMicLevel, setShowMicLevel] = useState(false);
   const [showConsoleLog, setShowConsoleLog] = useState(false);
   const [isAnimating, setIsAnimating] = useState(false);
+  const [showTeleprompter, setShowTeleprompter] = useState(false);
+  const [waveformStyle, setWaveformStyle] = useState<'classic' | 'enhanced' | 'particles'>('enhanced');
 
   // Only show in development
   const isDev = import.meta.env.DEV;
@@ -79,6 +82,21 @@ export function DevTools(props: DevToolsProps) {
       className += " active";
     }
     return className;
+  };
+
+  const handleWaveformStyleChange = async (style: 'classic' | 'enhanced' | 'particles') => {
+    try {
+      await invoke('set_overlay_waveform_style', { style });
+      setWaveformStyle(style);
+      console.log(`[DevTools] Switched to ${style} waveform`);
+    } catch (error) {
+      console.error('[DevTools] Failed to change waveform style:', error);
+    }
+  };
+
+  const handleTeleprompterToggle = (enabled: boolean) => {
+    setShowTeleprompter(enabled);
+    console.log(`[DevTools] Teleprompter overlay ${enabled ? 'shown' : 'hidden'}`);
   };
 
   // Console logging effect - context aware
@@ -169,19 +187,31 @@ export function DevTools(props: DevToolsProps) {
                   </label>
                 </div>
                 
-                <div className="dev-tool-item primary">
-                  <label className="dev-tool-checkbox">
-                    <input
-                      type="checkbox"
-                      checked={showTranscriptionOverlay}
-                      onChange={(e) => {
-                        if (onToggleTranscriptionOverlay) {
-                          onToggleTranscriptionOverlay(e.target.checked);
-                        }
-                      }}
-                    />
-                    <span className="checkbox-label">Show Transcription Overlay</span>
-                  </label>
+                <div className="dev-tool-section">
+                  <h4>Native Overlay</h4>
+                  <div className="dev-tool-item">
+                    <label className="dev-tool-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={showTeleprompter}
+                        onChange={(e) => handleTeleprompterToggle(e.target.checked)}
+                      />
+                      <span className="checkbox-label">Show Teleprompter Overlay</span>
+                    </label>
+                  </div>
+                  
+                  <div className="dev-tool-item">
+                    <span className="status-label">Waveform Style:</span>
+                    <select 
+                      className="dev-tool-select"
+                      value={waveformStyle}
+                      onChange={(e) => handleWaveformStyleChange(e.target.value as 'classic' | 'enhanced' | 'particles')}
+                    >
+                      <option value="classic">Classic Bars</option>
+                      <option value="enhanced">Subtle Spectrum</option>
+                      <option value="particles">Particle Flow</option>
+                    </select>
+                  </div>
                 </div>
               </>
             )}
@@ -331,6 +361,17 @@ export function DevTools(props: DevToolsProps) {
             </span>
           </div>
         </div>
+      )}
+
+      {/* Transcription Overlay (Teleprompter) */}
+      {showTeleprompter && (
+        <TranscriptionOverlay
+          isVisible={showTeleprompter}
+          isRecording={isRecording}
+          audioLevel={audioLevel}
+          onClose={() => setShowTeleprompter(false)}
+          mode="teleprompter"
+        />
       )}
     </>
   );

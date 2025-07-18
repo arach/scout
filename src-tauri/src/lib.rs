@@ -111,11 +111,12 @@ async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle, devi
         let _ = menu_item.set_text("Stop Recording");
     }
 
-    // Show native NSPanel overlay (state will be updated by progress tracker)
+    // Show native NSPanel overlay and immediately set recording state
     #[cfg(target_os = "macos")]
     {
         let overlay = state.native_panel_overlay.lock().await;
         overlay.show();
+        overlay.set_recording_state(true);
         drop(overlay);
         
         // Start audio level monitoring for native overlay AFTER recording has started
@@ -1277,6 +1278,17 @@ async fn play_success_sound() -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+async fn set_overlay_waveform_style(state: State<'_, AppState>, style: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let overlay = state.native_panel_overlay.lock().await;
+        overlay.set_waveform_style(&style);
+    }
+    Ok(())
+}
+
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Initialize env_logger with our custom interceptor to capture whisper logs
@@ -1568,19 +1580,15 @@ pub fn run() {
             // This is optional - if it fails, push-to-talk will still work but won't auto-stop
             keyboard_monitor.set_push_to_talk_key(&push_to_talk_hotkey);
             
-            // Only start monitoring if explicitly enabled
-            // Due to accessibility permission requirements, we'll disable by default
+            // Disable keyboard monitor to prevent crashes
+            // The frontend-based solution will handle key release detection
+            info(Component::UI, "Keyboard monitoring disabled - using frontend key detection");
+            info(Component::UI, "Push-to-talk will work when Scout window has focus");
+            
+            // Only start if explicitly requested via environment variable
             if std::env::var("SCOUT_ENABLE_KEYBOARD_MONITOR").is_ok() {
-                info(Component::UI, "Keyboard monitoring enabled via SCOUT_ENABLE_KEYBOARD_MONITOR");
+                info(Component::UI, "Keyboard monitoring force-enabled via SCOUT_ENABLE_KEYBOARD_MONITOR");
                 keyboard_monitor.clone().start_monitoring();
-            } else {
-                info(Component::UI, "Keyboard monitoring disabled by default");
-                info(Component::UI, "To enable: export SCOUT_ENABLE_KEYBOARD_MONITOR=1");
-                info(Component::UI, "Note: Requires accessibility permissions on macOS");
-                
-                // Emit event to let frontend know keyboard monitoring is unavailable
-                let _ = app.handle().emit("keyboard-monitor-unavailable", 
-                    "Push-to-talk key release detection is disabled. Enable with SCOUT_ENABLE_KEYBOARD_MONITOR=1");
             }
             
             // Set up system tray
@@ -1748,7 +1756,8 @@ pub fn run() {
             get_push_to_talk_shortcut,
             update_push_to_talk_shortcut,
             paste_text,
-            play_success_sound
+            play_success_sound,
+            set_overlay_waveform_style
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

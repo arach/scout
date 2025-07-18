@@ -125,11 +125,18 @@ impl RecordingWorkflow {
                         
                         info(Component::Recording, "Initializing transcription context for real-time chunking...");
                         performance_tracker_for_iter.track_event("transcription_init", "Creating transcription context").await;
+                        
+                        // Get the current settings
+                        let settings_guard = settings_for_iter.lock().await;
+                        let current_settings = settings_guard.get().clone();
+                        drop(settings_guard);
+                        
                         // Initialize transcription context for real-time chunking
                         let transcription_context = match TranscriptionContext::new_from_db(
                             database_for_iter.clone(),
                             models_dir.clone(),
-                        ) {
+                            &current_settings,
+                        ).await {
                             Ok(ctx) => ctx.with_app_handle(app_handle_for_iter.clone()),
                             Err(e) => {
                                 warn(Component::Recording, &format!("Failed to create transcription context: {}", e));

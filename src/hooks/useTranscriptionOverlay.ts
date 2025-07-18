@@ -174,7 +174,7 @@ export function useTranscriptionOverlay(options: UseTranscriptionOverlayOptions 
   // Functions
   const showOverlay = useCallback(() => setIsVisible(true), []);
   const hideOverlay = useCallback(() => setIsVisible(false), []);
-  const toggleOverlay = useCallback(() => setIsVisible(prev => !prev), []);
+  const toggleOverlay = useCallback(() => setIsVisible((prev: boolean) => !prev), []);
 
   const updateTransparency = useCallback((value: number) => {
     setTransparency(Math.max(20, Math.min(100, value))); // Clamp between 20-100%

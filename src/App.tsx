@@ -8,7 +8,6 @@ import { RecordView } from "./components/RecordView";
 import { TranscriptsView } from "./components/TranscriptsView";
 import { SettingsView } from "./components/SettingsView";
 import { ChevronRight, PanelLeftClose } from 'lucide-react';
-import { LLMSettings as LLMSettingsType } from './types/llm';
 import { useRecording } from './hooks/useRecording';
 import { useSettings } from './hooks/useSettings';
 import { useFileDrop } from './hooks/useFileDrop';
@@ -64,7 +63,7 @@ function App() {
   const [sessionStartTime] = useState(() => new Date().toISOString());
   const processingFileRef = useRef<string | null>(null); // Track file being processed to prevent duplicates
   const keyboardMonitorAvailable = useRef(true);
-  const processingStartTimeRef = useRef<number>(0);
+  // const processingStartTimeRef = useRef<number>(0); // Unused variable
   
   // Use the settings hook
   const {
@@ -117,7 +116,8 @@ function App() {
     },
     soundEnabled,
     selectedMic,
-    vadEnabled
+    vadEnabled,
+    pushToTalkShortcut: pushToTalkHotkey
   });
 
   // Use the file drop hook
@@ -146,9 +146,7 @@ function App() {
   });
 
   // Use the transcript events hook
-  const { processingTimeoutRef } = useTranscriptEvents({
-    autoCopy,
-    autoPaste,
+  useTranscriptEvents({
     soundEnabled,
     completionSoundThreshold,
     setIsProcessing,

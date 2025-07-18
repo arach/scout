@@ -13,8 +13,6 @@ interface Transcript {
 }
 
 interface UseTranscriptEventsOptions {
-  autoCopy: boolean;
-  autoPaste: boolean;
   soundEnabled: boolean;
   completionSoundThreshold: number;
   onTranscriptCreated?: (transcript: Transcript) => void;
@@ -26,8 +24,6 @@ interface UseTranscriptEventsOptions {
 
 export function useTranscriptEvents(options: UseTranscriptEventsOptions) {
   const {
-    autoCopy,
-    autoPaste,
     soundEnabled,
     completionSoundThreshold,
     onTranscriptCreated,
@@ -71,28 +67,8 @@ export function useTranscriptEvents(options: UseTranscriptEventsOptions) {
         processingTimeoutRef.current = null;
       }
       
-      // Handle auto-copy if enabled
-      if (autoCopy && newTranscript.text) {
-        try {
-          await navigator.clipboard.writeText(newTranscript.text);
-          console.log('Transcript auto-copied to clipboard');
-        } catch (error) {
-          console.error('Failed to auto-copy transcript:', error);
-        }
-      }
-      
-      // Handle auto-paste if enabled
-      if (autoPaste && newTranscript.text) {
-        try {
-          // First copy to clipboard
-          await navigator.clipboard.writeText(newTranscript.text);
-          // Then paste using Tauri command
-          await invoke('paste_text');
-          console.log('Transcript auto-pasted');
-        } catch (error) {
-          console.error('Failed to auto-paste transcript:', error);
-        }
-      }
+      // Auto-copy and auto-paste are now handled by the backend in post_processing.rs
+      // This avoids double-pasting issues and ensures proper sequencing
       
       // Play success sound if enabled and transcript meets threshold
       const duration = newTranscript.duration_ms || 0;
@@ -195,7 +171,7 @@ export function useTranscriptEvents(options: UseTranscriptEventsOptions) {
         console.error('Error unsubscribing from recording completed events:', error);
       });
     };
-  }, [autoCopy, autoPaste, soundEnabled, completionSoundThreshold, onTranscriptCreated, onProcessingComplete, onRecordingCompleted, setIsProcessing, setTranscripts]);
+  }, [soundEnabled, completionSoundThreshold, onTranscriptCreated, onProcessingComplete, onRecordingCompleted, setIsProcessing, setTranscripts]);
 
   return {
     processingTimeoutRef,
