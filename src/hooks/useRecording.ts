@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { recordingManager } from './recordingManager';
+import { usePushToTalkMonitor } from './usePushToTalkMonitor';
 
 interface RecordingProgress {
   Idle?: any;
@@ -20,6 +21,7 @@ interface UseRecordingOptions {
   soundEnabled?: boolean;
   selectedMic?: string;
   vadEnabled?: boolean;
+  pushToTalkShortcut?: string;
 }
 
 export function useRecording(options: UseRecordingOptions = {}) {
@@ -28,7 +30,8 @@ export function useRecording(options: UseRecordingOptions = {}) {
     onRecordingComplete,
     soundEnabled = true,
     selectedMic = 'Default microphone',
-    vadEnabled = false
+    vadEnabled = false,
+    pushToTalkShortcut = ''
   } = options;
 
   // State
@@ -44,6 +47,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
   const audioTargetRef = useRef(0);
   const audioCurrentRef = useRef(0);
   const animationFrameRef = useRef<number>();
+  const isPushToTalkActiveRef = useRef(false);
 
   // Sync with backend state on mount
   useEffect(() => {
@@ -336,6 +340,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
     
     if (!isRecordingRef.current && !recordingManager.getState().isRecording) {
       pushToTalkStartTimeRef.current = now;
+      isPushToTalkActiveRef.current = true;
       console.log('Starting recording from push-to-talk');
       await startRecording();
     }
@@ -343,6 +348,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
 
   const handlePushToTalkReleased = useCallback(async () => {
     console.log('Push-to-talk released');
+    isPushToTalkActiveRef.current = false;
     const now = Date.now();
     const recordingTime = now - pushToTalkStartTimeRef.current;
     
@@ -374,6 +380,18 @@ export function useRecording(options: UseRecordingOptions = {}) {
       await stopRecording();
     }
   }, [stopRecording, vadEnabled]);
+
+  // Use push-to-talk monitor to detect key release in the frontend
+  usePushToTalkMonitor({
+    enabled: !!pushToTalkShortcut && typeof window !== 'undefined',
+    shortcut: pushToTalkShortcut,
+    onRelease: () => {
+      console.log('[Frontend] Push-to-talk key released detected');
+      if (isPushToTalkActiveRef.current) {
+        handlePushToTalkReleased();
+      }
+    }
+  });
 
   // Set up event listeners
   useEffect(() => {
@@ -431,8 +449,11 @@ export function useRecording(options: UseRecordingOptions = {}) {
         await handlePushToTalkPressed();
       });
       
+      // Listen for push-to-talk release from keyboard monitor (if available)
+      // This is a backup - our frontend monitor handles most cases
       const unsubscribePushToTalkReleased = await listen('push-to-talk-released', async () => {
         if (!mounted) return;
+        console.log('[Backend] Push-to-talk released event received');
         await handlePushToTalkReleased();
       });
 

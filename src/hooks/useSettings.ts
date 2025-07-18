@@ -2,20 +2,21 @@ import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { LLMSettings } from '../types/llm';
 
-interface Settings {
-  overlayPosition: string;
-  hotkey: string;
-  pushToTalkHotkey: string;
-  theme: 'light' | 'dark' | 'system';
-  soundEnabled: boolean;
-  startSound: string;
-  stopSound: string;
-  successSound: string;
-  completionSoundThreshold: number;
-  llmSettings: LLMSettings;
-  autoCopy: boolean;
-  autoPaste: boolean;
-}
+// Commented out unused interface
+// interface Settings {
+//   overlayPosition: string;
+//   hotkey: string;
+//   pushToTalkHotkey: string;
+//   theme: 'light' | 'dark' | 'system';
+//   soundEnabled: boolean;
+//   startSound: string;
+//   stopSound: string;
+//   successSound: string;
+//   completionSoundThreshold: number;
+//   llmSettings: LLMSettings;
+//   autoCopy: boolean;
+//   autoPaste: boolean;
+// }
 
 export function useSettings() {
   // UI Settings

@@ -143,7 +143,7 @@ export function PerformanceTimeline({ isRecording, transcriptId, onClose }: Perf
     };
 
     const copyTimeline = () => {
-        const timelineText = displayEvents.map((event, index) => {
+        const timelineText = displayEvents.map((event) => {
             const time = formatTimestamp(event.duration_from_start_ms);
             return `${time} - ${event.event_type}: ${event.details}`;
         }).join('\n');

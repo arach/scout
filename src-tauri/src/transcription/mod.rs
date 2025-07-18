@@ -1,17 +1,47 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
-use crate::logger::{warn, Component};
+use crate::logger::{warn, info, Component};
+use once_cell::sync::Lazy;
 
 pub mod strategy;
 pub mod ring_buffer_transcriber;
 
 pub use strategy::{TranscriptionStrategy, TranscriptionConfig, TranscriptionResult, TranscriptionStrategySelector};
 
+// Global singleton for transcriber instances to avoid CoreML reinitialization
+static TRANSCRIBER_CACHE: Lazy<Arc<Mutex<Option<(PathBuf, Arc<Mutex<Transcriber>>)>>>> = 
+    Lazy::new(|| Arc::new(Mutex::new(None)));
+
 pub struct Transcriber {
     context: WhisperContext,
 }
 
 impl Transcriber {
+    /// Get or create a cached transcriber instance to avoid CoreML reinitialization
+    pub async fn get_or_create_cached(model_path: &Path) -> Result<Arc<Mutex<Self>>, String> {
+        let mut cache = TRANSCRIBER_CACHE.lock().await;
+        
+        // Check if we have a cached transcriber for this model
+        if let Some((cached_path, cached_transcriber)) = &*cache {
+            if cached_path == model_path {
+                info(Component::Transcription, "Reusing cached transcriber instance");
+                return Ok(cached_transcriber.clone());
+            }
+        }
+        
+        // Create new transcriber
+        info(Component::Transcription, &format!("Creating new transcriber for model: {:?}", model_path));
+        let transcriber = Self::new(model_path)?;
+        let transcriber_arc = Arc::new(Mutex::new(transcriber));
+        
+        // Update cache
+        *cache = Some((model_path.to_path_buf(), transcriber_arc.clone()));
+        
+        Ok(transcriber_arc)
+    }
+    
     pub fn new(model_path: &Path) -> Result<Self, String> {
         let model_path_str = model_path.to_str().ok_or("Invalid model path")?;
         
@@ -57,14 +87,14 @@ impl Transcriber {
         params.set_translate(false);
         params.set_language(Some("en"));
         params.set_print_special(false);
-        params.set_print_progress(true);  // Enable to capture whisper logs
+        params.set_print_progress(false);  // Disabled for performance - was causing 9-10s delays
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
         
-        // Set up progress callback to capture whisper output
-        params.set_progress_callback_safe(|progress| {
-            log::info!(target: "whisper", "Progress: {}%", progress);
-        });
+        // Progress callback disabled for performance - uncomment only for debugging
+        // params.set_progress_callback_safe(|progress| {
+        //     log::info!(target: "whisper", "Progress: {}%", progress);
+        // });
         
         // Suppress non-speech tokens (music, background noise descriptions)
         params.set_suppress_non_speech_tokens(true);

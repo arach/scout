@@ -240,24 +240,48 @@
   animation: anticipatedPulse 2s ease-in-out infinite;
 }
 
-/* Enhanced decrypting chunks with mio.xyz-style reveal */
+/* Enhanced decrypting chunks with smooth character reveal */
 .decrypting-chunk {
   display: inline;
   position: relative;
-  transition: all 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+  color: #f0f0f0;
 }
 
+/* Character reveal effect */
 .decrypting-chunk.revealing {
-  opacity: 0;
-  transform: translateX(-2px) scale(0.98);
-  filter: blur(3px);
+  position: relative;
+}
+
+.decrypting-chunk.revealing::after {
+  content: '|';
+  position: absolute;
+  right: -2px;
+  color: #87ceeb;
+  animation: cursorBlink 1s infinite;
+  font-weight: 300;
+}
+
+@keyframes cursorBlink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
 }
 
 .decrypting-chunk.revealed {
-  opacity: 1;
-  transform: translateX(0) scale(1);
-  filter: blur(0);
-  animation: textGlow 1.5s ease-out;
+  animation: subtleGlow 0.5s ease-out;
+}
+
+@keyframes subtleGlow {
+  0% {
+    opacity: 0.8;
+  }
+  50% {
+    opacity: 1;
+    text-shadow: 0 0 8px rgba(135, 206, 235, 0.3);
+  }
+  100% {
+    opacity: 1;
+    text-shadow: none;
+  }
 }
 
 /* Character-by-character reveal animation - horizontal only */

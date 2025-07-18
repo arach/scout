@@ -56,7 +56,12 @@
       "Bash(gh pr edit:*)",
       "Bash(npx tsc:*)",
       "Bash(./scripts/download-models.sh:*)",
-      "Bash(git merge:*)"
+      "Bash(git merge:*)",
+      "Bash(sed:*)",
+      "Bash(pnpm lint:*)",
+      "Bash(rustc:*)",
+      "Bash(chmod:*)",
+      "Bash(./scripts/download-coreml-models.sh:*)"
     ],
     "deny": []
   }
