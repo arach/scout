@@ -1,58 +1,119 @@
 import Link from 'next/link';
+import { ArrowUpRight } from 'lucide-react';
 
 const blogPosts = [
   {
-    title: "Building Sub-300ms Transcription: The Journey to Progressive Processing",
+    title: "Building Sub-300ms Transcription with Progressive Processing",
     slug: "progressive-transcription-300ms",
     date: "July 18, 2024",
-    excerpt: "How we rebuilt Scout's transcription pipeline to deliver instant results while improving quality in the background. A story of questioning assumptions and achieving 85-94% latency reduction."
+    excerpt: "Combining Whisper's fast-but-loose Tiny model with the accurate-but-slow Medium model. How we built progressive transcription for instant feedback with background refinement.",
+    readTime: "6 min read",
+    tags: ["Engineering", "Performance", "Whisper"]
   },
   {
     title: "Introducing Scout SDK: The Voice Layer for Desktop Apps",
     slug: "scout-sdk-announcement", 
     date: "January 30, 2025",
-    excerpt: "Scout SDK is an embeddable voice layer that brings intelligent, local-first voice capabilities to any desktop application."
+    excerpt: "Scout SDK is an embeddable voice layer that brings intelligent, local-first voice capabilities to any desktop application.",
+    readTime: "5 min read",
+    tags: ["Product", "SDK", "Launch"]
   }
 ];
 
 export default function BlogPage() {
   return (
-    <div className="min-h-screen bg-white dark:bg-gray-900">
-      <div className="max-w-4xl mx-auto px-4 py-16">
-        <h1 className="text-4xl font-bold mb-8 text-gray-900 dark:text-white">
-          Scout Blog
+    <>
+      {/* Header */}
+      <header className="border-b border-gray-200 dark:border-gray-800 bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm sticky top-0 z-10">
+        <div className="max-w-5xl mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <Link href="/" className="flex items-center gap-2 group">
+              <div className="w-7 h-7 bg-gray-900 dark:bg-white rounded-md flex items-center justify-center group-hover:scale-110 transition-transform">
+                <span className="text-white dark:text-gray-900 font-semibold text-sm">S</span>
+              </div>
+              <span className="text-lg font-light tracking-tight">Scout</span>
+            </Link>
+            <nav className="flex items-center gap-8">
+              <Link href="/" className="text-sm font-light text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors">
+                Home
+              </Link>
+              <Link href="/blog" className="text-sm font-light text-gray-900 dark:text-white">
+                Blog
+              </Link>
+              <Link href="https://github.com/arach/scout" target="_blank" className="text-sm font-light text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors flex items-center gap-1">
+                GitHub
+                <ArrowUpRight className="w-3 h-3" />
+              </Link>
+            </nav>
+          </div>
+        </div>
+      </header>
+
+      {/* Hero */}
+      <div className="max-w-5xl mx-auto px-6 pt-16 pb-12">
+        <h1 className="text-3xl md:text-4xl font-light tracking-tight text-gray-900 dark:text-white mb-6">
+          Engineering Blog
         </h1>
-        <p className="text-lg text-gray-600 dark:text-gray-400 mb-12">
-          Engineering insights, product updates, and stories from building a local-first dictation app.
+        <p className="text-base font-normal text-gray-600 dark:text-gray-400 leading-normal max-w-3xl">
+          Technical deep dives on building high-performance local voice transcription. 
+          Architecture decisions, performance optimizations, and implementation details.
         </p>
+      </div>
         
-        <div className="space-y-8">
-          {blogPosts.map((post) => (
+      {/* Posts */}
+      <div className="max-w-5xl mx-auto px-6 pb-24">
+        <div className="grid gap-1">
+          {blogPosts.map((post, index) => (
             <article 
               key={post.slug}
-              className="border-b border-gray-200 dark:border-gray-700 pb-8"
+              className="group"
             >
               <Link 
                 href={`/blog/${post.slug}`}
-                className="block hover:bg-gray-50 dark:hover:bg-gray-800 -mx-4 px-4 py-4 rounded-lg transition-colors"
+                className="block py-8 px-2 -mx-2 hover:bg-gray-50 dark:hover:bg-gray-900/50 rounded-xl transition-all duration-200"
               >
-                <time className="text-sm text-gray-500 dark:text-gray-400">
-                  {post.date}
-                </time>
-                <h2 className="text-2xl font-semibold mt-2 mb-3 text-gray-900 dark:text-white">
-                  {post.title}
-                </h2>
-                <p className="text-gray-600 dark:text-gray-400 leading-relaxed">
-                  {post.excerpt}
-                </p>
-                <span className="text-blue-600 dark:text-blue-400 font-medium mt-3 inline-block">
-                  Read more →
-                </span>
+                <div className="flex items-start justify-between gap-8">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3 mb-3">
+                      <time className="text-sm font-light text-gray-500 dark:text-gray-500">
+                        {post.date}
+                      </time>
+                      <span className="text-gray-300 dark:text-gray-700">•</span>
+                      <span className="text-sm font-light text-gray-500 dark:text-gray-500">
+                        {post.readTime}
+                      </span>
+                    </div>
+                    <h2 className="text-lg md:text-xl font-normal tracking-tight text-gray-900 dark:text-white mb-3 group-hover:text-gray-700 dark:group-hover:text-gray-200 transition-colors">
+                      {post.title}
+                    </h2>
+                    <p className="text-sm font-normal text-gray-600 dark:text-gray-400 leading-snug line-clamp-2">
+                      {post.excerpt}
+                    </p>
+                    <div className="flex items-center gap-2 mt-4">
+                      {post.tags.map(tag => (
+                        <span 
+                          key={tag}
+                          className="text-xs font-light px-2 py-1 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="hidden md:block">
+                    <div className="w-12 h-12 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center group-hover:bg-gray-200 dark:group-hover:bg-gray-700 transition-colors">
+                      <ArrowUpRight className="w-5 h-5 text-gray-400 dark:text-gray-500 group-hover:text-gray-600 dark:group-hover:text-gray-400 transition-colors" />
+                    </div>
+                  </div>
+                </div>
               </Link>
+              {index < blogPosts.length - 1 && (
+                <div className="border-b border-gray-100 dark:border-gray-800" />
+              )}
             </article>
           ))}
         </div>
       </div>
-    </div>
+    </>
   );
 }

@@ -1,0 +1,177 @@
+/* Code blocks with syntax highlighting */
+.prose pre {
+  @apply bg-gray-50 dark:bg-gray-900 rounded-lg overflow-x-auto;
+  @apply border border-gray-200 dark:border-gray-800;
+  @apply text-sm leading-relaxed;
+  tab-size: 2;
+}
+
+.prose pre code {
+  @apply bg-transparent p-0 rounded-none;
+  @apply font-mono text-sm;
+  @apply text-gray-800 dark:text-gray-100;
+}
+
+/* Inline code */
+.prose code {
+  @apply font-mono text-xs;
+  @apply bg-gray-100 dark:bg-gray-800;
+  @apply text-gray-700 dark:text-gray-300;
+  @apply px-1.5 py-0.5 rounded;
+}
+
+.prose code::before,
+.prose code::after {
+  content: none;
+}
+
+/* Tables */
+.prose table {
+  @apply w-full text-sm;
+}
+
+.prose thead {
+  @apply border-b-2 border-gray-200 dark:border-gray-700;
+}
+
+.prose th {
+  @apply text-left font-medium text-gray-900 dark:text-gray-100;
+  @apply px-4 py-3;
+}
+
+.prose td {
+  @apply px-4 py-3;
+  @apply border-t border-gray-100 dark:border-gray-800;
+}
+
+.prose tbody tr:hover {
+  @apply bg-gray-50 dark:bg-gray-900/50;
+}
+
+/* Better syntax highlighting */
+.prose pre {
+  @apply font-mono;
+}
+
+.prose pre code {
+  @apply leading-5;
+}
+
+/* Light mode code blocks */
+@media (prefers-color-scheme: light) {
+  .prose pre {
+    @apply bg-gray-50 text-gray-800;
+  }
+  .prose pre code {
+    @apply text-gray-800;
+  }
+}
+
+/* Dark mode code blocks */
+@media (prefers-color-scheme: dark) {
+  .prose pre {
+    @apply bg-gray-900 text-gray-100;
+  }
+  .prose pre code {
+    @apply text-gray-100;
+  }
+}
+
+/* Hide the first H1 since we display it separately */
+.prose h1:first-child {
+  @apply hidden;
+}
+
+/* Hide the date line (italic text immediately after H1) */
+.prose h1:first-child + p > em:only-child {
+  @apply hidden;
+}
+.prose p:has(> em:only-child):first-of-type {
+  @apply hidden;
+}
+
+/* Tighter paragraph spacing */
+.prose p {
+  @apply my-4;
+}
+
+/* Smooth scrolling for anchor links */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Better list spacing */
+.prose ul, .prose ol {
+  @apply my-4;
+}
+
+.prose li {
+  @apply my-1;
+}
+
+/* Improved blockquotes */
+.prose blockquote {
+  @apply border-l-4 border-gray-300 dark:border-gray-700;
+  @apply pl-6 italic;
+  @apply my-6;
+}
+
+/* Section spacing */
+.prose h2 {
+  @apply scroll-mt-20;
+}
+
+.prose h3 {
+  @apply scroll-mt-20;
+}
+
+/* Image styling */
+.prose img {
+  @apply rounded-lg shadow-sm;
+  @apply my-6;
+}
+
+/* Link hover effects */
+.prose a {
+  @apply relative;
+}
+
+.prose a:hover {
+  @apply text-gray-700 dark:text-gray-200;
+}
+
+/* Custom callout boxes */
+.prose .callout {
+  @apply p-4 rounded-lg my-6;
+  @apply bg-gray-100 dark:bg-gray-800;
+  @apply border border-gray-200 dark:border-gray-700;
+}
+
+.prose .callout-info {
+  @apply bg-blue-50 dark:bg-blue-900/20;
+  @apply border-blue-200 dark:border-blue-800;
+}
+
+.prose .callout-warning {
+  @apply bg-yellow-50 dark:bg-yellow-900/20;
+  @apply border-yellow-200 dark:border-yellow-800;
+}
+
+/* Performance metrics styling */
+.prose .metrics {
+  @apply grid grid-cols-2 md:grid-cols-4 gap-4 my-8;
+}
+
+.prose .metric {
+  @apply p-4 rounded-lg text-center;
+  @apply bg-gray-100 dark:bg-gray-800;
+}
+
+.prose .metric-value {
+  @apply text-2xl font-light text-gray-900 dark:text-white;
+  @apply block mb-1;
+}
+
+.prose .metric-label {
+  @apply text-sm text-gray-600 dark:text-gray-400;
+}
