@@ -25,17 +25,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "pnpm"
-          cache-dependency-path: landing/pnpm-lock.yaml
+          cache: "npm"
+          cache-dependency-path: landing/package-lock.json
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
@@ -47,16 +42,16 @@ jobs:
         with:
           path: |
             landing/.next/cache
-          key: ${{ runner.os }}-nextjs-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ hashFiles('**.[jt]s', '**.[jt]sx') }}
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json') }}-${{ hashFiles('**.[jt]s', '**.[jt]sx') }}
           restore-keys: |
-            ${{ runner.os }}-nextjs-${{ hashFiles('**/pnpm-lock.yaml') }}-
+            ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json') }}-
 
       - name: Install dependencies
-        run: pnpm install
+        run: npm ci
         working-directory: ./landing
 
       - name: Build with Next.js
-        run: pnpm build
+        run: npm run build
         working-directory: ./landing
         env:
           NODE_ENV: production
