@@ -3,6 +3,7 @@ use std::path::Path;
 use async_trait::async_trait;
 use crate::transcription::Transcriber;
 use crate::logger::{info, debug, warn, Component};
+use tauri::Emitter;
 
 /// Result of transcription containing the text and metadata
 #[derive(Debug, Clone)]
@@ -24,6 +25,8 @@ pub struct TranscriptionConfig {
     pub chunk_duration_secs: u64,
     /// Force a specific strategy (for testing)
     pub force_strategy: Option<String>,
+    /// Duration of refinement chunks in seconds (for progressive strategy)
+    pub refinement_chunk_secs: Option<u64>,
 }
 
 impl Default for TranscriptionConfig {
@@ -33,6 +36,7 @@ impl Default for TranscriptionConfig {
             chunking_threshold_secs: 10,
             chunk_duration_secs: 10,
             force_strategy: None,
+            refinement_chunk_secs: Some(10), // Engineering decision: 10s optimal balance
         }
     }
 }
@@ -379,12 +383,367 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
     }
 }
 
+/// Progressive transcription strategy - uses Tiny model for real-time feedback, then refines with Medium model
+pub struct ProgressiveTranscriptionStrategy {
+    tiny_transcriber: Arc<tokio::sync::Mutex<Transcriber>>,
+    medium_transcriber: Arc<tokio::sync::Mutex<Transcriber>>,
+    ring_buffer: Option<Arc<crate::audio::ring_buffer_recorder::RingBufferRecorder>>,
+    ring_transcriber: Option<crate::transcription::ring_buffer_transcriber::RingBufferTranscriber>,
+    monitor_handle: Option<(tokio::task::JoinHandle<crate::ring_buffer_monitor::RingBufferMonitor>, tokio::sync::mpsc::Sender<()>)>,
+    refinement_handle: Option<tokio::task::JoinHandle<()>>,
+    temp_dir: std::path::PathBuf,
+    start_time: Option<std::time::Instant>,
+    config: Option<TranscriptionConfig>,
+    recording_path: Option<std::path::PathBuf>,
+    app_handle: Option<tauri::AppHandle>,
+    /// Stores the Tiny model transcriptions for merging
+    tiny_chunks: Arc<tokio::sync::Mutex<Vec<(std::ops::Range<usize>, String)>>>,
+    /// Stores the refined Medium model transcriptions
+    refined_chunks: Arc<tokio::sync::Mutex<Vec<(std::ops::Range<usize>, String)>>>,
+}
+
+impl ProgressiveTranscriptionStrategy {
+    pub async fn new(
+        models_dir: &Path,
+        temp_dir: std::path::PathBuf,
+    ) -> Result<Self, String> {
+        info(Component::Transcription, "Creating ProgressiveTranscriptionStrategy");
+        
+        // Load Tiny model for real-time transcription
+        let tiny_path = models_dir.join("ggml-tiny.en.bin");
+        info(Component::Transcription, &format!("Loading Tiny model from: {:?}", tiny_path));
+        if !tiny_path.exists() {
+            return Err(format!("Tiny model not found at: {:?}", tiny_path));
+        }
+        let tiny_transcriber = Transcriber::get_or_create_cached(&tiny_path).await?;
+        info(Component::Transcription, "Tiny model loaded successfully");
+        
+        // Load Medium model for refinement
+        let medium_path = models_dir.join("ggml-medium.en.bin");
+        info(Component::Transcription, &format!("Loading Medium model from: {:?}", medium_path));
+        if !medium_path.exists() {
+            return Err(format!("Medium model not found at: {:?}", medium_path));
+        }
+        let medium_transcriber = Transcriber::get_or_create_cached(&medium_path).await?;
+        info(Component::Transcription, "Medium model loaded successfully");
+        
+        info(Component::Transcription, "Progressive transcription strategy initialized with Tiny + Medium models");
+        
+        Ok(Self {
+            tiny_transcriber,
+            medium_transcriber,
+            ring_buffer: None,
+            ring_transcriber: None,
+            monitor_handle: None,
+            refinement_handle: None,
+            temp_dir,
+            start_time: None,
+            config: None,
+            recording_path: None,
+            app_handle: None,
+            tiny_chunks: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            refined_chunks: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+        })
+    }
+    
+    pub fn with_app_handle(mut self, app_handle: tauri::AppHandle) -> Self {
+        self.app_handle = Some(app_handle);
+        self
+    }
+    
+    /// Start the background refinement task that processes chunks with Medium model
+    fn start_refinement_task(
+        &mut self,
+        ring_buffer: Arc<crate::audio::ring_buffer_recorder::RingBufferRecorder>,
+        recording_path: std::path::PathBuf,
+    ) {
+        let medium_transcriber = self.medium_transcriber.clone();
+        let temp_dir = self.temp_dir.clone();
+        let refined_chunks = self.refined_chunks.clone();
+        let app_handle = self.app_handle.clone();
+        
+        // Get chunk size from config or use 15 seconds as default
+        let chunk_seconds = self.config.as_ref()
+            .and_then(|c| c.refinement_chunk_secs)
+            .unwrap_or(15);
+        
+        let handle = tokio::spawn(async move {
+            info(Component::Transcription, &format!("Starting background refinement task ({}-second chunks with Medium model)", chunk_seconds));
+            let mut last_processed_samples = 0;
+            let chunk_samples = 48000 * chunk_seconds as usize; // chunk_seconds at 48kHz
+            
+            loop {
+                // Check if recording is finalized first - exit immediately if so
+                if ring_buffer.is_finalized() {
+                    info(Component::Transcription, "Recording finalized, stopping refinement task to minimize latency");
+                    break;
+                }
+                
+                // Wait a bit before checking for new data
+                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                
+                // Check if we have enough new samples for a chunk
+                let current_samples = ring_buffer.get_total_samples();
+                if current_samples < last_processed_samples + chunk_samples {
+                    // Check if recording is complete
+                    if ring_buffer.is_finalized() && current_samples > last_processed_samples {
+                        // Process final chunk even if less than 30 seconds
+                        let chunk_range = last_processed_samples..current_samples;
+                        if let Ok(samples) = ring_buffer.get_samples_range(chunk_range.clone()) {
+                            info(Component::Transcription, &format!(
+                                "Processing final refinement chunk: {} samples ({:.1}s)",
+                                samples.len(),
+                                samples.len() as f32 / 48000.0
+                            ));
+                            
+                            // Save chunk to temporary file
+                            let chunk_path = temp_dir.join(format!("refinement_final_{}.wav", last_processed_samples));
+                            if let Err(e) = crate::audio::ring_buffer_recorder::save_samples_to_wav(&samples, &chunk_path, ring_buffer.get_spec()) {
+                                warn(Component::Transcription, &format!("Failed to save refinement chunk: {}", e));
+                            } else {
+                                // Transcribe with Medium model
+                                let transcriber = medium_transcriber.lock().await;
+                                match transcriber.transcribe_file(&chunk_path) {
+                                    Ok(text) => {
+                                        info(Component::Transcription, &format!("Refined chunk transcription: {} chars", text.len()));
+                                        refined_chunks.lock().await.push((chunk_range, text.clone()));
+                                        
+                                        // Emit refinement event
+                                        if let Some(ref app) = app_handle {
+                                            let _ = app.emit("transcript-refined", serde_json::json!({
+                                                "chunk_start": last_processed_samples,
+                                                "chunk_end": current_samples,
+                                                "text": text
+                                            }));
+                                        }
+                                    }
+                                    Err(e) => {
+                                        warn(Component::Transcription, &format!("Failed to transcribe refinement chunk: {}", e));
+                                    }
+                                }
+                                
+                                // Clean up temp file
+                                let _ = tokio::fs::remove_file(&chunk_path).await;
+                            }
+                        }
+                        break; // Recording is complete
+                    }
+                    continue; // Not enough samples yet
+                }
+                
+                // Process a chunk
+                let chunk_end = last_processed_samples + chunk_samples;
+                let chunk_range = last_processed_samples..chunk_end;
+                
+                if let Ok(samples) = ring_buffer.get_samples_range(chunk_range.clone()) {
+                    info(Component::Transcription, &format!(
+                        "Processing refinement chunk: {} samples (30s) starting at sample {}",
+                        samples.len(), last_processed_samples
+                    ));
+                    
+                    // Save chunk to temporary file
+                    let chunk_path = temp_dir.join(format!("refinement_{}_{}.wav", last_processed_samples, chunk_end));
+                    if let Err(e) = crate::audio::ring_buffer_recorder::save_samples_to_wav(&samples, &chunk_path, ring_buffer.get_spec()) {
+                        warn(Component::Transcription, &format!("Failed to save refinement chunk: {}", e));
+                    } else {
+                        // Transcribe with Medium model
+                        let transcriber = medium_transcriber.lock().await;
+                        match transcriber.transcribe_file(&chunk_path) {
+                            Ok(text) => {
+                                info(Component::Transcription, &format!("Refined 30s chunk transcription: {} chars", text.len()));
+                                refined_chunks.lock().await.push((chunk_range, text.clone()));
+                                
+                                // Emit refinement event
+                                if let Some(ref app) = app_handle {
+                                    let _ = app.emit("transcript-refined", serde_json::json!({
+                                        "chunk_start": last_processed_samples,
+                                        "chunk_end": chunk_end,
+                                        "text": text
+                                    }));
+                                }
+                            }
+                            Err(e) => {
+                                warn(Component::Transcription, &format!("Failed to transcribe refinement chunk: {}", e));
+                            }
+                        }
+                        
+                        // Clean up temp file
+                        let _ = tokio::fs::remove_file(&chunk_path).await;
+                    }
+                }
+                
+                last_processed_samples = chunk_end;
+            }
+            
+            info(Component::Transcription, "Background refinement task completed");
+        });
+        
+        self.refinement_handle = Some(handle);
+    }
+}
+
+#[async_trait]
+impl TranscriptionStrategy for ProgressiveTranscriptionStrategy {
+    fn name(&self) -> &str {
+        "progressive"
+    }
+    
+    fn can_handle(&self, _duration_estimate: Option<std::time::Duration>, config: &TranscriptionConfig) -> bool {
+        // Progressive strategy is ideal for longer recordings
+        config.enable_chunking
+    }
+    
+    async fn start_recording(&mut self, output_path: &Path, config: &TranscriptionConfig) -> Result<(), String> {
+        self.start_time = Some(std::time::Instant::now());
+        self.config = Some(config.clone());
+        self.recording_path = Some(output_path.to_path_buf());
+        
+        info(Component::Transcription, &format!("Progressive transcription strategy started for: {:?}", output_path));
+        info(Component::Transcription, "Using Tiny model for real-time feedback, Medium model for background refinement");
+        
+        // Initialize ring buffer recorder
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 48000,
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Float,
+        };
+        
+        let ring_buffer = Arc::new(crate::audio::ring_buffer_recorder::RingBufferRecorder::new(
+            spec,
+            output_path,
+        )?);
+        
+        // Initialize ring buffer transcriber with TINY model for real-time
+        let ring_transcriber = crate::transcription::ring_buffer_transcriber::RingBufferTranscriber::new(
+            ring_buffer.clone(),
+            self.tiny_transcriber.clone(), // Use Tiny model for real-time
+            self.temp_dir.clone(),
+        );
+        
+        // Initialize and start monitor
+        let mut monitor = crate::ring_buffer_monitor::RingBufferMonitor::new(ring_buffer.clone());
+        if let Some(ref app_handle) = self.app_handle {
+            monitor = monitor.with_app_handle(app_handle.clone());
+        }
+        let (monitor_handle, stop_sender) = monitor.start_monitoring(
+            ring_transcriber,
+        ).await;
+        
+        // Start background refinement task
+        self.start_refinement_task(ring_buffer.clone(), output_path.to_path_buf());
+        
+        self.ring_buffer = Some(ring_buffer);
+        self.ring_transcriber = None; // Monitor owns the transcriber
+        self.monitor_handle = Some((monitor_handle, stop_sender));
+        
+        info(Component::Transcription, "Progressive transcription initialized - Tiny model for real-time, Medium model refining in background");
+        Ok(())
+    }
+    
+    async fn process_samples(&mut self, samples: &[f32]) -> Result<(), String> {
+        if let Some(ref ring_buffer) = self.ring_buffer {
+            ring_buffer.add_samples(samples)?;
+        } else {
+            return Err("Ring buffer not initialized".to_string());
+        }
+        Ok(())
+    }
+    
+    async fn finish_recording(&mut self) -> Result<TranscriptionResult, String> {
+        let _recording_start_time = self.start_time.take()
+            .ok_or("Recording was not started")?;
+        
+        let recording_path = self.recording_path.take()
+            .ok_or("Recording path was not set")?;
+        
+        info(Component::Transcription, "Finishing progressive transcription");
+        let transcription_start = std::time::Instant::now();
+        
+        // Stop the real-time monitor and collect Tiny model results
+        let mut tiny_chunks = Vec::new();
+        let mut chunks_processed = 0;
+        
+        if let Some((monitor_handle, stop_sender)) = self.monitor_handle.take() {
+            debug(Component::Transcription, "Stopping real-time monitor...");
+            
+            // Signal monitor to stop
+            let _ = stop_sender.send(()).await;
+            
+            // Wait for monitor to finish
+            match monitor_handle.await {
+                Ok(monitor) => {
+                    info(Component::Transcription, "Monitor stopped, collecting Tiny model chunks");
+                    
+                    match monitor.recording_complete().await {
+                        Ok(chunk_results) => {
+                            tiny_chunks = chunk_results;
+                            chunks_processed = tiny_chunks.len();
+                            info(Component::Transcription, &format!("Collected {} Tiny model chunks", chunks_processed));
+                        }
+                        Err(e) => {
+                            warn(Component::Transcription, &format!("Error collecting chunk results: {}", e));
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn(Component::Transcription, &format!("Error stopping monitor: {}", e));
+                }
+            }
+        }
+        
+        // Finalize the main recording file
+        if let Some(ref ring_buffer) = self.ring_buffer {
+            debug(Component::Transcription, "Finalizing main recording file");
+            if let Err(e) = ring_buffer.finalize_recording() {
+                warn(Component::Transcription, &format!("Error finalizing recording: {}", e));
+            }
+        }
+        
+        // Cancel refinement task immediately to minimize latency
+        if let Some(handle) = self.refinement_handle.take() {
+            info(Component::Transcription, "Canceling background refinement to minimize latency");
+            handle.abort(); // Cancel the task immediately
+        }
+        
+        // Get all refined chunks
+        let refined = self.refined_chunks.lock().await;
+        let refined_count = refined.len();
+        
+        info(Component::Transcription, &format!(
+            "Progressive transcription complete: {} Tiny chunks, {} Medium refinements", 
+            chunks_processed, refined_count
+        ));
+        
+        // For now, just return the Tiny model results
+        // TODO: Implement smart merging of Tiny and Medium results
+        let combined_text = tiny_chunks.join(" ");
+        
+        let transcription_time = transcription_start.elapsed();
+        
+        Ok(TranscriptionResult {
+            text: combined_text,
+            processing_time_ms: transcription_time.as_millis() as u64,
+            strategy_used: self.name().to_string(),
+            chunks_processed,
+        })
+    }
+    
+    fn get_partial_results(&self) -> Vec<String> {
+        vec![] // TODO: Implement if needed
+    }
+    
+    fn get_ring_buffer(&self) -> Option<Arc<crate::audio::ring_buffer_recorder::RingBufferRecorder>> {
+        self.ring_buffer.clone()
+    }
+}
+
 /// Strategy selector that chooses the best transcription approach
 pub struct TranscriptionStrategySelector;
 
 impl TranscriptionStrategySelector {
     /// Select the best strategy based on recording characteristics and config
-    pub fn select_strategy(
+    pub async fn select_strategy(
         duration_estimate: Option<std::time::Duration>,
         config: &TranscriptionConfig,
         transcriber: Arc<tokio::sync::Mutex<Transcriber>>,
@@ -406,6 +765,22 @@ impl TranscriptionStrategySelector {
                     }
                     return Box::new(strategy);
                 }
+                "progressive" => {
+                    info(Component::Transcription, "Using forced progressive strategy");
+                    // temp_dir is already the models directory
+                    let models_dir = &temp_dir;
+                    match ProgressiveTranscriptionStrategy::new(models_dir, temp_dir.clone()).await {
+                        Ok(mut strategy) => {
+                            if let Some(app_handle) = app_handle {
+                                strategy = strategy.with_app_handle(app_handle);
+                            }
+                            return Box::new(strategy);
+                        }
+                        Err(e) => {
+                            warn(Component::Transcription, &format!("Failed to create progressive strategy: {}, falling back", e));
+                        }
+                    }
+                }
                 _ => {
                     warn(Component::Transcription, &format!("Unknown forced strategy '{}', falling back to auto-selection", forced));
                 }
@@ -413,16 +788,54 @@ impl TranscriptionStrategySelector {
         }
         
         // Auto-select based on characteristics
+        debug(Component::Transcription, "Strategy selection debug:");
+        debug(Component::Transcription, &format!("  Duration estimate: {:?}", duration_estimate));
+        debug(Component::Transcription, &format!("  Enable chunking: {}", config.enable_chunking));
+        debug(Component::Transcription, &format!("  Threshold: {}s", config.chunking_threshold_secs));
+        
+        // Try progressive strategy first if chunking is enabled AND both models exist
+        if config.enable_chunking {
+            info(Component::Transcription, "Chunking enabled, checking model availability for progressive strategy");
+            // temp_dir is already the models directory
+            let models_dir = &temp_dir;
+            info(Component::Transcription, &format!("Models directory: {:?}", models_dir));
+            
+            // Check if both required models exist
+            let tiny_path = models_dir.join("ggml-tiny.en.bin");
+            let medium_path = models_dir.join("ggml-medium.en.bin");
+            let tiny_exists = tiny_path.exists();
+            let medium_exists = medium_path.exists();
+            
+            info(Component::Transcription, &format!("Tiny model exists: {}", tiny_exists));
+            info(Component::Transcription, &format!("Medium model exists: {}", medium_exists));
+            
+            // Only attempt progressive strategy if BOTH models are available
+            if tiny_exists && medium_exists {
+                match ProgressiveTranscriptionStrategy::new(models_dir, temp_dir.clone()).await {
+                    Ok(mut strategy) => {
+                        if let Some(ref app_handle) = app_handle {
+                            strategy = strategy.with_app_handle(app_handle.clone());
+                        }
+                        info(Component::Transcription, "Auto-selected progressive strategy (Tiny + Medium)");
+                        return Box::new(strategy);
+                    }
+                    Err(e) => {
+                        warn(Component::Transcription, &format!("Failed to create progressive strategy: {}, trying ring buffer", e));
+                    }
+                }
+            } else {
+                info(Component::Transcription, "Progressive strategy requires both Tiny and Medium models, falling back to ring buffer");
+            }
+        } else {
+            info(Component::Transcription, "Chunking disabled, skipping progressive strategy");
+        }
+        
+        // Fall back to ring buffer strategy
         let mut ring_buffer_strategy = RingBufferTranscriptionStrategy::new(transcriber.clone(), temp_dir.clone());
         if let Some(ref app_handle) = app_handle {
             ring_buffer_strategy = ring_buffer_strategy.with_app_handle(app_handle.clone());
         }
         let classic_strategy = ClassicTranscriptionStrategy::new(transcriber);
-        
-        debug(Component::Transcription, "Strategy selection debug:");
-        debug(Component::Transcription, &format!("  Duration estimate: {:?}", duration_estimate));
-        debug(Component::Transcription, &format!("  Enable chunking: {}", config.enable_chunking));
-        debug(Component::Transcription, &format!("  Threshold: {}s", config.chunking_threshold_secs));
         
         let can_handle_ring = ring_buffer_strategy.can_handle(duration_estimate, config);
         debug(Component::Transcription, &format!("  Ring buffer can handle: {}", can_handle_ring));

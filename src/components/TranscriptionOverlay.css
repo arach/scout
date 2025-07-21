@@ -1,18 +1,19 @@
 /* Transcription Overlay - Editor Window Style */
 .transcription-overlay {
-  background: rgba(18, 18, 18, 0.95);
-  border: 1px solid rgba(64, 64, 64, 0.8);
-  border-radius: 8px;
+  background: var(--bg-overlay, rgba(18, 18, 18, 0.95));
+  border: 1px solid var(--border-primary, rgba(64, 64, 64, 0.8));
+  border-radius: var(--border-radius, 8px);
   backdrop-filter: blur(16px);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 8px 32px var(--shadow-color, rgba(0, 0, 0, 0.4));
+  font-family: var(--font-family);
   min-width: 300px;
   max-width: 800px;
   width: 500px;
   height: 400px;
   overflow: hidden;
   resize: both;
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  transition: var(--transition, opacity 0.2s ease);
 }
 
 .transcription-overlay.minimized {
@@ -625,4 +626,76 @@
   .action-group {
     justify-content: center;
   }
+}
+
+/* ==================== Minimal Theme Styles ==================== */
+.transcription-overlay.minimal-theme {
+  background: rgba(0, 0, 0, 0.8);
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  min-width: 200px;
+  width: auto;
+  height: auto;
+  resize: none;
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-small);
+}
+
+.transcription-overlay.minimal-theme .transcription-overlay-header {
+  display: none;
+}
+
+.transcription-overlay.minimal-theme .teleprompter-container {
+  padding: 12px;
+  background: transparent;
+}
+
+.transcription-overlay.minimal-theme .hourglass-pattern {
+  background: transparent;
+  box-shadow: none;
+}
+
+.transcription-overlay.minimal-theme .completed-text,
+.transcription-overlay.minimal-theme .anticipated-text,
+.transcription-overlay.minimal-theme .decrypting-line {
+  color: rgba(255, 255, 255, 0.9);
+  font-family: inherit;
+  font-size: inherit;
+  line-height: 1.4;
+}
+
+.transcription-overlay.minimal-theme .completed-text {
+  opacity: 0.9;
+}
+
+.transcription-overlay.minimal-theme .anticipated-text {
+  opacity: 0.5;
+}
+
+.transcription-overlay.minimal-theme .wave-visualization {
+  display: none;
+}
+
+/* Simple recording indicator for minimal theme */
+.transcription-overlay.minimal-theme::before {
+  content: '';
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--recording, #ff0000);
+  opacity: 0;
+  animation: minimal-recording-pulse 2s ease-in-out infinite;
+}
+
+.transcription-overlay.minimal-theme.recording::before {
+  opacity: 1;
+}
+
+@keyframes minimal-recording-pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
 }

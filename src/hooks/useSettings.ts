@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { LLMSettings } from '../types/llm';
+import type { ThemeVariant } from '../themes/types';
 
 // Commented out unused interface
 // interface Settings {
@@ -24,6 +25,7 @@ export function useSettings() {
   const [hotkey, setHotkey] = useState("CmdOrCtrl+Shift+Space");
   const [pushToTalkHotkey, setPushToTalkHotkey] = useState("CmdOrCtrl+Shift+P");
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
+  const [selectedTheme, setSelectedTheme] = useState<ThemeVariant | undefined>(undefined);
   
   // Sound Settings
   const [soundEnabled, setSoundEnabled] = useState(true);
@@ -89,6 +91,12 @@ export function useSettings() {
       const savedTheme = localStorage.getItem('scout-theme');
       if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system') {
         setTheme(savedTheme);
+      }
+      
+      // Load selected theme variant
+      const savedSelectedTheme = localStorage.getItem('scout-selected-theme');
+      if (savedSelectedTheme) {
+        setSelectedTheme(savedSelectedTheme as ThemeVariant);
       }
       
       // Load sound settings
@@ -163,6 +171,11 @@ export function useSettings() {
   const updateTheme = (newTheme: 'light' | 'dark' | 'system') => {
     setTheme(newTheme);
     localStorage.setItem('scout-theme', newTheme);
+  };
+
+  const updateSelectedTheme = (themeVariant: ThemeVariant) => {
+    setSelectedTheme(themeVariant);
+    localStorage.setItem('scout-selected-theme', themeVariant);
   };
 
   const toggleSoundEnabled = async () => {
@@ -247,6 +260,7 @@ export function useSettings() {
     hotkey,
     pushToTalkHotkey,
     theme,
+    selectedTheme,
     soundEnabled,
     startSound,
     stopSound,
@@ -263,6 +277,7 @@ export function useSettings() {
     // Update functions
     updateOverlayPosition,
     updateTheme,
+    updateSelectedTheme,
     toggleSoundEnabled,
     updateStartSound,
     updateStopSound,
@@ -271,5 +286,30 @@ export function useSettings() {
     updateLLMSettings,
     toggleAutoCopy,
     toggleAutoPaste,
+    
+    // Convenience method for theme provider
+    settings: {
+      overlayPosition,
+      hotkey,
+      pushToTalkHotkey,
+      theme,
+      selectedTheme,
+      soundEnabled,
+      startSound,
+      stopSound,
+      successSound,
+      completionSoundThreshold,
+      llmSettings,
+      autoCopy,
+      autoPaste,
+    },
+    updateSettings: (updates: Partial<any>) => {
+      // Simple update wrapper for compatibility
+      Object.entries(updates).forEach(([key, value]) => {
+        if (key === 'selectedTheme' && value) {
+          updateSelectedTheme(value as ThemeVariant);
+        }
+      });
+    },
   };
 }
