@@ -71,6 +71,7 @@ function App() {
     hotkey,
     pushToTalkHotkey,
     theme,
+    selectedTheme,
     soundEnabled,
     startSound,
     stopSound,
@@ -83,6 +84,7 @@ function App() {
     setPushToTalkHotkey,
     updateOverlayPosition,
     updateTheme,
+    updateSelectedTheme,
     toggleSoundEnabled,
     updateStartSound,
     updateStopSound,
@@ -760,6 +762,7 @@ function App() {
             autoCopy={autoCopy}
             autoPaste={autoPaste}
             theme={theme}
+            selectedTheme={selectedTheme}
             soundEnabled={soundEnabled}
             startSound={startSound}
             stopSound={stopSound}
@@ -775,6 +778,7 @@ function App() {
             toggleAutoCopy={toggleAutoCopy}
             toggleAutoPaste={toggleAutoPaste}
             updateTheme={updateTheme}
+            updateSelectedTheme={updateSelectedTheme}
             toggleSoundEnabled={toggleSoundEnabled}
             updateStartSound={updateStartSound}
             updateStopSound={updateStopSound}
