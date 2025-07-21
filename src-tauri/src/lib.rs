@@ -209,59 +209,17 @@ async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Re
     // Play stop sound
     sound::SoundPlayer::play_stop();
     
-    // Ensure native overlay is set to idle state
+    // Set native overlay to processing state instead of idle
     #[cfg(target_os = "macos")]
     {
         use crate::logger::{info, debug, Component};
         
-        info(Component::Overlay, "Forcing native overlay to idle state after stop_recording");
+        info(Component::Overlay, "Setting native overlay to processing state for transcription");
         
-        // Capture initial progress tracker state
-        let progress_state = state.progress_tracker.current_state();
-        debug(Component::Overlay, &format!("Progress tracker state: {:?}", progress_state));
-        
-        // Try multiple times to ensure it sticks
-        for i in 0..3 {
-            debug(Component::Overlay, &format!("Attempt {} to set overlay to idle state", i + 1));
-            let start = std::time::Instant::now();
-            
-            // Capture overlay state before attempting change
-            let overlay = state.native_panel_overlay.lock().await;
-            let state_before = overlay.get_current_state();
-            debug(Component::Overlay, &format!("Overlay state BEFORE attempt {}: {}", i + 1, state_before));
-            
-            overlay.set_idle_state();
-            debug(Component::Overlay, &format!("Called set_idle_state() at attempt {}", i + 1));
-            
-            drop(overlay);
-            debug(Component::Overlay, &format!("Released overlay lock after {:?}", start.elapsed()));
-            
-            // Small delay to let the UI update
-            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-            
-            // Capture overlay state after attempting change
-            let overlay = state.native_panel_overlay.lock().await;
-            let state_after = overlay.get_current_state();
-            debug(Component::Overlay, &format!("Overlay state AFTER attempt {}: {}", i + 1, state_after));
-            drop(overlay);
-            
-            if state_after == "idle" {
-                info(Component::Overlay, &format!("Overlay successfully set to idle on attempt {}", i + 1));
-                break;
-            }
-            
-            if i < 2 {
-                // Delay between attempts
-                debug(Component::Overlay, "Waiting 100ms before retry...");
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                debug(Component::Overlay, &format!("Wait complete, total time for attempt {}: {:?}", i + 1, start.elapsed()));
-            }
-        }
-        
-        // Final state check
         let overlay = state.native_panel_overlay.lock().await;
-        let final_state = overlay.get_current_state();
-        info(Component::Overlay, &format!("Final overlay state: {}", final_state));
+        overlay.set_processing_state(true);
+        debug(Component::Overlay, "Native overlay set to processing state");
+        drop(overlay);
     }
     
     // Get the filename for background processing
@@ -1507,11 +1465,21 @@ pub fn run() {
                         {
                             match &status {
                                 ProcessingStatus::Complete { .. } | ProcessingStatus::Failed { .. } => {
-                                    // Processing is done - native overlay will be updated by progress tracker
-                                    debug(Component::UI, "Processing complete/failed - native overlay will be updated by progress tracker");
+                                    // Processing is done - set overlay to idle
+                                    debug(Component::UI, "Processing complete/failed - setting native overlay to idle");
+                                    let overlay = _native_overlay_clone.lock().await;
+                                    overlay.set_idle_state();
+                                    drop(overlay);
+                                }
+                                ProcessingStatus::Transcribing { .. } => {
+                                    // Transcription started - ensure overlay shows processing state
+                                    debug(Component::UI, "Transcription started - setting native overlay to processing");
+                                    let overlay = _native_overlay_clone.lock().await;
+                                    overlay.set_processing_state(true);
+                                    drop(overlay);
                                 }
                                 _ => {
-                                    // Still processing, ensure overlay shows processing state
+                                    // Other states don't affect overlay
                                 }
                             }
                         }

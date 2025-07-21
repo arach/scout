@@ -401,6 +401,16 @@ impl RecordingWorkflow {
                                 // Spawn async task for transcription
                                 tokio::spawn(async move {
                                     perf_tracker_clone.track_event("transcription_start", "Starting async transcription processing").await;
+                                    
+                                    // Emit transcribing status for native overlay
+                                    let transcribing_status = crate::processing_queue::ProcessingStatus::Transcribing {
+                                        filename: filename_clone.clone(),
+                                    };
+                                    if let Err(e) = app_handle_clone.emit("processing-status", &transcribing_status) {
+                                        error(Component::UI, &format!("Failed to emit transcribing status: {:?}", e));
+                                    } else {
+                                        info(Component::UI, "Emitted transcribing status for native overlay");
+                                    }
                                     // Add timeout to prevent hanging
                                     perf_tracker_clone.track_event("transcription_finish", "Calling finish_recording on transcription context").await;
                                     let finish_timeout = tokio::time::timeout(
