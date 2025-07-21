@@ -182,8 +182,8 @@ impl RecordingWorkflow {
                                 let strategy_name = transcription_context.current_strategy_name()
                                     .unwrap_or_else(|| "unknown".to_string());
                                 
-                                let sample_rx_option = if strategy_name == "ring_buffer" {
-                                    info(Component::RingBuffer, "Detected ring buffer strategy - connecting audio samples");
+                                let sample_rx_option = if strategy_name == "ring_buffer" || strategy_name == "progressive" {
+                                    info(Component::RingBuffer, &format!("Detected {} strategy - connecting audio samples", strategy_name));
                                     
                                     // Create a channel to send samples from AudioRecorder thread to transcription context
                                     let (sample_tx, sample_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<f32>>();

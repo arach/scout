@@ -1546,3 +1546,103 @@ h1 {
     color: #52525b; /* zinc-500 */
   }
 }
+
+/* ==================== Theme System Support ==================== */
+
+/* Animation classes */
+:root.animations-smooth * {
+  transition-property: background-color, border-color, color, fill, stroke;
+  transition-duration: 200ms;
+  transition-timing-function: ease;
+}
+
+:root.animations-retro * {
+  transition: none !important;
+  animation-timing-function: steps(4, end) !important;
+}
+
+:root.animations-minimal * {
+  transition-property: opacity;
+  transition-duration: 150ms;
+  transition-timing-function: ease;
+}
+
+:root.animations-none * {
+  transition: none !important;
+  animation: none !important;
+}
+
+/* Theme-specific adjustments */
+[data-theme="minimal-overlay"] {
+  --font-family: var(--font-family-mono);
+  
+  /* Override component styles for minimal theme */
+  .container {
+    background: var(--bg-primary);
+    border: none;
+    box-shadow: none;
+  }
+  
+  .button {
+    background: transparent;
+    border: 1px solid var(--border-primary);
+  }
+  
+  .button:hover {
+    background: var(--bg-hover);
+  }
+}
+
+[data-theme="winamp-classic"] {
+  /* Winamp classic theme overrides */
+  * {
+    image-rendering: pixelated;
+    image-rendering: -moz-crisp-edges;
+    image-rendering: crisp-edges;
+  }
+  
+  .container {
+    border: 2px solid var(--border-primary);
+    box-shadow: inset 1px 1px 0 #fff, inset -1px -1px 0 #000;
+  }
+  
+  .button {
+    border: 2px solid;
+    border-color: #dfdfdf #000 #000 #dfdfdf;
+    background: linear-gradient(135deg, #fff 0%, #dfdfdf 100%);
+    color: #000;
+    text-shadow: 1px 1px 0 #fff;
+  }
+  
+  .button:active {
+    border-color: #000 #dfdfdf #dfdfdf #000;
+    background: linear-gradient(135deg, #dfdfdf 0%, #fff 100%);
+  }
+}
+
+[data-theme="winamp-modern"] {
+  /* Winamp modern theme with gradients and effects */
+  .container {
+    background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+    border: 1px solid var(--border-primary);
+    box-shadow: 0 0 20px rgba(255, 102, 0, 0.1);
+  }
+  
+  .button {
+    background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-hover) 100%);
+    border: none;
+    box-shadow: 0 2px 8px rgba(255, 102, 0, 0.2);
+  }
+  
+  .button:hover {
+    box-shadow: 0 4px 12px rgba(255, 102, 0, 0.3);
+    transform: translateY(-1px);
+  }
+}
+
+/* Ensure overlay transparency works with themes */
+.transcription-overlay {
+  background: var(--bg-overlay, var(--bg-primary));
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}

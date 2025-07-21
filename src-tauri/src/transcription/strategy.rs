@@ -767,8 +767,8 @@ impl TranscriptionStrategySelector {
                 }
                 "progressive" => {
                     info(Component::Transcription, "Using forced progressive strategy");
-                    // Get models directory from temp_dir parent
-                    let models_dir = temp_dir.parent().unwrap_or(&temp_dir);
+                    // temp_dir is already the models directory
+                    let models_dir = &temp_dir;
                     match ProgressiveTranscriptionStrategy::new(models_dir, temp_dir.clone()).await {
                         Ok(mut strategy) => {
                             if let Some(app_handle) = app_handle {
@@ -796,7 +796,8 @@ impl TranscriptionStrategySelector {
         // Try progressive strategy first if chunking is enabled AND both models exist
         if config.enable_chunking {
             info(Component::Transcription, "Chunking enabled, checking model availability for progressive strategy");
-            let models_dir = temp_dir.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| temp_dir.clone());
+            // temp_dir is already the models directory
+            let models_dir = &temp_dir;
             info(Component::Transcription, &format!("Models directory: {:?}", models_dir));
             
             // Check if both required models exist
@@ -810,7 +811,7 @@ impl TranscriptionStrategySelector {
             
             // Only attempt progressive strategy if BOTH models are available
             if tiny_exists && medium_exists {
-                match ProgressiveTranscriptionStrategy::new(&models_dir, temp_dir.clone()).await {
+                match ProgressiveTranscriptionStrategy::new(models_dir, temp_dir.clone()).await {
                     Ok(mut strategy) => {
                         if let Some(ref app_handle) = app_handle {
                             strategy = strategy.with_app_handle(app_handle.clone());
