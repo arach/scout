@@ -58,9 +58,16 @@ export function useRecording(options: UseRecordingOptions = {}) {
           console.log('Syncing initial recording state with backend:', backendIsRecording);
           setIsRecording(backendIsRecording);
           isRecordingRef.current = backendIsRecording;
+          // Also sync the recording manager
+          recordingManager.setRecording(backendIsRecording);
+        } else {
+          // Make sure recording manager is also in sync even if states match
+          recordingManager.setRecording(backendIsRecording);
         }
       } catch (error) {
         console.error('Failed to check initial recording state:', error);
+        // Reset recording manager on error to ensure clean state
+        recordingManager.reset();
       }
     };
     
