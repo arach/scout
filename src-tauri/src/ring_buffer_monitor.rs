@@ -11,6 +11,7 @@ use tauri::{AppHandle, Emitter};
 pub struct RingBufferMonitor {
     ring_buffer: Arc<RingBufferRecorder>,
     chunked_transcriber: Option<RingBufferTranscriber>,
+    initial_transcriber: Option<RingBufferTranscriber>, // Store the initial transcriber for short recordings
     last_chunk_time: Duration,
     chunk_duration: Duration,
     threshold_duration: Duration,
@@ -25,6 +26,7 @@ impl RingBufferMonitor {
         Self {
             ring_buffer,
             chunked_transcriber: None,
+            initial_transcriber: None,
             last_chunk_time: Duration::ZERO,
             chunk_duration: Duration::from_secs(5), // 5-second chunks
             threshold_duration: Duration::from_secs(5), // Start chunking after 5 seconds
@@ -51,7 +53,7 @@ impl RingBufferMonitor {
             info(Component::RingBuffer, "Ring buffer monitor started");
             
             // Store the ring transcriber for later use
-            let mut ring_transcriber = Some(ring_transcriber);
+            self.initial_transcriber = Some(ring_transcriber);
             
             // Check every 2 seconds
             let mut interval = time::interval(Duration::from_secs(2));
@@ -87,7 +89,7 @@ impl RingBufferMonitor {
                     }
                     
                     // Use the pre-created ring transcriber
-                    if let Some(transcriber) = ring_transcriber.take() {
+                    if let Some(transcriber) = self.initial_transcriber.take() {
                         self.chunked_transcriber = Some(transcriber);
                     }
                 }
@@ -149,6 +151,26 @@ impl RingBufferMonitor {
     pub async fn recording_complete(mut self) -> Result<Vec<String>, String> {
         info(Component::RingBuffer, "Recording complete, collecting all chunks...");
         info(Component::RingBuffer, &format!("Already collected {} chunks during recording", self.completed_chunks.len()));
+        
+        // If no chunks were processed during recording (short recording), process the entire recording as one chunk
+        if self.completed_chunks.is_empty() && self.chunked_transcriber.is_none() {
+            let buffer_duration = self.ring_buffer.get_duration();
+            if buffer_duration > Duration::from_millis(500) { // Only process if > 500ms
+                info(Component::RingBuffer, &format!("Short recording detected ({:?}), processing as single chunk", buffer_duration));
+                
+                // Use the initial transcriber that was stored for short recordings
+                if let Some(transcriber) = self.initial_transcriber.take() {
+                    info(Component::RingBuffer, "Using stored transcriber for short recording");
+                    self.chunked_transcriber = Some(transcriber);
+                } else {
+                    warn(Component::RingBuffer, "No initial transcriber available for short recording");
+                    return Ok(vec![]);
+                }
+            } else {
+                warn(Component::RingBuffer, "Recording too short to process (< 500ms)");
+                return Ok(vec![]);
+            }
+        }
         
         if let Some(chunked) = self.chunked_transcriber.take() {
             let buffer_duration = self.ring_buffer.get_duration();
