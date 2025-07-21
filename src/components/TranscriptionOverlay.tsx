@@ -1,6 +1,8 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useResizable } from '../hooks/useResizable';
+import { useTheme } from '../themes/ThemeProvider';
+import { useSettings } from '../hooks/useSettings';
 import './TranscriptionOverlay.css';
 
 interface TranscriptionChunk {
@@ -43,6 +45,30 @@ export function TranscriptionOverlay({
   onDiscardEdits,
   mode = 'teleprompter'
 }: TranscriptionOverlayProps) {
+  const { theme } = useTheme();
+  const { overlayPosition } = useSettings();
+  
+  // Calculate position based on theme settings
+  const getPositionFromTheme = useCallback(() => {
+    const position = theme.layout.overlayPosition || overlayPosition || 'top-right';
+    const padding = 20;
+    const overlayWidth = 600;
+    const overlayHeight = 400;
+    
+    switch (position) {
+      case 'top-left': return { x: padding, y: padding };
+      case 'top-center': return { x: window.innerWidth / 2 - overlayWidth / 2, y: padding };
+      case 'top-right': return { x: window.innerWidth - overlayWidth - padding, y: padding };
+      case 'center-left': return { x: padding, y: window.innerHeight / 2 - overlayHeight / 2 };
+      case 'center': return { x: window.innerWidth / 2 - overlayWidth / 2, y: window.innerHeight / 2 - overlayHeight / 2 };
+      case 'center-right': return { x: window.innerWidth - overlayWidth - padding, y: window.innerHeight / 2 - overlayHeight / 2 };
+      case 'bottom-left': return { x: padding, y: window.innerHeight - overlayHeight - padding };
+      case 'bottom-center': return { x: window.innerWidth / 2 - overlayWidth / 2, y: window.innerHeight - overlayHeight - padding };
+      case 'bottom-right': return { x: window.innerWidth - overlayWidth - padding, y: window.innerHeight - overlayHeight - padding };
+      default: return { x: window.innerWidth - overlayWidth - padding, y: padding }; // Default to top-right
+    }
+  }, [theme.layout.overlayPosition, overlayPosition]);
+  
   const [transcriptionState, setTranscriptionState] = useState<TranscriptionState>({
     completedText: '',
     decryptingChunks: [],
@@ -54,7 +80,15 @@ export function TranscriptionOverlay({
   const [hasEdits, setHasEdits] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [currentMode, setCurrentMode] = useState<'teleprompter' | 'editor'>(mode);
-  const [position, setPosition] = useState({ x: 20, y: 20 });
+  const [position, setPosition] = useState(() => {
+    const savedPos = localStorage.getItem('scout-overlay-position-xy');
+    if (savedPos) {
+      try {
+        return JSON.parse(savedPos);
+      } catch {}
+    }
+    return getPositionFromTheme();
+  });
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [speechActivity, setSpeechActivity] = useState<{
@@ -135,6 +169,15 @@ export function TranscriptionOverlay({
       setOriginalText(fullText);
     }
   }, [fullText, hasEdits]);
+  
+  // Update position when theme overlay position changes
+  useEffect(() => {
+    const savedPos = localStorage.getItem('scout-overlay-position-xy');
+    if (!savedPos && !isDragging) {
+      // Only auto-update position if user hasn't manually positioned it
+      setPosition(getPositionFromTheme());
+    }
+  }, [theme.layout.overlayPosition, overlayPosition, isDragging, getPositionFromTheme]);
 
   // Real-time audio level monitoring for immediate speech feedback
   useEffect(() => {
@@ -412,15 +455,18 @@ export function TranscriptionOverlay({
 
   const handleMouseMove = (e: MouseEvent) => {
     if (isDragging) {
-      setPosition({
+      const newPosition = {
         x: e.clientX - dragOffset.x,
         y: e.clientY - dragOffset.y
-      });
+      };
+      setPosition(newPosition);
     }
   };
 
   const handleMouseUp = () => {
     setIsDragging(false);
+    // Save custom position to localStorage
+    localStorage.setItem('scout-overlay-position-xy', JSON.stringify(position));
   };
 
   // Add drag event listeners
@@ -450,12 +496,14 @@ export function TranscriptionOverlay({
   return (
     <div
       ref={overlayRef}
-      className={`transcription-overlay ${isMinimized ? 'minimized' : ''} ${isResizing ? 'resizing' : ''} ${isDragging ? 'dragging' : ''}`}
+      className={`transcription-overlay ${isMinimized ? 'minimized' : ''} ${isResizing ? 'resizing' : ''} ${isDragging ? 'dragging' : ''} ${theme.id === 'minimal-overlay' ? 'minimal-theme' : ''}`}
       style={{
         position: 'fixed',
         top: `${position.y}px`,
         left: `${position.x}px`,
         zIndex: 9999,
+        opacity: theme.layout.overlayOpacity || 1,
+        backgroundColor: theme.id === 'minimal-overlay' ? 'rgba(0, 0, 0, 0.8)' : undefined,
       }}
       onMouseDown={handleMouseDown}
     >

@@ -11,7 +11,6 @@ use crate::transcription::{
 };
 use crate::db::Database;
 use crate::performance_logger::PerformanceLogger;
-use crate::models;
 
 /// Manages transcription strategy selection and execution
 pub struct TranscriptionContext {
@@ -147,7 +146,7 @@ impl TranscriptionContext {
             self.transcriber.clone(),
             self.temp_dir.clone(),
             self.app_handle.clone(),
-        );
+        ).await;
         
         // Start recording with the selected strategy
         strategy.start_recording(output_path, &self.config).await?;

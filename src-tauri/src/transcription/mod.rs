@@ -10,9 +10,10 @@ pub mod ring_buffer_transcriber;
 
 pub use strategy::{TranscriptionStrategy, TranscriptionConfig, TranscriptionResult, TranscriptionStrategySelector};
 
-// Global singleton for transcriber instances to avoid CoreML reinitialization
-static TRANSCRIBER_CACHE: Lazy<Arc<Mutex<Option<(PathBuf, Arc<Mutex<Transcriber>>)>>>> = 
-    Lazy::new(|| Arc::new(Mutex::new(None)));
+// Global cache for transcriber instances to avoid CoreML reinitialization
+// Changed from single instance to HashMap to support multiple models
+static TRANSCRIBER_CACHE: Lazy<Arc<Mutex<std::collections::HashMap<PathBuf, Arc<Mutex<Transcriber>>>>>> = 
+    Lazy::new(|| Arc::new(Mutex::new(std::collections::HashMap::new())));
 
 pub struct Transcriber {
     context: WhisperContext,
@@ -24,11 +25,9 @@ impl Transcriber {
         let mut cache = TRANSCRIBER_CACHE.lock().await;
         
         // Check if we have a cached transcriber for this model
-        if let Some((cached_path, cached_transcriber)) = &*cache {
-            if cached_path == model_path {
-                info(Component::Transcription, "Reusing cached transcriber instance");
-                return Ok(cached_transcriber.clone());
-            }
+        if let Some(cached_transcriber) = cache.get(model_path) {
+            info(Component::Transcription, &format!("Reusing cached transcriber instance for {:?}", model_path));
+            return Ok(cached_transcriber.clone());
         }
         
         // Create new transcriber
@@ -37,7 +36,8 @@ impl Transcriber {
         let transcriber_arc = Arc::new(Mutex::new(transcriber));
         
         // Update cache
-        *cache = Some((model_path.to_path_buf(), transcriber_arc.clone()));
+        cache.insert(model_path.to_path_buf(), transcriber_arc.clone());
+        info(Component::Transcription, &format!("Cached transcriber for {:?}. Total cached models: {}", model_path, cache.len()));
         
         Ok(transcriber_arc)
     }
