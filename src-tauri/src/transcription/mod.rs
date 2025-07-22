@@ -15,6 +15,9 @@ pub use strategy::{TranscriptionStrategy, TranscriptionConfig, TranscriptionResu
 static TRANSCRIBER_CACHE: Lazy<Arc<Mutex<std::collections::HashMap<PathBuf, Arc<Mutex<Transcriber>>>>>> = 
     Lazy::new(|| Arc::new(Mutex::new(std::collections::HashMap::new())));
 
+// Global mutex to serialize CoreML state creation and prevent concurrent initialization deadlocks
+static COREML_INIT_LOCK: Lazy<std::sync::Mutex<()>> = Lazy::new(|| std::sync::Mutex::new(()));
+
 pub struct Transcriber {
     context: WhisperContext,
 }
@@ -110,7 +113,15 @@ impl Transcriber {
         params.set_no_speech_thold(0.6);
 
         // Run the transcription
-        let mut state = self.context.create_state().map_err(|e| format!("Failed to create state: {}", e))?;
+        // CRITICAL: Serialize state creation to prevent CoreML initialization deadlocks
+        // when Tiny and Medium models try to initialize simultaneously
+        let mut state = {
+            let _lock = COREML_INIT_LOCK.lock().unwrap();
+            info(Component::Transcription, "Creating whisper state (with CoreML lock)");
+            let state_result = self.context.create_state().map_err(|e| format!("Failed to create state: {}", e));
+            info(Component::Transcription, "Whisper state created successfully");
+            state_result?
+        };
         
         // Log transcription start
         log::info!(target: "whisper", "Starting transcription of {} samples", audio_data.len());
