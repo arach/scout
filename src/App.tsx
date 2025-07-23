@@ -3,7 +3,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { safeEventListen, cleanupListeners } from "./lib/safeEventListener";
 import { open } from "@tauri-apps/plugin-dialog";
 import { OnboardingFlow } from "./components/OnboardingFlow";
-import { OnboardingFlowNew } from "./components/OnboardingFlowNew";
 import { Sidebar, useSidebarState } from "./components/Sidebar";
 import { RecordView } from "./components/RecordView";
 import { TranscriptsView } from "./components/TranscriptsView";
@@ -52,7 +51,6 @@ function App() {
     isBulk: boolean;
   }>({ show: false, transcriptId: null, transcriptText: "", isBulk: false });
   const [showFirstRun, setShowFirstRun] = useState(false);
-  const [useNewOnboarding, setUseNewOnboarding] = useState(true); // Toggle for new onboarding
   const [hotkeyUpdateStatus, setHotkeyUpdateStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [uploadProgress, setUploadProgress] = useState<{
     filename?: string;
@@ -707,43 +705,7 @@ function App() {
       localStorage.setItem('scout-onboarding-complete', 'true');
     };
 
-    return (
-      <div style={{ position: 'relative' }}>
-        {/* Toggle button for comparing layouts */}
-        <button
-          onClick={() => setUseNewOnboarding(!useNewOnboarding)}
-          style={{
-            position: 'fixed',
-            top: '20px',
-            right: '20px',
-            zIndex: 20000,
-            background: 'rgba(255, 255, 255, 0.1)',
-            color: 'white',
-            border: '1px solid rgba(255, 255, 255, 0.2)',
-            borderRadius: '8px',
-            padding: '8px 16px',
-            fontSize: '12px',
-            cursor: 'pointer',
-            backdropFilter: 'blur(10px)',
-            transition: 'all 0.2s ease'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'rgba(255, 255, 255, 0.15)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)';
-          }}
-        >
-          {useNewOnboarding ? 'View Old Layout' : 'View New Layout'}
-        </button>
-
-        {useNewOnboarding ? (
-          <OnboardingFlowNew onComplete={onComplete} />
-        ) : (
-          <OnboardingFlow onComplete={onComplete} />
-        )}
-      </div>
-    );
+    return <OnboardingFlow onComplete={onComplete} />;
   }
 
   return (

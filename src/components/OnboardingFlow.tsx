@@ -128,8 +128,6 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
     try {
       const status = await invoke<PermissionStatus>('request_microphone_permission');
       setMicPermission(status);
-      
-      // Remove auto-advance to let user see the granted state and manually continue
     } catch (error) {
       console.error('Failed to request microphone permission:', error);
     }
@@ -152,175 +150,6 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
       console.error('Failed to mark onboarding complete:', error);
     }
   };
-
-  const renderModelStep = () => (
-    <div className="onboarding-step welcome-step">
-      <div className="welcome-visual">
-        <img 
-          src={soundwaveImage} 
-          alt="Voice visualization in glass dome"
-          className="soundwave-hero"
-        />
-      </div>
-      <div className="welcome-content">
-          <div className="model-info">
-            <h1 className="welcome-title">Welcome to Scout</h1>
-            <p className="welcome-subtitle">Private. Local. Lightning-fast transcription.</p>
-            
-            <div className="info-features">
-              <div className="feature">
-                <Check /> All processing happens locally on your Mac
-              </div>
-              <div className="feature">
-                <Check /> Your audio never leaves your device
-              </div>
-              <div className="feature">
-                <Check /> No internet connection required
-              </div>
-            </div>
-            
-            <p className="step-description">Let's start by downloading your first lightweight AI model to power your transcriptions:</p>
-            
-            <div className="model-details">
-              <div className="info-item">
-                <strong>File:</strong> ggml-tiny.en.bin (39 MB)
-              </div>
-              <div className="info-item">
-                <strong>Source:</strong> <code>https://huggingface.co/ggerganov/whisper.cpp</code>
-              </div>
-            </div>
-
-            {downloadStatus === 'idle' && (
-              <button className="btn-primary welcome-cta" onClick={startModelDownload}>
-                Download & Continue
-              </button>
-            )}
-            {downloadStatus === 'complete' && (
-              <button className="btn-primary welcome-cta" disabled>
-                ✓ Model Downloaded
-              </button>
-            )}
-          </div>
-
-          {downloadStatus === 'downloading' && (
-            <div className="download-status">
-              {downloadProgress ? (
-                <>
-                  <div className="progress-bar">
-                    <div 
-                      className="progress-fill"
-                      style={{ width: `${downloadProgress.progress}%` }}
-                    />
-                  </div>
-                  <div className="progress-text">
-                    {downloadProgress.downloadedMb.toFixed(1)} / {downloadProgress.totalMb.toFixed(1)} MB
-                  </div>
-                </>
-              ) : (
-                <div className="download-initiating">
-                  <div className="spinner" />
-                  <div className="progress-text">Initiating download...</div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {downloadStatus === 'error' && (
-            <div className="error-state">
-              <AlertCircle size={20} />
-              <p>Download failed: {downloadError}</p>
-              <button className="btn-primary" onClick={startModelDownload}>
-                Retry Download
-              </button>
-            </div>
-          )}
-      </div>
-    </div>
-  );
-
-  const renderMicrophoneStep = () => (
-    <div className="onboarding-step welcome-step">
-      <div className="welcome-visual">
-        <img 
-          src={soundwaveImage} 
-          alt="Voice visualization in glass dome"
-          className="soundwave-hero"
-        />
-      </div>
-      <div className="welcome-content">
-        <div className="model-info">
-          <h1 className="welcome-title">Microphone Permission</h1>
-          <p className="welcome-subtitle">Enable voice recording for local transcription.</p>
-          
-          <div className="info-features">
-            <div className="feature">
-              <Check /> All processing happens locally on your Mac
-            </div>
-            <div className="feature">
-              <Check /> You control when recording starts and stops
-            </div>
-          </div>
-          
-          <p className="step-description">Scout needs microphone access for voice transcription. All audio processing happens locally - your voice never leaves your device.</p>
-          
-          <div className="permission-status-card">
-            {micPermission === 'not-determined' && (
-              <div className="status-item status-waiting">
-                <div className="status-icon">
-                  <div className="spinner" />
-                </div>
-                <div className="status-content">
-                  <div className="status-title">Requesting Permission</div>
-                  <div className="status-description">macOS will prompt you to allow microphone access</div>
-                </div>
-              </div>
-            )}
-            {micPermission === 'granted' && (
-              <div className="status-item status-granted">
-                <div className="status-icon">
-                  <Check size={24} />
-                </div>
-                <div className="status-content">
-                  <div className="status-title">Permission Granted</div>
-                  <div className="status-description">Scout can now access your microphone for transcription</div>
-                </div>
-              </div>
-            )}
-            {micPermission === 'denied' && (
-              <div className="status-item status-denied">
-                <div className="status-icon">
-                  <X size={24} />
-                </div>
-                <div className="status-content">
-                  <div className="status-title">Permission Denied</div>
-                  <div className="status-description">Please enable microphone access in System Preferences to continue</div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {micPermission === 'not-determined' && (
-            <button className="btn-primary welcome-cta" onClick={requestMicPermission}>
-              Grant Permission
-            </button>
-          )}
-          {micPermission === 'granted' && (
-            <button className="btn-primary welcome-cta" onClick={() => setCurrentStep('shortcuts')}>
-              Continue
-            </button>
-          )}
-          {micPermission === 'denied' && (
-            <button className="btn-secondary welcome-cta" onClick={() => {
-              // TODO: Open system preferences
-              invoke('open_system_preferences_audio');
-            }}>
-              Open System Preferences
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
 
   // Keyboard event handler for shortcut capture
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -370,199 +199,348 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
 
-  const renderShortcutsStep = () => (
-    <div className="onboarding-step welcome-step">
-      <div className="welcome-visual">
-        <img 
-          src={soundwaveImage} 
-          alt="Voice visualization in glass dome"
-          className="soundwave-hero"
-        />
+  const renderModelStep = () => (
+    <>
+      <div className="new-step-header">
+        <h1 className="new-step-title">Welcome to Scout</h1>
+        <p className="new-step-subtitle">Private. Local. Lightning-fast transcription.</p>
       </div>
-      <div className="welcome-content">
-        <div className="model-info">
-          <h1 className="welcome-title">Create Shortcuts</h1>
-          <p className="welcome-subtitle">Set up keyboard shortcuts for quick voice recording.</p>
-          
-          <div className="shortcuts-config">
-            <div className="shortcut-item">
-              <label>Push-to-Talk:</label>
-              <kbd className={isCapturingPTT ? 'capturing' : ''}>
-                {isCapturingPTT ? 'Press any key...' : pushToTalkShortcut}
-              </kbd>
-              <button 
-                className="btn-text"
-                onClick={() => {
-                  setIsCapturingPTT(true);
-                  setIsCapturingToggle(false);
-                }}
-              >
-                Change
-              </button>
+      
+      <div className="new-step-features">
+        <div className="new-feature">
+          <Check size={16} /> All processing happens locally on your Mac
+        </div>
+        <div className="new-feature">
+          <Check size={16} /> Your audio never leaves your device
+        </div>
+        <div className="new-feature">
+          <Check size={16} /> No internet connection required
+        </div>
+      </div>
+      
+      <div className="new-step-content">
+        <p className="new-step-description">
+          Let's start by downloading your first lightweight AI model to power your transcriptions:
+        </p>
+        
+        <div className="new-model-details">
+          <div className="new-detail-item">
+            <strong>File:</strong> ggml-tiny.en.bin (39 MB)
+          </div>
+          <div className="new-detail-item">
+            <strong>Source:</strong> <code>https://huggingface.co/ggerganov/whisper.cpp</code>
+          </div>
+        </div>
+
+        {downloadStatus === 'downloading' && downloadProgress && (
+          <div className="new-download-progress">
+            <div className="new-progress-bar">
+              <div 
+                className="new-progress-fill"
+                style={{ width: `${downloadProgress.progress}%` }}
+              />
             </div>
-            <div className="shortcut-item">
-              <label>Toggle Recording:</label>
-              <kbd className={isCapturingToggle ? 'capturing' : ''}>
-                {isCapturingToggle ? 'Press any key...' : toggleShortcut}
-              </kbd>
-              <button 
-                className="btn-text"
-                onClick={() => {
-                  setIsCapturingToggle(true);
-                  setIsCapturingPTT(false);
-                }}
-              >
-                Change
-              </button>
+            <div className="new-progress-text">
+              {downloadProgress.downloadedMb.toFixed(1)} / {downloadProgress.totalMb.toFixed(1)} MB
             </div>
           </div>
+        )}
 
-          <div className="step-actions">
-            <button className="btn-link skip-link" onClick={() => setCurrentStep('tour')}>
-              Skip for now
+        {downloadStatus === 'downloading' && !downloadProgress && (
+          <div className="new-download-initiating">
+            <div className="new-spinner" />
+            <div className="new-progress-text">Initiating download...</div>
+          </div>
+        )}
+
+        {downloadStatus === 'error' && (
+          <div className="new-error-state">
+            <AlertCircle size={20} />
+            <p>Download failed: {downloadError}</p>
+            <button className="new-btn-secondary" onClick={startModelDownload}>
+              Retry Download
             </button>
-            <button className="btn-primary welcome-cta" onClick={() => {
-              setShortcutsConfigured(true);
-              setCurrentStep('tour');
-            }}>
-              Continue
+          </div>
+        )}
+      </div>
+      
+      <div className="new-step-actions">
+        {downloadStatus === 'idle' && (
+          <button className="new-btn-primary" onClick={startModelDownload}>
+            Download & Continue
+          </button>
+        )}
+        {downloadStatus === 'complete' && (
+          <button className="new-btn-primary" disabled>
+            ✓ Model Downloaded
+          </button>
+        )}
+      </div>
+    </>
+  );
+
+  const renderMicrophoneStep = () => (
+    <>
+      <div className="new-step-header">
+        <h1 className="new-step-title">Microphone Permission</h1>
+        <p className="new-step-subtitle">Enable voice recording for local transcription.</p>
+      </div>
+      
+      <div className="new-step-features">
+        <div className="new-feature">
+          <Check size={16} /> All processing happens locally on your Mac
+        </div>
+        <div className="new-feature">
+          <Check size={16} /> You control when recording starts and stops
+        </div>
+      </div>
+      
+      <div className="new-step-content">
+        <p className="new-step-description">
+          Scout needs microphone access for voice transcription. All audio processing happens locally - your voice never leaves your device.
+        </p>
+        
+        <div className="new-permission-card">
+          {micPermission === 'not-determined' && (
+            <div className="new-status-item new-status-waiting">
+              <div className="new-status-icon">
+                <div className="new-spinner" />
+              </div>
+              <div className="new-status-content">
+                <div className="new-status-title">Requesting Permission</div>
+                <div className="new-status-description">macOS will prompt you to allow microphone access</div>
+              </div>
+            </div>
+          )}
+          {micPermission === 'granted' && (
+            <div className="new-status-item new-status-granted">
+              <div className="new-status-icon">
+                <Check size={20} />
+              </div>
+              <div className="new-status-content">
+                <div className="new-status-title">Permission Granted</div>
+                <div className="new-status-description">Scout can now access your microphone for transcription</div>
+              </div>
+            </div>
+          )}
+          {micPermission === 'denied' && (
+            <div className="new-status-item new-status-denied">
+              <div className="new-status-icon">
+                <X size={20} />
+              </div>
+              <div className="new-status-content">
+                <div className="new-status-title">Permission Denied</div>
+                <div className="new-status-description">Please enable microphone access in System Preferences to continue</div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+      
+      <div className="new-step-actions">
+        {micPermission === 'not-determined' && (
+          <button className="new-btn-primary" onClick={requestMicPermission}>
+            Grant Permission
+          </button>
+        )}
+        {micPermission === 'granted' && (
+          <button className="new-btn-primary" onClick={() => setCurrentStep('shortcuts')}>
+            Continue
+          </button>
+        )}
+        {micPermission === 'denied' && (
+          <button className="new-btn-secondary" onClick={() => {
+            invoke('open_system_preferences_audio');
+          }}>
+            Open System Preferences
+          </button>
+        )}
+      </div>
+    </>
+  );
+
+  const renderShortcutsStep = () => (
+    <>
+      <div className="new-step-header new-shortcuts-header">
+        <h1 className="new-step-title">Create Shortcuts</h1>
+        <p className="new-step-subtitle">Set up keyboard shortcuts for quick voice recording.</p>
+      </div>
+      
+      <div className="new-step-content">
+        <div className="new-shortcuts-config">
+          <div className="new-shortcut-item">
+            <label>Hold Key:</label>
+            <kbd className={isCapturingPTT ? 'new-capturing' : ''}>
+              {isCapturingPTT ? 'Press any key...' : pushToTalkShortcut}
+            </kbd>
+            <button 
+              className="new-btn-text"
+              onClick={() => {
+                setIsCapturingPTT(true);
+                setIsCapturingToggle(false);
+              }}
+            >
+              Change
+            </button>
+          </div>
+          <div className="new-shortcut-item">
+            <label>Toggle Key:</label>
+            <kbd className={isCapturingToggle ? 'new-capturing' : ''}>
+              {isCapturingToggle ? 'Press any key...' : toggleShortcut}
+            </kbd>
+            <button 
+              className="new-btn-text"
+              onClick={() => {
+                setIsCapturingToggle(true);
+                setIsCapturingPTT(false);
+              }}
+            >
+              Change
             </button>
           </div>
         </div>
       </div>
-    </div>
+
+      <div className="new-step-actions">
+        <button className="new-btn-link" onClick={() => setCurrentStep('tour')}>
+          Skip for now
+        </button>
+        <button className="new-btn-primary" onClick={() => {
+          setShortcutsConfigured(true);
+          setCurrentStep('tour');
+        }}>
+          Continue
+        </button>
+      </div>
+    </>
   );
 
   const renderTourStep = () => {
     const canFinish = downloadStatus === 'complete';
     
     return (
-      <div className="onboarding-step welcome-step">
-        <div className="welcome-visual">
-          <img 
-            src={soundwaveImage} 
-            alt="Voice visualization in glass dome"
-            className="soundwave-hero"
-          />
+      <>
+        <div className="new-step-header">
+          <h1 className="new-step-title">You're Ready!</h1>
+          <p className="new-step-subtitle">Scout is configured and ready for voice transcription.</p>
         </div>
-        <div className="welcome-content">
-          <div className="model-info">
-            <h1 className="welcome-title">You're Ready!</h1>
-            <p className="welcome-subtitle">Scout is configured and ready for voice transcription.</p>
-            
-            <div className="info-features">
-              <div className="feature">
-                <Check /> AI model downloaded and ready
-              </div>
-              <div className="feature">
-                <Check /> Microphone access granted
-              </div>
-              <div className="feature">
-                <Check /> Shortcuts configured for quick recording
-              </div>
-            </div>
-            
-            <div className="quick-reference">
-              <div className="reference-item">
-                <span className="reference-label">Push-to-Talk:</span>
-                <kbd className="reference-shortcut">{pushToTalkShortcut}</kbd>
-              </div>
-              <div className="reference-item">
-                <span className="reference-label">Toggle Recording:</span>
-                <kbd className="reference-shortcut">{toggleShortcut}</kbd>
-              </div>
-            </div>
-
-            <div className="download-status-final">
-              {downloadStatus === 'complete' ? (
-                <div className="status-complete">
-                  <Check size={16} />
-                  Model downloaded successfully!
-                </div>
-              ) : (
-                <div className="status-downloading">
-                  <div className="spinner-small" />
-                  Downloading model... {downloadProgress?.progress.toFixed(0)}% complete
-                </div>
-              )}
-            </div>
-
-            <button 
-              className="btn-primary welcome-cta" 
-              onClick={completeOnboarding}
-              disabled={!canFinish}
-            >
-              {canFinish ? 'Finish Setup' : 'Waiting for download...'}
-            </button>
+        
+        <div className="new-step-features">
+          <div className="new-feature">
+            <Check size={16} /> AI model downloaded and ready
+          </div>
+          <div className="new-feature">
+            <Check size={16} /> Microphone access granted
+          </div>
+          <div className="new-feature">
+            <Check size={16} /> Shortcuts configured for quick recording
           </div>
         </div>
-      </div>
+        
+        <div className="new-step-content">
+          <div className="new-quick-reference">
+            <div className="new-reference-item">
+              <span className="new-reference-label">Hold Key:</span>
+              <kbd className="new-reference-shortcut">{pushToTalkShortcut}</kbd>
+            </div>
+            <div className="new-reference-item">
+              <span className="new-reference-label">Toggle Key:</span>
+              <kbd className="new-reference-shortcut">{toggleShortcut}</kbd>
+            </div>
+          </div>
+
+          <div className="new-download-status-final">
+            {downloadStatus === 'complete' ? (
+              <div className="new-status-complete">
+                <Check size={16} />
+                Model downloaded successfully!
+              </div>
+            ) : (
+              <div className="new-status-downloading">
+                <div className="new-spinner-small" />
+                Downloading model... {downloadProgress?.progress.toFixed(0)}% complete
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="new-step-actions">
+          <button 
+            className="new-btn-primary" 
+            onClick={completeOnboarding}
+            disabled={!canFinish}
+          >
+            {canFinish ? 'Finish Setup' : 'Waiting for download...'}
+          </button>
+        </div>
+      </>
     );
   };
 
-  // Download progress indicator (shown on all steps except first)
-  const renderProgressIndicator = () => {
-    if (currentStep === 'model' || downloadStatus !== 'downloading') return null;
-    
-    return (
-      <div className="global-download-progress">
-        <div className="mini-progress-bar">
-          <div 
-            className="mini-progress-fill"
-            style={{ width: `${downloadProgress?.progress || 0}%` }}
-          />
-        </div>
-        <span className="mini-progress-text">
-          Downloading model... {downloadProgress?.progress.toFixed(0)}%
-        </span>
-      </div>
-    );
+  const renderStepContent = () => {
+    switch (currentStep) {
+      case 'model': return renderModelStep();
+      case 'microphone': return renderMicrophoneStep();
+      case 'shortcuts': return renderShortcutsStep();
+      case 'tour': return renderTourStep();
+    }
   };
 
   return (
-    <div className="onboarding-overlay">
-      <div className="onboarding-container">
-        {renderProgressIndicator()}
-        
-        <div className="onboarding-content">
-          {currentStep === 'model' && renderModelStep()}
-          {currentStep === 'microphone' && renderMicrophoneStep()}
-          {currentStep === 'shortcuts' && renderShortcutsStep()}
-          {currentStep === 'tour' && renderTourStep()}
-        </div>
-        
-        <div className="step-indicators">
+    <div className="new-onboarding-overlay">
+      {/* Background image */}
+      <div className="new-background-image">
+        <img 
+          src={soundwaveImage} 
+          alt="Voice visualization in glass dome"
+          className="new-soundwave-hero"
+        />
+      </div>
+
+      {/* Content container */}
+      <div className="new-content-container">
+        {/* Wrapper to center glass card while allowing indicators positioning */}
+        <div className="new-glass-wrapper">
+          <div className="new-step-indicators">
           <button 
-            className={`indicator ${currentStep === 'model' ? 'active' : 'completed'}`} 
+            className={`new-indicator ${currentStep === 'model' ? 'new-active' : 'new-completed'}`} 
             onClick={() => setCurrentStep('model')}
             disabled={false}
           >
-            {currentStep !== 'model' ? <Check size={12} /> : null}
+            {currentStep !== 'model' ? <Check size={14} /> : '1'}
           </button>
-          <div className={`indicator-connector ${downloadStatus === 'complete' ? 'completed' : ''}`} />
+          <div className={`new-indicator-connector ${downloadStatus === 'complete' ? 'new-completed' : ''}`} />
           <button 
-            className={`indicator ${currentStep === 'microphone' ? 'active' : ''} ${downloadStatus === 'complete' ? (currentStep === 'microphone' ? 'active' : 'completed') : ''}`} 
+            className={`new-indicator ${currentStep === 'microphone' ? 'new-active' : ''} ${downloadStatus === 'complete' ? (currentStep === 'microphone' ? 'new-active' : 'new-completed') : ''}`} 
             onClick={() => downloadStatus === 'complete' && setCurrentStep('microphone')}
             disabled={downloadStatus !== 'complete'}
           >
-            {downloadStatus === 'complete' && currentStep !== 'microphone' ? <Check size={12} /> : null}
+            {downloadStatus === 'complete' && currentStep !== 'microphone' ? <Check size={14} /> : 
+             currentStep === 'microphone' ? '2' : '2'}
           </button>
-          <div className={`indicator-connector ${micPermission === 'granted' ? 'completed' : ''}`} />
+          <div className={`new-indicator-connector ${micPermission === 'granted' ? 'new-completed' : ''}`} />
           <button 
-            className={`indicator ${currentStep === 'shortcuts' ? 'active' : ''} ${micPermission === 'granted' ? (currentStep === 'shortcuts' ? 'active' : 'completed') : ''}`} 
+            className={`new-indicator ${currentStep === 'shortcuts' ? 'new-active' : ''} ${micPermission === 'granted' ? (currentStep === 'shortcuts' ? 'new-active' : 'new-completed') : ''}`} 
             onClick={() => micPermission === 'granted' && setCurrentStep('shortcuts')}
             disabled={micPermission !== 'granted'}
           >
-            {micPermission === 'granted' && currentStep !== 'shortcuts' ? <Check size={12} /> : null}
+            {micPermission === 'granted' && currentStep !== 'shortcuts' ? <Check size={14} /> : 
+             currentStep === 'shortcuts' ? '3' : '3'}
           </button>
-          <div className={`indicator-connector ${shortcutsConfigured || currentStep === 'tour' ? 'completed' : ''}`} />
+          <div className={`new-indicator-connector ${shortcutsConfigured || currentStep === 'tour' ? 'new-completed' : ''}`} />
           <button 
-            className={`indicator ${currentStep === 'tour' ? 'active' : ''} ${shortcutsConfigured || currentStep === 'tour' ? (currentStep === 'tour' ? 'active' : 'completed') : ''}`} 
+            className={`new-indicator ${currentStep === 'tour' ? 'new-active' : ''} ${shortcutsConfigured || currentStep === 'tour' ? (currentStep === 'tour' ? 'new-active' : 'new-completed') : ''}`} 
             onClick={() => (shortcutsConfigured || currentStep === 'tour') && setCurrentStep('tour')}
             disabled={!shortcutsConfigured && currentStep !== 'tour'}
           >
-            {(shortcutsConfigured || currentStep === 'tour') && currentStep !== 'tour' ? <Check size={12} /> : null}
+            {(shortcutsConfigured || currentStep === 'tour') && currentStep !== 'tour' ? <Check size={14} /> : 
+             currentStep === 'tour' ? '4' : '4'}
           </button>
+        </div>
+        
+          <div className="new-glass-card">
+            {renderStepContent()}
+          </div>
         </div>
       </div>
     </div>
