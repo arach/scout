@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { safeEventListen, cleanupListeners } from "./lib/safeEventListener";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -97,6 +97,34 @@ function App() {
     toggleAutoPaste,
   } = useSettings();
 
+  // Memoize callback functions to prevent unnecessary re-renders
+  const onTranscriptCreatedCallback = useCallback(() => {
+    if (currentView === 'record') {
+      loadRecentTranscripts();
+    }
+  }, [currentView]);
+
+  const onRecordingCompleteCallback = useCallback(() => {
+    // Don't show processing state for normal recording
+    // Ring buffer transcribes in real-time, so transcription is already done
+    // The transcript-created event will fire immediately
+    // Only file uploads need the processing state
+  }, []);
+
+  const onProcessingCompleteCallback = useCallback(() => {
+    // Force refresh to ensure UI is updated
+    setTimeout(() => {
+      loadRecentTranscripts();
+    }, 50);
+  }, []);
+
+  const onRecordingCompletedCallback = useCallback(() => {
+    // Force refresh
+    setTimeout(() => {
+      loadRecentTranscripts();
+    }, 50);
+  }, []);
+
   // Use the recording hook (always call it, but disable when showing onboarding)
   const { 
     isRecording, 
@@ -107,17 +135,8 @@ function App() {
     stopRecording,
     cancelRecording 
   } = useRecording({
-    onTranscriptCreated: showFirstRun ? undefined : () => {
-      if (currentView === 'record') {
-        loadRecentTranscripts();
-      }
-    },
-    onRecordingComplete: showFirstRun ? undefined : () => {
-      // Don't show processing state for normal recording
-      // Ring buffer transcribes in real-time, so transcription is already done
-      // The transcript-created event will fire immediately
-      // Only file uploads need the processing state
-    },
+    onTranscriptCreated: showFirstRun ? undefined : onTranscriptCreatedCallback,
+    onRecordingComplete: showFirstRun ? undefined : onRecordingCompleteCallback,
     soundEnabled,
     selectedMic,
     vadEnabled,
@@ -156,32 +175,16 @@ function App() {
     completionSoundThreshold,
     setIsProcessing: showFirstRun ? undefined : setIsProcessing,
     setTranscripts: showFirstRun ? undefined : setTranscripts,
-    onTranscriptCreated: showFirstRun ? undefined : () => {
-      if (currentView === 'record') {
-        loadRecentTranscripts();
-      }
-    },
-    onProcessingComplete: showFirstRun ? undefined : () => {
-      // Force refresh to ensure UI is updated
-      setTimeout(() => {
-        loadRecentTranscripts();
-      }, 50);
-    },
-    onRecordingCompleted: showFirstRun ? undefined : () => {
-      // Force refresh
-      setTimeout(() => {
-        loadRecentTranscripts();
-      }, 50);
-    }
+    onTranscriptCreated: showFirstRun ? undefined : onTranscriptCreatedCallback,
+    onProcessingComplete: showFirstRun ? undefined : onProcessingCompleteCallback,
+    onRecordingCompleted: showFirstRun ? undefined : onRecordingCompletedCallback
   });
 
   // Use the processing status hook (only when not showing onboarding)
   useProcessingStatus({
     setUploadProgress: showFirstRun ? () => {} : setUploadProgress,
     setIsProcessing: showFirstRun ? () => {} : setIsProcessing,
-    onProcessingComplete: showFirstRun ? undefined : () => {
-      loadRecentTranscripts();
-    }
+    onProcessingComplete: showFirstRun ? undefined : onProcessingCompleteCallback
   });
 
   // Use the native overlay hook (only when not showing onboarding)
