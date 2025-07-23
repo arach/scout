@@ -37,8 +37,8 @@
   justify-content: center;
   z-index: 1;
   overflow: hidden;
-  /* Base background matching the darkest parts of the soundwave image */
-  background: #080c1a;
+  /* Base background harmonizing with the soundwave image's dark navy background */
+  background: #0a0f1c;
 }
 
 /* Edge blend gradients positioned around the image boundaries */
@@ -53,33 +53,33 @@
   background: 
     /* Left edge gradient */
     linear-gradient(90deg, 
-      #080c1a 0%,
-      #0c1028 10%,
-      rgba(12, 16, 40, 0.5) 20%, 
+      #0a0f1c 0%,
+      #0e132a 10%,
+      rgba(14, 19, 42, 0.5) 20%, 
       transparent 40%),
     /* Right edge gradient */
     linear-gradient(-90deg, 
-      #080c1a 0%,
-      #0c1028 10%,
-      rgba(12, 16, 40, 0.5) 20%, 
+      #0a0f1c 0%,
+      #0e132a 10%,
+      rgba(14, 19, 42, 0.5) 20%, 
       transparent 40%),
     /* Vignette to blend edges */
     radial-gradient(ellipse at center, 
       transparent 30%, 
-      rgba(8, 12, 26, 0.3) 60%, 
-      rgba(8, 12, 26, 0.7) 85%, 
-      #080c1a 100%);
+      rgba(10, 15, 28, 0.3) 60%, 
+      rgba(10, 15, 28, 0.7) 85%, 
+      #0a0f1c 100%);
   z-index: 1;
   pointer-events: none;
 }
 
 .new-soundwave-hero {
-  width: 80%;
-  height: 80%;
+  width: 68%;
+  height: 68%;
   object-fit: contain;
   object-position: center;
   opacity: 1;
-  transform: translateY(-180px); /* Position high up but leave more room below */
+  transform: translateY(-205px); /* Position high up but leave more room below */
   z-index: 0;
 }
 
@@ -838,7 +838,7 @@
   }
   
   .new-soundwave-hero {
-    transform: translateY(-150px); /* Adjust for mobile */
+    transform: translateY(-175px); /* Adjust for mobile */
   }
   
   /* Move step indicators to bottom on mobile */
