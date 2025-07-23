@@ -129,10 +129,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
       const status = await invoke<PermissionStatus>('request_microphone_permission');
       setMicPermission(status);
       
-      if (status === 'granted') {
-        // Auto-advance after a short delay
-        setTimeout(() => setCurrentStep('shortcuts'), 1000);
-      }
+      // Remove auto-advance to let user see the granted state and manually continue
     } catch (error) {
       console.error('Failed to request microphone permission:', error);
     }
@@ -198,19 +195,33 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
                 Download & Continue
               </button>
             )}
+            {downloadStatus === 'complete' && (
+              <button className="btn-primary welcome-cta" disabled>
+                ✓ Model Downloaded
+              </button>
+            )}
           </div>
 
-          {downloadStatus === 'downloading' && downloadProgress && (
+          {downloadStatus === 'downloading' && (
             <div className="download-status">
-              <div className="progress-bar">
-                <div 
-                  className="progress-fill"
-                  style={{ width: `${downloadProgress.progress}%` }}
-                />
-              </div>
-              <div className="progress-text">
-                {downloadProgress.downloadedMb.toFixed(1)} / {downloadProgress.totalMb.toFixed(1)} MB
-              </div>
+              {downloadProgress ? (
+                <>
+                  <div className="progress-bar">
+                    <div 
+                      className="progress-fill"
+                      style={{ width: `${downloadProgress.progress}%` }}
+                    />
+                  </div>
+                  <div className="progress-text">
+                    {downloadProgress.downloadedMb.toFixed(1)} / {downloadProgress.totalMb.toFixed(1)} MB
+                  </div>
+                </>
+              ) : (
+                <div className="download-initiating">
+                  <div className="spinner" />
+                  <div className="progress-text">Initiating download...</div>
+                </div>
+              )}
             </div>
           )}
 
@@ -228,52 +239,86 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
   );
 
   const renderMicrophoneStep = () => (
-    <div className="onboarding-step">
-      <div className="step-icon">
-        <Mic size={48} />
+    <div className="onboarding-step welcome-step">
+      <div className="welcome-visual">
+        <img 
+          src={soundwaveImage} 
+          alt="Voice visualization in glass dome"
+          className="soundwave-hero"
+        />
       </div>
-      <h2>Scout needs microphone access</h2>
-      <p>To transcribe your speech, Scout needs permission to use your microphone.</p>
-      
-      <div className="permission-status">
-        {micPermission === 'not-determined' && (
-          <div className="status-waiting">
-            <div className="spinner" />
-            Waiting for permission...
+      <div className="welcome-content">
+        <div className="model-info">
+          <h1 className="welcome-title">Microphone Permission</h1>
+          <p className="welcome-subtitle">Enable voice recording for local transcription.</p>
+          
+          <div className="info-features">
+            <div className="feature">
+              <Check /> All processing happens locally on your Mac
+            </div>
+            <div className="feature">
+              <Check /> You control when recording starts and stops
+            </div>
           </div>
-        )}
-        {micPermission === 'granted' && (
-          <div className="status-granted">
-            <Check size={20} />
-            Permission granted!
+          
+          <p className="step-description">Scout needs microphone access for voice transcription. All audio processing happens locally - your voice never leaves your device.</p>
+          
+          <div className="permission-status-card">
+            {micPermission === 'not-determined' && (
+              <div className="status-item status-waiting">
+                <div className="status-icon">
+                  <div className="spinner" />
+                </div>
+                <div className="status-content">
+                  <div className="status-title">Requesting Permission</div>
+                  <div className="status-description">macOS will prompt you to allow microphone access</div>
+                </div>
+              </div>
+            )}
+            {micPermission === 'granted' && (
+              <div className="status-item status-granted">
+                <div className="status-icon">
+                  <Check size={24} />
+                </div>
+                <div className="status-content">
+                  <div className="status-title">Permission Granted</div>
+                  <div className="status-description">Scout can now access your microphone for transcription</div>
+                </div>
+              </div>
+            )}
+            {micPermission === 'denied' && (
+              <div className="status-item status-denied">
+                <div className="status-icon">
+                  <X size={24} />
+                </div>
+                <div className="status-content">
+                  <div className="status-title">Permission Denied</div>
+                  <div className="status-description">Please enable microphone access in System Preferences to continue</div>
+                </div>
+              </div>
+            )}
           </div>
-        )}
-        {micPermission === 'denied' && (
-          <div className="status-denied">
-            <X size={20} />
-            Permission denied - Scout won't work without microphone access
-          </div>
-        )}
-      </div>
 
-      {micPermission === 'not-determined' && (
-        <button className="btn-primary" onClick={requestMicPermission}>
-          Grant Permission
-        </button>
-      )}
-      {micPermission === 'granted' && (
-        <button className="btn-primary" onClick={() => setCurrentStep('shortcuts')}>
-          Continue
-        </button>
-      )}
-      {micPermission === 'denied' && (
-        <button className="btn-secondary" onClick={() => {
-          // TODO: Open system preferences
-          invoke('open_system_preferences_audio');
-        }}>
-          Open System Preferences
-        </button>
-      )}
+          {micPermission === 'not-determined' && (
+            <button className="btn-primary welcome-cta" onClick={requestMicPermission}>
+              Grant Permission
+            </button>
+          )}
+          {micPermission === 'granted' && (
+            <button className="btn-primary welcome-cta" onClick={() => setCurrentStep('shortcuts')}>
+              Continue
+            </button>
+          )}
+          {micPermission === 'denied' && (
+            <button className="btn-secondary welcome-cta" onClick={() => {
+              // TODO: Open system preferences
+              invoke('open_system_preferences_audio');
+            }}>
+              Open System Preferences
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 
@@ -290,8 +335,10 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
     if (e.altKey) modifiers.push('Alt');
     if (e.shiftKey) modifiers.push('Shift');
     
-    // Get the key
+    // Get the key - ignore modifier-only presses
     let key = e.key;
+    if (['Meta', 'Control', 'Alt', 'Shift'].includes(key)) return;
+    
     if (key === ' ') key = 'Space';
     else if (key.length === 1) key = key.toUpperCase();
     
@@ -324,59 +371,64 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
   }, [handleKeyDown]);
 
   const renderShortcutsStep = () => (
-    <div className="onboarding-step">
-      <div className="step-icon">
-        <Keyboard size={48} />
+    <div className="onboarding-step welcome-step">
+      <div className="welcome-visual">
+        <img 
+          src={soundwaveImage} 
+          alt="Voice visualization in glass dome"
+          className="soundwave-hero"
+        />
       </div>
-      <h2>Set up your recording shortcuts</h2>
-      
-      <div className="shortcuts-config">
-        <div className="shortcut-item">
-          <label>Push-to-Talk:</label>
-          <kbd className={isCapturingPTT ? 'capturing' : ''}>
-            {isCapturingPTT ? 'Press any key...' : pushToTalkShortcut}
-          </kbd>
-          <button 
-            className="btn-text"
-            onClick={() => {
-              setIsCapturingPTT(true);
-              setIsCapturingToggle(false);
-            }}
-          >
-            Change
-          </button>
-        </div>
-        <div className="shortcut-item">
-          <label>Toggle Recording:</label>
-          <kbd className={isCapturingToggle ? 'capturing' : ''}>
-            {isCapturingToggle ? 'Press any key...' : toggleShortcut}
-          </kbd>
-          <button 
-            className="btn-text"
-            onClick={() => {
-              setIsCapturingToggle(true);
-              setIsCapturingPTT(false);
-            }}
-          >
-            Change
-          </button>
-        </div>
-      </div>
+      <div className="welcome-content">
+        <div className="model-info">
+          <h1 className="welcome-title">Create Shortcuts</h1>
+          <p className="welcome-subtitle">Set up keyboard shortcuts for quick voice recording.</p>
+          
+          <div className="shortcuts-config">
+            <div className="shortcut-item">
+              <label>Push-to-Talk:</label>
+              <kbd className={isCapturingPTT ? 'capturing' : ''}>
+                {isCapturingPTT ? 'Press any key...' : pushToTalkShortcut}
+              </kbd>
+              <button 
+                className="btn-text"
+                onClick={() => {
+                  setIsCapturingPTT(true);
+                  setIsCapturingToggle(false);
+                }}
+              >
+                Change
+              </button>
+            </div>
+            <div className="shortcut-item">
+              <label>Toggle Recording:</label>
+              <kbd className={isCapturingToggle ? 'capturing' : ''}>
+                {isCapturingToggle ? 'Press any key...' : toggleShortcut}
+              </kbd>
+              <button 
+                className="btn-text"
+                onClick={() => {
+                  setIsCapturingToggle(true);
+                  setIsCapturingPTT(false);
+                }}
+              >
+                Change
+              </button>
+            </div>
+          </div>
 
-      <div className="shortcut-hint">
-        <p>💡 Hold the push-to-talk key while speaking for instant transcription</p>
-      </div>
-
-      <div className="step-actions">
-        <button className="btn-secondary" onClick={() => setCurrentStep('tour')}>
-          Skip for now
-        </button>
-        <button className="btn-primary" onClick={() => {
-          setShortcutsConfigured(true);
-          setCurrentStep('tour');
-        }}>
-          Continue
-        </button>
+          <div className="step-actions">
+            <button className="btn-link skip-link" onClick={() => setCurrentStep('tour')}>
+              Skip for now
+            </button>
+            <button className="btn-primary welcome-cta" onClick={() => {
+              setShortcutsConfigured(true);
+              setCurrentStep('tour');
+            }}>
+              Continue
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -385,52 +437,65 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
     const canFinish = downloadStatus === 'complete';
     
     return (
-      <div className="onboarding-step">
-        <div className="step-icon">
-          <Sparkles size={48} />
+      <div className="onboarding-step welcome-step">
+        <div className="welcome-visual">
+          <img 
+            src={soundwaveImage} 
+            alt="Voice visualization in glass dome"
+            className="soundwave-hero"
+          />
         </div>
-        <h2>You're almost ready!</h2>
-        
-        <div className="tour-content">
-          <div className="tour-item">
-            <h3>Push-to-Talk</h3>
-            <p>Hold <kbd>{pushToTalkShortcut}</kbd> while speaking for instant transcription</p>
-          </div>
-          <div className="tour-item">
-            <h3>Toggle Mode</h3>
-            <p>Press <kbd>{toggleShortcut}</kbd> to start/stop longer recordings</p>
-          </div>
-          <div className="tour-item">
-            <h3>Transcription Area</h3>
-            <p>Your text appears here in real-time as you speak</p>
-          </div>
-          <div className="tour-item">
-            <h3>Search & Export</h3>
-            <p>Find past transcriptions and export them in various formats</p>
-          </div>
-        </div>
-
-        <div className="download-status-final">
-          {downloadStatus === 'complete' ? (
-            <div className="status-complete">
-              <Check size={16} />
-              Model downloaded successfully!
+        <div className="welcome-content">
+          <div className="model-info">
+            <h1 className="welcome-title">You're Ready!</h1>
+            <p className="welcome-subtitle">Scout is configured and ready for voice transcription.</p>
+            
+            <div className="info-features">
+              <div className="feature">
+                <Check /> AI model downloaded and ready
+              </div>
+              <div className="feature">
+                <Check /> Microphone access granted
+              </div>
+              <div className="feature">
+                <Check /> Shortcuts configured for quick recording
+              </div>
             </div>
-          ) : (
-            <div className="status-downloading">
-              <div className="spinner-small" />
-              Downloading model... {downloadProgress?.progress.toFixed(0)}% complete
+            
+            <div className="quick-reference">
+              <div className="reference-item">
+                <span className="reference-label">Push-to-Talk:</span>
+                <kbd className="reference-shortcut">{pushToTalkShortcut}</kbd>
+              </div>
+              <div className="reference-item">
+                <span className="reference-label">Toggle Recording:</span>
+                <kbd className="reference-shortcut">{toggleShortcut}</kbd>
+              </div>
             </div>
-          )}
-        </div>
 
-        <button 
-          className="btn-primary" 
-          onClick={completeOnboarding}
-          disabled={!canFinish}
-        >
-          {canFinish ? 'Finish Setup' : 'Waiting for download...'}
-        </button>
+            <div className="download-status-final">
+              {downloadStatus === 'complete' ? (
+                <div className="status-complete">
+                  <Check size={16} />
+                  Model downloaded successfully!
+                </div>
+              ) : (
+                <div className="status-downloading">
+                  <div className="spinner-small" />
+                  Downloading model... {downloadProgress?.progress.toFixed(0)}% complete
+                </div>
+              )}
+            </div>
+
+            <button 
+              className="btn-primary welcome-cta" 
+              onClick={completeOnboarding}
+              disabled={!canFinish}
+            >
+              {canFinish ? 'Finish Setup' : 'Waiting for download...'}
+            </button>
+          </div>
+        </div>
       </div>
     );
   };
@@ -467,10 +532,37 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
         </div>
         
         <div className="step-indicators">
-          <div className={`indicator ${currentStep === 'model' ? 'active' : ''}`} />
-          <div className={`indicator ${currentStep === 'microphone' ? 'active' : ''}`} />
-          <div className={`indicator ${currentStep === 'shortcuts' ? 'active' : ''}`} />
-          <div className={`indicator ${currentStep === 'tour' ? 'active' : ''}`} />
+          <button 
+            className={`indicator ${currentStep === 'model' ? 'active' : 'completed'}`} 
+            onClick={() => setCurrentStep('model')}
+            disabled={false}
+          >
+            {currentStep !== 'model' ? <Check size={12} /> : null}
+          </button>
+          <div className={`indicator-connector ${downloadStatus === 'complete' ? 'completed' : ''}`} />
+          <button 
+            className={`indicator ${currentStep === 'microphone' ? 'active' : ''} ${downloadStatus === 'complete' ? (currentStep === 'microphone' ? 'active' : 'completed') : ''}`} 
+            onClick={() => downloadStatus === 'complete' && setCurrentStep('microphone')}
+            disabled={downloadStatus !== 'complete'}
+          >
+            {downloadStatus === 'complete' && currentStep !== 'microphone' ? <Check size={12} /> : null}
+          </button>
+          <div className={`indicator-connector ${micPermission === 'granted' ? 'completed' : ''}`} />
+          <button 
+            className={`indicator ${currentStep === 'shortcuts' ? 'active' : ''} ${micPermission === 'granted' ? (currentStep === 'shortcuts' ? 'active' : 'completed') : ''}`} 
+            onClick={() => micPermission === 'granted' && setCurrentStep('shortcuts')}
+            disabled={micPermission !== 'granted'}
+          >
+            {micPermission === 'granted' && currentStep !== 'shortcuts' ? <Check size={12} /> : null}
+          </button>
+          <div className={`indicator-connector ${shortcutsConfigured || currentStep === 'tour' ? 'completed' : ''}`} />
+          <button 
+            className={`indicator ${currentStep === 'tour' ? 'active' : ''} ${shortcutsConfigured || currentStep === 'tour' ? (currentStep === 'tour' ? 'active' : 'completed') : ''}`} 
+            onClick={() => (shortcutsConfigured || currentStep === 'tour') && setCurrentStep('tour')}
+            disabled={!shortcutsConfigured && currentStep !== 'tour'}
+          >
+            {(shortcutsConfigured || currentStep === 'tour') && currentStep !== 'tour' ? <Check size={12} /> : null}
+          </button>
         </div>
       </div>
     </div>

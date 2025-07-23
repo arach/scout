@@ -322,7 +322,7 @@
   border-radius: 20px;
   padding: 32px 36px 28px;
   width: 100%;
-  max-width: 540px;
+  max-width: 460px;
   margin: 0 auto 24px;
   text-align: center;
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -465,7 +465,7 @@
   color: #ffffff !important;
   border: 1px solid rgba(255, 255, 255, 0.15) !important;
   border-radius: 10px;
-  padding: 14px 44px;
+  padding: 10px 44px;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 15px;
   font-weight: 600;
@@ -477,6 +477,8 @@
   box-shadow: 
     0 2px 8px rgba(0, 0, 0, 0.15),
     inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+  position: relative;
+  z-index: 10;
 }
 
 .btn-primary.welcome-cta:hover:not(:disabled) {
@@ -487,12 +489,45 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.15) !important;
 }
 
+.btn-primary.welcome-cta:disabled {
+  opacity: 0.5 !important;
+  cursor: not-allowed !important;
+}
+
+/* Secondary button in welcome context */
+.btn-secondary.welcome-cta {
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 10px;
+  padding: 10px 44px;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-top: 20px;
+  text-transform: none;
+  letter-spacing: 0;
+  position: relative;
+  z-index: 10;
+  box-shadow: 
+    0 2px 8px rgba(0, 0, 0, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+}
+
+.btn-secondary.welcome-cta:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.15) !important;
+}
+
 .btn-primary:not(.welcome-cta) {
   background: var(--accent-primary);
   color: white;
   border: none;
   border-radius: 10px;
-  padding: 14px 32px;
+  padding: 10px 32px;
+  margin-top: 12px;
   font-size: 16px;
   font-weight: 600;
   cursor: pointer;
@@ -584,33 +619,86 @@
   color: var(--text-danger);
 }
 
-.permission-status {
-  padding: 20px;
+.permission-status-card {
   width: 100%;
   max-width: 400px;
+  margin: 16px 0;
 }
 
-.status-waiting,
-.status-granted,
-.status-denied {
+.status-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 20px;
+  border-radius: 10px;
+  border: 1px solid;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: all 0.3s ease;
+}
+
+.status-item.status-waiting {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.status-item.status-granted {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.15) 0%, rgba(34, 197, 94, 0.08) 100%);
+  border-color: rgba(34, 197, 94, 0.3);
+  color: #22c55e;
+}
+
+.status-item.status-denied {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(239, 68, 68, 0.08) 100%);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+}
+
+.status-icon {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  font-size: 16px;
-  font-weight: 500;
+  border-radius: 50%;
+  margin-top: 1px;
 }
 
-.status-waiting {
-  color: var(--text-secondary);
+.status-waiting .status-icon {
+  background: rgba(255, 255, 255, 0.1);
 }
 
-.status-granted {
-  color: var(--text-success);
+.status-granted .status-icon {
+  background: rgba(34, 197, 94, 0.2);
 }
 
-.status-denied {
-  color: var(--text-danger);
+.status-denied .status-icon {
+  background: rgba(239, 68, 68, 0.2);
+}
+
+.status-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+}
+
+.status-title {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+  text-align: left;
+}
+
+.status-description {
+  font-size: 13px;
+  font-weight: 400;
+  opacity: 0.8;
+  line-height: 1.3;
+  text-align: left;
 }
 
 .spinner {
@@ -646,33 +734,55 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 16px;
-  background: var(--bg-secondary);
-  border-radius: 8px;
+  padding: 14px 18px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
-.shortcut-item label {
+.welcome-step .shortcut-item label {
   flex: 1;
   font-size: 14px;
-  color: var(--text-primary);
+  color: rgba(255, 255, 255, 0.9);
   text-align: left;
+  font-weight: 400;
 }
 
-.shortcut-item kbd {
-  font-family: var(--font-family-mono);
+.welcome-step .shortcut-item kbd {
+  font-family: 'SF Mono', Monaco, monospace;
   font-size: 12px;
-  background: var(--bg-tertiary);
-  padding: 4px 8px;
-  border-radius: 4px;
-  border: 1px solid var(--border-primary);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.95);
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
   transition: all 0.2s ease;
+  min-width: 100px;
+  text-align: center;
 }
 
-.shortcut-item kbd.capturing {
-  background: var(--accent-primary);
+.welcome-step .shortcut-item kbd.capturing {
+  background: rgba(74, 158, 255, 0.8);
   color: white;
-  border-color: var(--accent-primary);
+  border-color: rgba(74, 158, 255, 0.6);
   animation: pulse 1.5s infinite;
+}
+
+.welcome-step .btn-text {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 8px;
+  transition: all 0.2s ease;
+  text-decoration: none;
+}
+
+.welcome-step .btn-text:hover {
+  color: rgba(255, 255, 255, 0.9);
 }
 
 @keyframes pulse {
@@ -687,64 +797,86 @@
   }
 }
 
-.shortcut-hint {
-  background: var(--bg-secondary);
-  padding: 16px;
+.welcome-step .shortcut-hint {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.01) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 14px 16px;
   border-radius: 8px;
   width: 100%;
   max-width: 400px;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
 }
 
-.shortcut-hint p {
-  font-size: 14px;
-  color: var(--text-secondary);
+.welcome-step .shortcut-hint p {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.8);
   margin: 0;
   text-align: left;
+  line-height: 1.4;
 }
 
 .step-actions {
   display: flex;
-  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
   margin-top: 8px;
 }
 
-.tour-content {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 16px;
-  width: 100%;
-  max-width: 500px;
-  margin: 20px 0;
+.btn-link.skip-link {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 13px;
+  font-weight: 400;
+  cursor: pointer;
+  padding: 8px 12px;
+  transition: all 0.2s ease;
+  text-decoration: none;
 }
 
-.tour-item {
-  background: var(--bg-secondary);
-  padding: 16px;
-  border-radius: 8px;
-  text-align: left;
+.btn-link.skip-link:hover {
+  color: rgba(255, 255, 255, 0.7);
 }
 
-.tour-item h3 {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin: 0 0 8px 0;
+.quick-reference {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.01) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-top: 20px;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
 }
 
-.tour-item p {
-  font-size: 14px;
-  color: var(--text-secondary);
-  margin: 0;
-  text-align: left;
+.reference-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
 }
 
-.tour-item kbd {
-  font-family: var(--font-family-mono);
-  font-size: 12px;
-  background: var(--bg-tertiary);
-  padding: 2px 6px;
-  border-radius: 4px;
-  border: 1px solid var(--border-primary);
+.reference-item:not(:last-child) {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.reference-label {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.8);
+  font-weight: 400;
+}
+
+.reference-shortcut {
+  font-family: 'SF Mono', Monaco, monospace;
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.95);
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  min-width: 80px;
+  text-align: center;
 }
 
 .download-status-final {
@@ -774,25 +906,115 @@
   color: var(--text-secondary);
 }
 
+.download-initiating {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+}
+
+.download-initiating .spinner {
+  width: 24px;
+  height: 24px;
+}
+
+/* Smooth transitions for step changes */
+.onboarding-content {
+  transition: opacity 0.2s ease-in-out;
+}
+
+.onboarding-step {
+  animation: fadeInUp 0.4s ease-out;
+}
+
 .step-indicators {
   display: flex;
-  gap: 8px;
+  align-items: center;
   justify-content: center;
   margin-top: 24px;
+  gap: 0;
 }
 
 .indicator {
-  width: 8px;
-  height: 8px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
-  background: var(--bg-tertiary);
-  transition: all 0.3s ease;
+  background: rgba(255, 255, 255, 0.1);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+  transition: all 0.4s ease;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+
+.indicator:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.3);
+  transform: scale(1.1);
 }
 
 .indicator.active {
+  background: linear-gradient(135deg, #4a9eff 0%, #357abd 100%);
+  border-color: #4a9eff;
+  box-shadow: 0 0 20px rgba(74, 158, 255, 0.4);
+  animation: pulse-glow 2s ease-in-out infinite;
+  position: relative;
+}
+
+.indicator.active::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 8px;
+  height: 8px;
+  background: white;
+  border-radius: 50%;
+  opacity: 0.9;
+}
+
+.indicator.completed {
+  background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+  border-color: #22c55e;
+  color: white;
+  box-shadow: 0 0 15px rgba(34, 197, 94, 0.3);
+}
+
+.indicator.completed:hover {
+  box-shadow: 0 0 20px rgba(34, 197, 94, 0.5);
+}
+
+.indicator:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.indicator-connector {
   width: 24px;
-  border-radius: 4px;
-  background: var(--accent-primary);
+  height: 2px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.2) 0%, rgba(255, 255, 255, 0.1) 100%);
+  position: relative;
+  transition: all 0.4s ease;
+}
+
+.indicator-connector.completed {
+  background: linear-gradient(90deg, #22c55e 0%, #16a34a 100%);
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.3);
+}
+
+/* Pulse animation for active step */
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(74, 158, 255, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(74, 158, 255, 0.6);
+  }
 }
 
 /* Responsive adjustments */
