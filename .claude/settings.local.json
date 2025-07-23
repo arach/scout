@@ -82,7 +82,10 @@
       "Bash(/usr/libexec/PlistBuddy:*)",
       "Bash(/Users/arach/dev/scout/scripts/add-microphone-permission.sh \"/Users/arach/dev/scout/src-tauri/target/release/bundle/macos/Scout.app/Contents/Info.plist\")",
       "Bash(codesign:*)",
-      "Bash(hdiutil create:*)"
+      "Bash(hdiutil create:*)",
+      "Bash(rg -A 5 -B 5 \"showFirstRun.*true|OnboardingFlow\" src/App.tsx)",
+      "Bash(rg -n -A 10 \"if.*showFirstRun.*{\" src/App.tsx)",
+      "Bash(rg -n -A 10 \"if.*showFirstRun\" src/App.tsx)"
     ],
     "deny": []
   }
