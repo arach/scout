@@ -361,7 +361,7 @@ export const OnboardingFlowNew: React.FC<OnboardingFlowNewProps> = ({ onComplete
 
   const renderShortcutsStep = () => (
     <>
-      <div className="new-step-header">
+      <div className="new-step-header new-shortcuts-header">
         <h1 className="new-step-title">Create Shortcuts</h1>
         <p className="new-step-subtitle">Set up keyboard shortcuts for quick voice recording.</p>
       </div>
@@ -369,7 +369,7 @@ export const OnboardingFlowNew: React.FC<OnboardingFlowNewProps> = ({ onComplete
       <div className="new-step-content">
         <div className="new-shortcuts-config">
           <div className="new-shortcut-item">
-            <label>Push-to-Talk:</label>
+            <label>Hold Key:</label>
             <kbd className={isCapturingPTT ? 'new-capturing' : ''}>
               {isCapturingPTT ? 'Press any key...' : pushToTalkShortcut}
             </kbd>
@@ -384,7 +384,7 @@ export const OnboardingFlowNew: React.FC<OnboardingFlowNewProps> = ({ onComplete
             </button>
           </div>
           <div className="new-shortcut-item">
-            <label>Toggle Recording:</label>
+            <label>Toggle Key:</label>
             <kbd className={isCapturingToggle ? 'new-capturing' : ''}>
               {isCapturingToggle ? 'Press any key...' : toggleShortcut}
             </kbd>
@@ -440,11 +440,11 @@ export const OnboardingFlowNew: React.FC<OnboardingFlowNewProps> = ({ onComplete
         <div className="new-step-content">
           <div className="new-quick-reference">
             <div className="new-reference-item">
-              <span className="new-reference-label">Push-to-Talk:</span>
+              <span className="new-reference-label">Hold Key:</span>
               <kbd className="new-reference-shortcut">{pushToTalkShortcut}</kbd>
             </div>
             <div className="new-reference-item">
-              <span className="new-reference-label">Toggle Recording:</span>
+              <span className="new-reference-label">Toggle Key:</span>
               <kbd className="new-reference-shortcut">{toggleShortcut}</kbd>
             </div>
           </div>
