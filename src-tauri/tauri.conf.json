@@ -15,7 +15,7 @@
         "label": "main",
         "title": "Scout - Voice Transcription",
         "width": 960,
-        "height": 720,
+        "height": 1024,
         "closable": true,
         "minimizable": true,
         "dragDropEnabled": true

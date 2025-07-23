@@ -18,9 +18,9 @@ export const minimalOverlay: Theme = {
     textDanger: '#ff6b6b',
     textSuccess: '#51cf66',
     
-    accentPrimary: 'rgba(255, 255, 255, 0.8)',
-    accentHover: 'rgba(255, 255, 255, 0.9)',
-    accentActive: 'rgba(255, 255, 255, 1)',
+    accentPrimary: '#4a9eff',
+    accentHover: '#5aa7ff',
+    accentActive: '#3a8eef',
     
     borderPrimary: 'rgba(255, 255, 255, 0.1)',
     borderHover: 'rgba(255, 255, 255, 0.2)',

@@ -2,10 +2,12 @@ import { useState, useRef, useEffect } from 'react';
 import { ChevronDown, Check } from 'lucide-react';
 import './Dropdown.css';
 
+type DropdownOption = string | { value: string; label: string };
+
 interface DropdownProps {
     value: string;
     onChange: (value: string) => void;
-    options: string[];
+    options: DropdownOption[];
     disabled?: boolean;
     placeholder?: string;
     className?: string;
@@ -35,12 +37,25 @@ export function Dropdown({
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    const handleSelect = (option: string) => {
-        onChange(option);
+    const handleSelect = (optionValue: string) => {
+        onChange(optionValue);
         setIsOpen(false);
     };
 
-    const displayValue = value || placeholder;
+    const getOptionValue = (option: DropdownOption): string => {
+        return typeof option === 'string' ? option : option.value;
+    };
+
+    const getOptionLabel = (option: DropdownOption): string => {
+        return typeof option === 'string' ? option : option.label;
+    };
+
+    const findSelectedLabel = (): string => {
+        const selectedOption = options.find(opt => getOptionValue(opt) === value);
+        return selectedOption ? getOptionLabel(selectedOption) : placeholder;
+    };
+
+    const displayValue = value ? findSelectedLabel() : placeholder;
 
     return (
         <div className={`dropdown-container ${className || ''}`} ref={dropdownRef} style={style}>
@@ -59,23 +74,26 @@ export function Dropdown({
             
             {isOpen && !disabled && (
                 <div className="dropdown-menu">
-                    {options.map((option) => (
-                        option === '---' ? (
-                            <div key={option} className="dropdown-separator" />
+                    {options.map((option, index) => {
+                        const optionValue = getOptionValue(option);
+                        const optionLabel = getOptionLabel(option);
+                        
+                        return optionLabel === '---' ? (
+                            <div key={`separator-${index}`} className="dropdown-separator" />
                         ) : (
                             <button
-                                key={option}
-                                className={`dropdown-option ${value === option ? 'selected' : ''}`}
-                                onClick={() => handleSelect(option)}
+                                key={optionValue}
+                                className={`dropdown-option ${value === optionValue ? 'selected' : ''}`}
+                                onClick={() => handleSelect(optionValue)}
                                 type="button"
                             >
-                                <span className="dropdown-option-text">{option}</span>
-                                {value === option && (
+                                <span className="dropdown-option-text">{optionLabel}</span>
+                                {value === optionValue && (
                                     <Check size={16} className="dropdown-check" />
                                 )}
                             </button>
-                        )
-                    ))}
+                        );
+                    })}
                 </div>
             )}
         </div>

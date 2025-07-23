@@ -85,7 +85,7 @@ fn main() {
       <SDKNav />
       {/* Hero Section */}
       <section className="relative overflow-hidden bg-background pt-24 pb-32">
-        <div className="absolute inset-0 bg-gradient-to-br from-violet-600/5 via-transparent to-purple-600/5" />
+        <div className="absolute inset-0 bg-gradient-to-br from-gray-600/5 via-transparent to-gray-600/5" />
         <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent" />
         
         <div className="container relative mx-auto px-6 max-w-6xl">
@@ -97,7 +97,7 @@ fn main() {
             
             <h1 className="text-5xl md:text-7xl font-bold leading-tight animate-fade-in">
               Add Voice to Your App{" "}
-              <span className="bg-gradient-to-r from-violet-600 to-purple-600 bg-clip-text text-transparent animate-gradient">
+              <span className="text-gray-900 dark:text-white">
                 in Minutes
               </span>
             </h1>
@@ -421,7 +421,7 @@ fn main() {
 
       {/* CTA Section */}
       <section className="py-24 px-6 relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-r from-violet-600/10 via-purple-600/5 to-violet-600/10" />
+        <div className="absolute inset-0 bg-gradient-to-r from-gray-600/10 via-gray-600/5 to-gray-600/10" />
         <div className="absolute inset-0 bg-gradient-to-b from-transparent via-background/50 to-background" />
         <div className="container relative mx-auto max-w-4xl text-center">
           <h2 className="text-3xl font-bold mb-4">

@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { marked } from 'marked';
 import Link from 'next/link';
-import { ArrowLeft, ArrowUpRight } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import '../blog.css';
 
 // Configure marked for better code highlighting
@@ -50,34 +50,7 @@ export default async function BlogPost({ params }: { params: Promise<{ slug: str
   const readTime = Math.ceil(wordCount / 200);
   
   return (
-    <>
-      {/* Header */}
-      <header className="border-b border-gray-200 dark:border-gray-800 bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm sticky top-0 z-10">
-        <div className="max-w-5xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <Link href="/" className="flex items-center gap-2 group">
-              <div className="w-7 h-7 bg-gray-900 dark:bg-white rounded-md flex items-center justify-center group-hover:scale-110 transition-transform">
-                <span className="text-white dark:text-gray-900 font-semibold text-sm">S</span>
-              </div>
-              <span className="text-lg font-light tracking-tight">Scout</span>
-            </Link>
-            <nav className="flex items-center gap-8">
-              <Link href="/" className="text-sm font-light text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors">
-                Home
-              </Link>
-              <Link href="/blog" className="text-sm font-light text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors">
-                Blog
-              </Link>
-              <Link href="https://github.com/arach/scout" target="_blank" className="text-sm font-light text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors flex items-center gap-1">
-                GitHub
-                <ArrowUpRight className="w-3 h-3" />
-              </Link>
-            </nav>
-          </div>
-        </div>
-      </header>
-
-      <article className="max-w-4xl mx-auto px-6 py-12">
+    <article className="max-w-4xl mx-auto px-6 py-12">
         {/* Back button */}
         <Link 
           href="/blog"
@@ -88,13 +61,13 @@ export default async function BlogPost({ params }: { params: Promise<{ slug: str
         </Link>
         
         {/* Article header */}
-        <header className="mb-10">
-          <div className="flex items-center gap-3 mb-6 text-sm font-light text-gray-500">
-            {date && <time>{date}</time>}
-            {date && <span className="text-gray-300 dark:text-gray-700">•</span>}
-            <span>{readTime} min read</span>
+        <header className="mb-12">
+          <div className="flex items-center gap-3 mb-8 text-sm text-gray-500 dark:text-gray-400">
+            {date && <time className="font-normal">{date}</time>}
+            {date && <span className="text-gray-300 dark:text-gray-700">·</span>}
+            <span className="font-normal">{readTime} min read</span>
           </div>
-          <h1 className="text-2xl md:text-3xl font-normal tracking-tight text-gray-900 dark:text-white leading-tight">
+          <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-gray-900 dark:text-white leading-tight">
             {title}
           </h1>
         </header>
@@ -102,62 +75,87 @@ export default async function BlogPost({ params }: { params: Promise<{ slug: str
         {/* Article content */}
         <div 
           className="
-            prose prose-base 
+            prose prose-lg 
             prose-gray dark:prose-invert 
             max-w-none
             
+            /* Base font */
+            prose-base:font-normal
+            
             /* Headings */
-            prose-headings:font-normal 
+            prose-headings:font-semibold 
             prose-headings:tracking-tight
-            prose-h2:text-2xl 
-            prose-h2:mt-8 
-            prose-h2:mb-4
+            prose-h2:text-3xl 
+            prose-h2:mt-12 
+            prose-h2:mb-6
             prose-h3:text-xl 
-            prose-h3:mt-6 
-            prose-h3:mb-3
+            prose-h3:mt-8 
+            prose-h3:mb-4
+            prose-h4:text-lg
+            prose-h4:mt-6
+            prose-h4:mb-3
             
             /* Paragraphs and text */
-            prose-p:font-normal 
-            prose-p:text-gray-700 
-            dark:prose-p:text-gray-300
-            prose-p:leading-normal
-            prose-p:text-[15px]
-            prose-strong:font-medium
+            prose-p:text-gray-600 
+            dark:prose-p:text-gray-400
+            prose-p:leading-[1.8]
+            prose-p:mb-6
+            prose-strong:font-semibold
+            prose-strong:text-gray-900
+            dark:prose-strong:text-white
             
             /* Links */
-            prose-a:text-gray-900
-            dark:prose-a:text-white
-            prose-a:underline
-            prose-a:decoration-gray-300
-            dark:prose-a:decoration-gray-700
-            prose-a:underline-offset-2
-            prose-a:transition-colors
-            hover:prose-a:decoration-gray-500
-            dark:hover:prose-a:decoration-gray-500
+            prose-a:text-gray-700
+            dark:prose-a:text-gray-300
+            prose-a:no-underline
+            prose-a:font-medium
+            prose-a:transition-all
+            hover:prose-a:text-gray-900
+            dark:hover:prose-a:text-gray-100
+            prose-a:relative
+            prose-a:after:content-['']
+            prose-a:after:absolute
+            prose-a:after:left-0
+            prose-a:after:bottom-0
+            prose-a:after:w-full
+            prose-a:after:h-px
+            prose-a:after:bg-gray-600/30
+            dark:prose-a:after:bg-gray-400/30
+            prose-a:after:scale-x-0
+            prose-a:after:origin-left
+            prose-a:after:transition-transform
+            hover:prose-a:after:scale-x-100
             
             /* Lists */
-            prose-li:font-normal
-            prose-li:text-gray-700
-            dark:prose-li:text-gray-300
-            prose-li:text-[15px]
+            prose-ul:my-6
+            prose-ol:my-6
+            prose-li:text-gray-600
+            dark:prose-li:text-gray-400
+            prose-li:leading-[1.8]
+            prose-li:my-2
+            prose-ul:list-disc
+            prose-ol:list-decimal
             
             /* Quotes */
-            prose-blockquote:font-light
-            prose-blockquote:border-gray-300
-            dark:prose-blockquote:border-gray-700
-            prose-blockquote:text-gray-700
-            dark:prose-blockquote:text-gray-300
+            prose-blockquote:border-l-4
+            prose-blockquote:border-gray-400
+            prose-blockquote:pl-6
+            prose-blockquote:py-2
+            prose-blockquote:my-8
+            prose-blockquote:text-gray-600
+            dark:prose-blockquote:text-gray-400
+            prose-blockquote:italic
             
             /* Code */
-            prose-code:font-normal
-            prose-code:text-xs
+            prose-code:font-mono
+            prose-code:text-sm
             prose-code:bg-gray-100
-            dark:prose-code:bg-gray-800
+            dark:prose-code:bg-gray-800/50
             prose-code:text-gray-700
             dark:prose-code:text-gray-300
             prose-code:px-1.5
             prose-code:py-0.5
-            prose-code:rounded-md
+            prose-code:rounded
             prose-code:before:content-none
             prose-code:after:content-none
             
@@ -165,23 +163,32 @@ export default async function BlogPost({ params }: { params: Promise<{ slug: str
             prose-pre:bg-gray-50
             dark:prose-pre:bg-gray-900
             prose-pre:text-gray-800
-            dark:prose-pre:text-gray-100
+            dark:prose-pre:text-gray-200
             prose-pre:border
             prose-pre:border-gray-200
             dark:prose-pre:border-gray-800
+            prose-pre:rounded-lg
             prose-pre:shadow-sm
+            prose-pre:my-6
             
             /* Tables */
-            prose-table:font-light
-            prose-th:font-medium
+            prose-table:my-8
+            prose-th:font-semibold
             prose-th:text-gray-900
             dark:prose-th:text-white
-            prose-td:text-gray-700
-            dark:prose-td:text-gray-300
+            prose-th:text-left
+            prose-td:text-gray-600
+            dark:prose-td:text-gray-400
             
             /* Horizontal rules */
             prose-hr:border-gray-200
             dark:prose-hr:border-gray-800
+            prose-hr:my-12
+            
+            /* Images */
+            prose-img:rounded-lg
+            prose-img:shadow-md
+            prose-img:my-8
           "
           dangerouslySetInnerHTML={{ __html: html }}
         />

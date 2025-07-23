@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { listen } from '@tauri-apps/api/event';
+import { safeEventListen, cleanupListeners } from '../lib/safeEventListener';
 import { invoke } from '@tauri-apps/api/core';
 
 interface Transcript {
@@ -36,11 +36,18 @@ export function useTranscriptEvents(options: UseTranscriptEventsOptions) {
   const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
+    // Skip if no callbacks are provided (e.g., during onboarding)
+    if (!setTranscripts && !onTranscriptCreated && !onProcessingComplete && !onRecordingCompleted) {
+      return;
+    }
+    
     let mounted = true;
+    const cleanupFunctions: Array<() => void> = [];
+    
     console.log('🔔 Setting up transcript-created listener at', new Date().toISOString());
     
     // Listen for transcript-created events (pub/sub for real-time updates)
-    const unsubscribeTranscriptCreated = listen('transcript-created', async (event) => {
+    safeEventListen('transcript-created', async (event) => {
       if (!mounted) return;
       const newTranscript = event.payload as Transcript;
       console.log('📝 Transcript created event received at', new Date().toISOString(), ':', {
@@ -81,10 +88,10 @@ export function useTranscriptEvents(options: UseTranscriptEventsOptions) {
       }
       
       onTranscriptCreated?.(newTranscript);
-    });
+    }).then(cleanup => cleanupFunctions.push(cleanup));
     
     // Listen for performance metrics events (for debugging)
-    const unsubscribePerformanceMetrics = listen('performance-metrics-recorded', async (event) => {
+    safeEventListen('performance-metrics-recorded', async (event) => {
       if (!mounted) return;
       const metrics = event.payload as any;
       console.log('Performance Metrics:', {
@@ -94,10 +101,10 @@ export function useTranscriptEvents(options: UseTranscriptEventsOptions) {
         queue_time: `${metrics.processing_queue_time_ms}ms`,
         model: metrics.model_used,
       });
-    });
+    }).then(cleanup => cleanupFunctions.push(cleanup));
     
     // Listen for transcript-refined events from progressive transcription
-    const unsubscribeTranscriptRefined = listen('transcript-refined', async (event) => {
+    safeEventListen('transcript-refined', async (event) => {
       if (!mounted) return;
       const refinement = event.payload as { chunk_start: number; chunk_end: number; text: string };
       console.log('🔄 Transcript refinement received:', {
@@ -111,10 +118,10 @@ export function useTranscriptEvents(options: UseTranscriptEventsOptions) {
         // We'll need to implement smart merging logic here
         console.log('📝 Would update transcript with refined text (not implemented yet)');
       }
-    });
+    }).then(cleanup => cleanupFunctions.push(cleanup));
     
     // Listen for processing-complete event as a backup to transcript-created
-    const unsubscribeProcessingComplete = listen('processing-complete', async (event) => {
+    safeEventListen('processing-complete', async (event) => {
       if (!mounted) return;
       const transcript = event.payload as Transcript;
       console.log('🏁 Processing complete event received at', new Date().toISOString(), 'transcript:', transcript.id);
@@ -135,10 +142,10 @@ export function useTranscriptEvents(options: UseTranscriptEventsOptions) {
       });
       
       onProcessingComplete?.(transcript);
-    });
+    }).then(cleanup => cleanupFunctions.push(cleanup));
     
     // Listen for recording-completed event as another backup
-    const unsubscribeRecordingCompleted = listen('recording-completed', async (_event) => {
+    safeEventListen('recording-completed', async (_event) => {
       if (!mounted) return;
       console.log('🏁 Recording-completed event received at', new Date().toISOString());
       
@@ -150,51 +157,12 @@ export function useTranscriptEvents(options: UseTranscriptEventsOptions) {
       setIsProcessing?.(false);
       
       onRecordingCompleted?.();
-    });
+    }).then(cleanup => cleanupFunctions.push(cleanup));
 
     return () => {
       mounted = false;
-      
-      // Properly cleanup event listeners
-      unsubscribeTranscriptCreated.then(fn => {
-        if (typeof fn === 'function') {
-          fn();
-        }
-      }).catch(error => {
-        console.error('Error unsubscribing from transcript-created events:', error);
-      });
-      
-      unsubscribePerformanceMetrics.then(fn => {
-        if (typeof fn === 'function') {
-          fn();
-        }
-      }).catch(error => {
-        console.error('Error unsubscribing from performance metrics events:', error);
-      });
-      
-      unsubscribeTranscriptRefined.then(fn => {
-        if (typeof fn === 'function') {
-          fn();
-        }
-      }).catch(error => {
-        console.error('Error unsubscribing from transcript refined events:', error);
-      });
-      
-      unsubscribeProcessingComplete.then(fn => {
-        if (typeof fn === 'function') {
-          fn();
-        }
-      }).catch(error => {
-        console.error('Error unsubscribing from processing complete events:', error);
-      });
-      
-      unsubscribeRecordingCompleted.then(fn => {
-        if (typeof fn === 'function') {
-          fn();
-        }
-      }).catch(error => {
-        console.error('Error unsubscribing from recording completed events:', error);
-      });
+      // Use the safe cleanup utility
+      cleanupListeners(cleanupFunctions);
     };
   }, [soundEnabled, completionSoundThreshold, onTranscriptCreated, onProcessingComplete, onRecordingCompleted, setIsProcessing, setTranscripts]);
 

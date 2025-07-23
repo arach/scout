@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { listen } from '@tauri-apps/api/event';
+import { safeEventListen, cleanupListeners } from '../lib/safeEventListener';
 import { invoke } from '@tauri-apps/api/core';
 
 interface UseNativeOverlayOptions {
@@ -12,10 +12,16 @@ export function useNativeOverlay(options: UseNativeOverlayOptions) {
   const { startRecording, stopRecording, cancelRecording } = options;
 
   useEffect(() => {
+    // Skip if no callbacks are provided (e.g., during onboarding)
+    if (!startRecording || !stopRecording || !cancelRecording) {
+      return;
+    }
+    
     let mounted = true;
+    const cleanupFunctions: Array<() => void> = [];
     
     // Listen for recording requests from native overlay
-    const unsubscribeNativeStart = listen('native-overlay-start-recording', async () => {
+    safeEventListen('native-overlay-start-recording', async () => {
       console.log('Native overlay start recording event received');
       if (!mounted) return;
       
@@ -33,9 +39,9 @@ export function useNativeOverlay(options: UseNativeOverlayOptions) {
       } catch (error) {
         console.error('Error handling native overlay start recording:', error);
       }
-    });
+    }).then(cleanup => cleanupFunctions.push(cleanup));
 
-    const unsubscribeNativeStop = listen('native-overlay-stop-recording', async () => {
+    safeEventListen('native-overlay-stop-recording', async () => {
       console.log('Native overlay stop recording event received');
       if (!mounted) return;
       
@@ -53,9 +59,9 @@ export function useNativeOverlay(options: UseNativeOverlayOptions) {
       } catch (error) {
         console.error('Error handling native overlay stop recording:', error);
       }
-    });
+    }).then(cleanup => cleanupFunctions.push(cleanup));
 
-    const unsubscribeNativeCancel = listen('native-overlay-cancel-recording', async () => {
+    safeEventListen('native-overlay-cancel-recording', async () => {
       console.log('Native overlay cancel recording event received');
       if (!mounted) return;
       
@@ -73,35 +79,12 @@ export function useNativeOverlay(options: UseNativeOverlayOptions) {
       } catch (error) {
         console.error('Error handling native overlay cancel recording:', error);
       }
-    });
+    }).then(cleanup => cleanupFunctions.push(cleanup));
 
     return () => {
       mounted = false;
-      
-      // Properly cleanup event listeners
-      unsubscribeNativeStart.then(fn => {
-        if (typeof fn === 'function') {
-          fn();
-        }
-      }).catch(error => {
-        console.error('Error unsubscribing from native start events:', error);
-      });
-      
-      unsubscribeNativeStop.then(fn => {
-        if (typeof fn === 'function') {
-          fn();
-        }
-      }).catch(error => {
-        console.error('Error unsubscribing from native stop events:', error);
-      });
-      
-      unsubscribeNativeCancel.then(fn => {
-        if (typeof fn === 'function') {
-          fn();
-        }
-      }).catch(error => {
-        console.error('Error unsubscribing from native cancel events:', error);
-      });
+      // Use the safe cleanup utility
+      cleanupListeners(cleanupFunctions);
     };
   }, [startRecording, stopRecording, cancelRecording]);
 }

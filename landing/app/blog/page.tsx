@@ -23,38 +23,12 @@ const blogPosts = [
 export default function BlogPage() {
   return (
     <>
-      {/* Header */}
-      <header className="border-b border-gray-200 dark:border-gray-800 bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm sticky top-0 z-10">
-        <div className="max-w-5xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <Link href="/" className="flex items-center gap-2 group">
-              <div className="w-7 h-7 bg-gray-900 dark:bg-white rounded-md flex items-center justify-center group-hover:scale-110 transition-transform">
-                <span className="text-white dark:text-gray-900 font-semibold text-sm">S</span>
-              </div>
-              <span className="text-lg font-light tracking-tight">Scout</span>
-            </Link>
-            <nav className="flex items-center gap-8">
-              <Link href="/" className="text-sm font-light text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors">
-                Home
-              </Link>
-              <Link href="/blog" className="text-sm font-light text-gray-900 dark:text-white">
-                Blog
-              </Link>
-              <Link href="https://github.com/arach/scout" target="_blank" className="text-sm font-light text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors flex items-center gap-1">
-                GitHub
-                <ArrowUpRight className="w-3 h-3" />
-              </Link>
-            </nav>
-          </div>
-        </div>
-      </header>
-
       {/* Hero */}
-      <div className="max-w-5xl mx-auto px-6 pt-16 pb-12">
-        <h1 className="text-3xl md:text-4xl font-light tracking-tight text-gray-900 dark:text-white mb-6">
+      <div className="max-w-5xl mx-auto px-6 pt-12 pb-8">
+        <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-gray-900 dark:text-white mb-4">
           Engineering Blog
         </h1>
-        <p className="text-base font-normal text-gray-600 dark:text-gray-400 leading-normal max-w-3xl">
+        <p className="text-lg text-gray-600 dark:text-gray-400 leading-relaxed max-w-3xl">
           Technical deep dives on building high-performance local voice transcription. 
           Architecture decisions, performance optimizations, and implementation details.
         </p>
@@ -75,25 +49,25 @@ export default function BlogPage() {
                 <div className="flex items-start justify-between gap-8">
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-3">
-                      <time className="text-sm font-light text-gray-500 dark:text-gray-500">
+                      <time className="text-sm font-normal text-gray-500 dark:text-gray-400">
                         {post.date}
                       </time>
-                      <span className="text-gray-300 dark:text-gray-700">•</span>
-                      <span className="text-sm font-light text-gray-500 dark:text-gray-500">
+                      <span className="text-gray-300 dark:text-gray-700">·</span>
+                      <span className="text-sm font-normal text-gray-500 dark:text-gray-400">
                         {post.readTime}
                       </span>
                     </div>
-                    <h2 className="text-lg md:text-xl font-normal tracking-tight text-gray-900 dark:text-white mb-3 group-hover:text-gray-700 dark:group-hover:text-gray-200 transition-colors">
+                    <h2 className="text-xl md:text-2xl font-semibold tracking-tight text-gray-900 dark:text-white mb-3 group-hover:text-gray-700 dark:group-hover:text-gray-300 transition-colors">
                       {post.title}
                     </h2>
-                    <p className="text-sm font-normal text-gray-600 dark:text-gray-400 leading-snug line-clamp-2">
+                    <p className="text-base text-gray-600 dark:text-gray-400 leading-relaxed line-clamp-2">
                       {post.excerpt}
                     </p>
                     <div className="flex items-center gap-2 mt-4">
                       {post.tags.map(tag => (
                         <span 
                           key={tag}
-                          className="text-xs font-light px-2 py-1 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
+                          className="text-xs font-medium px-2.5 py-1 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
                         >
                           {tag}
                         </span>

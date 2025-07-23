@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { listen } from '@tauri-apps/api/event';
+import { safeEventListen } from '../lib/safeEventListener';
 
 interface TranscriptionChunk {
   id: number;
@@ -88,70 +88,82 @@ export function useTranscriptionOverlay(options: UseTranscriptionOverlayOptions 
     if (!isVisible) return;
 
     let mounted = true;
+    let unsubscribeRecordingStart: (() => void) | undefined;
+    let unsubscribeRecordingComplete: (() => void) | undefined;
 
-    // Listen for recording state changes
-    const unsubscribeRecordingStart = listen('recording-started', () => {
-      if (!mounted) return;
-      if (autoShowOnRecording) {
-        setIsVisible(true);
-      }
-    });
+    const setupListeners = async () => {
+      // Listen for recording state changes
+      unsubscribeRecordingStart = await safeEventListen('recording-started', () => {
+        if (!mounted) return;
+        if (autoShowOnRecording) {
+          setIsVisible(true);
+        }
+      });
 
-    const unsubscribeRecordingComplete = listen('recording-completed', () => {
-      if (!mounted) return;
-      if (autoHideOnComplete && !hasUnsavedEdits) {
-        setIsVisible(false);
-      }
-    });
+      unsubscribeRecordingComplete = await safeEventListen('recording-completed', () => {
+        if (!mounted) return;
+        if (autoHideOnComplete && !hasUnsavedEdits) {
+          setIsVisible(false);
+        }
+      });
+    };
+
+    setupListeners();
 
     return () => {
       mounted = false;
-      unsubscribeRecordingStart.then(fn => fn()).catch(console.error);
-      unsubscribeRecordingComplete.then(fn => fn()).catch(console.error);
+      if (unsubscribeRecordingStart) unsubscribeRecordingStart();
+      if (unsubscribeRecordingComplete) unsubscribeRecordingComplete();
     };
   }, [autoShowOnRecording, autoHideOnComplete, hasUnsavedEdits, isVisible]);
 
   // Listen for transcription events and build up text
   useEffect(() => {
     let mounted = true;
+    let unsubscribeChunks: (() => void) | undefined;
+    let unsubscribeComplete: (() => void) | undefined;
 
-    // Listen for partial transcription chunks (if backend supports it)
-    const unsubscribeChunks = listen('transcription-chunk', (event) => {
-      if (!mounted) return;
-      
-      const chunk = event.payload as TranscriptionChunk;
-      setChunks(prev => {
-        const existingIndex = prev.findIndex(c => c.id === chunk.id);
-        if (existingIndex >= 0) {
-          const newChunks = [...prev];
-          newChunks[existingIndex] = chunk;
-          return newChunks;
-        } else {
-          return [...prev, chunk].sort((a, b) => a.timestamp - b.timestamp);
-        }
+    const setupListeners = async () => {
+      // Listen for partial transcription chunks (if backend supports it)
+      unsubscribeChunks = await safeEventListen('transcription-chunk', (event) => {
+        if (!mounted) return;
+        
+        const chunk = event.payload as TranscriptionChunk;
+        setChunks(prev => {
+          const existingIndex = prev.findIndex(c => c.id === chunk.id);
+          if (existingIndex >= 0) {
+            const newChunks = [...prev];
+            newChunks[existingIndex] = chunk;
+            return newChunks;
+          } else {
+            return [...prev, chunk].sort((a, b) => a.timestamp - b.timestamp);
+          }
+        });
       });
-    });
 
-    // Listen for complete transcripts
-    const unsubscribeComplete = listen('transcript-created', (event) => {
-      if (!mounted) return;
-      
-      const transcript = event.payload as any;
-      // If we're building text progressively, append new content
-      setBuildingText(prev => {
-        const newText = prev ? `${prev}\n\n${transcript.text}` : transcript.text;
-        // Update edited text if user hasn't made edits
-        if (!hasUnsavedEdits) {
-          setEditedText(newText);
-        }
-        return newText;
+      // Listen for complete transcripts
+      unsubscribeComplete = await safeEventListen('transcript-created', (event) => {
+        if (!mounted) return;
+        
+        const transcript = event.payload as any;
+        // If we're building text progressively, append new content
+        setBuildingText(prev => {
+          const newText = prev ? `${prev}\n\n${transcript.text}` : transcript.text;
+          // Update edited text if user hasn't made edits
+          if (!hasUnsavedEdits) {
+            setEditedText(newText);
+          }
+          return newText;
+        });
       });
-    });
+    };
+
+    setupListeners();
 
     return () => {
       mounted = false;
-      unsubscribeChunks.then(fn => fn()).catch(console.error);
-      unsubscribeComplete.then(fn => fn()).catch(console.error);
+      if (unsubscribeChunks) unsubscribeChunks();
+      if (unsubscribeComplete) unsubscribeComplete();
     };
   }, [hasUnsavedEdits]);
 

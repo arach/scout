@@ -66,7 +66,23 @@
       "Bash(RUST_LOG=scout=info cargo run --bin test_progressive_real)",
       "Bash(mv:*)",
       "Bash(./quick_test.sh:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(npm info:*)",
+      "Bash(npx pnpm:*)",
+      "Bash(pnpm ls:*)",
+      "Bash(pnpm update:*)",
+      "Bash(pnpm import:*)",
+      "Bash(npm install:*)",
+      "Bash(npm ci:*)",
+      "Bash(git reset:*)",
+      "Bash(git restore:*)",
+      "Bash(bash scripts/view-logs.sh:*)",
+      "Bash(./target/release/scout)",
+      "Bash(./scripts/build-with-permissions.sh:*)",
+      "Bash(/usr/libexec/PlistBuddy:*)",
+      "Bash(/Users/arach/dev/scout/scripts/add-microphone-permission.sh \"/Users/arach/dev/scout/src-tauri/target/release/bundle/macos/Scout.app/Contents/Info.plist\")",
+      "Bash(codesign:*)",
+      "Bash(hdiutil create:*)"
     ],
     "deny": []
   }
