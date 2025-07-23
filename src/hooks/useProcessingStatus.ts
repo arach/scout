@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { listen } from '@tauri-apps/api/event';
+import { safeEventListen, cleanupListeners } from '../lib/safeEventListener';
 
 interface ProcessingStatus {
   Queued?: { position: number };
@@ -37,10 +37,16 @@ export function useProcessingStatus(options: UseProcessingStatusOptions) {
   const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
+    // Skip if no callbacks are provided (e.g., during onboarding)
+    if (!setUploadProgress && !setIsProcessing) {
+      return;
+    }
+    
     let mounted = true;
+    const cleanupFunctions: Array<() => void> = [];
     
     // Listen for processing status updates from the background queue
-    const unsubscribeProcessing = listen<ProcessingStatus>('processing-status', (event) => {
+    safeEventListen<ProcessingStatus>('processing-status', (event) => {
       if (!mounted) return;
       const status = event.payload;
       
@@ -108,10 +114,10 @@ export function useProcessingStatus(options: UseProcessingStatusOptions) {
         // Show error message to user
         alert(`Failed to process audio file: ${errorMsg}`);
       }
-    });
+    }).then(cleanup => cleanupFunctions.push(cleanup));
     
     // Listen for file upload complete events
-    const unsubscribeFileUpload = listen('file-upload-complete', (event) => {
+    safeEventListen('file-upload-complete', (event) => {
       if (!mounted) return;
       const data = event.payload as any;
       
@@ -122,27 +128,12 @@ export function useProcessingStatus(options: UseProcessingStatusOptions) {
         fileSize: data.size,
         status: 'queued'
       }));
-    });
+    }).then(cleanup => cleanupFunctions.push(cleanup));
 
     return () => {
       mounted = false;
-      
-      // Properly cleanup event listeners
-      unsubscribeProcessing.then(fn => {
-        if (fn && typeof fn === 'function') {
-          fn();
-        }
-      }).catch(error => {
-        console.error('Error unsubscribing from processing events:', error);
-      });
-      
-      unsubscribeFileUpload.then(fn => {
-        if (fn && typeof fn === 'function') {
-          fn();
-        }
-      }).catch(error => {
-        console.error('Error unsubscribing from file upload events:', error);
-      });
+      // Use the safe cleanup utility
+      cleanupListeners(cleanupFunctions);
     };
   }, [setUploadProgress, setIsProcessing, onProcessingComplete, onProcessingFailed]);
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { safeEventListen } from '../lib/safeEventListener';
 import './FirstRunSetup.css';
 
 interface FirstRunSetupProps {
@@ -29,7 +29,7 @@ export const FirstRunSetup: React.FC<FirstRunSetupProps> = ({ onComplete }) => {
       const modelsDir = await invoke<string>('get_models_dir');
       
       // Set up progress listener
-      const unlisten = await listen<DownloadProgress>('download-progress', (event) => {
+      const unlisten = await safeEventListen<DownloadProgress>('download-progress', (event) => {
         setProgress(event.payload.progress);
       });
 
@@ -59,7 +59,7 @@ export const FirstRunSetup: React.FC<FirstRunSetupProps> = ({ onComplete }) => {
       });
 
       // Cleanup
-      await unlisten();
+      unlisten();
       
       setStage('complete');
       setTimeout(onComplete, 1000);

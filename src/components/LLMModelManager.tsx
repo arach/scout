@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { safeEventListen } from '../lib/safeEventListener';
 import { Brain, Gauge, Package, CheckCircle, Download } from 'lucide-react';
 import { LLMModel, LLMDownloadProgress } from '../types/llm';
 import './LLMModelManager.css';
@@ -15,38 +15,45 @@ export const LLMModelManager: React.FC = () => {
     loadModels();
     // getModelsDir(); // Commented out since modelsDir is unused
 
-    // Listen for download progress events
-    const unlistenProgress = listen<{
-      model_id: string;
-      progress: number;
-      downloaded_bytes: number;
-      total_bytes: number;
-    }>('llm-download-progress', (event) => {
-      const { model_id, progress, downloaded_bytes, total_bytes } = event.payload;
-      setDownloading(prev => ({
-        ...prev,
-        [model_id]: {
-          modelId: model_id,
-          progress,
-          downloadedMb: downloaded_bytes / (1024 * 1024),
-          totalMb: total_bytes / (1024 * 1024)
-        }
-      }));
-    });
+    let unlistenProgress: (() => void) | undefined;
+    let unlistenComplete: (() => void) | undefined;
 
-    // Listen for download complete events
-    const unlistenComplete = listen<{ model_id: string }>('llm-model-downloaded', (event) => {
-      setDownloading(prev => {
-        const updated = { ...prev };
-        delete updated[event.payload.model_id];
-        return updated;
+    const setupListeners = async () => {
+      // Listen for download progress events
+      unlistenProgress = await safeEventListen<{
+        model_id: string;
+        progress: number;
+        downloaded_bytes: number;
+        total_bytes: number;
+      }>('llm-download-progress', (event) => {
+        const { model_id, progress, downloaded_bytes, total_bytes } = event.payload;
+        setDownloading(prev => ({
+          ...prev,
+          [model_id]: {
+            modelId: model_id,
+            progress,
+            downloadedMb: downloaded_bytes / (1024 * 1024),
+            totalMb: total_bytes / (1024 * 1024)
+          }
+        }));
       });
-      loadModels(); // Reload to update downloaded status
-    });
+
+      // Listen for download complete events
+      unlistenComplete = await safeEventListen<{ model_id: string }>('llm-model-downloaded', (event) => {
+        setDownloading(prev => {
+          const updated = { ...prev };
+          delete updated[event.payload.model_id];
+          return updated;
+        });
+        loadModels(); // Reload to update downloaded status
+      });
+    };
+
+    setupListeners();
 
     return () => {
-      unlistenProgress.then(fn => fn());
-      unlistenComplete.then(fn => fn());
+      if (unlistenProgress) unlistenProgress();
+      if (unlistenComplete) unlistenComplete();
     };
   }, []);
 

@@ -22,6 +22,7 @@ import type { ThemeVariant } from '../themes/types';
 export function useSettings() {
   // UI Settings
   const [overlayPosition, setOverlayPosition] = useState<string>('top-center');
+  const [overlayTreatment, setOverlayTreatment] = useState<string>('particles'); // Default to particles
   const [hotkey, setHotkey] = useState("CmdOrCtrl+Shift+Space");
   const [pushToTalkHotkey, setPushToTalkHotkey] = useState("CmdOrCtrl+Shift+P");
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
@@ -97,6 +98,17 @@ export function useSettings() {
       const savedSelectedTheme = localStorage.getItem('scout-selected-theme');
       if (savedSelectedTheme) {
         setSelectedTheme(savedSelectedTheme as ThemeVariant);
+      }
+      
+      // Load overlay treatment
+      const savedOverlayTreatment = localStorage.getItem('scout-overlay-treatment');
+      if (savedOverlayTreatment) {
+        setOverlayTreatment(savedOverlayTreatment);
+        // Set the overlay treatment on the native overlay
+        invoke('set_overlay_treatment', { treatment: savedOverlayTreatment }).catch(console.error);
+      } else {
+        // Set default treatment
+        invoke('set_overlay_treatment', { treatment: 'particles' }).catch(console.error);
       }
       
       // Load sound settings
@@ -178,6 +190,16 @@ export function useSettings() {
     localStorage.setItem('scout-selected-theme', themeVariant);
   };
 
+  const updateOverlayTreatment = async (treatment: string) => {
+    setOverlayTreatment(treatment);
+    localStorage.setItem('scout-overlay-treatment', treatment);
+    try {
+      await invoke('set_overlay_treatment', { treatment });
+    } catch (error) {
+      console.error('Failed to update overlay treatment:', error);
+    }
+  };
+
   const toggleSoundEnabled = async () => {
     const newValue = !soundEnabled;
     setSoundEnabled(newValue);
@@ -257,6 +279,7 @@ export function useSettings() {
   return {
     // State
     overlayPosition,
+    overlayTreatment,
     hotkey,
     pushToTalkHotkey,
     theme,
@@ -276,6 +299,7 @@ export function useSettings() {
     
     // Update functions
     updateOverlayPosition,
+    updateOverlayTreatment,
     updateTheme,
     updateSelectedTheme,
     toggleSoundEnabled,
@@ -290,6 +314,7 @@ export function useSettings() {
     // Convenience method for theme provider
     settings: {
       overlayPosition,
+      overlayTreatment,
       hotkey,
       pushToTalkHotkey,
       theme,

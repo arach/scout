@@ -672,6 +672,126 @@ async fn set_overlay_position(state: State<'_, AppState>, position: String) -> R
 }
 
 #[tauri::command]
+async fn set_overlay_treatment(state: State<'_, AppState>, treatment: String) -> Result<(), String> {
+    // Update the native overlay waveform style
+    #[cfg(target_os = "macos")]
+    {
+        let overlay = state.native_panel_overlay.lock().await;
+        overlay.set_waveform_style(&treatment);
+    }
+    
+    Ok(())
+}
+
+#[tauri::command]
+async fn download_model(
+    app: tauri::AppHandle,
+    model_name: String,
+    model_url: String,
+) -> Result<(), String> {
+    use tauri::Emitter;
+    use std::path::Path;
+    
+    let models_dir = app.path().app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?
+        .join("models");
+    
+    // Create models directory if it doesn't exist
+    std::fs::create_dir_all(&models_dir)
+        .map_err(|e| format!("Failed to create models directory: {}", e))?;
+    
+    let model_filename = format!("ggml-{}.bin", model_name);
+    let dest_path = models_dir.join(&model_filename);
+    
+    // Check if model already exists
+    if dest_path.exists() {
+        return Ok(());
+    }
+    
+    // Download the model
+    let response = reqwest::get(&model_url).await
+        .map_err(|e| format!("Failed to download model: {}", e))?;
+    
+    let total_size = response.content_length().unwrap_or(0);
+    let mut downloaded = 0u64;
+    
+    let mut file = std::fs::File::create(&dest_path)
+        .map_err(|e| format!("Failed to create file: {}", e))?;
+    
+    let mut stream = response.bytes_stream();
+    use futures_util::StreamExt;
+    use std::io::Write;
+    
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("Failed to read chunk: {}", e))?;
+        file.write_all(&chunk)
+            .map_err(|e| format!("Failed to write chunk: {}", e))?;
+        
+        downloaded += chunk.len() as u64;
+        let progress = if total_size > 0 {
+            (downloaded as f32 / total_size as f32 * 100.0) as u32
+        } else {
+            0
+        };
+        
+        // Emit download progress
+        app.emit("model-download-progress", serde_json::json!({
+            "progress": progress,
+            "downloaded": downloaded,
+            "total": total_size,
+        })).ok();
+    }
+    
+    Ok(())
+}
+
+#[tauri::command]
+async fn check_microphone_permission() -> Result<String, String> {
+    // For now, just check if we can access audio devices
+    // If we can enumerate devices, we likely have permission
+    #[cfg(target_os = "macos")]
+    {
+        use cpal::traits::{HostTrait, DeviceTrait};
+        
+        let host = cpal::default_host();
+        match host.default_input_device() {
+            Some(_) => Ok("granted".to_string()),
+            None => Ok("denied".to_string()),
+        }
+    }
+    
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok("granted".to_string())
+    }
+}
+
+#[tauri::command]
+async fn request_microphone_permission() -> Result<String, String> {
+    // The actual permission request happens when we try to use the microphone
+    // For now, we'll trigger a check by trying to access the device
+    check_microphone_permission().await
+}
+
+#[tauri::command]
+async fn open_system_preferences_audio() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+            .spawn()
+            .map_err(|e| format!("Failed to open system preferences: {}", e))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn mark_onboarding_complete(state: State<'_, AppState>) -> Result<(), String> {
+    // Could store this in settings if needed
+    Ok(())
+}
+
+#[tauri::command]
 async fn is_vad_enabled(state: State<'_, AppState>) -> Result<bool, String> {
     let recorder = state.recorder.lock().await;
     Ok(recorder.is_vad_enabled())
@@ -1684,6 +1804,12 @@ pub fn run() {
             subscribe_to_progress,
             get_overlay_position,
             set_overlay_position,
+            set_overlay_treatment,
+            download_model,
+            check_microphone_permission,
+            request_microphone_permission,
+            open_system_preferences_audio,
+            mark_onboarding_complete,
             get_processing_status,
             set_sound_enabled,
             is_sound_enabled,

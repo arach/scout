@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { safeEventListen, cleanupListeners } from '../lib/safeEventListener';
 import { recordingManager } from './recordingManager';
 import { usePushToTalkMonitor } from './usePushToTalkMonitor';
 
@@ -22,6 +22,7 @@ interface UseRecordingOptions {
   selectedMic?: string;
   vadEnabled?: boolean;
   pushToTalkShortcut?: string;
+  isRecordViewActive?: boolean;
 }
 
 export function useRecording(options: UseRecordingOptions = {}) {
@@ -31,7 +32,8 @@ export function useRecording(options: UseRecordingOptions = {}) {
     soundEnabled = true,
     selectedMic = 'Default microphone',
     vadEnabled = false,
-    pushToTalkShortcut = ''
+    pushToTalkShortcut = '',
+    isRecordViewActive = false
   } = options;
 
   // State
@@ -75,11 +77,20 @@ export function useRecording(options: UseRecordingOptions = {}) {
   }, []);
 
 
-  // Start audio level monitoring on mount - using polling like in master
+  // Start audio level monitoring only when in record view
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
     let animationFrame: number;
     let isActive = true;
+
+    // Skip audio monitoring if not in record view
+    if (!isRecordViewActive) {
+      // Reset audio level when not monitoring
+      audioTargetRef.current = 0;
+      audioCurrentRef.current = 0;
+      setAudioLevel(0);
+      return;
+    }
 
     const startMonitoring = async () => {
       try {
@@ -187,7 +198,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
       audioCurrentRef.current = 0;
       setAudioLevel(0);
     };
-  }, [selectedMic]);
+  }, [selectedMic, isRecordViewActive]);
 
 
   // Start recording
@@ -403,14 +414,14 @@ export function useRecording(options: UseRecordingOptions = {}) {
   // Set up event listeners
   useEffect(() => {
     let mounted = true;
-    const unsubscribers: Array<() => void> = [];
+    const cleanupFunctions: Array<() => void> = [];
     
     const setupListeners = async () => {
       if (!mounted) return;
       
       try {
         // Listen for recording state changes from backend
-        const unsubscribeRecordingState = await listen("recording-state-changed", (event: any) => {
+        const cleanupRecordingState = await safeEventListen("recording-state-changed", (event: any) => {
           if (!mounted) return;
         const { state } = event.payload;
         
@@ -437,8 +448,9 @@ export function useRecording(options: UseRecordingOptions = {}) {
           }
         }
       });
+      cleanupFunctions.push(cleanupRecordingState);
 
-      const unsubscribeProgress = await listen<RecordingProgress>('recording-progress', (event) => {
+      const cleanupProgress = await safeEventListen<RecordingProgress>('recording-progress', (event) => {
         if (!mounted) return;
         if (event.payload.Recording) {
           // Update start time from backend
@@ -448,37 +460,31 @@ export function useRecording(options: UseRecordingOptions = {}) {
           setRecordingStartTime(null);
         }
       });
+      cleanupFunctions.push(cleanupProgress);
 
       // Audio level is now handled by polling in the monitoring effect above
 
-      const unsubscribePushToTalkPressed = await listen('push-to-talk-pressed', async () => {
+      const cleanupPushToTalkPressed = await safeEventListen('push-to-talk-pressed', async () => {
         if (!mounted) return;
         await handlePushToTalkPressed();
       });
+      cleanupFunctions.push(cleanupPushToTalkPressed);
       
       // Listen for push-to-talk release from keyboard monitor (if available)
       // This is a backup - our frontend monitor handles most cases
-      const unsubscribePushToTalkReleased = await listen('push-to-talk-released', async () => {
+      const cleanupPushToTalkReleased = await safeEventListen('push-to-talk-released', async () => {
         if (!mounted) return;
         console.log('[Backend] Push-to-talk released event received');
         await handlePushToTalkReleased();
       });
+      cleanupFunctions.push(cleanupPushToTalkReleased);
 
-      const unsubscribeProcessingComplete = await listen('processing-complete', () => {
+      const cleanupProcessingComplete = await safeEventListen('processing-complete', () => {
         if (!mounted) return;
         onTranscriptCreated?.();
       });
+      cleanupFunctions.push(cleanupProcessingComplete);
 
-      // Store all unsubscribe functions (filter out any undefined)
-      const validUnsubscribers = [
-        unsubscribeRecordingState,
-        unsubscribeProgress,
-        unsubscribePushToTalkPressed,
-        unsubscribePushToTalkReleased,
-        unsubscribeProcessingComplete
-      ].filter(fn => typeof fn === 'function');
-      
-      unsubscribers.push(...validUnsubscribers);
       } catch (error) {
         console.error('Failed to set up recording event listeners:', error);
       }
@@ -503,19 +509,8 @@ export function useRecording(options: UseRecordingOptions = {}) {
         animationFrameRef.current = undefined;
       }
       
-      // Call all unsubscribe functions
-      unsubscribers.forEach(unsubscribe => {
-        try {
-          if (typeof unsubscribe === 'function') {
-            unsubscribe();
-          }
-        } catch (error) {
-          console.error('Error during listener cleanup:', error);
-        }
-      });
-      
-      // Clear the array to prevent double cleanup
-      unsubscribers.length = 0;
+      // Use safe cleanup
+      cleanupListeners(cleanupFunctions);
     };
   }, [handlePushToTalkPressed, handlePushToTalkReleased, onTranscriptCreated]);
 

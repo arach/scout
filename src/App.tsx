@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { safeEventListen, cleanupListeners } from "./lib/safeEventListener";
 import { open } from "@tauri-apps/plugin-dialog";
-import { FirstRunSetup } from "./components/FirstRunSetup";
+import { OnboardingFlow } from "./components/OnboardingFlow";
 import { Sidebar, useSidebarState } from "./components/Sidebar";
 import { RecordView } from "./components/RecordView";
 import { TranscriptsView } from "./components/TranscriptsView";
@@ -50,6 +50,7 @@ function App() {
     transcriptText: string;
     isBulk: boolean;
   }>({ show: false, transcriptId: null, transcriptText: "", isBulk: false });
+  const [showFirstRun, setShowFirstRun] = useState(false);
   const [hotkeyUpdateStatus, setHotkeyUpdateStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [uploadProgress, setUploadProgress] = useState<{
     filename?: string;
@@ -58,7 +59,6 @@ function App() {
     queuePosition?: number;
     progress?: number;
   }>({ status: 'idle' });
-  const [showFirstRun, setShowFirstRun] = useState(false);
   const [currentView, setCurrentView] = useState<View>('record');
   const [sessionStartTime] = useState(() => new Date().toISOString());
   const processingFileRef = useRef<string | null>(null); // Track file being processed to prevent duplicates
@@ -68,6 +68,7 @@ function App() {
   // Use the settings hook
   const {
     overlayPosition,
+    overlayTreatment,
     hotkey,
     pushToTalkHotkey,
     theme,
@@ -83,6 +84,7 @@ function App() {
     setHotkey,
     setPushToTalkHotkey,
     updateOverlayPosition,
+    updateOverlayTreatment,
     updateTheme,
     updateSelectedTheme,
     toggleSoundEnabled,
@@ -95,7 +97,7 @@ function App() {
     toggleAutoPaste,
   } = useSettings();
 
-  // Use the recording hook
+  // Use the recording hook (always call it, but disable when showing onboarding)
   const { 
     isRecording, 
     recordingStartTime, 
@@ -105,12 +107,12 @@ function App() {
     stopRecording,
     cancelRecording 
   } = useRecording({
-    onTranscriptCreated: () => {
+    onTranscriptCreated: showFirstRun ? undefined : () => {
       if (currentView === 'record') {
         loadRecentTranscripts();
       }
     },
-    onRecordingComplete: () => {
+    onRecordingComplete: showFirstRun ? undefined : () => {
       // Don't show processing state for normal recording
       // Ring buffer transcribes in real-time, so transcription is already done
       // The transcript-created event will fire immediately
@@ -119,7 +121,8 @@ function App() {
     soundEnabled,
     selectedMic,
     vadEnabled,
-    pushToTalkShortcut: pushToTalkHotkey
+    pushToTalkShortcut: pushToTalkHotkey,
+    isRecordViewActive: !showFirstRun && currentView === 'record'
   });
 
   // Use the file drop hook
@@ -147,24 +150,24 @@ function App() {
     }
   });
 
-  // Use the transcript events hook
+  // Use the transcript events hook (only when not showing onboarding)
   useTranscriptEvents({
     soundEnabled,
     completionSoundThreshold,
-    setIsProcessing,
-    setTranscripts,
-    onTranscriptCreated: () => {
+    setIsProcessing: showFirstRun ? undefined : setIsProcessing,
+    setTranscripts: showFirstRun ? undefined : setTranscripts,
+    onTranscriptCreated: showFirstRun ? undefined : () => {
       if (currentView === 'record') {
         loadRecentTranscripts();
       }
     },
-    onProcessingComplete: () => {
+    onProcessingComplete: showFirstRun ? undefined : () => {
       // Force refresh to ensure UI is updated
       setTimeout(() => {
         loadRecentTranscripts();
       }, 50);
     },
-    onRecordingCompleted: () => {
+    onRecordingCompleted: showFirstRun ? undefined : () => {
       // Force refresh
       setTimeout(() => {
         loadRecentTranscripts();
@@ -172,35 +175,36 @@ function App() {
     }
   });
 
-  // Use the processing status hook
+  // Use the processing status hook (only when not showing onboarding)
   useProcessingStatus({
-    setUploadProgress,
-    setIsProcessing,
-    onProcessingComplete: () => {
+    setUploadProgress: showFirstRun ? () => {} : setUploadProgress,
+    setIsProcessing: showFirstRun ? () => {} : setIsProcessing,
+    onProcessingComplete: showFirstRun ? undefined : () => {
       loadRecentTranscripts();
     }
   });
 
-  // Use the native overlay hook
+  // Use the native overlay hook (only when not showing onboarding)
   useNativeOverlay({
-    startRecording,
-    stopRecording,
-    cancelRecording
+    startRecording: showFirstRun ? async () => {} : startRecording,
+    stopRecording: showFirstRun ? async () => {} : stopRecording,
+    cancelRecording: showFirstRun ? async () => {} : cancelRecording
   });
 
   useEffect(() => {
-    // Check if we have any models
-    const checkModels = async () => {
+    // Check if we have completed onboarding
+    const checkOnboarding = async () => {
       try {
-        const hasModel = await invoke<boolean>('has_any_model');
-        if (!hasModel) {
+        const onboardingComplete = localStorage.getItem('scout-onboarding-complete');
+        if (!onboardingComplete) {
+          // Show onboarding if not completed
           setShowFirstRun(true);
         }
       } catch (error) {
-        console.error('Failed to check models:', error);
+        console.error('Failed to check onboarding:', error);
       }
     };
-    checkModels();
+    checkOnboarding();
     
     // One-time check of all audio devices
     const checkAudioDevices = async () => {
@@ -217,7 +221,11 @@ function App() {
   }, []);
 
   useEffect(() => {
+    // Skip initialization if showing onboarding
+    if (showFirstRun) return;
+    
     let mounted = true;
+    const cleanupFunctions: Array<() => void> = [];
     
     const init = async () => {
       if (!mounted) return;
@@ -234,24 +242,23 @@ function App() {
     init();
     
     // Listen for global hotkey events
-    const unsubscribe = listen('toggle-recording', async () => {
+    safeEventListen('toggle-recording', async () => {
       if (!mounted) return;
       await toggleRecording();
-    });
+    }).then(cleanup => cleanupFunctions.push(cleanup));
     
     // Listen for keyboard monitor unavailable event
-    const unsubscribeKeyboardMonitor = listen('keyboard-monitor-unavailable', async (event) => {
+    safeEventListen('keyboard-monitor-unavailable', async (event) => {
       if (!mounted) return;
       console.warn('Keyboard monitor unavailable:', event.payload);
       keyboardMonitorAvailable.current = false;
-    });
+    }).then(cleanup => cleanupFunctions.push(cleanup));
 
     return () => {
       mounted = false;
-      unsubscribe.then(fn => fn()).catch(console.error);
-      unsubscribeKeyboardMonitor.then(fn => fn()).catch(console.error);
+      cleanupListeners(cleanupFunctions);
     };
-  }, []); // Empty dependency array since we're checking state from backend
+  }, [showFirstRun, toggleRecording]); // Re-run when onboarding state changes
 
   // Recording duration is now managed by the useRecording hook
 
@@ -693,7 +700,10 @@ function App() {
 
 
   if (showFirstRun) {
-    return <FirstRunSetup onComplete={() => setShowFirstRun(false)} />;
+    return <OnboardingFlow onComplete={() => {
+      setShowFirstRun(false);
+      localStorage.setItem('scout-onboarding-complete', 'true');
+    }} />;
   }
 
   return (
@@ -759,6 +769,7 @@ function App() {
             isCapturingPushToTalkHotkey={isCapturingPushToTalkHotkey}
             vadEnabled={vadEnabled}
             overlayPosition={overlayPosition}
+            overlayTreatment={overlayTreatment}
             autoCopy={autoCopy}
             autoPaste={autoPaste}
             theme={theme}
@@ -775,6 +786,7 @@ function App() {
             stopCapturingPushToTalkHotkey={stopCapturingPushToTalkHotkey}
             toggleVAD={toggleVAD}
             updateOverlayPosition={updateOverlayPosition}
+            updateOverlayTreatment={updateOverlayTreatment}
             toggleAutoCopy={toggleAutoCopy}
             toggleAutoPaste={toggleAutoPaste}
             updateTheme={updateTheme}

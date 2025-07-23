@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { listen } from '@tauri-apps/api/event';
+import { safeEventListen } from '../lib/safeEventListener';
 import { useResizable } from '../hooks/useResizable';
 import { useTheme } from '../themes/ThemeProvider';
 import { useSettings } from '../hooks/useSettings';
@@ -343,57 +343,57 @@ export function TranscriptionOverlay({
     if (!isVisible) return;
 
     let mounted = true;
+    let unsubscribeChunks: (() => void) | undefined;
+    let unsubscribeComplete: (() => void) | undefined;
 
-    // Listen for partial transcription chunks (5-second ring buffer chunks)
-    const unsubscribeChunks = listen('transcription-chunk', (event) => {
-      if (!mounted) return;
-      
-      try {
-        const chunk = event.payload as TranscriptionChunk;
-        if (currentMode === 'teleprompter' && chunk.text.trim()) {
-          // Add chunk to decryption zone (middle of hourglass)
-          const chunkId = `chunk-${chunk.id}-${Date.now()}`;
-          animateChunkDecryption(chunkId, chunk.text.trim());
-        }
-      } catch (error) {
-        console.error('Error handling transcription chunk:', error);
-      }
-    }).catch(error => {
-      console.error('Error setting up transcription-chunk listener:', error);
-      return Promise.resolve(() => {});
-    });
-
-    // Listen for complete transcripts (final full transcription)
-    const unsubscribeComplete = listen('transcript-created', (event) => {
-      if (!mounted) return;
-      
-      try {
-        const transcript = event.payload as any;
+    const setupListeners = async () => {
+      // Listen for partial transcription chunks (5-second ring buffer chunks)
+      unsubscribeChunks = await safeEventListen('transcription-chunk', (event) => {
+        if (!mounted) return;
         
-        if (currentMode === 'teleprompter' && transcript.text.trim()) {
-          // If this is a complete transcription and we have decrypting chunks, 
-          // we can either replace them or append final text
-          const finalChunkId = `final-${Date.now()}`;
-          animateChunkDecryption(finalChunkId, transcript.text.trim());
-        } else if (currentMode === 'editor') {
-          // Editor mode - just append to completed text
-          setTranscriptionState(prev => ({
-            ...prev,
-            completedText: prev.completedText + (prev.completedText ? ' ' : '') + transcript.text.trim()
-          }));
+        try {
+          const chunk = event.payload as TranscriptionChunk;
+          if (currentMode === 'teleprompter' && chunk.text.trim()) {
+            // Add chunk to decryption zone (middle of hourglass)
+            const chunkId = `chunk-${chunk.id}-${Date.now()}`;
+            animateChunkDecryption(chunkId, chunk.text.trim());
+          }
+        } catch (error) {
+          console.error('Error handling transcription chunk:', error);
         }
-      } catch (error) {
-        console.error('Error handling transcript-created:', error);
-      }
-    }).catch(error => {
-      console.error('Error setting up transcript-created listener:', error);
-      return Promise.resolve(() => {});
-    });
+      });
+
+      // Listen for complete transcripts (final full transcription)
+      unsubscribeComplete = await safeEventListen('transcript-created', (event) => {
+        if (!mounted) return;
+        
+        try {
+          const transcript = event.payload as any;
+          
+          if (currentMode === 'teleprompter' && transcript.text.trim()) {
+            // If this is a complete transcription and we have decrypting chunks, 
+            // we can either replace them or append final text
+            const finalChunkId = `final-${Date.now()}`;
+            animateChunkDecryption(finalChunkId, transcript.text.trim());
+          } else if (currentMode === 'editor') {
+            // Editor mode - just append to completed text
+            setTranscriptionState(prev => ({
+              ...prev,
+              completedText: prev.completedText + (prev.completedText ? ' ' : '') + transcript.text.trim()
+            }));
+          }
+        } catch (error) {
+          console.error('Error handling transcript-created:', error);
+        }
+      });
+    };
+
+    setupListeners();
 
     return () => {
       mounted = false;
-      unsubscribeChunks.then(fn => fn()).catch(console.error);
-      unsubscribeComplete.then(fn => fn()).catch(console.error);
+      if (unsubscribeChunks) unsubscribeChunks();
+      if (unsubscribeComplete) unsubscribeComplete();
     };
   }, [isVisible, currentMode]);
 

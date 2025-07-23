@@ -225,3 +225,42 @@
     background: rgba(34, 197, 94, 0.15);
   }
 }
+
+/* Minimal theme specific adjustments */
+[data-theme="minimal-overlay"] .model-card {
+  background: var(--bg-secondary);
+  border-color: var(--border-primary);
+}
+
+[data-theme="minimal-overlay"] .model-card:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--border-hover);
+}
+
+[data-theme="minimal-overlay"] .btn-primary {
+  background: var(--accent-primary);
+  color: white;
+  border: 1px solid var(--accent-primary);
+}
+
+[data-theme="minimal-overlay"] .btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+[data-theme="minimal-overlay"] .btn-secondary {
+  background: transparent;
+  color: var(--text-primary);
+  border: 1px solid var(--border-primary);
+}
+
+[data-theme="minimal-overlay"] .btn-secondary:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+
+[data-theme="minimal-overlay"] .model-status.good {
+  color: var(--text-success);
+  background: rgba(81, 207, 102, 0.15);
+}

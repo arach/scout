@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { safeEventListen } from '../lib/safeEventListener';
 import { BarChart3, Gauge, Package, CheckCircle, Sparkles, Download } from 'lucide-react';
 import './ModelManager.css';
 
@@ -73,7 +73,7 @@ export const ModelManager: React.FC = () => {
 
     try {
       // Set up progress listener
-      const unlisten = await listen<{
+      const unlisten = await safeEventListen<{
         url: string;
         downloaded: number;
         total: number;
@@ -105,7 +105,7 @@ export const ModelManager: React.FC = () => {
       });
 
       // Cleanup listener
-      await unlisten();
+      unlisten();
 
       // Remove from downloading state
       setDownloading(prev => {

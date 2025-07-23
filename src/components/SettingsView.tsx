@@ -19,6 +19,7 @@ interface SettingsViewProps {
     isCapturingPushToTalkHotkey: boolean;
     vadEnabled: boolean;
     overlayPosition: string;
+    overlayTreatment: string;
     autoCopy: boolean;
     autoPaste: boolean;
     theme: 'light' | 'dark' | 'system';
@@ -35,6 +36,7 @@ interface SettingsViewProps {
     stopCapturingPushToTalkHotkey: () => void;
     toggleVAD: () => void;
     updateOverlayPosition: (position: string) => void;
+    updateOverlayTreatment: (treatment: string) => void;
     toggleAutoCopy: () => void;
     toggleAutoPaste: () => void;
     updateTheme: (theme: 'light' | 'dark' | 'system') => void;
@@ -55,6 +57,7 @@ export function SettingsView({
     isCapturingPushToTalkHotkey,
     vadEnabled,
     overlayPosition,
+    overlayTreatment,
     autoCopy,
     autoPaste,
     // theme,
@@ -71,6 +74,7 @@ export function SettingsView({
     stopCapturingPushToTalkHotkey,
     toggleVAD,
     updateOverlayPosition,
+    updateOverlayTreatment,
     toggleAutoCopy,
     toggleAutoPaste,
     // updateTheme,
@@ -444,6 +448,25 @@ export function SettingsView({
                             </div>
                             <p className="setting-hint">
                                 Choose where the recording indicator appears on your screen
+                            </p>
+                        </div>
+                        
+                        <div className="setting-item">
+                            <label>Overlay Treatment</label>
+                            <Dropdown
+                                value={overlayTreatment}
+                                onChange={updateOverlayTreatment}
+                                options={[
+                                    { value: 'particles', label: 'Particles' },
+                                    { value: 'pulsingDot', label: 'Pulsing Dot' },
+                                    { value: 'animatedWaveform', label: 'Waveform' },
+                                    { value: 'gradientOrb', label: 'Gradient Orb' },
+                                    { value: 'floatingBubbles', label: 'Floating Bubbles' }
+                                ]}
+                                style={{ width: '100%' }}
+                            />
+                            <p className="setting-hint">
+                                Visual style of the recording indicator
                             </p>
                         </div>
                         
