@@ -498,29 +498,28 @@ export function AppContent() {
       
       <main className={`app-main ${!isSidebarExpanded ? 'sidebar-collapsed' : ''}`}>
         <div className="view-header">
-          {!isSidebarExpanded && (
-            <button
-              className="sidebar-toggle-button"
-              onClick={toggleSidebar}
-              title="Show Sidebar"
-            >
-              <ChevronRight size={16} />
-            </button>
-          )}
-          <h1 className="view-title">
-            {currentView === 'record' && 'Record'}
-            {currentView === 'transcripts' && 'Transcripts'}
-            {currentView === 'settings' && 'Settings'}
-          </h1>
-          {isSidebarExpanded && (
-            <button
-              className="sidebar-close-button"
-              onClick={toggleSidebar}
-              title="Hide Sidebar"
-            >
-              <PanelLeftClose size={16} />
-            </button>
-          )}
+          <div className="view-header-left">
+            {!isSidebarExpanded && (
+              <button
+                className="sidebar-toggle-button"
+                onClick={toggleSidebar}
+                title="Show Sidebar"
+              >
+                <ChevronRight size={16} />
+              </button>
+            )}
+          </div>
+          <div className="view-header-right">
+            {isSidebarExpanded && (
+              <button
+                className="sidebar-close-button"
+                onClick={toggleSidebar}
+                title="Hide Sidebar"
+              >
+                <PanelLeftClose size={16} />
+              </button>
+            )}
+          </div>
         </div>
 
         {currentView === 'record' && (
