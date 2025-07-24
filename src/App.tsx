@@ -16,6 +16,7 @@ import { useProcessingStatus } from './hooks/useProcessingStatus';
 import { useNativeOverlay } from './hooks/useNativeOverlay';
 import { DevTools } from './components/DevTools';
 import { TranscriptionOverlay } from './components/TranscriptionOverlay';
+import { RecordingProvider } from './contexts/RecordingContext';
 import "./App.css";
 
 interface Transcript {
@@ -712,7 +713,8 @@ function App() {
   }
 
   return (
-    <div className="app-container">
+    <RecordingProvider>
+      <div className="app-container">
       <Sidebar currentView={currentView} onViewChange={setCurrentView} isExpanded={isSidebarExpanded} />
       <main className={`container ${isDragging ? 'drag-highlight' : ''}`}>
         <button
@@ -889,21 +891,24 @@ function App() {
         onToggleTranscriptionOverlay={setShowTranscriptionOverlay}
       />
 
-      {/* Transcription Overlay */}
-      <TranscriptionOverlay
-        isVisible={showTranscriptionOverlay}
-        isRecording={isRecording}
-        audioLevel={audioLevel}
-        onClose={() => setShowTranscriptionOverlay(false)}
-        onSaveEdits={(editedText) => {
-          console.log('Saved edited transcript:', editedText);
-          // TODO: Save edited transcript
-        }}
-        onDiscardEdits={() => {
-          console.log('Discarded transcript edits');
-        }}
-      />
-    </div>
+      {/* Transcription Overlay - Only render when needed */}
+      {showTranscriptionOverlay && (
+        <TranscriptionOverlay
+          isVisible={showTranscriptionOverlay}
+          isRecording={isRecording}
+          audioLevel={audioLevel}
+          onClose={() => setShowTranscriptionOverlay(false)}
+          onSaveEdits={(editedText) => {
+            console.log('Saved edited transcript:', editedText);
+            // TODO: Save edited transcript
+          }}
+          onDiscardEdits={() => {
+            console.log('Discarded transcript edits');
+          }}
+        />
+      )}
+      </div>
+    </RecordingProvider>
   );
 }
 

@@ -97,8 +97,8 @@ export function TranscriptionOverlay({
     currentPattern: string;
   }>({ isActive: false, lastActivityTime: 0, currentPattern: '' });
   
-  // Prevent unused variable warning by adding it to a debug log
-  if (process.env.NODE_ENV === 'development') {
+  // Only log speech activity when overlay is visible and active
+  if (process.env.NODE_ENV === 'development' && isVisible && isRecording) {
     console.debug('Speech activity state:', speechActivity);
   }
   const textareaRef = useRef<HTMLTextAreaElement>(null);

@@ -1,8 +1,9 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { safeEventListen, cleanupListeners } from '../lib/safeEventListener';
-import { recordingManager } from './recordingManager';
+import { useRecordingContext } from '../contexts/RecordingContext';
 import { usePushToTalkMonitor } from './usePushToTalkMonitor';
+import { useAudioLevelMonitoring } from './useAudioLevelMonitoring';
 
 interface RecordingProgress {
   Idle?: any;
@@ -36,19 +37,24 @@ export function useRecording(options: UseRecordingOptions = {}) {
     isRecordViewActive = false
   } = options;
 
+  // Recording context (replaces singleton)
+  const recordingContext = useRecordingContext();
+
+  // Audio level monitoring (extracted to separate hook)
+  const { audioLevel } = useAudioLevelMonitoring({
+    selectedMic,
+    isActive: isRecordViewActive,
+  });
+
   // State
   const [isRecording, setIsRecording] = useState(false);
   const [recordingStartTime, setRecordingStartTime] = useState<number | null>(null);
-  const [audioLevel, setAudioLevel] = useState(0);
   
   // Refs
   const isRecordingRef = useRef(false);
   const lastToggleTimeRef = useRef(0);
   const pushToTalkTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pushToTalkStartTimeRef = useRef<number>(0);
-  const audioTargetRef = useRef(0);
-  const audioCurrentRef = useRef(0);
-  const animationFrameRef = useRef<number>();
   const isPushToTalkActiveRef = useRef(false);
 
   // Sync with backend state on mount
@@ -61,15 +67,15 @@ export function useRecording(options: UseRecordingOptions = {}) {
           setIsRecording(backendIsRecording);
           isRecordingRef.current = backendIsRecording;
           // Also sync the recording manager
-          recordingManager.setRecording(backendIsRecording);
+          recordingContext.setRecording(backendIsRecording);
         } else {
           // Make sure recording manager is also in sync even if states match
-          recordingManager.setRecording(backendIsRecording);
+          recordingContext.setRecording(backendIsRecording);
         }
       } catch (error) {
         console.error('Failed to check initial recording state:', error);
         // Reset recording manager on error to ensure clean state
-        recordingManager.reset();
+        recordingContext.reset();
       }
     };
     
@@ -77,139 +83,15 @@ export function useRecording(options: UseRecordingOptions = {}) {
   }, []);
 
 
-  // Start audio level monitoring only when in record view
-  useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
-    let animationFrame: number;
-    let isActive = true;
-
-    // Skip audio monitoring if not in record view
-    if (!isRecordViewActive) {
-      // Reset audio level when not monitoring
-      audioTargetRef.current = 0;
-      audioCurrentRef.current = 0;
-      setAudioLevel(0);
-      return;
-    }
-
-    const startMonitoring = async () => {
-      try {
-        console.log('Attempting to start audio level monitoring...');
-        // Start monitoring first
-        await invoke('start_audio_level_monitoring', { 
-          deviceName: selectedMic !== 'Default microphone' ? selectedMic : null 
-        });
-        console.log('Audio level monitoring started successfully');
-        
-        // Animation function - define inside effect to avoid stale closures
-        const animate = () => {
-          if (!isActive) return;
-          
-          const target = audioTargetRef.current;
-          const current = audioCurrentRef.current;
-          const diff = target - current;
-          const speed = 0.3;
-          let newLevel = current + (diff * speed);
-          
-          // Organic motion from master
-          if (target > 0.02) {
-            const flutter = (Math.random() - 0.5) * target * 0.12;
-            const shimmer = Math.sin(Date.now() * 0.007) * target * 0.04;
-            const pulse = Math.sin(Date.now() * 0.003) * target * 0.06;
-            newLevel += flutter + shimmer + pulse;
-          }
-          
-          // Breathing motion even when quiet
-          const breathingMotion = Math.sin(Date.now() * 0.0015) * 0.015;
-          newLevel += breathingMotion;
-          
-          // Clamp and update
-          audioCurrentRef.current = Math.max(0, Math.min(newLevel, 1.0));
-          setAudioLevel(audioCurrentRef.current);
-          
-          // console.log('[useRecording] Animation frame:', {
-          //   target: target.toFixed(6),
-          //   current: current.toFixed(6),
-          //   newLevel: newLevel.toFixed(6),
-          //   final: audioCurrentRef.current.toFixed(6)
-          // });
-          
-          animationFrame = requestAnimationFrame(animate);
-        };
-        
-        // Start the animation loop
-        animate();
-        
-        // Poll every 150ms like in master
-        interval = setInterval(async () => {
-          if (!isActive) return;
-          try {
-            const level = await invoke<number>('get_current_audio_level');
-            
-            // Log raw backend value
-            // console.log('[useRecording] Backend audio level:', {
-            //   raw: level.toFixed(6),
-            //   timestamp: Date.now(),
-            //   device: selectedMic
-            // });
-            
-            // Same processing as master
-            let processed = 0;
-            if (level > 0.12) {
-              processed = (level - 0.12) * 1.5; // More amplification
-            }
-            
-            // Add bit of raw signal for organic movement
-            processed += level * 0.08; // More jitter for liveliness
-            
-            // Set target - animation will smoothly move toward it
-            audioTargetRef.current = Math.min(processed, 1.0);
-            
-            // console.log('[useRecording] Processed audio:', {
-            //   target: audioTargetRef.current.toFixed(6),
-            //   current: audioCurrentRef.current.toFixed(6),
-            //   frontendLevel: audioLevel.toFixed(6)
-            // });
-          } catch (error) {
-            console.error('Failed to get audio level:', error);
-          }
-        }, 150);
-        
-      } catch (error) {
-        console.error('Failed to start audio level monitoring:', error);
-      }
-    };
-
-    // Delay start to ensure Tauri is ready
-    const timeoutId = setTimeout(() => {
-      if (isActive) {
-        startMonitoring();
-      }
-    }, 200);
-
-    // Cleanup on unmount
-    return () => {
-      isActive = false;
-      clearTimeout(timeoutId);
-      if (interval) clearInterval(interval);
-      if (animationFrame) cancelAnimationFrame(animationFrame);
-      invoke('stop_audio_level_monitoring').catch(() => {});
-      audioTargetRef.current = 0;
-      audioCurrentRef.current = 0;
-      setAudioLevel(0);
-    };
-  }, [selectedMic, isRecordViewActive]);
-
-
   // Start recording
   const startRecording = useCallback(async () => {
     // Use global singleton to prevent multiple instances
-    if (!recordingManager.canStartRecording()) {
+    if (!recordingContext.canStartRecording()) {
       console.log('RecordingManager prevented duplicate recording');
       return;
     }
 
-    recordingManager.setStarting(true);
+    recordingContext.setStarting(true);
 
     try {
       // Check backend state first
@@ -218,15 +100,15 @@ export function useRecording(options: UseRecordingOptions = {}) {
         console.log('Backend is already recording, syncing frontend state');
         setIsRecording(true);
         isRecordingRef.current = true;
-        recordingManager.setRecording(true);
-        recordingManager.setStarting(false);
+        recordingContext.setRecording(true);
+        recordingContext.setStarting(false);
         return;
       }
 
       // Set frontend state optimistically before calling backend
       setIsRecording(true);
       isRecordingRef.current = true;
-      recordingManager.setRecording(true);
+      recordingContext.setRecording(true);
       setRecordingStartTime(Date.now());
       
       console.log('Starting recording with device:', selectedMic);
@@ -251,15 +133,15 @@ export function useRecording(options: UseRecordingOptions = {}) {
       // If the error is "Recording already in progress", keep our state as recording
       if (error.includes && error.includes('already in progress')) {
         console.log('Backend says recording in progress, keeping recording state');
-        recordingManager.setRecording(true);
+        recordingContext.setRecording(true);
       } else {
         // Only reset state on actual errors
         setIsRecording(false);
         isRecordingRef.current = false;
-        recordingManager.setRecording(false);
+        recordingContext.setRecording(false);
       }
     } finally {
-      recordingManager.setStarting(false);
+      recordingContext.setStarting(false);
     }
   }, [selectedMic, soundEnabled]);
 
@@ -273,9 +155,6 @@ export function useRecording(options: UseRecordingOptions = {}) {
         setIsRecording(false);
         isRecordingRef.current = false;
         setRecordingStartTime(null);
-        audioTargetRef.current = 0;
-        audioCurrentRef.current = 0;
-        setAudioLevel(0);
         return;
       }
     } catch (error) {
@@ -296,11 +175,8 @@ export function useRecording(options: UseRecordingOptions = {}) {
       // Only update frontend state after backend confirms stop
       isRecordingRef.current = false;
       setIsRecording(false);
-      recordingManager.setRecording(false);
+      recordingContext.setRecording(false);
       setRecordingStartTime(null);
-      audioTargetRef.current = 0;
-      audioCurrentRef.current = 0;
-      setAudioLevel(0);
       
       if (soundEnabled) {
         try {
@@ -356,7 +232,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
       pushToTalkTimeoutRef.current = null;
     }
     
-    if (!isRecordingRef.current && !recordingManager.getState().isRecording) {
+    if (!isRecordingRef.current && !recordingContext.state.isRecording) {
       pushToTalkStartTimeRef.current = now;
       isPushToTalkActiveRef.current = true;
       console.log('Starting recording from push-to-talk');
@@ -376,14 +252,14 @@ export function useRecording(options: UseRecordingOptions = {}) {
     
     const minimumRecordingTime = vadEnabled ? 50 : 300;
     
-    const currentlyRecording = isRecordingRef.current || recordingManager.getState().isRecording;
+    const currentlyRecording = isRecordingRef.current || recordingContext.state.isRecording;
     console.log(`Recording time: ${recordingTime}ms, minimum: ${minimumRecordingTime}ms, isRecording: ${currentlyRecording}`);
     
     if (currentlyRecording && recordingTime >= minimumRecordingTime) {
       if (vadEnabled) {
         console.log('VAD enabled, setting timeout to stop recording');
         pushToTalkTimeoutRef.current = setTimeout(async () => {
-          const stillRecording = isRecordingRef.current || recordingManager.getState().isRecording;
+          const stillRecording = isRecordingRef.current || recordingContext.state.isRecording;
           if (stillRecording) {
             console.log('Stopping recording after VAD timeout');
             await stopRecording();
@@ -431,7 +307,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
             // console.log('Backend started recording, updating frontend state');
             setIsRecording(true);
             isRecordingRef.current = true;
-            recordingManager.setRecording(true);
+            recordingContext.setRecording(true);
             setRecordingStartTime(null);
           }
         } else if (state === "stopped" || state === "idle") {
@@ -440,11 +316,8 @@ export function useRecording(options: UseRecordingOptions = {}) {
             // console.log('Backend stopped recording, updating frontend state');
             setIsRecording(false);
             isRecordingRef.current = false;
-            recordingManager.setRecording(false);
+            recordingContext.setRecording(false);
             setRecordingStartTime(null);
-            audioTargetRef.current = 0;
-            audioCurrentRef.current = 0;
-            setAudioLevel(audioCurrentRef.current);
           }
         }
       });
@@ -501,12 +374,6 @@ export function useRecording(options: UseRecordingOptions = {}) {
       if (pushToTalkTimeoutRef.current) {
         clearTimeout(pushToTalkTimeoutRef.current);
         pushToTalkTimeoutRef.current = null;
-      }
-      
-      // Cancel animation frame
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-        animationFrameRef.current = undefined;
       }
       
       // Use safe cleanup
