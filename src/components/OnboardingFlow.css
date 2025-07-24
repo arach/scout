@@ -74,12 +74,12 @@
 }
 
 .new-soundwave-hero {
-  width: 68%;
-  height: 68%;
+  width: 80%;
+  height: 40%; /* Crop to top 40% of window */
   object-fit: contain;
-  object-position: center;
+  object-position: center top; /* Anchor to top */
   opacity: 1;
-  transform: translateY(-205px); /* Position high up but leave more room below */
+  transform: translateY(-100px); /* Less dramatic offset */
   z-index: 0;
 }
 
@@ -92,11 +92,33 @@
   right: 0;
   bottom: 0;
   background: linear-gradient(to bottom, 
-    transparent 0%, 
-    rgba(0,0,0,0.3) 50%,
-    rgba(0,0,0,0.7) 70%, 
-    rgba(0,0,10,0.95) 100%);
+    rgba(0,0,0,0.2) 0%,
+    rgba(0,0,0,0.4) 30%,
+    rgba(0,0,0,0.6) 60%,
+    rgba(0,0,0,0.9) 100%);
   z-index: 1;
+}
+
+/* Hero headline overlay */
+.new-hero-headline {
+  position: absolute;
+  top: 20%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  text-align: center;
+  color: white;
+  font-family: 'Silkscreen', monospace;
+  font-size: 18px;
+  font-weight: 400;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(8px);
+  padding: 12px 24px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
 }
 
 /* Content container with centered glass box */
@@ -129,8 +151,8 @@
     linear-gradient(135deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.03) 100%),
     linear-gradient(135deg, rgba(30, 40, 80, 0.02) 0%, transparent 100%);
   border-radius: 20px;
-  padding: 28px 32px 24px;
-  width: 460px; /* Fixed width - no more max-width flexibility */
+  padding: 24px 32px 24px; /* 8pt grid: equal top/bottom padding */
+  width: 552px; /* Increased by ~20% (460 * 1.2) */
   min-height: 480px; /* Minimum height but allow growing if needed */
   max-height: 520px; /* Cap the maximum height */
   text-align: center;
@@ -144,7 +166,7 @@
   animation: new-slideUp 0.8s ease-out 0.2s both;
   display: flex;
   flex-direction: column;
-  gap: 15px;
+  gap: 16px; /* 8pt grid: 16px = 2 * 8pt */
   /* Remove transform since we're using container padding instead */
   overflow: hidden;
   flex-shrink: 0; /* Prevent shrinking */
@@ -208,12 +230,13 @@
 
 .new-step-title {
   font-family: 'Silkscreen', monospace;
-  font-size: 24px;
+  font-size: 24pt; /* 24pt for headlines on macOS */
   font-weight: 400;
   color: #fff;
   margin: 0;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  line-height: 1.5;
 }
 
 .new-step-subtitle {
@@ -229,8 +252,8 @@
 .new-step-features {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 15px;
+  gap: 8px; /* 8pt grid */
+  padding: 16px; /* 8pt grid: 16px = 2 * 8pt */
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%);
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -257,12 +280,12 @@
 .new-step-content {
   display: flex;
   flex-direction: column;
-  gap: 15px;
+  gap: 24px; /* 8pt grid: 24px gap between bullet list and model-download */
   flex: 1;
 }
 
 .new-step-description {
-  font-size: 15px;
+  font-size: 17pt; /* 17pt for body text on macOS */
   font-weight: 300;
   color: rgba(255, 255, 255, 0.8);
   line-height: 1.5;
@@ -736,10 +759,10 @@
 }
 
 .new-indicator.new-active {
-  background: linear-gradient(135deg, rgba(34, 197, 94, 0.7) 0%, rgba(16, 185, 129, 0.6) 100%);
-  border-color: rgba(34, 197, 94, 0.6);
+  background: linear-gradient(135deg, rgba(74, 158, 255, 0.8) 0%, rgba(59, 130, 246, 0.7) 100%);
+  border-color: rgba(74, 158, 255, 0.8);
   box-shadow: 
-    0 0 20px rgba(34, 197, 94, 0.3),
+    0 0 20px rgba(74, 158, 255, 0.4),
     0 4px 16px rgba(0, 0, 0, 0.15),
     inset 0 1px 1px rgba(255, 255, 255, 0.25);
   backdrop-filter: blur(12px);
@@ -751,13 +774,14 @@
 /* Remove the white dot that overlaps with step numbers */
 
 .new-indicator.new-completed {
-  background: linear-gradient(135deg, rgba(34, 197, 94, 0.9) 0%, rgba(22, 163, 74, 0.8) 100%);
-  border-color: rgba(34, 197, 94, 0.8);
-  color: white;
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.6) 0%, rgba(22, 163, 74, 0.5) 100%);
+  border-color: rgba(34, 197, 94, 0.4);
+  color: rgba(255, 255, 255, 0.7);
+  opacity: 0.7; /* Fade completed steps */
   box-shadow: 
-    0 0 15px rgba(34, 197, 94, 0.3),
-    0 4px 16px rgba(0, 0, 0, 0.15),
-    inset 0 1px 1px rgba(255, 255, 255, 0.25);
+    0 0 10px rgba(34, 197, 94, 0.2),
+    0 2px 8px rgba(0, 0, 0, 0.1),
+    inset 0 1px 1px rgba(255, 255, 255, 0.15);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   animation: new-coin-flip 0.35s cubic-bezier(0.68, -0.55, 0.265, 1.55);
@@ -796,8 +820,18 @@
 }
 
 @keyframes new-pulse-glow {
-  0%, 100% { box-shadow: 0 0 20px rgba(34, 197, 94, 0.3); }
-  50% { box-shadow: 0 0 30px rgba(34, 197, 94, 0.5); }
+  0%, 100% { 
+    box-shadow: 
+      0 0 20px rgba(74, 158, 255, 0.4),
+      0 4px 16px rgba(0, 0, 0, 0.15),
+      inset 0 1px 1px rgba(255, 255, 255, 0.25);
+  }
+  50% { 
+    box-shadow: 
+      0 0 30px rgba(74, 158, 255, 0.6),
+      0 4px 20px rgba(0, 0, 0, 0.2),
+      inset 0 1px 1px rgba(255, 255, 255, 0.3);
+  }
 }
 
 /* Blazing fast double coin flip animation */
