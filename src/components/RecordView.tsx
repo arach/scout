@@ -1,4 +1,4 @@
-import { Fragment, useRef, useEffect, useState } from 'react';
+import { Fragment, useRef, useEffect, useState, memo } from 'react';
 import { Settings } from 'lucide-react';
 import { MicrophoneQuickPicker } from './MicrophoneQuickPicker';
 import { SessionTranscripts } from './SessionTranscripts';
@@ -68,7 +68,7 @@ function formatKey(key: string): string {
     return keyMap[key] || key;
 }
 
-export function RecordView({
+export const RecordView = memo(function RecordView({
     isRecording,
     isProcessing,
     recordingStartTime,
@@ -331,4 +331,4 @@ export function RecordView({
 
         </div>
     );
-} 
+}); 

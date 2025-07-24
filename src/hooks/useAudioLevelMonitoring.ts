@@ -55,7 +55,9 @@ export function useAudioLevelMonitoring(options: UseAudioLevelMonitoringOptions 
             // Set target - animation will smoothly move toward it
             audioTargetRef.current = Math.min(processed, 1.0);
           } catch (error) {
-            console.error('Failed to get audio level:', error);
+            // Silently fail if monitoring isn't available (e.g., during onboarding)
+            audioTargetRef.current = 0;
+            return;
           }
           
           // Animate towards target
@@ -87,6 +89,8 @@ export function useAudioLevelMonitoring(options: UseAudioLevelMonitoringOptions 
         
       } catch (error) {
         console.error('Failed to start audio level monitoring:', error);
+        // Don't set up polling interval if starting failed
+        return;
       }
     };
 

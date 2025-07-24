@@ -1698,16 +1698,29 @@ pub fn run() {
                     .build(app)?
             ])?;
             
-            // Load tray icon
-            let icon_path = std::env::current_dir()
-                .unwrap()
-                .join("icons/tray-icon.png");
+            // Load tray icon - try multiple paths to find the proper Scout icon
+            let possible_paths = vec![
+                "src-tauri/icons/scout-tray-icon.png",        // Development path - Scout logo
+                "icons/scout-tray-icon.png",                  // Current directory - Scout logo
+                "../src-tauri/icons/scout-tray-icon.png",     // Relative from target directory
+                "../../src-tauri/icons/scout-tray-icon.png",  // Further relative
+                "src-tauri/icons/tray-icon.png",              // Fallback to original (Tauri logo)
+                "icons/tray-icon.png",                        // Fallback current directory
+            ];
             
-            let tray_icon = tauri::image::Image::from_path(&icon_path)
-                .unwrap_or_else(|_| {
-                    // Fallback to default icon if tray icon not found
-                    app.default_window_icon().unwrap().clone()
-                });
+            let mut tray_icon = None;
+            for path in possible_paths {
+                if let Ok(icon) = tauri::image::Image::from_path(path) {
+                    tray_icon = Some(icon);
+                    info(Component::UI, &format!("Successfully loaded tray icon from: {}", path));
+                    break;
+                }
+            }
+            
+            let tray_icon = tray_icon.unwrap_or_else(|| {
+                warn(Component::UI, "Could not find Scout tray icon (scout-tray-icon.png), using default window icon");
+                app.default_window_icon().unwrap().clone()
+            });
             
             let _ = TrayIconBuilder::new()
                 .icon(tray_icon)

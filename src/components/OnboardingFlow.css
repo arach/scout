@@ -1,11 +1,11 @@
 @import url('https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=Inter:wght@300;400;500;600;700&display=swap');
 
-/* Base font for all new onboarding content */
-.new-onboarding-overlay * {
+/* Base font for all onboarding content */
+.onboarding-overlay * {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
-.new-onboarding-overlay {
+.onboarding-overlay {
   position: fixed;
   top: 0;
   left: 0;
@@ -17,16 +17,16 @@
   align-items: center;
   justify-content: center;
   z-index: 10000;
-  animation: new-fadeIn 0.3s ease;
+  animation: onboarding-fadeIn 0.3s ease;
 }
 
-@keyframes new-fadeIn {
+@keyframes onboarding-fadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
 }
 
 /* Background image layer - recreate original beautiful layout */
-.new-background-image {
+.onboarding-background {
   position: absolute;
   top: 0;
   left: 0;
@@ -42,7 +42,7 @@
 }
 
 /* Edge blend gradients positioned around the image boundaries */
-.new-background-image::before {
+.onboarding-background::before {
   content: '';
   position: absolute;
   top: 0;
@@ -73,20 +73,18 @@
   pointer-events: none;
 }
 
-.new-soundwave-hero {
-  position: absolute;
-  top: 20px; /* Position 20px from top */
-  left: 50%;
-  transform: translateX(-50%); /* Center horizontally */
-  width: 96%; /* Increased by 20% (80% * 1.2) */
-  height: 48vh; /* Increased by 20% (40vh * 1.2) */
+.onboarding-soundwave-image {
+  width: 80%;
+  height: 40%; /* Crop to top 40% of window */
   object-fit: contain;
+  object-position: center top; /* Anchor to top */
   opacity: 1;
+  transform: translateY(-280px); /* Move wave image up 100px */
   z-index: 0;
 }
 
 /* Add the gradient overlay like the original */
-.new-background-image::after {
+.onboarding-background::after {
   content: '';
   position: absolute;
   top: 0;
@@ -102,7 +100,7 @@
 }
 
 /* Hero headline overlay */
-.new-hero-headline {
+.onboarding-hero-headline {
   position: absolute;
   top: 20%;
   left: 50%;
@@ -110,10 +108,11 @@
   z-index: 2;
   text-align: center;
   color: white;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  font-size: 16px;
-  font-weight: 500;
-  letter-spacing: 0.02em;
+  font-family: 'Silkscreen', monospace;
+  font-size: 18px;
+  font-weight: 400;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
   background: rgba(0, 0, 0, 0.3);
   backdrop-filter: blur(8px);
   padding: 12px 24px;
@@ -123,7 +122,7 @@
 }
 
 /* Content container with centered glass box */
-.new-content-container {
+.onboarding-content-container {
   position: relative;
   z-index: 2;
   width: 100%;
@@ -133,12 +132,12 @@
   align-items: flex-start;
   justify-content: center;
   min-height: 100vh;
-  /* Push content way down to show more soundwave - moved up 50px */
-  padding: 450px 60px 40px;
+  /* Push content way down to show more soundwave */
+  padding: 760px 60px 460px;
 }
 
 /* Wrapper to contain glass card and indicators */
-.new-glass-wrapper {
+.onboarding-glass-wrapper {
   position: relative;
   display: flex;
   align-items: center;
@@ -146,25 +145,25 @@
 }
 
 /* Glass card positioned naturally in flexbox */
-.new-glass-card {
+.onboarding-glass-card {
   position: relative;
+  margin-top: 5px;
   background: 
     linear-gradient(135deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.03) 100%),
     linear-gradient(135deg, rgba(30, 40, 80, 0.02) 0%, transparent 100%);
   border-radius: 20px;
   padding: 24px 32px 24px; /* 8pt grid: equal top/bottom padding */
   width: 552px; /* Increased by ~20% (460 * 1.2) */
-  min-height: 480px; /* Minimum height but allow growing if needed */
-  max-height: 520px; /* Cap the maximum height */
+  height: 520px; /* Fixed height to prevent movement between steps */
   text-align: center;
-  border: 1px solid rgba(74, 158, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   backdrop-filter: blur(16px) saturate(150%);
   -webkit-backdrop-filter: blur(16px) saturate(150%);
   box-shadow: 
     0 12px 40px rgba(0, 0, 0, 0.15),
     inset 0 1px 1px rgba(255, 255, 255, 0.08),
     0 0 0 1px rgba(0, 0, 0, 0.05);
-  animation: new-slideUp 0.8s ease-out 0.2s both;
+  animation: onboarding-slideUp 0.8s ease-out 0.2s both;
   display: flex;
   flex-direction: column;
   gap: 16px; /* 8pt grid: 16px = 2 * 8pt */
@@ -173,8 +172,8 @@
   flex-shrink: 0; /* Prevent shrinking */
 }
 
-/* Glass shimmer effect with blue tint */
-.new-glass-card::before {
+/* Glass shimmer effect from original */
+.onboarding-glass-card::before {
   content: '';
   position: absolute;
   top: -50%;
@@ -184,7 +183,7 @@
   background: linear-gradient(
     45deg,
     transparent 30%,
-    rgba(74, 158, 255, 0.08) 50%,
+    rgba(255, 255, 255, 0.05) 50%,
     transparent 70%
   );
   transform: rotate(45deg) translateY(-100%);
@@ -192,18 +191,18 @@
   pointer-events: none;
 }
 
-.new-glass-card:hover::before {
+.onboarding-glass-card:hover::before {
   transform: rotate(45deg) translateY(100%);
 }
 
-/* Subtle blue glow on hover */
-.new-glass-card:hover {
-  border-color: rgba(74, 158, 255, 0.25);
+/* Subtle glow on hover */
+.onboarding-glass-card:hover {
+  border-color: rgba(255, 255, 255, 0.2);
   box-shadow: 
     0 8px 32px rgba(0, 0, 0, 0.12),
     inset 0 1px 1px rgba(255, 255, 255, 0.15),
     0 0 0 1px rgba(0, 0, 0, 0.05),
-    0 0 40px rgba(74, 158, 255, 0.15);
+    0 0 40px rgba(255, 255, 255, 0.05);
 }
 
 @keyframes new-slideUp {
@@ -218,20 +217,20 @@
 }
 
 /* Step header */
-.new-step-header {
+.step-header {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
 /* Extra spacing for shortcuts header */
-.new-shortcuts-header {
+.shortcuts-step-header {
   margin-bottom: 8px;
 }
 
-.new-step-title {
+.step-title {
   font-family: 'Silkscreen', monospace;
-  font-size: 24pt; /* 24pt for headlines on macOS */
+  font-size: 24px;
   font-weight: 400;
   color: #fff;
   margin: 0;
@@ -240,7 +239,17 @@
   line-height: 1.5;
 }
 
-.new-step-subtitle {
+/* Shared subtitle class for consistent typography */
+.subtitle {
+  font-size: 16px;
+  font-weight: 300;
+  color: rgba(255, 255, 255, 0.9);
+  margin: 0;
+  line-height: 1.4;
+  letter-spacing: 0.015em;
+}
+
+.step-subtitle {
   font-size: 16px;
   font-weight: 300;
   color: rgba(255, 255, 255, 0.9);
@@ -250,17 +259,17 @@
 }
 
 /* Features list */
-.new-step-features {
+.step-features {
   display: flex;
   flex-direction: column;
-  gap: 8px; /* 8pt grid */
+  gap: 8px; /* More vertical spacing between features on final page */
   padding: 16px; /* 8pt grid: 16px = 2 * 8pt */
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%);
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.new-feature {
+.step-feature {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -271,30 +280,31 @@
   letter-spacing: 0.01em;
 }
 
-.new-feature svg {
+.step-feature svg {
   flex-shrink: 0;
-  color: #4a9eff;
+  color: #22c55e;
   opacity: 0.9;
 }
 
 /* Step content */
-.new-step-content {
+.step-content {
   display: flex;
   flex-direction: column;
-  gap: 12px; /* Reduced gap for tighter spacing */
+  gap: 24px; /* 8pt grid: 24px gap between bullet list and model-download */
   flex: 1;
 }
 
-.new-step-description {
-  font-size: 14px; /* Smaller, more appropriate size */
-  font-weight: 400;
-  color: rgba(255, 255, 255, 0.8);
+.step-description {
+  font-size: 16px;
+  font-weight: 300;
+  color: rgba(255, 255, 255, 0.9);
+  margin: 0;
   line-height: 1.4;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.015em;
 }
 
 /* Model details */
-.new-model-details {
+.model-download-details {
   background: rgba(0, 0, 0, 0.3);
   border-radius: 10px;
   padding: 12px;
@@ -305,19 +315,19 @@
   text-align: left;
 }
 
-.new-detail-item {
+.model-detail-item {
   font-size: 13px;
   color: rgba(255, 255, 255, 0.75);
   letter-spacing: 0.01em;
 }
 
-.new-detail-item strong {
+.model-detail-item strong {
   color: rgba(255, 255, 255, 0.9);
   margin-right: 8px;
   font-weight: 500;
 }
 
-.new-detail-item code {
+.model-detail-item code {
   font-family: 'SF Mono', Monaco, monospace;
   font-size: 10px;
   background: rgba(255, 255, 255, 0.08);
@@ -328,53 +338,69 @@
   word-break: break-all;
 }
 
-.new-tiny-source-icon {
-  color: rgba(255, 255, 255, 0.5);
+.model-source-link {
+  color: rgba(74, 158, 255, 0.8);
   text-decoration: none;
-  font-size: 10px;
-  margin-left: 4px;
-  transition: color 0.2s ease;
-  display: inline-block;
-}
-
-.new-tiny-source-icon:hover {
-  color: rgba(255, 255, 255, 0.8);
-}
-
-.new-upgrade-note {
-  font-style: italic;
-  color: rgba(255, 255, 255, 0.6);
+  margin-left: 8px;
   font-size: 12px;
+  transition: color 0.2s ease;
+}
+
+.model-source-link:hover {
+  color: rgba(74, 158, 255, 1);
 }
 
 /* Download progress */
-.new-download-progress {
+.model-download-progress {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.new-progress-bar {
+.model-progress-bar {
   height: 8px;
   background: rgba(255, 255, 255, 0.1);
   border-radius: 4px;
   overflow: hidden;
 }
 
-.new-progress-fill {
+.model-progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #4a9eff 0%, #59a6ff 100%);
+  background: linear-gradient(90deg, #4a9eff 0%, #22c55e 100%);
   transition: width 0.3s ease;
-  box-shadow: 0 0 8px rgba(74, 158, 255, 0.3);
 }
 
-.new-progress-text {
+.model-progress-text {
   font-size: 13px;
   color: rgba(255, 255, 255, 0.7);
   text-align: center;
 }
 
-.new-download-initiating {
+.model-download-success {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.1) 0%, rgba(34, 197, 94, 0.05) 100%);
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  border-radius: 8px;
+  margin: 8px 0;
+}
+
+.model-success-icon {
+  color: #22c55e;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.model-success-text {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 500;
+}
+
+.model-download-initiating {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -382,27 +408,27 @@
   padding: 12px;
 }
 
-.new-spinner {
+.loading-spinner {
   width: 20px;
   height: 20px;
   border: 2px solid rgba(255, 255, 255, 0.2);
   border-top-color: #4a9eff;
   border-radius: 50%;
-  animation: new-spin 1s linear infinite;
+  animation: loading-spin 1s linear infinite;
 }
 
-.new-spinner-small {
+.loading-spinner-small {
   width: 16px;
   height: 16px;
   border-width: 2px;
 }
 
-@keyframes new-spin {
+@keyframes loading-spin {
   to { transform: rotate(360deg); }
 }
 
 /* Error state */
-.new-error-state {
+.model-error-state {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -414,16 +440,16 @@
   border: 1px solid rgba(239, 68, 68, 0.2);
 }
 
-.new-error-state svg {
+.model-error-state svg {
   color: #ef4444;
 }
 
 /* Permission card */
-.new-permission-card {
+.permission-status-card {
   width: 100%;
 }
 
-.new-status-item {
+.permission-status-item {
   display: flex;
   align-items: flex-start;
   gap: 10px;
@@ -434,25 +460,25 @@
   -webkit-backdrop-filter: blur(8px);
 }
 
-.new-status-item.new-status-waiting {
+.permission-status-item.permission-waiting {
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.03) 100%);
   border-color: rgba(255, 255, 255, 0.15);
   color: rgba(255, 255, 255, 0.9);
 }
 
-.new-status-item.new-status-granted {
+.permission-status-item.permission-granted {
   background: linear-gradient(135deg, rgba(34, 197, 94, 0.15) 0%, rgba(34, 197, 94, 0.08) 100%);
   border-color: rgba(34, 197, 94, 0.3);
   color: #22c55e;
 }
 
-.new-status-item.new-status-denied {
+.permission-status-item.permission-denied {
   background: linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(239, 68, 68, 0.08) 100%);
   border-color: rgba(239, 68, 68, 0.3);
   color: #ef4444;
 }
 
-.new-status-icon {
+.permission-status-icon {
   flex-shrink: 0;
   width: 32px;
   height: 32px;
@@ -463,19 +489,19 @@
   margin-top: 2px;
 }
 
-.new-status-waiting .new-status-icon {
+.permission-waiting .permission-status-icon {
   background: rgba(255, 255, 255, 0.15);
 }
 
-.new-status-granted .new-status-icon {
+.permission-granted .permission-status-icon {
   background: rgba(34, 197, 94, 0.2);
 }
 
-.new-status-denied .new-status-icon {
+.permission-denied .permission-status-icon {
   background: rgba(239, 68, 68, 0.2);
 }
 
-.new-status-content {
+.permission-status-content {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -483,13 +509,13 @@
   text-align: left;
 }
 
-.new-status-title {
+.permission-status-title {
   font-size: 16px;
   font-weight: 600;
   line-height: 1.3;
 }
 
-.new-status-description {
+.permission-status-description {
   font-size: 14px;
   font-weight: 400;
   opacity: 0.8;
@@ -497,13 +523,13 @@
 }
 
 /* Shortcuts config */
-.new-shortcuts-config {
+.shortcuts-config {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.new-shortcut-item {
+.shortcut-item {
   display: flex;
   align-items: center;
   gap: 16px;
@@ -516,15 +542,7 @@
   transition: all 0.2s ease;
 }
 
-.new-shortcut-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 100px;
-  justify-content: flex-start;
-}
-
-.new-shortcut-item label {
+.shortcut-item label {
   flex: 1;
   font-size: 14px;
   color: rgba(255, 255, 255, 0.95);
@@ -533,7 +551,7 @@
   letter-spacing: 0.01em;
 }
 
-.new-shortcut-item kbd {
+.shortcut-item kbd {
   font-family: 'SF Mono', Monaco, monospace;
   font-size: 13px;
   background: rgba(255, 255, 255, 0.12);
@@ -541,7 +559,7 @@
   padding: 8px 16px;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.2);
-  width: 180px;
+  min-width: 130px;
   text-align: center;
   transition: all 0.2s ease;
   font-weight: 600;
@@ -549,26 +567,25 @@
   box-shadow: 
     0 2px 8px rgba(0, 0, 0, 0.1),
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  flex-shrink: 0;
 }
 
-.new-shortcut-item kbd.new-capturing {
+.shortcut-item kbd.shortcut-capturing {
   background: linear-gradient(135deg, rgba(74, 158, 255, 0.9) 0%, rgba(74, 158, 255, 0.7) 100%);
   color: white;
   border-color: rgba(74, 158, 255, 0.8);
-  animation: new-pulse 1.5s infinite;
+  animation: shortcut-pulse 1.5s infinite;
   box-shadow: 
     0 4px 12px rgba(74, 158, 255, 0.3),
     inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
-@keyframes new-pulse {
+@keyframes shortcut-pulse {
   0%, 100% { opacity: 0.8; }
   50% { opacity: 1; }
 }
 
 /* Quick reference */
-.new-quick-reference {
+.shortcuts-quick-reference {
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
@@ -578,24 +595,24 @@
   gap: 12px;
 }
 
-.new-reference-item {
+.shortcuts-reference-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 8px 0;
 }
 
-.new-reference-item:not(:last-child) {
+.shortcuts-reference-item:not(:last-child) {
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.new-reference-label {
+.shortcuts-reference-label {
   font-size: 14px;
   color: rgba(255, 255, 255, 0.8);
   font-weight: 400;
 }
 
-.new-reference-shortcut {
+.shortcuts-reference-shortcut {
   font-family: 'SF Mono', Monaco, monospace;
   font-size: 12px;
   background: rgba(255, 255, 255, 0.1);
@@ -608,12 +625,12 @@
 }
 
 /* Download status final */
-.new-download-status-final {
+.model-download-status-final {
   width: 100%;
 }
 
-.new-status-complete,
-.new-status-downloading {
+.model-status-complete,
+.model-status-downloading {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -624,33 +641,33 @@
   font-weight: 500;
 }
 
-.new-status-complete {
-  background: rgba(74, 158, 255, 0.15);
-  color: #4a9eff;
-  border: 1px solid rgba(74, 158, 255, 0.2);
+.model-status-complete {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.2);
 }
 
-.new-status-downloading {
+.model-status-downloading {
   background: rgba(255, 255, 255, 0.05);
   color: rgba(255, 255, 255, 0.8);
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 /* Step actions */
-.new-step-actions {
+.step-actions {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 16px;
   margin-top: auto;
 }
 
 /* Buttons */
-.new-btn-primary {
-  background: linear-gradient(135deg, rgba(74, 158, 255, 0.8) 0%, rgba(59, 130, 246, 0.7) 100%);
+.btn-primary {
+  background: rgba(255, 255, 255, 0.1);
   color: #ffffff;
-  border: 1px solid rgba(74, 158, 255, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 12px;
   padding: 8px 32px;
   font-size: 16px;
@@ -660,29 +677,26 @@
   text-transform: none;
   letter-spacing: 0;
   box-shadow: 
-    0 4px 16px rgba(74, 158, 255, 0.25),
+    0 4px 16px rgba(0, 0, 0, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.3);
+  transform: translateY(-1px);
+  box-shadow: 
+    0 6px 20px rgba(0, 0, 0, 0.2),
     inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
-.new-btn-primary:hover:not(:disabled) {
-  background: linear-gradient(135deg, rgba(74, 158, 255, 0.9) 0%, rgba(59, 130, 246, 0.8) 100%);
-  border-color: rgba(74, 158, 255, 0.8);
-  transform: translateY(-1px);
-  box-shadow: 
-    0 6px 20px rgba(74, 158, 255, 0.35),
-    inset 0 1px 0 rgba(255, 255, 255, 0.25);
-}
-
-.new-btn-primary:disabled {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.15);
-  color: rgba(255, 255, 255, 0.5);
-  box-shadow: none;
+.btn-primary:disabled {
+  opacity: 0.5;
   cursor: not-allowed;
   transform: none;
 }
 
-.new-btn-secondary {
+.btn-secondary {
   background: rgba(255, 255, 255, 0.05);
   color: #ffffff;
   border: 1px solid rgba(255, 255, 255, 0.15);
@@ -694,12 +708,12 @@
   transition: all 0.2s ease;
 }
 
-.new-btn-secondary:hover:not(:disabled) {
+.btn-secondary:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.08);
   border-color: rgba(255, 255, 255, 0.2);
 }
 
-.new-btn-text {
+.btn-text {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);
   color: rgba(255, 255, 255, 0.8);
@@ -712,13 +726,13 @@
   font-weight: 500;
 }
 
-.new-btn-text:hover {
+.btn-text:hover {
   background: rgba(255, 255, 255, 0.08);
   border-color: rgba(255, 255, 255, 0.15);
   color: rgba(255, 255, 255, 0.95);
 }
 
-.new-btn-link {
+.btn-link {
   background: none;
   border: none;
   color: rgba(255, 255, 255, 0.6);
@@ -730,104 +744,12 @@
   text-decoration: none;
 }
 
-.new-btn-link:hover {
+.btn-link:hover {
   color: rgba(255, 255, 255, 0.8);
 }
 
-/* Capture button - blue CTA */
-.new-btn-capture {
-  background: linear-gradient(135deg, rgba(74, 158, 255, 0.8) 0%, rgba(59, 130, 246, 0.7) 100%);
-  border: 1px solid rgba(74, 158, 255, 0.6);
-  color: #ffffff;
-  font-size: 13px;
-  cursor: pointer;
-  padding: 8px 16px;
-  border-radius: 8px;
-  transition: all 0.2s ease;
-  text-decoration: none;
-  font-weight: 600;
-  width: 80px;
-  text-align: center;
-  flex-shrink: 0;
-  box-shadow: 
-    0 2px 8px rgba(74, 158, 255, 0.25),
-    inset 0 1px 0 rgba(255, 255, 255, 0.2);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.new-btn-capture:hover {
-  background: linear-gradient(135deg, rgba(74, 158, 255, 0.9) 0%, rgba(59, 130, 246, 0.8) 100%);
-  border-color: rgba(74, 158, 255, 0.8);
-  transform: translateY(-1px);
-  box-shadow: 
-    0 4px 12px rgba(74, 158, 255, 0.35),
-    inset 0 1px 0 rgba(255, 255, 255, 0.25);
-}
-
-/* Cancel button - light red */
-.new-btn-cancel {
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  color: #ef4444;
-  font-size: 13px;
-  cursor: pointer;
-  padding: 8px 16px;
-  border-radius: 8px;
-  transition: all 0.2s ease;
-  text-decoration: none;
-  font-weight: 500;
-  width: 80px;
-  text-align: center;
-  flex-shrink: 0;
-  box-shadow: 
-    0 2px 6px rgba(239, 68, 68, 0.15),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.new-btn-cancel:hover {
-  background: rgba(239, 68, 68, 0.15);
-  border-color: rgba(239, 68, 68, 0.4);
-  color: #f87171;
-  transform: translateY(-1px);
-  box-shadow: 
-    0 4px 10px rgba(239, 68, 68, 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.15);
-}
-
-
-/* Capture indicator - small green checkmark */
-.new-capture-indicator {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  background: rgba(34, 197, 94, 0.15);
-  border: 1px solid rgba(34, 197, 94, 0.3);
-  border-radius: 50%;
-  color: #22c55e;
-  flex-shrink: 0;
-  animation: new-capture-success 0.3s ease-out;
-}
-
-@keyframes new-capture-success {
-  0% {
-    opacity: 0;
-    transform: scale(0.8);
-  }
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
 /* Step indicators positioned absolutely relative to glass box */
-.new-step-indicators {
+.onboarding-step-indicators {
   position: absolute;
   right: 100%; /* Position to the left of the glass box */
   top: 50%;
@@ -843,38 +765,50 @@
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
   border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 16px;
-  padding: 10px 6px;
+  border-radius: 20px;
+  padding: 8px 6px;
   box-shadow: 
     0 12px 40px rgba(0, 0, 0, 0.15),
     inset 0 1px 1px rgba(255, 255, 255, 0.15),
     0 0 0 1px rgba(0, 0, 0, 0.05);
 }
 
-.new-indicator {
+.step-indicator {
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.06) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.15) 0%, rgba(255, 255, 255, 0.08) 100%);
+  border: 2px solid rgba(255, 255, 255, 0.30);
   cursor: pointer;
-  transition: all 0.25s ease;
+  transition: all 0.3s ease;
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 2;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   box-shadow: 
-    0 2px 8px rgba(0, 0, 0, 0.08),
-    inset 0 0.5px 0.5px rgba(255, 255, 255, 0.15);
-  font-weight: 500;
+    0 6px 20px rgba(0, 0, 0, 0.12),
+    inset 0 1px 1px rgba(255, 255, 255, 0.20),
+    0 0 0 1px rgba(0, 0, 0, 0.03);
+  font-weight: 600;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.8);
+  color: rgba(255, 255, 255, 0.9);
 }
 
-.new-indicator:hover:not(:disabled) {
+/* Fix tooltip positioning for step indicators */
+.onboarding-step-indicators .tooltip {
+  top: 0 !important;
+  transform: translateY(0) !important;
+}
+
+.onboarding-step-indicators [role="tooltip"] {
+  top: 0 !important;
+  transform: translateY(0) !important;
+}
+
+.step-indicator:hover:not(:disabled) {
   background: linear-gradient(135deg, rgba(34, 197, 94, 0.4) 0%, rgba(16, 185, 129, 0.3) 100%);
   border-color: rgba(34, 197, 94, 0.4);
   transform: scale(1.05);
@@ -883,59 +817,59 @@
     inset 0 1px 1px rgba(255, 255, 255, 0.2);
 }
 
-.new-indicator.new-active {
-  background: linear-gradient(135deg, rgba(34, 197, 94, 0.8) 0%, rgba(22, 163, 74, 0.7) 100%);
-  border-color: rgba(34, 197, 94, 0.8);
+.step-indicator.indicator-active {
+  background: linear-gradient(135deg, rgba(74, 158, 255, 0.8) 0%, rgba(59, 130, 246, 0.7) 100%);
+  border-color: rgba(74, 158, 255, 0.8);
   box-shadow: 
-    0 0 20px rgba(34, 197, 94, 0.4),
+    0 0 20px rgba(74, 158, 255, 0.4),
     0 4px 16px rgba(0, 0, 0, 0.15),
     inset 0 1px 1px rgba(255, 255, 255, 0.25);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  animation: new-pulse-glow 2s ease-in-out infinite;
+  animation: indicator-pulse-glow 2s ease-in-out infinite;
   color: white;
 }
 
 /* Remove the white dot that overlaps with step numbers */
 
-.new-indicator.new-completed {
-  background: linear-gradient(135deg, rgba(34, 197, 94, 0.7) 0%, rgba(22, 163, 74, 0.6) 100%);
-  border-color: rgba(34, 197, 94, 0.6);
-  color: white;
+.step-indicator.indicator-completed {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.6) 0%, rgba(22, 163, 74, 0.5) 100%);
+  border-color: rgba(34, 197, 94, 0.4);
+  color: rgba(255, 255, 255, 0.7);
+  opacity: 0.7; /* Fade completed steps */
   box-shadow: 
-    0 0 15px rgba(34, 197, 94, 0.3),
-    0 4px 16px rgba(0, 0, 0, 0.15),
-    inset 0 1px 1px rgba(255, 255, 255, 0.25);
+    0 0 10px rgba(34, 197, 94, 0.2),
+    0 2px 8px rgba(0, 0, 0, 0.1),
+    inset 0 1px 1px rgba(255, 255, 255, 0.15);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  animation: new-coin-flip 0.35s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  animation: indicator-coin-flip 0.35s cubic-bezier(0.68, -0.55, 0.265, 1.55);
 }
 
-.new-indicator.new-completed:hover {
-  background: linear-gradient(135deg, rgba(34, 197, 94, 0.8) 0%, rgba(22, 163, 74, 0.7) 100%);
-  border-color: rgba(34, 197, 94, 0.7);
+.step-indicator.indicator-completed:hover {
   box-shadow: 
     0 0 20px rgba(34, 197, 94, 0.5),
     0 6px 20px rgba(0, 0, 0, 0.2),
     inset 0 1px 1px rgba(255, 255, 255, 0.3);
 }
 
-.new-indicator:disabled {
+.step-indicator:disabled {
+  cursor: not-allowed;
   opacity: 0.4;
-  pointer-events: auto; /* Ensure tooltips work on disabled buttons */
 }
 
-.new-indicator-connector {
-  width: 2px;
-  height: 16px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.2) 0%, rgba(255, 255, 255, 0.08) 100%);
-  border-radius: 1px;
+.step-indicator-connector {
+  width: 3px;
+  height: 20px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.25) 0%, rgba(255, 255, 255, 0.12) 100%);
+  border-radius: 2px;
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
-  transition: all 0.25s ease;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  transition: all 0.3s ease;
 }
 
-.new-indicator-connector.new-completed {
+.step-indicator-connector.connector-completed {
   background: linear-gradient(180deg, rgba(34, 197, 94, 0.9) 0%, rgba(22, 163, 74, 0.8) 100%);
   box-shadow: 
     0 0 8px rgba(34, 197, 94, 0.3),
@@ -944,23 +878,23 @@
   -webkit-backdrop-filter: blur(8px);
 }
 
-@keyframes new-pulse-glow {
+@keyframes indicator-pulse-glow {
   0%, 100% { 
     box-shadow: 
-      0 0 20px rgba(34, 197, 94, 0.4),
+      0 0 20px rgba(74, 158, 255, 0.4),
       0 4px 16px rgba(0, 0, 0, 0.15),
       inset 0 1px 1px rgba(255, 255, 255, 0.25);
   }
   50% { 
     box-shadow: 
-      0 0 30px rgba(34, 197, 94, 0.6),
+      0 0 30px rgba(74, 158, 255, 0.6),
       0 4px 20px rgba(0, 0, 0, 0.2),
       inset 0 1px 1px rgba(255, 255, 255, 0.3);
   }
 }
 
 /* Blazing fast double coin flip animation */
-@keyframes new-coin-flip {
+@keyframes indicator-coin-flip {
   0% {
     transform: rotateY(0deg) scale(1);
   }
@@ -983,11 +917,11 @@
 
 /* Responsive adjustments */
 @media (max-width: 600px) {
-  .new-content-container {
+  .onboarding-content-container {
     padding: 32px 24px;
   }
   
-  .new-glass-card {
+  .onboarding-glass-card {
     width: 90vw; /* Responsive width on mobile but still fixed per viewport */
     max-width: 400px; /* Cap the width on mobile */
     min-height: 480px; /* Keep minimum height steady */
@@ -996,12 +930,12 @@
     top: 0; /* Reset offset on mobile */
   }
   
-  .new-soundwave-hero {
-    transform: translateY(-175px); /* Adjust for mobile */
+  .onboarding-soundwave-image {
+    transform: translateY(-260px); /* Adjust for mobile - move wave image up 100px */
   }
   
   /* Move step indicators to bottom on mobile */
-  .new-step-indicators {
+  .onboarding-step-indicators {
     position: fixed;
     bottom: 20px;
     left: 50%;
@@ -1013,44 +947,196 @@
     padding: 8px 12px;
   }
   
-  .new-indicator-connector {
+  .step-indicator-connector {
     width: 20px;
     height: 3px;
     background: linear-gradient(90deg, rgba(255, 255, 255, 0.25) 0%, rgba(255, 255, 255, 0.12) 100%);
   }
   
-  .new-indicator-connector.new-completed {
+  .step-indicator-connector.connector-completed {
     background: linear-gradient(90deg, rgba(34, 197, 94, 0.9) 0%, rgba(22, 163, 74, 0.8) 100%);
   }
   
-  .new-step-title {
+  .step-title {
     font-size: 20px;
   }
   
-  .new-step-subtitle {
+  .step-subtitle {
     font-size: 14px;
   }
   
-  .new-shortcut-item {
+  .shortcut-item {
     flex-direction: column;
     align-items: stretch;
     gap: 12px;
     text-align: center;
   }
   
-  .new-shortcut-item label {
+  .shortcut-item label {
     text-align: center;
   }
   
-  .new-reference-item {
+  .shortcuts-reference-item {
     flex-direction: column;
     gap: 8px;
     align-items: center;
   }
   
-  .new-btn-primary,
-  .new-btn-secondary {
+  .btn-primary,
+  .btn-secondary {
     padding: 10px 24px;
     font-size: 14px;
   }
+}
+
+/* Completion step feature styling - restored original design */
+.completion-feature-with-subitems {
+  position: relative;
+}
+
+.step-feature {
+  position: relative;
+}
+
+.completion-feature-checkmark {
+  position: absolute;
+  right: 0;
+  top: 0;
+  color: #22c55e;
+  font-weight: 400;
+  font-size: 14px;
+}
+
+/* Ensure subitems stack vertically */
+.completion-feature-subitems {
+  padding-left: 16px;
+  padding-right: 16px;
+}
+
+.completion-subitem {
+  display: block;
+  width: 100%;
+  margin-bottom: 6px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.7);
+  line-height: 1.4;
+}
+
+/* Model subitem - left-aligned text with same indentation */
+.completion-subitem.model-subitem {
+  display: block;
+  text-align: left;
+}
+
+.completion-subitem-model {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 12px;
+  text-align: left;
+}
+
+/* Shortcut subitems - label and field on same line, each subitem on separate line */
+.completion-subitem:not(.model-subitem) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.completion-subitem-label {
+  color: rgba(255, 255, 255, 0.7);
+  font-weight: 500;
+}
+
+.completion-subitem-field {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-family: 'SF Mono', Monaco, monospace;
+  font-size: 11px;
+  display: inline-block;
+}
+
+/* Button classes for shortcut actions */
+.btn-capture {
+  background: linear-gradient(135deg, rgba(74, 158, 255, 0.8) 0%, rgba(59, 130, 246, 0.7) 100%);
+  color: white;
+  border: 1px solid rgba(74, 158, 255, 0.8);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-capture:hover {
+  background: linear-gradient(135deg, rgba(74, 158, 255, 0.9) 0%, rgba(59, 130, 246, 0.8) 100%);
+  transform: translateY(-1px);
+}
+
+.btn-cancel {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.8) 0%, rgba(220, 38, 38, 0.7) 100%);
+  color: white;
+  border: 1px solid rgba(239, 68, 68, 0.8);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-cancel:hover {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.9) 0%, rgba(220, 38, 38, 0.8) 100%);
+  transform: translateY(-1px);
+}
+
+.shortcut-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.model-upgrade-note {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+  text-align: center;
+  margin-top: 12px;
+  width: 100%;
+}
+
+/* Final onboarding screen quick tips - semantic naming to avoid conflicts */
+.onboarding-final-tips-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 18px 20px;
+  background: linear-gradient(135deg, rgba(74, 158, 255, 0.12) 0%, rgba(74, 158, 255, 0.06) 100%);
+  border: 1px solid rgba(74, 158, 255, 0.25);
+  border-radius: 14px;
+  backdrop-filter: blur(12px) saturate(150%);
+  box-shadow: 0 8px 32px rgba(74, 158, 255, 0.15), inset 0 1px 1px rgba(255, 255, 255, 0.15);
+}
+
+.onboarding-final-tip-item {
+  font-size: 15px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.95);
+  line-height: 1.4;
+  letter-spacing: 0.01em;
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.tip-icon {
+  flex-shrink: 0;
+  color: rgba(74, 158, 255, 1);
+}
+
+.onboarding-final-tip-cta {
+  font-weight: 600;
+  color: rgba(74, 158, 255, 1);
 }

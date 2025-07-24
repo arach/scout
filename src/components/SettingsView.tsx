@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, memo } from 'react';
 import { Sparkles, FolderOpen, ArrowUpLeft, ArrowUp, ArrowUpRight, ArrowLeft, ArrowRight, ArrowDownLeft, ArrowDown, ArrowDownRight, Brain } from 'lucide-react';
 import { ModelManager } from './ModelManager';
 import { LLMSettings } from './LLMSettings';
@@ -49,7 +49,7 @@ interface SettingsViewProps {
     updateLLMSettings: (settings: Partial<LLMSettingsType>) => void;
 }
 
-export function SettingsView({
+export const SettingsView = memo(function SettingsView({
     hotkey,
     isCapturingHotkey,
     hotkeyUpdateStatus,
@@ -573,4 +573,4 @@ export function SettingsView({
             </div>
         </div>
     );
-} 
+}); 

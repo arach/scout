@@ -87,8 +87,8 @@ export const applyTheme = (theme: Theme): void => {
 
 // Get all available themes for UI
 export const getAvailableThemes = (): Array<{ id: ThemeVariant; name: string }> => {
-  return Object.values(themes).map(theme => ({
-    id: theme.id,
+  return Object.entries(themes).map(([id, theme]) => ({
+    id: id as ThemeVariant,
     name: theme.name,
   }));
 };
