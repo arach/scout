@@ -119,20 +119,31 @@ impl AudioRecorder {
             return Err("Recorder not initialized".to_string());
         }
 
-        self.control_tx
+        let start_time = std::time::Instant::now();
+        info(Component::Recording, &format!("AudioRecorder::start_recording called at {:?}", start_time));
+
+        let result = self.control_tx
             .as_ref()
             .unwrap()
             .send(RecorderCommand::StartRecording(
                 output_path.to_string_lossy().to_string(),
                 device_name.map(|s| s.to_string()),
             ))
-            .map_err(|e| format!("Failed to send start command: {}", e))
+            .map_err(|e| format!("Failed to send start command: {}", e));
+        
+        let elapsed = start_time.elapsed();
+        info(Component::Recording, &format!("AudioRecorder::start_recording command sent in {:?}", elapsed));
+        
+        result
     }
 
     pub fn stop_recording(&self) -> Result<(), String> {
         if self.control_tx.is_none() {
             return Err("Recorder not initialized".to_string());
         }
+
+        let start_time = std::time::Instant::now();
+        info(Component::Recording, &format!("AudioRecorder::stop_recording called at {:?}", start_time));
 
         // Clear the recording state immediately to prevent race conditions
         // This ensures that any concurrent is_recording() calls will return false
@@ -150,12 +161,20 @@ impl AudioRecorder {
                 format!("Failed to send stop command: {}", e)
             })?;
             
+        let command_sent_time = start_time.elapsed();
+        info(Component::Recording, &format!("AudioRecorder::stop_recording command sent in {:?}", command_sent_time));
+            
         // Wait for the recording state to actually change instead of using sleep
+        let wait_start = std::time::Instant::now();
         let _guard = self.recording_state_changed
             .wait_timeout(
                 self.is_recording.lock().unwrap(),
                 Duration::from_millis(100)
             ).unwrap();
+        
+        let wait_time = wait_start.elapsed();
+        let total_time = start_time.elapsed();
+        info(Component::Recording, &format!("AudioRecorder::stop_recording synchronization completed in {:?}, total time: {:?}", wait_time, total_time));
         
         // The worker thread will also clear the state, but we've already done it
         // to prevent race conditions with concurrent state queries
