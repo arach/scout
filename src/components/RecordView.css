@@ -707,9 +707,9 @@
     position: absolute;
     top: 50%;
     left: 100%;
-    transform: translateY(-50%) translateX(8px);
+    transform: translateY(-60%) translateX(8px);
     background: var(--bg-primary);
-    border: 1px solid var(--border-primary);
+    border: 2px solid var(--border-primary);
     border-radius: 8px;
     padding: 8px 12px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15), 0 4px 12px rgba(0, 0, 0, 0.1);
@@ -723,7 +723,7 @@
 
 .button-container:hover .record-tooltip {
     opacity: 1;
-    transform: translateY(-50%) translateX(12px);
+    transform: translateY(-60%) translateX(12px);
 }
 
 .tooltip-content {

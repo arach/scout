@@ -140,7 +140,7 @@ function App() {
     soundEnabled,
     selectedMic,
     vadEnabled,
-    pushToTalkShortcut: pushToTalkHotkey,
+    pushToTalkShortcut: showFirstRun ? '' : pushToTalkHotkey, // Disable push-to-talk during onboarding
     isRecordViewActive: !showFirstRun && currentView === 'record'
   });
 
@@ -244,9 +244,9 @@ function App() {
     
     init();
     
-    // Listen for global hotkey events
+    // Listen for global hotkey events (only when not in onboarding)
     safeEventListen('toggle-recording', async () => {
-      if (!mounted) return;
+      if (!mounted || showFirstRun) return;
       await toggleRecording();
     }).then(cleanup => cleanupFunctions.push(cleanup));
     

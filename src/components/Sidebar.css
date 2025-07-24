@@ -90,7 +90,7 @@
   position: absolute;
   left: 100%;
   top: 50%;
-  transform: translateY(-50%);
+  transform: translateY(-60%);
   background-color: var(--bg-primary);
   color: var(--text-primary);
   padding: 6px 12px;
@@ -105,7 +105,7 @@
   font-weight: 500;
   pointer-events: none;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-  border: 1px solid var(--border-primary);
+  border: 2px solid var(--border-primary);
   display: none;
 }
 
