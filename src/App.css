@@ -175,9 +175,8 @@ h1 {
   height: 24px;
 }
 
-.view-header-right {
-  justify-content: flex-end;
-}
+/* Both left and right containers should left-align their content 
+   so the buttons appear in the same spot */
 
 .sidebar-toggle-button,
 .sidebar-close-button {
