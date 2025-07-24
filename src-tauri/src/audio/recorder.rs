@@ -1,8 +1,9 @@
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Condvar};
 use std::thread;
 use std::sync::mpsc;
 use std::any::TypeId;
+use std::time::Duration;
 use super::vad::VoiceActivityDetector;
 use crate::logger::{info, debug, warn, error, Component};
 
@@ -16,6 +17,8 @@ pub struct AudioRecorder {
     current_audio_level: Arc<Mutex<f32>>,
     current_device_info: Arc<Mutex<Option<DeviceInfo>>>,
     sample_callback: Arc<Mutex<Option<SampleCallback>>>,
+    // Synchronization for recording state changes
+    recording_state_changed: Arc<Condvar>,
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +46,7 @@ impl AudioRecorder {
             current_audio_level: Arc::new(Mutex::new(0.0)),
             current_device_info: Arc::new(Mutex::new(None)),
             sample_callback: Arc::new(Mutex::new(None)),
+            recording_state_changed: Arc::new(Condvar::new()),
         }
     }
     
@@ -72,9 +76,10 @@ impl AudioRecorder {
         let audio_level = self.current_audio_level.clone();
         let device_info = self.current_device_info.clone();
         let sample_callback = self.sample_callback.clone();
+        let recording_state_changed = self.recording_state_changed.clone();
 
         thread::spawn(move || {
-            let mut recorder = AudioRecorderWorker::new(is_recording, vad_enabled, audio_level, device_info, sample_callback);
+            let mut recorder = AudioRecorderWorker::new(is_recording, vad_enabled, audio_level, device_info, sample_callback, recording_state_changed);
             
             while let Ok(cmd) = rx.recv() {
                 match cmd {
@@ -145,8 +150,12 @@ impl AudioRecorder {
                 format!("Failed to send stop command: {}", e)
             })?;
             
-        // Wait a bit for the command to be processed
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        // Wait for the recording state to actually change instead of using sleep
+        let _guard = self.recording_state_changed
+            .wait_timeout(
+                self.is_recording.lock().unwrap(),
+                Duration::from_millis(100)
+            ).unwrap();
         
         // The worker thread will also clear the state, but we've already done it
         // to prevent race conditions with concurrent state queries
@@ -227,10 +236,11 @@ struct AudioRecorderWorker {
     current_audio_level: Arc<Mutex<f32>>,
     current_device_info: Arc<Mutex<Option<DeviceInfo>>>,
     sample_callback: Arc<Mutex<Option<SampleCallback>>>,
+    recording_state_changed: Arc<Condvar>,
 }
 
 impl AudioRecorderWorker {
-    fn new(is_recording: Arc<Mutex<bool>>, vad_enabled: Arc<Mutex<bool>>, audio_level: Arc<Mutex<f32>>, device_info: Arc<Mutex<Option<DeviceInfo>>>, sample_callback: Arc<Mutex<Option<SampleCallback>>>) -> Self {
+    fn new(is_recording: Arc<Mutex<bool>>, vad_enabled: Arc<Mutex<bool>>, audio_level: Arc<Mutex<f32>>, device_info: Arc<Mutex<Option<DeviceInfo>>>, sample_callback: Arc<Mutex<Option<SampleCallback>>>, recording_state_changed: Arc<Condvar>) -> Self {
         Self {
             stream: None,
             monitoring_stream: None,
@@ -245,6 +255,7 @@ impl AudioRecorderWorker {
             current_audio_level: audio_level,
             current_device_info: device_info,
             sample_callback,
+            recording_state_changed,
         }
     }
 
@@ -340,10 +351,12 @@ impl AudioRecorderWorker {
             channels = default_config.channels();
         }
 
+        // Use a fixed low-latency buffer size of 128 samples for optimal performance
+        // At 48kHz, this provides ~2.67ms latency vs potentially 10-100ms with Default
         let config = cpal::StreamConfig {
             channels,
             sample_rate: default_config.sample_rate(),
-            buffer_size: cpal::BufferSize::Default,
+            buffer_size: cpal::BufferSize::Fixed(128),
         };
 
         // Store sample rate, channels, and format for later use
@@ -434,21 +447,22 @@ impl AudioRecorderWorker {
 
     fn stop_recording(&mut self) -> Result<(), String> {
         info(Component::Recording, &format!("AudioRecorder::stop_recording called at {}", chrono::Local::now().format("%H:%M:%S%.3f")));
-        *self.is_recording.lock().unwrap() = false;
-        debug(Component::Recording, "Set is_recording to false");
+        
+        // Set recording to false and notify waiting threads
+        {
+            let mut recording = self.is_recording.lock().unwrap();
+            *recording = false;
+            self.recording_state_changed.notify_all();
+        }
+        debug(Component::Recording, "Set is_recording to false and notified waiters");
         
         // Reset audio level only after recording stops
         *self.current_audio_level.lock().unwrap() = 0.0;
 
-        // Give the stream a moment to process any remaining audio
-        std::thread::sleep(std::time::Duration::from_millis(100));
-
+        // Drop the stream immediately - the stream itself handles proper shutdown
         if let Some(stream) = self.stream.take() {
             drop(stream);
         }
-
-        // Add another small delay to ensure all samples are written
-        std::thread::sleep(std::time::Duration::from_millis(100));
 
         // Check if we need to pad with silence
         let total_samples = *self.sample_count.lock().unwrap();
