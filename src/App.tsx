@@ -16,7 +16,6 @@ import { useProcessingStatus } from './hooks/useProcessingStatus';
 import { useNativeOverlay } from './hooks/useNativeOverlay';
 import { DevTools } from './components/DevTools';
 import { TranscriptionOverlay } from './components/TranscriptionOverlay';
-import { RecordingProvider } from './contexts/RecordingContext';
 import "./App.css";
 
 interface Transcript {
@@ -713,8 +712,7 @@ function App() {
   }
 
   return (
-    <RecordingProvider>
-      <div className="app-container">
+    <div className="app-container">
       <Sidebar currentView={currentView} onViewChange={setCurrentView} isExpanded={isSidebarExpanded} />
       <main className={`container ${isDragging ? 'drag-highlight' : ''}`}>
         <button
@@ -907,8 +905,7 @@ function App() {
           }}
         />
       )}
-      </div>
-    </RecordingProvider>
+    </div>
   );
 }
 

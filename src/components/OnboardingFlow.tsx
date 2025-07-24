@@ -495,6 +495,9 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
           alt="Voice visualization in glass dome"
           className="new-soundwave-hero"
         />
+        <div className="new-hero-headline">
+          Scout runs 100% on-device
+        </div>
       </div>
 
       {/* Content container */}
