@@ -1,4 +1,4 @@
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { listen } from '@tauri-apps/api/event';
 
 /**
  * Safely creates an event listener with proper cleanup handling

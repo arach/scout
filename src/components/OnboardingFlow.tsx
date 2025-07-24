@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { safeEventListen } from '../lib/safeEventListener';
-import { Download, Mic, Keyboard, Sparkles, Check, X, AlertCircle } from 'lucide-react';
+import { Check, X, AlertCircle } from 'lucide-react';
 import soundwaveImage from '../assets/soundwave.png';
 import './OnboardingFlow.css';
 

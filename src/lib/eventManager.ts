@@ -1,4 +1,4 @@
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { listen } from '@tauri-apps/api/event';
 
 /**
  * Enhanced event listener manager with proper cleanup and error recovery
@@ -13,7 +13,7 @@ export class EventManager {
   async register<T>(
     event: string,
     handler: (event: { payload: T }) => void,
-    options: { immediate?: boolean } = {}
+    _options: { immediate?: boolean } = {}
   ): Promise<void> {
     if (!this.mounted) {
       console.warn(`Attempted to register listener for ${event} after cleanup`);
