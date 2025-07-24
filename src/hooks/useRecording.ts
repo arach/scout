@@ -19,6 +19,7 @@ interface RecordingProgress {
 interface UseRecordingOptions {
   onTranscriptCreated?: () => void;
   onRecordingComplete?: () => void;
+  onRecordingStart?: () => void;
   soundEnabled?: boolean;
   selectedMic?: string;
   vadEnabled?: boolean;
@@ -30,6 +31,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
   const {
     onTranscriptCreated,
     onRecordingComplete,
+    onRecordingStart,
     soundEnabled = true,
     selectedMic = 'Default microphone',
     vadEnabled = false,
@@ -110,6 +112,9 @@ export function useRecording(options: UseRecordingOptions = {}) {
       isRecordingRef.current = true;
       recordingContext.setRecording(true);
       setRecordingStartTime(Date.now());
+      
+      // Call onRecordingStart callback if provided
+      onRecordingStart?.();
       
       console.log('Starting recording with device:', selectedMic);
       const result = await invoke<string>('start_recording', { 

@@ -86,7 +86,8 @@
       "Bash(rg -A 5 -B 5 \"showFirstRun.*true|OnboardingFlow\" src/App.tsx)",
       "Bash(rg -n -A 10 \"if.*showFirstRun.*{\" src/App.tsx)",
       "Bash(rg -n -A 10 \"if.*showFirstRun\" src/App.tsx)",
-      "Bash(git worktree:*)"
+      "Bash(git worktree:*)",
+      "Bash(sips:*)"
     ],
     "deny": []
   }

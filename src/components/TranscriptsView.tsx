@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, memo } from 'react';
 import { TranscriptDetailPanel } from './TranscriptDetailPanel';
 import { TranscriptItem } from './TranscriptItem';
 import { ChevronDown } from 'lucide-react';
@@ -35,7 +35,7 @@ interface TranscriptsViewProps {
 
 const ITEMS_PER_PAGE = 50;
 
-export function TranscriptsView({
+export const TranscriptsView = memo(function TranscriptsView({
     transcripts,
     selectedTranscripts,
     searchQuery,
@@ -420,4 +420,4 @@ export function TranscriptsView({
             )}
         </div>
     );
-} 
+}); 
