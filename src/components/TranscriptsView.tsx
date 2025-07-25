@@ -73,6 +73,7 @@ export const TranscriptsView = memo(function TranscriptsView({
             setPanelState(prev => ({ ...prev, transcript: null }));
         }, 200);
     }, []);
+
     
     const toggleGroup = useCallback((groupTitle: string) => {
         setExpandedGroups(prev => {
@@ -95,7 +96,7 @@ export const TranscriptsView = memo(function TranscriptsView({
         setDisplayedItems(ITEMS_PER_PAGE);
     }, [transcripts]);
     
-    // Handle click outside for export menus
+    // Handle click outside for menus
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
             const target = event.target as HTMLElement;
