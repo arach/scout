@@ -1,5 +1,5 @@
 import { useRef, useEffect } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { tauriApi } from '../types/tauri';
 import { useAudioContext } from '../contexts/AudioContext';
 
 interface UseAudioLevelMonitoringOptions {
@@ -29,7 +29,7 @@ export function useAudioLevelMonitoring(options: UseAudioLevelMonitoringOptions 
       try {
         console.log('Attempting to start audio level monitoring...');
         // Start monitoring first
-        await invoke('start_audio_level_monitoring', { 
+        await tauriApi.startAudioLevelMonitoring({ 
           deviceName: selectedMic !== 'Default microphone' ? selectedMic : null 
         });
         console.log('Audio level monitoring started successfully');
@@ -40,7 +40,7 @@ export function useAudioLevelMonitoring(options: UseAudioLevelMonitoringOptions 
           
           try {
             // Poll backend for audio level
-            const level = await invoke<number>('get_current_audio_level');
+            const level = await tauriApi.getCurrentAudioLevel();
             
             // Same processing as master
             let processed = 0;
@@ -105,7 +105,7 @@ export function useAudioLevelMonitoring(options: UseAudioLevelMonitoringOptions 
       isActiveInternal = false;
       clearTimeout(timeoutId);
       if (interval) clearInterval(interval);
-      invoke('stop_audio_level_monitoring').catch(() => {});
+      tauriApi.stopAudioLevelMonitoring().catch(() => {});
       audioTargetRef.current = 0;
       audioCurrentRef.current = 0;
       setAudioLevel(0);

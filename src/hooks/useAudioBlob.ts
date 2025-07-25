@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { tauriApi } from '../types/tauri';
 
 export const useAudioBlob = (audioPath: string) => {
     const [blob, setBlob] = useState<Blob | null>(null);
@@ -22,7 +22,7 @@ export const useAudioBlob = (audioPath: string) => {
             }
 
             try {
-                const audioData: number[] = await invoke('read_audio_file', { audioPath });
+                const audioData: number[] = await tauriApi.readAudioFile({ audioPath });
                 
                 if (!isMounted) {
                     return;

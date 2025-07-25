@@ -4,7 +4,7 @@ import { ModelManager } from './ModelManager';
 import { LLMSettings } from './LLMSettings';
 import { Dropdown } from './Dropdown';
 import { ThemeSelector } from './ThemeSelector';
-import { invoke } from '@tauri-apps/api/core';
+import { tauriApi } from '../types/tauri';
 import { formatShortcutJSX } from '../lib/formatShortcutJSX';
 import { LLMSettings as LLMSettingsType } from '../types/llm';
 import { ThemeVariant } from '../themes/types';
@@ -126,7 +126,7 @@ export const SettingsView = memo(function SettingsView({
 
     const openModelsFolder = async () => {
         try {
-            await invoke('open_models_folder');
+            await tauriApi.openModelsFolder();
         } catch (error) {
             console.error('Failed to open models folder:', error);
         }
@@ -138,7 +138,7 @@ export const SettingsView = memo(function SettingsView({
         console.log('Preview button clicked!');
         try {
             setIsPreviewingSound(true);
-            await invoke('preview_sound_flow');
+            await tauriApi.previewSoundFlow();
         } catch (error) {
             console.error('Failed to preview sound flow:', error);
             // Reset immediately on error

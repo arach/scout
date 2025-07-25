@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { tauriApi } from '../types/tauri';
 import { safeEventListen } from '../lib/safeEventListener';
 import { Brain, Gauge, Package, CheckCircle, Download } from 'lucide-react';
 import { LLMModel, LLMDownloadProgress } from '../types/llm';
@@ -100,7 +100,7 @@ export const LLMModelManager: React.FC = () => {
           totalMb: 0
         }
       }));
-      await invoke('download_llm_model', { modelId });
+      await tauriApi.downloadLLMModel({ modelId });
     } catch (error) {
       console.error('Failed to download model:', error);
       setDownloading(prev => {
@@ -113,7 +113,7 @@ export const LLMModelManager: React.FC = () => {
 
   const selectModel = async (modelId: string) => {
     try {
-      await invoke('set_active_llm_model', { modelId });
+      await tauriApi.setActiveLLMModel({ modelId });
       await loadModels();
     } catch (error) {
       console.error('Failed to select model:', error);
