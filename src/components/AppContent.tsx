@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { invokeTyped, tauriApi } from '../types/tauri';
+import { loggers } from '../utils/logger';
 import { safeEventListen, cleanupListeners } from "../lib/safeEventListener";
 import { open } from "@tauri-apps/plugin-dialog";
 import { OnboardingFlow } from "./OnboardingFlow";
@@ -420,7 +421,7 @@ export function AppContent() {
     const checkAudioDevices = async () => {
       try {
         const devices = await tauriApi.getAudioDevices();
-        console.log('🔊 Audio devices available:', devices);
+        loggers.audio.debug('Audio devices available', { count: devices.length, devices });
       } catch (error) {
         console.error('🔊 Failed to get audio devices:', error);
       }
@@ -692,10 +693,10 @@ export function AppContent() {
           audioLevel={audioLevel}
           onClose={() => setShowTranscriptionOverlay(false)}
           onSaveEdits={(editedText) => {
-            console.log('Saved edited transcript:', editedText);
+            loggers.ui.info('Saved edited transcript', { length: editedText.length });
           }}
           onDiscardEdits={() => {
-            console.log('Discarded transcript edits');
+            loggers.ui.debug('Discarded transcript edits');
           }}
         />
       )}

@@ -1,3 +1,5 @@
+import { loggers } from '../utils/logger';
+
 export interface AppContext {
   name: string;
   bundle_id: string;
@@ -32,7 +34,7 @@ export function parseTranscriptMetadata(metadataStr?: string): TranscriptMetadat
   try {
     return JSON.parse(metadataStr);
   } catch (e) {
-    console.error('Failed to parse transcript metadata:', e);
+    loggers.api.error('Failed to parse transcript metadata', e);
     return null;
   }
 }
