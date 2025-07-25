@@ -4,6 +4,8 @@ export type ThemeVariant =
   | 'minimal-overlay'
   | 'winamp-classic' 
   | 'winamp-modern'
+  | 'terminal-chic'
+  | 'terminal-chic-light'
   | 'system';
 
 export interface ThemeColors {

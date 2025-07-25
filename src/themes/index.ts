@@ -2,6 +2,7 @@ import { Theme, ThemeVariant } from './types';
 import { vscodeLight, vscodeDark } from './base/vscode';
 import { minimalOverlay } from './base/minimal';
 import { winampClassic, winampModern } from './base/winamp';
+import { terminalChic, terminalChicLight } from './base/terminal';
 
 export * from './types';
 
@@ -12,6 +13,8 @@ export const themes: Record<ThemeVariant, Theme> = {
   'minimal-overlay': minimalOverlay,
   'winamp-classic': winampClassic,
   'winamp-modern': winampModern,
+  'terminal-chic': terminalChic,
+  'terminal-chic-light': terminalChicLight,
   'system': vscodeDark, // Default to dark for system
 };
 
