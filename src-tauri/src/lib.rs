@@ -48,6 +48,33 @@ use std::path::Path;
 use crate::logger::{info, debug, warn, error, Component};
 use crate::transcription::Transcriber;
 use crate::performance_tracker::PerformanceTracker;
+use std::sync::OnceLock;
+
+/// Global storage for the current device sample rate
+static DEVICE_SAMPLE_RATE: OnceLock<Arc<Mutex<Option<u32>>>> = OnceLock::new();
+
+/// Get the current device sample rate from the global cache
+/// This is used by transcription strategies to avoid hardcoding 48kHz
+pub fn get_current_device_sample_rate() -> Option<u32> {
+    let rate_storage = DEVICE_SAMPLE_RATE.get_or_init(|| Arc::new(Mutex::new(None)));
+    
+    // Use try_lock to avoid blocking if the mutex is held
+    if let Ok(rate) = rate_storage.try_lock() {
+        *rate
+    } else {
+        None
+    }
+}
+
+/// Update the cached device sample rate (called from the audio recorder)
+pub fn update_device_sample_rate(sample_rate: u32) {
+    let rate_storage = DEVICE_SAMPLE_RATE.get_or_init(|| Arc::new(Mutex::new(None)));
+    
+    if let Ok(mut rate) = rate_storage.try_lock() {
+        *rate = Some(sample_rate);
+        info(Component::Recording, &format!("Updated global device sample rate to: {} Hz", sample_rate));
+    }
+}
 
 // Overlay dimensions configuration
 const OVERLAY_EXPANDED_WIDTH: f64 = 220.0;
