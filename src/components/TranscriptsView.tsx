@@ -3,17 +3,8 @@ import { TranscriptDetailPanel } from './TranscriptDetailPanel';
 import { TranscriptItem } from './TranscriptItem';
 import { ChevronDown } from 'lucide-react';
 import { formatShortcut } from '../lib/formatShortcut';
+import { Transcript } from '../types/transcript';
 import './TranscriptsView.css';
-
-interface Transcript {
-    id: number;
-    text: string;
-    duration_ms: number;
-    created_at: string;
-    metadata?: string;
-    audio_path?: string;
-    file_size?: number;
-}
 
 interface TranscriptsViewProps {
     transcripts: Transcript[];

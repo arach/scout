@@ -1,19 +1,10 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { TranscriptionOverlay } from './TranscriptionOverlay';
+import { Transcript } from '../types/transcript';
 import './DevTools.css';
 
 type View = 'record' | 'transcripts' | 'settings';
-
-interface Transcript {
-  id: number;
-  text: string;
-  duration_ms: number;
-  created_at: string;
-  metadata?: string;
-  audio_path?: string;
-  file_size?: number;
-}
 
 interface DevToolsProps {
   currentView: View;

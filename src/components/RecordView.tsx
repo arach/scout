@@ -3,6 +3,7 @@ import { Settings } from 'lucide-react';
 import { MicrophoneQuickPicker } from './MicrophoneQuickPicker';
 import { SessionTranscripts } from './SessionTranscripts';
 import { RecordingTimer } from './RecordingTimer';
+import { Transcript } from '../types/transcript';
 import './RecordView.css';
 
 interface UploadProgress {
@@ -11,16 +12,6 @@ interface UploadProgress {
     status: 'idle' | 'uploading' | 'queued' | 'processing' | 'converting' | 'transcribing';
     queuePosition?: number;
     progress?: number;
-}
-
-interface Transcript {
-    id: number;
-    text: string;
-    duration_ms: number;
-    created_at: string;
-    metadata?: string;
-    audio_path?: string;
-    file_size?: number;
 }
 
 interface RecordViewProps {

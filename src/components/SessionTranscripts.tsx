@@ -1,15 +1,6 @@
 import { TranscriptItem } from './TranscriptItem';
+import { Transcript } from '../types/transcript';
 import './SessionTranscripts.css';
-
-interface Transcript {
-    id: number;
-    text: string;
-    duration_ms: number;
-    created_at: string;
-    metadata?: string;
-    audio_path?: string;
-    file_size?: number;
-}
 
 interface SessionTranscriptsProps {
     transcripts: Transcript[];
