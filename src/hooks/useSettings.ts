@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { tauriApi } from '../types/tauri';
 import { LLMSettings } from '../types/llm';
 import type { ThemeVariant } from '../themes/types';
 
@@ -56,11 +56,11 @@ export function useSettings() {
       const savedPosition = localStorage.getItem('scout-overlay-position');
       if (savedPosition) {
         setOverlayPosition(savedPosition);
-        invoke('set_overlay_position', { position: savedPosition }).catch(console.error);
+        tauriApi.setOverlayPosition({ position: savedPosition }).catch(console.error);
       } else {
         // Get current position from backend
         try {
-          const pos = await invoke<string>('get_overlay_position');
+          const pos = await tauriApi.getOverlayPosition();
           setOverlayPosition(pos);
         } catch (error) {
           console.error('Failed to get overlay position:', error);
@@ -69,7 +69,7 @@ export function useSettings() {
       
       // Load keyboard shortcuts
       try {
-        const backendShortcut = await invoke<string>('get_current_shortcut');
+        const backendShortcut = await tauriApi.getCurrentShortcut();
         setHotkey(backendShortcut);
         localStorage.setItem('scout-hotkey', backendShortcut);
       } catch (err) {
@@ -79,7 +79,7 @@ export function useSettings() {
       }
       
       try {
-        const backendShortcut = await invoke<string>('get_push_to_talk_shortcut');
+        const backendShortcut = await tauriApi.getPushToTalkShortcut();
         setPushToTalkHotkey(backendShortcut);
         localStorage.setItem('scout-push-to-talk-hotkey', backendShortcut);
       } catch (err) {
@@ -105,22 +105,22 @@ export function useSettings() {
       if (savedOverlayTreatment) {
         setOverlayTreatment(savedOverlayTreatment);
         // Set the overlay treatment on the native overlay
-        invoke('set_overlay_treatment', { treatment: savedOverlayTreatment }).catch(console.error);
+        tauriApi.setOverlayTreatment({ treatment: savedOverlayTreatment }).catch(console.error);
       } else {
         // Set default treatment
-        invoke('set_overlay_treatment', { treatment: 'particles' }).catch(console.error);
+        tauriApi.setOverlayTreatment({ treatment: 'particles' }).catch(console.error);
       }
       
       // Load sound settings
       try {
-        const enabled = await invoke<boolean>('is_sound_enabled');
+        const enabled = await tauriApi.isSoundEnabled();
         setSoundEnabled(enabled);
       } catch (error) {
         console.error('Failed to get sound enabled state:', error);
       }
       
       try {
-        const settings = await invoke<{ startSound: string; stopSound: string; successSound: string }>('get_sound_settings');
+        const settings = await tauriApi.getSoundSettings();
         setStartSound(settings.startSound);
         setStopSound(settings.stopSound);
         setSuccessSound(settings.successSound);
@@ -130,7 +130,7 @@ export function useSettings() {
       
       // Load general settings from backend
       try {
-        const settings = await invoke<any>('get_settings');
+        const settings = await tauriApi.getSettings();
         if (settings?.ui?.completion_sound_threshold_ms) {
           setCompletionSoundThreshold(settings.ui.completion_sound_threshold_ms);
         }
@@ -151,8 +151,8 @@ export function useSettings() {
       // Load clipboard settings
       try {
         const [copyEnabled, pasteEnabled] = await Promise.all([
-          invoke<boolean>('is_auto_copy_enabled'),
-          invoke<boolean>('is_auto_paste_enabled')
+          tauriApi.isAutoCopyEnabled(),
+          tauriApi.isAutoPasteEnabled()
         ]);
         setAutoCopy(copyEnabled);
         setAutoPaste(pasteEnabled);
@@ -174,7 +174,7 @@ export function useSettings() {
     setOverlayPosition(position);
     localStorage.setItem('scout-overlay-position', position);
     try {
-      await invoke('set_overlay_position', { position });
+      await tauriApi.setOverlayPosition({ position });
     } catch (error) {
       console.error('Failed to update overlay position:', error);
     }
@@ -194,7 +194,7 @@ export function useSettings() {
     setOverlayTreatment(treatment);
     localStorage.setItem('scout-overlay-treatment', treatment);
     try {
-      await invoke('set_overlay_treatment', { treatment });
+      await tauriApi.setOverlayTreatment({ treatment });
     } catch (error) {
       console.error('Failed to update overlay treatment:', error);
     }
@@ -204,7 +204,7 @@ export function useSettings() {
     const newValue = !soundEnabled;
     setSoundEnabled(newValue);
     try {
-      await invoke('set_sound_enabled', { enabled: newValue });
+      await tauriApi.setSoundEnabled({ enabled: newValue });
     } catch (error) {
       console.error('Failed to update sound enabled:', error);
     }
@@ -213,7 +213,7 @@ export function useSettings() {
   const updateStartSound = async (sound: string) => {
     setStartSound(sound);
     try {
-      await invoke('set_start_sound', { sound });
+      await tauriApi.setStartSound({ sound });
     } catch (error) {
       console.error('Failed to update start sound:', error);
     }
@@ -222,7 +222,7 @@ export function useSettings() {
   const updateStopSound = async (sound: string) => {
     setStopSound(sound);
     try {
-      await invoke('set_stop_sound', { sound });
+      await tauriApi.setStopSound({ sound });
     } catch (error) {
       console.error('Failed to update stop sound:', error);
     }
@@ -231,7 +231,7 @@ export function useSettings() {
   const updateSuccessSound = async (sound: string) => {
     setSuccessSound(sound);
     try {
-      await invoke('set_success_sound', { sound });
+      await tauriApi.setSuccessSound({ sound });
     } catch (error) {
       console.error('Failed to update success sound:', error);
     }
@@ -240,7 +240,7 @@ export function useSettings() {
   const updateCompletionSoundThreshold = async (threshold: number) => {
     setCompletionSoundThreshold(threshold);
     try {
-      await invoke('update_completion_sound_threshold', { thresholdMs: threshold });
+      await tauriApi.updateCompletionSoundThreshold({ thresholdMs: threshold });
     } catch (error) {
       console.error('Failed to update completion sound threshold:', error);
     }
@@ -250,7 +250,7 @@ export function useSettings() {
     const newSettings = { ...llmSettings, ...updates };
     setLLMSettings(newSettings);
     try {
-      await invoke('update_llm_settings', { settings: newSettings });
+      await tauriApi.updateLLMSettings({ settings: newSettings });
     } catch (error) {
       console.error('Failed to update LLM settings:', error);
     }
@@ -260,7 +260,7 @@ export function useSettings() {
     const newValue = !autoCopy;
     setAutoCopy(newValue);
     try {
-      await invoke('set_auto_copy_enabled', { enabled: newValue });
+      await tauriApi.setAutoCopyEnabled({ enabled: newValue });
     } catch (error) {
       console.error('Failed to update auto-copy:', error);
     }
@@ -270,7 +270,7 @@ export function useSettings() {
     const newValue = !autoPaste;
     setAutoPaste(newValue);
     try {
-      await invoke('set_auto_paste_enabled', { enabled: newValue });
+      await tauriApi.setAutoPasteEnabled({ enabled: newValue });
     } catch (error) {
       console.error('Failed to update auto-paste:', error);
     }

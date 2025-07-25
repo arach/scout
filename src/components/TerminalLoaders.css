@@ -1,0 +1,467 @@
+/* 
+ * Terminal Chic ASCII Art Loading Indicators
+ * Authentic terminal-style spinners and progress bars
+ */
+
+/* ASCII Spinner Animations - Various classic terminal styles */
+
+@keyframes terminalSpin {
+  0% { content: "|"; }
+  25% { content: "/"; }
+  50% { content: "-"; }
+  75% { content: "\\"; }
+  100% { content: "|"; }
+}
+
+@keyframes terminalDots {
+  0% { content: ""; }
+  25% { content: "."; }
+  50% { content: ".."; }
+  75% { content: "..."; }
+  100% { content: ""; }
+}
+
+@keyframes terminalClock {
+  0% { content: "🕐"; }
+  8.33% { content: "🕑"; }
+  16.66% { content: "🕒"; }
+  25% { content: "🕓"; }
+  33.33% { content: "🕔"; }
+  41.66% { content: "🕕"; }
+  50% { content: "🕖"; }
+  58.33% { content: "🕗"; }
+  66.66% { content: "🕘"; }
+  75% { content: "🕙"; }
+  83.33% { content: "🕚"; }
+  91.66% { content: "🕛"; }
+  100% { content: "🕐"; }
+}
+
+@keyframes terminalBraille {
+  0% { content: "⠋"; }
+  12.5% { content: "⠙"; }
+  25% { content: "⠹"; }
+  37.5% { content: "⠸"; }
+  50% { content: "⠼"; }
+  62.5% { content: "⠴"; }
+  75% { content: "⠦"; }
+  87.5% { content: "⠧"; }
+  100% { content: "⠇"; }
+}
+
+@keyframes terminalSquare {
+  0% { content: "▖"; }
+  25% { content: "▘"; }
+  50% { content: "▝"; }
+  75% { content: "▗"; }
+  100% { content: "▖"; }
+}
+
+@keyframes terminalBounce {
+  0% { content: "●○○"; }
+  33% { content: "○●○"; }
+  66% { content: "○○●"; }
+  100% { content: "●○○"; }
+}
+
+/* Terminal Chic Theme Loading Indicator Overrides */
+[data-theme="terminal-chic"] .processing-spinner,
+[data-theme="terminal-chic-light"] .processing-spinner {
+  /* Hide the circular spinner */
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  width: auto !important;
+  height: auto !important;
+  
+  /* Show ASCII spinner instead */
+  display: inline-block;
+  font-family: var(--font-family-mono);
+  font-size: 16px;
+  line-height: 1;
+  color: var(--text-primary);
+}
+
+[data-theme="terminal-chic"] .processing-spinner::before,
+[data-theme="terminal-chic-light"] .processing-spinner::before {
+  content: "|";
+  animation: terminalSpin 0.8s linear infinite;
+  display: inline-block;
+}
+
+/* Different spinner styles for different contexts */
+
+/* Recording state - bouncing dots */
+[data-theme="terminal-chic"] .recording-indicator .processing-spinner::before,
+[data-theme="terminal-chic-light"] .recording-indicator .processing-spinner::before {
+  content: "●○○";
+  animation: terminalBounce 1.2s ease-in-out infinite;
+  letter-spacing: 0.1em;
+}
+
+/* Transcription processing - Braille spinner (elegant) */
+[data-theme="terminal-chic"] .transcription-overlay .processing-spinner::before,
+[data-theme="terminal-chic-light"] .transcription-overlay .processing-spinner::before {
+  content: "⠋";
+  animation: terminalBraille 1s linear infinite;
+  font-size: 14px;
+}
+
+/* Model download - Clock spinner */
+[data-theme="terminal-chic"] .model-download .processing-spinner::before,
+[data-theme="terminal-chic-light"] .model-download .processing-spinner::before {
+  content: "🕐";
+  animation: terminalClock 1.5s steps(12) infinite;
+  font-size: 12px;
+}
+
+/* Small spinners - Simple dots */
+[data-theme="terminal-chic"] .spinner::before,
+[data-theme="terminal-chic-light"] .spinner::before {
+  content: "";
+  animation: terminalDots 1.2s ease-in-out infinite;
+  font-family: var(--font-family-mono);
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+/* Override existing spinner styling for Terminal Chic */
+[data-theme="terminal-chic"] .spinner,
+[data-theme="terminal-chic-light"] .spinner {
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  width: auto !important;
+  height: auto !important;
+  display: inline-block;
+  min-width: 20px;
+}
+
+/* ASCII Progress Bars */
+
+.terminal-progress-bar {
+  font-family: var(--font-family-mono);
+  font-size: 12px;
+  line-height: 1;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  padding: 4px 8px;
+  margin: 4px 0;
+  white-space: nowrap;
+}
+
+.terminal-progress-fill {
+  color: var(--accent-primary);
+  background: transparent;
+}
+
+/* Terminal progress for different percentages */
+.terminal-progress-0::before { content: "[          ] 0%"; }
+.terminal-progress-10::before { content: "[█         ] 10%"; }
+.terminal-progress-20::before { content: "[██        ] 20%"; }
+.terminal-progress-30::before { content: "[███       ] 30%"; }
+.terminal-progress-40::before { content: "[████      ] 40%"; }
+.terminal-progress-50::before { content: "[█████     ] 50%"; }
+.terminal-progress-60::before { content: "[██████    ] 60%"; }
+.terminal-progress-70::before { content: "[███████   ] 70%"; }
+.terminal-progress-80::before { content: "[████████  ] 80%"; }
+.terminal-progress-90::before { content: "[█████████ ] 90%"; }
+.terminal-progress-100::before { content: "[██████████] 100%"; }
+
+/* Status dots replacement with ASCII */
+[data-theme="terminal-chic"] .status-dot,
+[data-theme="terminal-chic-light"] .status-dot {
+  width: auto !important;
+  height: auto !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  font-family: var(--font-family-mono);
+  font-size: 8px;
+  display: inline-block;
+  line-height: 1;
+}
+
+[data-theme="terminal-chic"] .status-dot.recording::before,
+[data-theme="terminal-chic-light"] .status-dot.recording::before {
+  content: "●";
+  color: #ff4444;
+  animation: pulse 1s ease-in-out infinite;
+}
+
+[data-theme="terminal-chic"] .status-dot.processing::before,
+[data-theme="terminal-chic-light"] .status-dot.processing::before {
+  content: "◐";
+  color: var(--accent-primary);
+  animation: terminalSpin 0.8s linear infinite;
+}
+
+[data-theme="terminal-chic"] .status-dot.idle::before,
+[data-theme="terminal-chic-light"] .status-dot.idle::before {
+  content: "○";
+  color: var(--text-secondary);
+}
+
+[data-theme="terminal-chic"] .status-dot.complete::before,
+[data-theme="terminal-chic-light"] .status-dot.complete::before {
+  content: "✓";
+  color: #00ff41;
+}
+
+/* Terminal-style upload progress */
+[data-theme="terminal-chic"] .upload-progress-container,
+[data-theme="terminal-chic-light"] .upload-progress-container {
+  font-family: var(--font-family-mono);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 0;
+  padding: 8px 12px;
+}
+
+[data-theme="terminal-chic"] .upload-filename,
+[data-theme="terminal-chic-light"] .upload-filename {
+  font-family: var(--font-family-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.05em;
+}
+
+/* Transcription overlay ASCII effects */
+[data-theme="terminal-chic"] .partial-indicator,
+[data-theme="terminal-chic-light"] .partial-indicator {
+  font-family: var(--font-family-mono);
+}
+
+[data-theme="terminal-chic"] .partial-indicator::after,
+[data-theme="terminal-chic-light"] .partial-indicator::after {
+  content: "";
+  animation: terminalDots 1.5s ease-in-out infinite;
+  margin-left: 4px;
+}
+
+/* Processing text with terminal cursor */
+.terminal-processing-text {
+  font-family: var(--font-family-mono);
+  position: relative;
+}
+
+.terminal-processing-text::after {
+  content: "▊";
+  animation: pulse 1s ease-in-out infinite;
+  margin-left: 2px;
+  color: var(--accent-primary);
+}
+
+/* Special terminal effects for model downloads */
+[data-theme="terminal-chic"] .model-download-progress,
+[data-theme="terminal-chic-light"] .model-download-progress {
+  font-family: var(--font-family-mono);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 0;
+  padding: 6px 10px;
+  color: var(--text-primary);
+}
+
+[data-theme="terminal-chic"] .model-download-progress::before,
+[data-theme="terminal-chic-light"] .model-download-progress::before {
+  content: "downloading... ";
+  color: var(--text-secondary);
+}
+
+/* Hover effects for interactive terminal elements */
+[data-theme="terminal-chic"] .terminal-progress-bar:hover,
+[data-theme="terminal-chic-light"] .terminal-progress-bar:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-hover);
+}
+
+/* Terminal aesthetic for existing processing states */
+[data-theme="terminal-chic"] .processing-state,
+[data-theme="terminal-chic-light"] .processing-state {
+  background: var(--bg-secondary) !important;
+  border: 1px solid var(--border-primary) !important;
+  border-radius: 0 !important;
+  font-family: var(--font-family-mono);
+}
+
+[data-theme="terminal-chic"] .processing-state .processing-spinner,
+[data-theme="terminal-chic-light"] .processing-state .processing-spinner {
+  margin-right: 8px;
+}
+
+/* Terminal Spinner Component Styling */
+.terminal-spinner {
+  font-family: var(--font-family-mono);
+  display: inline-block;
+  line-height: 1;
+  color: var(--text-primary);
+}
+
+.terminal-spinner-small .spinner-content {
+  font-size: 10px;
+}
+
+.terminal-spinner-medium .spinner-content {
+  font-size: 14px;
+}
+
+.terminal-spinner-large .spinner-content {
+  font-size: 18px;
+}
+
+/* Individual spinner type animations */
+.terminal-spinner-default .spinner-content {
+  animation: terminalSpin 0.8s linear infinite;
+}
+
+.terminal-spinner-braille .spinner-content {
+  animation: terminalBraille 1s linear infinite;
+}
+
+.terminal-spinner-dots .spinner-content {
+  animation: terminalDots 1.2s ease-in-out infinite;
+}
+
+.terminal-spinner-bounce .spinner-content {
+  animation: terminalBounce 1.2s ease-in-out infinite;
+  letter-spacing: 0.1em;
+}
+
+.terminal-spinner-clock .spinner-content {
+  animation: terminalClock 1.5s steps(12) infinite;
+}
+
+.terminal-spinner-square .spinner-content {
+  animation: terminalSquare 0.6s linear infinite;
+}
+
+/* Terminal Status Dot Styling */
+.terminal-status-dot {
+  font-family: var(--font-family-mono);
+  font-size: 8px;
+  line-height: 1;
+  display: inline-block;
+}
+
+.terminal-status-recording {
+  color: #ff4444;
+  animation: pulse 1s ease-in-out infinite;
+}
+
+.terminal-status-processing {
+  color: var(--accent-primary);
+  animation: terminalSpin 0.8s linear infinite;
+}
+
+.terminal-status-complete {
+  color: #00ff41;
+}
+
+.terminal-status-error {
+  color: #ff4444;
+}
+
+.terminal-status-idle {
+  color: var(--text-secondary);
+}
+
+/* Terminal Progress Bar Styling */
+.terminal-progress-bar {
+  font-family: var(--font-family-mono);
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  padding: 6px 10px;
+  margin: 2px 0;
+  white-space: nowrap;
+  transition: all 0.1s ease;
+}
+
+.terminal-progress-content {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.05em;
+}
+
+/* Terminal Processing Text */
+.terminal-processing-text {
+  font-family: var(--font-family-mono);
+  position: relative;
+  color: var(--text-primary);
+}
+
+.terminal-cursor {
+  animation: pulse 1s ease-in-out infinite;
+  margin-left: 2px;
+  color: var(--accent-primary);
+}
+
+/* Loading wrapper for better positioning */
+.terminal-loading-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .terminal-progress-bar {
+    font-size: 10px;
+    padding: 4px 8px;
+  }
+  
+  .terminal-spinner-large .spinner-content {
+    font-size: 16px;
+  }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .terminal-progress-bar {
+    border-width: 2px;
+  }
+  
+  .terminal-status-dot {
+    font-weight: bold;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .terminal-spinner .spinner-content {
+    animation: none;
+  }
+  
+  .terminal-status-processing {
+    animation: none;
+  }
+  
+  .terminal-cursor {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+/* Focus states for accessibility */
+.terminal-progress-bar:focus-visible,
+.terminal-spinner:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+/* Integration with existing Scout components */
+[data-theme="terminal-chic"] .upload-progress .progress-bar,
+[data-theme="terminal-chic-light"] .upload-progress .progress-bar {
+  background: transparent !important;
+  border: 1px solid var(--border-primary) !important;
+  height: auto !important;
+  border-radius: 0 !important;
+}
+
+[data-theme="terminal-chic"] .processing-filename,
+[data-theme="terminal-chic-light"] .processing-filename {
+  font-family: var(--font-family-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.05em;
+}

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { tauriApi } from '../types/tauri';
+import { loggers } from '../utils/logger';
 import { Settings } from 'lucide-react';
 import './Sidebar.css';
 
@@ -23,12 +24,12 @@ export const useSidebarState = (): SidebarState => {
   useEffect(() => {
     const loadSidebarState = async () => {
       try {
-        const settings = await invoke<{ sidebar_expanded?: boolean }>('get_settings');
+        const settings = await tauriApi.getSettings();
         if (settings.sidebar_expanded !== undefined) {
           setIsExpanded(settings.sidebar_expanded);
         }
       } catch (error) {
-        console.error('Failed to load sidebar state:', error);
+        loggers.ui.error('Failed to load sidebar state', error);
       }
     };
     loadSidebarState();
@@ -39,13 +40,13 @@ export const useSidebarState = (): SidebarState => {
     setIsExpanded(newState);
     
     try {
-      const settings = await invoke('get_settings') as Record<string, any>;
-      await invoke('update_settings', { 
+      const settings = await tauriApi.getSettings();
+      await tauriApi.updateSettings({ 
         ...settings, 
         sidebar_expanded: newState 
       });
     } catch (error) {
-      console.error('Failed to save sidebar state:', error);
+      loggers.ui.error('Failed to save sidebar state', error);
     }
   };
 

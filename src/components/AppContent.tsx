@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useEffect, useCallback, useMemo } from "react";
 import { invokeTyped, tauriApi } from '../types/tauri';
 import { loggers } from '../utils/logger';
 import { safeEventListen, cleanupListeners } from "../lib/safeEventListener";
@@ -12,10 +12,13 @@ import { AudioErrorBoundary, TranscriptionErrorBoundary, SettingsErrorBoundary }
 import { ChevronRight, PanelLeftClose } from 'lucide-react';
 import { useRecording } from '../hooks/useRecording';
 import { useSettings } from '../hooks/useSettings';
-import { useFileDrop } from '../hooks/useFileDrop';
 import { useTranscriptEvents } from '../hooks/useTranscriptEvents';
 import { useProcessingStatus } from '../hooks/useProcessingStatus';
 import { useNativeOverlay } from '../hooks/useNativeOverlay';
+import { useTranscriptOperations } from '../hooks/useTranscriptOperations';
+import { useFileDropOperations } from '../hooks/useFileDropOperations';
+import { useOnboardingLogic } from '../hooks/useOnboardingLogic';
+import { usePerformanceMonitor } from '../hooks/usePerformanceMonitor';
 import { DevTools } from './DevTools';
 import { TranscriptionOverlay } from './TranscriptionOverlay';
 import { useAudioContext } from '../contexts/AudioContext';
@@ -27,6 +30,9 @@ import { useUIContext } from '../contexts/UIContext';
  * Maintains 100% feature parity while using new context architecture
  */
 export function AppContent() {
+  // Performance monitoring
+  usePerformanceMonitor('AppContent', { logThreshold: 20 });
+  
   const { isExpanded: isSidebarExpanded, toggleExpanded: toggleSidebar } = useSidebarState();
   
   // Context state
@@ -60,8 +66,6 @@ export function AppContent() {
     setUploadProgress 
   } = useUIContext();
 
-  // Local refs
-  const processingFileRef = useRef<string | null>(null);
 
   // Settings hook
   const {
@@ -93,59 +97,22 @@ export function AppContent() {
     toggleAutoPaste,
   } = useSettings();
 
-  // Load transcripts functions
-  const loadRecentTranscripts = useCallback(async () => {
-    try {
-      const recent = await tauriApi.getRecentTranscripts({ limit: 10 });
-      setTranscripts(recent);
-    } catch (error) {
-      console.error("Failed to load transcripts:", error);
-    }
-  }, [setTranscripts]);
+  // Transcript operations hook
+  const {
+    loadRecentTranscripts,
+    loadAllTranscripts,
+    onTranscriptCreatedCallback,
+    onRecordingCompleteCallback,
+    onProcessingCompleteCallback,
+    onRecordingCompletedCallback,
+  } = useTranscriptOperations({ setTranscripts, currentView });
 
-  const loadAllTranscripts = useCallback(async () => {
-    try {
-      const all = await tauriApi.getRecentTranscripts({ limit: 1000 });
-      setTranscripts(all);
-    } catch (error) {
-      console.error("Failed to load all transcripts:", error);
-    }
-  }, [setTranscripts]);
-
-  // Memoized callback functions
-  const onTranscriptCreatedCallback = useCallback(() => {
-    if (currentView === 'record') {
-      loadRecentTranscripts();
-    }
-  }, [currentView, loadRecentTranscripts]);
-
-  const onRecordingCompleteCallback = useCallback(() => {
-    // Ring buffer transcribes in real-time, so transcription is already done
-  }, []);
-
-  const onProcessingCompleteCallback = useCallback(() => {
-    setTimeout(() => {
-      loadRecentTranscripts();
-    }, 50);
-  }, [loadRecentTranscripts]);
-
-  const onRecordingCompletedCallback = useCallback(() => {
-    setTimeout(() => {
-      loadRecentTranscripts();
-    }, 50);
-  }, [loadRecentTranscripts]);
-
-  // Track if we're on the final onboarding step to enable shortcuts
-  const [isOnboardingTourStep, setIsOnboardingTourStep] = useState(false);
-
-  const onRecordingStartCallback = useCallback(() => {
-    // If recording starts during onboarding tour step, complete onboarding
-    if (showFirstRun && isOnboardingTourStep) {
-      localStorage.setItem('scout-onboarding-complete', 'true');
-      setShowFirstRun(false);
-      setCurrentView('record');
-    }
-  }, [showFirstRun, isOnboardingTourStep]);
+  // Onboarding logic hook
+  const {
+    isOnboardingTourStep,
+    setIsOnboardingTourStep,
+    onRecordingStartCallback,
+  } = useOnboardingLogic({ showFirstRun, setShowFirstRun, setCurrentView });
 
   // Recording hook
   const { 
@@ -167,29 +134,11 @@ export function AppContent() {
     isRecordViewActive: !showFirstRun && currentView === 'record'
   });
 
-  // File drop hook
-  const { isDragging } = useFileDrop({
+  // File drop operations hook
+  const { isDragging, processingFileRef } = useFileDropOperations({
     isProcessing,
-    onFileDropped: useCallback(async (filePath: string) => {
-      try {
-        setIsProcessing(true);
-        const filename = filePath.split('/').pop() || 'audio file';
-        setUploadProgress({
-          filename: filename,
-          status: 'uploading',
-          progress: 0
-        });
-
-        await invokeTyped<string>('transcribe_file', { 
-          filePath: filePath 
-        });
-      } catch (error) {
-        console.error('Failed to process dropped file:', error);
-        alert(`Failed to process file: ${error}`);
-        setIsProcessing(false);
-        processingFileRef.current = null;
-      }
-    }, [setIsProcessing, setUploadProgress])
+    setIsProcessing,
+    setUploadProgress,
   });
 
   // Hooks (only when not showing onboarding)

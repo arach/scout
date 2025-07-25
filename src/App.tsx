@@ -1,6 +1,7 @@
 import { AppProviders } from './contexts/AppProviders';
 import { AppContent } from './components/AppContent';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { loggers } from './utils/logger';
 import "./App.css";
 import "./components/TerminalLoaders.css";
 
@@ -13,9 +14,9 @@ function App() {
   return (
     <ErrorBoundary 
       name="App"
-      onError={(error, errorInfo) => {
+      onError={(error) => {
         // Could send to error tracking service here
-        console.error('App-level error:', error, errorInfo);
+        loggers.ui.error('App-level error', error);
       }}
     >
       <AppProviders>
