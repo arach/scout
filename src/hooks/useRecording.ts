@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { invokeTyped, tauriApi } from '../types/tauri';
 import { safeEventListen, cleanupListeners } from '../lib/safeEventListener';
 import { useRecordingContext } from '../contexts/RecordingContext';
 import { useAudioContext } from '../contexts/AudioContext';
@@ -66,7 +66,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
   useEffect(() => {
     const checkBackendState = async () => {
       try {
-        const backendIsRecording = await invoke<boolean>('is_recording');
+        const backendIsRecording = await tauriApi.isRecording();
         if (backendIsRecording !== isRecordingRef.current) {
           console.log('Syncing initial recording state with backend:', backendIsRecording);
           setIsRecording(backendIsRecording);
@@ -100,7 +100,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
 
     try {
       // Check backend state first
-      const backendIsRecording = await invoke<boolean>('is_recording');
+      const backendIsRecording = await tauriApi.isRecording();
       if (backendIsRecording) {
         console.log('Backend is already recording, syncing frontend state');
         setIsRecording(true);
@@ -120,7 +120,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
       onRecordingStart?.();
       
       console.log('Starting recording with device:', selectedMic);
-      const result = await invoke<string>('start_recording', { 
+      const result = await invokeTyped<string>('start_recording', { 
         deviceName: selectedMic !== 'Default microphone' ? selectedMic : null 
       });
       
@@ -128,7 +128,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
       
       if (soundEnabled) {
         try {
-          await invoke('play_start_sound');
+          await tauriApi.playStartSound();
         } catch (error: any) {
           // Only log if it's not a "command not found" error
           if (!error.includes || !error.includes('not found')) {
@@ -157,7 +157,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
   const stopRecording = useCallback(async () => {
     // Check backend state first
     try {
-      const backendIsRecording = await invoke<boolean>('is_recording');
+      const backendIsRecording = await tauriApi.isRecording();
       if (!backendIsRecording) {
         // console.log('Backend is not recording, syncing frontend state');
         setIsRecording(false);
@@ -177,7 +177,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
       // console.log('Stopping recording...');
       
       // Call backend FIRST, then update frontend state
-      await invoke('stop_recording');
+      await tauriApi.stopRecording();
       // console.log('Recording stopped successfully');
       
       // Only update frontend state after backend confirms stop
@@ -188,7 +188,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
       
       if (soundEnabled) {
         try {
-          await invoke('play_stop_sound');
+          await tauriApi.playStopSound();
         } catch (error: any) {
           // Only log if it's not a "command not found" error
           if (!error.includes || !error.includes('not found')) {
@@ -401,7 +401,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
       isRecordingRef.current = false;
       setIsRecording(false);
       
-      await invoke('cancel_recording');
+      await tauriApi.cancelRecording();
       console.log('Recording cancelled successfully');
     } catch (error) {
       console.error('Failed to cancel recording:', error);
