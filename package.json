@@ -11,7 +11,8 @@
     "tauri:build": "tauri build",
     "tauri:build:universal": "tauri build --target universal-apple-darwin",
     "tauri:build:prod": "tauri build -c tauri.prod.conf.json",
-    "analyze": "vite build --mode analyze"
+    "analyze": "ANALYZE=true vite build",
+    "analyze:serve": "ANALYZE=true vite build && npx vite preview"
   },
   "dependencies": {
     "@base-ui-components/react": "1.0.0-beta.0",
@@ -36,6 +37,7 @@
     "@vitejs/plugin-react": "^4.6.0",
     "terser": "^5.43.1",
     "typescript": "~5.6.3",
-    "vite": "^6.3.5"
+    "vite": "^6.3.5",
+    "vite-bundle-analyzer": "^1.1.0"
   }
 }

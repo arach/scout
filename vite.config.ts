@@ -1,13 +1,25 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { resolve } from "path";
+import { analyzer } from 'vite-bundle-analyzer';
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vitejs.dev/config/
-export default defineConfig(async () => ({
-  plugins: [react()],
+export default defineConfig(async () => {
+  const isAnalyzing = process.env.ANALYZE === 'true';
+  
+  return {
+    plugins: [
+      react(),
+      // Add bundle analyzer when ANALYZE=true
+      ...(isAnalyzing ? [analyzer({ 
+        analyzerMode: 'server',
+        openAnalyzer: true,
+        reportFilename: 'bundle-analysis.html'
+      })] : [])
+    ],
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
@@ -57,4 +69,5 @@ export default defineConfig(async () => ({
     // Enable source maps for production debugging
     sourcemap: false, // Set to true if you need production debugging
   },
-}));
+  };
+});
