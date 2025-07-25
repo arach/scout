@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { tauriApi } from '../types/tauri';
 import { safeEventListen, cleanupListeners } from '../lib/safeEventListener';
 import { Transcript } from '../types/transcript';
+import { loggers } from '../utils/logger';
 
 interface UseTranscriptEventsOptions {
   soundEnabled: boolean;
@@ -35,7 +36,7 @@ export function useTranscriptEvents(options: UseTranscriptEventsOptions) {
     let mounted = true;
     const cleanupFunctions: Array<() => void> = [];
     
-    console.log('🔔 Setting up transcript event listeners at', new Date().toISOString());
+    loggers.transcription.info('Setting up transcript event listeners');
     
     // Set up all event listeners asynchronously to prevent race conditions
     const setupListeners = async () => {
@@ -44,7 +45,7 @@ export function useTranscriptEvents(options: UseTranscriptEventsOptions) {
         const transcriptCreatedCleanup = await safeEventListen('transcript-created', async (event) => {
           if (!mounted) return;
           const newTranscript = event.payload as Transcript;
-          console.log('📝 Transcript created event received at', new Date().toISOString(), ':', {
+          loggers.transcription.info('Transcript created event received', {
             id: newTranscript.id,
             textLength: newTranscript.text?.length || 0,
             duration: newTranscript.duration_ms
@@ -61,7 +62,7 @@ export function useTranscriptEvents(options: UseTranscriptEventsOptions) {
           });
           
           // Clear processing state when transcript is created
-          console.log('📝 Transcript created - clearing processing state');
+          loggers.transcription.debug('Transcript created - clearing processing state');
           setIsProcessing?.(false);
           if (processingTimeoutRef.current) {
             clearTimeout(processingTimeoutRef.current);
@@ -75,9 +76,9 @@ export function useTranscriptEvents(options: UseTranscriptEventsOptions) {
           const duration = newTranscript.duration_ms || 0;
           if (soundEnabled && duration >= completionSoundThreshold) {
             try {
-              await invoke('play_success_sound');
+              await tauriApi.playSuccessSound();
             } catch (error) {
-              console.error('Failed to play success sound:', error);
+              loggers.audio.error('Failed to play success sound', error);
             }
           }
           
@@ -89,7 +90,7 @@ export function useTranscriptEvents(options: UseTranscriptEventsOptions) {
         const performanceMetricsCleanup = await safeEventListen('performance-metrics-recorded', async (event) => {
           if (!mounted) return;
           const metrics = event.payload as any;
-          console.log('Performance Metrics:', {
+          loggers.performance.info('Performance metrics recorded', {
             recording_duration: `${metrics.recording_duration_ms}ms`,
             transcription_time: `${metrics.transcription_time_ms}ms`, 
             user_perceived_latency: metrics.user_perceived_latency_ms ? `${metrics.user_perceived_latency_ms}ms` : 'N/A',
@@ -103,7 +104,7 @@ export function useTranscriptEvents(options: UseTranscriptEventsOptions) {
         const transcriptRefinedCleanup = await safeEventListen('transcript-refined', async (event) => {
           if (!mounted) return;
           const refinement = event.payload as { chunk_start: number; chunk_end: number; text: string };
-          console.log('🔄 Transcript refinement received:', {
+          loggers.transcription.debug('Transcript refinement received', {
             range: `${refinement.chunk_start}-${refinement.chunk_end}`,
             textLength: refinement.text.length,
           });
@@ -112,7 +113,7 @@ export function useTranscriptEvents(options: UseTranscriptEventsOptions) {
           // For now, just log it
           if (onTranscriptCreated) {
             // We'll need to implement smart merging logic here
-            console.log('📝 Would update transcript with refined text (not implemented yet)');
+            loggers.transcription.debug('Would update transcript with refined text (not implemented yet)');
           }
         });
         cleanupFunctions.push(transcriptRefinedCleanup);
@@ -121,10 +122,10 @@ export function useTranscriptEvents(options: UseTranscriptEventsOptions) {
         const processingCompleteCleanup = await safeEventListen('processing-complete', async (event) => {
           if (!mounted) return;
           const transcript = event.payload as Transcript;
-          console.log('🏁 Processing complete event received at', new Date().toISOString(), 'transcript:', transcript.id);
+          loggers.transcription.info('Processing complete event received', { transcriptId: transcript.id });
           
           // Clear processing state immediately
-          console.log('🎯 Clearing processing state from processing-complete at', new Date().toISOString());
+          loggers.transcription.debug('Clearing processing state from processing-complete');
           if (processingTimeoutRef.current) {
             clearTimeout(processingTimeoutRef.current);
             processingTimeoutRef.current = null;
@@ -145,7 +146,7 @@ export function useTranscriptEvents(options: UseTranscriptEventsOptions) {
         // Listen for recording-completed event as another backup
         const recordingCompletedCleanup = await safeEventListen('recording-completed', async (_event) => {
           if (!mounted) return;
-          console.log('🏁 Recording-completed event received at', new Date().toISOString());
+          loggers.recording.info('Recording-completed event received');
           
           // Clear processing state immediately
           if (processingTimeoutRef.current) {
@@ -159,7 +160,7 @@ export function useTranscriptEvents(options: UseTranscriptEventsOptions) {
         cleanupFunctions.push(recordingCompletedCleanup);
         
       } catch (error) {
-        console.error('Failed to set up transcript event listeners:', error);
+        loggers.transcription.error('Failed to set up transcript event listeners', error);
       }
     };
     

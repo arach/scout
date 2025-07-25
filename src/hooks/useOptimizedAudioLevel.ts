@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { tauriApi } from '../types/tauri';
+import { loggers } from '../utils/logger';
 
 interface UseOptimizedAudioLevelOptions {
   deviceName?: string | null;
@@ -95,14 +96,14 @@ export function useOptimizedAudioLevel(options: UseOptimizedAudioLevelOptions = 
       lastPollTimeRef.current = now;
       
       // Async poll - don't await to avoid blocking animation
-      invoke<number>('get_current_audio_level')
+      tauriApi.getCurrentAudioLevel()
         .then(rawLevel => {
           if (!mountedRef.current) return;
           targetRef.current = processAudioLevel(rawLevel);
         })
         .catch(error => {
           if (mountedRef.current) {
-            console.error('Failed to get audio level:', error);
+            loggers.audio.error('Failed to get audio level', error);
           }
         });
     }
@@ -133,8 +134,8 @@ export function useOptimizedAudioLevel(options: UseOptimizedAudioLevelOptions = 
     if (!enabled || monitoringStartedRef.current || !mountedRef.current) return;
 
     try {
-      console.log('Starting optimized audio level monitoring...');
-      await invoke('start_audio_level_monitoring', { deviceName });
+      loggers.audio.debug('Starting optimized audio level monitoring');
+      await tauriApi.startAudioLevelMonitoring({ deviceName: deviceName || undefined });
       
       if (!mountedRef.current) return;
       
@@ -145,9 +146,9 @@ export function useOptimizedAudioLevel(options: UseOptimizedAudioLevelOptions = 
       // Start animation loop
       animationFrameRef.current = requestAnimationFrame(animate);
       
-      console.log('Audio level monitoring started successfully');
+      loggers.audio.info('Audio level monitoring started successfully');
     } catch (error) {
-      console.error('Failed to start audio level monitoring:', error);
+      loggers.audio.error('Failed to start audio level monitoring', error);
       setIsMonitoring(false);
     }
   }, [enabled, deviceName, animate]);
@@ -174,9 +175,9 @@ export function useOptimizedAudioLevel(options: UseOptimizedAudioLevelOptions = 
     
     // Stop backend monitoring
     try {
-      await invoke('stop_audio_level_monitoring');
+      await tauriApi.stopAudioLevelMonitoring();
     } catch (error) {
-      console.error('Failed to stop audio level monitoring:', error);
+      loggers.audio.error('Failed to stop audio level monitoring', error);
     }
   }, []);
 
@@ -210,7 +211,7 @@ export function useOptimizedAudioLevel(options: UseOptimizedAudioLevelOptions = 
       }
       // Don't await stopMonitoring in cleanup to avoid memory leaks
       if (monitoringStartedRef.current) {
-        invoke('stop_audio_level_monitoring').catch(() => {});
+        tauriApi.stopAudioLevelMonitoring().catch(() => {});
       }
     };
   }, []);

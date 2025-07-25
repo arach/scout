@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { tauriApi } from '../types/tauri';
+import { loggers } from '../utils/logger';
 import { safeEventListen } from '../lib/safeEventListener';
 import { BarChart3, Gauge, Package, CheckCircle, Sparkles, Download } from 'lucide-react';
 import './ModelManager.css';
@@ -44,10 +45,10 @@ export const ModelManager: React.FC = () => {
 
   const loadModels = async () => {
     try {
-      const availableModels = await invoke<WhisperModel[]>('get_available_models');
-      setModels(availableModels);
+      const availableModels = await tauriApi.getAvailableModels();
+      setModels(availableModels as unknown as WhisperModel[]);
     } catch (error) {
-      console.error('Failed to load models:', error);
+      loggers.api.error('Failed to load models', error);
     } finally {
       setLoading(false);
     }
@@ -55,10 +56,10 @@ export const ModelManager: React.FC = () => {
 
   const getModelsDir = async () => {
     try {
-      const dir = await invoke<string>('get_models_dir');
+      const dir = await tauriApi.getModelsDir();
       setModelsDir(dir);
     } catch (error) {
-      console.error('Failed to get models directory:', error);
+      loggers.api.error('Failed to get models directory', error);
     }
   };
 
@@ -99,9 +100,10 @@ export const ModelManager: React.FC = () => {
       const destPath = `${modelsDir}/${model.filename}`;
 
       // Start download using backend service
-      await invoke('download_file', {
+      await tauriApi.downloadFile({
         url: model.url,
-        destPath: destPath
+        fileName: model.filename,
+        destination: destPath
       });
 
       // Cleanup listener
@@ -117,7 +119,7 @@ export const ModelManager: React.FC = () => {
       // Reload models to update download status
       await loadModels();
     } catch (error) {
-      console.error('Failed to download model:', error);
+      loggers.api.error('Failed to download model', error);
       
       // Remove from downloading state
       setDownloading(prev => {
@@ -132,10 +134,10 @@ export const ModelManager: React.FC = () => {
 
   const setActiveModel = async (modelId: string) => {
     try {
-      await invoke('set_active_model', { modelId });
+      await tauriApi.setActiveModel({ modelId });
       await loadModels();
     } catch (error) {
-      console.error('Failed to set active model:', error);
+      loggers.api.error('Failed to set active model', error);
       alert(`Failed to set active model: ${error}`);
     }
   };
