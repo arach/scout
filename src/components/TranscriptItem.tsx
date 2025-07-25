@@ -3,17 +3,8 @@ import { Trash2, Copy, Check, Play, Pause, Download, Eye } from 'lucide-react';
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { useAudioBlob } from '../hooks/useAudioBlob';
+import { Transcript } from '../types/transcript';
 import './TranscriptItem.css';
-
-interface Transcript {
-    id: number;
-    text: string;
-    duration_ms: number;
-    created_at: string;
-    metadata?: string;
-    audio_path?: string;
-    file_size?: number;
-}
 
 interface TranscriptItemProps {
     transcript: Transcript;

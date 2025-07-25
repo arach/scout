@@ -1,14 +1,5 @@
 import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
-
-interface Transcript {
-  id: number;
-  text: string;
-  duration_ms: number;
-  created_at: string;
-  metadata?: string;
-  audio_path?: string;
-  file_size?: number;
-}
+import { Transcript } from '../types/transcript';
 
 interface TranscriptContextState {
   transcripts: Transcript[];

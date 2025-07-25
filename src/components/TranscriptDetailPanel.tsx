@@ -3,19 +3,9 @@ import { SimpleAudioPlayer } from './SimpleAudioPlayer';
 import { TranscriptAIInsights } from './TranscriptAIInsights';
 import { PerformanceTimeline } from './PerformanceTimeline';
 import { invoke } from '@tauri-apps/api/core';
-import { parseTranscriptMetadata } from '../types/transcript';
+import { parseTranscriptMetadata, Transcript } from '../types/transcript';
 import { useResizable } from '../hooks/useResizable';
 import './TranscriptDetailPanel.css';
-
-interface Transcript {
-    id: number;
-    text: string;
-    duration_ms: number;
-    created_at: string;
-    metadata?: string;
-    audio_path?: string;
-    file_size?: number;
-}
 
 interface PerformanceMetrics {
     id: number;
