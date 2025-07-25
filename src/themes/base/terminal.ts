@@ -4,55 +4,55 @@ export const terminalChic: Theme = {
   id: 'terminal-chic',
   name: 'Terminal Chic',
   colors: {
-    // High contrast terminal backgrounds with better separation
-    bgPrimary: '#0f0f0f',           // Slightly lighter for better contrast
-    bgSecondary: '#1a1a1a',         // More distinct secondary
-    bgTertiary: '#252525',          // Better card contrast
-    bgHover: '#2a2a2a',             // More visible hover state
-    bgActive: '#333333',            // Clear active state
-    bgDanger: '#2a1515',            // Clearer danger state
-    bgOverlay: 'rgba(0, 0, 0, 0.95)',
+    // Sophisticated dark terminal with better contrast
+    bgPrimary: 'hsl(240, 10%, 3.9%)',      // Rich dark background
+    bgSecondary: 'hsl(240, 6%, 10%)',       // Elevated surface
+    bgTertiary: 'hsl(240, 5%, 14%)',        // Card/group backgrounds
+    bgHover: 'hsl(240, 4%, 16%)',           // Sophisticated hover
+    bgActive: 'hsl(240, 5%, 21%)',          // Active state
+    bgDanger: 'hsl(0, 84%, 8%)',            // Dark danger state
+    bgOverlay: 'hsla(240, 10%, 3.9%, 0.95)',
     
-    // Terminal-inspired text colors
-    textPrimary: '#e0e0e0',         // Bright terminal text
-    textSecondary: '#a0a0a0',       // Dimmed terminal text
-    textTertiary: '#606060',        // Even more dimmed text
-    textPlaceholder: '#606060',     // Subtle placeholder
-    textDanger: '#ff4444',          // Terminal red
-    textSuccess: '#00ff41',         // Classic terminal green
+    // Enhanced terminal text hierarchy
+    textPrimary: 'hsl(0, 0%, 98%)',         // High contrast primary
+    textSecondary: 'hsl(240, 5%, 65%)',     // Refined secondary
+    textTertiary: 'hsl(240, 4%, 46%)',      // Subtle tertiary
+    textPlaceholder: 'hsl(240, 4%, 40%)',   // Muted placeholder
+    textDanger: 'hsl(0, 84%, 60%)',         // Terminal red
+    textSuccess: 'hsl(142, 76%, 36%)',      // Terminal green
     
-    // Subtle white/grey accents instead of strong green
-    accentPrimary: '#ffffff',       // Clean white
-    accentHover: '#f0f0f0',         // Light grey hover
-    accentActive: '#e0e0e0',        // Slightly darker active
+    // Refined accent system
+    accentPrimary: 'hsl(210, 40%, 70%)',    // Subtle blue accent
+    accentHover: 'hsl(210, 40%, 75%)',      // Lighter on hover
+    accentActive: 'hsl(210, 40%, 65%)',     // Darker when active
     
-    // Ultra-thin borders for that sleek terminal feel
-    borderPrimary: '#404040',       // More visible grey border
-    borderHover: '#555555',         // Brighter on hover for contrast
+    // Sophisticated border system
+    borderPrimary: 'hsl(240, 4%, 16%)',     // Subtle primary border
+    borderHover: 'hsl(240, 5%, 26%)',       // Enhanced on hover
     
-    // Minimal shadows
-    shadowColor: 'rgba(0, 0, 0, 0.8)',
-    overlayBackdrop: 'rgba(0, 0, 0, 0.9)',
+    // Enhanced shadows for depth
+    shadowColor: 'hsla(240, 10%, 3.9%, 0.5)',
+    overlayBackdrop: 'hsla(240, 10%, 3.9%, 0.9)',
   },
   typography: {
-    // Pure monospace for that authentic terminal feel
+    // Enhanced monospace stack with better rendering
     fontFamily: '"SF Mono", "JetBrains Mono", "Fira Code", Monaco, Consolas, "Courier New", monospace',
     fontFamilyMono: '"SF Mono", "JetBrains Mono", "Fira Code", Monaco, Consolas, "Courier New", monospace',
     fontSize: {
-      small: '9px',     // More compact terminal text
-      base: '11px',     // Smaller standard terminal size
-      large: '12px',    // Smaller headers
-      xlarge: '14px',   // Smaller titles
+      small: '12px',    // Readable small text
+      base: '13px',     // Comfortable base size
+      large: '14px',    // Clear headers
+      xlarge: '16px',   // Prominent titles
     },
     fontWeight: {
-      normal: 300,      // Light weight for that thin terminal look
-      medium: 400,      // Standard weight, still light
-      bold: 500,        // "Bold" is just medium weight
+      normal: 400,      // Standard readable weight
+      medium: 500,      // Medium emphasis
+      bold: 600,        // Strong emphasis
     },
     lineHeight: {
-      tight: '1.0',     // Very tight for terminal density
-      normal: '1.2',    // Compact normal spacing
-      relaxed: '1.4',   // Still quite tight
+      tight: '1.25',    // Compact but readable
+      normal: '1.5',    // Comfortable reading
+      relaxed: '1.75',  // Spacious when needed
     },
   },
   layout: {
@@ -68,53 +68,53 @@ export const terminalChicLight: Theme = {
   id: 'terminal-chic-light',
   name: 'Terminal Chic Light',
   colors: {
-    // Inverted for light mode with paper-like feel
-    bgPrimary: '#fafafa',           // Almost white
-    bgSecondary: '#f5f5f5',         // Light grey
-    bgTertiary: '#f0f0f0',          // Card backgrounds
-    bgHover: '#eeeeee',             // Subtle hover
-    bgActive: '#e8e8e8',            // Active state
-    bgDanger: '#fef5f5',            // Light red tint
-    bgOverlay: 'rgba(255, 255, 255, 0.95)',
+    // Sophisticated light terminal with enhanced contrast
+    bgPrimary: 'hsl(0, 0%, 98%)',           // Pure white background
+    bgSecondary: 'hsl(210, 20%, 96%)',      // Subtle tinted secondary
+    bgTertiary: 'hsl(210, 20%, 94%)',       // Card backgrounds
+    bgHover: 'hsl(210, 20%, 92%)',          // Enhanced hover
+    bgActive: 'hsl(210, 20%, 88%)',         // Clear active state
+    bgDanger: 'hsl(0, 100%, 97%)',          // Light danger tint
+    bgOverlay: 'hsla(0, 0%, 98%, 0.95)',
     
-    // Dark text on light for high contrast
-    textPrimary: '#1a1a1a',         // Dark primary text
-    textSecondary: '#4a4a4a',       // Medium grey
-    textTertiary: '#9a9a9a',        // Light grey tertiary text
-    textPlaceholder: '#9a9a9a',     // Light grey placeholder
-    textDanger: '#cc0000',          // Dark red
-    textSuccess: '#006600',         // Dark green
+    // Refined text hierarchy for light mode
+    textPrimary: 'hsl(240, 10%, 10%)',      // Deep primary text
+    textSecondary: 'hsl(240, 6%, 30%)',     // Sophisticated secondary
+    textTertiary: 'hsl(240, 4%, 54%)',      // Balanced tertiary
+    textPlaceholder: 'hsl(240, 4%, 60%)',   // Subtle placeholder
+    textDanger: 'hsl(0, 84%, 40%)',         // Terminal red
+    textSuccess: 'hsl(142, 76%, 30%)',      // Terminal green
     
-    // Clean dark accents for light theme
-    accentPrimary: '#333333',       // Dark grey
-    accentHover: '#444444',         // Medium grey hover
-    accentActive: '#222222',        // Darker active
+    // Refined accent system for light mode
+    accentPrimary: 'hsl(210, 100%, 40%)',   // Clean blue accent
+    accentHover: 'hsl(210, 100%, 35%)',     // Darker on hover
+    accentActive: 'hsl(210, 100%, 45%)',    // Lighter when active
     
-    // Thin light borders
-    borderPrimary: '#d0d0d0',       // Light border
-    borderHover: '#b0b0b0',         // Darker on hover
+    // Sophisticated border system
+    borderPrimary: 'hsl(210, 20%, 84%)',    // Subtle borders
+    borderHover: 'hsl(210, 20%, 74%)',      // Enhanced on hover
     
-    shadowColor: 'rgba(0, 0, 0, 0.1)',
-    overlayBackdrop: 'rgba(255, 255, 255, 0.9)',
+    shadowColor: 'hsla(240, 10%, 10%, 0.1)',
+    overlayBackdrop: 'hsla(0, 0%, 98%, 0.9)',
   },
   typography: {
     fontFamily: '"SF Mono", "JetBrains Mono", "Fira Code", Monaco, Consolas, "Courier New", monospace',
     fontFamilyMono: '"SF Mono", "JetBrains Mono", "Fira Code", Monaco, Consolas, "Courier New", monospace',
     fontSize: {
-      small: '9px',     // More compact terminal text
-      base: '11px',     // Smaller standard terminal size
-      large: '12px',    // Smaller headers
-      xlarge: '14px',   // Smaller titles
+      small: '12px',    // Readable small text
+      base: '13px',     // Comfortable base size
+      large: '14px',    // Clear headers
+      xlarge: '16px',   // Prominent titles
     },
     fontWeight: {
-      normal: 300,
-      medium: 400,
-      bold: 500,
+      normal: 400,      // Standard readable weight
+      medium: 500,      // Medium emphasis
+      bold: 600,        // Strong emphasis
     },
     lineHeight: {
-      tight: '1.0',
-      normal: '1.2',
-      relaxed: '1.4',
+      tight: '1.25',    // Compact but readable
+      normal: '1.5',    // Comfortable reading
+      relaxed: '1.75',  // Spacious when needed
     },
   },
   layout: {

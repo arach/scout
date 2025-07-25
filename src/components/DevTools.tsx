@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { tauriApi } from '../types/tauri';
+import { loggers } from '../utils/logger';
 import { TranscriptionOverlay } from './TranscriptionOverlay';
 import { Transcript } from '../types/transcript';
 import './DevTools.css';
@@ -77,17 +78,17 @@ export function DevTools(props: DevToolsProps) {
 
   const handleWaveformStyleChange = async (style: 'classic' | 'enhanced' | 'particles') => {
     try {
-      await invoke('set_overlay_waveform_style', { style });
+      await tauriApi.setOverlayWaveformStyle({ style });
       setWaveformStyle(style);
-      console.log(`[DevTools] Switched to ${style} waveform`);
+      loggers.ui.debug(`Switched to ${style} waveform`);
     } catch (error) {
-      console.error('[DevTools] Failed to change waveform style:', error);
+      loggers.ui.error('Failed to change waveform style', error);
     }
   };
 
   const handleTeleprompterToggle = (enabled: boolean) => {
     setShowTeleprompter(enabled);
-    console.log(`[DevTools] Teleprompter overlay ${enabled ? 'shown' : 'hidden'}`);
+    loggers.ui.debug(`Teleprompter overlay ${enabled ? 'shown' : 'hidden'}`);
   };
 
   // Console logging effect - context aware
@@ -120,7 +121,7 @@ export function DevTools(props: DevToolsProps) {
       });
     }
 
-    console.log('[DevTools]', logData);
+    loggers.ui.debug('DevTools context update', logData);
   }, [
     showConsoleLog,
     currentView,
@@ -256,9 +257,9 @@ export function DevTools(props: DevToolsProps) {
                   className="dev-tool-button"
                   onClick={async () => {
                     try {
-                      await invoke('open_log_file');
+                      await tauriApi.openLogFile();
                     } catch (error) {
-                      console.error('Failed to open log file:', error);
+                      loggers.ui.error('Failed to open log file', error);
                     }
                   }}
                 >
@@ -268,9 +269,9 @@ export function DevTools(props: DevToolsProps) {
                   className="dev-tool-button"
                   onClick={async () => {
                     try {
-                      await invoke('show_log_file_in_finder');
+                      await tauriApi.showLogFileInFinder();
                     } catch (error) {
-                      console.error('Failed to show log file in finder:', error);
+                      loggers.ui.error('Failed to show log file in finder', error);
                     }
                   }}
                 >
