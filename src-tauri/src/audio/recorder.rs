@@ -416,6 +416,9 @@ impl AudioRecorderWorker {
         self.channels = channels;
         self.sample_format = Some(default_config.sample_format());
         
+        // Update global device sample rate cache for transcription strategies
+        crate::update_device_sample_rate(config.sample_rate.0);
+        
         // Store device info for metadata
         let device_info = DeviceInfo {
             name: device_name_for_metadata.clone(),
