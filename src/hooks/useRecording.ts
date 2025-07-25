@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { safeEventListen, cleanupListeners } from '../lib/safeEventListener';
 import { useRecordingContext } from '../contexts/RecordingContext';
+import { useAudioContext } from '../contexts/AudioContext';
 import { usePushToTalkMonitor } from './usePushToTalkMonitor';
 import { useAudioLevelMonitoring } from './useAudioLevelMonitoring';
 
@@ -41,10 +42,12 @@ export function useRecording(options: UseRecordingOptions = {}) {
 
   // Recording context (replaces singleton)
   const recordingContext = useRecordingContext();
+  
+  // Get audio level from AudioContext
+  const { audioLevel } = useAudioContext();
 
-  // Audio level monitoring (extracted to separate hook)
-  const { audioLevel } = useAudioLevelMonitoring({
-    selectedMic,
+  // Audio level monitoring (extracted to separate hook) - no longer returns audioLevel
+  useAudioLevelMonitoring({
     isActive: isRecordViewActive,
   });
 

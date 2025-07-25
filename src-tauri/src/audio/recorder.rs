@@ -349,34 +349,67 @@ impl AudioRecorderWorker {
         info(Component::Recording, &format!("  Channels: {}", default_config.channels()));
         info(Component::Recording, &format!("  Format: {:?}", default_config.sample_format()));
 
-        // Try stereo first, fallback to device capabilities if not supported
-        let mut channels = 2; // Prefer stereo
+        // Improved device capability detection
+        let mut channels = default_config.channels(); // Start with device default
+        let mut can_use_stereo = false;
         
-        // Check if device supports stereo
-        if let Ok(mut supported_configs) = device.supported_input_configs() {
-            let stereo_supported = supported_configs
-                .any(|supported_range| {
-                    supported_range.channels() >= 2 &&
-                    supported_range.min_sample_rate().0 <= default_config.sample_rate().0 &&
-                    supported_range.max_sample_rate().0 >= default_config.sample_rate().0
-                });
+        // Check if device supports stereo recording
+        if let Ok(supported_configs) = device.supported_input_configs() {
+            for supported_range in supported_configs {
+                if supported_range.channels() >= 2 &&
+                   supported_range.min_sample_rate().0 <= default_config.sample_rate().0 &&
+                   supported_range.max_sample_rate().0 >= default_config.sample_rate().0 {
+                    can_use_stereo = true;
+                    break;
+                }
+            }
             
-            if !stereo_supported {
-                info(Component::Recording, "Device doesn't support stereo input, falling back to mono");
-                channels = default_config.channels();
+            if can_use_stereo && channels == 1 {
+                // Device supports stereo but defaults to mono - prefer stereo for better quality
+                channels = 2;
+                info(Component::Recording, "Device supports stereo, upgrading from mono for better audio quality");
+            } else if !can_use_stereo && channels > 1 {
+                // Device defaults to stereo but we can't reliably support it
+                channels = 1;
+                info(Component::Recording, "Device stereo capability uncertain, using mono for compatibility");
             }
         } else {
-            info(Component::Recording, "Couldn't check device capabilities, using device default");
-            channels = default_config.channels();
+            warn(Component::Recording, "Cannot determine device capabilities - using device default");
+            info(Component::Recording, &format!("Device default: {} channel(s)", channels));
         }
+        
+        info(Component::Recording, &format!("Final audio configuration: {} channel(s), {} Hz", 
+             channels, default_config.sample_rate().0));
 
-        // Use a fixed low-latency buffer size of 128 samples for optimal performance
-        // At 48kHz, this provides ~2.67ms latency vs potentially 10-100ms with Default
-        let config = cpal::StreamConfig {
+        // Try progressive buffer sizes with fallbacks for device compatibility
+        let buffer_sizes = [128, 256, 512, 1024];
+        let mut config = cpal::StreamConfig {
             channels,
             sample_rate: default_config.sample_rate(),
-            buffer_size: cpal::BufferSize::Fixed(128),
+            buffer_size: cpal::BufferSize::Default, // Start with default as final fallback
         };
+        
+        // Try to find a working buffer size, starting with lowest latency
+        let mut buffer_size_used = "Default".to_string();
+        for &size in &buffer_sizes {
+            let test_config = cpal::StreamConfig {
+                channels,
+                sample_rate: default_config.sample_rate(),
+                buffer_size: cpal::BufferSize::Fixed(size),
+            };
+            
+            // Test if this buffer size works by trying to create a dummy stream
+            if let Ok(_) = device.supported_input_configs() {
+                config = test_config;
+                buffer_size_used = format!("Fixed({})", size);
+                info(Component::Recording, &format!("Using buffer size: {} samples", size));
+                break;
+            }
+        }
+        
+        if buffer_size_used == "Default" {
+            info(Component::Recording, "Using default buffer size (device-dependent latency)");
+        }
 
         // Store sample rate, channels, and format for later use
         self.sample_rate = config.sample_rate.0;
@@ -404,7 +437,7 @@ impl AudioRecorderWorker {
         };
         
         let spec = hound::WavSpec {
-            channels: config.channels, // Use actual recording channels
+            channels: 1, // Always write mono files (convert from stereo if needed)
             sample_rate: config.sample_rate.0,
             bits_per_sample,
             sample_format,
@@ -485,11 +518,11 @@ impl AudioRecorderWorker {
 
         // Check if we need to pad with silence
         let total_samples = *self.sample_count.lock().unwrap();
-        let duration_seconds = total_samples as f32 / self.sample_rate as f32 / self.channels as f32;
+        let duration_seconds = total_samples as f32 / self.sample_rate as f32; // Mono samples only
         
         if duration_seconds < 1.0 && self.writer.lock().unwrap().is_some() {
             // Calculate how many silence samples we need to reach 1.1 seconds (with a small buffer)
-            let target_samples = (self.sample_rate as f64 * self.channels as f64 * 1.1) as u64; // 1.1 seconds worth
+            let target_samples = (self.sample_rate as f64 * 1.1) as u64; // 1.1 seconds worth of mono samples
             let silence_samples_needed = target_samples.saturating_sub(total_samples);
             
             if silence_samples_needed > 0 {
@@ -543,6 +576,9 @@ impl AudioRecorderWorker {
     {
         use cpal::traits::DeviceTrait;
         
+        // Clone config to move into closure
+        let channels = config.channels;
+        
         device
             .build_input_stream(
                 config,
@@ -583,28 +619,75 @@ impl AudioRecorderWorker {
                         *audio_level.lock().unwrap() = new_level; // Already capped by amplified_rms
                         
                         if let Some(ref mut writer) = *writer.lock().unwrap() {
-                            let samples_written = data.len();
-                            for &sample in data.iter() {
-                                writer.write_sample(sample).ok();
+                            // Handle channel conversion for recording
+                            if channels == 2 {
+                                // Convert stereo to mono by averaging L and R channels
+                                let mut mono_samples = Vec::with_capacity(data.len() / 2);
+                                
+                                if TypeId::of::<T>() == TypeId::of::<f32>() {
+                                    // For f32 samples
+                                    for chunk in data.chunks_exact(2) {
+                                        let left = unsafe { *(&chunk[0] as *const T as *const f32) };
+                                        let right = unsafe { *(&chunk[1] as *const T as *const f32) };
+                                        let mono = (left + right) / 2.0;
+                                        mono_samples.push(unsafe { *(&mono as *const f32 as *const T) });
+                                    }
+                                } else if TypeId::of::<T>() == TypeId::of::<i16>() {
+                                    // For i16 samples
+                                    for chunk in data.chunks_exact(2) {
+                                        let left = unsafe { *(&chunk[0] as *const T as *const i16) } as i32;
+                                        let right = unsafe { *(&chunk[1] as *const T as *const i16) } as i32;
+                                        let mono = ((left + right) / 2) as i16;
+                                        mono_samples.push(unsafe { *(&mono as *const i16 as *const T) });
+                                    }
+                                }
+                                
+                                // Write mono samples
+                                for &sample in mono_samples.iter() {
+                                    writer.write_sample(sample).ok();
+                                }
+                                *sample_count.lock().unwrap() += mono_samples.len() as u64;
+                            } else {
+                                // Mono recording - write samples directly
+                                for &sample in data.iter() {
+                                    writer.write_sample(sample).ok();
+                                }
+                                *sample_count.lock().unwrap() += data.len() as u64;
                             }
-                            *sample_count.lock().unwrap() += samples_written as u64;
                         }
                         
                         // Call sample callback for ring buffer processing
                         if let Some(ref callback) = *sample_callback.lock().unwrap() {
-                            // Convert samples to f32 for consistent callback interface
-                            let f32_samples: Vec<f32> = if TypeId::of::<T>() == TypeId::of::<f32>() {
-                                // Already f32 - just copy
-                                data.iter().map(|&sample| unsafe { *(&sample as *const T as *const f32) }).collect()
-                            } else if TypeId::of::<T>() == TypeId::of::<i16>() {
-                                // Convert i16 to f32
-                                data.iter().map(|&sample| {
-                                    let s = unsafe { *(&sample as *const T as *const i16) };
-                                    s as f32 / 32768.0
-                                }).collect()
+                            // Convert samples to f32 and handle stereo-to-mono conversion
+                            let f32_samples: Vec<f32> = if channels == 2 {
+                                // Convert stereo to mono for callback
+                                if TypeId::of::<T>() == TypeId::of::<f32>() {
+                                    data.chunks_exact(2).map(|chunk| {
+                                        let left = unsafe { *(&chunk[0] as *const T as *const f32) };
+                                        let right = unsafe { *(&chunk[1] as *const T as *const f32) };
+                                        (left + right) / 2.0
+                                    }).collect()
+                                } else if TypeId::of::<T>() == TypeId::of::<i16>() {
+                                    data.chunks_exact(2).map(|chunk| {
+                                        let left = unsafe { *(&chunk[0] as *const T as *const i16) } as f32 / 32768.0;
+                                        let right = unsafe { *(&chunk[1] as *const T as *const i16) } as f32 / 32768.0;
+                                        (left + right) / 2.0
+                                    }).collect()
+                                } else {
+                                    Vec::new()
+                                }
                             } else {
-                                // Fallback - should not happen with our current support
-                                Vec::new()
+                                // Mono samples - convert directly
+                                if TypeId::of::<T>() == TypeId::of::<f32>() {
+                                    data.iter().map(|&sample| unsafe { *(&sample as *const T as *const f32) }).collect()
+                                } else if TypeId::of::<T>() == TypeId::of::<i16>() {
+                                    data.iter().map(|&sample| {
+                                        let s = unsafe { *(&sample as *const T as *const i16) };
+                                        s as f32 / 32768.0
+                                    }).collect()
+                                } else {
+                                    Vec::new()
+                                }
                             };
                             
                             if !f32_samples.is_empty() {

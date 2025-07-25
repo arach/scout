@@ -1366,6 +1366,88 @@ async fn set_overlay_waveform_style(state: State<'_, AppState>, style: String) -
     Ok(())
 }
 
+#[tauri::command]
+async fn get_log_file_path() -> Result<Option<String>, String> {
+    Ok(logger::get_log_file_path().map(|p| p.to_string_lossy().to_string()))
+}
+
+#[tauri::command]
+async fn open_log_file() -> Result<(), String> {
+    use std::process::Command;
+    
+    if let Some(log_path) = logger::get_log_file_path() {
+        #[cfg(target_os = "macos")]
+        {
+            Command::new("open")
+                .arg(&log_path)
+                .spawn()
+                .map_err(|e| format!("Failed to open log file: {}", e))?;
+        }
+        
+        #[cfg(target_os = "windows")]
+        {
+            Command::new("notepad")
+                .arg(&log_path)
+                .spawn()
+                .map_err(|e| format!("Failed to open log file: {}", e))?;
+        }
+        
+        #[cfg(target_os = "linux")]
+        {
+            Command::new("xdg-open")
+                .arg(&log_path)
+                .spawn()
+                .map_err(|e| format!("Failed to open log file: {}", e))?;
+        }
+        
+        Ok(())
+    } else {
+        Err("No log file found".to_string())
+    }
+}
+
+#[tauri::command]
+async fn show_log_file_in_finder() -> Result<(), String> {
+    use std::process::Command;
+    
+    if let Some(log_path) = logger::get_log_file_path() {
+        #[cfg(target_os = "macos")]
+        {
+            Command::new("open")
+                .arg("-R")  // Reveal in Finder
+                .arg(&log_path)
+                .spawn()
+                .map_err(|e| format!("Failed to reveal log file in Finder: {}", e))?;
+        }
+        
+        #[cfg(target_os = "windows")]
+        {
+            Command::new("explorer")
+                .arg("/select,")
+                .arg(&log_path)
+                .spawn()
+                .map_err(|e| format!("Failed to reveal log file in Explorer: {}", e))?;
+        }
+        
+        #[cfg(target_os = "linux")]
+        {
+            // Try to reveal in file manager, fall back to opening directory
+            if let Some(parent) = log_path.parent() {
+                Command::new("xdg-open")
+                    .arg(parent)
+                    .spawn()
+                    .map_err(|e| format!("Failed to open logs directory: {}", e))?;
+            } else {
+                return Err("Could not find logs directory".to_string());
+            }
+        }
+        
+        Ok(())
+    } else {
+        Err("No log file found".to_string())
+    }
+}
+
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -1398,6 +1480,13 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir().expect("Failed to get app data dir");
+            
+            // Initialize file-based logging
+            if let Err(e) = logger::init_logger(&app_data_dir) {
+                eprintln!("Failed to initialize file logger: {}", e);
+            } else {
+                info(Component::UI, &format!("Scout application starting - logs available at: {:?}", logger::get_log_file_path()));
+            }
             
             let recordings_dir = app_data_dir.join("recordings");
             std::fs::create_dir_all(&recordings_dir).expect("Failed to create recordings directory");
@@ -1693,6 +1782,8 @@ pub fn run() {
                     .build(app)?,
                 &toggle_recording_item,
                 &PredefinedMenuItem::separator(app)?,
+                &MenuItemBuilder::with_id("show_logs", "Show Logs")
+                    .build(app)?,
                 &MenuItemBuilder::with_id("quit", "Quit Scout")
                     .accelerator("CmdOrCtrl+Q")
                     .build(app)?
@@ -1742,6 +1833,36 @@ pub fn run() {
                         "toggle_recording" => {
                             if let Err(e) = app.emit("toggle-recording", ()) {
                                 error(Component::UI, &format!("Failed to emit toggle-recording event: {}", e));
+                            }
+                        }
+                        "show_logs" => {
+                            use std::process::Command;
+                            
+                            if let Some(log_path) = logger::get_log_file_path() {
+                                #[cfg(target_os = "macos")]
+                                {
+                                    if let Err(e) = Command::new("open").arg("-R").arg(&log_path).spawn() {
+                                        error(Component::UI, &format!("Failed to reveal log file from menu: {}", e));
+                                    }
+                                }
+                                
+                                #[cfg(target_os = "windows")]
+                                {
+                                    if let Err(e) = Command::new("explorer").arg("/select,").arg(&log_path).spawn() {
+                                        error(Component::UI, &format!("Failed to reveal log file from menu: {}", e));
+                                    }
+                                }
+                                
+                                #[cfg(target_os = "linux")]
+                                {
+                                    if let Some(parent) = log_path.parent() {
+                                        if let Err(e) = Command::new("xdg-open").arg(parent).spawn() {
+                                            error(Component::UI, &format!("Failed to open logs directory from menu: {}", e));
+                                        }
+                                    }
+                                }
+                            } else {
+                                error(Component::UI, "No log file found to show from menu");
                             }
                         }
                         "quit" => {
@@ -1864,7 +1985,10 @@ pub fn run() {
             update_push_to_talk_shortcut,
             paste_text,
             play_success_sound,
-            set_overlay_waveform_style
+            set_overlay_waveform_style,
+            get_log_file_path,
+            open_log_file,
+            show_log_file_in_finder
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

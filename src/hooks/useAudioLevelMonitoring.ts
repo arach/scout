@@ -1,15 +1,14 @@
-import { useState, useRef, useEffect } from 'react';
+import { useRef, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { useAudioContext } from '../contexts/AudioContext';
 
 interface UseAudioLevelMonitoringOptions {
-  selectedMic?: string;
   isActive?: boolean;
 }
 
 export function useAudioLevelMonitoring(options: UseAudioLevelMonitoringOptions = {}) {
-  const { selectedMic = 'Default microphone', isActive = false } = options;
-  
-  const [audioLevel, setAudioLevel] = useState(0);
+  const { isActive = false } = options;
+  const { selectedMic, setAudioLevel } = useAudioContext();
   const audioTargetRef = useRef(0);
   const audioCurrentRef = useRef(0);
 
@@ -79,7 +78,7 @@ export function useAudioLevelMonitoring(options: UseAudioLevelMonitoringOptions 
           const breathingMotion = Math.sin(Date.now() * 0.0015) * 0.015;
           newLevel += breathingMotion;
           
-          // Clamp and update
+          // Clamp and update context
           audioCurrentRef.current = Math.max(0, Math.min(newLevel, 1.0));
           setAudioLevel(audioCurrentRef.current);
         };
@@ -114,7 +113,6 @@ export function useAudioLevelMonitoring(options: UseAudioLevelMonitoringOptions 
   }, [selectedMic, isActive]);
 
   return {
-    audioLevel,
     audioTargetRef,
     audioCurrentRef,
   };

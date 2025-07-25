@@ -259,6 +259,33 @@ export function DevTools(props: DevToolsProps) {
                   </span>
                 </label>
               </div>
+              
+              <div className="dev-tool-item">
+                <button 
+                  className="dev-tool-button"
+                  onClick={async () => {
+                    try {
+                      await invoke('open_log_file');
+                    } catch (error) {
+                      console.error('Failed to open log file:', error);
+                    }
+                  }}
+                >
+                  Open Log File
+                </button>
+                <button 
+                  className="dev-tool-button"
+                  onClick={async () => {
+                    try {
+                      await invoke('show_log_file_in_finder');
+                    } catch (error) {
+                      console.error('Failed to show log file in finder:', error);
+                    }
+                  }}
+                >
+                  Show in Finder
+                </button>
+              </div>
             </div>
 
             {/* Context-specific status */}
