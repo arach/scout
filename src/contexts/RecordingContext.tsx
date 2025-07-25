@@ -1,4 +1,5 @@
 import { createContext, useContext, useReducer, useCallback, ReactNode } from 'react';
+import { loggers } from '../utils/logger';
 
 // Recording state interface
 interface RecordingState {
@@ -65,12 +66,12 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
     const now = Date.now();
     // Prevent rapid starts within 500ms
     if (now - state.lastStartTime < 500) {
-      console.log('RecordingContext: Ignoring rapid start request');
+      loggers.recording.debug('Ignoring rapid start request - too frequent');
       return false;
     }
     
     if (state.isStarting || state.isRecording) {
-      console.log('RecordingContext: Already starting or recording');
+      loggers.recording.debug('Cannot start recording - already starting or recording');
       return false;
     }
     

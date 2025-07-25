@@ -5,6 +5,7 @@ import { useRecordingContext } from '../contexts/RecordingContext';
 import { useAudioContext } from '../contexts/AudioContext';
 import { usePushToTalkMonitor } from './usePushToTalkMonitor';
 import { useAudioLevelMonitoring } from './useAudioLevelMonitoring';
+import { loggers } from '../utils/logger';
 
 interface RecordingProgress {
   Idle?: any;
@@ -68,7 +69,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
       try {
         const backendIsRecording = await tauriApi.isRecording();
         if (backendIsRecording !== isRecordingRef.current) {
-          console.log('Syncing initial recording state with backend:', backendIsRecording);
+          loggers.recording.debug('Syncing initial recording state with backend', { backendIsRecording });
           setIsRecording(backendIsRecording);
           isRecordingRef.current = backendIsRecording;
           // Also sync the recording manager
@@ -78,7 +79,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
           recordingContext.setRecording(backendIsRecording);
         }
       } catch (error) {
-        console.error('Failed to check initial recording state:', error);
+        loggers.recording.error('Failed to check initial recording state', error);
         // Reset recording manager on error to ensure clean state
         recordingContext.reset();
       }
@@ -92,7 +93,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
   const startRecording = useCallback(async () => {
     // Use global singleton to prevent multiple instances
     if (!recordingContext.canStartRecording()) {
-      console.log('RecordingManager prevented duplicate recording');
+      loggers.recording.debug('RecordingManager prevented duplicate recording');
       return;
     }
 
@@ -102,7 +103,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
       // Check backend state first
       const backendIsRecording = await tauriApi.isRecording();
       if (backendIsRecording) {
-        console.log('Backend is already recording, syncing frontend state');
+        loggers.recording.debug('Backend is already recording, syncing frontend state');
         setIsRecording(true);
         isRecordingRef.current = true;
         recordingContext.setRecording(true);
@@ -119,12 +120,12 @@ export function useRecording(options: UseRecordingOptions = {}) {
       // Call onRecordingStart callback if provided
       onRecordingStart?.();
       
-      console.log('Starting recording with device:', selectedMic);
+      loggers.recording.info('Starting recording', { device: selectedMic || 'default' });
       const result = await invokeTyped<string>('start_recording', { 
         deviceName: selectedMic !== 'Default microphone' ? selectedMic : null 
       });
       
-      console.log('Recording started successfully:', result);
+      loggers.recording.info('Recording started successfully', { result });
       
       if (soundEnabled) {
         try {
@@ -132,15 +133,15 @@ export function useRecording(options: UseRecordingOptions = {}) {
         } catch (error: any) {
           // Only log if it's not a "command not found" error
           if (!error.includes || !error.includes('not found')) {
-            console.error('Failed to play start sound:', error);
+            loggers.audio.error('Failed to play start sound', error);
           }
         }
       }
     } catch (error: any) {
-      console.error('Failed to start recording:', error);
+      loggers.recording.error('Failed to start recording', error);
       // If the error is "Recording already in progress", keep our state as recording
       if (error.includes && error.includes('already in progress')) {
-        console.log('Backend says recording in progress, keeping recording state');
+        loggers.recording.debug('Backend reports recording in progress, syncing state');
         recordingContext.setRecording(true);
       } else {
         // Only reset state on actual errors
@@ -166,7 +167,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
         return;
       }
     } catch (error) {
-      console.error('Failed to check recording state:', error);
+      loggers.recording.error('Failed to check recording state', error);
     }
 
     if (!isRecordingRef.current) {
@@ -192,7 +193,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
         } catch (error: any) {
           // Only log if it's not a "command not found" error
           if (!error.includes || !error.includes('not found')) {
-            console.error('Failed to play stop sound:', error);
+            loggers.audio.error('Failed to play stop sound', error);
           }
         }
       }
@@ -202,7 +203,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
       // For ring buffer recordings, transcript-created event fires immediately
       // so we don't need a processing state
     } catch (error) {
-      console.error('Failed to stop recording:', error);
+      loggers.recording.error('Failed to stop recording', error);
       // Don't change state on error - let the backend state sync handle it
       // The recording-state-changed event will update our state
     }
@@ -212,7 +213,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
   const toggleRecording = useCallback(async () => {
     const now = Date.now();
     if (now - lastToggleTimeRef.current < 300) {
-      console.log('Ignoring rapid toggle');
+      loggers.recording.debug('Ignoring rapid toggle - too frequent');
       return;
     }
     lastToggleTimeRef.current = now;
@@ -226,12 +227,12 @@ export function useRecording(options: UseRecordingOptions = {}) {
 
   // Push-to-talk handlers
   const handlePushToTalkPressed = useCallback(async () => {
-    console.log('Push-to-talk pressed');
+    loggers.recording.debug('Push-to-talk pressed');
     const now = Date.now();
     
     // Prevent multiple push-to-talk presses in quick succession
     if (now - pushToTalkStartTimeRef.current < 100) {
-      console.log('Ignoring rapid push-to-talk press');
+      loggers.recording.debug('Ignoring rapid push-to-talk press');
       return;
     }
     
@@ -243,13 +244,13 @@ export function useRecording(options: UseRecordingOptions = {}) {
     if (!isRecordingRef.current && !recordingContext.state.isRecording) {
       pushToTalkStartTimeRef.current = now;
       isPushToTalkActiveRef.current = true;
-      console.log('Starting recording from push-to-talk');
+      loggers.recording.info('Starting recording from push-to-talk');
       await startRecording();
     }
   }, [startRecording]);
 
   const handlePushToTalkReleased = useCallback(async () => {
-    console.log('Push-to-talk released');
+    loggers.recording.debug('Push-to-talk released');
     isPushToTalkActiveRef.current = false;
     const now = Date.now();
     const recordingTime = now - pushToTalkStartTimeRef.current;
@@ -261,24 +262,24 @@ export function useRecording(options: UseRecordingOptions = {}) {
     const minimumRecordingTime = vadEnabled ? 50 : 300;
     
     const currentlyRecording = isRecordingRef.current || recordingContext.state.isRecording;
-    console.log(`Recording time: ${recordingTime}ms, minimum: ${minimumRecordingTime}ms, isRecording: ${currentlyRecording}`);
+    loggers.recording.debug('Push-to-talk timing', { recordingTime, minimumRecordingTime, isRecording: currentlyRecording });
     
     if (currentlyRecording && recordingTime >= minimumRecordingTime) {
       if (vadEnabled) {
-        console.log('VAD enabled, setting timeout to stop recording');
+        loggers.recording.debug('VAD enabled, setting timeout to stop recording');
         pushToTalkTimeoutRef.current = setTimeout(async () => {
           const stillRecording = isRecordingRef.current || recordingContext.state.isRecording;
           if (stillRecording) {
-            console.log('Stopping recording after VAD timeout');
+            loggers.recording.debug('Stopping recording after VAD timeout');
             await stopRecording();
           }
         }, 500);
       } else {
-        console.log('VAD disabled, stopping recording immediately');
+        loggers.recording.debug('VAD disabled, stopping recording immediately');
         await stopRecording();
       }
     } else if (currentlyRecording) {
-      console.log('Recording time too short, stopping anyway');
+      loggers.recording.debug('Recording time too short, stopping anyway');
       await stopRecording();
     }
   }, [stopRecording, vadEnabled]);
@@ -288,7 +289,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
     enabled: !!pushToTalkShortcut && typeof window !== 'undefined',
     shortcut: pushToTalkShortcut,
     onRelease: () => {
-      console.log('[Frontend] Push-to-talk key released detected');
+      loggers.recording.debug('Push-to-talk key released detected (frontend)');
       if (isPushToTalkActiveRef.current) {
         handlePushToTalkReleased();
       }
@@ -355,7 +356,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
       // This is a backup - our frontend monitor handles most cases
       const cleanupPushToTalkReleased = await safeEventListen('push-to-talk-released', async () => {
         if (!mounted) return;
-        console.log('[Backend] Push-to-talk released event received');
+        loggers.recording.debug('Push-to-talk released event received (backend)');
         await handlePushToTalkReleased();
       });
       cleanupFunctions.push(cleanupPushToTalkReleased);
@@ -367,12 +368,12 @@ export function useRecording(options: UseRecordingOptions = {}) {
       cleanupFunctions.push(cleanupProcessingComplete);
 
       } catch (error) {
-        console.error('Failed to set up recording event listeners:', error);
+        loggers.recording.error('Failed to set up recording event listeners', error);
       }
     };
 
     setupListeners().catch(error => {
-      console.error('Failed to setup recording listeners:', error);
+      loggers.recording.error('Failed to setup recording listeners', error);
     });
 
     return () => {
@@ -392,19 +393,19 @@ export function useRecording(options: UseRecordingOptions = {}) {
   // Cancel recording
   const cancelRecording = useCallback(async () => {
     if (!isRecordingRef.current) {
-      console.log('No recording to cancel');
+      loggers.recording.debug('No recording to cancel');
       return;
     }
 
     try {
-      console.log('Cancelling recording...');
+      loggers.recording.info('Cancelling recording');
       isRecordingRef.current = false;
       setIsRecording(false);
       
       await tauriApi.cancelRecording();
-      console.log('Recording cancelled successfully');
+      loggers.recording.info('Recording cancelled successfully');
     } catch (error) {
-      console.error('Failed to cancel recording:', error);
+      loggers.recording.error('Failed to cancel recording', error);
       setIsRecording(false);
       isRecordingRef.current = false;
     }
