@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invokeTyped, tauriApi } from '../types/tauri';
 import { safeEventListen, cleanupListeners } from "../lib/safeEventListener";
 import { open } from "@tauri-apps/plugin-dialog";
 import { OnboardingFlow } from "./OnboardingFlow";
@@ -17,7 +17,7 @@ import { useNativeOverlay } from '../hooks/useNativeOverlay';
 import { DevTools } from './DevTools';
 import { TranscriptionOverlay } from './TranscriptionOverlay';
 import { useAudioContext } from '../contexts/AudioContext';
-import { useTranscriptContext, type Transcript } from '../contexts/TranscriptContext';
+import { useTranscriptContext } from '../contexts/TranscriptContext';
 import { useUIContext } from '../contexts/UIContext';
 
 /**
@@ -94,7 +94,7 @@ export function AppContent() {
   // Load transcripts functions
   const loadRecentTranscripts = useCallback(async () => {
     try {
-      const recent = await invoke<Transcript[]>("get_recent_transcripts", { limit: 10 });
+      const recent = await tauriApi.getRecentTranscripts({ limit: 10 });
       setTranscripts(recent);
     } catch (error) {
       console.error("Failed to load transcripts:", error);
@@ -103,7 +103,7 @@ export function AppContent() {
 
   const loadAllTranscripts = useCallback(async () => {
     try {
-      const all = await invoke<Transcript[]>("get_recent_transcripts", { limit: 1000 });
+      const all = await tauriApi.getRecentTranscripts({ limit: 1000 });
       setTranscripts(all);
     } catch (error) {
       console.error("Failed to load all transcripts:", error);
@@ -178,7 +178,7 @@ export function AppContent() {
           progress: 0
         });
 
-        await invoke<string>('transcribe_file', { 
+        await invokeTyped<string>('transcribe_file', { 
           filePath: filePath 
         });
       } catch (error) {
@@ -281,7 +281,7 @@ export function AppContent() {
             progress: 0
           });
           
-          await invoke<string>('transcribe_file', { 
+          await invokeTyped<string>('transcribe_file', { 
             filePath: result 
           });
         } catch (error) {
@@ -316,7 +316,7 @@ export function AppContent() {
 
   const handleDeleteTranscript = useCallback(async (id: number) => {
     try {
-      await invoke('delete_transcript', { id });
+      await tauriApi.deleteTranscript({ id });
       setTranscripts(prev => prev.filter(t => t.id !== id));
       setSelectedTranscripts((prev: Set<number>) => {
         const newSet = new Set(prev);
@@ -351,7 +351,7 @@ export function AppContent() {
       return;
     }
     try {
-      const results = await invoke<Transcript[]>('search_transcripts', { query: searchQuery });
+      const results = await tauriApi.searchTranscripts({ query: searchQuery });
       setTranscripts(results);
     } catch (error) {
       console.error('Failed to search transcripts:', error);
@@ -389,7 +389,7 @@ export function AppContent() {
 
   const exportTranscripts = useCallback(async (format: 'json' | 'markdown' | 'text') => {
     try {
-      await invoke('export_transcripts', { format, transcriptIds: Array.from(selectedTranscripts) });
+      await tauriApi.exportTranscripts({ format, transcriptIds: Array.from(selectedTranscripts) });
     } catch (error) {
       console.error('Failed to export transcripts:', error);
     }
@@ -419,7 +419,7 @@ export function AppContent() {
     
     const checkAudioDevices = async () => {
       try {
-        const devices = await invoke<string[]>('get_audio_devices');
+        const devices = await tauriApi.getAudioDevices();
         console.log('🔊 Audio devices available:', devices);
       } catch (error) {
         console.error('🔊 Failed to get audio devices:', error);
@@ -443,8 +443,8 @@ export function AppContent() {
         loadRecentTranscripts();
       }
       
-      invoke<string>('get_current_model').catch(console.error);
-      invoke('subscribe_to_progress').catch(console.error);
+      tauriApi.getCurrentModel().catch(console.error);
+      tauriApi.subscribeToProgress().catch(console.error);
     };
     
     init();
