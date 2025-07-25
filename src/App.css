@@ -1826,24 +1826,6 @@ h1 {
     letter-spacing: 0.1em;
   }
   
-  /* Clean terminal-style record button */
-  .circular-record-button {
-    background: var(--accent-primary) !important;
-    box-shadow: none !important;
-    border: 1px solid var(--accent-primary) !important;
-  }
-  
-  .circular-record-button::before,
-  .circular-record-button::after {
-    display: none !important;
-  }
-  
-  .circular-record-button:hover {
-    background: var(--accent-hover) !important;
-    border-color: var(--accent-hover) !important;
-    transform: none !important;
-  }
-  
   /* Clean audio visualizer */
   .audio-visualizer-ring {
     border: 1px solid var(--accent-primary);
@@ -1884,17 +1866,39 @@ h1 {
     border-left: 2px solid #ffffff !important;
   }
   
-  .circular-record-button.recording-button {
-    background: #ffffff !important;
-    border: 1px solid #ffffff !important;
-    color: var(--bg-primary) !important;
-    box-shadow: none !important;
-  }
   
   /* Fix checkbox alignment with monospace font */
   .setting-item label input[type="checkbox"] {
     margin-top: 1px !important;
     vertical-align: text-top;
+  }
+  
+  /* Better transcript item contrast for dark theme */
+  .transcript-item {
+    background: var(--bg-tertiary) !important;
+    border: 1px solid var(--border-primary) !important;
+  }
+  
+  .transcript-item:hover {
+    background: var(--bg-hover) !important;
+  }
+  
+  /* Transcription view improvements */
+  .transcripts-view {
+    background: var(--bg-primary) !important;
+  }
+  
+  .transcript-group {
+    background: var(--bg-secondary) !important;
+    border: 1px solid var(--border-primary) !important;
+  }
+  
+  /* Define missing color variables for Terminal Chic Dark */
+  :root[data-theme="terminal-chic"] {
+    --border-secondary: #444444;
+    --error: #ff4444;
+    --success: #00ff41; 
+    --recording: #ff4444;
   }
 }
 
@@ -2047,24 +2051,6 @@ h1 {
     letter-spacing: 0.1em;
   }
   
-  /* Clean terminal-style record button */
-  .circular-record-button {
-    background: var(--accent-primary) !important;
-    box-shadow: none !important;
-    border: 1px solid var(--accent-primary) !important;
-  }
-  
-  .circular-record-button::before,
-  .circular-record-button::after {
-    display: none !important;
-  }
-  
-  .circular-record-button:hover {
-    background: var(--accent-hover) !important;
-    border-color: var(--accent-hover) !important;
-    transform: none !important;
-  }
-  
   /* Clean audio visualizer */
   .audio-visualizer-ring {
     border: 1px solid var(--accent-primary);
@@ -2105,15 +2091,238 @@ h1 {
     border-left: 2px solid #333333 !important;
   }
   
-  .circular-record-button.recording-button {
-    background: #333333 !important;
-    border: 2px solid #333333 !important;
-    color: var(--bg-primary) !important;
-  }
   
   /* Fix checkbox alignment with monospace font */
   .setting-item label input[type="checkbox"] {
     margin-top: 1px !important;
     vertical-align: text-top;
+  }
+  
+  /* Transcription View Component Overrides for Terminal Chic Light */
+  
+  /* TranscriptsView components */
+  .transcripts-view {
+    background: var(--bg-primary) !important;
+  }
+  
+  .transcript-group {
+    background: var(--bg-primary) !important;
+    border-color: var(--border-primary) !important;
+    box-shadow: none !important;
+  }
+  
+  .transcript-group-header {
+    background: var(--bg-secondary) !important;
+    border-bottom-color: var(--border-primary) !important;
+  }
+  
+  .transcript-group-header:hover {
+    background: var(--bg-hover) !important;
+  }
+  
+  .transcript-group-title {
+    color: var(--text-primary) !important;
+  }
+  
+  .transcript-group-items {
+    background: var(--bg-primary) !important;
+  }
+  
+  .group-count {
+    color: var(--text-secondary) !important;
+  }
+  
+  .group-clear-btn {
+    color: var(--text-secondary) !important;
+  }
+  
+  .group-clear-btn:hover {
+    background: var(--bg-hover) !important;
+    color: var(--text-primary) !important;
+  }
+  
+  /* Search input */
+  .search-input {
+    background: var(--bg-primary) !important;
+    border-color: var(--border-primary) !important;
+    color: var(--text-primary) !important;
+  }
+  
+  .search-input:focus {
+    border-color: var(--accent-primary) !important;
+    box-shadow: 0 0 0 1px var(--accent-primary) !important;
+  }
+  
+  .search-input::placeholder {
+    color: var(--text-secondary) !important;
+  }
+  
+  /* Header action buttons */
+  .header-action-btn.select-all,
+  .select-all-button {
+    background: var(--bg-primary) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--border-primary) !important;
+  }
+  
+  .header-action-btn.select-all:hover,
+  .select-all-button:hover {
+    background: var(--bg-hover) !important;
+    border-color: var(--accent-primary) !important;
+    color: var(--accent-primary) !important;
+  }
+  
+  .header-action-btn.export,
+  .export-button {
+    background: var(--bg-primary) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--border-primary) !important;
+  }
+  
+  .header-action-btn.export:hover,
+  .export-button:hover {
+    background: var(--bg-hover) !important;
+    border-color: var(--accent-primary) !important;
+    color: var(--accent-primary) !important;
+  }
+  
+  /* Export and download menus */
+  .export-options,
+  .download-menu {
+    background: var(--bg-primary) !important;
+    border-color: var(--border-primary) !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+  }
+  
+  .export-options button,
+  .download-menu button {
+    color: var(--text-secondary) !important;
+  }
+  
+  .export-options button:hover,
+  .download-menu button:hover {
+    background: var(--bg-hover) !important;
+    color: var(--text-primary) !important;
+  }
+  
+  /* Floating action bar */
+  .floating-action-bar {
+    background: var(--bg-primary) !important;
+    border-color: var(--border-primary) !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+  }
+  
+  .selection-count {
+    color: var(--text-secondary) !important;
+  }
+  
+  .action-btn.export {
+    background: var(--bg-primary) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--border-primary) !important;
+  }
+  
+  .action-btn.export:hover {
+    background: var(--bg-hover) !important;
+    border-color: var(--accent-primary) !important;
+    color: var(--accent-primary) !important;
+  }
+  
+  .floating-action-bar .export-menu {
+    background: var(--bg-primary) !important;
+    border-color: var(--border-primary) !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+  }
+  
+  .floating-action-bar .export-menu button {
+    color: var(--text-secondary) !important;
+  }
+  
+  .floating-action-bar .export-menu button:hover {
+    background: var(--bg-hover) !important;
+    color: var(--text-primary) !important;
+  }
+  
+  /* Load more button */
+  .load-more-btn {
+    background: var(--bg-primary) !important;
+    border-color: var(--border-primary) !important;
+    color: var(--text-primary) !important;
+    box-shadow: none !important;
+  }
+  
+  .load-more-btn:hover {
+    background: var(--bg-hover) !important;
+    border-color: var(--accent-primary) !important;
+    box-shadow: none !important;
+  }
+  
+  /* TranscriptItem components */
+  .transcript-item {
+    background: var(--bg-primary) !important;
+    border-color: var(--border-primary) !important;
+  }
+  
+  .transcript-item:hover {
+    background: var(--bg-hover) !important;
+  }
+  
+  .transcript-item.selected,
+  .transcript-item.active {
+    background: var(--bg-secondary) !important;
+  }
+  
+  .transcript-actions {
+    background: linear-gradient(to left, transparent, transparent 15%, var(--bg-hover) 40%) !important;
+  }
+  
+  .transcript-time {
+    color: var(--text-secondary) !important;
+  }
+  
+  .transcript-duration {
+    color: var(--text-secondary) !important;
+  }
+  
+  .transcript-text {
+    color: var(--text-primary) !important;
+  }
+  
+  .transcript-empty {
+    color: var(--text-secondary) !important;
+  }
+  
+  .transcript-action-button {
+    background: var(--bg-primary) !important;
+    border-color: var(--border-primary) !important;
+    color: var(--text-secondary) !important;
+  }
+  
+  .transcript-action-button:hover:not(:disabled) {
+    background: var(--bg-hover) !important;
+    border-color: var(--accent-primary) !important;
+    color: var(--accent-primary) !important;
+  }
+  
+  .transcript-checkbox-wrapper:hover {
+    background: var(--bg-hover) !important;
+  }
+  
+  /* Add overrides for any elements using var(--text-tertiary) */
+  .hotkey-hint,
+  .drag-hint,
+  .no-transcripts svg,
+  .upload-divider,
+  .transcript-duration,
+  .sidebar-toggle-main {
+    color: var(--text-tertiary) !important;
+  }
+  
+  /* Define missing color variables for Terminal Chic Light */
+  :root[data-theme="terminal-chic-light"] {
+    --border-secondary: #b0b0b0;
+    --error: #cc0000;
+    --success: #006600; 
+    --recording: #cc0000;
   }
 }

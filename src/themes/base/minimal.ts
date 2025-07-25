@@ -14,6 +14,7 @@ export const minimalOverlay: Theme = {
     
     textPrimary: 'rgba(255, 255, 255, 0.9)',
     textSecondary: 'rgba(255, 255, 255, 0.7)',
+    textTertiary: 'rgba(255, 255, 255, 0.5)',
     textPlaceholder: 'rgba(255, 255, 255, 0.5)',
     textDanger: '#ff6b6b',
     textSuccess: '#51cf66',
