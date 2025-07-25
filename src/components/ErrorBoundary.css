@@ -1,0 +1,185 @@
+/* Error Boundary Styles */
+.error-boundary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+  padding: 2rem;
+  background: var(--vscode-editor-background);
+  border: 1px solid var(--vscode-errorForeground);
+  border-radius: 8px;
+  margin: 1rem;
+}
+
+.error-boundary-content {
+  text-align: center;
+  max-width: 500px;
+  color: var(--vscode-foreground);
+}
+
+.error-boundary-icon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+}
+
+.error-boundary-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: var(--vscode-errorForeground);
+}
+
+.error-boundary-message {
+  font-size: 1rem;
+  line-height: 1.5;
+  margin-bottom: 1.5rem;
+  color: var(--vscode-descriptionForeground);
+}
+
+.error-boundary-details {
+  text-align: left;
+  margin: 1rem 0;
+  padding: 1rem;
+  background: var(--vscode-textBlockQuote-background);
+  border: 1px solid var(--vscode-textBlockQuote-border);
+  border-radius: 4px;
+}
+
+.error-boundary-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: var(--vscode-textLink-foreground);
+}
+
+.error-boundary-details summary:hover {
+  color: var(--vscode-textLink-activeForeground);
+}
+
+.error-boundary-error-info {
+  margin-top: 0.5rem;
+}
+
+.error-boundary-error-info p {
+  margin: 0.25rem 0;
+  font-size: 0.9rem;
+}
+
+.error-boundary-stack {
+  background: var(--vscode-textCodeBlock-background);
+  border: 1px solid var(--vscode-widget-border);
+  border-radius: 4px;
+  padding: 0.5rem;
+  font-family: var(--vscode-editor-font-family);
+  font-size: 0.8rem;
+  line-height: 1.4;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  color: var(--vscode-editor-foreground);
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.error-boundary-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.error-boundary-button {
+  padding: 0.5rem 1rem;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-width: 120px;
+}
+
+.error-boundary-button:hover {
+  opacity: 0.9;
+}
+
+.error-boundary-button:active {
+  transform: translateY(1px);
+}
+
+.error-boundary-button-primary {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  border-color: var(--vscode-button-background);
+}
+
+.error-boundary-button-primary:hover {
+  background: var(--vscode-button-hoverBackground);
+  border-color: var(--vscode-button-hoverBackground);
+}
+
+.error-boundary-button-secondary {
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  border-color: var(--vscode-button-border);
+}
+
+.error-boundary-button-secondary:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
+/* Specialized error boundary fallbacks */
+.audio-error-fallback,
+.transcription-error-fallback,
+.settings-error-fallback {
+  padding: 1rem;
+  text-align: center;
+  background: var(--vscode-notifications-background);
+  border: 1px solid var(--vscode-notifications-border);
+  border-radius: 6px;
+  color: var(--vscode-notifications-foreground);
+  margin: 0.5rem;
+}
+
+.audio-error-fallback p,
+.transcription-error-fallback p,
+.settings-error-fallback p {
+  margin: 0.5rem 0;
+  line-height: 1.4;
+}
+
+/* Dark mode adjustments */
+@media (prefers-color-scheme: dark) {
+  .error-boundary {
+    background: var(--vscode-editor-background, #1e1e1e);
+  }
+  
+  .error-boundary-content {
+    color: var(--vscode-foreground, #cccccc);
+  }
+  
+  .error-boundary-title {
+    color: var(--vscode-errorForeground, #f48771);
+  }
+}
+
+/* Responsive design */
+@media (max-width: 600px) {
+  .error-boundary {
+    padding: 1rem;
+    margin: 0.5rem;
+  }
+  
+  .error-boundary-content {
+    max-width: 100%;
+  }
+  
+  .error-boundary-actions {
+    flex-direction: column;
+    align-items: center;
+  }
+  
+  .error-boundary-button {
+    width: 100%;
+    max-width: 200px;
+  }
+}

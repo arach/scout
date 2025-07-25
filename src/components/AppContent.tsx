@@ -8,6 +8,7 @@ import { Sidebar, useSidebarState } from "./Sidebar";
 import { RecordView } from "./RecordView";
 import { TranscriptsView } from "./TranscriptsView";
 import { SettingsView } from "./SettingsView";
+import { AudioErrorBoundary, TranscriptionErrorBoundary, SettingsErrorBoundary } from './ErrorBoundary';
 import { ChevronRight, PanelLeftClose } from 'lucide-react';
 import { useRecording } from '../hooks/useRecording';
 import { useSettings } from '../hooks/useSettings';
@@ -524,83 +525,89 @@ export function AppContent() {
         </div>
 
         {currentView === 'record' && (
-          <RecordView
-            isRecording={isRecording}
-            isProcessing={isProcessing}
-            recordingStartTime={recordingStartTime}
-            hotkey={hotkey}
-            pushToTalkHotkey={pushToTalkHotkey}
-            uploadProgress={uploadProgress}
-            sessionTranscripts={sessionTranscripts}
-            selectedMic={selectedMic}
-            onMicChange={setSelectedMic}
-            audioLevel={audioLevel}
-            startRecording={startRecording}
-            stopRecording={stopRecording}
-            cancelRecording={cancelRecording}
-            handleFileUpload={handleFileUpload}
-            formatDuration={formatDuration}
-            formatRecordingTimer={formatRecordingTimer}
-            showDeleteConfirmation={showDeleteConfirmation}
-          />
+          <AudioErrorBoundary>
+            <RecordView
+              isRecording={isRecording}
+              isProcessing={isProcessing}
+              recordingStartTime={recordingStartTime}
+              hotkey={hotkey}
+              pushToTalkHotkey={pushToTalkHotkey}
+              uploadProgress={uploadProgress}
+              sessionTranscripts={sessionTranscripts}
+              selectedMic={selectedMic}
+              onMicChange={setSelectedMic}
+              audioLevel={audioLevel}
+              startRecording={startRecording}
+              stopRecording={stopRecording}
+              cancelRecording={cancelRecording}
+              handleFileUpload={handleFileUpload}
+              formatDuration={formatDuration}
+              formatRecordingTimer={formatRecordingTimer}
+              showDeleteConfirmation={showDeleteConfirmation}
+            />
+          </AudioErrorBoundary>
         )}
         {currentView === 'transcripts' && (
-          <TranscriptsView
-            transcripts={transcripts}
-            selectedTranscripts={selectedTranscripts}
-            searchQuery={searchQuery}
-            hotkey={hotkey}
-            setSearchQuery={setSearchQuery}
-            searchTranscripts={searchTranscripts}
-            toggleTranscriptSelection={toggleTranscriptSelection}
-            toggleTranscriptGroupSelection={toggleTranscriptGroupSelection}
-            selectAllTranscripts={selectAllTranscripts}
-            showBulkDeleteConfirmation={showBulkDeleteConfirmation}
-            exportTranscripts={exportTranscripts}
-            copyTranscript={copyTranscript}
-            showDeleteConfirmation={showDeleteConfirmation}
-            formatDuration={formatDuration}
-            formatFileSize={formatFileSize}
-          />
+          <TranscriptionErrorBoundary>
+            <TranscriptsView
+              transcripts={transcripts}
+              selectedTranscripts={selectedTranscripts}
+              searchQuery={searchQuery}
+              hotkey={hotkey}
+              setSearchQuery={setSearchQuery}
+              searchTranscripts={searchTranscripts}
+              toggleTranscriptSelection={toggleTranscriptSelection}
+              toggleTranscriptGroupSelection={toggleTranscriptGroupSelection}
+              selectAllTranscripts={selectAllTranscripts}
+              showBulkDeleteConfirmation={showBulkDeleteConfirmation}
+              exportTranscripts={exportTranscripts}
+              copyTranscript={copyTranscript}
+              showDeleteConfirmation={showDeleteConfirmation}
+              formatDuration={formatDuration}
+              formatFileSize={formatFileSize}
+            />
+          </TranscriptionErrorBoundary>
         )}
         {currentView === 'settings' && (
-          <SettingsView
-            hotkey={hotkey}
-            isCapturingHotkey={isCapturingHotkey}
-            hotkeyUpdateStatus={hotkeyUpdateStatus}
-            pushToTalkHotkey={pushToTalkHotkey}
-            isCapturingPushToTalkHotkey={isCapturingPushToTalkHotkey}
-            vadEnabled={vadEnabled}
-            overlayPosition={overlayPosition}
-            overlayTreatment={overlayTreatment}
-            autoCopy={autoCopy}
-            autoPaste={autoPaste}
-            theme={theme}
-            selectedTheme={selectedTheme}
-            soundEnabled={soundEnabled}
-            startSound={startSound}
-            stopSound={stopSound}
-            successSound={successSound}
-            completionSoundThreshold={completionSoundThreshold}
-            llmSettings={llmSettings}
-            stopCapturingHotkey={() => setIsCapturingHotkey(false)}
-            startCapturingHotkey={() => setIsCapturingHotkey(true)}
-            startCapturingPushToTalkHotkey={() => setIsCapturingPushToTalkHotkey(true)}
-            stopCapturingPushToTalkHotkey={() => setIsCapturingPushToTalkHotkey(false)}
-            toggleVAD={() => setVadEnabled(!vadEnabled)}
-            updateOverlayPosition={updateOverlayPosition}
-            updateOverlayTreatment={updateOverlayTreatment}
-            toggleAutoCopy={toggleAutoCopy}
-            toggleAutoPaste={toggleAutoPaste}
-            updateTheme={updateTheme}
-            updateSelectedTheme={updateSelectedTheme}
-            toggleSoundEnabled={toggleSoundEnabled}
-            updateStartSound={updateStartSound}
-            updateStopSound={updateStopSound}
-            updateSuccessSound={updateSuccessSound}
-            updateCompletionSoundThreshold={updateCompletionSoundThreshold}
-            updateLLMSettings={updateLLMSettings}
-          />
+          <SettingsErrorBoundary>
+            <SettingsView
+              hotkey={hotkey}
+              isCapturingHotkey={isCapturingHotkey}
+              hotkeyUpdateStatus={hotkeyUpdateStatus}
+              pushToTalkHotkey={pushToTalkHotkey}
+              isCapturingPushToTalkHotkey={isCapturingPushToTalkHotkey}
+              vadEnabled={vadEnabled}
+              overlayPosition={overlayPosition}
+              overlayTreatment={overlayTreatment}
+              autoCopy={autoCopy}
+              autoPaste={autoPaste}
+              theme={theme}
+              selectedTheme={selectedTheme}
+              soundEnabled={soundEnabled}
+              startSound={startSound}
+              stopSound={stopSound}
+              successSound={successSound}
+              completionSoundThreshold={completionSoundThreshold}
+              llmSettings={llmSettings}
+              stopCapturingHotkey={() => setIsCapturingHotkey(false)}
+              startCapturingHotkey={() => setIsCapturingHotkey(true)}
+              startCapturingPushToTalkHotkey={() => setIsCapturingPushToTalkHotkey(true)}
+              stopCapturingPushToTalkHotkey={() => setIsCapturingPushToTalkHotkey(false)}
+              toggleVAD={() => setVadEnabled(!vadEnabled)}
+              updateOverlayPosition={updateOverlayPosition}
+              updateOverlayTreatment={updateOverlayTreatment}
+              toggleAutoCopy={toggleAutoCopy}
+              toggleAutoPaste={toggleAutoPaste}
+              updateTheme={updateTheme}
+              updateSelectedTheme={updateSelectedTheme}
+              toggleSoundEnabled={toggleSoundEnabled}
+              updateStartSound={updateStartSound}
+              updateStopSound={updateStopSound}
+              updateSuccessSound={updateSuccessSound}
+              updateCompletionSoundThreshold={updateCompletionSoundThreshold}
+              updateLLMSettings={updateLLMSettings}
+            />
+          </SettingsErrorBoundary>
         )}
 
         {/* File drop overlay */}
