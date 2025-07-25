@@ -26,6 +26,7 @@ export const ThemeSelector: React.FC<ThemeSelectorProps> = ({
   const themeCategories = {
     'VS Code': availableThemes.filter(t => t.id.startsWith('vscode')),
     'Minimal': availableThemes.filter(t => t.id.startsWith('minimal')),
+    'Terminal': availableThemes.filter(t => t.id.startsWith('terminal-chic')),
     'Retro': availableThemes.filter(t => t.id.startsWith('winamp')),
     'System': availableThemes.filter(t => t.id === 'system'),
   };
@@ -102,6 +103,28 @@ const ThemeIcon: React.FC<{ themeId: ThemeVariant }> = ({ themeId }) => {
           <circle cx="5" cy="10" r="1" fill="#ff6600"/>
           <circle cx="8" cy="10" r="1" fill="#00ff88"/>
           <circle cx="11" cy="10" r="1" fill="#ff6600"/>
+        </svg>
+      );
+    case 'terminal-chic':
+      return (
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="1" y="2" width="14" height="12" fill="#0a0a0a" stroke="#00ff41" strokeWidth="1"/>
+          <text x="3" y="6" fontSize="3" fill="#00ff41" fontFamily="monospace">$</text>
+          <rect x="4.5" y="4.5" width="1" height="1" fill="#00ff41"/>
+          <text x="3" y="9" fontSize="2.5" fill="#e0e0e0" fontFamily="monospace">user@scout</text>
+          <rect x="3" y="11" width="4" height="1" fill="#333333"/>
+          <rect x="8" y="11" width="2" height="1" fill="#333333"/>
+        </svg>
+      );
+    case 'terminal-chic-light':
+      return (
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="1" y="2" width="14" height="12" fill="#fafafa" stroke="#006600" strokeWidth="1"/>
+          <text x="3" y="6" fontSize="3" fill="#006600" fontFamily="monospace">$</text>
+          <rect x="4.5" y="4.5" width="1" height="1" fill="#006600"/>
+          <text x="3" y="9" fontSize="2.5" fill="#1a1a1a" fontFamily="monospace">user@scout</text>
+          <rect x="3" y="11" width="4" height="1" fill="#d0d0d0"/>
+          <rect x="8" y="11" width="2" height="1" fill="#d0d0d0"/>
         </svg>
       );
     case 'system':

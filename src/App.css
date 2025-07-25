@@ -1,44 +1,20 @@
 @import url('./styles/spacing.css');
 
 :root {
-  /* VSCode-inspired color scheme - Light mode */
-  --bg-primary: #ffffff;
-  --bg-secondary: #f3f3f3;
-  --bg-tertiary: #ececec;
-  --bg-hover: #e8e8e8;
-  --bg-active: #e0e0e0;
-  
-  --text-primary: #333333;
-  --text-secondary: #6e6e6e;
-  --text-tertiary: #999999;
-  
-  --border-primary: #e5e5e5;
-  --border-secondary: #ddd;
-  --border-hover: #cccccc;
-  
-  --accent-primary: #007acc;
-  --accent-hover: #005a9e;
-  --accent-active: #004578;
-  
-  --success: #16825d;
-  --warning: #cca700;
-  --error: #cc3d3d;
-  
-  --recording: #d73a49;
-  
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "SF Pro Text", "Roboto", sans-serif;
-  font-size: 13px;
-  line-height: 1.5;
-  font-weight: 400;
-
-  color: var(--text-primary);
-  background-color: var(--bg-primary);
-
+  /* Base rendering optimizations */
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   -webkit-text-size-adjust: 100%;
+
+  /* Theme-controlled properties - values set by theme system */
+  font-family: var(--font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", "SF Pro Text", "Roboto", sans-serif);
+  font-size: var(--font-size-base, 13px);
+  line-height: var(--line-height-normal, 1.5);
+  font-weight: var(--font-weight-normal, 400);
+  color: var(--text-primary);
+  background-color: var(--bg-primary);
 }
 
 .app-container {
@@ -47,34 +23,8 @@
   overflow: visible;
 }
 
-/* Dark mode */
+/* Dark mode drag overlay adjustments - theme-independent */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg-primary: #1a1a1a;
-    --bg-secondary: #242424;
-    --bg-tertiary: #2a2a2a;
-    --bg-hover: #333333;
-    --bg-active: #404040;
-    
-    --text-primary: #e0e0e0;
-    --text-secondary: #a0a0a0;
-    --text-tertiary: #707070;
-    
-    --border-primary: #3a3a3a;
-    --border-secondary: #444444;
-    --border-hover: #555555;
-    
-    --accent-primary: #4a9eff;
-    --accent-hover: #5aa3ff;
-    --accent-active: #6aadff;
-    
-    --success: #73c991;
-    --warning: #ffb86c;
-    --error: #ff5555;
-    
-    --recording: #ff5555;
-    color: rgba(255, 255, 255, 0.6);
-  }
   
   /* Dark mode drag overlay adjustments */
   .drag-drop-backdrop {
@@ -1710,4 +1660,460 @@ h1 {
   background: var(--bg-overlay, var(--bg-primary));
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
+}
+
+/* ==================== Terminal Chic Theme Enhancements ==================== */
+
+[data-theme="terminal-chic"] {
+  /* Force all text to use monospace */
+  * {
+    font-family: var(--font-family-mono) !important;
+    font-weight: var(--font-weight-normal) !important;
+  }
+  
+  /* Ultra-thin borders for that sleek terminal feel */
+  .container,
+  .settings-section,
+  .transcript-item,
+  .record-button,
+  .upload-button,
+  input,
+  select,
+  textarea,
+  button {
+    border-width: 1px !important;
+    border-radius: 0 !important;
+  }
+  
+  /* Sharp, geometric inputs */
+  input[type="text"],
+  input[type="search"],
+  select,
+  textarea {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-primary);
+    transition: all 0.1s ease-out;
+  }
+  
+  input[type="text"]:focus,
+  input[type="search"]:focus,
+  select:focus,
+  textarea:focus {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 1px var(--accent-primary);
+    outline: none;
+  }
+  
+  /* Terminal-style buttons */
+  button,
+  .record-button,
+  .upload-button {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-primary);
+    color: var(--text-primary);
+    transition: all 0.1s ease-out;
+    font-family: var(--font-family-mono);
+    font-weight: var(--font-weight-normal);
+  }
+  
+  button:hover,
+  .record-button:hover,
+  .upload-button:hover {
+    background: var(--bg-secondary);
+    border-color: var(--accent-primary);
+    transform: none; /* Remove transforms for terminal aesthetic */
+    box-shadow: none;
+  }
+  
+  /* Terminal green accent for primary actions */
+  .record-button,
+  .apply-button,
+  .confirm-delete-button,
+  .stop-recording-button {
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+    color: var(--bg-primary);
+  }
+  
+  .record-button:hover,
+  .apply-button:hover,
+  .stop-recording-button:hover {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+  }
+  
+  /* Minimal shadows and effects */
+  .settings-modal,
+  .delete-modal,
+  .drag-drop-container,
+  .mic-dropdown-menu {
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3) !important;
+    border: 1px solid var(--border-primary) !important;
+  }
+  
+  /* Terminal-style scrollbars */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  
+  ::-webkit-scrollbar-track {
+    background: var(--bg-primary);
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    background: var(--border-primary);
+    border-radius: 0;
+  }
+  
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-primary);
+  }
+  
+  /* Code-like spacing for lists and transcripts */
+  .transcript-item {
+    margin-bottom: 1px;
+    background: var(--bg-primary);
+    border-bottom: 1px solid var(--border-primary);
+  }
+  
+  .transcript-item:hover {
+    background: var(--bg-secondary);
+  }
+  
+  /* Terminal cursor effect for active inputs */
+  input[type="text"]:focus::after,
+  textarea:focus::after {
+    content: '▌';
+    color: var(--accent-primary);
+    animation: blink 1s infinite;
+  }
+  
+  @keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0; }
+  }
+  
+  /* Monospace number display */
+  .recording-timer,
+  .transcript-date,
+  .transcript-duration,
+  .processing-filename,
+  .upload-filename {
+    font-family: var(--font-family-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.05em;
+  }
+  
+  /* Clean, minimal drag and drop styling */
+  .drag-drop-border {
+    background: var(--bg-primary) !important;
+    border: 2px dashed var(--border-primary) !important;
+    border-radius: 0 !important;
+  }
+  
+  .drag-drop-border::before {
+    display: none; /* Remove shimmer effect */
+  }
+  
+  /* Terminal-style status indicators */
+  .status-indicator,
+  .recording-indicator {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-primary);
+    font-family: var(--font-family-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  
+  /* Clean terminal-style record button */
+  .circular-record-button {
+    background: var(--accent-primary) !important;
+    box-shadow: none !important;
+    border: 1px solid var(--accent-primary) !important;
+  }
+  
+  .circular-record-button::before,
+  .circular-record-button::after {
+    display: none !important;
+  }
+  
+  .circular-record-button:hover {
+    background: var(--accent-hover) !important;
+    border-color: var(--accent-hover) !important;
+    transform: none !important;
+  }
+  
+  /* Clean audio visualizer */
+  .audio-visualizer-ring {
+    border: 1px solid var(--accent-primary);
+    box-shadow: none !important;
+  }
+  
+  /* Terminal-style tooltips */
+  .record-tooltip,
+  .tooltip-content {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-primary);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    border-radius: 0;
+  }
+  
+  /* Minimize animations for snappy terminal feel */
+  * {
+    transition-duration: 0.1s !important;
+    animation-duration: 0.1s !important;
+  }
+  
+  /* Terminal Chic specific overrides */
+  .tab-button.active {
+    border-bottom: 2px solid #ffffff !important;
+  }
+  
+  .transcript-actions {
+    gap: 4px !important;
+    padding: 4px !important;
+  }
+  
+  .transcript-group {
+    border-radius: 0 !important;
+  }
+  
+  .sidebar-button.active {
+    background: var(--bg-secondary) !important;
+    border-left: 2px solid #ffffff !important;
+  }
+  
+  .circular-record-button.recording-button {
+    background: #ffffff !important;
+    border: 1px solid #ffffff !important;
+    color: var(--bg-primary) !important;
+    box-shadow: none !important;
+  }
+  
+  /* Fix checkbox alignment with monospace font */
+  .setting-item label input[type="checkbox"] {
+    margin-top: 1px !important;
+    vertical-align: text-top;
+  }
+}
+
+[data-theme="terminal-chic-light"] {
+  /* Force all text to use monospace */
+  * {
+    font-family: var(--font-family-mono) !important;
+    font-weight: var(--font-weight-normal) !important;
+  }
+  
+  /* Ultra-thin borders for that sleek terminal feel */
+  .container,
+  .settings-section,
+  .transcript-item,
+  .record-button,
+  .upload-button,
+  input,
+  select,
+  textarea,
+  button {
+    border-width: 1px !important;
+    border-radius: 0 !important;
+  }
+  
+  /* Sharp, geometric inputs */
+  input[type="text"],
+  input[type="search"],
+  select,
+  textarea {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-primary);
+    transition: all 0.1s ease-out;
+  }
+  
+  input[type="text"]:focus,
+  input[type="search"]:focus,
+  select:focus,
+  textarea:focus {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 1px var(--accent-primary);
+    outline: none;
+  }
+  
+  /* Terminal-style buttons */
+  button,
+  .record-button,
+  .upload-button {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-primary);
+    color: var(--text-primary);
+    transition: all 0.1s ease-out;
+    font-family: var(--font-family-mono);
+    font-weight: var(--font-weight-normal);
+  }
+  
+  button:hover,
+  .record-button:hover,
+  .upload-button:hover {
+    background: var(--bg-secondary);
+    border-color: var(--accent-primary);
+    transform: none;
+    box-shadow: none;
+  }
+  
+  /* Terminal green accent for primary actions */
+  .record-button,
+  .apply-button,
+  .confirm-delete-button,
+  .stop-recording-button {
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+    color: var(--bg-primary);
+  }
+  
+  .record-button:hover,
+  .apply-button:hover,
+  .stop-recording-button:hover {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+  }
+  
+  /* Minimal shadows and effects */
+  .settings-modal,
+  .delete-modal,
+  .drag-drop-container,
+  .mic-dropdown-menu {
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+    border: 1px solid var(--border-primary) !important;
+  }
+  
+  /* Terminal-style scrollbars */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  
+  ::-webkit-scrollbar-track {
+    background: var(--bg-primary);
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    background: var(--border-primary);
+    border-radius: 0;
+  }
+  
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-primary);
+  }
+  
+  /* Code-like spacing for lists and transcripts */
+  .transcript-item {
+    margin-bottom: 1px;
+    background: var(--bg-primary);
+    border-bottom: 1px solid var(--border-primary);
+  }
+  
+  .transcript-item:hover {
+    background: var(--bg-secondary);
+  }
+  
+  /* Monospace number display */
+  .recording-timer,
+  .transcript-date,
+  .transcript-duration,
+  .processing-filename,
+  .upload-filename {
+    font-family: var(--font-family-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.05em;
+  }
+  
+  /* Clean, minimal drag and drop styling */
+  .drag-drop-border {
+    background: var(--bg-primary) !important;
+    border: 2px dashed var(--border-primary) !important;
+    border-radius: 0 !important;
+  }
+  
+  .drag-drop-border::before {
+    display: none;
+  }
+  
+  /* Terminal-style status indicators */
+  .status-indicator,
+  .recording-indicator {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-primary);
+    font-family: var(--font-family-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  
+  /* Clean terminal-style record button */
+  .circular-record-button {
+    background: var(--accent-primary) !important;
+    box-shadow: none !important;
+    border: 1px solid var(--accent-primary) !important;
+  }
+  
+  .circular-record-button::before,
+  .circular-record-button::after {
+    display: none !important;
+  }
+  
+  .circular-record-button:hover {
+    background: var(--accent-hover) !important;
+    border-color: var(--accent-hover) !important;
+    transform: none !important;
+  }
+  
+  /* Clean audio visualizer */
+  .audio-visualizer-ring {
+    border: 1px solid var(--accent-primary);
+    box-shadow: none !important;
+  }
+  
+  /* Terminal-style tooltips */
+  .record-tooltip,
+  .tooltip-content {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-primary);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    border-radius: 0;
+  }
+  
+  /* Minimize animations for snappy terminal feel */
+  * {
+    transition-duration: 0.1s !important;
+    animation-duration: 0.1s !important;
+  }
+  
+  /* Terminal Chic Light specific overrides */
+  .tab-button.active {
+    border-bottom: 2px solid #333333 !important;
+  }
+  
+  .transcript-actions {
+    gap: 4px !important;
+    padding: 4px !important;
+  }
+  
+  .transcript-group {
+    border-radius: 0 !important;
+  }
+  
+  .sidebar-button.active {
+    background: var(--bg-secondary) !important;
+    border-left: 2px solid #333333 !important;
+  }
+  
+  .circular-record-button.recording-button {
+    background: #333333 !important;
+    border: 2px solid #333333 !important;
+    color: var(--bg-primary) !important;
+  }
+  
+  /* Fix checkbox alignment with monospace font */
+  .setting-item label input[type="checkbox"] {
+    margin-top: 1px !important;
+    vertical-align: text-top;
+  }
 }
