@@ -21,6 +21,7 @@ export interface ThemeColors {
   // Text colors
   textPrimary: string;
   textSecondary: string;
+  textTertiary: string;
   textPlaceholder: string;
   textDanger: string;
   textSuccess: string;

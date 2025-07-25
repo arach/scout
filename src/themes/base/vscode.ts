@@ -13,6 +13,7 @@ export const vscodeLight: Theme = {
     
     textPrimary: '#333333',
     textSecondary: '#666666',
+    textTertiary: '#999999',
     textPlaceholder: '#999999',
     textDanger: '#d32f2f',
     textSuccess: '#388e3c',
@@ -66,6 +67,7 @@ export const vscodeDark: Theme = {
     
     textPrimary: '#e0e0e0',
     textSecondary: '#b0b0b0',
+    textTertiary: '#808080',
     textPlaceholder: '#808080',
     textDanger: '#ef5350',
     textSuccess: '#66bb6a',

@@ -14,6 +14,7 @@ export const winampClassic: Theme = {
     
     textPrimary: '#00ff00',
     textSecondary: '#00cc00',
+    textTertiary: '#008800',
     textPlaceholder: '#008800',
     textDanger: '#ff0000',
     textSuccess: '#00ff00',
@@ -68,6 +69,7 @@ export const winampModern: Theme = {
     
     textPrimary: '#00ff88',
     textSecondary: '#00cc66',
+    textTertiary: '#008844',
     textPlaceholder: '#008844',
     textDanger: '#ff4466',
     textSuccess: '#00ff88',

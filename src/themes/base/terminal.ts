@@ -4,18 +4,19 @@ export const terminalChic: Theme = {
   id: 'terminal-chic',
   name: 'Terminal Chic',
   colors: {
-    // High contrast terminal backgrounds
-    bgPrimary: '#0a0a0a',           // Deep black
-    bgSecondary: '#111111',         // Slightly lighter black
-    bgTertiary: '#1a1a1a',          // Card backgrounds
-    bgHover: '#222222',             // Subtle hover state
-    bgActive: '#2a2a2a',            // Active/pressed state
-    bgDanger: '#1a0f0f',            // Dark red tint
+    // High contrast terminal backgrounds with better separation
+    bgPrimary: '#0f0f0f',           // Slightly lighter for better contrast
+    bgSecondary: '#1a1a1a',         // More distinct secondary
+    bgTertiary: '#252525',          // Better card contrast
+    bgHover: '#2a2a2a',             // More visible hover state
+    bgActive: '#333333',            // Clear active state
+    bgDanger: '#2a1515',            // Clearer danger state
     bgOverlay: 'rgba(0, 0, 0, 0.95)',
     
     // Terminal-inspired text colors
     textPrimary: '#e0e0e0',         // Bright terminal text
     textSecondary: '#a0a0a0',       // Dimmed terminal text
+    textTertiary: '#606060',        // Even more dimmed text
     textPlaceholder: '#606060',     // Subtle placeholder
     textDanger: '#ff4444',          // Terminal red
     textSuccess: '#00ff41',         // Classic terminal green
@@ -26,8 +27,8 @@ export const terminalChic: Theme = {
     accentActive: '#e0e0e0',        // Slightly darker active
     
     // Ultra-thin borders for that sleek terminal feel
-    borderPrimary: '#333333',       // Subtle grey border
-    borderHover: '#444444',         // Slightly brighter on hover
+    borderPrimary: '#404040',       // More visible grey border
+    borderHover: '#555555',         // Brighter on hover for contrast
     
     // Minimal shadows
     shadowColor: 'rgba(0, 0, 0, 0.8)',
@@ -79,6 +80,7 @@ export const terminalChicLight: Theme = {
     // Dark text on light for high contrast
     textPrimary: '#1a1a1a',         // Dark primary text
     textSecondary: '#4a4a4a',       // Medium grey
+    textTertiary: '#9a9a9a',        // Light grey tertiary text
     textPlaceholder: '#9a9a9a',     // Light grey placeholder
     textDanger: '#cc0000',          // Dark red
     textSuccess: '#006600',         // Dark green
