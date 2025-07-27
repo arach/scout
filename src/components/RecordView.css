@@ -893,6 +893,47 @@
     }
 }
 
+/* Terminal theme specific mic button styling */
+[data-theme="terminal-chic"] .circular-record-button,
+[data-theme="terminal-chic-light"] .circular-record-button {
+    background: var(--bg-secondary);
+    border: 2px solid var(--border-primary);
+    box-shadow: none;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+[data-theme="terminal-chic"] .circular-record-button:hover,
+[data-theme="terminal-chic-light"] .circular-record-button:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent-primary);
+    transform: none;
+    box-shadow: none;
+}
+
+[data-theme="terminal-chic"] .circular-record-button::before,
+[data-theme="terminal-chic"] .circular-record-button::after,
+[data-theme="terminal-chic-light"] .circular-record-button::before,
+[data-theme="terminal-chic-light"] .circular-record-button::after {
+    display: none; /* Remove fancy animations */
+}
+
+[data-theme="terminal-chic"] .audio-level-fill,
+[data-theme="terminal-chic-light"] .audio-level-fill {
+    background: var(--accent-primary);
+    opacity: 0.3;
+}
+
+[data-theme="terminal-chic"] .circular-record-button.recording-button,
+[data-theme="terminal-chic-light"] .circular-record-button.recording-button {
+    background: var(--bg-danger);
+    border-color: var(--text-danger);
+}
+
+[data-theme="terminal-chic"] .mic-settings-button,
+[data-theme="terminal-chic-light"] .mic-settings-button {
+    display: none; /* Hide gear button for cleaner look */
+}
+
 /* Dark mode adjustments */
 @media (prefers-color-scheme: dark) {
     /* More subtle, harmonious button with deep blue gradient */

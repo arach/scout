@@ -75,9 +75,9 @@
     flex-direction: column;
     max-height: 520px;
     overflow-y: auto;
-    background: white;
-    border-radius: 6px;
-    border: 1px solid rgba(0, 0, 0, 0.08);
+    background: var(--bg-tertiary);
+    border-radius: var(--border-radius, 6px);
+    border: 1px solid var(--border-primary);
 }
 
 /* Custom scrollbar for session list */
@@ -99,9 +99,9 @@
 }
 
 .session-item {
-    background-color: rgba(0, 0, 0, 0.02);
+    background-color: var(--bg-secondary);
     border: 1px solid var(--border-primary);
-    border-radius: 6px;
+    border-radius: var(--border-radius, 6px);
     padding: 12px;
     animation: slideIn 0.2s ease-out;
     transition: border-color 0.15s ease;
@@ -201,21 +201,22 @@
     margin: 0 auto;
 }
 
-/* Dark mode adjustments */
-@media (prefers-color-scheme: dark) {
-    .session-list {
-        background: rgba(255, 255, 255, 0.03);
-        border-color: rgba(255, 255, 255, 0.08);
-    }
-    
-    .import-audio-button {
-        color: rgba(255, 255, 255, 0.6);
-        border-color: rgba(255, 255, 255, 0.1);
-    }
-    
-    .import-audio-button:hover {
-        background: rgba(255, 255, 255, 0.05);
-        border-color: var(--accent-primary);
-        color: var(--accent-primary);
-    }
+/* Dark mode styles removed - now handled by theme system */
+
+/* Terminal theme specific adjustments */
+[data-theme="terminal-chic"] .session-list,
+[data-theme="terminal-chic-light"] .session-list {
+    border-radius: 0; /* Sharp edges for terminal theme */
+}
+
+[data-theme="terminal-chic"] .session-item,
+[data-theme="terminal-chic-light"] .session-item {
+    border-radius: 0; /* Sharp edges for terminal theme */
+    border: none; /* Borderless for terminal theme */
+    border-bottom: 1px solid var(--border-primary);
+}
+
+[data-theme="terminal-chic"] .session-item:last-child,
+[data-theme="terminal-chic-light"] .session-item:last-child {
+    border-bottom: none; /* Remove double border on last item */
 }
