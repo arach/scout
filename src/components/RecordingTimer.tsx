@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, memo } from 'react';
 
 interface RecordingTimerProps {
     startTime: number | null;
@@ -7,7 +7,7 @@ interface RecordingTimerProps {
 
 const TIMER_INTERVAL = 10; // Update every 10ms for smooth centisecond display
 
-export function RecordingTimer({ startTime, formatTimer }: RecordingTimerProps) {
+export const RecordingTimer = memo(function RecordingTimer({ startTime, formatTimer }: RecordingTimerProps) {
     const [elapsed, setElapsed] = useState(0);
     const intervalRef = useRef<NodeJS.Timeout | null>(null);
     const startTimeRef = useRef<number | null>(null);
@@ -50,4 +50,4 @@ export function RecordingTimer({ startTime, formatTimer }: RecordingTimerProps) 
     }, [startTime, updateTimer]);
 
     return <>{formatTimer(elapsed)}</>;
-}
+});

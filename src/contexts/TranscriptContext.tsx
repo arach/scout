@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useMemo, ReactNode } from 'react';
 import { Transcript } from '../types/transcript';
+import { useSetState } from '../hooks/useSetState';
 
 interface TranscriptContextState {
   transcripts: Transcript[];
@@ -17,6 +18,10 @@ interface TranscriptContextActions {
   addTranscript: (transcript: Transcript) => void;
   removeTranscript: (id: number) => void;
   clearSelectedTranscripts: () => void;
+  // Optimized Set operations
+  toggleTranscriptSelection: (id: number) => void;
+  toggleTranscriptGroupSelection: (ids: number[]) => void;
+  selectAllTranscripts: (transcriptIds: number[]) => void;
 }
 
 interface TranscriptContextValue extends TranscriptContextState, TranscriptContextActions {}
@@ -30,9 +35,11 @@ interface TranscriptProviderProps {
 export function TranscriptProvider({ children }: TranscriptProviderProps) {
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedTranscripts, setSelectedTranscripts] = useState<Set<number>>(new Set());
   const [isProcessing, setIsProcessing] = useState(false);
   const [sessionStartTime] = useState(() => new Date().toISOString());
+  
+  // Use optimized Set state management
+  const selectedTranscriptsSet = useSetState<number>();
 
   const handleSetTranscripts = useCallback((transcriptsOrUpdater: Transcript[] | ((prev: Transcript[]) => Transcript[])) => {
     if (typeof transcriptsOrUpdater === 'function') {
@@ -48,11 +55,13 @@ export function TranscriptProvider({ children }: TranscriptProviderProps) {
 
   const handleSetSelectedTranscripts = useCallback((selected: Set<number> | ((prev: Set<number>) => Set<number>)) => {
     if (typeof selected === 'function') {
-      setSelectedTranscripts(selected);
+      // For backward compatibility, convert function-based updates
+      const newSet = selected(selectedTranscriptsSet.set);
+      selectedTranscriptsSet.replaceAll(Array.from(newSet));
     } else {
-      setSelectedTranscripts(selected);
+      selectedTranscriptsSet.replaceAll(Array.from(selected));
     }
-  }, []);
+  }, [selectedTranscriptsSet]);
 
   const handleSetIsProcessing = useCallback((processing: boolean) => {
     setIsProcessing(processing);
@@ -68,22 +77,31 @@ export function TranscriptProvider({ children }: TranscriptProviderProps) {
 
   const removeTranscript = useCallback((id: number) => {
     setTranscripts(prev => prev.filter(t => t.id !== id));
-    setSelectedTranscripts(prev => {
-      const newSet = new Set(prev);
-      newSet.delete(id);
-      return newSet;
-    });
-  }, []);
+    selectedTranscriptsSet.remove(id);
+  }, [selectedTranscriptsSet]);
 
   const clearSelectedTranscripts = useCallback(() => {
-    setSelectedTranscripts(new Set());
-  }, []);
+    selectedTranscriptsSet.clear();
+  }, [selectedTranscriptsSet]);
 
-  const value: TranscriptContextValue = {
+  // New optimized Set operations
+  const toggleTranscriptSelection = useCallback((id: number) => {
+    selectedTranscriptsSet.toggle(id);
+  }, [selectedTranscriptsSet]);
+
+  const toggleTranscriptGroupSelection = useCallback((ids: number[]) => {
+    selectedTranscriptsSet.toggleMultiple(ids);
+  }, [selectedTranscriptsSet]);
+
+  const selectAllTranscripts = useCallback((transcriptIds: number[]) => {
+    selectedTranscriptsSet.replaceAll(transcriptIds);
+  }, [selectedTranscriptsSet]);
+
+  const value: TranscriptContextValue = useMemo(() => ({
     // State
     transcripts,
     searchQuery,
-    selectedTranscripts,
+    selectedTranscripts: selectedTranscriptsSet.set,
     isProcessing,
     sessionStartTime,
     // Actions
@@ -94,7 +112,27 @@ export function TranscriptProvider({ children }: TranscriptProviderProps) {
     addTranscript,
     removeTranscript,
     clearSelectedTranscripts,
-  };
+    // Optimized Set operations
+    toggleTranscriptSelection,
+    toggleTranscriptGroupSelection,
+    selectAllTranscripts,
+  }), [
+    transcripts,
+    searchQuery,
+    selectedTranscriptsSet.set,
+    isProcessing,
+    sessionStartTime,
+    handleSetTranscripts,
+    handleSetSearchQuery,
+    handleSetSelectedTranscripts,
+    handleSetIsProcessing,
+    addTranscript,
+    removeTranscript,
+    clearSelectedTranscripts,
+    toggleTranscriptSelection,
+    toggleTranscriptGroupSelection,
+    selectAllTranscripts,
+  ]);
 
   return (
     <TranscriptContext.Provider value={value}>

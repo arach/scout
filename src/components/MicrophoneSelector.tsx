@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, memo } from 'react';
 import { Select } from '@base-ui-components/react/select';
 import { invoke } from '@tauri-apps/api/core';
 import './MicrophoneSelector.css';
@@ -9,7 +9,7 @@ interface MicrophoneSelectorProps {
   disabled?: boolean;
 }
 
-export function MicrophoneSelector({ selectedMic, onMicChange, disabled = false }: MicrophoneSelectorProps) {
+export const MicrophoneSelector = memo(function MicrophoneSelector({ selectedMic, onMicChange, disabled = false }: MicrophoneSelectorProps) {
   const [availableMics, setAvailableMics] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -87,4 +87,4 @@ export function MicrophoneSelector({ selectedMic, onMicChange, disabled = false 
       </Select.Root>
     </div>
   );
-}
+});

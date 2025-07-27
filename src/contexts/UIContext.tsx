@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useMemo, ReactNode } from 'react';
 
 type View = 'record' | 'transcripts' | 'settings';
 
@@ -125,7 +125,7 @@ export function UIProvider({ children }: UIProviderProps) {
     });
   }, []);
 
-  const value: UIContextValue = {
+  const value: UIContextValue = useMemo(() => ({
     // State
     currentView,
     showTranscriptionOverlay,
@@ -148,7 +148,28 @@ export function UIProvider({ children }: UIProviderProps) {
     setUploadProgress: handleSetUploadProgress,
     showDeleteDialog,
     hideDeleteDialog,
-  };
+  }), [
+    currentView,
+    showTranscriptionOverlay,
+    showFirstRun,
+    isCapturingHotkey,
+    isCapturingPushToTalkHotkey,
+    capturedKeys,
+    deleteConfirmation,
+    hotkeyUpdateStatus,
+    uploadProgress,
+    handleSetCurrentView,
+    handleSetShowTranscriptionOverlay,
+    handleSetShowFirstRun,
+    handleSetIsCapturingHotkey,
+    handleSetIsCapturingPushToTalkHotkey,
+    handleSetCapturedKeys,
+    handleSetDeleteConfirmation,
+    handleSetHotkeyUpdateStatus,
+    handleSetUploadProgress,
+    showDeleteDialog,
+    hideDeleteDialog,
+  ]);
 
   return (
     <UIContext.Provider value={value}>
