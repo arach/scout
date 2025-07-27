@@ -115,8 +115,9 @@ export const RecordView = memo(function RecordView({
                                 <div 
                                     className="audio-visualizer-ring recording-ring"
                                     style={{
-                                        '--audio-level': audioLevel
-                                    } as React.CSSProperties}
+                                        opacity: 0.1 + audioLevel * 0.4,
+                                        boxShadow: `0 0 ${10 + audioLevel * 20}px rgba(217, 58, 73, ${audioLevel * 0.3})`
+                                    }}
                                 />
                                 
                                 {/* Same large button but now a stop button */}
@@ -125,14 +126,18 @@ export const RecordView = memo(function RecordView({
                                     onClick={stopRecording}
                                     title="Stop recording"
                                     style={{
-                                        '--audio-level': audioLevel
-                                    } as React.CSSProperties}
+                                        boxShadow: `
+                                            0 4px 20px rgba(217, 58, 73, ${0.3 + audioLevel * 0.2}),
+                                            0 2px 8px rgba(217, 58, 73, 0.2),
+                                            inset 0 1px 0 rgba(255, 255, 255, 0.2)
+                                        `
+                                    }}
                                 >
                                     {/* Audio level fill indicator - darker for recording state */}
                                     <div 
                                         className="audio-level-fill recording"
                                         style={{
-                                            height: `${audioLevel * 100}%`
+                                            transform: `scaleY(${audioLevel})`
                                         }}
                                     />
                                     <div className="stop-icon-large">
@@ -190,8 +195,9 @@ export const RecordView = memo(function RecordView({
                                 <div 
                                     className="audio-visualizer-ring" 
                                     style={{
-                                        '--audio-level': audioLevel
-                                    } as React.CSSProperties}
+                                        opacity: 0.1 + audioLevel * 0.4,
+                                        boxShadow: `0 0 ${10 + audioLevel * 20}px rgba(74, 158, 255, ${audioLevel * 0.3})`
+                                    }}
                                 />
                                 
                                 <button
@@ -199,14 +205,19 @@ export const RecordView = memo(function RecordView({
                                     onClick={startRecording}
                                     disabled={isProcessing}
                                     style={{
-                                        '--audio-level': audioLevel
-                                    } as React.CSSProperties}
+                                        boxShadow: `
+                                            0 4px 20px rgba(74, 158, 255, ${0.25 + audioLevel * 0.5}),
+                                            0 2px 8px rgba(74, 158, 255, ${0.15 + audioLevel * 0.4}),
+                                            inset 0 1px 0 rgba(255, 255, 255, 0.2),
+                                            0 0 ${20 + audioLevel * 60}px rgba(74, 158, 255, ${0.15 + audioLevel * 0.6})
+                                        `
+                                    }}
                                 >
                                     {/* Audio level fill indicator */}
                                     <div 
                                         className="audio-level-fill"
                                         style={{
-                                            height: `${audioLevel * 100}%`
+                                            transform: `scaleY(${audioLevel})`
                                         }}
                                     />
                                     <div 

@@ -13,8 +13,15 @@ export function useAudioLevelMonitoring(options: UseAudioLevelMonitoringOptions 
   const audioCurrentRef = useRef(0);
 
   useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
+    let animationFrameId: number | null = null;
     let isActiveInternal = true;
+    let lastPollTime = 0;
+    const POLL_INTERVAL = 50; // Poll backend every 50ms
+    
+    // Pre-calculate time constants for performance
+    const FLUTTER_SPEED = 0.007;
+    const SHIMMER_SPEED = 0.003;
+    const BREATHING_SPEED = 0.0015;
 
     // Skip audio monitoring if not active
     if (!isActive) {
@@ -34,57 +41,66 @@ export function useAudioLevelMonitoring(options: UseAudioLevelMonitoringOptions 
         });
         console.log('Audio level monitoring started successfully');
         
-        // Combined animation and polling function to prevent dual loops
-        const animateAndPoll = async () => {
+        // Animation loop using requestAnimationFrame for 60fps
+        const animate = (timestamp: number) => {
           if (!isActiveInternal) return;
           
-          try {
-            // Poll backend for audio level
-            const level = await invoke<number>('get_current_audio_level');
+          // Poll backend at reduced rate to minimize overhead
+          if (timestamp - lastPollTime > POLL_INTERVAL) {
+            lastPollTime = timestamp;
             
-            // Same processing as master
-            let processed = 0;
-            if (level > 0.12) {
-              processed = (level - 0.12) * 1.5; // More amplification
-            }
-            
-            // Add bit of raw signal for organic movement
-            processed += level * 0.08; // More jitter for liveliness
-            
-            // Set target - animation will smoothly move toward it
-            audioTargetRef.current = Math.min(processed, 1.0);
-          } catch (error) {
-            // Silently fail if monitoring isn't available (e.g., during onboarding)
-            audioTargetRef.current = 0;
-            return;
+            // Non-blocking backend poll
+            invoke<number>('get_current_audio_level')
+              .then(level => {
+                // Same processing as before
+                let processed = 0;
+                if (level > 0.12) {
+                  processed = (level - 0.12) * 1.5;
+                }
+                processed += level * 0.08;
+                audioTargetRef.current = Math.min(processed, 1.0);
+              })
+              .catch(() => {
+                audioTargetRef.current = 0;
+              });
           }
           
-          // Animate towards target
+          // Animate towards target every frame
           const target = audioTargetRef.current;
           const current = audioCurrentRef.current;
           const diff = target - current;
           const speed = 0.3;
           let newLevel = current + (diff * speed);
           
-          // Organic motion from master
+          // Optimize organic motion calculations
           if (target > 0.02) {
+            // Use timestamp for consistent animation timing
+            const timeInSeconds = timestamp * 0.001;
             const flutter = (Math.random() - 0.5) * target * 0.12;
-            const shimmer = Math.sin(Date.now() * 0.007) * target * 0.04;
-            const pulse = Math.sin(Date.now() * 0.003) * target * 0.06;
+            const shimmer = Math.sin(timeInSeconds * FLUTTER_SPEED) * target * 0.04;
+            const pulse = Math.sin(timeInSeconds * SHIMMER_SPEED) * target * 0.06;
             newLevel += flutter + shimmer + pulse;
           }
           
           // Breathing motion even when quiet
-          const breathingMotion = Math.sin(Date.now() * 0.0015) * 0.015;
+          const breathingMotion = Math.sin(timestamp * BREATHING_SPEED) * 0.015;
           newLevel += breathingMotion;
           
-          // Clamp and update context
-          audioCurrentRef.current = Math.max(0, Math.min(newLevel, 1.0));
-          setAudioLevel(audioCurrentRef.current);
+          // Clamp and update only if changed significantly (reduce React renders)
+          const clampedLevel = Math.max(0, Math.min(newLevel, 1.0));
+          const levelDiff = Math.abs(clampedLevel - audioCurrentRef.current);
+          
+          if (levelDiff > 0.001) {
+            audioCurrentRef.current = clampedLevel;
+            setAudioLevel(clampedLevel);
+          }
+          
+          // Continue animation loop
+          animationFrameId = requestAnimationFrame(animate);
         };
         
-        // Use interval instead of requestAnimationFrame to reduce CPU usage
-        interval = setInterval(animateAndPoll, 150);
+        // Start animation loop
+        animationFrameId = requestAnimationFrame(animate);
         
       } catch (error) {
         console.error('Failed to start audio level monitoring:', error);
@@ -104,7 +120,7 @@ export function useAudioLevelMonitoring(options: UseAudioLevelMonitoringOptions 
     return () => {
       isActiveInternal = false;
       clearTimeout(timeoutId);
-      if (interval) clearInterval(interval);
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
       invoke('stop_audio_level_monitoring').catch(() => {});
       audioTargetRef.current = 0;
       audioCurrentRef.current = 0;

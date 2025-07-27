@@ -1,0 +1,41 @@
+/* Z-Index Design Tokens
+   =====================
+   Consistent z-index scale to prevent stacking conflicts
+*/
+
+:root {
+  /* Z-index scale */
+  --z-auto: auto;
+  --z-0: 0;
+  --z-10: 10;
+  --z-20: 20;
+  --z-30: 30;
+  --z-40: 40;
+  --z-50: 50;
+  --z-60: 60;
+  --z-70: 70;
+  --z-80: 80;
+  --z-90: 90;
+  --z-100: 100;
+  --z-max: 9999;
+  
+  /* Component z-index assignments */
+  --z-base: var(--z-0);
+  --z-dropdown: var(--z-50);
+  --z-sticky: var(--z-60);
+  --z-sidebar: var(--z-70);
+  --z-modal-backdrop: var(--z-80);
+  --z-modal: var(--z-90);
+  --z-popover: var(--z-90);
+  --z-tooltip: var(--z-100);
+  --z-notification: var(--z-100);
+  --z-debug: var(--z-max);
+  
+  /* Specific UI elements */
+  --z-header: var(--z-sticky);
+  --z-footer: var(--z-sticky);
+  --z-floating-action: var(--z-60);
+  --z-overlay: var(--z-70);
+  --z-dialog: var(--z-modal);
+  --z-toast: var(--z-notification);
+}

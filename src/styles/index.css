@@ -1,0 +1,27 @@
+/* Scout CSS Architecture
+   =====================
+   This is the main entry point for all styles.
+   Import order matters for cascade and specificity.
+*/
+
+/* 1. Base - Reset and normalization */
+@import './base/reset.css';
+@import './base/typography.css';
+
+/* 2. Design Tokens - CSS Custom Properties */
+@import './tokens/colors.css';
+@import './tokens/spacing.css';
+@import './tokens/typography.css';
+@import './tokens/shadows.css';
+@import './tokens/animations.css';
+@import './tokens/z-index.css';
+
+/* 3. Utilities - Single-purpose helper classes */
+@import './utilities/spacing.css';
+@import './utils.css';
+
+/* 4. Components - Reusable UI components */
+@import './components/buttons.css';
+
+/* 5. Themes - Theme-specific overrides */
+@import './themes/theme-overrides.css';
