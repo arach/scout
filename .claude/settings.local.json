@@ -94,7 +94,8 @@
       "Bash(pnpm run analyze:*)",
       "Bash(git filter-branch:*)",
       "Bash(git rebase:*)",
-      "Bash(EDITOR='sed -i \"\"6s/pick/reword/\"\"' git rebase -i HEAD~7)"
+      "Bash(EDITOR='sed -i \"\"6s/pick/reword/\"\"' git rebase -i HEAD~7)",
+      "Bash(EDITOR='true' git rebase -i HEAD~8)"
     ],
     "deny": []
   }
