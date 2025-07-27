@@ -59,11 +59,62 @@ export default defineConfig(async () => {
         main: resolve(__dirname, "index.html"),
       },
       output: {
-        // Manual chunk splitting for better caching
+        // Enhanced manual chunk splitting for better caching
         manualChunks: {
+          // React ecosystem
           'react-vendor': ['react', 'react-dom'],
-          'tauri-vendor': ['@tauri-apps/api'],
+          
+          // Tauri and plugins
+          'tauri-vendor': [
+            '@tauri-apps/api',
+            '@tauri-apps/plugin-dialog',
+            '@tauri-apps/plugin-fs',
+            '@tauri-apps/plugin-http',
+            '@tauri-apps/plugin-opener'
+          ],
+          
+          // UI libraries
+          'ui-vendor': [
+            '@base-ui-components/react',
+            '@radix-ui/react-select',
+            'lucide-react'
+          ],
+          
+          // Audio/media libraries
+          'media-vendor': [
+            'wavesurfer.js',
+            '@wavesurfer/react'
+          ],
+          
+          // Text processing
+          'text-vendor': [
+            'marked',
+            '@types/marked'
+          ],
+          
+          // Large components that change less frequently
+          'components-stable': (id) => {
+            if (id.includes('/src/components/')) {
+              // Group stable UI components that don't change often
+              return ['TranscriptItem', 'TranscriptsView', 'SettingsView', 'RecordView']
+                .some(component => id.includes(component));
+            }
+            return false;
+          },
+          
+          // Contexts and providers
+          'contexts': (id) => {
+            return id.includes('/src/contexts/') || id.includes('/src/themes/');
+          }
         },
+        
+        // Improve file naming for better caching
+        chunkFileNames: (chunkInfo) => {
+          const facadeModuleId = chunkInfo.facadeModuleId ? 
+            chunkInfo.facadeModuleId.split('/').pop()?.replace('.tsx', '').replace('.ts', '') : 'chunk';
+          return `assets/[name]-[hash].js`;
+        },
+        assetFileNames: 'assets/[name]-[hash].[ext]'
       },
     },
     // Enable source maps for production debugging
