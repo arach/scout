@@ -4,6 +4,7 @@ import { MicrophoneQuickPicker } from './MicrophoneQuickPicker';
 import { SessionTranscripts } from './SessionTranscripts';
 import { RecordingTimer } from './RecordingTimer';
 import { Transcript } from '../types/transcript';
+import { useAudioLevel } from '../contexts/AudioContext';
 import './RecordView.css';
 
 interface UploadProgress {
@@ -24,7 +25,6 @@ interface RecordViewProps {
     sessionTranscripts?: Transcript[];
     selectedMic: string;
     onMicChange: (mic: string) => void;
-    audioLevel: number;
     startRecording: () => void;
     stopRecording: () => void;
     cancelRecording: () => void;
@@ -69,7 +69,6 @@ export const RecordView = memo(function RecordView({
     sessionTranscripts = [],
     selectedMic,
     onMicChange,
-    audioLevel,
     startRecording,
     stopRecording,
     cancelRecording,
@@ -78,6 +77,8 @@ export const RecordView = memo(function RecordView({
     formatRecordingTimer,
     showDeleteConfirmation,
 }: RecordViewProps) {
+    // Get audio level from the subscription hook
+    const audioLevel = useAudioLevel();
     const [showSuccessHint, setShowSuccessHint] = useState(false);
     const [showQuickMicPicker, setShowQuickMicPicker] = useState(false);
     const gearButtonRef = useRef<HTMLButtonElement>(null);
@@ -93,13 +94,8 @@ export const RecordView = memo(function RecordView({
         transcriptCountRef.current = sessionTranscripts.length;
     }, [sessionTranscripts.length]);
 
-    // useEffect(() => {
-    //     console.log('[RecordView] Current audioLevel:', audioLevel.toFixed(6), {
-    //         timestamp: new Date().toISOString(),
-    //         isRecording,
-    //         isProcessing
-    //     });
-    // }, [audioLevel, isRecording, isProcessing]);
+    // The component will now only re-render when audio level changes,
+    // not on every state update in AudioContext
 
     return (
         <div className="record-view">

@@ -1,9 +1,34 @@
-import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, ReactNode, useRef, useSyncExternalStore } from 'react';
+
+// Audio level subscription system
+type AudioLevelListener = (level: number) => void;
+
+class AudioLevelStore {
+  private listeners = new Set<AudioLevelListener>();
+  private currentLevel = 0;
+
+  subscribe = (listener: AudioLevelListener) => {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  };
+
+  getSnapshot = () => {
+    return this.currentLevel;
+  };
+
+  setLevel = (level: number) => {
+    if (this.currentLevel !== level) {
+      this.currentLevel = level;
+      this.listeners.forEach(listener => listener(level));
+    }
+  };
+}
 
 interface AudioContextState {
   selectedMic: string;
   vadEnabled: boolean;
-  audioLevel: number;
 }
 
 interface AudioContextActions {
@@ -12,7 +37,9 @@ interface AudioContextActions {
   setAudioLevel: (level: number) => void;
 }
 
-interface AudioContextValue extends AudioContextState, AudioContextActions {}
+interface AudioContextValue extends AudioContextState, AudioContextActions {
+  audioLevelStore: AudioLevelStore;
+}
 
 const AudioContext = createContext<AudioContextValue | undefined>(undefined);
 
@@ -23,7 +50,12 @@ interface AudioProviderProps {
 export function AudioProvider({ children }: AudioProviderProps) {
   const [selectedMic, setSelectedMic] = useState<string>('Default microphone');
   const [vadEnabled, setVadEnabled] = useState(false);
-  const [audioLevel, setAudioLevel] = useState(0);
+  const audioLevelStoreRef = useRef<AudioLevelStore>();
+
+  // Create audio level store instance once
+  if (!audioLevelStoreRef.current) {
+    audioLevelStoreRef.current = new AudioLevelStore();
+  }
 
   const handleSetSelectedMic = useCallback((mic: string) => {
     setSelectedMic(mic);
@@ -34,18 +66,19 @@ export function AudioProvider({ children }: AudioProviderProps) {
   }, []);
 
   const handleSetAudioLevel = useCallback((level: number) => {
-    setAudioLevel(level);
+    audioLevelStoreRef.current?.setLevel(level);
   }, []);
 
   const value: AudioContextValue = {
     // State
     selectedMic,
     vadEnabled,
-    audioLevel,
     // Actions
     setSelectedMic: handleSetSelectedMic,
     setVadEnabled: handleSetVadEnabled,
     setAudioLevel: handleSetAudioLevel,
+    // Store
+    audioLevelStore: audioLevelStoreRef.current!,
   };
 
   return (
@@ -55,10 +88,26 @@ export function AudioProvider({ children }: AudioProviderProps) {
   );
 }
 
-export function useAudioContext(): AudioContextValue {
+export function useAudioContext(): Omit<AudioContextValue, 'audioLevelStore'> {
   const context = useContext(AudioContext);
   if (context === undefined) {
     throw new Error('useAudioContext must be used within an AudioProvider');
   }
-  return context;
+  // Return everything except audioLevelStore to maintain backward compatibility
+  const { audioLevelStore, ...contextWithoutStore } = context;
+  return contextWithoutStore;
+}
+
+// New hook for components that need audio level
+export function useAudioLevel(): number {
+  const context = useContext(AudioContext);
+  if (context === undefined) {
+    throw new Error('useAudioLevel must be used within an AudioProvider');
+  }
+  
+  return useSyncExternalStore(
+    context.audioLevelStore.subscribe,
+    context.audioLevelStore.getSnapshot,
+    context.audioLevelStore.getSnapshot
+  );
 }

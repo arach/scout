@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { TranscriptionOverlay } from './TranscriptionOverlay';
 import { Transcript } from '../types/transcript';
+import { useAudioLevel } from '../contexts/AudioContext';
 import './DevTools.css';
 
 type View = 'record' | 'transcripts' | 'settings';
@@ -9,7 +10,6 @@ type View = 'record' | 'transcripts' | 'settings';
 interface DevToolsProps {
   currentView: View;
   // Recording context
-  audioLevel?: number;
   selectedMic?: string;
   isRecording?: boolean;
   isProcessing?: boolean;
@@ -31,7 +31,6 @@ interface DevToolsProps {
 export function DevTools(props: DevToolsProps) {
   const {
     currentView,
-    audioLevel = 0,
     selectedMic = '',
     isRecording = false,
     isProcessing = false,
@@ -44,6 +43,9 @@ export function DevTools(props: DevToolsProps) {
     // currentUser = 'Unknown', // Unused variable
     appVersion = '0.1.0'
   } = props;
+
+  // Get audio level from the subscription hook
+  const audioLevel = useAudioLevel();
 
   const [isOpen, setIsOpen] = useState(false);
   const [showMicLevel, setShowMicLevel] = useState(false);
@@ -386,7 +388,6 @@ export function DevTools(props: DevToolsProps) {
         <TranscriptionOverlay
           isVisible={showTeleprompter}
           isRecording={isRecording}
-          audioLevel={audioLevel}
           onClose={() => setShowTeleprompter(false)}
           mode="teleprompter"
         />

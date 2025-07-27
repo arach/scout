@@ -3,6 +3,7 @@ import { safeEventListen } from '../lib/safeEventListener';
 import { useResizable } from '../hooks/useResizable';
 import { useTheme } from '../themes/ThemeProvider';
 import { useSettings } from '../hooks/useSettings';
+import { useAudioLevel } from '../contexts/AudioContext';
 import './TranscriptionOverlay.css';
 
 interface TranscriptionChunk {
@@ -29,7 +30,6 @@ interface TranscriptionState {
 interface TranscriptionOverlayProps {
   isVisible: boolean;
   isRecording: boolean;
-  audioLevel?: number;
   onClose: () => void;
   onSaveEdits?: (editedText: string) => void;
   onDiscardEdits?: () => void;
@@ -39,12 +39,13 @@ interface TranscriptionOverlayProps {
 export function TranscriptionOverlay({
   isVisible,
   isRecording,
-  audioLevel = 0,
   onClose,
   onSaveEdits,
   onDiscardEdits,
   mode = 'teleprompter'
 }: TranscriptionOverlayProps) {
+  // Get audio level from the subscription hook
+  const audioLevel = useAudioLevel();
   const { theme } = useTheme();
   const { overlayPosition } = useSettings();
   
