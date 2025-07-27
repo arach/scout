@@ -19,6 +19,7 @@ mod env;
 mod post_processing;
 mod profanity_filter;
 mod performance_metrics_service;
+mod dictionary_processor;
 pub mod benchmarking;
 mod llm;
 mod whisper_logger;
@@ -655,12 +656,6 @@ async fn read_audio_file(audio_path: String) -> Result<Vec<u8>, String> {
 }
 
 #[tauri::command]
-async fn set_vad_enabled(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
-    let recorder = state.recorder.lock().await;
-    recorder.set_vad_enabled(enabled)
-}
-
-#[tauri::command]
 async fn subscribe_to_progress(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<(), String> {
     let mut receiver = state.progress_tracker.subscribe();
     
@@ -816,12 +811,6 @@ async fn open_system_preferences_audio() -> Result<(), String> {
 async fn mark_onboarding_complete(state: State<'_, AppState>) -> Result<(), String> {
     // Could store this in settings if needed
     Ok(())
-}
-
-#[tauri::command]
-async fn is_vad_enabled(state: State<'_, AppState>) -> Result<bool, String> {
-    let recorder = state.recorder.lock().await;
-    Ok(recorder.is_vad_enabled())
 }
 
 #[tauri::command]
@@ -1476,6 +1465,331 @@ async fn show_log_file_in_finder() -> Result<(), String> {
 }
 
 
+// Dictionary commands
+#[tauri::command]
+async fn get_dictionary_entries(
+    state: State<'_, AppState>,
+    enabled_only: bool,
+) -> Result<Vec<db::DictionaryEntry>, String> {
+    if enabled_only {
+        state.database.get_enabled_dictionary_entries().await
+    } else {
+        state.database.get_all_dictionary_entries().await
+    }
+}
+
+#[tauri::command]
+async fn save_dictionary_entry(
+    state: State<'_, AppState>,
+    original_text: String,
+    replacement_text: String,
+    match_type: String,
+    is_case_sensitive: bool,
+    phonetic_pattern: Option<String>,
+    category: Option<String>,
+    description: Option<String>,
+) -> Result<i64, String> {
+    state.database.save_dictionary_entry(
+        &original_text,
+        &replacement_text,
+        &match_type,
+        is_case_sensitive,
+        phonetic_pattern.as_deref(),
+        category.as_deref(),
+        description.as_deref(),
+    ).await
+}
+
+#[tauri::command]
+async fn update_dictionary_entry(
+    state: State<'_, AppState>,
+    id: i64,
+    original_text: String,
+    replacement_text: String,
+    match_type: String,
+    is_case_sensitive: bool,
+    phonetic_pattern: Option<String>,
+    category: Option<String>,
+    description: Option<String>,
+    enabled: bool,
+) -> Result<(), String> {
+    state.database.update_dictionary_entry(
+        id,
+        &original_text,
+        &replacement_text,
+        &match_type,
+        is_case_sensitive,
+        phonetic_pattern.as_deref(),
+        category.as_deref(),
+        description.as_deref(),
+        enabled,
+    ).await
+}
+
+#[tauri::command]
+async fn delete_dictionary_entry(
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<(), String> {
+    state.database.delete_dictionary_entry(id).await
+}
+
+#[tauri::command]
+async fn get_dictionary_matches_for_transcript(
+    state: State<'_, AppState>,
+    transcript_id: i64,
+) -> Result<Vec<serde_json::Value>, String> {
+    state.database.get_dictionary_matches_for_transcript(transcript_id).await
+}
+
+#[tauri::command]
+async fn test_dictionary_replacement(
+    state: State<'_, AppState>,
+    text: String,
+) -> Result<String, String> {
+    let dictionary_processor = crate::dictionary_processor::DictionaryProcessor::new(state.database.clone());
+    let (processed_text, _matches) = dictionary_processor.process_transcript(&text, None).await?;
+    Ok(processed_text)
+}
+
+#[derive(serde::Serialize)]
+struct DayActivity {
+    date: String,
+    count: i32,
+    duration_ms: i64,
+    words: i64,
+}
+
+#[derive(serde::Serialize)]
+struct RecordingStats {
+    total_recordings: i32,
+    total_duration: i64,
+    total_words: i64,
+    current_streak: i32,
+    longest_streak: i32,
+    average_daily: f64,
+    most_active_day: String,
+    most_active_hour: i32,
+    daily_activity: Vec<DayActivity>,
+    weekly_distribution: Vec<(String, i32)>,
+    hourly_distribution: Vec<(i32, i32)>,
+}
+
+#[tauri::command]
+async fn get_recording_stats(state: State<'_, AppState>) -> Result<RecordingStats, String> {
+    use chrono::{DateTime, Datelike, Local, NaiveDate, TimeZone, Timelike, Weekday};
+    use std::collections::HashMap;
+    
+    // Log the start of the function
+    eprintln!("get_recording_stats called");
+    
+    // First, let's return simple mock data to test if the frontend is working
+    return Ok(RecordingStats {
+        total_recordings: 5,
+        total_duration: 300000, // 5 minutes in ms
+        total_words: 1234,
+        current_streak: 3,
+        longest_streak: 7,
+        average_daily: 2.5,
+        most_active_day: "Monday".to_string(),
+        most_active_hour: 14,
+        daily_activity: vec![
+            DayActivity {
+                date: "2025-01-01".to_string(),
+                count: 2,
+                duration_ms: 120000,
+                words: 500,
+            },
+            DayActivity {
+                date: "2025-01-02".to_string(),
+                count: 3,
+                duration_ms: 180000,
+                words: 734,
+            },
+        ],
+        weekly_distribution: vec![
+            ("Mon".to_string(), 5),
+            ("Tue".to_string(), 3),
+            ("Wed".to_string(), 7),
+            ("Thu".to_string(), 2),
+            ("Fri".to_string(), 4),
+            ("Sat".to_string(), 1),
+            ("Sun".to_string(), 0),
+        ],
+        hourly_distribution: vec![
+            (9, 2),
+            (10, 5),
+            (11, 3),
+            (14, 8),
+            (15, 6),
+            (16, 4),
+        ],
+    });
+    
+    // Get all transcripts to calculate stats
+    let all_transcripts = state.database.get_recent_transcripts(10000).await?;
+    eprintln!("Found {} transcripts", all_transcripts.len());
+    
+    if all_transcripts.is_empty() {
+        eprintln!("Returning empty stats");
+        return Ok(RecordingStats {
+            total_recordings: 0,
+            total_duration: 0,
+            total_words: 0,
+            current_streak: 0,
+            longest_streak: 0,
+            average_daily: 0.0,
+            most_active_day: "Monday".to_string(),
+            most_active_hour: 0,
+            daily_activity: vec![],
+            weekly_distribution: vec![
+                ("Monday".to_string(), 0),
+                ("Tuesday".to_string(), 0),
+                ("Wednesday".to_string(), 0),
+                ("Thursday".to_string(), 0),
+                ("Friday".to_string(), 0),
+                ("Saturday".to_string(), 0),
+                ("Sunday".to_string(), 0),
+            ],
+            hourly_distribution: (0..24).map(|h| (h, 0)).collect(),
+        });
+    }
+    
+    // Calculate basic stats
+    let total_recordings = all_transcripts.len() as i32;
+    let total_duration: i64 = all_transcripts.iter().map(|t| t.duration_ms as i64).sum();
+    let total_words: i64 = all_transcripts.iter()
+        .map(|t| t.text.split_whitespace().count() as i64)
+        .sum();
+    
+    // Group by date for daily activity
+    let mut daily_map: HashMap<String, (i32, i64, i64)> = HashMap::new();
+    let mut weekday_map: HashMap<Weekday, i32> = HashMap::new();
+    let mut hour_map: HashMap<i32, i32> = HashMap::new();
+    
+    for transcript in &all_transcripts {
+        // Parse created_at timestamp
+        let created_at = if let Ok(dt) = DateTime::parse_from_rfc3339(&transcript.created_at) {
+            dt.with_timezone(&Local)
+        } else if let Ok(naive_dt) = transcript.created_at.parse::<chrono::NaiveDateTime>() {
+            Local.from_local_datetime(&naive_dt).single()
+                .ok_or_else(|| format!("Ambiguous local time: {}", transcript.created_at))?
+        } else {
+            return Err(format!("Failed to parse timestamp: {}", transcript.created_at));
+        };
+        
+        let date_str = created_at.format("%Y-%m-%d").to_string();
+        let words = transcript.text.split_whitespace().count() as i64;
+        
+        let entry = daily_map.entry(date_str).or_insert((0, 0, 0));
+        entry.0 += 1;
+        entry.1 += transcript.duration_ms as i64;
+        entry.2 += words;
+        
+        // Track weekday distribution
+        let weekday = created_at.weekday();
+        *weekday_map.entry(weekday).or_insert(0) += 1;
+        
+        // Track hourly distribution
+        let hour = created_at.hour() as i32;
+        *hour_map.entry(hour).or_insert(0) += 1;
+    }
+    
+    // Convert daily map to sorted vec
+    let mut daily_activity: Vec<DayActivity> = daily_map.into_iter()
+        .map(|(date, (count, duration, words))| DayActivity {
+            date,
+            count,
+            duration_ms: duration,
+            words,
+        })
+        .collect();
+    daily_activity.sort_by(|a, b| a.date.cmp(&b.date));
+    
+    // Calculate streaks
+    let mut current_streak = 0;
+    let mut longest_streak = 0;
+    let mut temp_streak = 0;
+    let mut last_date: Option<NaiveDate> = None;
+    
+    let today = Local::now().date_naive();
+    
+    for activity in &daily_activity {
+        let date = NaiveDate::parse_from_str(&activity.date, "%Y-%m-%d")
+            .map_err(|_| "Failed to parse date")?;
+        
+        if let Some(last) = last_date {
+            let diff = date.signed_duration_since(last).num_days();
+            if diff == 1 {
+                temp_streak += 1;
+            } else {
+                longest_streak = longest_streak.max(temp_streak);
+                temp_streak = 1;
+            }
+        } else {
+            temp_streak = 1;
+        }
+        
+        last_date = Some(date);
+        
+        // Check if current streak is still active
+        if date == today || date == today.pred_opt().unwrap_or(today) {
+            current_streak = temp_streak;
+        }
+    }
+    longest_streak = longest_streak.max(temp_streak);
+    
+    // Calculate average daily recordings
+    let days_with_recordings = daily_activity.len() as f64;
+    let average_daily = if days_with_recordings > 0.0 {
+        total_recordings as f64 / days_with_recordings
+    } else {
+        0.0
+    };
+    
+    // Find most active day of week
+    let most_active_day = weekday_map.iter()
+        .max_by_key(|(_, count)| *count)
+        .map(|(weekday, _)| format!("{:?}", weekday))
+        .unwrap_or_else(|| "Monday".to_string());
+    
+    // Find most active hour
+    let most_active_hour = hour_map.iter()
+        .max_by_key(|(_, count)| *count)
+        .map(|(hour, _)| *hour)
+        .unwrap_or(0);
+    
+    // Prepare weekly distribution
+    let weekly_distribution = vec![
+        ("Monday".to_string(), *weekday_map.get(&Weekday::Mon).unwrap_or(&0)),
+        ("Tuesday".to_string(), *weekday_map.get(&Weekday::Tue).unwrap_or(&0)),
+        ("Wednesday".to_string(), *weekday_map.get(&Weekday::Wed).unwrap_or(&0)),
+        ("Thursday".to_string(), *weekday_map.get(&Weekday::Thu).unwrap_or(&0)),
+        ("Friday".to_string(), *weekday_map.get(&Weekday::Fri).unwrap_or(&0)),
+        ("Saturday".to_string(), *weekday_map.get(&Weekday::Sat).unwrap_or(&0)),
+        ("Sunday".to_string(), *weekday_map.get(&Weekday::Sun).unwrap_or(&0)),
+    ];
+    
+    // Prepare hourly distribution
+    let hourly_distribution: Vec<(i32, i32)> = (0..24)
+        .map(|h| (h, *hour_map.get(&h).unwrap_or(&0)))
+        .collect();
+    
+    Ok(RecordingStats {
+        total_recordings,
+        total_duration,
+        total_words,
+        current_streak,
+        longest_streak,
+        average_daily,
+        most_active_day,
+        most_active_hour,
+        daily_activity,
+        weekly_distribution,
+        hourly_distribution,
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Initialize env_logger with our custom interceptor to capture whisper logs
@@ -1956,8 +2270,6 @@ pub fn run() {
             get_recent_transcripts,
             search_transcripts,
             read_audio_file,
-            set_vad_enabled,
-            is_vad_enabled,
             delete_transcript,
             delete_transcripts,
             export_transcripts,
@@ -2015,7 +2327,15 @@ pub fn run() {
             set_overlay_waveform_style,
             get_log_file_path,
             open_log_file,
-            show_log_file_in_finder
+            show_log_file_in_finder,
+            // Dictionary commands
+            get_dictionary_entries,
+            save_dictionary_entry,
+            update_dictionary_entry,
+            delete_dictionary_entry,
+            get_dictionary_matches_for_transcript,
+            test_dictionary_replacement,
+            get_recording_stats
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

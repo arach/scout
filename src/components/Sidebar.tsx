@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { Settings } from 'lucide-react';
 import './Sidebar.css';
 
-type View = 'record' | 'transcripts' | 'settings';
+type View = 'record' | 'transcripts' | 'settings' | 'stats';
 
 interface SidebarProps {
   currentView: View;
@@ -80,6 +80,19 @@ export function Sidebar({ currentView, onViewChange, isExpanded }: SidebarProps)
         </svg>
         {isExpanded && <span className="sidebar-label">Transcripts</span>}
         <span className="sidebar-tooltip">Transcripts</span>
+      </button>
+      <button
+        className={`sidebar-button sidebar-button-stats ${currentView === 'stats' ? 'active' : ''}`}
+        onClick={() => onViewChange('stats')}
+        aria-label="Stats"
+      >
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="3" y="12" width="3" height="5" rx="0.5" fill="currentColor"/>
+          <rect x="8.5" y="8" width="3" height="9" rx="0.5" fill="currentColor"/>
+          <rect x="14" y="5" width="3" height="12" rx="0.5" fill="currentColor"/>
+        </svg>
+        {isExpanded && <span className="sidebar-label">Stats</span>}
+        <span className="sidebar-tooltip">Stats</span>
       </button>
       <button
         className={`sidebar-button sidebar-button-settings ${currentView === 'settings' ? 'active' : ''}`}

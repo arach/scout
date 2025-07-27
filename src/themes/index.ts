@@ -4,6 +4,10 @@ import { loadTheme, preloadTheme, clearThemeCache } from './lazy';
 export * from './types';
 export { preloadTheme, clearThemeCache };
 
+// Export theme hooks and provider separately to maintain Fast Refresh compatibility
+export { ThemeProvider } from './ThemeProvider';
+export { useTheme } from './useTheme';
+
 // Default themes that are always loaded (for initial render)
 import { vscodeDark, vscodeLight } from './base/vscode';
 

@@ -4,7 +4,6 @@ use std::thread;
 use std::sync::mpsc;
 use std::any::TypeId;
 use std::time::Duration;
-use super::vad::VoiceActivityDetector;
 use crate::logger::{info, debug, warn, error, Component};
 
 // Type alias for sample callback
@@ -13,7 +12,6 @@ pub type SampleCallback = Arc<dyn Fn(&[f32]) + Send + Sync>;
 pub struct AudioRecorder {
     control_tx: Option<mpsc::Sender<RecorderCommand>>,
     is_recording: Arc<Mutex<bool>>,
-    vad_enabled: Arc<Mutex<bool>>,
     current_audio_level: Arc<Mutex<f32>>,
     current_device_info: Arc<Mutex<Option<DeviceInfo>>>,
     sample_callback: Arc<Mutex<Option<SampleCallback>>>,
@@ -31,7 +29,6 @@ pub struct DeviceInfo {
 enum RecorderCommand {
     StartRecording(String, Option<String>), // (path, device_name)
     StopRecording,
-    SetVadEnabled(bool),
     StartAudioLevelMonitoring(Option<String>), // device_name
     StopAudioLevelMonitoring,
     SetSampleCallback(Option<SampleCallback>),
@@ -42,7 +39,6 @@ impl AudioRecorder {
         Self {
             control_tx: None,
             is_recording: Arc::new(Mutex::new(false)),
-            vad_enabled: Arc::new(Mutex::new(false)),
             current_audio_level: Arc::new(Mutex::new(0.0)),
             current_device_info: Arc::new(Mutex::new(None)),
             sample_callback: Arc::new(Mutex::new(None)),
@@ -72,14 +68,13 @@ impl AudioRecorder {
         let (tx, rx) = mpsc::channel();
         self.control_tx = Some(tx);
         let is_recording = self.is_recording.clone();
-        let vad_enabled = self.vad_enabled.clone();
         let audio_level = self.current_audio_level.clone();
         let device_info = self.current_device_info.clone();
         let sample_callback = self.sample_callback.clone();
         let recording_state_changed = self.recording_state_changed.clone();
 
         thread::spawn(move || {
-            let mut recorder = AudioRecorderWorker::new(is_recording, vad_enabled, audio_level, device_info, sample_callback, recording_state_changed);
+            let mut recorder = AudioRecorderWorker::new(is_recording, audio_level, device_info, sample_callback, recording_state_changed);
             
             while let Ok(cmd) = rx.recv() {
                 match cmd {
@@ -92,9 +87,6 @@ impl AudioRecorder {
                         if let Err(e) = recorder.stop_recording() {
                             error(Component::Recording, &format!("Failed to stop recording: {}", e));
                         }
-                    }
-                    RecorderCommand::SetVadEnabled(enabled) => {
-                        *recorder.vad_enabled.lock().unwrap() = enabled;
                     }
                     RecorderCommand::StartAudioLevelMonitoring(device_name) => {
                         if let Err(e) = recorder.start_audio_level_monitoring(device_name.as_deref()) {
@@ -186,21 +178,6 @@ impl AudioRecorder {
         *self.is_recording.lock().unwrap()
     }
 
-    pub fn set_vad_enabled(&self, enabled: bool) -> Result<(), String> {
-        if self.control_tx.is_none() {
-            return Err("Recorder not initialized".to_string());
-        }
-
-        self.control_tx
-            .as_ref()
-            .unwrap()
-            .send(RecorderCommand::SetVadEnabled(enabled))
-            .map_err(|e| format!("Failed to send VAD command: {}", e))
-    }
-
-    pub fn is_vad_enabled(&self) -> bool {
-        *self.vad_enabled.lock().unwrap()
-    }
     
     pub fn set_sample_callback(&self, callback: Option<SampleCallback>) -> Result<(), String> {
         if self.control_tx.is_none() {
@@ -246,8 +223,6 @@ struct AudioRecorderWorker {
     monitoring_stream: Option<cpal::Stream>,
     writer: Arc<Mutex<Option<hound::WavWriter<std::io::BufWriter<std::fs::File>>>>>,
     is_recording: Arc<Mutex<bool>>,
-    vad_enabled: Arc<Mutex<bool>>,
-    vad: Option<VoiceActivityDetector>,
     sample_count: Arc<Mutex<u64>>,
     sample_rate: u32,
     channels: u16,
@@ -259,14 +234,12 @@ struct AudioRecorderWorker {
 }
 
 impl AudioRecorderWorker {
-    fn new(is_recording: Arc<Mutex<bool>>, vad_enabled: Arc<Mutex<bool>>, audio_level: Arc<Mutex<f32>>, device_info: Arc<Mutex<Option<DeviceInfo>>>, sample_callback: Arc<Mutex<Option<SampleCallback>>>, recording_state_changed: Arc<Condvar>) -> Self {
+    fn new(is_recording: Arc<Mutex<bool>>, audio_level: Arc<Mutex<f32>>, device_info: Arc<Mutex<Option<DeviceInfo>>>, sample_callback: Arc<Mutex<Option<SampleCallback>>>, recording_state_changed: Arc<Condvar>) -> Self {
         Self {
             stream: None,
             monitoring_stream: None,
             writer: Arc::new(Mutex::new(None)),
             is_recording,
-            vad_enabled,
-            vad: None,
             sample_count: Arc::new(Mutex::new(0)),
             sample_rate: 48000, // default, will be updated when recording starts
             channels: 1, // default, will be updated when recording starts
@@ -340,6 +313,12 @@ impl AudioRecorderWorker {
         let default_config = device
             .default_input_config()
             .map_err(|e| format!("Failed to get input config: {}", e))?;
+        
+        // DIAGNOSTIC: Log raw device configuration
+        info(Component::Recording, &format!("Raw device config - Sample Rate: {}, Channels: {}, Format: {:?}", 
+            default_config.sample_rate().0, 
+            default_config.channels(), 
+            default_config.sample_format()));
 
         // Log detailed device information
         let device_name_for_metadata = device.name().unwrap_or_else(|_| "Unknown".to_string());
@@ -355,7 +334,20 @@ impl AudioRecorderWorker {
         
         // Check if device supports stereo recording
         if let Ok(supported_configs) = device.supported_input_configs() {
-            for supported_range in supported_configs {
+            let supported_vec: Vec<_> = supported_configs.collect();
+            
+            // DIAGNOSTIC: Log all supported configurations
+            info(Component::Recording, "Supported device configurations:");
+            for (i, config) in supported_vec.iter().enumerate() {
+                info(Component::Recording, &format!("  Config {}: {} channels, {}-{} Hz, {:?}",
+                    i, config.channels(), 
+                    config.min_sample_rate().0, 
+                    config.max_sample_rate().0,
+                    config.sample_format()));
+            }
+            
+            // Check stereo support
+            for supported_range in supported_vec.iter() {
                 if supported_range.channels() >= 2 &&
                    supported_range.min_sample_rate().0 <= default_config.sample_rate().0 &&
                    supported_range.max_sample_rate().0 >= default_config.sample_rate().0 {
@@ -381,11 +373,46 @@ impl AudioRecorderWorker {
         info(Component::Recording, &format!("Final audio configuration: {} channel(s), {} Hz", 
              channels, default_config.sample_rate().0));
 
+        // DIAGNOSTIC: Check for common problematic configurations
+        if device_name_for_metadata.to_lowercase().contains("airpod") {
+            warn(Component::Recording, &format!("AirPods detected with sample rate: {} Hz", default_config.sample_rate().0));
+            if default_config.sample_rate().0 == 8000 || default_config.sample_rate().0 == 16000 {
+                error(Component::Recording, "AirPods in low-quality mode! This will cause chipmunk audio.");
+                error(Component::Recording, "Solution: Disconnect and reconnect AirPods, or use wired headphones.");
+                // Some AirPods report 8kHz or 16kHz in call mode but actually deliver 48kHz audio
+                // This mismatch causes the chipmunk effect
+            }
+            warn(Component::Recording, "For best results, use wired headphones or ensure AirPods are in high-quality mode");
+        }
+        
+        // Additional check for other Bluetooth devices
+        if device_name_for_metadata.to_lowercase().contains("bluetooth") || 
+           device_name_for_metadata.to_lowercase().contains("wireless") {
+            info(Component::Recording, &format!("Bluetooth device detected: {} at {} Hz", 
+                device_name_for_metadata, default_config.sample_rate().0));
+            if default_config.sample_rate().0 < 44100 {
+                warn(Component::Recording, "Low sample rate detected on Bluetooth device - may cause audio quality issues");
+            }
+        }
+        
+        // Handle known problematic devices that report incorrect sample rates
+        let actual_sample_rate = if device_name_for_metadata.to_lowercase().contains("airpod") && 
+                                   (default_config.sample_rate().0 == 8000 || 
+                                    default_config.sample_rate().0 == 16000 || 
+                                    default_config.sample_rate().0 == 24000) {
+            // AirPods in call mode often report low sample rates but deliver 48kHz audio
+            warn(Component::Recording, &format!("Overriding AirPods sample rate from {} Hz to 48000 Hz", default_config.sample_rate().0));
+            warn(Component::Recording, "AirPods may be in call mode - audio quality may be degraded");
+            cpal::SampleRate(48000)
+        } else {
+            default_config.sample_rate()
+        };
+        
         // Try progressive buffer sizes with fallbacks for device compatibility
         let buffer_sizes = [128, 256, 512, 1024];
         let mut config = cpal::StreamConfig {
             channels,
-            sample_rate: default_config.sample_rate(),
+            sample_rate: actual_sample_rate,
             buffer_size: cpal::BufferSize::Default, // Start with default as final fallback
         };
         
@@ -416,6 +443,14 @@ impl AudioRecorderWorker {
         self.channels = channels;
         self.sample_format = Some(default_config.sample_format());
         
+        // IMPORTANT: Double-check that we're using the correct sample rate
+        // Some devices (especially Bluetooth) may report one rate but deliver another
+        info(Component::Recording, &format!("Final recording configuration:"));
+        info(Component::Recording, &format!("  Device reports: {} Hz", default_config.sample_rate().0));
+        info(Component::Recording, &format!("  Stream config: {} Hz", config.sample_rate.0));
+        info(Component::Recording, &format!("  WAV will use: {} Hz", config.sample_rate.0));
+        info(Component::Recording, &format!("  Channels: {} (device) -> 1 (WAV file)", channels));
+        
         // Update global device sample rate cache for transcription strategies
         crate::update_device_sample_rate(config.sample_rate.0);
         
@@ -439,6 +474,10 @@ impl AudioRecorderWorker {
             _ => return Err("Unsupported sample format".to_string()),
         };
         
+        // DIAGNOSTIC: Verify sample rate consistency
+        info(Component::Recording, &format!("WAV file spec - Sample Rate: {}, Channels: 1 (mono), Bits: {}, Format: {:?}",
+            config.sample_rate.0, bits_per_sample, sample_format));
+        
         let spec = hound::WavSpec {
             channels: 1, // Always write mono files (convert from stereo if needed)
             sample_rate: config.sample_rate.0,
@@ -446,10 +485,6 @@ impl AudioRecorderWorker {
             sample_format,
         };
 
-        // Initialize VAD if enabled
-        if *self.vad_enabled.lock().unwrap() {
-            self.vad = Some(VoiceActivityDetector::new(config.sample_rate.0)?);
-        }
 
         let writer = hound::WavWriter::create(output_path, spec)
             .map_err(|e| format!("Failed to create WAV writer: {}", e))?;
@@ -579,14 +614,25 @@ impl AudioRecorderWorker {
     {
         use cpal::traits::DeviceTrait;
         
-        // Clone config to move into closure
+        // Clone config values to move into closure
         let channels = config.channels;
+        let sample_rate_for_log = config.sample_rate.0;
         
         device
             .build_input_stream(
                 config,
                 move |data: &[T], _: &cpal::InputCallbackInfo| {
                     if *is_recording.lock().unwrap() {
+                        // DIAGNOSTIC: Log first callback to verify actual data rate
+                        static FIRST_CALLBACK: std::sync::Once = std::sync::Once::new();
+                        FIRST_CALLBACK.call_once(|| {
+                            info(Component::Recording, &format!("First audio callback received - {} samples, {} channels", 
+                                data.len(), channels));
+                            info(Component::Recording, &format!("Expected samples per callback at {} Hz: ~{}", 
+                                sample_rate_for_log, 
+                                data.len() / channels as usize));
+                        });
+                        
                         // Calculate RMS (Root Mean Square) level for volume
                         let mut sum_squares = 0.0f32;
                         

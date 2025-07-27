@@ -284,6 +284,10 @@ export const RecordView = memo(function RecordView({
                                     <span className="status-dot"></span>
                                     <span className="status-text">Ready</span>
                                 </div>
+                                <div className="selected-mic-display">
+                                    <span className="mic-label">Mic:</span>
+                                    <span className="mic-name">{selectedMic}</span>
+                                </div>
                             </div>
                         </div>
                     )}

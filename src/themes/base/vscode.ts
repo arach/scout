@@ -58,17 +58,17 @@ export const vscodeDark: Theme = {
   id: 'vscode-dark',
   name: 'VS Code Dark',
   colors: {
-    bgPrimary: '#1a1a1a',
-    bgSecondary: '#2a2a2a',
-    bgTertiary: '#303030',
-    bgHover: '#3a3a3a',
-    bgActive: '#4a4a4a',
-    bgDanger: '#2a1a1a',
+    bgPrimary: '#1e1e1e',         // VS Code's actual dark background
+    bgSecondary: '#252526',       // VS Code's sidebar background
+    bgTertiary: '#2d2d30',        // VS Code's editor group background
+    bgHover: '#3e3e42',           // VS Code's hover state
+    bgActive: '#37373d',          // VS Code's active state
+    bgDanger: '#3a1d1d',
     
-    textPrimary: '#e0e0e0',
-    textSecondary: '#b0b0b0',
-    textTertiary: '#808080',
-    textPlaceholder: '#808080',
+    textPrimary: '#cccccc',       // VS Code's default text color
+    textSecondary: '#969696',     // VS Code's secondary text
+    textTertiary: '#858585',      // VS Code's tertiary text
+    textPlaceholder: '#767676',   // VS Code's placeholder text
     textDanger: '#ef5350',
     textSuccess: '#66bb6a',
     
@@ -76,8 +76,8 @@ export const vscodeDark: Theme = {
     accentHover: '#1a8fff',
     accentActive: '#0066cc',
     
-    borderPrimary: '#3a3a3a',
-    borderHover: '#4a4a4a',
+    borderPrimary: '#464647',     // VS Code's border color
+    borderHover: '#5a5a5a',       // VS Code's hover border
     
     shadowColor: 'rgba(0, 0, 0, 0.3)',
   },

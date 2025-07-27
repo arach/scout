@@ -1,7 +1,7 @@
 import React from 'react';
 import { ThemeVariant } from '../themes/types';
 import { getAvailableThemes } from '../themes';
-import { useTheme } from '../themes/ThemeProvider';
+import { useTheme } from '../themes/useTheme';
 import './ThemeSelector.css';
 
 interface ThemeSelectorProps {

@@ -28,12 +28,10 @@ class AudioLevelStore {
 
 interface AudioContextState {
   selectedMic: string;
-  vadEnabled: boolean;
 }
 
 interface AudioContextActions {
   setSelectedMic: (mic: string) => void;
-  setVadEnabled: (enabled: boolean) => void;
   setAudioLevel: (level: number) => void;
 }
 
@@ -49,7 +47,6 @@ interface AudioProviderProps {
 
 export function AudioProvider({ children }: AudioProviderProps) {
   const [selectedMic, setSelectedMic] = useState<string>('Default microphone');
-  const [vadEnabled, setVadEnabled] = useState(false);
   const audioLevelStoreRef = useRef<AudioLevelStore>();
 
   // Create audio level store instance once
@@ -61,10 +58,6 @@ export function AudioProvider({ children }: AudioProviderProps) {
     setSelectedMic(mic);
   }, []);
 
-  const handleSetVadEnabled = useCallback((enabled: boolean) => {
-    setVadEnabled(enabled);
-  }, []);
-
   const handleSetAudioLevel = useCallback((level: number) => {
     audioLevelStoreRef.current?.setLevel(level);
   }, []);
@@ -72,10 +65,8 @@ export function AudioProvider({ children }: AudioProviderProps) {
   const value: AudioContextValue = {
     // State
     selectedMic,
-    vadEnabled,
     // Actions
     setSelectedMic: handleSetSelectedMic,
-    setVadEnabled: handleSetVadEnabled,
     setAudioLevel: handleSetAudioLevel,
     // Store
     audioLevelStore: audioLevelStoreRef.current!,

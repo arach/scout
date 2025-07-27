@@ -17,7 +17,6 @@ interface SettingsViewProps {
     hotkeyUpdateStatus: 'idle' | 'success' | 'error';
     pushToTalkHotkey: string;
     isCapturingPushToTalkHotkey: boolean;
-    vadEnabled: boolean;
     overlayPosition: string;
     overlayTreatment: string;
     autoCopy: boolean;
@@ -34,7 +33,6 @@ interface SettingsViewProps {
     startCapturingHotkey: () => void;
     startCapturingPushToTalkHotkey: () => void;
     stopCapturingPushToTalkHotkey: () => void;
-    toggleVAD: () => void;
     updateOverlayPosition: (position: string) => void;
     updateOverlayTreatment: (treatment: string) => void;
     toggleAutoCopy: () => void;
@@ -55,7 +53,6 @@ export const SettingsView = memo(function SettingsView({
     hotkeyUpdateStatus,
     pushToTalkHotkey,
     isCapturingPushToTalkHotkey,
-    vadEnabled,
     overlayPosition,
     overlayTreatment,
     autoCopy,
@@ -72,7 +69,6 @@ export const SettingsView = memo(function SettingsView({
     startCapturingHotkey,
     startCapturingPushToTalkHotkey,
     stopCapturingPushToTalkHotkey,
-    toggleVAD,
     updateOverlayPosition,
     updateOverlayTreatment,
     toggleAutoCopy,
@@ -477,20 +473,6 @@ export const SettingsView = memo(function SettingsView({
                             />
                         </div>
                         
-                        <div className="setting-item">
-                            <label>
-                                <input
-                                    type="checkbox"
-                                    checked={vadEnabled}
-                                    onChange={toggleVAD}
-                                />
-                                Voice Activity Detection
-                            </label>
-                            <p className="setting-hint">
-                                Automatically start recording when you speak
-                            </p>
-                        </div>
-
                     </div>
                 </div>
 
@@ -507,11 +489,7 @@ export const SettingsView = memo(function SettingsView({
                                             <span className={`collapse-arrow ${isModelManagerExpanded ? 'expanded' : ''}`}>
                                                 ▶
                                             </span>
-                                            Transcription Models
-                                            <span className="ai-badge">
-                                                (AI)
-                                                <Sparkles size={16} className="sparkle-icon" />
-                                            </span>
+                                            Transcription Models (AI) <Sparkles size={16} className="sparkle-icon" />
                                         </h3>
                                         <p className="collapsible-subtitle">
                                             Download and manage AI models for transcription

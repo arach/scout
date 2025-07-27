@@ -4,63 +4,63 @@ export const terminalChic: Theme = {
   id: 'terminal-chic',
   name: 'Terminal Chic',
   colors: {
-    // High contrast terminal backgrounds with better separation
-    bgPrimary: '#0f0f0f',           // Slightly lighter for better contrast
-    bgSecondary: '#1a1a1a',         // More distinct secondary
-    bgTertiary: '#252525',          // Better card contrast
-    bgHover: '#2a2a2a',             // More visible hover state
-    bgActive: '#333333',            // Clear active state
-    bgDanger: '#2a1515',            // Clearer danger state
-    bgOverlay: 'rgba(0, 0, 0, 0.95)',
+    // Simplified dark color scheme
+    bgPrimary: '#1a1a1a',           // Very dark background
+    bgSecondary: '#1a1a1a',         // Same dark for consistency
+    bgTertiary: '#1a1a1a',          // No color variations - pure black theme
+    bgHover: '#2a2a2a',             // Subtle hover state
+    bgActive: '#333333',            // Slightly brighter active state
+    bgDanger: '#3a1a1a',            // Subtle red tint for danger
+    bgOverlay: 'rgba(26, 26, 26, 0.98)',
     
-    // Terminal-inspired text colors
-    textPrimary: '#e0e0e0',         // Bright terminal text
-    textSecondary: '#a0a0a0',       // Dimmed terminal text
-    textTertiary: '#606060',        // Even more dimmed text
+    // All text in light colors - no green
+    textPrimary: '#f0f0f0',         // Light gray for primary text
+    textSecondary: '#b0b0b0',       // Medium gray for secondary text
+    textTertiary: '#808080',        // Darker gray for tertiary text
     textPlaceholder: '#606060',     // Subtle placeholder
-    textDanger: '#ff4444',          // Terminal red
-    textSuccess: '#00ff41',         // Classic terminal green
+    textDanger: '#ff6b6b',          // Soft red for errors
+    textSuccess: '#f0f0f0',         // No green - use same as primary
     
-    // Subtle white/grey accents instead of strong green
-    accentPrimary: '#ffffff',       // Clean white
-    accentHover: '#f0f0f0',         // Light grey hover
+    // Minimal accent colors
+    accentPrimary: '#f0f0f0',       // Light gray accent
+    accentHover: '#ffffff',         // White on hover
     accentActive: '#e0e0e0',        // Slightly darker active
     
-    // Ultra-thin borders for that sleek terminal feel
-    borderPrimary: '#404040',       // More visible grey border
-    borderHover: '#555555',         // Brighter on hover for contrast
+    // Very subtle borders
+    borderPrimary: '#333333',       // Subtle border
+    borderHover: '#404040',         // Slightly brighter on hover
     
     // Minimal shadows
-    shadowColor: 'rgba(0, 0, 0, 0.8)',
-    overlayBackdrop: 'rgba(0, 0, 0, 0.9)',
+    shadowColor: 'rgba(0, 0, 0, 0.5)',
+    overlayBackdrop: 'rgba(0, 0, 0, 0.95)',
   },
   typography: {
-    // Pure monospace for that authentic terminal feel
+    // Monospace font stack for terminal aesthetic
     fontFamily: '"SF Mono", "JetBrains Mono", "Fira Code", Monaco, Consolas, "Courier New", monospace',
     fontFamilyMono: '"SF Mono", "JetBrains Mono", "Fira Code", Monaco, Consolas, "Courier New", monospace',
     fontSize: {
-      small: '9px',     // More compact terminal text
-      base: '11px',     // Smaller standard terminal size
-      large: '12px',    // Smaller headers
-      xlarge: '14px',   // Smaller titles
+      small: '11px',    // Small but readable
+      base: '12px',     // Compact base size for tech-savvy users
+      large: '14px',    // Modest headers
+      xlarge: '16px',   // Still relatively small titles
     },
     fontWeight: {
-      normal: 300,      // Light weight for that thin terminal look
-      medium: 400,      // Standard weight, still light
-      bold: 500,        // "Bold" is just medium weight
+      normal: 400,      // Normal weight for better readability
+      medium: 500,      // Medium weight
+      bold: 600,        // Actual bold for emphasis
     },
     lineHeight: {
-      tight: '1.0',     // Very tight for terminal density
-      normal: '1.2',    // Compact normal spacing
-      relaxed: '1.4',   // Still quite tight
+      tight: '1.3',     // Tight but not cramped
+      normal: '1.5',    // Good readability
+      relaxed: '1.6',   // Comfortable spacing
     },
   },
   layout: {
-    borderRadius: '0px',              // Sharp, geometric edges
-    transition: 'all 0.1s ease-out', // Snappy, minimal transitions
+    borderRadius: '0px',              // Sharp corners - no rounded edges
+    transition: 'all 0.1s ease-out', // Snappy transitions
     overlayPosition: 'top-right',
-    overlayOpacity: 0.95,
-    animations: 'minimal',            // Very subtle animations
+    overlayOpacity: 0.98,
+    animations: 'minimal',            // Minimal animations
   },
 };
 

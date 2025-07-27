@@ -5512,6 +5512,7 @@ dependencies = [
  "objc",
  "once_cell",
  "rdev",
+ "regex",
  "reqwest 0.11.27",
  "safetensors 0.6.0",
  "serde",

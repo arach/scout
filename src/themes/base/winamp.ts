@@ -4,11 +4,11 @@ export const winampClassic: Theme = {
   id: 'winamp-classic',
   name: 'Winamp Classic',
   colors: {
-    bgPrimary: '#232323',
-    bgSecondary: '#1a1a1a',
-    bgTertiary: '#0a0a0a',
-    bgHover: '#333333',
-    bgActive: '#434343',
+    bgPrimary: '#000000',        // Pure black like classic Winamp
+    bgSecondary: '#1a1a1a',      // Slightly lighter for headers
+    bgTertiary: '#232323',       // More visible for transcript boxes
+    bgHover: '#333333',          // Clear hover state
+    bgActive: '#434343',         // Active state
     bgDanger: '#3a0a0a',
     bgOverlay: '#0a0a0a',
     
@@ -23,8 +23,8 @@ export const winampClassic: Theme = {
     accentHover: '#33ff33',
     accentActive: '#00cc00',
     
-    borderPrimary: '#333333',
-    borderHover: '#444444',
+    borderPrimary: '#00ff00',     // Classic Winamp green border
+    borderHover: '#33ff33',       // Brighter green on hover
     
     shadowColor: 'rgba(0, 255, 0, 0.2)',
   },

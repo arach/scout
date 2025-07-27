@@ -90,7 +90,7 @@ export function invokeTyped<T = any>(
 // Specific typed invoke functions for better type inference
 export const tauriApi = {
   // Recording commands
-  startRecording: (args: { device_name?: string | null; vad_enabled?: boolean }) => 
+  startRecording: (args: { device_name?: string | null }) => 
     invokeTyped<string>('start_recording', args),
   stopRecording: () => 
     invokeTyped<string>('stop_recording'),

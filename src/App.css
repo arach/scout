@@ -111,10 +111,13 @@ h1 {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 12px;
+  padding: 8px 16px;
   border-bottom: 1px solid var(--border-primary);
   background-color: var(--bg-secondary);
-  min-height: 32px;
+  min-height: 40px;
+  height: 40px; /* Increased height for more breathing room */
+  box-sizing: border-box;
+  position: relative; /* This fixed the alignment issue */
 }
 
 .view-header-left,
@@ -123,6 +126,27 @@ h1 {
   align-items: center;
   width: 32px; /* Fixed width to keep buttons in same position */
   height: 24px;
+}
+
+.view-header-center {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.view-title {
+  font-family: 'Silkscreen', monospace;
+  font-size: 20px;
+  font-weight: 400;
+  color: var(--text-primary);
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  height: 20px; /* Explicit height */
 }
 
 /* Both left and right containers should left-align their content 
@@ -142,6 +166,17 @@ h1 {
   cursor: pointer;
   transition: all 0.15s ease;
   padding: 0;
+  /* Ensure consistent icon positioning */
+  position: relative;
+}
+
+/* Ensure icons are perfectly centered */
+.sidebar-toggle-button svg,
+.sidebar-close-button svg {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
 }
 
 .sidebar-toggle-button:hover,
@@ -1064,7 +1099,7 @@ h1 {
 .settings-view {
   max-width: 800px;
   margin: 0 auto;
-  padding: var(--space-5) var(--space-4) var(--space-4) var(--space-4);
+  padding: 40px 32px 20px 32px; /* Match TranscriptsView padding */
 }
 
 .settings-body {

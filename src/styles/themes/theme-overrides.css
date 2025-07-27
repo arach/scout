@@ -128,21 +128,10 @@
   /* Force monospace font everywhere */
   * {
     font-family: var(--font-family-mono) !important;
-    font-weight: var(--font-weight-normal) !important;
   }
   
-  /* Remove all border radius */
-  .container,
-  .settings-section,
-  .transcript-item,
-  .record-button,
-  .upload-button,
-  input,
-  select,
-  textarea,
-  button,
-  .btn {
-    border-width: 1px !important;
+  /* Remove all border radius - sharp rectangular edges */
+  * {
     border-radius: 0 !important;
   }
   
@@ -151,8 +140,9 @@
   input[type="search"],
   select,
   textarea {
-    background: var(--bg-primary);
-    border: 1px solid var(--border-primary);
+    background: var(--bg-primary) !important;
+    border: 1px solid var(--border-primary) !important;
+    color: var(--text-primary) !important;
     transition: var(--transition-fast);
   }
   
@@ -160,30 +150,55 @@
   input[type="search"]:focus,
   select:focus,
   textarea:focus {
-    border-color: var(--accent-primary);
-    box-shadow: 0 0 0 1px var(--accent-primary);
+    border-color: var(--border-hover) !important;
+    box-shadow: none !important;
     outline: none;
+  }
+  
+  /* Search input specific styles */
+  .search-input {
+    background: var(--bg-primary) !important;
+    border: 1px solid var(--border-primary) !important;
+    color: var(--text-primary) !important;
+    font-family: var(--font-family-mono) !important;
+    font-size: var(--font-size-base) !important;
+  }
+  
+  .search-input:focus {
+    border-color: var(--border-hover) !important;
+    box-shadow: none !important;
+  }
+  
+  .search-input::placeholder {
+    color: var(--text-placeholder) !important;
+    opacity: 0.6; /* Ensure placeholder is visible but subtle */
   }
   
   /* Terminal-style buttons */
   button,
   .record-button,
   .upload-button,
-  .btn {
-    background: var(--bg-primary);
-    border: 1px solid var(--border-primary);
-    color: var(--text-primary);
+  .btn,
+  .header-action-btn {
+    background: var(--bg-primary) !important;
+    border: 1px solid var(--border-primary) !important;
+    color: var(--text-primary) !important;
     transition: var(--transition-fast);
     transform: none !important;
     box-shadow: none !important;
+    font-family: var(--font-family-mono) !important;
+    font-size: var(--font-size-small) !important;
+    font-weight: var(--font-weight-medium) !important;
   }
   
   button:hover,
   .record-button:hover,
   .upload-button:hover,
-  .btn:hover {
-    background: var(--bg-secondary);
-    border-color: var(--accent-primary);
+  .btn:hover,
+  .header-action-btn:hover {
+    background: var(--bg-hover) !important;
+    border-color: var(--border-hover) !important;
+    transform: none !important;
   }
   
   /* Primary action buttons */
@@ -287,10 +302,45 @@
     border-radius: 0;
   }
   
-  /* Fast animations */
+  /* Fast animations for most elements */
   * {
     transition-duration: 0.1s !important;
     animation-duration: 0.1s !important;
+  }
+  
+  /* Slower animations for sidebar and view transitions */
+  .sidebar {
+    transition: width 0.3s ease !important;
+  }
+  
+  .sidebar-button {
+    transition: all 0.25s ease !important;
+  }
+  
+  .app-main,
+  .record-view,
+  .transcripts-view,
+  .settings-view {
+    transition-duration: 0.3s !important;
+  }
+  
+  .transcript-item,
+  .transcript-group {
+    transition-duration: 0.2s !important;
+  }
+  
+  /* Even slower for fade animations */
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  
+  .transcript-item {
+    animation: fadeIn 0.3s ease-out !important;
   }
   
   /* Active states */
@@ -317,23 +367,92 @@
   --success: #00ff41;
   --recording: #ff4444;
   
-  /* Better contrast for dark theme */
+  /* Completely borderless transcript view */
+  .transcripts-view {
+    background: var(--bg-primary) !important;
+  }
+  
+  /* Force dark backgrounds for all transcript view components */
+  .transcript-list-container,
+  .transcript-group-items {
+    background: var(--bg-primary) !important;
+  }
+  
+  /* Remove all borders from transcript groups */
+  .transcript-group {
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    margin-bottom: 24px !important;
+  }
+  
+  /* Borderless group headers */
+  .transcript-group-header {
+    background: transparent !important;
+    border-bottom: 1px solid var(--border-primary) !important;
+  }
+  
+  /* Clean transcript items */
   .transcript-item {
-    background: var(--bg-tertiary) !important;
-    border: 1px solid var(--border-primary) !important;
+    background: transparent !important;
+    border: none !important;
+    border-bottom: 1px solid var(--border-primary) !important;
   }
   
   .transcript-item:hover {
     background: var(--bg-hover) !important;
   }
   
-  .transcripts-view {
-    background: var(--bg-primary) !important;
+  /* Fix double border issue - remove border from last item in each group */
+  .transcript-group-items .transcript-item:last-child {
+    border-bottom: none !important;
   }
   
-  .transcript-group {
-    background: var(--bg-secondary) !important;
+  /* Ensure text uses proper colors */
+  .transcript-text {
+    color: var(--text-primary) !important;
+  }
+  
+  .transcript-time {
+    color: var(--text-secondary) !important;
+  }
+  
+  .transcript-empty {
+    color: var(--text-tertiary) !important;
+  }
+  
+  /* Better contrast for search input */
+  .search-input {
+    background: #2a2a2a !important; /* Lighter than bg-primary for better visibility */
+    border: 1px solid #404040 !important; /* More visible border */
+    color: #f0f0f0 !important;
+  }
+  
+  .search-input:focus {
+    background: #333333 !important; /* Even lighter when focused */
+    border-color: #606060 !important;
+  }
+  
+  .search-input::placeholder {
+    color: #808080 !important; /* More visible placeholder */
+  }
+  
+  /* Clean action gradient */
+  .transcript-actions {
+    background: linear-gradient(to left, transparent, transparent 15%, var(--bg-primary) 40%) !important;
+  }
+  
+  /* Minimal action buttons */
+  .transcript-action-button {
+    background: transparent !important;
     border: 1px solid var(--border-primary) !important;
+    color: var(--text-secondary) !important;
+  }
+  
+  .transcript-action-button:hover:not(:disabled) {
+    background: var(--bg-hover) !important;
+    border-color: var(--border-hover) !important;
+    color: var(--text-primary) !important;
   }
 }
 

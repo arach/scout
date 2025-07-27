@@ -8,6 +8,7 @@ import { Sidebar, useSidebarState } from "./Sidebar";
 import { RecordView } from "./RecordView";
 import { TranscriptsView } from "./TranscriptsView";
 import { SettingsView } from "./SettingsView";
+import { StatsView } from "./StatsView";
 import { AudioErrorBoundary, TranscriptionErrorBoundary, SettingsErrorBoundary } from './ErrorBoundary';
 import { ChevronRight, PanelLeftClose } from 'lucide-react';
 import { useRecording } from '../hooks/useRecording';
@@ -30,7 +31,7 @@ export function AppContent() {
   const { isExpanded: isSidebarExpanded, toggleExpanded: toggleSidebar } = useSidebarState();
   
   // Context state
-  const { selectedMic, vadEnabled, setSelectedMic, setVadEnabled } = useAudioContext();
+  const { selectedMic, setSelectedMic } = useAudioContext();
   const { 
     transcripts, 
     searchQuery, 
@@ -161,7 +162,6 @@ export function AppContent() {
     onRecordingStart: onRecordingStartCallback, // Always pass the callback to handle onboarding
     soundEnabled,
     selectedMic,
-    vadEnabled,
     pushToTalkShortcut: (showFirstRun && !isOnboardingTourStep) ? '' : pushToTalkHotkey, // Enable shortcuts only on tour step
     isRecordViewActive: !showFirstRun && currentView === 'record'
   });
@@ -500,7 +500,7 @@ export function AppContent() {
       <main className={`app-main ${!isSidebarExpanded ? 'sidebar-collapsed' : ''}`}>
         <div className="view-header">
           <div className="view-header-left">
-            {!isSidebarExpanded && (
+            {!isSidebarExpanded ? (
               <button
                 className="sidebar-toggle-button"
                 onClick={toggleSidebar}
@@ -508,10 +508,7 @@ export function AppContent() {
               >
                 <ChevronRight size={16} />
               </button>
-            )}
-          </div>
-          <div className="view-header-right">
-            {isSidebarExpanded && (
+            ) : (
               <button
                 className="sidebar-close-button"
                 onClick={toggleSidebar}
@@ -520,6 +517,17 @@ export function AppContent() {
                 <PanelLeftClose size={16} />
               </button>
             )}
+          </div>
+          <div className="view-header-center">
+            <h1 className="view-title">
+              {currentView === 'record' && 'Recording'}
+              {currentView === 'transcripts' && 'Transcripts'}
+              {currentView === 'settings' && 'Settings'}
+              {currentView === 'stats' && 'Stats'}
+            </h1>
+          </div>
+          <div className="view-header-right">
+            {/* Empty for now, but available for future controls */}
           </div>
         </div>
 
@@ -574,7 +582,6 @@ export function AppContent() {
               hotkeyUpdateStatus={hotkeyUpdateStatus}
               pushToTalkHotkey={pushToTalkHotkey}
               isCapturingPushToTalkHotkey={isCapturingPushToTalkHotkey}
-              vadEnabled={vadEnabled}
               overlayPosition={overlayPosition}
               overlayTreatment={overlayTreatment}
               autoCopy={autoCopy}
@@ -591,7 +598,6 @@ export function AppContent() {
               startCapturingHotkey={() => setIsCapturingHotkey(true)}
               startCapturingPushToTalkHotkey={() => setIsCapturingPushToTalkHotkey(true)}
               stopCapturingPushToTalkHotkey={() => setIsCapturingPushToTalkHotkey(false)}
-              toggleVAD={() => setVadEnabled(!vadEnabled)}
               updateOverlayPosition={updateOverlayPosition}
               updateOverlayTreatment={updateOverlayTreatment}
               toggleAutoCopy={toggleAutoCopy}
@@ -606,6 +612,9 @@ export function AppContent() {
               updateLLMSettings={updateLLMSettings}
             />
           </SettingsErrorBoundary>
+        )}
+        {currentView === 'stats' && (
+          <StatsView />
         )}
 
         {/* File drop overlay */}
@@ -681,7 +690,6 @@ export function AppContent() {
         transcripts={transcripts}
         searchQuery={searchQuery}
         selectedTranscripts={selectedTranscripts}
-        vadEnabled={vadEnabled}
         hotkey={hotkey}
         pushToTalkHotkey={pushToTalkHotkey}
         appVersion="0.1.0"

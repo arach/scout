@@ -23,7 +23,6 @@ interface UseRecordingOptions {
   onRecordingStart?: () => void;
   soundEnabled?: boolean;
   selectedMic?: string;
-  vadEnabled?: boolean;
   pushToTalkShortcut?: string;
   isRecordViewActive?: boolean;
 }
@@ -35,7 +34,6 @@ export function useRecording(options: UseRecordingOptions = {}) {
     onRecordingStart,
     soundEnabled = true,
     selectedMic = 'Default microphone',
-    vadEnabled = false,
     pushToTalkShortcut = '',
     isRecordViewActive = false
   } = options;
@@ -255,30 +253,19 @@ export function useRecording(options: UseRecordingOptions = {}) {
       clearTimeout(pushToTalkTimeoutRef.current);
     }
     
-    const minimumRecordingTime = vadEnabled ? 50 : 300;
+    const minimumRecordingTime = 300;
     
     const currentlyRecording = isRecordingRef.current || recordingContext.state.isRecording;
     loggers.recording.debug('Push-to-talk timing', { recordingTime, minimumRecordingTime, isRecording: currentlyRecording });
     
     if (currentlyRecording && recordingTime >= minimumRecordingTime) {
-      if (vadEnabled) {
-        loggers.recording.debug('VAD enabled, setting timeout to stop recording');
-        pushToTalkTimeoutRef.current = setTimeout(async () => {
-          const stillRecording = isRecordingRef.current || recordingContext.state.isRecording;
-          if (stillRecording) {
-            loggers.recording.debug('Stopping recording after VAD timeout');
-            await stopRecording();
-          }
-        }, 500);
-      } else {
-        loggers.recording.debug('VAD disabled, stopping recording immediately');
-        await stopRecording();
-      }
+      loggers.recording.debug('Stopping recording immediately');
+      await stopRecording();
     } else if (currentlyRecording) {
       loggers.recording.debug('Recording time too short, stopping anyway');
       await stopRecording();
     }
-  }, [stopRecording, vadEnabled]);
+  }, [stopRecording]);
 
   // Use push-to-talk monitor to detect key release in the frontend
   usePushToTalkMonitor({

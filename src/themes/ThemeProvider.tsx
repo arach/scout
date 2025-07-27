@@ -1,18 +1,10 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { ThemeVariant, ThemeContextType, Theme } from './types';
+import React, { useEffect, useState } from 'react';
+import { ThemeContextType, Theme } from './types';
+import { ThemeVariant, THEME_VARIANTS } from './config';
 import { getTheme, getThemeAsync, applyTheme, themes, preloadTheme } from './index';
 import { useSettings } from '../hooks/useSettings';
 import { vscodeDark } from './base/vscode';
-
-const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
-
-export const useTheme = (): ThemeContextType => {
-  const context = useContext(ThemeContext);
-  if (!context) {
-    throw new Error('useTheme must be used within a ThemeProvider');
-  }
-  return context;
-};
+import { ThemeContext } from './ThemeContext';
 
 interface ThemeProviderProps {
   children: React.ReactNode;
@@ -82,10 +74,9 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
     updateSettings({ selectedTheme: themeId });
     
     // Preload adjacent themes for faster switching
-    const allThemeIds: ThemeVariant[] = ['vscode-light', 'vscode-dark', 'minimal-overlay', 'winamp-classic', 'winamp-modern', 'terminal-chic', 'terminal-chic-light'];
-    const currentIndex = allThemeIds.indexOf(themeId);
-    if (currentIndex > 0) preloadTheme(allThemeIds[currentIndex - 1]);
-    if (currentIndex < allThemeIds.length - 1) preloadTheme(allThemeIds[currentIndex + 1]);
+    const currentIndex = THEME_VARIANTS.indexOf(themeId);
+    if (currentIndex > 0) preloadTheme(THEME_VARIANTS[currentIndex - 1]);
+    if (currentIndex < THEME_VARIANTS.length - 1) preloadTheme(THEME_VARIANTS[currentIndex + 1]);
     
     // Also update the legacy theme setting for backward compatibility
     if (themeId === 'vscode-light') {
