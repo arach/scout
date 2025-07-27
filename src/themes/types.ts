@@ -1,12 +1,5 @@
-export type ThemeVariant = 
-  | 'vscode-light' 
-  | 'vscode-dark'
-  | 'minimal-overlay'
-  | 'winamp-classic' 
-  | 'winamp-modern'
-  | 'terminal-chic'
-  | 'terminal-chic-light'
-  | 'system';
+import { ThemeVariant } from './config';
+export type { ThemeVariant };
 
 export interface ThemeColors {
   // Background colors

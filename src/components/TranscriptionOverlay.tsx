@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { safeEventListen } from '../lib/safeEventListener';
 import { useResizable } from '../hooks/useResizable';
-import { useTheme } from '../themes/ThemeProvider';
+import { useTheme } from '../themes/useTheme';
 import { useSettings } from '../hooks/useSettings';
 import { useAudioLevel } from '../contexts/AudioContext';
 import './TranscriptionOverlay.css';

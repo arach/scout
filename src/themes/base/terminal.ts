@@ -5,13 +5,13 @@ export const terminalChic: Theme = {
   name: 'Terminal Chic',
   colors: {
     // High contrast terminal backgrounds with better separation
-    bgPrimary: '#000000',           // Pure black terminal background
-    bgSecondary: '#0a0a0a',         // Very subtle secondary
-    bgTertiary: '#1a1a1a',          // More visible card contrast
-    bgHover: '#252525',             // Clear hover state
-    bgActive: '#303030',            // Distinct active state
-    bgDanger: '#2a1515',            // Clearer danger state
-    bgOverlay: 'rgba(0, 0, 0, 0.95)',
+    bgPrimary: '#2a2a2a',           // Medium gray background
+    bgSecondary: '#404040',         // Darker for headers
+    bgTertiary: '#505050',          // Much lighter for transcript cards
+    bgHover: '#606060',             // Even lighter on hover
+    bgActive: '#707070',            // Clear active state
+    bgDanger: '#5a3a3a',            // Reddish danger state
+    bgOverlay: 'rgba(42, 42, 42, 0.95)',
     
     // Terminal-inspired text colors
     textPrimary: '#e0e0e0',         // Bright terminal text
@@ -27,8 +27,8 @@ export const terminalChic: Theme = {
     accentActive: '#e0e0e0',        // Slightly darker active
     
     // Ultra-thin borders for that sleek terminal feel
-    borderPrimary: '#333333',       // More visible grey border
-    borderHover: '#444444',         // Brighter on hover for contrast
+    borderPrimary: '#7a7a7a',       // Much brighter border
+    borderHover: '#8a8a8a',         // Even brighter on hover
     
     // Minimal shadows
     shadowColor: 'rgba(0, 0, 0, 0.8)',
