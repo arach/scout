@@ -1,0 +1,422 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { Book, Plus, Search, Download, Upload, Trash2, Edit2, Eye, EyeOff, Hash, TestTube } from 'lucide-react';
+import { tauriApi } from '../types/tauri';
+import { DictionaryEntry, DictionaryEntryInput, MatchType } from '../types/dictionary';
+import { Dropdown } from './Dropdown';
+import './DictionaryView.css';
+
+const getMatchTypeLabel = (type: MatchType): string => {
+  switch (type) {
+    case 'exact': return 'Exact';
+    case 'word': return 'Word';
+    case 'phrase': return 'Phrase';
+    case 'regex': return 'Regex';
+    default: return type;
+  }
+};
+
+export const DictionaryStandalone: React.FC = () => {
+  const [entries, setEntries] = useState<DictionaryEntry[]>([]);
+  const [filteredEntries, setFilteredEntries] = useState<DictionaryEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<DictionaryEntry | null>(null);
+  const [testText, setTestText] = useState('');
+  const [testResult, setTestResult] = useState('');
+  const [showTestPanel, setShowTestPanel] = useState(false);
+  
+  // Form state
+  const [formData, setFormData] = useState<DictionaryEntryInput>({
+    original_text: '',
+    replacement_text: '',
+    match_type: 'exact',
+    is_case_sensitive: false,
+    is_enabled: true,
+    category: '',
+    description: ''
+  });
+
+  const loadEntries = async () => {
+    try {
+      setLoading(true);
+      const data = await tauriApi.getDictionaryEntries();
+      setEntries(data);
+      setFilteredEntries(data);
+    } catch (error) {
+      console.error('Failed to load dictionary entries:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadEntries();
+  }, []);
+
+  useEffect(() => {
+    // Filter entries based on search query
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      setFilteredEntries(entries.filter(entry => 
+        entry.original_text.toLowerCase().includes(query) ||
+        entry.replacement_text.toLowerCase().includes(query) ||
+        (entry.category && entry.category.toLowerCase().includes(query)) ||
+        (entry.description && entry.description.toLowerCase().includes(query))
+      ));
+    } else {
+      setFilteredEntries(entries);
+    }
+  }, [searchQuery, entries]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    try {
+      if (editingEntry) {
+        await tauriApi.updateDictionaryEntry(editingEntry.id, formData);
+      } else {
+        await tauriApi.saveDictionaryEntry(formData);
+      }
+      
+      // Reset form
+      setFormData({
+        original_text: '',
+        replacement_text: '',
+        match_type: 'exact',
+        is_case_sensitive: false,
+        is_enabled: true,
+        category: '',
+        description: ''
+      });
+      setShowAddForm(false);
+      setEditingEntry(null);
+      
+      // Reload entries
+      loadEntries();
+    } catch (error) {
+      console.error('Failed to save dictionary entry:', error);
+    }
+  };
+
+  const handleEdit = (entry: DictionaryEntry) => {
+    setEditingEntry(entry);
+    setFormData({
+      original_text: entry.original_text,
+      replacement_text: entry.replacement_text,
+      match_type: entry.match_type,
+      is_case_sensitive: entry.is_case_sensitive,
+      is_enabled: entry.is_enabled,
+      category: entry.category || '',
+      description: entry.description || ''
+    });
+    setShowAddForm(true);
+  };
+
+  const handleDelete = async (id: number) => {
+    if (confirm('Are you sure you want to delete this entry?')) {
+      try {
+        await tauriApi.deleteDictionaryEntry(id);
+        loadEntries();
+      } catch (error) {
+        console.error('Failed to delete dictionary entry:', error);
+      }
+    }
+  };
+
+  const handleToggleEnabled = async (entry: DictionaryEntry) => {
+    try {
+      await tauriApi.updateDictionaryEntry(entry.id, {
+        ...entry,
+        is_enabled: !entry.is_enabled
+      });
+      loadEntries();
+    } catch (error) {
+      console.error('Failed to toggle dictionary entry:', error);
+    }
+  };
+
+  const handleTest = async () => {
+    if (!testText.trim()) return;
+    
+    try {
+      const result = await tauriApi.testDictionaryReplacement(testText);
+      setTestResult(result);
+    } catch (error) {
+      console.error('Failed to test replacement:', error);
+    }
+  };
+
+  // Group entries by category
+  const groupedEntries = filteredEntries.reduce((acc, entry) => {
+    const category = entry.category || 'Uncategorized';
+    if (!acc[category]) {
+      acc[category] = [];
+    }
+    acc[category].push(entry);
+    return acc;
+  }, {} as Record<string, DictionaryEntry[]>);
+
+  return (
+    <div className="dictionary-view-page">
+      <div className="page-header">
+        <h1>Dictionary</h1>
+        <p>Manage custom text replacements for your transcriptions</p>
+      </div>
+
+      {/* Controls Bar */}
+      <div className="dictionary-controls">
+        <div className="search-container">
+          <Search size={16} className="search-icon" />
+          <input
+            type="text"
+            placeholder="Search dictionary entries..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="search-input"
+          />
+        </div>
+        <div className="control-buttons">
+          <button
+            className="control-button test-button"
+            onClick={() => setShowTestPanel(!showTestPanel)}
+            title="Test replacements"
+          >
+            <TestTube size={16} />
+            Test
+          </button>
+          <button
+            className="control-button add-button"
+            onClick={() => {
+              setEditingEntry(null);
+              setFormData({
+                original_text: '',
+                replacement_text: '',
+                match_type: 'exact',
+                is_case_sensitive: false,
+                is_enabled: true,
+                category: '',
+                description: ''
+              });
+              setShowAddForm(true);
+            }}
+          >
+            <Plus size={16} />
+            Add Entry
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="dictionary-loading">Loading dictionary entries...</div>
+      ) : (
+        <>
+          {/* Test Panel */}
+          {showTestPanel && (
+            <div className="dictionary-test-panel">
+              <h4>Test Dictionary Replacements</h4>
+              <div className="test-input-group">
+                <textarea
+                  placeholder="Enter text to test replacements..."
+                  value={testText}
+                  onChange={(e) => setTestText(e.target.value)}
+                  rows={3}
+                />
+                <button onClick={handleTest} className="test-button">
+                  Test
+                </button>
+              </div>
+              {testResult && (
+                <div className="test-result">
+                  <label>Result:</label>
+                  <div className="test-result-text">{testResult}</div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Add/Edit Form */}
+          {showAddForm && (
+            <form onSubmit={handleSubmit} className="dictionary-form">
+              <h4>{editingEntry ? 'Edit Entry' : 'Add New Entry'}</h4>
+              
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Original Text*</label>
+                  <input
+                    type="text"
+                    value={formData.original_text}
+                    onChange={(e) => setFormData(prev => ({ ...prev, original_text: e.target.value }))}
+                    required
+                    placeholder="e.g., api"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Replacement Text*</label>
+                  <input
+                    type="text"
+                    value={formData.replacement_text}
+                    onChange={(e) => setFormData(prev => ({ ...prev, replacement_text: e.target.value }))}
+                    required
+                    placeholder="e.g., API"
+                  />
+                </div>
+              </div>
+
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Match Type</label>
+                  <Dropdown
+                    options={[
+                      { value: 'exact', label: 'Exact Match' },
+                      { value: 'word', label: 'Word Boundary' },
+                      { value: 'phrase', label: 'Phrase' },
+                      { value: 'regex', label: 'Regular Expression' }
+                    ]}
+                    value={formData.match_type}
+                    onChange={(value) => setFormData(prev => ({ ...prev, match_type: value as MatchType }))}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Category</label>
+                  <input
+                    type="text"
+                    value={formData.category || ''}
+                    onChange={(e) => setFormData(prev => ({ ...prev, category: e.target.value }))}
+                    placeholder="e.g., Technical"
+                  />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label>Description</label>
+                <input
+                  type="text"
+                  value={formData.description || ''}
+                  onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+                  placeholder="Optional description"
+                />
+              </div>
+
+              <div className="form-checkboxes">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={formData.is_case_sensitive}
+                    onChange={(e) => setFormData(prev => ({ ...prev, is_case_sensitive: e.target.checked }))}
+                  />
+                  Case Sensitive
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={formData.is_enabled}
+                    onChange={(e) => setFormData(prev => ({ ...prev, is_enabled: e.target.checked }))}
+                  />
+                  Enabled
+                </label>
+              </div>
+
+              <div className="form-actions">
+                <button type="submit" className="submit-button">
+                  {editingEntry ? 'Update' : 'Add'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddForm(false);
+                    setEditingEntry(null);
+                    setFormData({
+                      original_text: '',
+                      replacement_text: '',
+                      match_type: 'exact',
+                      is_case_sensitive: false,
+                      is_enabled: true,
+                      category: '',
+                      description: ''
+                    });
+                  }}
+                  className="cancel-button"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* Entries List */}
+          <div className="dictionary-entries">
+            {Object.keys(groupedEntries).length === 0 ? (
+              <div className="dictionary-empty">
+                <p>No dictionary entries yet.</p>
+                <p>Add entries to automatically replace text in your transcripts.</p>
+              </div>
+            ) : (
+              Object.entries(groupedEntries).map(([category, categoryEntries]) => (
+                <div key={category} className="dictionary-category">
+                  <h5 className="category-title">{category}</h5>
+                  <div className="entries-list">
+                    {categoryEntries.map(entry => (
+                      <div key={entry.id} className={`dictionary-entry ${!entry.is_enabled ? 'disabled' : ''}`}>
+                        <div className="entry-header">
+                          <div className="entry-text">
+                            <span className="original-text">{entry.original_text}</span>
+                            <span className="arrow">→</span>
+                            <span className="replacement-text">{entry.replacement_text}</span>
+                          </div>
+                          <div className="entry-actions">
+                            <button
+                              onClick={() => handleToggleEnabled(entry)}
+                              className="icon-button"
+                              title={entry.is_enabled ? 'Disable' : 'Enable'}
+                            >
+                              {entry.is_enabled ? <Eye size={14} /> : <EyeOff size={14} />}
+                            </button>
+                            <button
+                              onClick={() => handleEdit(entry)}
+                              className="icon-button"
+                              title="Edit"
+                            >
+                              <Edit2 size={14} />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(entry.id)}
+                              className="icon-button delete"
+                              title="Delete"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </div>
+                        <div className="entry-details">
+                          <span className="match-type">{getMatchTypeLabel(entry.match_type)}</span>
+                          {entry.is_case_sensitive && <span className="case-sensitive">Case Sensitive</span>}
+                          {entry.usage_count > 0 && (
+                            <span className="usage-count">
+                              <Hash size={12} />
+                              {entry.usage_count} uses
+                            </span>
+                          )}
+                        </div>
+                        {entry.description && (
+                          <div className="entry-description">{entry.description}</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Footer */}
+          <div className="dictionary-footer">
+            <p className="footer-hint">
+              Dictionary replacements are applied automatically to new transcripts.
+            </p>
+          </div>
+        </>
+      )}
+    </div>
+  );
+};

@@ -177,6 +177,10 @@ export function StatsView() {
         {/* Primary Stats */}
         <div className="stats-metrics-primary">
           <div className="metric-card primary">
+            <div className="metric-value primary">{stats.current_streak}</div>
+            <div className="metric-label">Day Streak 🔥</div>
+          </div>
+          <div className="metric-card primary">
             <div className="metric-value primary">{formatNumber(stats.total_recordings)}</div>
             <div className="metric-label">Total Recordings</div>
           </div>
@@ -184,25 +188,25 @@ export function StatsView() {
             <div className="metric-value primary">{formatDuration(stats.total_duration)}</div>
             <div className="metric-label">Time Recorded</div>
           </div>
-          <div className="metric-card primary">
-            <div className="metric-value primary">{formatNumber(stats.total_words)}</div>
-            <div className="metric-label">Words Transcribed</div>
-          </div>
         </div>
         
         {/* Secondary Stats */}
         <div className="stats-metrics-secondary">
           <div className="metric-card">
-            <div className="metric-value">{stats.current_streak}</div>
-            <div className="metric-label">Current Streak</div>
-          </div>
-          <div className="metric-card">
             <div className="metric-value">{stats.longest_streak}</div>
             <div className="metric-label">Best Streak</div>
           </div>
           <div className="metric-card">
+            <div className="metric-value">{formatNumber(stats.total_words)}</div>
+            <div className="metric-label">Words</div>
+          </div>
+          <div className="metric-card">
             <div className="metric-value">{stats.average_daily.toFixed(1)}</div>
-            <div className="metric-label">Daily Average</div>
+            <div className="metric-label">Daily Avg</div>
+          </div>
+          <div className="metric-card">
+            <div className="metric-value">{stats.most_active_hour}:00</div>
+            <div className="metric-label">Peak Hour</div>
           </div>
         </div>
       </div>
@@ -229,6 +233,16 @@ export function StatsView() {
                     const dayData = calendarGrid.find(d => d.week === week && d.weekday === day);
                     if (!dayData) return <div key={`${week}-${day}`} className="heatmap-day empty"></div>;
                     
+                    // Check if this is a future date
+                    const dayDate = new Date(dayData.date);
+                    const today = new Date();
+                    today.setHours(23, 59, 59, 999); // End of today
+                    const isFuture = dayDate > today;
+                    
+                    if (isFuture) {
+                      return <div key={`${week}-${day}`} className="heatmap-day empty"></div>;
+                    }
+                    
                     return (
                       <div
                         key={`${week}-${day}`}
@@ -246,7 +260,7 @@ export function StatsView() {
             </div>
           </div>
           <div className="heatmap-legend">
-            <span className="legend-label">0</span>
+            <span className="legend-label">No activity</span>
             <div className="legend-scale">
               <div className="legend-box" style={{ backgroundColor: 'var(--stats-heatmap-level-0)' }}></div>
               <div className="legend-box" style={{ backgroundColor: 'var(--stats-heatmap-level-1)' }}></div>
@@ -254,7 +268,7 @@ export function StatsView() {
               <div className="legend-box" style={{ backgroundColor: 'var(--stats-heatmap-level-3)' }}></div>
               <div className="legend-box" style={{ backgroundColor: 'var(--stats-heatmap-level-4)' }}></div>
             </div>
-            <span className="legend-label">10+ recordings</span>
+            <span className="legend-label">High activity</span>
           </div>
         </div>
       </div>
