@@ -96,7 +96,9 @@
       "Bash(git rebase:*)",
       "Bash(EDITOR='sed -i \"\"6s/pick/reword/\"\"' git rebase -i HEAD~7)",
       "Bash(EDITOR='true' git rebase -i HEAD~8)",
-      "Bash(git cherry-pick:*)"
+      "Bash(git cherry-pick:*)",
+      "Bash(gh pr list:*)",
+      "Bash(gh pr view:*)"
     ],
     "deny": []
   }
