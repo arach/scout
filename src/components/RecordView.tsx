@@ -124,6 +124,7 @@ export const RecordView = memo(function RecordView({
                                     className="circular-record-button recording-button"
                                     onClick={stopRecording}
                                     title="Stop recording"
+                                    aria-label="Stop recording"
                                     style={{
                                         '--audio-level': audioLevel
                                     } as React.CSSProperties}
@@ -161,6 +162,7 @@ export const RecordView = memo(function RecordView({
                                 className="cancel-recording-button-small"
                                 onClick={cancelRecording}
                                 title="Cancel recording (Escape)"
+                                aria-label="Cancel recording"
                             >
                                 Cancel
                             </button>
@@ -198,6 +200,8 @@ export const RecordView = memo(function RecordView({
                                     className="circular-record-button"
                                     onClick={startRecording}
                                     disabled={isProcessing}
+                                    aria-label="Start recording"
+                                    aria-keyshortcuts={hotkey}
                                     style={{
                                         '--audio-level': audioLevel
                                     } as React.CSSProperties}
@@ -230,6 +234,9 @@ export const RecordView = memo(function RecordView({
                                         setShowQuickMicPicker(!showQuickMicPicker);
                                     }}
                                     title="Select microphone"
+                                    aria-label="Microphone settings"
+                                    aria-expanded={showQuickMicPicker}
+                                    aria-haspopup="true"
                                 >
                                     <Settings 
                                         className={`w-2.5 h-2.5 transition-colors duration-200 ${

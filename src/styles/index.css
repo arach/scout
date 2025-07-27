@@ -1,0 +1,22 @@
+/* Scout CSS Architecture
+ * This is the main entry point for all styles
+ * Import order matters - base styles first, then components
+ */
+
+/* Base styles */
+@import './base/reset.css';
+@import './base/typography.css';
+@import './base/layout.css';
+
+/* Utilities */
+@import './utils/animations.css';
+@import './utils/transitions.css';
+@import './spacing.css';
+
+/* Component styles */
+@import './components/buttons.css';
+@import './components/forms.css';
+@import './components/modals.css';
+
+/* Note: Additional imports will be added as CSS files are migrated */
+/* See CSS_MIGRATION_PLAN.md for the full migration schedule */

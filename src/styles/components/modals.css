@@ -1,0 +1,232 @@
+/* Modal Styles */
+
+/* Modal backdrop */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: fadeIn 0.2s ease-out;
+}
+
+/* Modal container */
+.modal {
+  position: relative;
+  width: 100%;
+  max-width: 500px;
+  max-height: 90vh;
+  background-color: var(--modal-bg, var(--bg-primary));
+  border-radius: 8px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  animation: scaleIn 0.2s ease-out;
+}
+
+/* Modal sizes */
+.modal-sm { max-width: 400px; }
+.modal-md { max-width: 500px; }
+.modal-lg { max-width: 700px; }
+.modal-xl { max-width: 900px; }
+.modal-full { max-width: 95vw; }
+
+/* Modal header */
+.modal-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border-primary);
+}
+
+.modal-title {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+
+.modal-subtitle {
+  margin-top: 4px;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+/* Modal body */
+.modal-body {
+  flex: 1;
+  padding: 24px;
+  overflow-y: auto;
+}
+
+/* Modal footer */
+.modal-footer {
+  padding: 16px 24px;
+  border-top: 1px solid var(--border-primary);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.modal-footer.footer-left {
+  justify-content: flex-start;
+}
+
+.modal-footer.footer-center {
+  justify-content: center;
+}
+
+.modal-footer.footer-between {
+  justify-content: space-between;
+}
+
+/* Close button */
+.modal-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.modal-close:hover {
+  color: var(--text-primary);
+  background-color: var(--bg-secondary);
+}
+
+/* Delete confirmation modal specific styles */
+.delete-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.delete-modal {
+  width: 100%;
+  max-width: 400px;
+  background-color: var(--modal-bg, var(--bg-primary));
+  border-radius: 8px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  animation: scaleIn 0.2s ease-out;
+}
+
+.delete-modal-header {
+  padding: 20px;
+  border-bottom: 1px solid var(--border-primary);
+}
+
+.delete-modal-header h3 {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+
+.delete-modal-body {
+  padding: 20px;
+}
+
+.delete-modal-body p {
+  margin: 0 0 12px 0;
+  color: var(--text-secondary);
+}
+
+.delete-preview {
+  padding: 12px;
+  margin: 12px 0;
+  background-color: var(--bg-secondary);
+  border-radius: 4px;
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  max-height: 100px;
+  overflow-y: auto;
+  word-break: break-word;
+}
+
+.delete-warning {
+  font-size: var(--font-size-sm);
+  color: var(--color-danger);
+  font-weight: var(--font-weight-medium);
+}
+
+.delete-modal-footer {
+  padding: 16px 20px;
+  border-top: 1px solid var(--border-primary);
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.cancel-button {
+  padding: 6px 16px;
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  background-color: var(--button-secondary-bg);
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.cancel-button:hover {
+  background-color: var(--button-secondary-hover);
+}
+
+.confirm-delete-button {
+  padding: 6px 16px;
+  font-size: var(--font-size-sm);
+  color: white;
+  background-color: var(--color-danger);
+  border: 1px solid var(--color-danger);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.confirm-delete-button:hover {
+  background-color: var(--color-danger-hover);
+}
+
+/* Dialog utilities */
+.dialog-enter {
+  opacity: 0;
+  transform: scale(0.95);
+}
+
+.dialog-enter-active {
+  opacity: 1;
+  transform: scale(1);
+  transition: opacity 200ms, transform 200ms;
+}
+
+.dialog-exit {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.dialog-exit-active {
+  opacity: 0;
+  transform: scale(0.95);
+  transition: opacity 200ms, transform 200ms;
+}

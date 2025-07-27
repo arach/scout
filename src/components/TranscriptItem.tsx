@@ -147,6 +147,9 @@ export const TranscriptItem = memo(function TranscriptItem({
         <div 
             className={`transcript-item ${variant} ${isSelected ? 'selected' : ''} ${isActive ? 'active' : ''} ${onClick ? 'clickable' : ''}`}
             onClick={handleClick}
+            role="article"
+            aria-selected={isSelected}
+            tabIndex={0}
         >
             <div className="transcript-item-content">
                 {showCheckbox && (
@@ -161,6 +164,7 @@ export const TranscriptItem = memo(function TranscriptItem({
                             type="checkbox"
                             className="transcript-checkbox"
                             checked={isSelected}
+                            aria-label={`Select transcript from ${formatTime(transcript.created_at)}`}
                             onChange={(e) => {
                                 e.stopPropagation();
                                 onSelectToggle?.(transcript.id);
@@ -206,6 +210,7 @@ export const TranscriptItem = memo(function TranscriptItem({
                                 }
                             }}
                             title={isPlaying ? "Pause audio" : "Play audio"}
+                            aria-label={isPlaying ? "Pause audio" : "Play audio"}
                             disabled={isAudioLoading || !audioUrl}
                         >
                             {isPlaying ? <Pause size={14} /> : <Play size={14} />}
@@ -220,6 +225,9 @@ export const TranscriptItem = memo(function TranscriptItem({
                                 setShowDownloadMenu(!showDownloadMenu);
                             }}
                             title="Download transcript"
+                            aria-label="Download transcript"
+                            aria-expanded={showDownloadMenu}
+                            aria-haspopup="true"
                             disabled={isBlankAudio}
                         >
                             <Download size={14} />
@@ -306,6 +314,7 @@ export const TranscriptItem = memo(function TranscriptItem({
                         className={`transcript-action-button copy ${copied ? 'copied' : ''}`}
                         onClick={handleCopy}
                         title={copied ? "Copied!" : "Copy to clipboard"}
+                        aria-label={copied ? "Copied!" : "Copy transcript to clipboard"}
                         disabled={isBlankAudio}
                     >
                         {copied ? <Check size={14} /> : <Copy size={14} />}
@@ -320,6 +329,7 @@ export const TranscriptItem = memo(function TranscriptItem({
                             }
                         }}
                         title="View transcript details"
+                        aria-label="View transcript details"
                         disabled={isBlankAudio}
                     >
                         <Eye size={14} />
@@ -333,6 +343,7 @@ export const TranscriptItem = memo(function TranscriptItem({
                                 onDelete(transcript.id, transcript.text);
                             }}
                             title="Delete transcript"
+                            aria-label="Delete transcript"
                         >
                             <Trash2 size={14} />
                         </button>

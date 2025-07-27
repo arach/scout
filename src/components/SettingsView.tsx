@@ -172,11 +172,11 @@ export const SettingsView = memo(function SettingsView({
                                     )}
                                 </div>
                                 {isCapturingHotkey ? (
-                                    <button onClick={stopCapturingHotkey} className="cancel-button">
+                                    <button onClick={stopCapturingHotkey} className="cancel-button" aria-label="Cancel hotkey capture">
                                         Cancel
                                     </button>
                                 ) : (
-                                    <button onClick={startCapturingHotkey}>
+                                    <button onClick={startCapturingHotkey} aria-label="Start capturing new hotkey">
                                         Capture
                                     </button>
                                 )}
@@ -228,8 +228,10 @@ export const SettingsView = memo(function SettingsView({
                             <label>
                                 <input
                                     type="checkbox"
+                                    id="auto-copy-checkbox"
                                     checked={autoCopy}
                                     onChange={toggleAutoCopy}
+                                    aria-label="Automatically copy transcripts to clipboard"
                                 />
                                 Auto-copy to clipboard
                             </label>
@@ -242,8 +244,10 @@ export const SettingsView = memo(function SettingsView({
                             <label>
                                 <input
                                     type="checkbox"
+                                    id="auto-paste-checkbox"
                                     checked={autoPaste}
                                     onChange={toggleAutoPaste}
+                                    aria-label="Automatically paste transcripts to active application"
                                 />
                                 Auto-paste
                             </label>
@@ -305,8 +309,10 @@ export const SettingsView = memo(function SettingsView({
                         <label>
                             <input
                                 type="checkbox"
+                                id="sound-enabled-checkbox"
                                 checked={soundEnabled}
                                 onChange={toggleSoundEnabled}
+                                aria-label="Enable sound effects for recording events"
                             />
                             Enable sound effects
                         </label>
@@ -481,8 +487,10 @@ export const SettingsView = memo(function SettingsView({
                             <label>
                                 <input
                                     type="checkbox"
+                                    id="vad-enabled-checkbox"
                                     checked={vadEnabled}
                                     onChange={toggleVAD}
+                                    aria-label="Enable Voice Activity Detection for automatic recording"
                                 />
                                 Voice Activity Detection
                             </label>

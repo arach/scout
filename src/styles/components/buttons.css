@@ -1,0 +1,167 @@
+/* Button Styles */
+
+/* Base button styles */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 12px;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.5;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+  white-space: nowrap;
+  user-select: none;
+  outline: none;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--focus-color);
+  outline-offset: 2px;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Button variants */
+.btn-primary {
+  color: white;
+  background-color: var(--button-primary-bg);
+  border-color: var(--button-primary-bg);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-color: var(--button-primary-hover);
+  border-color: var(--button-primary-hover);
+}
+
+.btn-secondary {
+  color: var(--text-primary);
+  background-color: var(--button-secondary-bg);
+  border-color: var(--border-primary);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background-color: var(--button-secondary-hover);
+}
+
+.btn-danger {
+  color: white;
+  background-color: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background-color: var(--color-danger-hover);
+  border-color: var(--color-danger-hover);
+}
+
+.btn-ghost {
+  color: var(--text-secondary);
+  background-color: transparent;
+  border-color: transparent;
+}
+
+.btn-ghost:hover:not(:disabled) {
+  color: var(--text-primary);
+  background-color: var(--button-ghost-hover);
+}
+
+/* Button sizes */
+.btn-sm {
+  padding: 4px 8px;
+  font-size: var(--font-size-xs);
+}
+
+.btn-lg {
+  padding: 8px 16px;
+  font-size: var(--font-size-md);
+}
+
+/* Icon buttons */
+.btn-icon {
+  padding: 6px;
+  min-width: 32px;
+  min-height: 32px;
+}
+
+.btn-icon.btn-sm {
+  padding: 4px;
+  min-width: 24px;
+  min-height: 24px;
+}
+
+.btn-icon.btn-lg {
+  padding: 8px;
+  min-width: 40px;
+  min-height: 40px;
+}
+
+/* Button groups */
+.btn-group {
+  display: inline-flex;
+  gap: 1px;
+}
+
+.btn-group .btn {
+  border-radius: 0;
+}
+
+.btn-group .btn:first-child {
+  border-top-left-radius: 4px;
+  border-bottom-left-radius: 4px;
+}
+
+.btn-group .btn:last-child {
+  border-top-right-radius: 4px;
+  border-bottom-right-radius: 4px;
+}
+
+/* Action buttons (used in components) */
+.action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  background: var(--button-secondary-bg);
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.action-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--button-secondary-hover);
+  border-color: var(--border-secondary);
+}
+
+.action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Round buttons */
+.btn-round {
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+}
+
+.btn-round.btn-sm {
+  width: 32px;
+  height: 32px;
+}
+
+.btn-round.btn-lg {
+  width: 48px;
+  height: 48px;
+}

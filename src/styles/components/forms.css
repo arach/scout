@@ -1,0 +1,221 @@
+/* Form Styles */
+
+/* Input base styles */
+.input,
+.textarea,
+.select {
+  width: 100%;
+  padding: 6px 10px;
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  color: var(--text-primary);
+  background-color: var(--input-bg);
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  transition: all 0.15s ease-in-out;
+  outline: none;
+}
+
+.input:focus,
+.textarea:focus,
+.select:focus {
+  border-color: var(--input-focus-border);
+  box-shadow: 0 0 0 3px var(--input-focus-shadow);
+}
+
+.input:disabled,
+.textarea:disabled,
+.select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background-color: var(--input-disabled-bg);
+}
+
+/* Input sizes */
+.input-sm {
+  padding: 4px 8px;
+  font-size: var(--font-size-xs);
+}
+
+.input-lg {
+  padding: 8px 12px;
+  font-size: var(--font-size-md);
+}
+
+/* Textarea specific */
+.textarea {
+  min-height: 80px;
+  resize: vertical;
+}
+
+/* Checkbox and Radio */
+.checkbox,
+.radio {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.checkbox input[type="checkbox"],
+.radio input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  margin-right: 8px;
+  cursor: pointer;
+}
+
+.checkbox input[type="checkbox"]:focus-visible,
+.radio input[type="radio"]:focus-visible {
+  outline: 2px solid var(--focus-color);
+  outline-offset: 2px;
+}
+
+/* Range slider */
+input[type="range"] {
+  width: 100%;
+  height: 4px;
+  background: var(--slider-track);
+  border-radius: 2px;
+  outline: none;
+  -webkit-appearance: none;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  background: var(--slider-thumb);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  background: var(--slider-thumb-hover);
+  transform: scale(1.1);
+}
+
+input[type="range"]:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px var(--input-focus-shadow);
+}
+
+/* Form groups */
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+}
+
+.form-help {
+  margin-top: 4px;
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+}
+
+.form-error {
+  margin-top: 4px;
+  font-size: var(--font-size-xs);
+  color: var(--color-danger);
+}
+
+/* Input groups */
+.input-group {
+  display: flex;
+  align-items: stretch;
+}
+
+.input-group .input {
+  flex: 1;
+  border-radius: 0;
+}
+
+.input-group .input:first-child {
+  border-top-left-radius: 4px;
+  border-bottom-left-radius: 4px;
+}
+
+.input-group .input:last-child {
+  border-top-right-radius: 4px;
+  border-bottom-right-radius: 4px;
+}
+
+.input-group-addon {
+  display: flex;
+  align-items: center;
+  padding: 6px 10px;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 0;
+}
+
+.input-group-addon:first-child {
+  border-right: 0;
+  border-top-left-radius: 4px;
+  border-bottom-left-radius: 4px;
+}
+
+.input-group-addon:last-child {
+  border-left: 0;
+  border-top-right-radius: 4px;
+  border-bottom-right-radius: 4px;
+}
+
+/* Toggle switch */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 20px;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--toggle-bg);
+  transition: .3s;
+  border-radius: 20px;
+}
+
+.toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 14px;
+  width: 14px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: .3s;
+  border-radius: 50%;
+}
+
+input:checked + .toggle-slider {
+  background-color: var(--toggle-checked-bg);
+}
+
+input:checked + .toggle-slider:before {
+  transform: translateX(20px);
+}
+
+input:focus-visible + .toggle-slider {
+  box-shadow: 0 0 0 3px var(--input-focus-shadow);
+}

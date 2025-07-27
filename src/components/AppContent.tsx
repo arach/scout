@@ -641,30 +641,48 @@ export function AppContent() {
 
         {/* Delete confirmation modal */}
         {deleteConfirmation.show && (
-          <div className="delete-modal-overlay">
+          <div 
+            className="delete-modal-overlay"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-dialog-title"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) {
+                setDeleteConfirmation({ show: false, transcriptId: null, transcriptText: "", isBulk: false });
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                setDeleteConfirmation({ show: false, transcriptId: null, transcriptText: "", isBulk: false });
+              }
+            }}
+          >
             <div className="delete-modal">
               <div className="delete-modal-header">
-                <h3>Confirm Delete</h3>
+                <h3 id="delete-dialog-title">Confirm Delete</h3>
               </div>
               <div className="delete-modal-body">
                 <p>Are you sure you want to delete {deleteConfirmation.isBulk ? deleteConfirmation.transcriptText : 'this transcript'}?</p>
                 {!deleteConfirmation.isBulk && (
-                  <div className="delete-preview">
+                  <div className="delete-preview" role="blockquote">
                     "{deleteConfirmation.transcriptText}"
                   </div>
                 )}
-                <p className="delete-warning">This action cannot be undone.</p>
+                <p className="delete-warning" role="alert">This action cannot be undone.</p>
               </div>
               <div className="delete-modal-footer">
                 <button 
                   className="cancel-button"
                   onClick={() => setDeleteConfirmation({ show: false, transcriptId: null, transcriptText: "", isBulk: false })}
+                  autoFocus
+                  aria-label="Cancel deletion"
                 >
                   Cancel
                 </button>
                 <button 
                   className="confirm-delete-button"
                   onClick={confirmDelete}
+                  aria-label={deleteConfirmation.isBulk ? "Confirm deletion of selected transcripts" : "Confirm deletion of transcript"}
                 >
                   Delete
                 </button>

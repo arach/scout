@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo, useCallback, memo } from 'react';
+import { useState, useEffect, useMemo, useCallback, memo, useRef, CSSProperties } from 'react';
+import { VariableSizeList as List } from 'react-window';
 import { TranscriptDetailPanel } from './TranscriptDetailPanel';
 import { TranscriptItem } from './TranscriptItem';
 import { ChevronDown } from 'lucide-react';
@@ -24,7 +25,80 @@ interface TranscriptsViewProps {
     formatFileSize?: (bytes: number) => string;
 }
 
-const ITEMS_PER_PAGE = 50;
+// Types for virtual list items
+interface GroupHeaderItem {
+    type: 'group-header';
+    title: string;
+    transcripts: Transcript[];
+    index: number;
+}
+
+interface TranscriptListItem {
+    type: 'transcript';
+    transcript: Transcript;
+    groupTitle: string;
+    index: number;
+}
+
+interface EmptyItem {
+    type: 'empty';
+    index: number;
+}
+
+type ListItem = GroupHeaderItem | TranscriptListItem | EmptyItem;
+
+// Heights for different item types
+const ITEM_HEIGHTS = {
+    GROUP_HEADER: 49, // 14px padding * 2 + 21px content
+    TRANSCRIPT: 72, // Based on current TranscriptItem height
+    EMPTY_STATE: 300, // Height for the empty state
+};
+
+// Group transcripts by date
+const groupTranscriptsByDate = (transcripts: Transcript[]) => {
+    const groups: { [key: string]: Transcript[] } = {};
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const thisWeek = new Date(today);
+    thisWeek.setDate(thisWeek.getDate() - 7);
+    const thisMonth = new Date(today);
+    thisMonth.setDate(thisMonth.getDate() - 30);
+
+    transcripts.forEach(transcript => {
+        const date = new Date(transcript.created_at);
+        let groupKey: string;
+
+        if (date >= today) {
+            groupKey = 'Today';
+        } else if (date >= yesterday) {
+            groupKey = 'Yesterday';
+        } else if (date >= thisWeek) {
+            groupKey = 'This Week';
+        } else if (date >= thisMonth) {
+            groupKey = 'This Month';
+        } else {
+            groupKey = 'Older';
+        }
+
+        if (!groups[groupKey]) {
+            groups[groupKey] = [];
+        }
+        groups[groupKey].push(transcript);
+    });
+
+    // Return in order
+    const orderedGroups: { title: string; transcripts: Transcript[] }[] = [];
+    const order = ['Today', 'Yesterday', 'This Week', 'This Month', 'Older'];
+    order.forEach(key => {
+        if (groups[key]) {
+            orderedGroups.push({ title: key, transcripts: groups[key] });
+        }
+    });
+
+    return orderedGroups;
+};
 
 export const TranscriptsView = memo(function TranscriptsView({
     transcripts,
@@ -49,9 +123,12 @@ export const TranscriptsView = memo(function TranscriptsView({
     }>({ transcript: null, isOpen: false });
     
     const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['Today', 'Yesterday']));
-    const [displayedItems, setDisplayedItems] = useState(ITEMS_PER_PAGE);
     const [showExportMenu, setShowExportMenu] = useState(false);
     const [showFloatingExportMenu, setShowFloatingExportMenu] = useState(false);
+    const [listHeight, setListHeight] = useState(window.innerHeight - 140);
+    
+    const listRef = useRef<List>(null);
+    const itemSizeMap = useRef<Map<number, number>>(new Map());
 
     const openDetailPanel = useCallback((transcript: Transcript) => {
         setPanelState({ transcript: transcript, isOpen: true });
@@ -76,16 +153,12 @@ export const TranscriptsView = memo(function TranscriptsView({
             }
             return newSet;
         });
+        
+        // Reset the size cache when groups are toggled
+        if (listRef.current) {
+            listRef.current.resetAfterIndex(0);
+        }
     }, []);
-    
-    const loadMore = () => {
-        setDisplayedItems(prev => prev + ITEMS_PER_PAGE);
-    };
-    
-    useEffect(() => {
-        // Reset displayed items when transcripts change
-        setDisplayedItems(ITEMS_PER_PAGE);
-    }, [transcripts]);
     
     // Handle click outside for menus
     useEffect(() => {
@@ -106,81 +179,187 @@ export const TranscriptsView = memo(function TranscriptsView({
             };
         }
     }, [showExportMenu, showFloatingExportMenu]);
-
-    // Group transcripts by date
-    const groupTranscriptsByDate = (transcripts: Transcript[]) => {
-        const groups: { [key: string]: Transcript[] } = {};
-        const now = new Date();
-        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const yesterday = new Date(today);
-        yesterday.setDate(yesterday.getDate() - 1);
-        const thisWeek = new Date(today);
-        thisWeek.setDate(thisWeek.getDate() - 7);
-        const thisMonth = new Date(today);
-        thisMonth.setDate(thisMonth.getDate() - 30);
-
-        transcripts.forEach(transcript => {
-            const date = new Date(transcript.created_at);
-            let groupKey: string;
-
-            if (date >= today) {
-                groupKey = 'Today';
-            } else if (date >= yesterday) {
-                groupKey = 'Yesterday';
-            } else if (date >= thisWeek) {
-                groupKey = 'This Week';
-            } else if (date >= thisMonth) {
-                groupKey = 'This Month';
-            } else {
-                groupKey = 'Older';
-            }
-
-            if (!groups[groupKey]) {
-                groups[groupKey] = [];
-            }
-            groups[groupKey].push(transcript);
-        });
-
-        // Return in order
-        const orderedGroups: { title: string; transcripts: Transcript[] }[] = [];
-        const order = ['Today', 'Yesterday', 'This Week', 'This Month', 'Older'];
-        order.forEach(key => {
-            if (groups[key]) {
-                orderedGroups.push({ title: key, transcripts: groups[key] });
-            }
-        });
-
-        return orderedGroups;
-    };
     
-    // Calculate paginated transcripts
-    const paginatedGroups = useMemo(() => {
-        const groups = groupTranscriptsByDate(transcripts);
-        let itemCount = 0;
-        const result: typeof groups = [];
+    // Handle window resize
+    useEffect(() => {
+        const handleResize = () => {
+            setListHeight(window.innerHeight - 140);
+        };
         
-        for (const group of groups) {
-            const visibleTranscripts: Transcript[] = [];
-            
-            for (const transcript of group.transcripts) {
-                if (itemCount < displayedItems) {
-                    visibleTranscripts.push(transcript);
-                    itemCount++;
-                }
-            }
-            
-            if (visibleTranscripts.length > 0) {
-                result.push({ title: group.title, transcripts: visibleTranscripts });
-            }
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, []);
+
+    // Get all groups for reference
+    const allGroups = useMemo(() => groupTranscriptsByDate(transcripts), [transcripts]);
+    
+    // Create flattened list for virtual scrolling
+    const flattenedItems = useMemo<ListItem[]>(() => {
+        if (transcripts.length === 0) {
+            return [{ type: 'empty', index: 0 }];
         }
         
-        return result;
-    }, [transcripts, displayedItems]);
+        const items: ListItem[] = [];
+        let index = 0;
+        
+        allGroups.forEach(group => {
+            // Add group header
+            items.push({
+                type: 'group-header',
+                title: group.title,
+                transcripts: group.transcripts,
+                index: index++,
+            });
+            
+            // Add transcripts if group is expanded
+            if (expandedGroups.has(group.title)) {
+                group.transcripts.forEach(transcript => {
+                    items.push({
+                        type: 'transcript',
+                        transcript,
+                        groupTitle: group.title,
+                        index: index++,
+                    });
+                });
+            }
+        });
+        
+        return items;
+    }, [transcripts, allGroups, expandedGroups]);
     
-    const hasMore = transcripts.length > displayedItems;
+    // Get item size
+    const getItemSize = useCallback((index: number) => {
+        // Check if we have a cached size
+        if (itemSizeMap.current.has(index)) {
+            return itemSizeMap.current.get(index)!;
+        }
+        
+        const item = flattenedItems[index];
+        if (!item) return ITEM_HEIGHTS.TRANSCRIPT;
+        
+        let size: number;
+        switch (item.type) {
+            case 'group-header':
+                size = ITEM_HEIGHTS.GROUP_HEADER;
+                break;
+            case 'transcript':
+                size = ITEM_HEIGHTS.TRANSCRIPT;
+                break;
+            case 'empty':
+                size = ITEM_HEIGHTS.EMPTY_STATE;
+                break;
+            default:
+                size = ITEM_HEIGHTS.TRANSCRIPT;
+        }
+        
+        itemSizeMap.current.set(index, size);
+        return size;
+    }, [flattenedItems]);
     
-    // Get all groups (unpaginated) for select all functionality
-    const allGroups = useMemo(() => groupTranscriptsByDate(transcripts), [transcripts]);
+    // Reset size cache when items change
+    useEffect(() => {
+        itemSizeMap.current.clear();
+        if (listRef.current) {
+            listRef.current.resetAfterIndex(0);
+        }
+    }, [flattenedItems]);
+    
+    // Render row component
+    const Row = memo(({ index, style }: { index: number; style: CSSProperties }) => {
+        const item = flattenedItems[index];
+        
+        if (!item) return null;
+        
+        switch (item.type) {
+            case 'empty':
+                return (
+                    <div style={style} className="no-transcripts">
+                        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.3">
+                            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                            <line x1="12" y1="19" x2="12" y2="22" />
+                            <line x1="8" y1="22" x2="16" y2="22" />
+                        </svg>
+                        <h3>No transcripts yet</h3>
+                        <p>Press <span title={hotkey}>{formatShortcut(hotkey)}</span> or click "Start Recording" to begin</p>
+                    </div>
+                );
+                
+            case 'group-header': {
+                const isExpanded = expandedGroups.has(item.title);
+                const allSelected = item.transcripts.every(t => selectedTranscripts.has(t.id));
+                const someSelected = item.transcripts.some(t => selectedTranscripts.has(t.id));
+                
+                return (
+                    <div style={style} className={`transcript-group-header ${isExpanded ? 'expanded' : ''}`}>
+                        <div className="group-header-left">
+                            <input
+                                type="checkbox"
+                                className="group-checkbox"
+                                checked={allSelected}
+                                aria-label={`Select all transcripts in ${item.title}`}
+                                onChange={(e) => {
+                                    e.stopPropagation();
+                                    const allGroupIds = item.transcripts.map(t => t.id);
+                                    toggleTranscriptGroupSelection(allGroupIds);
+                                }}
+                            />
+                            <button 
+                                className="group-toggle-btn"
+                                onClick={() => toggleGroup(item.title)}
+                                aria-expanded={isExpanded}
+                                aria-controls={`group-${item.title}`}
+                                aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${item.title} group`}
+                            >
+                                <ChevronDown size={16} className={`chevron-icon ${isExpanded ? 'expanded' : ''}`} />
+                            </button>
+                            <h3 
+                                className="transcript-group-title"
+                                onClick={() => toggleGroup(item.title)}
+                            >
+                                {item.title}
+                            </h3>
+                            <span className="group-count">({item.transcripts.length})</span>
+                        </div>
+                        {someSelected && (
+                            <button 
+                                className="group-clear-btn"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    const selectedInGroup = item.transcripts.filter(t => selectedTranscripts.has(t.id));
+                                    toggleTranscriptGroupSelection(selectedInGroup.map(t => t.id));
+                                }}
+                            >
+                                Clear
+                            </button>
+                        )}
+                    </div>
+                );
+            }
+                
+            case 'transcript':
+                return (
+                    <div style={style}>
+                        <TranscriptItem
+                            transcript={item.transcript}
+                            formatDuration={formatDuration}
+                            onDelete={showDeleteConfirmation}
+                            onClick={openDetailPanel}
+                            showCheckbox={true}
+                            isSelected={selectedTranscripts.has(item.transcript.id)}
+                            onSelectToggle={toggleTranscriptSelection}
+                            isActive={panelState.transcript?.id === item.transcript.id}
+                            variant="default"
+                        />
+                    </div>
+                );
+                
+            default:
+                return null;
+        }
+    });
+    
+    Row.displayName = 'VirtualRow';
     
     return (
         <div className="transcripts-view">
@@ -195,6 +374,7 @@ export const TranscriptsView = memo(function TranscriptsView({
                         type="text"
                         className="search-input"
                         placeholder="Search transcripts..."
+                        aria-label="Search transcripts"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         onKeyPress={(e) => e.key === 'Enter' && searchTranscripts()}
@@ -208,6 +388,7 @@ export const TranscriptsView = memo(function TranscriptsView({
                             <button
                                 className="header-action-btn select-all"
                                 onClick={selectAllTranscripts}
+                                aria-label={selectedTranscripts.size === transcripts.length ? 'Deselect all transcripts' : 'Select all transcripts'}
                             >
                                 {selectedTranscripts.size === transcripts.length ? 'Deselect All' : 'Select All'}
                             </button>
@@ -216,6 +397,7 @@ export const TranscriptsView = memo(function TranscriptsView({
                                     <button
                                         className="header-action-btn delete"
                                         onClick={showBulkDeleteConfirmation}
+                                        aria-label={`Delete ${selectedTranscripts.size} selected transcripts`}
                                     >
                                         Delete ({selectedTranscripts.size})
                                     </button>
@@ -223,6 +405,9 @@ export const TranscriptsView = memo(function TranscriptsView({
                                         <button 
                                             className="header-action-btn export"
                                             onClick={() => setShowExportMenu(!showExportMenu)}
+                                            aria-expanded={showExportMenu}
+                                            aria-haspopup="true"
+                                            aria-label="Export selected transcripts"
                                         >
                                             Export
                                         </button>
@@ -266,100 +451,17 @@ export const TranscriptsView = memo(function TranscriptsView({
             </div>
 
             <div className="transcripts-list">
-                {transcripts.length === 0 ? (
-                    <div className="no-transcripts">
-                        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.3">
-                            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
-                            <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                            <line x1="12" y1="19" x2="12" y2="22" />
-                            <line x1="8" y1="22" x2="16" y2="22" />
-                        </svg>
-                        <h3>No transcripts yet</h3>
-                        <p>Press <span title={hotkey}>{formatShortcut(hotkey)}</span> or click "Start Recording" to begin</p>
-                    </div>
-                ) : (
-                    <div className="transcript-list-container">
-                        {paginatedGroups.map(group => {
-                            // Find the full group data for this title
-                            const fullGroup = allGroups.find(g => g.title === group.title);
-                            const fullGroupTranscripts = fullGroup?.transcripts || [];
-                            
-                            return (
-                                <div key={group.title} className={`transcript-group ${expandedGroups.has(group.title) ? 'expanded' : ''}`}>
-                                    <div className="transcript-group-header">
-                                        <div className="group-header-left">
-                                            <input
-                                                type="checkbox"
-                                                className="group-checkbox"
-                                                checked={fullGroupTranscripts.every(t => selectedTranscripts.has(t.id))}
-                                                onChange={(e) => {
-                                                    e.stopPropagation();
-                                                    const allGroupIds = fullGroupTranscripts.map(t => t.id);
-                                                    toggleTranscriptGroupSelection(allGroupIds);
-                                                }}
-                                            />
-                                            <button 
-                                                className="group-toggle-btn"
-                                                onClick={() => toggleGroup(group.title)}
-                                            >
-                                                <ChevronDown size={16} className="chevron-icon" />
-                                            </button>
-                                            <h3 
-                                                className="transcript-group-title"
-                                                onClick={() => toggleGroup(group.title)}
-                                            >
-                                                {group.title}
-                                            </h3>
-                                            <span className="group-count">({fullGroupTranscripts.length})</span>
-                                        </div>
-                                        {fullGroupTranscripts.some(t => selectedTranscripts.has(t.id)) && (
-                                            <button 
-                                                className="group-clear-btn"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    const selectedInGroup = fullGroupTranscripts.filter(t => selectedTranscripts.has(t.id));
-                                                    toggleTranscriptGroupSelection(selectedInGroup.map(t => t.id));
-                                                }}
-                                            >
-                                                Clear
-                                            </button>
-                                        )}
-                                    </div>
-                                {expandedGroups.has(group.title) && (
-                                    <div className="transcript-group-items">
-                                        {group.transcripts.map((transcript) => {
-                                            return (
-                                                <TranscriptItem
-                                                    key={transcript.id}
-                                                    transcript={transcript}
-                                                    formatDuration={formatDuration}
-                                                    onDelete={showDeleteConfirmation}
-                                                    onClick={openDetailPanel}
-                                                    showCheckbox={true}
-                                                    isSelected={selectedTranscripts.has(transcript.id)}
-                                                    onSelectToggle={toggleTranscriptSelection}
-                                                    isActive={panelState.transcript?.id === transcript.id}
-                                                    variant="default"
-                                                />
-                                            );
-                                        })}
-                                    </div>
-                                )}
-                                </div>
-                            );
-                        })}
-                        {hasMore && (
-                            <div className="load-more-container">
-                                <button 
-                                    className="load-more-btn"
-                                    onClick={loadMore}
-                                >
-                                    Load More ({transcripts.length - displayedItems} remaining)
-                                </button>
-                            </div>
-                        )}
-                    </div>
-                )}
+                <List
+                    ref={listRef}
+                    height={listHeight}
+                    itemCount={flattenedItems.length}
+                    itemSize={getItemSize}
+                    width="100%"
+                    className="transcript-list-container"
+                    overscanCount={5}
+                >
+                    {Row}
+                </List>
             </div>
             
             <TranscriptDetailPanel
@@ -412,4 +514,4 @@ export const TranscriptsView = memo(function TranscriptsView({
             )}
         </div>
     );
-}); 
+});

@@ -322,6 +322,16 @@
     user-select: none;
     transition: background 0.2s ease;
     border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+    border-radius: 12px;
+    margin-bottom: 0;
+    position: relative;
+}
+
+/* Virtual scrolling specific styles */
+.transcript-group-header.expanded {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
 }
 
 .transcript-group-header:hover {
@@ -357,6 +367,10 @@
 
 .group-toggle-btn .chevron-icon {
     transition: transform 0.2s ease;
+}
+
+.group-toggle-btn .chevron-icon.expanded {
+    transform: rotate(180deg);
 }
 
 .transcript-group.expanded .group-toggle-btn .chevron-icon {

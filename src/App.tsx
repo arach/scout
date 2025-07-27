@@ -2,7 +2,6 @@ import { AppProviders } from './contexts/AppProviders';
 import { AppContent } from './components/AppContent';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import "./App.css";
-import "./components/TerminalLoaders.css";
 
 /**
  * Main App component - now a lightweight wrapper that provides context providers

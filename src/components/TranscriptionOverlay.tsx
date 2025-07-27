@@ -533,6 +533,7 @@ export function TranscriptionOverlay({
             className={`overlay-button mode-toggle ${currentMode}`}
             onClick={toggleMode}
             title={`Switch to ${currentMode === 'teleprompter' ? 'editor' : 'teleprompter'} mode`}
+            aria-label={`Switch to ${currentMode === 'teleprompter' ? 'editor' : 'teleprompter'} mode`}
           >
             {currentMode === 'teleprompter' ? '📝' : '📺'}
           </button>
@@ -540,6 +541,8 @@ export function TranscriptionOverlay({
             className="overlay-button minimize"
             onClick={() => setIsMinimized(!isMinimized)}
             title={isMinimized ? 'Expand' : 'Minimize'}
+            aria-label={isMinimized ? 'Expand overlay' : 'Minimize overlay'}
+            aria-expanded={!isMinimized}
           >
             {isMinimized ? '⬆️' : '⬇️'}
           </button>
@@ -547,6 +550,7 @@ export function TranscriptionOverlay({
             className="overlay-button close"
             onClick={onClose}
             title="Close overlay"
+            aria-label="Close transcription overlay"
           >
             ×
           </button>
@@ -654,6 +658,7 @@ export function TranscriptionOverlay({
                 onClick={handleClear}
                 disabled={!transcriptionState.completedText && transcriptionState.decryptingChunks.length === 0}
                 title="Clear all text"
+                aria-label="Clear all transcribed text"
               >
                 Clear
               </button>
@@ -663,6 +668,7 @@ export function TranscriptionOverlay({
                 onClick={() => navigator.clipboard.writeText(currentMode === 'editor' ? editedText : fullText)}
                 disabled={!fullText.trim()}
                 title="Copy to clipboard"
+                aria-label="Copy transcription to clipboard"
               >
                 Copy
               </button>
@@ -675,6 +681,7 @@ export function TranscriptionOverlay({
                   className="action-button discard"
                   onClick={handleDiscardEdits}
                   title="Discard changes"
+                  aria-label="Discard all changes"
                 >
                   Discard
                 </button>
@@ -682,6 +689,7 @@ export function TranscriptionOverlay({
                   className="action-button save"
                   onClick={handleSaveEdits}
                   title="Save edits"
+                  aria-label="Save edited transcription"
                 >
                   Save Edits
                 </button>
