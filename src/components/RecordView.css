@@ -700,26 +700,32 @@
 }
 
 .status-dot {
-    width: 5px;
-    height: 5px;
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
     background: #4CAF50;
-    animation: statusPulse 2s ease-in-out infinite;
+    animation: statusPulse 3s ease-in-out infinite;
 }
 
 .status-dot.processing {
     background: var(--accent-primary);
-    animation: statusPulse 0.8s ease-in-out infinite;
+    animation: statusPulse 2s ease-in-out infinite;
 }
 
 .status-dot.recording {
     background: var(--recording);
-    animation: statusPulse 1s ease-in-out infinite;
+    animation: statusPulse 2s ease-in-out infinite;
 }
 
 @keyframes statusPulse {
-    0%, 100% { opacity: 0.4; }
-    50% { opacity: 1; }
+    0%, 100% { 
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% { 
+        opacity: 0.8;
+        transform: scale(1.1);
+    }
 }
 
 .status-text {
