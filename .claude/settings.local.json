@@ -91,7 +91,8 @@
       "WebFetch(domain:docs.anthropic.com)",
       "Bash(EDITOR='sed -i \"\"s/pick/reword/g\"\"' git rebase -i HEAD~2)",
       "Bash(git filter-branch:*)",
-      "Bash(pnpm run analyze:*)"
+      "Bash(pnpm run analyze:*)",
+      "Bash(git filter-branch:*)"
     ],
     "deny": []
   }
