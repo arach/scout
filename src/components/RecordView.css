@@ -661,9 +661,26 @@
 /* Record hint container */
 .record-hint {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     justify-content: center;
+}
+
+.selected-mic-display {
+    font-size: 11px;
+    color: var(--text-secondary);
+    opacity: 0.8;
+}
+
+.mic-label {
+    color: var(--text-tertiary);
+    margin-right: 4px;
+}
+
+.mic-name {
+    color: var(--text-primary);
+    font-weight: 500;
 }
 
 /* Status indicator */
@@ -896,42 +913,128 @@
 /* Terminal theme specific mic button styling */
 [data-theme="terminal-chic"] .circular-record-button,
 [data-theme="terminal-chic-light"] .circular-record-button {
-    background: var(--bg-secondary);
-    border: 2px solid var(--border-primary);
+    background: var(--bg-primary);
+    border: 1px solid var(--border-primary);
     box-shadow: none;
-    transition: background 0.2s ease, border-color 0.2s ease;
+    transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
 }
 
 [data-theme="terminal-chic"] .circular-record-button:hover,
 [data-theme="terminal-chic-light"] .circular-record-button:hover {
-    background: var(--bg-hover);
+    background: var(--bg-secondary);
     border-color: var(--accent-primary);
-    transform: none;
-    box-shadow: none;
+    transform: scale(1.05);
+    box-shadow: 0 0 0 1px var(--accent-primary);
 }
 
+[data-theme="terminal-chic"] .circular-record-button:active,
+[data-theme="terminal-chic-light"] .circular-record-button:active {
+    transform: scale(0.98);
+    transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Subtle pulse animation for terminal theme */
 [data-theme="terminal-chic"] .circular-record-button::before,
-[data-theme="terminal-chic"] .circular-record-button::after,
-[data-theme="terminal-chic-light"] .circular-record-button::before,
-[data-theme="terminal-chic-light"] .circular-record-button::after {
-    display: none; /* Remove fancy animations */
+[data-theme="terminal-chic-light"] .circular-record-button::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: 50%;
+    background: transparent;
+    border: 1px solid var(--accent-primary);
+    opacity: 0;
+    transform: scale(0.8);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+[data-theme="terminal-chic"] .circular-record-button:hover::before,
+[data-theme="terminal-chic-light"] .circular-record-button:hover::before {
+    opacity: 0.5;
+    transform: scale(1);
+}
+
+[data-theme="terminal-chic"] .circular-record-button::after,
+[data-theme="terminal-chic-light"] .circular-record-button::after {
+    display: none; /* Remove shimmer animation */
+}
+
+/* Minimal audio level indicator */
 [data-theme="terminal-chic"] .audio-level-fill,
 [data-theme="terminal-chic-light"] .audio-level-fill {
     background: var(--accent-primary);
+    opacity: 0.2;
+    transition: opacity 0.15s ease;
+}
+
+[data-theme="terminal-chic"] .circular-record-button:hover .audio-level-fill,
+[data-theme="terminal-chic-light"] .circular-record-button:hover .audio-level-fill {
     opacity: 0.3;
+}
+
+/* Recording state with subtle pulse */
+@keyframes terminalPulse {
+    0%, 100% { 
+        box-shadow: 0 0 0 0 var(--text-danger);
+        opacity: 1;
+    }
+    50% { 
+        box-shadow: 0 0 0 3px var(--text-danger);
+        opacity: 0.8;
+    }
 }
 
 [data-theme="terminal-chic"] .circular-record-button.recording-button,
 [data-theme="terminal-chic-light"] .circular-record-button.recording-button {
     background: var(--bg-danger);
     border-color: var(--text-danger);
+    animation: terminalPulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
+[data-theme="terminal-chic"] .circular-record-button.recording-button:hover,
+[data-theme="terminal-chic-light"] .circular-record-button.recording-button:hover {
+    transform: scale(1.05);
+    animation: terminalPulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Smooth icon transitions */
+[data-theme="terminal-chic"] .microphone-icon,
+[data-theme="terminal-chic-light"] .microphone-icon {
+    transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+[data-theme="terminal-chic"] .circular-record-button:hover .microphone-icon,
+[data-theme="terminal-chic-light"] .circular-record-button:hover .microphone-icon {
+    transform: scale(1.1);
+}
+
+/* Terminal theme mic settings button */
 [data-theme="terminal-chic"] .mic-settings-button,
 [data-theme="terminal-chic-light"] .mic-settings-button {
-    display: none; /* Hide gear button for cleaner look */
+    background: var(--bg-primary);
+    border: 1px solid var(--border-primary);
+    opacity: 0.6;
+    transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+[data-theme="terminal-chic"] .mic-settings-button:hover,
+[data-theme="terminal-chic-light"] .mic-settings-button:hover {
+    background: var(--bg-secondary);
+    border-color: var(--accent-primary);
+    opacity: 1;
+    transform: scale(1.1);
+}
+
+[data-theme="terminal-chic"] .mic-settings-button svg,
+[data-theme="terminal-chic-light"] .mic-settings-button svg {
+    animation: none; /* Remove rotation animation */
+    transition: transform 0.15s ease;
+}
+
+[data-theme="terminal-chic"] .mic-settings-button:hover svg,
+[data-theme="terminal-chic-light"] .mic-settings-button:hover svg {
+    transform: rotate(90deg); /* Simple 90 degree rotation on hover */
 }
 
 /* Dark mode adjustments */
