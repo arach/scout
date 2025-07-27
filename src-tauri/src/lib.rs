@@ -1577,83 +1577,111 @@ struct RecordingStats {
 
 #[tauri::command]
 async fn get_recording_stats(state: State<'_, AppState>) -> Result<RecordingStats, String> {
-    use chrono::{DateTime, Datelike, Local, NaiveDate, TimeZone, Timelike, Weekday};
+    use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, TimeZone, Timelike, Weekday, Duration};
     use std::collections::HashMap;
     
     // Log the start of the function
     eprintln!("get_recording_stats called");
-    
-    // First, let's return simple mock data to test if the frontend is working
-    return Ok(RecordingStats {
-        total_recordings: 5,
-        total_duration: 300000, // 5 minutes in ms
-        total_words: 1234,
-        current_streak: 3,
-        longest_streak: 7,
-        average_daily: 2.5,
-        most_active_day: "Monday".to_string(),
-        most_active_hour: 14,
-        daily_activity: vec![
-            DayActivity {
-                date: "2025-01-01".to_string(),
-                count: 2,
-                duration_ms: 120000,
-                words: 500,
-            },
-            DayActivity {
-                date: "2025-01-02".to_string(),
-                count: 3,
-                duration_ms: 180000,
-                words: 734,
-            },
-        ],
-        weekly_distribution: vec![
-            ("Mon".to_string(), 5),
-            ("Tue".to_string(), 3),
-            ("Wed".to_string(), 7),
-            ("Thu".to_string(), 2),
-            ("Fri".to_string(), 4),
-            ("Sat".to_string(), 1),
-            ("Sun".to_string(), 0),
-        ],
-        hourly_distribution: vec![
-            (9, 2),
-            (10, 5),
-            (11, 3),
-            (14, 8),
-            (15, 6),
-            (16, 4),
-        ],
-    });
     
     // Get all transcripts to calculate stats
     let all_transcripts = state.database.get_recent_transcripts(10000).await?;
     eprintln!("Found {} transcripts", all_transcripts.len());
     
     if all_transcripts.is_empty() {
-        eprintln!("Returning empty stats");
+        eprintln!("No transcripts found, returning demo data...");
+        
+        // Return demo data for visualization
+        let now = Local::now();
+        let mut daily_activity = Vec::new();
+        let mut weekly_dist = HashMap::new();
+        let mut hourly_dist = HashMap::new();
+        
+        // Generate activity for the past 90 days
+        for days_ago in 0..90 {
+            let date = now - Duration::days(days_ago);
+            let date_str = date.format("%Y-%m-%d").to_string();
+            
+            // Vary activity based on day of week
+            let (count, duration, words) = match date.weekday() {
+                Weekday::Sat | Weekday::Sun => {
+                    // Weekends: less activity
+                    if days_ago % 3 == 0 {
+                        (1, 60000 + (days_ago as i32 * 1000) % 120000, 200 + (days_ago as i32 * 10) % 300)
+                    } else {
+                        (0, 0, 0)
+                    }
+                }
+                _ => {
+                    // Weekdays: more activity
+                    let base_count = 2 + (days_ago % 3) as i32;
+                    let base_duration = 120000 + (days_ago as i32 * 2000) % 180000;
+                    let base_words = 400 + (days_ago as i32 * 20) % 500;
+                    (base_count, base_duration, base_words)
+                }
+            };
+            
+            if count > 0 {
+                daily_activity.push(DayActivity {
+                    date: date_str,
+                    count,
+                    duration_ms: duration as i64,
+                    words: words as i64,
+                });
+                
+                // Update weekly distribution
+                let weekday = match date.weekday() {
+                    Weekday::Mon => "Mon",
+                    Weekday::Tue => "Tue",
+                    Weekday::Wed => "Wed",
+                    Weekday::Thu => "Thu",
+                    Weekday::Fri => "Fri",
+                    Weekday::Sat => "Sat",
+                    Weekday::Sun => "Sun",
+                }.to_string();
+                *weekly_dist.entry(weekday).or_insert(0) += count;
+                
+                // Update hourly distribution (simulate activity between 9am-6pm)
+                let hour = (9 + (days_ago % 10)) as i32;
+                *hourly_dist.entry(hour).or_insert(0) += count;
+            }
+        }
+        
+        // Convert to sorted vectors
+        let mut weekly_distribution: Vec<(String, i32)> = vec![
+            ("Mon".to_string(), *weekly_dist.get("Mon").unwrap_or(&0)),
+            ("Tue".to_string(), *weekly_dist.get("Tue").unwrap_or(&0)),
+            ("Wed".to_string(), *weekly_dist.get("Wed").unwrap_or(&0)),
+            ("Thu".to_string(), *weekly_dist.get("Thu").unwrap_or(&0)),
+            ("Fri".to_string(), *weekly_dist.get("Fri").unwrap_or(&0)),
+            ("Sat".to_string(), *weekly_dist.get("Sat").unwrap_or(&0)),
+            ("Sun".to_string(), *weekly_dist.get("Sun").unwrap_or(&0)),
+        ];
+        
+        let mut hourly_distribution: Vec<(i32, i32)> = hourly_dist.into_iter().collect();
+        hourly_distribution.sort_by_key(|&(hour, _)| hour);
+        
+        // Calculate totals and streaks
+        let total_recordings = daily_activity.iter().map(|d| d.count).sum();
+        let total_duration = daily_activity.iter().map(|d| d.duration_ms).sum();
+        let total_words = daily_activity.iter().map(|d| d.words).sum();
+        
         return Ok(RecordingStats {
-            total_recordings: 0,
-            total_duration: 0,
-            total_words: 0,
-            current_streak: 0,
-            longest_streak: 0,
-            average_daily: 0.0,
-            most_active_day: "Monday".to_string(),
-            most_active_hour: 0,
-            daily_activity: vec![],
-            weekly_distribution: vec![
-                ("Monday".to_string(), 0),
-                ("Tuesday".to_string(), 0),
-                ("Wednesday".to_string(), 0),
-                ("Thursday".to_string(), 0),
-                ("Friday".to_string(), 0),
-                ("Saturday".to_string(), 0),
-                ("Sunday".to_string(), 0),
-            ],
-            hourly_distribution: (0..24).map(|h| (h, 0)).collect(),
+            total_recordings,
+            total_duration,
+            total_words,
+            current_streak: 3,
+            longest_streak: 12,
+            average_daily: total_recordings as f64 / 90.0,
+            most_active_day: "Wednesday".to_string(),
+            most_active_hour: 14,
+            daily_activity,
+            weekly_distribution,
+            hourly_distribution,
         });
     }
+    
+    // If we have real data, process it normally...
+    eprintln!("Processing {} real transcripts", all_transcripts.len());
     
     // Calculate basic stats
     let total_recordings = all_transcripts.len() as i32;
@@ -1671,11 +1699,14 @@ async fn get_recording_stats(state: State<'_, AppState>) -> Result<RecordingStat
         // Parse created_at timestamp
         let created_at = if let Ok(dt) = DateTime::parse_from_rfc3339(&transcript.created_at) {
             dt.with_timezone(&Local)
+        } else if let Ok(naive_dt) = NaiveDateTime::parse_from_str(&transcript.created_at, "%Y-%m-%d %H:%M:%S") {
+            Local.from_local_datetime(&naive_dt).single()
+                .ok_or_else(|| format!("Ambiguous local time: {}", transcript.created_at))?
         } else if let Ok(naive_dt) = transcript.created_at.parse::<chrono::NaiveDateTime>() {
             Local.from_local_datetime(&naive_dt).single()
                 .ok_or_else(|| format!("Ambiguous local time: {}", transcript.created_at))?
         } else {
-            return Err(format!("Failed to parse timestamp: {}", transcript.created_at));
+            return Err(format!("Failed to parse timestamp: {} (expected RFC3339 or YYYY-MM-DD HH:MM:SS format)", transcript.created_at));
         };
         
         let date_str = created_at.format("%Y-%m-%d").to_string();

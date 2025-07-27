@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
 
-type View = 'record' | 'transcripts' | 'settings' | 'stats';
+type View = 'record' | 'transcripts' | 'settings' | 'stats' | 'dictionary';
 
 interface DeleteConfirmation {
   show: boolean;
@@ -52,7 +52,13 @@ interface UIProviderProps {
 }
 
 export function UIProvider({ children }: UIProviderProps) {
-  const [currentView, setCurrentView] = useState<View>('record');
+  // Load saved view from localStorage or default to 'record'
+  const [currentView, setCurrentView] = useState<View>(() => {
+    const savedView = localStorage.getItem('scout-current-view');
+    return (savedView && ['record', 'transcripts', 'settings', 'stats', 'dictionary'].includes(savedView)) 
+      ? savedView as View 
+      : 'record';
+  });
   const [showTranscriptionOverlay, setShowTranscriptionOverlay] = useState(false);
   const [showFirstRun, setShowFirstRun] = useState(false);
   const [isCapturingHotkey, setIsCapturingHotkey] = useState(false);
@@ -69,6 +75,7 @@ export function UIProvider({ children }: UIProviderProps) {
 
   const handleSetCurrentView = useCallback((view: View) => {
     setCurrentView(view);
+    localStorage.setItem('scout-current-view', view);
   }, []);
 
   const handleSetShowTranscriptionOverlay = useCallback((show: boolean) => {

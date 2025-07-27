@@ -37,9 +37,7 @@ export function StatsView() {
   const loadStats = async () => {
     try {
       setLoading(true);
-      console.log('Loading stats...');
       const data = await invokeTyped<Stats>('get_recording_stats');
-      console.log('Stats data received:', data);
       setStats(data);
     } catch (error) {
       console.error('Failed to load stats:', error);
@@ -175,30 +173,37 @@ export function StatsView() {
   return (
     <div className="stats-view" onMouseMove={handleMouseMove}>
       {/* Key Metrics */}
-      <div className="stats-metrics">
-        <div className="metric-card">
-          <div className="metric-value">{formatNumber(stats.total_recordings)}</div>
-          <div className="metric-label">Total Recordings</div>
+      <div className="stats-metrics-container">
+        {/* Primary Stats */}
+        <div className="stats-metrics-primary">
+          <div className="metric-card primary">
+            <div className="metric-value primary">{formatNumber(stats.total_recordings)}</div>
+            <div className="metric-label">Total Recordings</div>
+          </div>
+          <div className="metric-card primary">
+            <div className="metric-value primary">{formatDuration(stats.total_duration)}</div>
+            <div className="metric-label">Time Recorded</div>
+          </div>
+          <div className="metric-card primary">
+            <div className="metric-value primary">{formatNumber(stats.total_words)}</div>
+            <div className="metric-label">Words Transcribed</div>
+          </div>
         </div>
-        <div className="metric-card">
-          <div className="metric-value">{formatDuration(stats.total_duration)}</div>
-          <div className="metric-label">Total Duration</div>
-        </div>
-        <div className="metric-card">
-          <div className="metric-value">{formatNumber(stats.total_words)}</div>
-          <div className="metric-label">Total Words</div>
-        </div>
-        <div className="metric-card">
-          <div className="metric-value">{stats.current_streak}</div>
-          <div className="metric-label">Current Streak</div>
-        </div>
-        <div className="metric-card">
-          <div className="metric-value">{stats.longest_streak}</div>
-          <div className="metric-label">Longest Streak</div>
-        </div>
-        <div className="metric-card">
-          <div className="metric-value">{stats.average_daily.toFixed(1)}</div>
-          <div className="metric-label">Daily Average</div>
+        
+        {/* Secondary Stats */}
+        <div className="stats-metrics-secondary">
+          <div className="metric-card">
+            <div className="metric-value">{stats.current_streak}</div>
+            <div className="metric-label">Current Streak</div>
+          </div>
+          <div className="metric-card">
+            <div className="metric-value">{stats.longest_streak}</div>
+            <div className="metric-label">Best Streak</div>
+          </div>
+          <div className="metric-card">
+            <div className="metric-value">{stats.average_daily.toFixed(1)}</div>
+            <div className="metric-label">Daily Average</div>
+          </div>
         </div>
       </div>
 
@@ -241,7 +246,7 @@ export function StatsView() {
             </div>
           </div>
           <div className="heatmap-legend">
-            <span className="legend-label">Less</span>
+            <span className="legend-label">0</span>
             <div className="legend-scale">
               <div className="legend-box" style={{ backgroundColor: 'var(--stats-heatmap-level-0)' }}></div>
               <div className="legend-box" style={{ backgroundColor: 'var(--stats-heatmap-level-1)' }}></div>
@@ -249,7 +254,7 @@ export function StatsView() {
               <div className="legend-box" style={{ backgroundColor: 'var(--stats-heatmap-level-3)' }}></div>
               <div className="legend-box" style={{ backgroundColor: 'var(--stats-heatmap-level-4)' }}></div>
             </div>
-            <span className="legend-label">More</span>
+            <span className="legend-label">10+ recordings</span>
           </div>
         </div>
       </div>

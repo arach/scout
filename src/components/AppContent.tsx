@@ -9,6 +9,7 @@ import { RecordView } from "./RecordView";
 import { TranscriptsView } from "./TranscriptsView";
 import { SettingsView } from "./SettingsView";
 import { StatsView } from "./StatsView";
+import { DictionaryViewStandalone } from "./DictionaryView.standalone";
 import { AudioErrorBoundary, TranscriptionErrorBoundary, SettingsErrorBoundary } from './ErrorBoundary';
 import { ChevronRight, PanelLeftClose } from 'lucide-react';
 import { useRecording } from '../hooks/useRecording';
@@ -524,6 +525,7 @@ export function AppContent() {
               {currentView === 'transcripts' && 'Transcripts'}
               {currentView === 'settings' && 'Settings'}
               {currentView === 'stats' && 'Stats'}
+              {currentView === 'dictionary' && 'Dictionary'}
             </h1>
           </div>
           <div className="view-header-right">
@@ -615,6 +617,9 @@ export function AppContent() {
         )}
         {currentView === 'stats' && (
           <StatsView />
+        )}
+        {currentView === 'dictionary' && (
+          <DictionaryViewStandalone />
         )}
 
         {/* File drop overlay */}

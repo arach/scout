@@ -378,3 +378,55 @@
   color: var(--foreground-secondary);
   text-align: center;
 }
+/* Standalone View Styles */
+.dictionary-view-standalone {
+  flex: 1;
+  padding: 24px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.dictionary-standalone-header {
+  margin-bottom: 8px;
+}
+
+.dictionary-standalone-header h1 {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 8px 0;
+}
+
+.dictionary-standalone-header p {
+  color: var(--text-secondary);
+  font-size: 14px;
+  margin: 0;
+}
+
+.dictionary-standalone-content {
+  flex: 1;
+}
+
+/* Override settings-specific styles for standalone view */
+.dictionary-view-standalone .settings-section {
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.dictionary-view-standalone .collapsible-header-wrapper {
+  display: none;
+}
+
+.dictionary-view-standalone .collapsible-content {
+  display: block \!important;
+  padding: 0;
+}
+
+.dictionary-view-standalone .dictionary-section {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+}
