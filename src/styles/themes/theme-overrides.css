@@ -171,6 +171,7 @@
   
   .search-input::placeholder {
     color: var(--text-placeholder) !important;
+    opacity: 0.6; /* Ensure placeholder is visible but subtle */
   }
   
   /* Terminal-style buttons */
@@ -301,10 +302,45 @@
     border-radius: 0;
   }
   
-  /* Fast animations */
+  /* Fast animations for most elements */
   * {
     transition-duration: 0.1s !important;
     animation-duration: 0.1s !important;
+  }
+  
+  /* Slower animations for sidebar and view transitions */
+  .sidebar {
+    transition: width 0.3s ease !important;
+  }
+  
+  .sidebar-button {
+    transition: all 0.25s ease !important;
+  }
+  
+  .app-main,
+  .record-view,
+  .transcripts-view,
+  .settings-view {
+    transition-duration: 0.3s !important;
+  }
+  
+  .transcript-item,
+  .transcript-group {
+    transition-duration: 0.2s !important;
+  }
+  
+  /* Even slower for fade animations */
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  
+  .transcript-item {
+    animation: fadeIn 0.3s ease-out !important;
   }
   
   /* Active states */
@@ -333,6 +369,12 @@
   
   /* Completely borderless transcript view */
   .transcripts-view {
+    background: var(--bg-primary) !important;
+  }
+  
+  /* Force dark backgrounds for all transcript view components */
+  .transcript-list-container,
+  .transcript-group-items {
     background: var(--bg-primary) !important;
   }
   
@@ -377,6 +419,22 @@
   
   .transcript-empty {
     color: var(--text-tertiary) !important;
+  }
+  
+  /* Better contrast for search input */
+  .search-input {
+    background: #2a2a2a !important; /* Lighter than bg-primary for better visibility */
+    border: 1px solid #404040 !important; /* More visible border */
+    color: #f0f0f0 !important;
+  }
+  
+  .search-input:focus {
+    background: #333333 !important; /* Even lighter when focused */
+    border-color: #606060 !important;
+  }
+  
+  .search-input::placeholder {
+    color: #808080 !important; /* More visible placeholder */
   }
   
   /* Clean action gradient */

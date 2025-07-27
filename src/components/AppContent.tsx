@@ -499,7 +499,7 @@ export function AppContent() {
       <main className={`app-main ${!isSidebarExpanded ? 'sidebar-collapsed' : ''}`}>
         <div className="view-header">
           <div className="view-header-left">
-            {!isSidebarExpanded && (
+            {!isSidebarExpanded ? (
               <button
                 className="sidebar-toggle-button"
                 onClick={toggleSidebar}
@@ -507,10 +507,7 @@ export function AppContent() {
               >
                 <ChevronRight size={16} />
               </button>
-            )}
-          </div>
-          <div className="view-header-right">
-            {isSidebarExpanded && (
+            ) : (
               <button
                 className="sidebar-close-button"
                 onClick={toggleSidebar}
@@ -519,6 +516,16 @@ export function AppContent() {
                 <PanelLeftClose size={16} />
               </button>
             )}
+          </div>
+          <div className="view-header-center">
+            <h1 className="view-title">
+              {currentView === 'record' && 'Recording'}
+              {currentView === 'transcripts' && 'Transcripts'}
+              {currentView === 'settings' && 'Settings'}
+            </h1>
+          </div>
+          <div className="view-header-right">
+            {/* Empty for now, but available for future controls */}
           </div>
         </div>
 

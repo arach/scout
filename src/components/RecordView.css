@@ -3,8 +3,8 @@
     flex-direction: column;
     align-items: center;
     height: 100%;
-    /* Reduced top padding since we now have a view-header */
-    padding: 20px 20px 20px 20px;
+    /* Match other views for consistent header alignment */
+    padding: 40px 32px 20px 32px;
     box-sizing: border-box;
     overflow-y: auto;
     /* Account for the view-header height */
@@ -704,28 +704,14 @@
     height: 6px;
     border-radius: 50%;
     background: #4CAF50;
-    animation: statusPulse 3s ease-in-out infinite;
 }
 
 .status-dot.processing {
     background: var(--accent-primary);
-    animation: statusPulse 2s ease-in-out infinite;
 }
 
 .status-dot.recording {
     background: var(--recording);
-    animation: statusPulse 2s ease-in-out infinite;
-}
-
-@keyframes statusPulse {
-    0%, 100% { 
-        opacity: 1;
-        transform: scale(1);
-    }
-    50% { 
-        opacity: 0.8;
-        transform: scale(1.1);
-    }
 }
 
 .status-text {
