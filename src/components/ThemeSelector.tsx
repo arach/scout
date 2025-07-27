@@ -13,7 +13,7 @@ export const ThemeSelector: React.FC<ThemeSelectorProps> = ({
   currentTheme: propTheme,
   onThemeChange 
 }) => {
-  const { theme, setTheme } = useTheme();
+  const { theme, setTheme, isLoadingTheme } = useTheme();
   const currentTheme = propTheme || theme.id;
   const availableThemes = getAvailableThemes();
   
@@ -23,13 +23,13 @@ export const ThemeSelector: React.FC<ThemeSelectorProps> = ({
   };
   
   // Group themes by category
-  const themeCategories = {
-    'VS Code': availableThemes.filter(t => t.id.startsWith('vscode')),
-    'Minimal': availableThemes.filter(t => t.id.startsWith('minimal')),
-    'Terminal': availableThemes.filter(t => t.id.startsWith('terminal-chic')),
-    'Retro': availableThemes.filter(t => t.id.startsWith('winamp')),
-    'System': availableThemes.filter(t => t.id === 'system'),
-  };
+  const themeCategories = availableThemes.reduce((acc, theme) => {
+    if (!acc[theme.category]) {
+      acc[theme.category] = [];
+    }
+    acc[theme.category].push(theme);
+    return acc;
+  }, {} as Record<string, typeof availableThemes>);
   
   return (
     <div className="theme-selector-container">
@@ -43,12 +43,16 @@ export const ThemeSelector: React.FC<ThemeSelectorProps> = ({
                 {themes.map(theme => (
                   <button
                     key={theme.id}
-                    className={`theme-option ${currentTheme === theme.id ? 'active' : ''}`}
+                    className={`theme-option ${currentTheme === theme.id ? 'active' : ''} ${isLoadingTheme && currentTheme === theme.id ? 'loading' : ''}`}
                     onClick={() => handleThemeChange(theme.id)}
                     title={theme.name}
+                    disabled={isLoadingTheme}
                   >
                     <ThemeIcon themeId={theme.id} />
                     <span>{theme.name}</span>
+                    {isLoadingTheme && currentTheme === theme.id && (
+                      <span className="theme-loading-indicator">...</span>
+                    )}
                   </button>
                 ))}
               </div>

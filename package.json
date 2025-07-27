@@ -23,11 +23,13 @@
     "@tauri-apps/plugin-http": "^2.5.0",
     "@tauri-apps/plugin-opener": "^2.4.0",
     "@types/marked": "^6.0.0",
+    "@types/react-window": "^1.8.8",
     "@wavesurfer/react": "^1.0.11",
     "lucide-react": "^0.522.0",
     "marked": "^16.1.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-window": "^1.8.11",
     "wavesurfer.js": "^7.9.9"
   },
   "devDependencies": {
