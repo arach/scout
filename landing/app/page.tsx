@@ -263,10 +263,99 @@ export default function Home() {
               description="Powered by OpenAI's Whisper models. Choose from tiny to large-v3."
             />
             <FeatureCard
+              icon="📖"
+              title="Custom Dictionary"
+              description="Auto-correct technical terms, acronyms, and names with smart replacements."
+            />
+            <FeatureCard
               icon="📂"
               title="Transcript Database"
               description="All transcriptions saved locally with search, export, and management."
             />
+          </div>
+        </div>
+      </section>
+
+      {/* Dictionary Feature Section */}
+      <section className="py-20 px-6 bg-gradient-to-b from-white to-gray-50 dark:from-gray-950 dark:to-gray-900">
+        <div className="max-w-6xl mx-auto">
+          <div className="grid md:grid-cols-2 gap-12 items-center">
+            <div>
+              <h2 className="text-4xl font-bold mb-4 text-gray-900 dark:text-white">
+                Your Words, Your Way
+              </h2>
+              <p className="text-xl text-gray-600 dark:text-gray-400 mb-6">
+                Teach Scout your vocabulary. Custom dictionaries ensure technical terms, company names, and industry jargon are always transcribed perfectly.
+              </p>
+              
+              <div className="space-y-4 mb-8">
+                <div className="flex items-start gap-3">
+                  <div className="text-2xl mt-1">⚡</div>
+                  <div>
+                    <h3 className="font-semibold text-gray-900 dark:text-white mb-1">Instant Updates</h3>
+                    <p className="text-gray-600 dark:text-gray-400">No training required. Add a word, and it works immediately.</p>
+                  </div>
+                </div>
+                
+                <div className="flex items-start gap-3">
+                  <div className="text-2xl mt-1">📊</div>
+                  <div>
+                    <h3 className="font-semibold text-gray-900 dark:text-white mb-1">Usage Analytics</h3>
+                    <p className="text-gray-600 dark:text-gray-400">Track which corrections matter most with detailed replacement history.</p>
+                  </div>
+                </div>
+                
+                <div className="flex items-start gap-3">
+                  <div className="text-2xl mt-1">🎯</div>
+                  <div>
+                    <h3 className="font-semibold text-gray-900 dark:text-white mb-1">Smart Matching</h3>
+                    <p className="text-gray-600 dark:text-gray-400">Four match types: exact, word boundaries, phrases, and regex patterns.</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-3">
+                <span className="px-3 py-1 bg-gray-100 dark:bg-gray-800 rounded-full text-sm text-gray-700 dark:text-gray-300">Medical Terms</span>
+                <span className="px-3 py-1 bg-gray-100 dark:bg-gray-800 rounded-full text-sm text-gray-700 dark:text-gray-300">Legal Jargon</span>
+                <span className="px-3 py-1 bg-gray-100 dark:bg-gray-800 rounded-full text-sm text-gray-700 dark:text-gray-300">Tech Acronyms</span>
+                <span className="px-3 py-1 bg-gray-100 dark:bg-gray-800 rounded-full text-sm text-gray-700 dark:text-gray-300">Brand Names</span>
+              </div>
+            </div>
+            
+            <div className="relative">
+              <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl p-6 border border-gray-200 dark:border-gray-800">
+                <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Dictionary Examples</h3>
+                <div className="space-y-3 font-mono text-sm">
+                  <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                    <span className="text-gray-600 dark:text-gray-400">"api"</span>
+                    <span className="text-gray-400 dark:text-gray-500">→</span>
+                    <span className="text-gray-900 dark:text-white font-semibold">"API"</span>
+                  </div>
+                  <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                    <span className="text-gray-600 dark:text-gray-400">"acme"</span>
+                    <span className="text-gray-400 dark:text-gray-500">→</span>
+                    <span className="text-gray-900 dark:text-white font-semibold">"ACME Corporation"</span>
+                  </div>
+                  <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                    <span className="text-gray-600 dark:text-gray-400">"ml"</span>
+                    <span className="text-gray-400 dark:text-gray-500">→</span>
+                    <span className="text-gray-900 dark:text-white font-semibold">"machine learning"</span>
+                  </div>
+                  <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                    <span className="text-gray-600 dark:text-gray-400">"dx"</span>
+                    <span className="text-gray-400 dark:text-gray-500">→</span>
+                    <span className="text-gray-900 dark:text-white font-semibold">"diagnosis"</span>
+                  </div>
+                </div>
+                
+                <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                  <p className="text-sm text-blue-800 dark:text-blue-300">
+                    <strong>Before:</strong> "The new api for acme is ready"<br/>
+                    <strong>After:</strong> "The new API for ACME Corporation is ready"
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -286,7 +375,7 @@ export default function Home() {
             <UseCase
               title="Professionals"
               description="Capture meeting notes, dictate emails, and document thoughts instantly."
-              features={["Global hotkeys", "Auto-copy to clipboard", "Search transcripts"]}
+              features={["Global hotkeys", "Auto-copy to clipboard", "Custom dictionaries"]}
             />
             <UseCase
               title="Writers & Students"

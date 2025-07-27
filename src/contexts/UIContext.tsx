@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
 
-type View = 'record' | 'transcripts' | 'settings';
+type View = 'record' | 'transcripts' | 'settings' | 'stats';
 
 interface DeleteConfirmation {
   show: boolean;

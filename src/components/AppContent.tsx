@@ -8,6 +8,7 @@ import { Sidebar, useSidebarState } from "./Sidebar";
 import { RecordView } from "./RecordView";
 import { TranscriptsView } from "./TranscriptsView";
 import { SettingsView } from "./SettingsView";
+import { StatsView } from "./StatsView";
 import { AudioErrorBoundary, TranscriptionErrorBoundary, SettingsErrorBoundary } from './ErrorBoundary';
 import { ChevronRight, PanelLeftClose } from 'lucide-react';
 import { useRecording } from '../hooks/useRecording';
@@ -522,6 +523,7 @@ export function AppContent() {
               {currentView === 'record' && 'Recording'}
               {currentView === 'transcripts' && 'Transcripts'}
               {currentView === 'settings' && 'Settings'}
+              {currentView === 'stats' && 'Stats'}
             </h1>
           </div>
           <div className="view-header-right">
@@ -610,6 +612,9 @@ export function AppContent() {
               updateLLMSettings={updateLLMSettings}
             />
           </SettingsErrorBoundary>
+        )}
+        {currentView === 'stats' && (
+          <StatsView />
         )}
 
         {/* File drop overlay */}

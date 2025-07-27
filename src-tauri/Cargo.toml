@@ -72,6 +72,7 @@ arboard = "3.4"
 async-trait = "0.1"
 rdev = "0.5"
 clap = { version = "4.0", features = ["derive"] }
+regex = "1.10"
 
 # LLM dependencies
 candle-core = "0.9"

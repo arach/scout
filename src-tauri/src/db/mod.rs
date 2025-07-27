@@ -61,6 +61,31 @@ pub struct LLMPromptTemplate {
     pub updated_at: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct DictionaryEntry {
+    pub id: i64,
+    pub original_text: String,
+    pub replacement_text: String,
+    pub match_type: String,
+    pub is_case_sensitive: bool,
+    pub phonetic_pattern: Option<String>,
+    pub category: Option<String>,
+    pub description: Option<String>,
+    pub usage_count: i32,
+    pub enabled: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DictionaryMatch {
+    pub entry_id: i64,
+    pub matched_text: String,
+    pub replaced_with: String,
+    pub position_start: usize,
+    pub position_end: usize,
+}
+
 pub struct Database {
     pool: Pool<Sqlite>,
 }
@@ -268,6 +293,49 @@ impl Database {
         .execute(&pool)
         .await
         .map_err(|e| format!("Failed to create whisper_logs table: {}", e))?;
+
+        // Create dictionary tables
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS dictionary_entries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                original_text TEXT NOT NULL COLLATE NOCASE,
+                replacement_text TEXT NOT NULL,
+                match_type TEXT NOT NULL CHECK (match_type IN ('exact', 'word', 'phrase', 'regex')),
+                is_case_sensitive BOOLEAN DEFAULT 0,
+                phonetic_pattern TEXT,
+                category TEXT,
+                description TEXT,
+                usage_count INTEGER DEFAULT 0,
+                enabled BOOLEAN DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            
+            CREATE INDEX IF NOT EXISTS idx_dictionary_original ON dictionary_entries(original_text);
+            CREATE INDEX IF NOT EXISTS idx_dictionary_enabled ON dictionary_entries(enabled);
+            CREATE INDEX IF NOT EXISTS idx_dictionary_category ON dictionary_entries(category);
+            
+            CREATE TABLE IF NOT EXISTS dictionary_match_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                transcript_id INTEGER NOT NULL,
+                entry_id INTEGER NOT NULL,
+                matched_text TEXT NOT NULL,
+                replaced_with TEXT NOT NULL,
+                position_start INTEGER NOT NULL,
+                position_end INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (transcript_id) REFERENCES transcripts(id) ON DELETE CASCADE,
+                FOREIGN KEY (entry_id) REFERENCES dictionary_entries(id) ON DELETE CASCADE
+            );
+            
+            CREATE INDEX IF NOT EXISTS idx_match_history_transcript ON dictionary_match_history(transcript_id);
+            CREATE INDEX IF NOT EXISTS idx_match_history_entry ON dictionary_match_history(entry_id);
+            "#
+        )
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("Failed to create dictionary tables: {}", e))?;
 
         // Create indexes for whisper_logs
         sqlx::query(
@@ -800,5 +868,214 @@ impl Database {
         .map_err(|e| format!("Failed to delete LLM prompt template: {}", e))?;
 
         Ok(())
+    }
+
+    // Dictionary methods
+    pub async fn get_enabled_dictionary_entries(&self) -> Result<Vec<DictionaryEntry>, String> {
+        let entries = sqlx::query_as::<_, DictionaryEntry>(
+            r#"
+            SELECT * FROM dictionary_entries
+            WHERE enabled = 1
+            ORDER BY original_text
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to get dictionary entries: {}", e))?;
+
+        Ok(entries)
+    }
+
+    pub async fn get_all_dictionary_entries(&self) -> Result<Vec<DictionaryEntry>, String> {
+        let entries = sqlx::query_as::<_, DictionaryEntry>(
+            r#"
+            SELECT * FROM dictionary_entries
+            ORDER BY category, original_text
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to get all dictionary entries: {}", e))?;
+
+        Ok(entries)
+    }
+
+    pub async fn save_dictionary_entry(
+        &self,
+        original_text: &str,
+        replacement_text: &str,
+        match_type: &str,
+        is_case_sensitive: bool,
+        phonetic_pattern: Option<&str>,
+        category: Option<&str>,
+        description: Option<&str>,
+    ) -> Result<i64, String> {
+        let result = sqlx::query(
+            r#"
+            INSERT INTO dictionary_entries (
+                original_text, replacement_text, match_type, is_case_sensitive,
+                phonetic_pattern, category, description
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "#
+        )
+        .bind(original_text)
+        .bind(replacement_text)
+        .bind(match_type)
+        .bind(is_case_sensitive)
+        .bind(phonetic_pattern)
+        .bind(category)
+        .bind(description)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to save dictionary entry: {}", e))?;
+
+        Ok(result.last_insert_rowid())
+    }
+
+    pub async fn update_dictionary_entry(
+        &self,
+        id: i64,
+        original_text: &str,
+        replacement_text: &str,
+        match_type: &str,
+        is_case_sensitive: bool,
+        phonetic_pattern: Option<&str>,
+        category: Option<&str>,
+        description: Option<&str>,
+        enabled: bool,
+    ) -> Result<(), String> {
+        sqlx::query(
+            r#"
+            UPDATE dictionary_entries 
+            SET original_text = ?1, replacement_text = ?2, match_type = ?3,
+                is_case_sensitive = ?4, phonetic_pattern = ?5, category = ?6,
+                description = ?7, enabled = ?8, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?9
+            "#
+        )
+        .bind(original_text)
+        .bind(replacement_text)
+        .bind(match_type)
+        .bind(is_case_sensitive)
+        .bind(phonetic_pattern)
+        .bind(category)
+        .bind(description)
+        .bind(enabled)
+        .bind(id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to update dictionary entry: {}", e))?;
+
+        Ok(())
+    }
+
+    pub async fn delete_dictionary_entry(&self, id: i64) -> Result<(), String> {
+        sqlx::query("DELETE FROM dictionary_entries WHERE id = ?1")
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| format!("Failed to delete dictionary entry: {}", e))?;
+
+        Ok(())
+    }
+
+    pub async fn increment_dictionary_usage(&self, entry_id: i64) -> Result<(), String> {
+        sqlx::query(
+            r#"
+            UPDATE dictionary_entries 
+            SET usage_count = usage_count + 1
+            WHERE id = ?1
+            "#
+        )
+        .bind(entry_id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to increment dictionary usage: {}", e))?;
+
+        Ok(())
+    }
+
+    pub async fn save_dictionary_matches(
+        &self,
+        transcript_id: i64,
+        matches: &[DictionaryMatch],
+    ) -> Result<(), String> {
+        let mut tx = self.pool.begin()
+            .await
+            .map_err(|e| format!("Failed to begin transaction: {}", e))?;
+
+        for m in matches {
+            sqlx::query(
+                r#"
+                INSERT INTO dictionary_match_history (
+                    transcript_id, entry_id, matched_text, replaced_with,
+                    position_start, position_end
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                "#
+            )
+            .bind(transcript_id)
+            .bind(m.entry_id)
+            .bind(&m.matched_text)
+            .bind(&m.replaced_with)
+            .bind(m.position_start as i64)
+            .bind(m.position_end as i64)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("Failed to save dictionary match: {}", e))?;
+
+            // Increment usage count
+            sqlx::query(
+                r#"
+                UPDATE dictionary_entries 
+                SET usage_count = usage_count + 1
+                WHERE id = ?1
+                "#
+            )
+            .bind(m.entry_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("Failed to increment usage count: {}", e))?;
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| format!("Failed to commit transaction: {}", e))?;
+
+        Ok(())
+    }
+
+    pub async fn get_dictionary_matches_for_transcript(&self, transcript_id: i64) -> Result<Vec<serde_json::Value>, String> {
+        let rows = sqlx::query(
+            r#"
+            SELECT dmh.*, de.original_text, de.replacement_text, de.category
+            FROM dictionary_match_history dmh
+            JOIN dictionary_entries de ON dmh.entry_id = de.id
+            WHERE dmh.transcript_id = ?1
+            ORDER BY dmh.position_start
+            "#
+        )
+        .bind(transcript_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to get dictionary matches: {}", e))?;
+
+        let matches: Vec<serde_json::Value> = rows.into_iter().map(|row| {
+            serde_json::json!({
+                "id": row.get::<i64, _>("id"),
+                "entry_id": row.get::<i64, _>("entry_id"),
+                "matched_text": row.get::<String, _>("matched_text"),
+                "replaced_with": row.get::<String, _>("replaced_with"),
+                "position_start": row.get::<i64, _>("position_start"),
+                "position_end": row.get::<i64, _>("position_end"),
+                "original_text": row.get::<String, _>("original_text"),
+                "replacement_text": row.get::<String, _>("replacement_text"),
+                "category": row.get::<Option<String>, _>("category"),
+                "created_at": row.get::<String, _>("created_at"),
+            })
+        }).collect();
+
+        Ok(matches)
     }
 }

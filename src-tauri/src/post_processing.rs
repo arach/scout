@@ -7,6 +7,7 @@ use crate::db::Database;
 use crate::logger::{info, error, debug, Component};
 use crate::llm::{CandleEngine, LLMEngine, GenerationOptions, ModelManager, PromptManager};
 use crate::llm::pipeline::LLMPipeline;
+use crate::dictionary_processor::DictionaryProcessor;
 use std::path::PathBuf;
 
 /// Post-processing hooks that run after successful transcription
@@ -43,8 +44,23 @@ impl PostProcessingHooks {
         
         let original_transcript = transcript.to_string();
         
-        // Execute profanity filtering first
-        let (filtered_transcript, analysis_logs) = self.execute_profanity_filter(transcript, recording_duration_ms).await;
+        // Execute dictionary replacements first (before other processing)
+        let dictionary_processor = DictionaryProcessor::new(self.database.clone());
+        let (dict_processed_transcript, dict_matches) = match dictionary_processor.process_transcript(transcript, transcript_id).await {
+            Ok((processed, matches)) => {
+                if !matches.is_empty() {
+                    info(Component::Processing, &format!("📖 Dictionary processing: {} replacements made", matches.len()));
+                }
+                (processed, matches)
+            }
+            Err(e) => {
+                error(Component::Processing, &format!("❌ Dictionary processing failed: {}", e));
+                (transcript.to_string(), vec![])
+            }
+        };
+        
+        // Execute profanity filtering on dictionary-processed transcript
+        let (filtered_transcript, analysis_logs) = self.execute_profanity_filter(&dict_processed_transcript, recording_duration_ms).await;
         
         // Execute auto-copy/paste hooks with filtered transcript
         self.execute_clipboard_hooks(&filtered_transcript).await;
