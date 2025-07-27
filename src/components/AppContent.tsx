@@ -30,7 +30,7 @@ export function AppContent() {
   const { isExpanded: isSidebarExpanded, toggleExpanded: toggleSidebar } = useSidebarState();
   
   // Context state
-  const { selectedMic, vadEnabled, setSelectedMic, setVadEnabled } = useAudioContext();
+  const { selectedMic, setSelectedMic } = useAudioContext();
   const { 
     transcripts, 
     searchQuery, 
@@ -161,7 +161,6 @@ export function AppContent() {
     onRecordingStart: onRecordingStartCallback, // Always pass the callback to handle onboarding
     soundEnabled,
     selectedMic,
-    vadEnabled,
     pushToTalkShortcut: (showFirstRun && !isOnboardingTourStep) ? '' : pushToTalkHotkey, // Enable shortcuts only on tour step
     isRecordViewActive: !showFirstRun && currentView === 'record'
   });
@@ -574,7 +573,6 @@ export function AppContent() {
               hotkeyUpdateStatus={hotkeyUpdateStatus}
               pushToTalkHotkey={pushToTalkHotkey}
               isCapturingPushToTalkHotkey={isCapturingPushToTalkHotkey}
-              vadEnabled={vadEnabled}
               overlayPosition={overlayPosition}
               overlayTreatment={overlayTreatment}
               autoCopy={autoCopy}
@@ -591,7 +589,6 @@ export function AppContent() {
               startCapturingHotkey={() => setIsCapturingHotkey(true)}
               startCapturingPushToTalkHotkey={() => setIsCapturingPushToTalkHotkey(true)}
               stopCapturingPushToTalkHotkey={() => setIsCapturingPushToTalkHotkey(false)}
-              toggleVAD={() => setVadEnabled(!vadEnabled)}
               updateOverlayPosition={updateOverlayPosition}
               updateOverlayTreatment={updateOverlayTreatment}
               toggleAutoCopy={toggleAutoCopy}
@@ -681,7 +678,6 @@ export function AppContent() {
         transcripts={transcripts}
         searchQuery={searchQuery}
         selectedTranscripts={selectedTranscripts}
-        vadEnabled={vadEnabled}
         hotkey={hotkey}
         pushToTalkHotkey={pushToTalkHotkey}
         appVersion="0.1.0"

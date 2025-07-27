@@ -18,7 +18,6 @@ interface DevToolsProps {
   searchQuery?: string;
   selectedTranscripts?: Set<number>;
   // Settings context  
-  vadEnabled?: boolean;
   hotkey?: string;
   pushToTalkHotkey?: string;
   // Transcription overlay
@@ -37,7 +36,6 @@ export function DevTools(props: DevToolsProps) {
     transcripts = [],
     searchQuery = '',
     selectedTranscripts = new Set(),
-    vadEnabled = false,
     hotkey = '',
     pushToTalkHotkey = '',
     // currentUser = 'Unknown', // Unused variable
@@ -116,7 +114,6 @@ export function DevTools(props: DevToolsProps) {
       });
     } else if (currentView === 'settings') {
       Object.assign(logData, {
-        vadEnabled,
         hotkey,
         pushToTalkHotkey
       });
@@ -136,7 +133,6 @@ export function DevTools(props: DevToolsProps) {
     searchQuery,
     selectedTranscripts.size,
     // Settings deps
-    vadEnabled,
     hotkey,
     pushToTalkHotkey
   ]);
@@ -326,10 +322,6 @@ export function DevTools(props: DevToolsProps) {
 
                 {currentView === 'settings' && (
                   <>
-                    <span className="status-label">VAD:</span>
-                    <span className={`status-badge ${vadEnabled ? 'ready' : 'idle'}`}>
-                      {vadEnabled ? 'ON' : 'OFF'}
-                    </span>
                     
                     <span className="status-label">Hotkey:</span>
                     <span className="status-value">{hotkey || 'None'}</span>

@@ -655,12 +655,6 @@ async fn read_audio_file(audio_path: String) -> Result<Vec<u8>, String> {
 }
 
 #[tauri::command]
-async fn set_vad_enabled(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
-    let recorder = state.recorder.lock().await;
-    recorder.set_vad_enabled(enabled)
-}
-
-#[tauri::command]
 async fn subscribe_to_progress(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<(), String> {
     let mut receiver = state.progress_tracker.subscribe();
     
@@ -816,12 +810,6 @@ async fn open_system_preferences_audio() -> Result<(), String> {
 async fn mark_onboarding_complete(state: State<'_, AppState>) -> Result<(), String> {
     // Could store this in settings if needed
     Ok(())
-}
-
-#[tauri::command]
-async fn is_vad_enabled(state: State<'_, AppState>) -> Result<bool, String> {
-    let recorder = state.recorder.lock().await;
-    Ok(recorder.is_vad_enabled())
 }
 
 #[tauri::command]
@@ -1956,8 +1944,6 @@ pub fn run() {
             get_recent_transcripts,
             search_transcripts,
             read_audio_file,
-            set_vad_enabled,
-            is_vad_enabled,
             delete_transcript,
             delete_transcripts,
             export_transcripts,

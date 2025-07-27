@@ -4,7 +4,6 @@ use std::thread;
 use std::sync::mpsc;
 use std::any::TypeId;
 use std::time::Duration;
-use super::vad::VoiceActivityDetector;
 use crate::logger::{info, debug, warn, error, Component};
 
 // Type alias for sample callback
@@ -13,7 +12,6 @@ pub type SampleCallback = Arc<dyn Fn(&[f32]) + Send + Sync>;
 pub struct AudioRecorder {
     control_tx: Option<mpsc::Sender<RecorderCommand>>,
     is_recording: Arc<Mutex<bool>>,
-    vad_enabled: Arc<Mutex<bool>>,
     current_audio_level: Arc<Mutex<f32>>,
     current_device_info: Arc<Mutex<Option<DeviceInfo>>>,
     sample_callback: Arc<Mutex<Option<SampleCallback>>>,
@@ -31,7 +29,6 @@ pub struct DeviceInfo {
 enum RecorderCommand {
     StartRecording(String, Option<String>), // (path, device_name)
     StopRecording,
-    SetVadEnabled(bool),
     StartAudioLevelMonitoring(Option<String>), // device_name
     StopAudioLevelMonitoring,
     SetSampleCallback(Option<SampleCallback>),
@@ -42,7 +39,6 @@ impl AudioRecorder {
         Self {
             control_tx: None,
             is_recording: Arc::new(Mutex::new(false)),
-            vad_enabled: Arc::new(Mutex::new(false)),
             current_audio_level: Arc::new(Mutex::new(0.0)),
             current_device_info: Arc::new(Mutex::new(None)),
             sample_callback: Arc::new(Mutex::new(None)),
@@ -72,14 +68,13 @@ impl AudioRecorder {
         let (tx, rx) = mpsc::channel();
         self.control_tx = Some(tx);
         let is_recording = self.is_recording.clone();
-        let vad_enabled = self.vad_enabled.clone();
         let audio_level = self.current_audio_level.clone();
         let device_info = self.current_device_info.clone();
         let sample_callback = self.sample_callback.clone();
         let recording_state_changed = self.recording_state_changed.clone();
 
         thread::spawn(move || {
-            let mut recorder = AudioRecorderWorker::new(is_recording, vad_enabled, audio_level, device_info, sample_callback, recording_state_changed);
+            let mut recorder = AudioRecorderWorker::new(is_recording, audio_level, device_info, sample_callback, recording_state_changed);
             
             while let Ok(cmd) = rx.recv() {
                 match cmd {
@@ -92,9 +87,6 @@ impl AudioRecorder {
                         if let Err(e) = recorder.stop_recording() {
                             error(Component::Recording, &format!("Failed to stop recording: {}", e));
                         }
-                    }
-                    RecorderCommand::SetVadEnabled(enabled) => {
-                        *recorder.vad_enabled.lock().unwrap() = enabled;
                     }
                     RecorderCommand::StartAudioLevelMonitoring(device_name) => {
                         if let Err(e) = recorder.start_audio_level_monitoring(device_name.as_deref()) {
@@ -186,21 +178,6 @@ impl AudioRecorder {
         *self.is_recording.lock().unwrap()
     }
 
-    pub fn set_vad_enabled(&self, enabled: bool) -> Result<(), String> {
-        if self.control_tx.is_none() {
-            return Err("Recorder not initialized".to_string());
-        }
-
-        self.control_tx
-            .as_ref()
-            .unwrap()
-            .send(RecorderCommand::SetVadEnabled(enabled))
-            .map_err(|e| format!("Failed to send VAD command: {}", e))
-    }
-
-    pub fn is_vad_enabled(&self) -> bool {
-        *self.vad_enabled.lock().unwrap()
-    }
     
     pub fn set_sample_callback(&self, callback: Option<SampleCallback>) -> Result<(), String> {
         if self.control_tx.is_none() {
@@ -246,8 +223,6 @@ struct AudioRecorderWorker {
     monitoring_stream: Option<cpal::Stream>,
     writer: Arc<Mutex<Option<hound::WavWriter<std::io::BufWriter<std::fs::File>>>>>,
     is_recording: Arc<Mutex<bool>>,
-    vad_enabled: Arc<Mutex<bool>>,
-    vad: Option<VoiceActivityDetector>,
     sample_count: Arc<Mutex<u64>>,
     sample_rate: u32,
     channels: u16,
@@ -259,14 +234,12 @@ struct AudioRecorderWorker {
 }
 
 impl AudioRecorderWorker {
-    fn new(is_recording: Arc<Mutex<bool>>, vad_enabled: Arc<Mutex<bool>>, audio_level: Arc<Mutex<f32>>, device_info: Arc<Mutex<Option<DeviceInfo>>>, sample_callback: Arc<Mutex<Option<SampleCallback>>>, recording_state_changed: Arc<Condvar>) -> Self {
+    fn new(is_recording: Arc<Mutex<bool>>, audio_level: Arc<Mutex<f32>>, device_info: Arc<Mutex<Option<DeviceInfo>>>, sample_callback: Arc<Mutex<Option<SampleCallback>>>, recording_state_changed: Arc<Condvar>) -> Self {
         Self {
             stream: None,
             monitoring_stream: None,
             writer: Arc::new(Mutex::new(None)),
             is_recording,
-            vad_enabled,
-            vad: None,
             sample_count: Arc::new(Mutex::new(0)),
             sample_rate: 48000, // default, will be updated when recording starts
             channels: 1, // default, will be updated when recording starts
@@ -446,10 +419,6 @@ impl AudioRecorderWorker {
             sample_format,
         };
 
-        // Initialize VAD if enabled
-        if *self.vad_enabled.lock().unwrap() {
-            self.vad = Some(VoiceActivityDetector::new(config.sample_rate.0)?);
-        }
 
         let writer = hound::WavWriter::create(output_path, spec)
             .map_err(|e| format!("Failed to create WAV writer: {}", e))?;
