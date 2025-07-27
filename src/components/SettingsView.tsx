@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, memo } from 'react';
 import { Sparkles, FolderOpen, ArrowUpLeft, ArrowUp, ArrowUpRight, ArrowLeft, ArrowRight, ArrowDownLeft, ArrowDown, ArrowDownRight, Brain } from 'lucide-react';
 import { ModelManager } from './ModelManager';
 import { LLMSettings } from './LLMSettings';
+import { DictionaryView } from './DictionaryView';
 import { Dropdown } from './Dropdown';
 import { ThemeSelector } from './ThemeSelector';
 import { invoke } from '@tauri-apps/api/core';
@@ -84,8 +85,10 @@ export const SettingsView = memo(function SettingsView({
 }: SettingsViewProps) {
     const [isModelManagerExpanded, setIsModelManagerExpanded] = useState(false);
     const [isLLMSettingsExpanded, setIsLLMSettingsExpanded] = useState(false);
+    const [isDictionaryExpanded, setIsDictionaryExpanded] = useState(false);
     const modelSectionRef = useRef<HTMLDivElement>(null);
     const llmSectionRef = useRef<HTMLDivElement>(null);
+    const dictionarySectionRef = useRef<HTMLDivElement>(null);
     const [availableSounds, setAvailableSounds] = useState<string[]>([]);
     const [isPreviewingSound, setIsPreviewingSound] = useState(false);
 
@@ -119,6 +122,18 @@ export const SettingsView = memo(function SettingsView({
             }, 100);
         }
     }, [isLLMSettingsExpanded]);
+
+    useEffect(() => {
+        if (isDictionaryExpanded && dictionarySectionRef.current) {
+            // Small delay to ensure the content is rendered
+            setTimeout(() => {
+                dictionarySectionRef.current?.scrollIntoView({ 
+                    behavior: 'smooth', 
+                    block: 'nearest'
+                });
+            }, 100);
+        }
+    }, [isDictionaryExpanded]);
 
     const openModelsFolder = async () => {
         try {
@@ -547,6 +562,14 @@ export const SettingsView = memo(function SettingsView({
                             />
                         </div>
                     )}
+                </div>
+
+                {/* Dictionary - Full Width Collapsible */}
+                <div className="settings-section model-manager-full-width" ref={dictionarySectionRef}>
+                    <DictionaryView 
+                        isExpanded={isDictionaryExpanded}
+                        onToggleExpand={() => setIsDictionaryExpanded(!isDictionaryExpanded)}
+                    />
                 </div>
             </div>
         </div>
