@@ -1,0 +1,135 @@
+/* Color Design Tokens
+   ===================
+   All color values are defined as CSS custom properties.
+   These are set by the theme system but we provide sensible defaults.
+*/
+
+:root {
+  /* Background colors - Set by theme */
+  --bg-primary: #ffffff;
+  --bg-secondary: #f5f5f5;
+  --bg-tertiary: #ebebeb;
+  --bg-hover: #e5e5e5;
+  --bg-active: #d4d4d4;
+  --bg-danger: #fef2f2;
+  --bg-warning: #fffbeb;
+  --bg-success: #f0fdf4;
+  --bg-overlay: rgba(255, 255, 255, 0.95);
+  
+  /* Text colors - Set by theme */
+  --text-primary: #1f2937;
+  --text-secondary: #6b7280;
+  --text-tertiary: #9ca3af;
+  --text-placeholder: #d1d5db;
+  --text-danger: #dc2626;
+  --text-warning: #d97706;
+  --text-success: #059669;
+  --text-on-accent: #ffffff;
+  
+  /* Accent colors - Set by theme */
+  --accent-primary: #3b82f6;
+  --accent-hover: #2563eb;
+  --accent-active: #1d4ed8;
+  
+  /* Border colors - Set by theme */
+  --border-primary: #e5e7eb;
+  --border-secondary: #d1d5db;
+  --border-hover: #9ca3af;
+  --border-danger: #f87171;
+  --border-warning: #fbbf24;
+  --border-success: #34d399;
+  
+  /* Special colors */
+  --recording: #ef4444;
+  --recording-hover: #dc2626;
+  --error: var(--text-danger);
+  --success: var(--text-success);
+  --warning: var(--text-warning);
+  
+  /* Shadow colors */
+  --shadow-color: rgba(0, 0, 0, 0.1);
+  --shadow-color-subtle: rgba(0, 0, 0, 0.05);
+  
+  /* Overlay backdrop */
+  --overlay-backdrop: rgba(0, 0, 0, 0.5);
+}
+
+/* Semantic color aliases for better developer experience */
+:root {
+  /* States */
+  --color-hover: var(--bg-hover);
+  --color-active: var(--bg-active);
+  --color-focus: var(--accent-primary);
+  --color-disabled: var(--text-tertiary);
+  
+  /* Feedback */
+  --color-error: var(--text-danger);
+  --color-success: var(--text-success);
+  --color-warning: var(--text-warning);
+  --color-info: var(--accent-primary);
+  
+  /* Interactive */
+  --color-link: var(--accent-primary);
+  --color-link-hover: var(--accent-hover);
+  --color-link-active: var(--accent-active);
+  
+  /* Form states */
+  --input-bg: var(--bg-primary);
+  --input-bg-hover: var(--bg-secondary);
+  --input-bg-focus: var(--bg-primary);
+  --input-border: var(--border-primary);
+  --input-border-hover: var(--border-secondary);
+  --input-border-focus: var(--accent-primary);
+  --input-border-error: var(--border-danger);
+  
+  /* Button variants */
+  --btn-primary-bg: var(--accent-primary);
+  --btn-primary-bg-hover: var(--accent-hover);
+  --btn-primary-bg-active: var(--accent-active);
+  --btn-primary-text: var(--text-on-accent);
+  
+  --btn-secondary-bg: var(--bg-secondary);
+  --btn-secondary-bg-hover: var(--bg-tertiary);
+  --btn-secondary-bg-active: var(--bg-hover);
+  --btn-secondary-text: var(--text-primary);
+  --btn-secondary-border: var(--border-primary);
+  
+  --btn-danger-bg: var(--text-danger);
+  --btn-danger-bg-hover: #b91c1c;
+  --btn-danger-bg-active: #991b1b;
+  --btn-danger-text: var(--text-on-accent);
+}
+
+/* Color utilities for specific UI elements */
+:root {
+  /* Sidebar */
+  --sidebar-bg: var(--bg-secondary);
+  --sidebar-border: var(--border-primary);
+  --sidebar-text: var(--text-secondary);
+  --sidebar-text-hover: var(--text-primary);
+  --sidebar-active-bg: var(--bg-active);
+  --sidebar-active-text: var(--accent-primary);
+  --sidebar-active-indicator: var(--accent-primary);
+  
+  /* Modal */
+  --modal-bg: var(--bg-primary);
+  --modal-border: var(--border-primary);
+  --modal-backdrop: var(--overlay-backdrop);
+  
+  /* Dropdown */
+  --dropdown-bg: var(--bg-primary);
+  --dropdown-border: var(--border-primary);
+  --dropdown-item-hover: var(--bg-hover);
+  --dropdown-shadow: var(--shadow-color);
+  
+  /* Tooltip */
+  --tooltip-bg: var(--bg-primary);
+  --tooltip-text: var(--text-primary);
+  --tooltip-border: var(--border-primary);
+  
+  /* Transcript items */
+  --transcript-bg: var(--bg-primary);
+  --transcript-bg-hover: var(--bg-secondary);
+  --transcript-bg-selected: var(--bg-tertiary);
+  --transcript-border: var(--border-primary);
+}

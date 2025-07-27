@@ -183,9 +183,23 @@
 
 .timeline-error {
     padding: 12px 16px;
-    background-color: var(--color-error-bg);
-    color: var(--color-error);
+    background-color: rgba(255, 204, 0, 0.1);
+    color: var(--color-text-secondary);
     text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-size: 12px;
+}
+
+.timeline-error .error-icon {
+    font-size: 14px;
+    opacity: 0.8;
+}
+
+.timeline-error .error-message {
+    flex: 1;
 }
 
 .timeline-loading {

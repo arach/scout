@@ -1,0 +1,372 @@
+/* Theme-Specific Overrides
+   ========================
+   All theme-specific styles consolidated in one place
+*/
+
+/* ==================== Animation Classes ==================== */
+:root.animations-smooth * {
+  transition-property: background-color, border-color, color, fill, stroke;
+  transition-duration: var(--duration-normal);
+  transition-timing-function: var(--ease-in-out);
+}
+
+:root.animations-retro * {
+  transition: none !important;
+  animation-timing-function: steps(4, end) !important;
+}
+
+:root.animations-minimal * {
+  transition-property: opacity;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-out);
+}
+
+:root.animations-none * {
+  transition: none !important;
+  animation: none !important;
+}
+
+/* ==================== Dark Mode Overrides ==================== */
+@media (prefers-color-scheme: dark) {
+  /* Drag overlay adjustments */
+  .drag-drop-backdrop {
+    background: rgba(0, 0, 0, 0.6);
+  }
+  
+  .drag-drop-border {
+    background: rgba(42, 42, 42, 0.95);
+    border-color: rgba(255, 255, 255, 0.15);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  }
+  
+  .drag-drop-icon {
+    background: rgba(255, 255, 255, 0.08);
+  }
+  
+  .drag-drop-icon svg {
+    color: rgba(255, 255, 255, 0.7);
+  }
+  
+  .format-badge {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.6);
+  }
+}
+
+/* ==================== Minimal Overlay Theme ==================== */
+[data-theme="minimal-overlay"] {
+  --font-family: var(--font-family-mono);
+  
+  .container {
+    background: var(--bg-primary);
+    border: none;
+    box-shadow: none;
+  }
+  
+  .btn {
+    background: transparent;
+    border: 1px solid var(--border-primary);
+  }
+  
+  .btn:hover {
+    background: var(--bg-hover);
+  }
+}
+
+/* ==================== Winamp Classic Theme ==================== */
+[data-theme="winamp-classic"] {
+  /* Pixelated rendering */
+  * {
+    image-rendering: pixelated;
+    image-rendering: -moz-crisp-edges;
+    image-rendering: crisp-edges;
+  }
+  
+  .container {
+    border: 2px solid var(--border-primary);
+    box-shadow: inset 1px 1px 0 #fff, inset -1px -1px 0 #000;
+  }
+  
+  .btn {
+    border: 2px solid;
+    border-color: #dfdfdf #000 #000 #dfdfdf;
+    background: linear-gradient(135deg, #fff 0%, #dfdfdf 100%);
+    color: #000;
+    text-shadow: 1px 1px 0 #fff;
+  }
+  
+  .btn:active {
+    border-color: #000 #dfdfdf #dfdfdf #000;
+    background: linear-gradient(135deg, #dfdfdf 0%, #fff 100%);
+  }
+}
+
+/* ==================== Winamp Modern Theme ==================== */
+[data-theme="winamp-modern"] {
+  .container {
+    background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+    border: 1px solid var(--border-primary);
+    box-shadow: 0 0 20px rgba(255, 102, 0, 0.1);
+  }
+  
+  .btn {
+    background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-hover) 100%);
+    border: none;
+    box-shadow: 0 2px 8px rgba(255, 102, 0, 0.2);
+  }
+  
+  .btn:hover {
+    box-shadow: 0 4px 12px rgba(255, 102, 0, 0.3);
+    transform: translateY(-1px);
+  }
+}
+
+/* ==================== Terminal Chic Themes ==================== */
+[data-theme="terminal-chic"],
+[data-theme="terminal-chic-light"] {
+  /* Force monospace font everywhere */
+  * {
+    font-family: var(--font-family-mono) !important;
+    font-weight: var(--font-weight-normal) !important;
+  }
+  
+  /* Remove all border radius */
+  .container,
+  .settings-section,
+  .transcript-item,
+  .record-button,
+  .upload-button,
+  input,
+  select,
+  textarea,
+  button,
+  .btn {
+    border-width: 1px !important;
+    border-radius: 0 !important;
+  }
+  
+  /* Terminal-style inputs */
+  input[type="text"],
+  input[type="search"],
+  select,
+  textarea {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-primary);
+    transition: var(--transition-fast);
+  }
+  
+  input[type="text"]:focus,
+  input[type="search"]:focus,
+  select:focus,
+  textarea:focus {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 1px var(--accent-primary);
+    outline: none;
+  }
+  
+  /* Terminal-style buttons */
+  button,
+  .record-button,
+  .upload-button,
+  .btn {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-primary);
+    color: var(--text-primary);
+    transition: var(--transition-fast);
+    transform: none !important;
+    box-shadow: none !important;
+  }
+  
+  button:hover,
+  .record-button:hover,
+  .upload-button:hover,
+  .btn:hover {
+    background: var(--bg-secondary);
+    border-color: var(--accent-primary);
+  }
+  
+  /* Primary action buttons */
+  .record-button,
+  .apply-button,
+  .confirm-delete-button,
+  .stop-recording-button,
+  .btn-primary {
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+    color: var(--bg-primary);
+  }
+  
+  .record-button:hover,
+  .apply-button:hover,
+  .stop-recording-button:hover,
+  .btn-primary:hover {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+  }
+  
+  /* Minimal shadows */
+  .settings-modal,
+  .delete-modal,
+  .drag-drop-container,
+  .mic-dropdown-menu,
+  .dropdown,
+  .modal {
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3) !important;
+    border: 1px solid var(--border-primary) !important;
+  }
+  
+  /* Terminal-style scrollbars */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  
+  ::-webkit-scrollbar-track {
+    background: var(--bg-primary);
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    background: var(--border-primary);
+    border-radius: 0;
+  }
+  
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-primary);
+  }
+  
+  /* Transcript styling */
+  .transcript-item {
+    margin-bottom: 1px;
+    background: var(--bg-primary);
+    border-bottom: 1px solid var(--border-primary);
+  }
+  
+  .transcript-item:hover {
+    background: var(--bg-secondary);
+  }
+  
+  /* Monospace numbers */
+  .recording-timer,
+  .transcript-date,
+  .transcript-duration,
+  .processing-filename,
+  .upload-filename {
+    font-family: var(--font-family-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.05em;
+  }
+  
+  /* Clean drag and drop */
+  .drag-drop-border {
+    background: var(--bg-primary) !important;
+    border: 2px dashed var(--border-primary) !important;
+    border-radius: 0 !important;
+  }
+  
+  .drag-drop-border::before {
+    display: none;
+  }
+  
+  /* Status indicators */
+  .status-indicator,
+  .recording-indicator {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-primary);
+    font-family: var(--font-family-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  
+  /* Tooltips */
+  .record-tooltip,
+  .tooltip-content {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-primary);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    border-radius: 0;
+  }
+  
+  /* Fast animations */
+  * {
+    transition-duration: 0.1s !important;
+    animation-duration: 0.1s !important;
+  }
+  
+  /* Active states */
+  .tab-button.active {
+    border-bottom: 2px solid var(--text-primary) !important;
+  }
+  
+  .sidebar-button.active {
+    background: var(--bg-secondary) !important;
+    border-left: 2px solid var(--text-primary) !important;
+  }
+  
+  /* Fix checkbox alignment */
+  .setting-item label input[type="checkbox"] {
+    margin-top: 1px !important;
+    vertical-align: text-top;
+  }
+}
+
+/* Terminal Chic Dark specific colors */
+[data-theme="terminal-chic"] {
+  --border-secondary: #444444;
+  --error: #ff4444;
+  --success: #00ff41;
+  --recording: #ff4444;
+  
+  /* Better contrast for dark theme */
+  .transcript-item {
+    background: var(--bg-tertiary) !important;
+    border: 1px solid var(--border-primary) !important;
+  }
+  
+  .transcript-item:hover {
+    background: var(--bg-hover) !important;
+  }
+  
+  .transcripts-view {
+    background: var(--bg-primary) !important;
+  }
+  
+  .transcript-group {
+    background: var(--bg-secondary) !important;
+    border: 1px solid var(--border-primary) !important;
+  }
+}
+
+/* Terminal Chic Light specific colors */
+[data-theme="terminal-chic-light"] {
+  --border-secondary: #b0b0b0;
+  --error: #cc0000;
+  --success: #006600;
+  --recording: #cc0000;
+  
+  /* Light theme adjustments */
+  .modal {
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+  }
+  
+  /* Fix specific component colors */
+  .search-input::placeholder {
+    color: var(--text-secondary) !important;
+  }
+  
+  .hotkey-hint,
+  .drag-hint,
+  .no-transcripts svg,
+  .upload-divider,
+  .transcript-duration,
+  .sidebar-toggle-main {
+    color: var(--text-tertiary) !important;
+  }
+}
+
+/* Ensure overlay transparency works with themes */
+.transcription-overlay {
+  background: var(--bg-overlay, var(--bg-primary));
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}

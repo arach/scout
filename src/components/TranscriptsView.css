@@ -290,6 +290,29 @@
     background: transparent;
 }
 
+/* Virtualized list styles */
+.transcript-list-virtual {
+    scrollbar-width: thin;
+    scrollbar-color: #d1d5db #f3f4f6;
+}
+
+.transcript-list-virtual::-webkit-scrollbar {
+    width: 8px;
+}
+
+.transcript-list-virtual::-webkit-scrollbar-track {
+    background: #f3f4f6;
+}
+
+.transcript-list-virtual::-webkit-scrollbar-thumb {
+    background: #d1d5db;
+    border-radius: 4px;
+}
+
+.transcript-list-virtual::-webkit-scrollbar-thumb:hover {
+    background: #9ca3af;
+}
+
 /* Date grouping styles */
 .transcript-group {
     margin-bottom: 32px;

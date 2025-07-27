@@ -1,0 +1,62 @@
+/* Shadow Design Tokens
+   ====================
+   Consistent shadow system for depth and elevation
+*/
+
+:root {
+  /* Shadow colors */
+  --shadow-color: rgba(0, 0, 0, 0.1);
+  --shadow-color-subtle: rgba(0, 0, 0, 0.05);
+  --shadow-color-strong: rgba(0, 0, 0, 0.15);
+  
+  /* Shadow values */
+  --shadow-none: none;
+  --shadow-sm: 0 1px 2px 0 var(--shadow-color-subtle);
+  --shadow-md: 0 2px 4px -1px var(--shadow-color-subtle), 
+               0 4px 6px -1px var(--shadow-color-subtle);
+  --shadow-lg: 0 4px 6px -2px var(--shadow-color-subtle), 
+               0 10px 15px -3px var(--shadow-color);
+  --shadow-xl: 0 8px 10px -3px var(--shadow-color-subtle), 
+               0 20px 25px -5px var(--shadow-color);
+  --shadow-2xl: 0 10px 10px -5px var(--shadow-color-subtle), 
+                0 25px 50px -12px var(--shadow-color-strong);
+  
+  /* Inset shadows */
+  --shadow-inner: inset 0 2px 4px 0 var(--shadow-color-subtle);
+  --shadow-inner-lg: inset 0 4px 6px -1px var(--shadow-color);
+  
+  /* Component-specific shadows */
+  --shadow-button: 0 1px 3px 0 var(--shadow-color-subtle), 
+                   0 1px 2px 0 var(--shadow-color-subtle);
+  --shadow-button-hover: 0 2px 4px 0 var(--shadow-color-subtle), 
+                         0 4px 6px -1px var(--shadow-color-subtle);
+  --shadow-card: var(--shadow-md);
+  --shadow-dropdown: 0 4px 12px var(--shadow-color);
+  --shadow-modal: 0 10px 25px var(--shadow-color), 
+                  0 20px 48px var(--shadow-color-strong);
+  --shadow-tooltip: 0 2px 8px var(--shadow-color);
+  
+  /* Focus shadows */
+  --shadow-focus: 0 0 0 3px rgba(var(--accent-primary-rgb, 59, 130, 246), 0.1);
+  --shadow-focus-danger: 0 0 0 3px rgba(var(--danger-rgb, 239, 68, 68), 0.1);
+  
+  /* Elevation shadows (Material Design inspired) */
+  --elevation-1: 0 1px 3px var(--shadow-color-subtle), 
+                 0 1px 2px var(--shadow-color-subtle);
+  --elevation-2: 0 3px 6px var(--shadow-color-subtle), 
+                 0 2px 4px var(--shadow-color-subtle);
+  --elevation-3: 0 10px 20px var(--shadow-color-subtle), 
+                 0 3px 6px var(--shadow-color-subtle);
+  --elevation-4: 0 15px 25px var(--shadow-color), 
+                 0 5px 10px var(--shadow-color-subtle);
+  --elevation-5: 0 20px 40px var(--shadow-color);
+}
+
+/* Dark mode shadow adjustments */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --shadow-color: rgba(0, 0, 0, 0.2);
+    --shadow-color-subtle: rgba(0, 0, 0, 0.1);
+    --shadow-color-strong: rgba(0, 0, 0, 0.3);
+  }
+}

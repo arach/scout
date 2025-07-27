@@ -1,7 +1,8 @@
-import React, { createContext, useContext, useEffect, useMemo } from 'react';
-import { ThemeVariant, ThemeContextType } from './types';
-import { getTheme, applyTheme, themes } from './index';
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { ThemeVariant, ThemeContextType, Theme } from './types';
+import { getTheme, getThemeAsync, applyTheme, themes, preloadTheme } from './index';
 import { useSettings } from '../hooks/useSettings';
+import { vscodeDark } from './base/vscode';
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
@@ -19,12 +20,37 @@ interface ThemeProviderProps {
 
 export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
   const { settings, updateSettings } = useSettings();
-  
-  // Get current theme based on settings
-  const currentTheme = useMemo(() => {
-    // Check if we have a selectedTheme in settings
+  const [currentTheme, setCurrentTheme] = useState<Theme>(() => {
+    // Initial theme - use sync version for immediate render
     const themeId = settings.selectedTheme || (settings.theme === 'dark' ? 'vscode-dark' : 'vscode-light');
     return getTheme(themeId as ThemeVariant);
+  });
+  const [isLoadingTheme, setIsLoadingTheme] = useState(false);
+  
+  // Load theme asynchronously when settings change
+  useEffect(() => {
+    const themeId = settings.selectedTheme || (settings.theme === 'dark' ? 'vscode-dark' : 'vscode-light');
+    
+    // For default themes, use sync version
+    if (themeId === 'vscode-dark' || themeId === 'vscode-light' || themeId === 'system') {
+      const theme = getTheme(themeId as ThemeVariant);
+      setCurrentTheme(theme);
+      return;
+    }
+    
+    // For other themes, load asynchronously
+    setIsLoadingTheme(true);
+    getThemeAsync(themeId as ThemeVariant)
+      .then(theme => {
+        setCurrentTheme(theme);
+        setIsLoadingTheme(false);
+      })
+      .catch(err => {
+        console.error('Failed to load theme:', err);
+        // Fallback to default theme
+        setCurrentTheme(vscodeDark);
+        setIsLoadingTheme(false);
+      });
   }, [settings.selectedTheme, settings.theme]);
   
   // Apply theme when it changes
@@ -37,9 +63,14 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
     if (settings.selectedTheme === 'system' || (!settings.selectedTheme && settings.theme === 'system')) {
       const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
       
-      const handleChange = () => {
-        const systemTheme = getTheme('system');
-        applyTheme(systemTheme);
+      const handleChange = async () => {
+        try {
+          const systemTheme = await getThemeAsync('system');
+          setCurrentTheme(systemTheme);
+          applyTheme(systemTheme);
+        } catch (err) {
+          console.error('Failed to load system theme:', err);
+        }
       };
       
       mediaQuery.addEventListener('change', handleChange);
@@ -49,6 +80,12 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
   
   const setTheme = (themeId: ThemeVariant) => {
     updateSettings({ selectedTheme: themeId });
+    
+    // Preload adjacent themes for faster switching
+    const allThemeIds: ThemeVariant[] = ['vscode-light', 'vscode-dark', 'minimal-overlay', 'winamp-classic', 'winamp-modern', 'terminal-chic', 'terminal-chic-light'];
+    const currentIndex = allThemeIds.indexOf(themeId);
+    if (currentIndex > 0) preloadTheme(allThemeIds[currentIndex - 1]);
+    if (currentIndex < allThemeIds.length - 1) preloadTheme(allThemeIds[currentIndex + 1]);
     
     // Also update the legacy theme setting for backward compatibility
     if (themeId === 'vscode-light') {
@@ -64,6 +101,7 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
     theme: currentTheme,
     setTheme,
     themes,
+    isLoadingTheme,
   };
   
   return (

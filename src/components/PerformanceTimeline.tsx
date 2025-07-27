@@ -37,7 +37,17 @@ export function PerformanceTimeline({ isRecording, transcriptId, onClose }: Perf
             setTimeline(result);
         } catch (err) {
             console.error('Failed to fetch performance timeline:', err);
-            setError(err instanceof Error ? err.message : 'Failed to fetch timeline');
+            const errorMessage = err instanceof Error ? err.message : 'Failed to fetch timeline';
+            
+            // Handle specific errors gracefully
+            if (errorMessage.includes('no such table') || errorMessage.includes('database')) {
+                console.warn('[PerformanceTimeline] Performance tracking not initialized');
+                // Don't show error for missing table during recording
+                setError(null);
+                setTimeline(null);
+            } else {
+                setError(errorMessage);
+            }
         } finally {
             setIsLoading(false);
         }
@@ -67,7 +77,19 @@ export function PerformanceTimeline({ isRecording, transcriptId, onClose }: Perf
             setHistoricalEvents(formattedEvents);
         } catch (err) {
             console.error('Failed to fetch historical timeline:', err);
-            setError(err instanceof Error ? err.message : 'Failed to fetch timeline');
+            const errorMessage = err instanceof Error ? err.message : 'Failed to fetch timeline';
+            
+            // Handle specific database errors gracefully
+            if (errorMessage.includes('no such table: performance_timeline')) {
+                console.warn('[PerformanceTimeline] Performance timeline table does not exist yet');
+                setError('Performance tracking is not yet available for this transcript');
+                setHistoricalEvents([]);
+            } else if (errorMessage.includes('database') || errorMessage.includes('sqlite')) {
+                setError('Unable to load performance data. This feature may not be available for older transcripts.');
+                setHistoricalEvents([]);
+            } else {
+                setError(errorMessage);
+            }
         } finally {
             setIsLoading(false);
         }
@@ -175,7 +197,10 @@ export function PerformanceTimeline({ isRecording, transcriptId, onClose }: Perf
             </div>
             
             {error && (
-                <div className="timeline-error">{error}</div>
+                <div className="timeline-error">
+                    <span className="error-icon">⚠️</span>
+                    <span className="error-message">{error}</span>
+                </div>
             )}
             
             {isLoading && displayEvents.length === 0 && (

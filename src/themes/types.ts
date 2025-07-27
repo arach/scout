@@ -81,4 +81,5 @@ export interface ThemeContextType {
   theme: Theme;
   setTheme: (themeId: ThemeVariant) => void;
   themes: Record<ThemeVariant, Theme>;
+  isLoadingTheme?: boolean;
 }

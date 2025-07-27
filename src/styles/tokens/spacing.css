@@ -1,0 +1,90 @@
+/* Spacing Design Tokens
+   =====================
+   Based on an 8pt grid system for consistent spacing
+*/
+
+:root {
+  /* Base unit */
+  --space-unit: 8px;
+  
+  /* Spacing scale */
+  --space-0: 0;
+  --space-0-5: calc(var(--space-unit) * 0.5);   /* 4px */
+  --space-1: var(--space-unit);                 /* 8px */
+  --space-1-5: calc(var(--space-unit) * 1.5);   /* 12px */
+  --space-2: calc(var(--space-unit) * 2);       /* 16px */
+  --space-2-5: calc(var(--space-unit) * 2.5);   /* 20px */
+  --space-3: calc(var(--space-unit) * 3);       /* 24px */
+  --space-4: calc(var(--space-unit) * 4);       /* 32px */
+  --space-5: calc(var(--space-unit) * 5);       /* 40px */
+  --space-6: calc(var(--space-unit) * 6);       /* 48px */
+  --space-7: calc(var(--space-unit) * 7);       /* 56px */
+  --space-8: calc(var(--space-unit) * 8);       /* 64px */
+  --space-9: calc(var(--space-unit) * 9);       /* 72px */
+  --space-10: calc(var(--space-unit) * 10);     /* 80px */
+  --space-12: calc(var(--space-unit) * 12);     /* 96px */
+  --space-16: calc(var(--space-unit) * 16);     /* 128px */
+  --space-20: calc(var(--space-unit) * 20);     /* 160px */
+  --space-24: calc(var(--space-unit) * 24);     /* 192px */
+  
+  /* Component spacing */
+  --component-padding-xs: var(--space-1);
+  --component-padding-sm: var(--space-1-5);
+  --component-padding-md: var(--space-2);
+  --component-padding-lg: var(--space-3);
+  --component-padding-xl: var(--space-4);
+  
+  /* Layout spacing */
+  --layout-gap-xs: var(--space-1);
+  --layout-gap-sm: var(--space-2);
+  --layout-gap-md: var(--space-3);
+  --layout-gap-lg: var(--space-4);
+  --layout-gap-xl: var(--space-6);
+  
+  /* Section spacing */
+  --section-padding: var(--space-3);
+  --section-margin: var(--space-3);
+  --section-gap: var(--space-6);
+  
+  /* Form spacing */
+  --form-label-margin: var(--space-1);
+  --form-hint-margin: var(--space-0-5);
+  --form-item-margin: var(--space-3);
+  --form-group-gap: var(--space-2);
+  
+  /* Input/Button heights (aligned to 8pt grid) */
+  --input-height-sm: 32px;  /* 4 × 8pt */
+  --input-height-md: 40px;  /* 5 × 8pt */
+  --input-height-lg: 48px;  /* 6 × 8pt */
+  
+  --button-height-sm: 32px;  /* 4 × 8pt */
+  --button-height-md: 40px;  /* 5 × 8pt */
+  --button-height-lg: 48px;  /* 6 × 8pt */
+  
+  /* Border radius */
+  --radius-none: 0;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-full: 9999px;
+  
+  /* Default radius for components */
+  --border-radius: var(--radius-md);
+}
+
+/* Responsive spacing overrides */
+@media (min-width: 640px) {
+  :root {
+    --layout-padding: var(--space-4);
+    --layout-margin: var(--space-5);
+  }
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --layout-padding: var(--space-5);
+    --layout-margin: var(--space-6);
+  }
+}

@@ -1,31 +1,57 @@
 import { Theme, ThemeVariant } from './types';
-import { vscodeLight, vscodeDark } from './base/vscode';
-import { minimalOverlay } from './base/minimal';
-import { winampClassic, winampModern } from './base/winamp';
-import { terminalChic, terminalChicLight } from './base/terminal';
+import { loadTheme, preloadTheme, clearThemeCache } from './lazy';
 
 export * from './types';
+export { preloadTheme, clearThemeCache };
 
-// Theme registry
+// Default themes that are always loaded (for initial render)
+import { vscodeDark, vscodeLight } from './base/vscode';
+
+// Theme metadata for UI
+export const themeMetadata: Record<ThemeVariant, { name: string; category: string }> = {
+  'vscode-light': { name: 'VS Code Light', category: 'Classic' },
+  'vscode-dark': { name: 'VS Code Dark', category: 'Classic' },
+  'minimal-overlay': { name: 'Minimal Overlay', category: 'Modern' },
+  'winamp-classic': { name: 'Winamp Classic', category: 'Retro' },
+  'winamp-modern': { name: 'Winamp Modern', category: 'Retro' },
+  'terminal-chic': { name: 'Terminal Chic', category: 'Terminal' },
+  'terminal-chic-light': { name: 'Terminal Chic Light', category: 'Terminal' },
+  'system': { name: 'System', category: 'Auto' },
+};
+
+// Legacy theme registry for backward compatibility
 export const themes: Record<ThemeVariant, Theme> = {
   'vscode-light': vscodeLight,
   'vscode-dark': vscodeDark,
-  'minimal-overlay': minimalOverlay,
-  'winamp-classic': winampClassic,
-  'winamp-modern': winampModern,
-  'terminal-chic': terminalChic,
-  'terminal-chic-light': terminalChicLight,
-  'system': vscodeDark, // Default to dark for system
+  'minimal-overlay': {} as Theme, // Will be loaded on demand
+  'winamp-classic': {} as Theme,
+  'winamp-modern': {} as Theme,
+  'terminal-chic': {} as Theme,
+  'terminal-chic-light': {} as Theme,
+  'system': vscodeDark,
 };
 
-// Get theme by ID
+// Get theme by ID (async version for lazy loading)
+export const getThemeAsync = async (themeId: ThemeVariant): Promise<Theme> => {
+  return loadTheme(themeId);
+};
+
+// Get theme by ID (sync version for backward compatibility - only works for default themes)
 export const getTheme = (themeId: ThemeVariant): Theme => {
   if (themeId === 'system') {
     // Check system preference
     const isDarkMode = window.matchMedia('(prefers-color-scheme: dark)').matches;
     return isDarkMode ? vscodeDark : vscodeLight;
   }
-  return themes[themeId] || vscodeDark;
+  
+  // Return default themes immediately
+  if (themeId === 'vscode-dark') return vscodeDark;
+  if (themeId === 'vscode-light') return vscodeLight;
+  
+  // For other themes, return vscode dark as fallback
+  // The async version should be used for non-default themes
+  console.warn(`Theme ${themeId} requires async loading. Using default theme.`);
+  return vscodeDark;
 };
 
 // Convert theme to CSS variables
@@ -89,9 +115,10 @@ export const applyTheme = (theme: Theme): void => {
 };
 
 // Get all available themes for UI
-export const getAvailableThemes = (): Array<{ id: ThemeVariant; name: string }> => {
-  return Object.entries(themes).map(([id, theme]) => ({
+export const getAvailableThemes = (): Array<{ id: ThemeVariant; name: string; category: string }> => {
+  return Object.entries(themeMetadata).map(([id, metadata]) => ({
     id: id as ThemeVariant,
-    name: theme.name,
+    name: metadata.name,
+    category: metadata.category,
   }));
 };

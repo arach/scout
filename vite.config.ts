@@ -20,6 +20,17 @@ export default defineConfig(async () => {
         reportFilename: 'bundle-analysis.html'
       })] : [])
     ],
+    
+    // CSS configuration
+    css: {
+      // Use PostCSS for processing if config exists
+      postcss: './postcss.config.js',
+      modules: {
+        // Enable CSS modules for .module.css files
+        localsConvention: 'camelCase',
+        generateScopedName: isAnalyzing ? '[name]__[local]___[hash:base64:5]' : '[hash:base64:8]'
+      }
+    },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
@@ -63,6 +74,15 @@ export default defineConfig(async () => {
         manualChunks: {
           'react-vendor': ['react', 'react-dom'],
           'tauri-vendor': ['@tauri-apps/api'],
+          'ui-vendor': ['lucide-react', '@radix-ui/react-select'],
+          'audio-vendor': ['wavesurfer.js', '@wavesurfer/react'],
+        },
+        // CSS code splitting
+        assetFileNames: (assetInfo) => {
+          if (assetInfo.name?.endsWith('.css')) {
+            return 'assets/css/[name]-[hash][extname]';
+          }
+          return 'assets/[name]-[hash][extname]';
         },
       },
     },

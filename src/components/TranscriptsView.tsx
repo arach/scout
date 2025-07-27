@@ -1,6 +1,7 @@
-import { useState, useEffect, useMemo, useCallback, memo } from 'react';
+import { useState, useEffect, useMemo, useCallback, memo, useRef } from 'react';
 import { TranscriptDetailPanel } from './TranscriptDetailPanel';
 import { TranscriptItem } from './TranscriptItem';
+import { VirtualizedTranscriptList } from './VirtualizedTranscriptList';
 import { ChevronDown } from 'lucide-react';
 import { formatShortcut } from '../lib/formatShortcut';
 import { Transcript } from '../types/transcript';
@@ -25,6 +26,7 @@ interface TranscriptsViewProps {
 }
 
 const ITEMS_PER_PAGE = 50;
+const ENABLE_VIRTUALIZATION_THRESHOLD = 100; // Use virtualization when more than 100 items
 
 export const TranscriptsView = memo(function TranscriptsView({
     transcripts,
@@ -182,6 +184,30 @@ export const TranscriptsView = memo(function TranscriptsView({
     // Get all groups (unpaginated) for select all functionality
     const allGroups = useMemo(() => groupTranscriptsByDate(transcripts), [transcripts]);
     
+    // Calculate list container height for virtualization
+    const [listContainerHeight, setListContainerHeight] = useState(600);
+    const listContainerRef = useRef<HTMLDivElement>(null);
+    
+    useEffect(() => {
+        const updateHeight = () => {
+            if (listContainerRef.current) {
+                const rect = listContainerRef.current.getBoundingClientRect();
+                const viewportHeight = window.innerHeight;
+                const topOffset = rect.top;
+                const bottomPadding = 100; // Space for floating action bar
+                const newHeight = viewportHeight - topOffset - bottomPadding;
+                setListContainerHeight(Math.max(400, newHeight));
+            }
+        };
+        
+        updateHeight();
+        window.addEventListener('resize', updateHeight);
+        return () => window.removeEventListener('resize', updateHeight);
+    }, []);
+    
+    // Decide whether to use virtualization
+    const shouldUseVirtualization = transcripts.length > ENABLE_VIRTUALIZATION_THRESHOLD;
+    
     return (
         <div className="transcripts-view">
             {/* 🧠 CSS Grid with specific column sizing */}
@@ -277,8 +303,27 @@ export const TranscriptsView = memo(function TranscriptsView({
                         <h3>No transcripts yet</h3>
                         <p>Press <span title={hotkey}>{formatShortcut(hotkey)}</span> or click "Start Recording" to begin</p>
                     </div>
+                ) : shouldUseVirtualization ? (
+                    <div className="transcript-list-container" ref={listContainerRef}>
+                        <VirtualizedTranscriptList
+                            groups={allGroups.map((group, idx) => ({
+                                ...group,
+                                startIndex: idx
+                            }))}
+                            expandedGroups={expandedGroups}
+                            selectedTranscripts={selectedTranscripts}
+                            toggleGroup={toggleGroup}
+                            toggleTranscriptSelection={toggleTranscriptSelection}
+                            toggleTranscriptGroupSelection={toggleTranscriptGroupSelection}
+                            openDetailPanel={openDetailPanel}
+                            showDeleteConfirmation={showDeleteConfirmation}
+                            formatDuration={formatDuration}
+                            panelTranscriptId={panelState.transcript?.id}
+                            height={listContainerHeight}
+                        />
+                    </div>
                 ) : (
-                    <div className="transcript-list-container">
+                    <div className="transcript-list-container" ref={listContainerRef}>
                         {paginatedGroups.map(group => {
                             // Find the full group data for this title
                             const fullGroup = allGroups.find(g => g.title === group.title);

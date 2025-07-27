@@ -151,7 +151,6 @@ export function AppContent() {
   const { 
     isRecording, 
     recordingStartTime, 
-    audioLevel, 
     toggleRecording,
     startRecording,
     stopRecording,
@@ -536,7 +535,6 @@ export function AppContent() {
               sessionTranscripts={sessionTranscripts}
               selectedMic={selectedMic}
               onMicChange={setSelectedMic}
-              audioLevel={audioLevel}
               startRecording={startRecording}
               stopRecording={stopRecording}
               cancelRecording={cancelRecording}
@@ -677,7 +675,6 @@ export function AppContent() {
       {/* Dev Tools */}
       <DevTools
         currentView={currentView}
-        audioLevel={audioLevel}
         selectedMic={selectedMic}
         isRecording={isRecording}
         isProcessing={isProcessing}
@@ -697,7 +694,6 @@ export function AppContent() {
         <TranscriptionOverlay
           isVisible={showTranscriptionOverlay}
           isRecording={isRecording}
-          audioLevel={audioLevel}
           onClose={() => setShowTranscriptionOverlay(false)}
           onSaveEdits={(editedText) => {
             loggers.ui.info('Saved edited transcript', { length: editedText.length });
