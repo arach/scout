@@ -6,7 +6,7 @@ import './DictionaryView.css';
 export const DictionaryViewStandalone: React.FC = () => {
   return (
     <div className="dictionary-view-standalone">
-      <DictionaryView />
+      <DictionaryView isExpanded={true} onToggleExpand={() => {}} />
     </div>
   );
 };

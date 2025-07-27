@@ -1576,6 +1576,102 @@ struct RecordingStats {
 }
 
 #[tauri::command]
+async fn generate_sample_data(state: State<'_, AppState>) -> Result<String, String> {
+    use chrono::{DateTime, Datelike, Local, Duration, Timelike, Weekday};
+    use std::collections::HashMap;
+    
+    eprintln!("Generating sample transcript data...");
+    
+    let now = Local::now();
+    let mut generated_count = 0;
+    
+    // Generate data for the past 180 days (6 months)
+    for days_ago in 0..180 {
+        let date = now - Duration::days(days_ago);
+        
+        // Skip some days to create realistic streaks and gaps
+        let skip_chance = match date.weekday() {
+            Weekday::Sat | Weekday::Sun => 0.7, // 70% chance to skip weekends
+            _ => 0.2, // 20% chance to skip weekdays
+        };
+        
+        // Use date as seed for consistent randomness
+        let date_seed = (date.day() * date.month() * ((days_ago + 1) as u32)) as f32;
+        if (date_seed % 100.0) / 100.0 < skip_chance {
+            continue;
+        }
+        
+        // Determine number of recordings for this day
+        let base_recordings = match date.weekday() {
+            Weekday::Mon | Weekday::Wed | Weekday::Fri => 3..=7, // Busy days
+            Weekday::Tue | Weekday::Thu => 2..=5, // Normal days
+            Weekday::Sat | Weekday::Sun => 1..=3, // Weekend
+        };
+        
+        let num_recordings = ((date_seed as usize % 5) + base_recordings.start()) 
+            .min(*base_recordings.end());
+        
+        // Generate recordings throughout the day
+        for recording_num in 0..num_recordings {
+            // Distribute recordings during work hours (9am-6pm) with some variation
+            let hour = match recording_num % 5 {
+                0 => 9 + (date_seed as u32 % 2), // Morning (9-10am)
+                1 => 11 + (date_seed as u32 % 2), // Late morning (11am-12pm)
+                2 => 14 + (date_seed as u32 % 2), // Afternoon (2-3pm)
+                3 => 16 + (date_seed as u32 % 2), // Late afternoon (4-5pm)
+                _ => 10 + (date_seed as u32 % 8), // Random throughout day
+            };
+            
+            let minute = (date_seed as u32 * ((recording_num + 1) as u32)) % 60;
+            
+            // Vary duration based on time of day
+            let duration_ms = match hour {
+                9..=11 => 60000 + ((date_seed as i32 * 1000) % 180000), // 1-4 minutes morning
+                14..=16 => 120000 + ((date_seed as i32 * 1500) % 240000), // 2-6 minutes afternoon
+                _ => 90000 + ((date_seed as i32 * 800) % 150000), // 1.5-4 minutes other times
+            };
+            
+            // Calculate approximate words (150-200 words per minute)
+            let words_per_minute = 150 + ((date_seed as i32) % 50);
+            let words = (duration_ms / 60000) * words_per_minute;
+            
+            // Create sample text
+            let text = format!(
+                "Sample recording from {} at {}:{:02}. This is recording {} of {} for the day. \
+                The recording lasted {} seconds and contains approximately {} words of transcribed content. \
+                This demonstrates typical usage patterns with varying activity levels throughout the week.",
+                date.format("%A, %B %d, %Y"),
+                hour,
+                minute,
+                recording_num + 1,
+                num_recordings,
+                duration_ms / 1000,
+                words
+            );
+            
+            // Set created_at timestamp
+            let created_at = date
+                .with_hour(hour)
+                .unwrap()
+                .with_minute(minute)
+                .unwrap()
+                .with_second(0)
+                .unwrap()
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string();
+            
+            // Save to database  
+            match state.database.save_transcript_with_timestamp(&text, duration_ms, None, None, &created_at).await {
+                Ok(_) => generated_count += 1,
+                Err(e) => eprintln!("Failed to create sample transcript: {}", e),
+            }
+        }
+    }
+    
+    Ok(format!("Generated {} sample transcripts over 180 days", generated_count))
+}
+
+#[tauri::command]
 async fn get_recording_stats(state: State<'_, AppState>) -> Result<RecordingStats, String> {
     use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, TimeZone, Timelike, Weekday, Duration};
     use std::collections::HashMap;
@@ -2366,7 +2462,8 @@ pub fn run() {
             delete_dictionary_entry,
             get_dictionary_matches_for_transcript,
             test_dictionary_replacement,
-            get_recording_stats
+            get_recording_stats,
+            generate_sample_data
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

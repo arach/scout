@@ -34,11 +34,36 @@
 /* Empty state */
 .stats-empty {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   min-height: 300px;
   color: var(--text-secondary);
   text-align: center;
+  gap: var(--spacing-lg);
+}
+
+.generate-sample-button {
+  padding: var(--spacing-sm) var(--spacing-lg);
+  background: var(--accent);
+  color: var(--background-primary);
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.generate-sample-button:hover {
+  background: var(--accent-hover);
+  transform: translateY(-1px);
+}
+
+.generate-sample-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
 }
 
 /* Metrics Section */
@@ -50,9 +75,10 @@
 /* Primary Metrics */
 .stats-metrics-primary {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(3, 1fr);
   gap: var(--spacing-lg);
   margin-bottom: 24px;
+  width: 100%;
 }
 
 /* Secondary Metrics */
@@ -116,6 +142,40 @@
   font-weight: 600;
   color: var(--text-primary);
   margin-bottom: 24px;
+}
+
+.heatmap-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.heatmap-header .stats-section-title {
+  margin-bottom: 0;
+}
+
+.generate-sample-button-inline {
+  padding: var(--spacing-xs) var(--spacing-md);
+  background: var(--background-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.generate-sample-button-inline:hover {
+  background: var(--accent);
+  color: var(--background-primary);
+  border-color: var(--accent);
+}
+
+.generate-sample-button-inline:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Heatmap */
@@ -344,7 +404,11 @@
     padding: var(--spacing-md);
   }
 
-  .stats-metrics {
+  .stats-metrics-primary {
+    grid-template-columns: 1fr;
+  }
+
+  .stats-metrics-secondary {
     grid-template-columns: repeat(2, 1fr);
   }
 

@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Book, Plus, Search, Download, Upload, Trash2, Edit2, Eye, EyeOff, Hash, TestTube } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Book, Plus, Search, Trash2, Edit2, Eye, EyeOff, Hash, TestTube } from 'lucide-react';
 import { tauriApi } from '../types/tauri';
 import { DictionaryEntry, DictionaryEntryInput, MatchType } from '../types/dictionary';
 import { Dropdown } from './Dropdown';

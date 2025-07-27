@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Book, Plus, Search, Download, Upload, Trash2, Edit2, Eye, EyeOff, Hash, TestTube } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Plus, Search, Trash2, Edit2, Eye, EyeOff, Hash, TestTube } from 'lucide-react';
 import { tauriApi } from '../types/tauri';
 import { DictionaryEntry, DictionaryEntryInput, MatchType } from '../types/dictionary';
 import { Dropdown } from './Dropdown';
@@ -25,6 +25,8 @@ export const DictionaryStandalone: React.FC = () => {
   const [testText, setTestText] = useState('');
   const [testResult, setTestResult] = useState('');
   const [showTestPanel, setShowTestPanel] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   
   // Form state
   const [formData, setFormData] = useState<DictionaryEntryInput>({
@@ -71,12 +73,15 @@ export const DictionaryStandalone: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSaving(true);
     
     try {
       if (editingEntry) {
-        await tauriApi.updateDictionaryEntry(editingEntry.id, formData);
+        await tauriApi.updateDictionaryEntry({ id: editingEntry.id, updates: formData });
+        showNotification('Entry updated successfully', 'success');
       } else {
-        await tauriApi.saveDictionaryEntry(formData);
+        await tauriApi.saveDictionaryEntry({ entry: formData });
+        showNotification('Entry added successfully', 'success');
       }
       
       // Reset form
@@ -93,9 +98,12 @@ export const DictionaryStandalone: React.FC = () => {
       setEditingEntry(null);
       
       // Reload entries
-      loadEntries();
+      await loadEntries();
     } catch (error) {
       console.error('Failed to save dictionary entry:', error);
+      showNotification('Failed to save entry', 'error');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -116,32 +124,47 @@ export const DictionaryStandalone: React.FC = () => {
   const handleDelete = async (id: number) => {
     if (confirm('Are you sure you want to delete this entry?')) {
       try {
-        await tauriApi.deleteDictionaryEntry(id);
-        loadEntries();
+        await tauriApi.deleteDictionaryEntry({ id });
+        await loadEntries();
+        showNotification('Entry deleted successfully', 'success');
       } catch (error) {
         console.error('Failed to delete dictionary entry:', error);
+        showNotification('Failed to delete entry', 'error');
       }
     }
   };
 
   const handleToggleEnabled = async (entry: DictionaryEntry) => {
     try {
-      await tauriApi.updateDictionaryEntry(entry.id, {
-        ...entry,
-        is_enabled: !entry.is_enabled
+      await tauriApi.updateDictionaryEntry({ 
+        id: entry.id, 
+        updates: {
+          ...entry,
+          is_enabled: !entry.is_enabled
+        }
       });
-      loadEntries();
+      await loadEntries();
+      showNotification(
+        entry.is_enabled ? 'Entry disabled' : 'Entry enabled',
+        'success'
+      );
     } catch (error) {
       console.error('Failed to toggle dictionary entry:', error);
+      showNotification('Failed to update entry', 'error');
     }
+  };
+
+  const showNotification = (message: string, type: 'success' | 'error') => {
+    setNotification({ message, type });
+    setTimeout(() => setNotification(null), 3000);
   };
 
   const handleTest = async () => {
     if (!testText.trim()) return;
     
     try {
-      const result = await tauriApi.testDictionaryReplacement(testText);
-      setTestResult(result);
+      const result = await tauriApi.testDictionaryReplacement({ text: testText });
+      setTestResult(result.replaced_text);
     } catch (error) {
       console.error('Failed to test replacement:', error);
     }
@@ -164,6 +187,13 @@ export const DictionaryStandalone: React.FC = () => {
         <p>Manage custom text replacements for your transcriptions</p>
       </div>
 
+      {/* Notification */}
+      {notification && (
+        <div className={`notification notification-${notification.type}`}>
+          {notification.message}
+        </div>
+      )}
+
       {/* Controls Bar */}
       <div className="dictionary-controls">
         <div className="search-container">
@@ -183,7 +213,7 @@ export const DictionaryStandalone: React.FC = () => {
             title="Test replacements"
           >
             <TestTube size={16} />
-            Test
+            <span>Test</span>
           </button>
           <button
             className="control-button add-button"
@@ -202,7 +232,7 @@ export const DictionaryStandalone: React.FC = () => {
             }}
           >
             <Plus size={16} />
-            Add Entry
+            <span>Add Entry</span>
           </button>
         </div>
       </div>
@@ -222,7 +252,11 @@ export const DictionaryStandalone: React.FC = () => {
                   onChange={(e) => setTestText(e.target.value)}
                   rows={3}
                 />
-                <button onClick={handleTest} className="test-button">
+                <button 
+                  onClick={handleTest} 
+                  className="test-button"
+                  disabled={!testText.trim()}
+                >
                   Test
                 </button>
               </div>
@@ -237,22 +271,23 @@ export const DictionaryStandalone: React.FC = () => {
 
           {/* Add/Edit Form */}
           {showAddForm && (
-            <form onSubmit={handleSubmit} className="dictionary-form">
+            <form onSubmit={handleSubmit} className={`dictionary-form ${saving ? 'saving' : ''}`}>
               <h4>{editingEntry ? 'Edit Entry' : 'Add New Entry'}</h4>
               
               <div className="form-row">
                 <div className="form-group">
-                  <label>Original Text*</label>
+                  <label data-required="*">Original Text</label>
                   <input
                     type="text"
                     value={formData.original_text}
                     onChange={(e) => setFormData(prev => ({ ...prev, original_text: e.target.value }))}
                     required
                     placeholder="e.g., api"
+                    autoFocus
                   />
                 </div>
                 <div className="form-group">
-                  <label>Replacement Text*</label>
+                  <label data-required="*">Replacement Text</label>
                   <input
                     type="text"
                     value={formData.replacement_text}
@@ -299,27 +334,33 @@ export const DictionaryStandalone: React.FC = () => {
               </div>
 
               <div className="form-checkboxes">
-                <label>
+                <div>
                   <input
                     type="checkbox"
+                    id="case-sensitive"
                     checked={formData.is_case_sensitive}
                     onChange={(e) => setFormData(prev => ({ ...prev, is_case_sensitive: e.target.checked }))}
                   />
-                  Case Sensitive
-                </label>
-                <label>
+                  <label htmlFor="case-sensitive">Case Sensitive</label>
+                </div>
+                <div>
                   <input
                     type="checkbox"
+                    id="enabled"
                     checked={formData.is_enabled}
                     onChange={(e) => setFormData(prev => ({ ...prev, is_enabled: e.target.checked }))}
                   />
-                  Enabled
-                </label>
+                  <label htmlFor="enabled">Enabled</label>
+                </div>
               </div>
 
               <div className="form-actions">
-                <button type="submit" className="submit-button">
-                  {editingEntry ? 'Update' : 'Add'}
+                <button 
+                  type="submit" 
+                  className="submit-button"
+                  disabled={saving}
+                >
+                  {saving ? 'Saving...' : (editingEntry ? 'Update' : 'Add')}
                 </button>
                 <button
                   type="button"
@@ -337,6 +378,7 @@ export const DictionaryStandalone: React.FC = () => {
                     });
                   }}
                   className="cancel-button"
+                  disabled={saving}
                 >
                   Cancel
                 </button>
@@ -348,8 +390,8 @@ export const DictionaryStandalone: React.FC = () => {
           <div className="dictionary-entries">
             {Object.keys(groupedEntries).length === 0 ? (
               <div className="dictionary-empty">
-                <p>No dictionary entries yet.</p>
-                <p>Add entries to automatically replace text in your transcripts.</p>
+                <p>No dictionary entries yet</p>
+                <p>Add entries to automatically replace text in your transcripts</p>
               </div>
             ) : (
               Object.entries(groupedEntries).map(([category, categoryEntries]) => (
@@ -390,11 +432,11 @@ export const DictionaryStandalone: React.FC = () => {
                         </div>
                         <div className="entry-details">
                           <span className="match-type">{getMatchTypeLabel(entry.match_type)}</span>
-                          {entry.is_case_sensitive && <span className="case-sensitive">Case Sensitive</span>}
+                          {entry.is_case_sensitive && <span className="case-sensitive">Case</span>}
                           {entry.usage_count > 0 && (
                             <span className="usage-count">
                               <Hash size={12} />
-                              {entry.usage_count} uses
+                              {entry.usage_count} {entry.usage_count === 1 ? 'use' : 'uses'}
                             </span>
                           )}
                         </div>
@@ -412,7 +454,7 @@ export const DictionaryStandalone: React.FC = () => {
           {/* Footer */}
           <div className="dictionary-footer">
             <p className="footer-hint">
-              Dictionary replacements are applied automatically to new transcripts.
+              Dictionary replacements are applied automatically to new transcripts
             </p>
           </div>
         </>

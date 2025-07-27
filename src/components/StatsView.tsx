@@ -28,6 +28,7 @@ export function StatsView() {
   const [loading, setLoading] = useState(true);
   const [hoveredDay, setHoveredDay] = useState<DayActivity | null>(null);
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
+  const [generating, setGenerating] = useState(false);
 
   // Load stats data
   useEffect(() => {
@@ -43,6 +44,19 @@ export function StatsView() {
       console.error('Failed to load stats:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleGenerateSampleData = async () => {
+    setGenerating(true);
+    try {
+      const result = await invokeTyped<string>('generate_sample_data');
+      console.log(result);
+      await loadStats(); // Reload stats after generation
+    } catch (error) {
+      console.error('Failed to generate sample data:', error);
+    } finally {
+      setGenerating(false);
     }
   };
 
@@ -74,30 +88,37 @@ export function StatsView() {
     return num.toString();
   }, []);
 
-  // Calculate color intensity for heatmap
-  const getColorIntensity = useCallback((count: number): string => {
-    if (count === 0) return 'var(--stats-heatmap-level-0)';
-    if (count <= 2) return 'var(--stats-heatmap-level-1)';
-    if (count <= 5) return 'var(--stats-heatmap-level-2)';
-    if (count <= 10) return 'var(--stats-heatmap-level-3)';
-    return 'var(--stats-heatmap-level-4)';
+  // Calculate color intensity for heatmap - memoized for performance
+  const getColorIntensity = useMemo(() => {
+    // Pre-calculate thresholds
+    const thresholds = [
+      { max: 0, color: 'var(--stats-heatmap-level-0)' },
+      { max: 2, color: 'var(--stats-heatmap-level-1)' },
+      { max: 5, color: 'var(--stats-heatmap-level-2)' },
+      { max: 10, color: 'var(--stats-heatmap-level-3)' },
+      { max: Infinity, color: 'var(--stats-heatmap-level-4)' }
+    ];
+    
+    return (count: number): string => {
+      return thresholds.find(t => count <= t.max)?.color || 'var(--stats-heatmap-level-0)';
+    };
   }, []);
 
-  // Generate calendar grid
-  const calendarGrid = useMemo(() => {
-    if (!stats) return [];
+  // Generate calendar grid with optimized computation
+  const { calendarGrid } = useMemo(() => {
+    if (!stats) return { calendarGrid: [], startDate: new Date() };
 
     const grid = [];
     const today = new Date();
     const daysToShow = 365;
     
     // Start from 365 days ago
-    const startDate = new Date(today);
-    startDate.setDate(startDate.getDate() - daysToShow + 1);
+    const calculatedStartDate = new Date(today);
+    calculatedStartDate.setDate(calculatedStartDate.getDate() - daysToShow + 1);
     
     // Adjust to start on Sunday
-    const startDay = startDate.getDay();
-    startDate.setDate(startDate.getDate() - startDay);
+    const startDay = calculatedStartDate.getDay();
+    calculatedStartDate.setDate(calculatedStartDate.getDate() - startDay);
 
     // Create a map for quick lookup
     const activityMap = new Map(
@@ -105,7 +126,7 @@ export function StatsView() {
     );
 
     // Generate all days
-    const currentDate = new Date(startDate);
+    const currentDate = new Date(calculatedStartDate);
     while (currentDate <= today) {
       const dateStr = currentDate.toISOString().split('T')[0];
       const activity = activityMap.get(dateStr) || {
@@ -118,13 +139,13 @@ export function StatsView() {
       grid.push({
         ...activity,
         weekday: currentDate.getDay(),
-        week: Math.floor((currentDate.getTime() - startDate.getTime()) / (7 * 24 * 60 * 60 * 1000))
+        week: Math.floor((currentDate.getTime() - calculatedStartDate.getTime()) / (7 * 24 * 60 * 60 * 1000))
       });
       
       currentDate.setDate(currentDate.getDate() + 1);
     }
 
-    return grid;
+    return { calendarGrid: grid, startDate: calculatedStartDate };
   }, [stats]);
 
   const weeks = useMemo(() => {
@@ -132,9 +153,16 @@ export function StatsView() {
     return Array.from({ length: weekCount }, (_, i) => i);
   }, [calendarGrid]);
 
-  const handleMouseMove = (e: React.MouseEvent) => {
-    setMousePosition({ x: e.clientX, y: e.clientY });
-  };
+  // Debounced mouse move handler to reduce re-renders
+  const handleMouseMove = useMemo(() => {
+    let timeoutId: NodeJS.Timeout;
+    return (e: React.MouseEvent) => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        setMousePosition({ x: e.clientX, y: e.clientY });
+      }, 16); // ~60fps
+    };
+  }, []);
 
   if (loading) {
     return (
@@ -163,6 +191,13 @@ export function StatsView() {
       <div className="stats-view">
         <div className="stats-empty">
           <p>No recordings yet. Start recording to see your stats!</p>
+          <button 
+            className="generate-sample-button"
+            onClick={handleGenerateSampleData}
+            disabled={generating}
+          >
+            {generating ? 'Generating...' : 'Generate Sample Data'}
+          </button>
         </div>
       </div>
     );
