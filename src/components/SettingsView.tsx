@@ -11,6 +11,7 @@ import { LLMSettings as LLMSettingsType } from '../types/llm';
 import { ThemeVariant } from '../themes/types';
 import './SettingsView.css';
 import './SettingsView-spacing.css';
+import '../styles/grid-system.css';
 
 interface SettingsViewProps {
     hotkey: string;
@@ -165,8 +166,8 @@ export const SettingsView = memo(function SettingsView({
     };
 
     return (
-        <div className="settings-view">
-            <div className="settings-body">
+        <div className="grid-container">
+            <div className="grid-content grid-content--settings">
                 {/* Shortcuts Section - Two Columns */}
                 <div className="settings-section">
                     <div className="settings-two-column">

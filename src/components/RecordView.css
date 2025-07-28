@@ -1,15 +1,4 @@
-.record-view {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    height: 100%;
-    /* Match other views for consistent header alignment */
-    padding: 40px 32px 20px 32px;
-    box-sizing: border-box;
-    overflow-y: auto;
-    /* Account for the view-header height */
-    flex: 1;
-}
+/* Record view styles now use grid-system.css */
 
 .record-view-content {
     display: flex;
@@ -48,6 +37,17 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    width: 110px;
+    height: 110px;
+}
+
+/* Record Button Container - handles shadows via filter */
+.record-button-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
     width: 110px;
     height: 110px;
 }

@@ -1,11 +1,4 @@
-.transcripts-view {
-    padding: 40px 32px 20px 32px; /* Extra top padding to avoid toggle button overlap */
-    height: 100%;
-    overflow-y: auto;
-    box-sizing: border-box;
-    display: flex;
-    flex-direction: column;
-}
+/* Transcripts view styles now use grid-system.css */
 
 /* 🧠 Legacy header styles - keeping for backward compatibility */
 .transcripts-header-container {

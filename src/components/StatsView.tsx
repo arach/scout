@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { invokeTyped } from '../types/tauri';
 import './StatsView.css';
+import '../styles/grid-system.css';
 
 interface DayActivity {
   date: string;
@@ -166,10 +167,12 @@ export function StatsView() {
 
   if (loading) {
     return (
-      <div className="stats-view">
-        <div className="stats-loading">
+      <div className="grid-container">
+        <div className="grid-content">
+          <div className="stats-loading">
           <div className="loading-spinner"></div>
           <p>Loading stats...</p>
+          </div>
         </div>
       </div>
     );
@@ -177,9 +180,11 @@ export function StatsView() {
 
   if (!stats) {
     return (
-      <div className="stats-view">
-        <div className="stats-empty">
+      <div className="grid-container">
+        <div className="grid-content">
+          <div className="stats-empty">
           <p>No stats data loaded. Check console for errors.</p>
+          </div>
         </div>
       </div>
     );
@@ -188,8 +193,9 @@ export function StatsView() {
   // Show empty state if no recordings
   if (stats.total_recordings === 0) {
     return (
-      <div className="stats-view">
-        <div className="stats-empty">
+      <div className="grid-container">
+        <div className="grid-content">
+          <div className="stats-empty">
           <p>No recordings yet. Start recording to see your stats!</p>
           <button 
             className="generate-sample-button"
@@ -198,6 +204,7 @@ export function StatsView() {
           >
             {generating ? 'Generating...' : 'Generate Sample Data'}
           </button>
+          </div>
         </div>
       </div>
     );
@@ -206,8 +213,8 @@ export function StatsView() {
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
   return (
-    <div className="stats-view" onMouseMove={handleMouseMove}>
-      <div className="stats-grid-container">
+    <div className="grid-container" onMouseMove={handleMouseMove}>
+      <div className="grid-content">
         {/* Primary Stats - Only the main 3 */}
         <div className="stats-metrics-container">
           <div className="stats-metrics-primary">

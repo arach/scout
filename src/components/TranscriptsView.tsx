@@ -6,6 +6,7 @@ import { ChevronDown } from 'lucide-react';
 import { formatShortcut } from '../lib/formatShortcut';
 import { Transcript } from '../types/transcript';
 import './TranscriptsView.css';
+import '../styles/grid-system.css';
 
 interface TranscriptsViewProps {
     transcripts: Transcript[];
@@ -209,7 +210,7 @@ export const TranscriptsView = memo(function TranscriptsView({
     const shouldUseVirtualization = transcripts.length > ENABLE_VIRTUALIZATION_THRESHOLD;
     
     return (
-        <div className="transcripts-view">
+        <div className="grid-container">
             {/* 🧠 CSS Grid with specific column sizing */}
             <div className="header-grid mb-4">
                 {/* Left: Title */}
@@ -455,6 +456,7 @@ export const TranscriptsView = memo(function TranscriptsView({
                     </div>
                 </div>
             )}
+          </div>
         </div>
     );
 }); 

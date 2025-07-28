@@ -32,17 +32,10 @@
 }
 
 /* Dictionary Page Styles */
-.dictionary-view-page {
-  flex: 1;
-  padding: 32px;
-  overflow-y: auto;
-  max-width: 1200px;
-  margin: 0 auto;
-  width: 100%;
-}
+/* Dictionary view page styles now use grid-system.css */
 
 .page-header {
-  margin-bottom: 32px;
+  margin-bottom: 36px;
 }
 
 .page-header h1 {
@@ -63,20 +56,15 @@
 /* Controls Bar */
 .dictionary-controls {
   display: flex;
-  gap: 16px;
-  align-items: center;
+  justify-content: center;
   margin-bottom: 24px;
-  padding: 16px 20px;
-  background: var(--bg-secondary);
-  border-radius: 12px;
-  border: 1px solid var(--border-primary);
-  box-shadow: 0 1px 3px var(--shadow-color-subtle);
 }
 
 .search-container {
-  flex: 1;
   position: relative;
-  max-width: 400px;
+  width: 100%;
+  max-width: 600px;
+  margin: 0 auto;
 }
 
 .search-icon {
@@ -90,6 +78,7 @@
 
 .search-input {
   width: 100%;
+  height: 40px;
   padding: 10px 12px 10px 40px;
   background: var(--input-bg);
   border: 1px solid var(--input-border);
@@ -124,8 +113,9 @@
 .control-button {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 10px 16px;
+  gap: 8px;
+  height: 40px;
+  padding: 0 20px;
   border: none;
   border-radius: 8px;
   font-size: 14px;
@@ -152,15 +142,38 @@
   cursor: not-allowed;
 }
 
-.add-button {
-  background: var(--accent);
-  color: white;
-  border: none;
+/* Add Entry Button - Inline */
+.dictionary-add-section {
+  display: flex;
+  justify-content: center;
+  margin-top: 32px;
+  padding-top: 32px;
+  border-top: 1px solid var(--border);
 }
 
-.add-button:hover {
+.inline-add-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px;
+  background: var(--accent-primary);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.inline-add-button:hover {
   background: var(--accent-hover);
   transform: translateY(-1px);
+}
+
+.inline-add-button:active {
+  background: var(--accent-active);
+  transform: translateY(0);
 }
 
 .dictionary-loading {
@@ -196,31 +209,18 @@
 
 /* Test Panel */
 .dictionary-test-panel {
-  background: linear-gradient(135deg, var(--bg-secondary), var(--bg-tertiary));
-  border: 1px solid var(--border-primary);
-  border-radius: 12px;
-  padding: 24px;
-  margin-bottom: 24px;
-  box-shadow: 0 2px 8px var(--shadow-color-subtle);
-  position: relative;
-  overflow: hidden;
-}
-
-.dictionary-test-panel::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
-  background: linear-gradient(90deg, var(--accent-primary), var(--accent-hover));
+  background: var(--background-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 20px;
 }
 
 .dictionary-test-panel h4 {
-  margin: 0 0 16px 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-primary);
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
 }
 
 .test-input-group {
@@ -481,14 +481,16 @@
 }
 
 .submit-button {
-  background: var(--accent);
-  color: white;
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
   border: none;
+  box-shadow: 0 1px 3px var(--shadow-color-subtle);
 }
 
 .submit-button:hover {
-  background: var(--accent-hover);
+  background: var(--btn-primary-bg-hover);
   transform: translateY(-1px);
+  box-shadow: 0 2px 8px var(--shadow-color);
 }
 
 .submit-button:active {
@@ -520,23 +522,110 @@
   gap: 24px;
 }
 
-.dictionary-empty {
+/* Zero State */
+.dictionary-zero-state {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 400px;
+  padding: 60px 40px;
+}
+
+.zero-state-content {
+  max-width: 600px;
   text-align: center;
-  padding: 40px 20px;
-  color: var(--text-tertiary);
 }
 
-.dictionary-empty p {
-  margin: 6px 0;
-  font-size: 14px;
-  line-height: 1.5;
-  color: var(--text-tertiary);
+.zero-state-content h2 {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 16px;
 }
 
-.dictionary-empty p:first-child {
-  font-size: 15px;
-  font-weight: 400;
+.zero-state-description {
+  font-size: 16px;
+  line-height: 1.6;
   color: var(--text-secondary);
+  margin-bottom: 40px;
+}
+
+.dictionary-examples {
+  background: var(--background-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 32px;
+}
+
+.dictionary-examples h3 {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 20px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.example-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.example-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  font-size: 15px;
+}
+
+.example-original {
+  background: var(--background-tertiary);
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+
+.example-arrow {
+  color: var(--text-tertiary);
+}
+
+.example-replacement {
+  background: var(--background-primary);
+  border: 1px solid var(--border);
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.zero-state-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 32px;
+  background: var(--accent-primary);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.zero-state-cta:hover {
+  background: var(--accent-hover);
+  transform: translateY(-1px);
+}
+
+.zero-state-cta:active {
+  background: var(--accent-active);
+  transform: translateY(0);
 }
 
 .dictionary-category {
@@ -1005,17 +1094,22 @@ textarea:focus-visible {
 
 /* Responsive improvements */
 @media (max-width: 768px) {
-  .dictionary-view-page {
-    padding: 16px;
-  }
+  /* Mobile padding handled by grid-system.css */
 
   .dictionary-controls {
     flex-direction: column;
     gap: 12px;
+    align-items: stretch;
   }
 
   .search-container {
+    width: 100%;
     max-width: none;
+  }
+
+  .add-button {
+    width: 100%;
+    justify-content: center;
   }
 
   .control-buttons {

@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, Trash2, Edit2, Eye, EyeOff, Hash, TestTube } from 'lucide-react';
+import { Plus, Search, Trash2, Edit2, Eye, EyeOff, Hash } from 'lucide-react';
 import { tauriApi } from '../types/tauri';
 import { DictionaryEntry, DictionaryEntryInput, MatchType } from '../types/dictionary';
 import { Dropdown } from './Dropdown';
 import './DictionaryView.css';
+import '../styles/grid-system.css';
 
 const getMatchTypeLabel = (type: MatchType): string => {
   switch (type) {
@@ -22,9 +23,6 @@ export const DictionaryStandalone: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingEntry, setEditingEntry] = useState<DictionaryEntry | null>(null);
-  const [testText, setTestText] = useState('');
-  const [testResult, setTestResult] = useState('');
-  const [showTestPanel, setShowTestPanel] = useState(false);
   const [saving, setSaving] = useState(false);
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   
@@ -42,7 +40,7 @@ export const DictionaryStandalone: React.FC = () => {
   const loadEntries = async () => {
     try {
       setLoading(true);
-      const data = await tauriApi.getDictionaryEntries();
+      const data = await tauriApi.getDictionaryEntries(false);
       setEntries(data);
       setFilteredEntries(data);
     } catch (error) {
@@ -77,10 +75,10 @@ export const DictionaryStandalone: React.FC = () => {
     
     try {
       if (editingEntry) {
-        await tauriApi.updateDictionaryEntry({ id: editingEntry.id, updates: formData });
+        await tauriApi.updateDictionaryEntry(editingEntry.id, formData);
         showNotification('Entry updated successfully', 'success');
       } else {
-        await tauriApi.saveDictionaryEntry({ entry: formData });
+        await tauriApi.saveDictionaryEntry(formData);
         showNotification('Entry added successfully', 'success');
       }
       
@@ -124,7 +122,7 @@ export const DictionaryStandalone: React.FC = () => {
   const handleDelete = async (id: number) => {
     if (confirm('Are you sure you want to delete this entry?')) {
       try {
-        await tauriApi.deleteDictionaryEntry({ id });
+        await tauriApi.deleteDictionaryEntry(id);
         await loadEntries();
         showNotification('Entry deleted successfully', 'success');
       } catch (error) {
@@ -136,12 +134,8 @@ export const DictionaryStandalone: React.FC = () => {
 
   const handleToggleEnabled = async (entry: DictionaryEntry) => {
     try {
-      await tauriApi.updateDictionaryEntry({ 
-        id: entry.id, 
-        updates: {
-          ...entry,
-          is_enabled: !entry.is_enabled
-        }
+      await tauriApi.updateDictionaryEntry(entry.id, {
+        is_enabled: !entry.is_enabled
       });
       await loadEntries();
       showNotification(
@@ -159,16 +153,6 @@ export const DictionaryStandalone: React.FC = () => {
     setTimeout(() => setNotification(null), 3000);
   };
 
-  const handleTest = async () => {
-    if (!testText.trim()) return;
-    
-    try {
-      const result = await tauriApi.testDictionaryReplacement({ text: testText });
-      setTestResult(result.replaced_text);
-    } catch (error) {
-      console.error('Failed to test replacement:', error);
-    }
-  };
 
   // Group entries by category
   const groupedEntries = filteredEntries.reduce((acc, entry) => {
@@ -181,11 +165,12 @@ export const DictionaryStandalone: React.FC = () => {
   }, {} as Record<string, DictionaryEntry[]>);
 
   return (
-    <div className="dictionary-view-page">
-      <div className="page-header">
-        <h1>Dictionary</h1>
-        <p>Manage custom text replacements for your transcriptions</p>
-      </div>
+    <div className="grid-container">
+      <div className="grid-content">
+        <div className="page-header">
+          <h1>Dictionary</h1>
+          <p>Manage custom text replacements for your transcriptions</p>
+        </div>
 
       {/* Notification */}
       {notification && (
@@ -194,80 +179,26 @@ export const DictionaryStandalone: React.FC = () => {
         </div>
       )}
 
-      {/* Controls Bar */}
-      <div className="dictionary-controls">
-        <div className="search-container">
-          <Search size={16} className="search-icon" />
-          <input
-            type="text"
-            placeholder="Search dictionary entries..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="search-input"
-          />
+      {/* Show search only when there are entries */}
+      {entries.length > 10 && (
+        <div className="dictionary-controls">
+          <div className="search-container">
+            <Search size={16} className="search-icon" />
+            <input
+              type="text"
+              placeholder="Search dictionary entries..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="search-input"
+            />
+          </div>
         </div>
-        <div className="control-buttons">
-          <button
-            className="control-button test-button"
-            onClick={() => setShowTestPanel(!showTestPanel)}
-            title="Test replacements"
-          >
-            <TestTube size={16} />
-            <span>Test</span>
-          </button>
-          <button
-            className="control-button add-button"
-            onClick={() => {
-              setEditingEntry(null);
-              setFormData({
-                original_text: '',
-                replacement_text: '',
-                match_type: 'exact',
-                is_case_sensitive: false,
-                is_enabled: true,
-                category: '',
-                description: ''
-              });
-              setShowAddForm(true);
-            }}
-          >
-            <Plus size={16} />
-            <span>Add Entry</span>
-          </button>
-        </div>
-      </div>
+      )}
 
       {loading ? (
         <div className="dictionary-loading">Loading dictionary entries...</div>
       ) : (
         <>
-          {/* Test Panel */}
-          {showTestPanel && (
-            <div className="dictionary-test-panel">
-              <h4>Test Dictionary Replacements</h4>
-              <div className="test-input-group">
-                <textarea
-                  placeholder="Enter text to test replacements..."
-                  value={testText}
-                  onChange={(e) => setTestText(e.target.value)}
-                  rows={3}
-                />
-                <button 
-                  onClick={handleTest} 
-                  className="test-button"
-                  disabled={!testText.trim()}
-                >
-                  Test
-                </button>
-              </div>
-              {testResult && (
-                <div className="test-result">
-                  <label>Result:</label>
-                  <div className="test-result-text">{testResult}</div>
-                </div>
-              )}
-            </div>
-          )}
 
           {/* Add/Edit Form */}
           {showAddForm && (
@@ -389,9 +320,56 @@ export const DictionaryStandalone: React.FC = () => {
           {/* Entries List */}
           <div className="dictionary-entries">
             {Object.keys(groupedEntries).length === 0 ? (
-              <div className="dictionary-empty">
-                <p>No dictionary entries yet</p>
-                <p>Add entries to automatically replace text in your transcripts</p>
+              <div className="dictionary-zero-state">
+                <div className="zero-state-content">
+                  <h2>What is the Dictionary?</h2>
+                  <p className="zero-state-description">
+                    The dictionary automatically corrects common misspellings, expands abbreviations, 
+                    and fixes technical terms in your transcriptions. It works silently in the background 
+                    to make your transcripts more accurate.
+                  </p>
+                  
+                  <div className="dictionary-examples">
+                    <h3>Examples of what you can do:</h3>
+                    <div className="example-list">
+                      <div className="example-item">
+                        <span className="example-original">api</span>
+                        <span className="example-arrow">→</span>
+                        <span className="example-replacement">API</span>
+                      </div>
+                      <div className="example-item">
+                        <span className="example-original">github</span>
+                        <span className="example-arrow">→</span>
+                        <span className="example-replacement">GitHub</span>
+                      </div>
+                      <div className="example-item">
+                        <span className="example-original">javascript</span>
+                        <span className="example-arrow">→</span>
+                        <span className="example-replacement">JavaScript</span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <button
+                    className="zero-state-cta"
+                    onClick={() => {
+                      setEditingEntry(null);
+                      setFormData({
+                        original_text: '',
+                        replacement_text: '',
+                        match_type: 'exact',
+                        is_case_sensitive: false,
+                        is_enabled: true,
+                        category: '',
+                        description: ''
+                      });
+                      setShowAddForm(true);
+                    }}
+                  >
+                    <Plus size={20} />
+                    <span>Add Your First Entry</span>
+                  </button>
+                </div>
               </div>
             ) : (
               Object.entries(groupedEntries).map(([category, categoryEntries]) => (
@@ -449,6 +427,31 @@ export const DictionaryStandalone: React.FC = () => {
                 </div>
               ))
             )}
+            
+            {/* Add entry button when there are existing entries */}
+            {Object.keys(groupedEntries).length > 0 && (
+              <div className="dictionary-add-section">
+                <button
+                  className="inline-add-button"
+                  onClick={() => {
+                    setEditingEntry(null);
+                    setFormData({
+                      original_text: '',
+                      replacement_text: '',
+                      match_type: 'exact',
+                      is_case_sensitive: false,
+                      is_enabled: true,
+                      category: '',
+                      description: ''
+                    });
+                    setShowAddForm(true);
+                  }}
+                >
+                  <Plus size={16} />
+                  <span>Add Entry</span>
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Footer */}
@@ -459,6 +462,7 @@ export const DictionaryStandalone: React.FC = () => {
           </div>
         </>
       )}
+      </div>
     </div>
   );
 };

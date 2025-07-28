@@ -1096,11 +1096,7 @@ h1 {
   color: var(--text-primary);
 }
 
-.settings-view {
-  max-width: 800px;
-  margin: 0 auto;
-  padding: 40px 32px 20px 32px; /* Match TranscriptsView padding */
-}
+/* Settings view styles moved to grid-system.css */
 
 .settings-body {
   padding: 0;

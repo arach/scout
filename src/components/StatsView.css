@@ -1,28 +1,4 @@
-.stats-view {
-  flex: 1;
-  padding: 40px 32px 20px 32px; /* Match other views for consistent alignment */
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 32px;
-  align-items: center;
-  box-sizing: border-box;
-}
-
-/* Stats content wrapper for consistent alignment */
-.stats-view > * {
-  width: 100%;
-  max-width: 1200px;
-}
-
-/* Grid system for consistent left alignment across all sections */
-.stats-grid-container {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 32px;
-  width: 100%;
-  max-width: 1200px;
-}
+/* Stats view styles now use grid-system.css */
 
 /* Loading state */
 .stats-loading {
