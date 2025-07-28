@@ -11,6 +11,7 @@
 /* 2. Design Tokens - CSS Custom Properties */
 @import './tokens/colors.css';
 @import './tokens/spacing.css';
+@import './legacy-spacing-map.css';
 @import './tokens/typography.css';
 @import './tokens/shadows.css';
 @import './tokens/animations.css';

@@ -1,0 +1,19 @@
+/* Legacy spacing variable mapping
+   Maps old --spacing-* variables to new --space-* variables
+   This ensures backward compatibility while transitioning to the new system */
+
+:root {
+  /* Legacy spacing variables mapped to new 8pt grid system */
+  --spacing-xs: var(--space-1);     /* 8px */
+  --spacing-sm: var(--space-2);     /* 16px */
+  --spacing-md: var(--space-3);     /* 24px */
+  --spacing-lg: var(--space-4);     /* 32px */
+  --spacing-xl: var(--space-6);     /* 48px */
+  
+  /* Also map common padding/margin values */
+  --padding-xs: var(--space-1);     /* 8px */
+  --padding-sm: var(--space-2);     /* 16px */
+  --padding-md: var(--space-3);     /* 24px */
+  --padding-lg: var(--space-4);     /* 32px */
+  --padding-xl: var(--space-6);     /* 48px */
+}

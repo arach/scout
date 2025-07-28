@@ -207,10 +207,10 @@ export function StatsView() {
 
   return (
     <div className="stats-view" onMouseMove={handleMouseMove}>
-      {/* Key Metrics */}
-      <div className="stats-metrics-container">
-        {/* Primary Stats */}
-        <div className="stats-metrics-primary">
+      <div className="stats-grid-container">
+        {/* Primary Stats - Only the main 3 */}
+        <div className="stats-metrics-container">
+          <div className="stats-metrics-primary">
           <div className="metric-card primary">
             <div className="metric-value primary">{stats.current_streak}</div>
             <div className="metric-label">Day Streak 🔥</div>
@@ -222,45 +222,18 @@ export function StatsView() {
           <div className="metric-card primary">
             <div className="metric-value primary">{formatDuration(stats.total_duration)}</div>
             <div className="metric-label">Time Recorded</div>
+            </div>
           </div>
         </div>
-        
-        {/* Secondary Stats */}
-        <div className="stats-metrics-secondary">
-          <div className="metric-card">
-            <div className="metric-value">{stats.longest_streak}</div>
-            <div className="metric-label">Best Streak</div>
-          </div>
-          <div className="metric-card">
-            <div className="metric-value">{formatNumber(stats.total_words)}</div>
-            <div className="metric-label">Words</div>
-          </div>
-          <div className="metric-card">
-            <div className="metric-value">{stats.average_daily.toFixed(1)}</div>
-            <div className="metric-label">Daily Avg</div>
-          </div>
-          <div className="metric-card">
-            <div className="metric-value">{stats.most_active_hour}:00</div>
-            <div className="metric-label">Peak Hour</div>
-          </div>
-        </div>
-      </div>
 
-      {/* Activity Heatmap */}
-      <div className="stats-heatmap-container">
+        {/* Activity Heatmap */}
+        <div className="stats-heatmap-container">
         <h2 className="stats-section-title">Activity Overview</h2>
         <div className="stats-heatmap">
           <div className="heatmap-months">
             {/* Month labels will go here */}
           </div>
           <div className="heatmap-content">
-            <div className="heatmap-weekdays">
-              {dayNames.map((day, i) => (
-                <div key={day} className="weekday-label" style={{ gridRow: i + 1 }}>
-                  {i % 2 === 1 ? day : ''}
-                </div>
-              ))}
-            </div>
             <div className="heatmap-grid">
               {weeks.map(week => (
                 <div key={week} className="heatmap-week">
@@ -305,58 +278,103 @@ export function StatsView() {
             </div>
             <span className="legend-label">High activity</span>
           </div>
-        </div>
-      </div>
-
-      {/* Time-based insights */}
-      <div className="stats-insights">
-        <div className="insight-card">
-          <h3>Weekly Pattern</h3>
-          <div className="weekly-chart">
-            {stats.weekly_distribution.map(([day, count]) => (
-              <div key={day} className="weekly-bar">
-                <div 
-                  className="bar" 
-                  style={{ 
-                    height: `${(count / Math.max(...stats.weekly_distribution.map(d => d[1]))) * 100}%` 
-                  }}
-                />
-                <div className="bar-label">{day.slice(0, 3)}</div>
-              </div>
-            ))}
           </div>
         </div>
 
+        {/* Secondary Stats - After heatmap */}
+        <div className="stats-metrics-container">
+        <div className="stats-metrics-secondary">
+          <div className="metric-card">
+            <div className="metric-value">{stats.longest_streak}</div>
+            <div className="metric-label">Best Streak</div>
+          </div>
+          <div className="metric-card">
+            <div className="metric-value">{formatNumber(stats.total_words)}</div>
+            <div className="metric-label">Words</div>
+          </div>
+          <div className="metric-card">
+            <div className="metric-value">{stats.average_daily.toFixed(1)}</div>
+            <div className="metric-label">Daily Avg</div>
+          </div>
+          <div className="metric-card">
+            <div className="metric-value">{stats.most_active_hour}:00</div>
+            <div className="metric-label">Peak Hour</div>
+          </div>
+          </div>
+        </div>
+
+        {/* Time-based insights */}
+        <div className="stats-insights">
         <div className="insight-card">
-          <h3>Daily Activity</h3>
-          <div className="hourly-chart">
-            <div className="hourly-grid">
-              {Array.from({ length: 24 }, (_, hour) => {
-                const activity = stats.hourly_distribution.find(h => h[0] === hour);
-                const count = activity?.[1] || 0;
-                const maxCount = Math.max(...stats.hourly_distribution.map(h => h[1]));
-                const intensity = maxCount > 0 ? count / maxCount : 0;
-                
+          <h3>Weekly Pattern</h3>
+          {stats.weekly_distribution.every(([_, count]) => count === 0) ? (
+            <div className="chart-empty-state">
+              <p>No activity data yet</p>
+              <p className="empty-state-hint">Start recording to see your weekly patterns</p>
+            </div>
+          ) : (
+            <div className="weekly-chart">
+              {stats.weekly_distribution.map(([day, count]) => {
+                const maxValue = Math.max(...stats.weekly_distribution.map(d => d[1]));
+                const height = maxValue > 0 ? (count / maxValue) * 100 : 0;
                 return (
-                  <div 
-                    key={hour} 
-                    className="hour-cell"
-                    style={{ 
-                      backgroundColor: `rgba(var(--accent-rgb), ${intensity * 0.8})` 
-                    }}
-                    title={`${hour}:00 - ${count} recordings`}
-                  >
-                    {hour === 0 && '12a'}
-                    {hour === 6 && '6a'}
-                    {hour === 12 && '12p'}
-                    {hour === 18 && '6p'}
+                  <div key={day} className="weekly-bar">
+                    <div 
+                      className="bar" 
+                      style={{ 
+                        height: height > 0 ? `${height}%` : '2px',
+                        opacity: height > 0 ? 1 : 0.3
+                      }}
+                    />
+                    <div className="bar-label">{day.slice(0, 3)}</div>
                   </div>
                 );
               })}
             </div>
-          </div>
-          <div className="chart-info">
-            Most active: {stats.most_active_hour}:00 - {(stats.most_active_hour + 1) % 24}:00
+          )}
+        </div>
+
+        <div className="insight-card">
+          <h3>Daily Activity</h3>
+          {stats.hourly_distribution.length === 0 || stats.hourly_distribution.every(([_, count]) => count === 0) ? (
+            <div className="chart-empty-state">
+              <p>No hourly data yet</p>
+              <p className="empty-state-hint">Record throughout the day to see your activity patterns</p>
+            </div>
+          ) : (
+            <>
+              <div className="hourly-chart">
+                <div className="hourly-grid">
+                  {Array.from({ length: 24 }, (_, hour) => {
+                    const activity = stats.hourly_distribution.find(h => h[0] === hour);
+                    const count = activity?.[1] || 0;
+                    const maxCount = Math.max(...stats.hourly_distribution.map(h => h[1]));
+                    const intensity = maxCount > 0 ? count / maxCount : 0;
+                    
+                    return (
+                      <div 
+                        key={hour} 
+                        className="hour-cell"
+                        style={{ 
+                          backgroundColor: intensity > 0 ? `rgba(var(--accent-rgb), ${intensity * 0.8})` : 'var(--background-tertiary)',
+                          opacity: intensity > 0 ? 1 : 0.5
+                        }}
+                        title={`${hour}:00 - ${count} recordings`}
+                      >
+                        {hour === 0 && '12a'}
+                        {hour === 6 && '6a'}
+                        {hour === 12 && '12p'}
+                        {hour === 18 && '6p'}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="chart-info">
+                Most active: {stats.most_active_hour}:00 - {(stats.most_active_hour + 1) % 24}:00
+              </div>
+            </>
+          )}
           </div>
         </div>
       </div>
