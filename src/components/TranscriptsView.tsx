@@ -55,6 +55,7 @@ export const TranscriptsView = memo(function TranscriptsView({
     const [displayedItems, setDisplayedItems] = useState(ITEMS_PER_PAGE);
     const [showExportMenu, setShowExportMenu] = useState(false);
     const [showFloatingExportMenu, setShowFloatingExportMenu] = useState(false);
+    const [isSelectionMode, setIsSelectionMode] = useState(false);
 
     const openDetailPanel = useCallback((transcript: Transcript) => {
         setPanelState({ transcript: transcript, isOpen: true });
@@ -231,11 +232,25 @@ export const TranscriptsView = memo(function TranscriptsView({
                     {transcripts.length > 0 && (
                         <>
                             <button
-                                className="header-action-btn select-all"
-                                onClick={selectAllTranscripts}
+                                className="header-action-btn select-mode"
+                                onClick={() => {
+                                    setIsSelectionMode(!isSelectionMode);
+                                    // Clear selections when exiting selection mode
+                                    if (isSelectionMode && selectedTranscripts.size > 0) {
+                                        selectAllTranscripts(); // This will deselect all
+                                    }
+                                }}
                             >
-                                {selectedTranscripts.size === transcripts.length ? 'Deselect All' : 'Select All'}
+                                {isSelectionMode ? 'Cancel' : 'Select'}
                             </button>
+                            {isSelectionMode && (
+                                <button
+                                    className="header-action-btn select-all"
+                                    onClick={selectAllTranscripts}
+                                >
+                                    {selectedTranscripts.size === transcripts.length ? 'Deselect All' : 'Select All'}
+                                </button>
+                            )}
                             {selectedTranscripts.size > 0 && (
                                 <>
                                     <button
@@ -323,6 +338,7 @@ export const TranscriptsView = memo(function TranscriptsView({
                             formatDuration={formatDuration}
                             panelTranscriptId={panelState.transcript?.id}
                             height={listContainerHeight}
+                            isSelectionMode={isSelectionMode}
                         />
                     </div>
                 ) : (
@@ -342,16 +358,18 @@ export const TranscriptsView = memo(function TranscriptsView({
                                             >
                                                 <ChevronDown size={16} className="chevron-icon" />
                                             </button>
-                                            <input
-                                                type="checkbox"
-                                                className="group-checkbox"
-                                                checked={fullGroupTranscripts.every(t => selectedTranscripts.has(t.id))}
-                                                onChange={(e) => {
-                                                    e.stopPropagation();
-                                                    const allGroupIds = fullGroupTranscripts.map(t => t.id);
-                                                    toggleTranscriptGroupSelection(allGroupIds);
-                                                }}
-                                            />
+                                            {isSelectionMode && (
+                                                <input
+                                                    type="checkbox"
+                                                    className="group-checkbox"
+                                                    checked={fullGroupTranscripts.every(t => selectedTranscripts.has(t.id))}
+                                                    onChange={(e) => {
+                                                        e.stopPropagation();
+                                                        const allGroupIds = fullGroupTranscripts.map(t => t.id);
+                                                        toggleTranscriptGroupSelection(allGroupIds);
+                                                    }}
+                                                />
+                                            )}
                                             <h3 
                                                 className="transcript-group-title"
                                                 onClick={() => toggleGroup(group.title)}
@@ -384,7 +402,7 @@ export const TranscriptsView = memo(function TranscriptsView({
                                                         formatDuration={formatDuration}
                                                         onDelete={showDeleteConfirmation}
                                                         onClick={openDetailPanel}
-                                                        showCheckbox={true}
+                                                        showCheckbox={isSelectionMode}
                                                         isSelected={selectedTranscripts.has(transcript.id)}
                                                         onSelectToggle={toggleTranscriptSelection}
                                                         isActive={panelState.transcript?.id === transcript.id}

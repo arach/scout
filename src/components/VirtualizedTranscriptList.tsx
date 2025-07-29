@@ -22,6 +22,7 @@ interface VirtualizedTranscriptListProps {
     formatDuration: (ms: number) => string;
     panelTranscriptId?: number;
     height: number;
+    isSelectionMode?: boolean;
 }
 
 const GROUP_HEADER_HEIGHT = 36;
@@ -44,7 +45,8 @@ export const VirtualizedTranscriptList = memo(function VirtualizedTranscriptList
     showDeleteConfirmation,
     formatDuration,
     panelTranscriptId,
-    height
+    height,
+    isSelectionMode = false
 }: VirtualizedTranscriptListProps) {
     const listRef = useRef<List>(null);
     const [listItems, setListItems] = useState<ListItem[]>([]);
@@ -119,16 +121,18 @@ export const VirtualizedTranscriptList = memo(function VirtualizedTranscriptList
                                     className="chevron-icon"
                                 />
                             </button>
-                            <input
-                                type="checkbox"
-                                className="group-checkbox"
-                                checked={fullGroupTranscripts.every(t => selectedTranscripts.has(t.id))}
-                                onChange={(e) => {
-                                    e.stopPropagation();
-                                    const allGroupIds = fullGroupTranscripts.map(t => t.id);
-                                    toggleTranscriptGroupSelection(allGroupIds);
-                                }}
-                            />
+                            {isSelectionMode && (
+                                <input
+                                    type="checkbox"
+                                    className="group-checkbox"
+                                    checked={fullGroupTranscripts.every(t => selectedTranscripts.has(t.id))}
+                                    onChange={(e) => {
+                                        e.stopPropagation();
+                                        const allGroupIds = fullGroupTranscripts.map(t => t.id);
+                                        toggleTranscriptGroupSelection(allGroupIds);
+                                    }}
+                                />
+                            )}
                             <h3 
                                 className="transcript-group-title"
                                 onClick={() => toggleGroup(group.title)}
@@ -161,7 +165,7 @@ export const VirtualizedTranscriptList = memo(function VirtualizedTranscriptList
                     formatDuration={formatDuration}
                     onDelete={showDeleteConfirmation}
                     onClick={openDetailPanel}
-                    showCheckbox={true}
+                    showCheckbox={isSelectionMode}
                     isSelected={selectedTranscripts.has(transcript.id)}
                     onSelectToggle={toggleTranscriptSelection}
                     isActive={panelTranscriptId === transcript.id}

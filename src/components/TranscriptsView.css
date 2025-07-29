@@ -80,6 +80,19 @@
     flex-shrink: 0;
 }
 
+.header-action-btn.select-mode {
+    background: var(--bg-primary, white);
+    color: var(--text-primary, #111827);
+    border: 1px solid var(--border-primary, #E5E7EB);
+}
+
+.header-action-btn.select-mode:hover {
+    background: #F3F4F6;
+    border-color: #3B82F6;
+    color: #3B82F6;
+    transform: scale(1.02);
+}
+
 .header-action-btn.select-all {
     background: var(--bg-primary, white);
     color: var(--text-primary, #111827);
@@ -130,6 +143,18 @@
     
     .search-input-expanded::placeholder {
         color: #a1a1aa; /* zinc-400 */
+    }
+    
+    .header-action-btn.select-mode {
+        background: #3f3f46; /* zinc-700 */
+        color: #f4f4f5; /* zinc-100 */
+        border: 1px solid #52525b; /* zinc-600 */
+    }
+    
+    .header-action-btn.select-mode:hover {
+        background: #52525b; /* zinc-600 */
+        border-color: #71717a; /* zinc-500 */
+        transform: scale(1.02);
     }
     
     .header-action-btn.select-all {
@@ -486,6 +511,12 @@
     cursor: pointer;
     user-select: none;
     letter-spacing: -0.01em;
+    margin-left: 12px; /* Default margin when no checkbox */
+}
+
+/* When checkbox is present, remove the margin */
+.group-checkbox + .transcript-group-title {
+    margin-left: 0;
 }
 
 .transcript-group-title:hover {
@@ -524,6 +555,7 @@
 .transcript-group-items {
     background: transparent;
     padding: 0;
+    margin-top: 4px; /* Add spacing between header and first item */
 }
 
 /* Dark mode border removed */

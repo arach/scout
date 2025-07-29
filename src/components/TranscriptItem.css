@@ -5,7 +5,7 @@
     border: none;
     border-bottom: 1px solid var(--border-primary);
     padding: 8px 16px; /* Add horizontal padding here instead of container */
-    padding-left: 56px; /* Adjusted for checkbox alignment with new padding */
+    padding-left: 16px; /* Default padding without checkbox */
     margin-bottom: 0;
     transition: all 150ms ease;
     cursor: default;
@@ -17,10 +17,19 @@
     box-sizing: border-box;
 }
 
+/* When checkbox is visible, adjust padding */
+.transcript-item:has(.transcript-checkbox-wrapper) {
+    padding-left: 56px; /* Adjusted for checkbox alignment with new padding */
+}
+
 /* Mobile responsive adjustments */
 @media (max-width: 768px) {
     .transcript-item {
         padding: 8px 16px;
+        padding-left: 16px;
+    }
+    
+    .transcript-item:has(.transcript-checkbox-wrapper) {
         padding-left: 56px;
     }
 }
@@ -47,14 +56,22 @@
 /* Compact variant for recent transcripts */
 .transcript-item.compact {
     padding: 6px 16px;
-    padding-left: 56px;
+    padding-left: 16px;
     font-size: 13px;
     min-height: 32px; /* Reduced for compact items */
+}
+
+.transcript-item.compact:has(.transcript-checkbox-wrapper) {
+    padding-left: 56px;
 }
 
 @media (max-width: 768px) {
     .transcript-item.compact {
         padding: 6px 16px;
+        padding-left: 16px;
+    }
+    
+    .transcript-item.compact:has(.transcript-checkbox-wrapper) {
         padding-left: 56px;
     }
 }
