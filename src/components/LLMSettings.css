@@ -6,23 +6,66 @@
   margin-bottom: 20px;
 }
 
-.llm-toggle-label {
+.llm-toggle-container {
   display: flex;
   align-items: center;
-  gap: 12px;
-  cursor: pointer;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.llm-toggle-label {
   font-size: 14px;
   font-weight: 500;
   color: var(--text-primary);
-  margin-bottom: 6px;
 }
 
-.llm-toggle-label input[type="checkbox"] {
-  width: 20px;
-  height: 20px;
+/* Toggle Switch Styles */
+.toggle-switch {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  background: #e0e0e0;
+  border: 1px solid #ccc;
+  border-radius: 12px;
   cursor: pointer;
-  margin: 0;
+  transition: all 0.3s ease;
   flex-shrink: 0;
+}
+
+.toggle-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.toggle-switch-slider {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: white;
+  border-radius: 50%;
+  transition: transform 0.3s ease;
+  pointer-events: none;
+}
+
+.toggle-switch input:checked ~ .toggle-switch-slider {
+  transform: translateX(18px);
+}
+
+/* Toggle switch checked state - use :has() for modern browsers */
+.toggle-switch:has(input:checked) {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+
+/* Fallback for browsers without :has() support */
+.toggle-switch input:checked + .toggle-switch-slider {
+  background: white;
 }
 
 .llm-setting-hint {
@@ -230,6 +273,20 @@
 
 /* Dark mode adjustments */
 @media (prefers-color-scheme: dark) {
+  .toggle-switch {
+    background: #2a2a2a;
+    border-color: #444;
+  }
+  
+  .toggle-switch-slider {
+    background: #f0f0f0;
+  }
+  
+  .toggle-switch:has(input:checked) {
+    background: var(--accent-primary, #007acc);
+    border-color: var(--accent-primary, #007acc);
+  }
+  
   .llm-prompt-category {
     background: rgba(255, 255, 255, 0.03);
     border-color: rgba(255, 255, 255, 0.06);

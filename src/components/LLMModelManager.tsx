@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { safeEventListen } from '../lib/safeEventListener';
-import { Brain, Gauge, Package, CheckCircle, Download } from 'lucide-react';
 import { LLMModel, LLMDownloadProgress } from '../types/llm';
+import { ModelCard, renderLLMSpecs } from './shared/ModelCard';
 import './LLMModelManager.css';
 
 export const LLMModelManager: React.FC = () => {
@@ -57,16 +57,6 @@ export const LLMModelManager: React.FC = () => {
     };
   }, []);
 
-  const formatSize = (mb: number): string => {
-    if (mb >= 1000) {
-      return `${(mb / 1000).toFixed(1)} GB`;
-    }
-    return `${Math.round(mb)} MB`;
-  };
-
-  const formatParameters = (params: string): string => {
-    return params;
-  };
 
   const loadModels = async () => {
     try {
@@ -137,78 +127,22 @@ export const LLMModelManager: React.FC = () => {
 
   return (
     <div className="llm-model-manager">
-      <div className="llm-models-grid">
+      <div className="model-grid">
         {models.map((model) => {
           const isDownloading = downloading[model.id] !== undefined;
           const progress = downloading[model.id];
 
           return (
-            <div key={model.id} className={`llm-model-card ${model.active ? 'active' : ''}`}>
-              <div className="llm-model-header">
-                <h4>{model.name}</h4>
-                {model.active && (
-                  <span className="active-indicator">
-                    <CheckCircle size={12} />
-                    Active
-                  </span>
-                )}
-              </div>
-              
-              <p className="llm-model-description">{model.description}</p>
-              
-              <div className="llm-model-specs">
-                <div className="llm-spec">
-                  <Brain size={14} />
-                  <span>{formatParameters(model.parameters)}</span>
-                </div>
-                <div className="llm-spec">
-                  <Package size={14} />
-                  <span>{formatSize(model.size_mb)}</span>
-                </div>
-                <div className="llm-spec">
-                  <Gauge size={14} />
-                  <span>{model.speed}</span>
-                </div>
-              </div>
-
-              {isDownloading ? (
-                <div className="llm-download-progress">
-                  <div className="llm-progress-bar">
-                    <div 
-                      className="llm-progress-fill" 
-                      style={{ width: `${progress?.progress || 0}%` }}
-                    />
-                  </div>
-                  <span className="llm-progress-text">
-                    {progress ? `${formatSize(progress.downloadedMb)} / ${formatSize(progress.totalMb)}` : 'Starting...'}
-                  </span>
-                </div>
-              ) : model.downloaded ? (
-                <div className="llm-model-actions">
-                  {model.active ? (
-                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Already Active</span>
-                  ) : (
-                    <button 
-                      className="llm-select-button"
-                      onClick={() => selectModel(model.id)}
-                    >
-                      <CheckCircle size={14} />
-                      Use Model
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <div className="llm-model-actions">
-                  <button 
-                    className="llm-download-button"
-                    onClick={() => downloadModel(model.id)}
-                  >
-                    <Download size={14} />
-                    Download
-                  </button>
-                </div>
-              )}
-            </div>
+            <ModelCard
+              key={model.id}
+              model={model}
+              type="llm"
+              isDownloading={isDownloading}
+              downloadProgress={progress}
+              onDownload={(m) => downloadModel(m.id)}
+              onSelect={selectModel}
+              renderSpecs={renderLLMSpecs}
+            />
           );
         })}
       </div>

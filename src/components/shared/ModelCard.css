@@ -82,6 +82,14 @@
   border: 1px solid rgba(59, 130, 246, 0.3);
 }
 
+/* Model description */
+.model-description {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.4;
+}
+
 /* Model details/specs */
 .model-details {
   display: flex;

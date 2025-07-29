@@ -39,6 +39,11 @@
   overflow-y: auto;
 }
 
+/* When used inside app-main (which has view-header), adjust top padding */
+.app-main .grid-container {
+  padding-top: 24px; /* Reduced padding since view-header provides spacing */
+}
+
 /* Content wrapper for max-width constraint */
 .grid-content {
   width: 100%;

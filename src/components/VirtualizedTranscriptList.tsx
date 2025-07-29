@@ -24,8 +24,8 @@ interface VirtualizedTranscriptListProps {
     height: number;
 }
 
-const GROUP_HEADER_HEIGHT = 48;
-const TRANSCRIPT_ITEM_HEIGHT = 72;
+const GROUP_HEADER_HEIGHT = 36;
+const TRANSCRIPT_ITEM_HEIGHT = 48;
 
 interface ListItem {
     type: 'header' | 'transcript';
@@ -154,19 +154,18 @@ export const VirtualizedTranscriptList = memo(function VirtualizedTranscriptList
             const transcript = item.data as Transcript;
             
             return (
-                <div style={style} className="transcript-group-items">
-                    <TranscriptItem
-                        transcript={transcript}
-                        formatDuration={formatDuration}
-                        onDelete={showDeleteConfirmation}
-                        onClick={openDetailPanel}
-                        showCheckbox={true}
-                        isSelected={selectedTranscripts.has(transcript.id)}
-                        onSelectToggle={toggleTranscriptSelection}
-                        isActive={panelTranscriptId === transcript.id}
-                        variant="default"
-                    />
-                </div>
+                <TranscriptItem
+                    transcript={transcript}
+                    formatDuration={formatDuration}
+                    onDelete={showDeleteConfirmation}
+                    onClick={openDetailPanel}
+                    showCheckbox={true}
+                    isSelected={selectedTranscripts.has(transcript.id)}
+                    onSelectToggle={toggleTranscriptSelection}
+                    isActive={panelTranscriptId === transcript.id}
+                    variant="default"
+                    style={style}
+                />
             );
         }
     };

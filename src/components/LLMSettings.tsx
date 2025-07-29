@@ -50,142 +50,143 @@ export const LLMSettings: React.FC<LLMSettingsProps> = ({ settings, onUpdateSett
     <div className="llm-settings">
       {/* Main Toggle */}
       <div className="llm-setting-item">
-        <label className="llm-toggle-label">
-          <input
-            type="checkbox"
-            checked={settings.enabled}
-            onChange={(e) => onUpdateSettings({ enabled: e.target.checked })}
-          />
-          <span>Enable AI Post-Processing</span>
-        </label>
-        <p className="llm-setting-hint">
-          Automatically process transcripts with AI to summarize, extract action items, and more
-        </p>
+        <div className="llm-toggle-container">
+          <span className="llm-toggle-label">Enable AI Post-Processing</span>
+          <div className="toggle-switch">
+            <input
+              type="checkbox"
+              id="llm-enable-toggle"
+              checked={settings.enabled}
+              onChange={(e) => onUpdateSettings({ enabled: e.target.checked })}
+            />
+            <span className="toggle-switch-slider"></span>
+          </div>
+        </div>
+      </div>
+
+      {/* Model Selection */}
+      <div className="llm-setting-section">
+        <h4 className="llm-section-title">
+          <Sparkles size={16} />
+          AI Models
+        </h4>
+        <LLMModelManager />
       </div>
 
       {settings.enabled && (
         <>
-          {/* Model Selection */}
-          <div className="llm-setting-section">
-            <h4 className="llm-section-title">
-              <Sparkles size={16} />
-              AI Models
-            </h4>
-            <LLMModelManager />
-          </div>
-
           {/* Prompt Templates */}
           <div className="llm-setting-section">
             <h4 className="llm-section-title">Enabled Prompts</h4>
             {loadingTemplates ? (
-              <div className="llm-loading">Loading prompts...</div>
-            ) : (
-              <div className="llm-prompt-categories">
-                {Object.entries(groupedTemplates).map(([category, templates]) => (
-                  <div key={category} className="llm-prompt-category">
-                    <h5 className="llm-category-title">
-                      {category.charAt(0).toUpperCase() + category.slice(1)}
-                    </h5>
-                    <div className="llm-prompts-list">
-                      {templates.map(template => (
-                        <label key={template.id} className="llm-prompt-item">
-                          <input
-                            type="checkbox"
-                            checked={settings.enabled_prompts.includes(template.id)}
-                            onChange={() => togglePrompt(template.id)}
-                          />
-                          <div className="llm-prompt-info">
-                            <span className="llm-prompt-name">{template.name}</span>
-                            {template.description && (
-                              <span className="llm-prompt-description">{template.description}</span>
-                            )}
-                          </div>
-                        </label>
-                      ))}
-                    </div>
+            <div className="llm-loading">Loading prompts...</div>
+          ) : (
+            <div className="llm-prompt-categories">
+              {Object.entries(groupedTemplates).map(([category, templates]) => (
+                <div key={category} className="llm-prompt-category">
+                  <h5 className="llm-category-title">
+                    {category.charAt(0).toUpperCase() + category.slice(1)}
+                  </h5>
+                  <div className="llm-prompts-list">
+                    {templates.map(template => (
+                      <label key={template.id} className="llm-prompt-item">
+                        <input
+                          type="checkbox"
+                          checked={settings.enabled_prompts.includes(template.id)}
+                          onChange={() => togglePrompt(template.id)}
+                        />
+                        <div className="llm-prompt-info">
+                          <span className="llm-prompt-name">{template.name}</span>
+                          {template.description && (
+                            <span className="llm-prompt-description">{template.description}</span>
+                          )}
+                        </div>
+                      </label>
+                    ))}
                   </div>
-                ))}
-              </div>
+                </div>
+              ))}
+            </div>
             )}
           </div>
 
           {/* Advanced Settings */}
           <div className="llm-setting-section">
-            <button
-              className="llm-advanced-toggle"
-              onClick={() => setShowAdvanced(!showAdvanced)}
-            >
-              <Settings size={16} />
-              Advanced Settings
-              <ChevronDown
-                size={16}
-                className={`llm-chevron ${showAdvanced ? 'expanded' : ''}`}
-              />
-            </button>
+          <button
+            className="llm-advanced-toggle"
+            onClick={() => setShowAdvanced(!showAdvanced)}
+          >
+            <Settings size={16} />
+            Advanced Settings
+            <ChevronDown
+              size={16}
+              className={`llm-chevron ${showAdvanced ? 'expanded' : ''}`}
+            />
+          </button>
 
-            {showAdvanced && (
-              <div className="llm-advanced-settings">
-                {/* Temperature */}
-                <div className="llm-setting-item">
-                  <label htmlFor="llm-temperature">
-                    Temperature
-                    <span className="llm-value-display">{settings.temperature.toFixed(1)}</span>
-                  </label>
-                  <input
-                    id="llm-temperature"
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.1"
-                    value={settings.temperature}
-                    onChange={(e) => onUpdateSettings({ temperature: parseFloat(e.target.value) })}
-                    className="llm-slider"
-                  />
-                  <p className="llm-setting-hint">
-                    Controls creativity vs consistency. Lower values are more focused, higher values are more creative.
-                  </p>
-                </div>
-
-                {/* Max Tokens */}
-                <div className="llm-setting-item">
-                  <label htmlFor="llm-max-tokens">
-                    Max Response Length
-                    <span className="llm-value-display">{settings.max_tokens} tokens</span>
-                  </label>
-                  <input
-                    id="llm-max-tokens"
-                    type="range"
-                    min="50"
-                    max="500"
-                    step="50"
-                    value={settings.max_tokens}
-                    onChange={(e) => onUpdateSettings({ max_tokens: parseInt(e.target.value) })}
-                    className="llm-slider"
-                  />
-                  <p className="llm-setting-hint">
-                    Maximum length of AI responses. Longer responses take more time to generate.
-                  </p>
-                </div>
-
-                {/* Auto-download */}
-                <div className="llm-setting-item">
-                  <label className="llm-toggle-label">
-                    <input
-                      type="checkbox"
-                      checked={settings.auto_download_model}
-                      onChange={(e) => onUpdateSettings({ auto_download_model: e.target.checked })}
-                    />
-                    <span>Auto-download models</span>
-                  </label>
-                  <p className="llm-setting-hint">
-                    Automatically download AI models when needed
-                  </p>
-                </div>
+          {showAdvanced && (
+            <div className="llm-advanced-settings">
+              {/* Temperature */}
+              <div className="llm-setting-item">
+                <label htmlFor="llm-temperature">
+                  Temperature
+                  <span className="llm-value-display">{settings.temperature.toFixed(1)}</span>
+                </label>
+                <input
+                  id="llm-temperature"
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.1"
+                  value={settings.temperature}
+                  onChange={(e) => onUpdateSettings({ temperature: parseFloat(e.target.value) })}
+                  className="llm-slider"
+                />
+                <p className="llm-setting-hint">
+                  Controls creativity vs consistency. Lower values are more focused, higher values are more creative.
+                </p>
               </div>
-            )}
-          </div>
-        </>
-      )}
+
+              {/* Max Tokens */}
+              <div className="llm-setting-item">
+                <label htmlFor="llm-max-tokens">
+                  Max Response Length
+                  <span className="llm-value-display">{settings.max_tokens} tokens</span>
+                </label>
+                <input
+                  id="llm-max-tokens"
+                  type="range"
+                  min="50"
+                  max="500"
+                  step="50"
+                  value={settings.max_tokens}
+                  onChange={(e) => onUpdateSettings({ max_tokens: parseInt(e.target.value) })}
+                  className="llm-slider"
+                />
+                <p className="llm-setting-hint">
+                  Maximum length of AI responses. Longer responses take more time to generate.
+                </p>
+              </div>
+
+              {/* Auto-download */}
+              <div className="llm-setting-item">
+                <label className="llm-toggle-label">
+                  <input
+                    type="checkbox"
+                    checked={settings.auto_download_model}
+                    onChange={(e) => onUpdateSettings({ auto_download_model: e.target.checked })}
+                  />
+                  <span>Auto-download models</span>
+                </label>
+                <p className="llm-setting-hint">
+                  Automatically download AI models when needed
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      </>
+    )}
     </div>
   );
 };
