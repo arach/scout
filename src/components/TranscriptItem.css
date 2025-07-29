@@ -4,7 +4,8 @@
     background: transparent;
     border: none;
     border-bottom: 1px solid var(--border-primary);
-    padding: 8px 16px;
+    padding: 8px 16px; /* Add horizontal padding here instead of container */
+    padding-left: 56px; /* Adjusted for checkbox alignment with new padding */
     margin-bottom: 0;
     transition: all 150ms ease;
     cursor: default;
@@ -12,8 +13,16 @@
     align-items: center;
     justify-content: space-between;
     gap: 16px;
-    min-height: 48px;
+    min-height: 40px; /* Reduced height to match header */
     box-sizing: border-box;
+}
+
+/* Mobile responsive adjustments */
+@media (max-width: 768px) {
+    .transcript-item {
+        padding: 8px 16px;
+        padding-left: 56px;
+    }
 }
 
 .transcript-item.clickable {
@@ -38,8 +47,16 @@
 /* Compact variant for recent transcripts */
 .transcript-item.compact {
     padding: 6px 16px;
+    padding-left: 56px;
     font-size: 13px;
-    min-height: 36px;
+    min-height: 32px; /* Reduced for compact items */
+}
+
+@media (max-width: 768px) {
+    .transcript-item.compact {
+        padding: 6px 16px;
+        padding-left: 56px;
+    }
 }
 
 .transcript-item.compact .transcript-text {
@@ -70,7 +87,7 @@
 .transcript-checkbox-wrapper {
     flex-shrink: 0;
     padding: 4px 8px 4px 4px;
-    margin: -4px -8px -4px -4px;
+    margin: -4px 0 -4px -44px; /* Adjusted for new padding to align with group header checkbox */
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -85,6 +102,8 @@
 .transcript-checkbox {
     cursor: pointer;
     pointer-events: none; /* Let the wrapper handle clicks */
+    width: 14px;
+    height: 14px;
 }
 
 /* Time column */

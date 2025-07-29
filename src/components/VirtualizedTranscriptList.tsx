@@ -107,47 +107,49 @@ export const VirtualizedTranscriptList = memo(function VirtualizedTranscriptList
             const fullGroupTranscripts = groups.find(g => g.title === group.title)?.transcripts || [];
             
             return (
-                <div style={style} className="transcript-group-header">
-                    <div className="group-header-left">
-                        <input
-                            type="checkbox"
-                            className="group-checkbox"
-                            checked={fullGroupTranscripts.every(t => selectedTranscripts.has(t.id))}
-                            onChange={(e) => {
-                                e.stopPropagation();
-                                const allGroupIds = fullGroupTranscripts.map(t => t.id);
-                                toggleTranscriptGroupSelection(allGroupIds);
-                            }}
-                        />
-                        <button 
-                            className="group-toggle-btn"
-                            onClick={() => toggleGroup(group.title)}
-                        >
-                            <ChevronDown 
-                                size={16} 
-                                className={`chevron-icon ${expandedGroups.has(group.title) ? 'expanded' : ''}`} 
+                <div style={style} className={`transcript-group ${expandedGroups.has(group.title) ? 'expanded' : ''}`}>
+                    <div className="transcript-group-header">
+                        <div className="group-header-left">
+                            <button 
+                                className="group-toggle-btn"
+                                onClick={() => toggleGroup(group.title)}
+                            >
+                                <ChevronDown 
+                                    size={16} 
+                                    className="chevron-icon"
+                                />
+                            </button>
+                            <input
+                                type="checkbox"
+                                className="group-checkbox"
+                                checked={fullGroupTranscripts.every(t => selectedTranscripts.has(t.id))}
+                                onChange={(e) => {
+                                    e.stopPropagation();
+                                    const allGroupIds = fullGroupTranscripts.map(t => t.id);
+                                    toggleTranscriptGroupSelection(allGroupIds);
+                                }}
                             />
-                        </button>
-                        <h3 
-                            className="transcript-group-title"
-                            onClick={() => toggleGroup(group.title)}
-                        >
-                            {group.title}
-                        </h3>
-                        <span className="group-count">({fullGroupTranscripts.length})</span>
+                            <h3 
+                                className="transcript-group-title"
+                                onClick={() => toggleGroup(group.title)}
+                            >
+                                {group.title}
+                            </h3>
+                            <span className="group-count">({fullGroupTranscripts.length})</span>
+                        </div>
+                        {fullGroupTranscripts.some(t => selectedTranscripts.has(t.id)) && (
+                            <button 
+                                className="group-clear-btn"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    const selectedInGroup = fullGroupTranscripts.filter(t => selectedTranscripts.has(t.id));
+                                    toggleTranscriptGroupSelection(selectedInGroup.map(t => t.id));
+                                }}
+                            >
+                                Clear
+                            </button>
+                        )}
                     </div>
-                    {fullGroupTranscripts.some(t => selectedTranscripts.has(t.id)) && (
-                        <button 
-                            className="group-clear-btn"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                const selectedInGroup = fullGroupTranscripts.filter(t => selectedTranscripts.has(t.id));
-                                toggleTranscriptGroupSelection(selectedInGroup.map(t => t.id));
-                            }}
-                        >
-                            Clear
-                        </button>
-                    )}
                 </div>
             );
         } else {

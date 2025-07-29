@@ -54,14 +54,36 @@
 .sidebar-button:hover {
   opacity: 0.8;
   color: var(--text-primary);
+  /* Remove background-color to prevent CATransformLayer conflicts */
+}
+
+/* Use pseudo-element for hover background to avoid transform layer conflicts */
+.sidebar-button::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: transparent;
+  transition: background-color 0.15s ease;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.sidebar-button:hover::after {
   background-color: var(--bg-hover);
 }
 
 .sidebar-button.active {
   opacity: 1;
   color: var(--accent-primary);
-  background-color: var(--bg-active);
+  /* Remove background-color to prevent CATransformLayer conflicts */
   position: relative;
+}
+
+.sidebar-button.active::after {
+  background-color: var(--bg-active);
 }
 
 .sidebar-button.active::before {
@@ -146,15 +168,15 @@
 .sidebar.collapsed .sidebar-button:hover .sidebar-tooltip {
   visibility: visible;
   opacity: 1;
-  transition-delay: 0.3s;
+  transition-delay: 0.6s; /* Delay tooltip until after animations complete (longest is 0.5s) */
 }
 
 /* Stats button bounce animation */
 @keyframes statsBounce {
   0% { transform: scale(1); }
-  40% { transform: scale(1.05); }
-  60% { transform: scale(0.97); }
-  80% { transform: scale(1.02); }
+  40% { transform: scale(1.15); }
+  60% { transform: scale(0.95); }
+  80% { transform: scale(1.05); }
   100% { transform: scale(1); }
 }
 
@@ -164,6 +186,18 @@
 
 .sidebar-button-stats:hover svg {
   animation: statsBounce 0.5s ease-out;
+}
+
+/* Dictionary button wiggle animation */
+@keyframes dictionaryWiggle {
+  0% { transform: rotate(0deg); }
+  25% { transform: rotate(-15deg); }
+  75% { transform: rotate(15deg); }
+  100% { transform: rotate(0deg); }
+}
+
+.sidebar-button-dictionary:hover svg {
+  animation: dictionaryWiggle 0.4s ease-in-out;
 }
 
 
@@ -205,8 +239,7 @@
 .sidebar-button svg,
 .sidebar-button > * {
   transition: transform 0.15s ease;
-  transform-style: preserve-3d;
-  perspective: 1000px;
+  transform-style: flat; /* Use flat instead of preserve-3d to prevent CATransformLayer conflicts */
 }
 
 /* Record button - coin flip on Y axis */
@@ -238,11 +271,11 @@
 
 /* Dark mode adjustments */
 @media (prefers-color-scheme: dark) {
-  .sidebar-button.active {
+  .sidebar-button.active::after {
     background-color: rgba(74, 158, 255, 0.1);
   }
   
-  .sidebar-button:hover:not(.active) {
+  .sidebar-button:hover:not(.active)::after {
     background-color: rgba(255, 255, 255, 0.05);
   }
   
