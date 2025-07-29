@@ -45,8 +45,8 @@ export const RecordingAudioSettings = memo(function RecordingAudioSettings() {
   return (
     <div className="recording-audio-settings">
       
-      {/* Recording Shortcuts - Two Column Layout */}
-      <div className="shortcuts-grid">
+      {/* Recording Shortcuts and Actions - Two Column Grid */}
+      <div className="actions-grid">
         {/* Toggle Recording Shortcut */}
         <div className="setting-item">
           <label>Toggle Recording</label>
@@ -55,7 +55,7 @@ export const RecordingAudioSettings = memo(function RecordingAudioSettings() {
               {shortcuts.isCapturingHotkey ? (
                 <span className="capturing-text">Press shortcut keys...</span>
               ) : (
-                <span className="hotkey-keys" title={shortcuts.hotkey}>
+                <span className="keyboard-key" title={shortcuts.hotkey}>
                   {formatShortcutJSX(shortcuts.hotkey)}
                 </span>
               )}
@@ -95,7 +95,7 @@ export const RecordingAudioSettings = memo(function RecordingAudioSettings() {
               {shortcuts.isCapturingPushToTalkHotkey ? (
                 <span className="capturing-text">Press shortcut keys...</span>
               ) : (
-                <span className="hotkey-keys" title={shortcuts.pushToTalkHotkey}>
+                <span className="keyboard-key" title={shortcuts.pushToTalkHotkey}>
                   {shortcuts.pushToTalkHotkey ? formatShortcutJSX(shortcuts.pushToTalkHotkey) : 'Not Set'}
                 </span>
               )}
@@ -126,34 +126,33 @@ export const RecordingAudioSettings = memo(function RecordingAudioSettings() {
             )}
           </div>
         </div>
-      </div>
 
-      {/* Auto Actions - Positioned after shortcuts */}
-      <div className="auto-actions-row">
-        {/* Auto-copy */}
-        <div className="setting-item compact">
-          <label htmlFor="auto-copy">
+        {/* Auto-copy Toggle */}
+        <div className="toggle-setting">
+          <label htmlFor="auto-copy">Auto-copy to clipboard</label>
+          <div className="toggle-switch">
             <input
               id="auto-copy"
               type="checkbox"
               checked={clipboard.autoCopy}
               onChange={actions.toggleAutoCopy}
             />
-            <span>Auto-copy to clipboard</span>
-          </label>
+            <span className="toggle-switch-slider"></span>
+          </div>
         </div>
         
-        {/* Auto-paste */}
-        <div className="setting-item compact">
-          <label htmlFor="auto-paste">
+        {/* Auto-paste Toggle */}
+        <div className="toggle-setting">
+          <label htmlFor="auto-paste">Auto-paste after transcription</label>
+          <div className="toggle-switch">
             <input
               id="auto-paste"
               type="checkbox"
               checked={clipboard.autoPaste}
               onChange={actions.toggleAutoPaste}
             />
-            <span>Auto-paste after transcription</span>
-          </label>
+            <span className="toggle-switch-slider"></span>
+          </div>
         </div>
       </div>
 
