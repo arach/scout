@@ -471,6 +471,18 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
+}
+
+.bar-label-hover {
+  position: absolute;
+  opacity: 0;
+  transition: opacity 0.15s ease-out;
+  pointer-events: none;
+}
+
+.hourly-bar:hover .bar-label-hover {
+  opacity: 1;
 }
 
 .chart-info {

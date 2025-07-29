@@ -545,7 +545,10 @@ export function StatsView() {
                       data-height={`${height}%`}
                     />
                     <div className="bar-value">{count > 0 ? count : ''}</div>
-                    <div className="bar-label">{showLabel ? formatHour(hour) : ''}</div>
+                    <div className="bar-label">
+                      {showLabel ? formatHour(hour) : ''}
+                      {!showLabel && <span className="bar-label-hover">{formatHour(hour)}</span>}
+                    </div>
                   </div>
                 );
               }).filter(Boolean)}
