@@ -444,8 +444,11 @@ export function StatsView() {
                       className="bar" 
                       style={{ 
                         height: height > 0 ? `${height}%` : '2px',
-                        opacity: height > 0 ? 1 : 0.3
+                        opacity: height > 0 ? 1 : 0.3,
+                        minHeight: '2px'
                       }}
+                      data-count={count}
+                      data-height={`${height}%`}
                     />
                     <div className="bar-label">{String(day).slice(0, 3)}</div>
                   </div>

@@ -326,12 +326,15 @@
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: flex-end;
   gap: var(--spacing-xs);
+  height: 100%;
+  position: relative;
 }
 
 .weekly-bar .bar {
   width: 100%;
-  background: var(--accent);
+  background: var(--accent-primary);
   border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   transition: background 0.2s ease;
   min-height: 2px;
