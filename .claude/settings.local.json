@@ -87,7 +87,9 @@
       "Bash(rg -n -A 10 \"if.*showFirstRun.*{\" src/App.tsx)",
       "Bash(rg -n -A 10 \"if.*showFirstRun\" src/App.tsx)",
       "Bash(git worktree:*)",
-      "Bash(sips:*)"
+      "Bash(sips:*)",
+      "Bash(osascript:*)",
+      "Bash(system_profiler:*)"
     ],
     "deny": []
   }

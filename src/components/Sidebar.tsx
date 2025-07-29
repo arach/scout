@@ -41,8 +41,10 @@ export const useSidebarState = (): SidebarState => {
     try {
       const settings = await invoke('get_settings') as Record<string, any>;
       await invoke('update_settings', { 
-        ...settings, 
-        sidebar_expanded: newState 
+        newSettings: {
+          ...settings, 
+          sidebar_expanded: newState 
+        }
       });
     } catch (error) {
       console.error('Failed to save sidebar state:', error);

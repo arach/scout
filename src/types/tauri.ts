@@ -249,16 +249,16 @@ export const tauriApi = {
     invokeTyped<void>('mark_onboarding_complete'),
 
   // Dictionary commands
-  getDictionaryEntries: (args?: { enabledOnly?: boolean }) => 
-    invokeTyped<DictionaryEntry[]>('get_dictionary_entries', args),
-  saveDictionaryEntry: (args: { entry: DictionaryEntryInput }) => 
-    invokeTyped<DictionaryEntry>('save_dictionary_entry', args),
-  updateDictionaryEntry: (args: { id: number; updates: DictionaryEntryUpdate }) => 
-    invokeTyped<DictionaryEntry>('update_dictionary_entry', args),
-  deleteDictionaryEntry: (args: { id: number }) => 
-    invokeTyped<void>('delete_dictionary_entry', args),
-  testDictionaryReplacement: (args: { text: string }) => 
-    invokeTyped<DictionaryTestResult>('test_dictionary_replacement', args),
+  getDictionaryEntries: (enabledOnly: boolean = false) => 
+    invokeTyped<DictionaryEntry[]>('get_dictionary_entries', { enabled_only: enabledOnly }),
+  saveDictionaryEntry: (entry: DictionaryEntryInput) => 
+    invokeTyped<DictionaryEntry>('save_dictionary_entry', entry),
+  updateDictionaryEntry: (id: number, updates: DictionaryEntryUpdate) => 
+    invokeTyped<DictionaryEntry>('update_dictionary_entry', { id, ...updates }),
+  deleteDictionaryEntry: (id: number) => 
+    invokeTyped<void>('delete_dictionary_entry', { id }),
+  testDictionaryReplacement: (text: string) => 
+    invokeTyped<DictionaryTestResult>('test_dictionary_replacement', { text }),
   getDictionaryMatchesForTranscript: (args: { transcriptId: number }) => 
     invokeTyped<DictionaryMatch[]>('get_dictionary_matches_for_transcript', args),
 };

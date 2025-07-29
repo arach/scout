@@ -101,9 +101,9 @@ export function useDictionary(): UseDictionaryReturn {
     
     try {
       if (editingEntry) {
-        await tauriApi.updateDictionaryEntry({ id: editingEntry.id, updates: formData });
+        await tauriApi.updateDictionaryEntry(editingEntry.id, formData);
       } else {
-        await tauriApi.saveDictionaryEntry({ entry: formData });
+        await tauriApi.saveDictionaryEntry(formData);
       }
       
       resetForm();
@@ -132,7 +132,7 @@ export function useDictionary(): UseDictionaryReturn {
   const handleDelete = useCallback(async (id: number) => {
     if (confirm('Are you sure you want to delete this entry?')) {
       try {
-        await tauriApi.deleteDictionaryEntry({ id });
+        await tauriApi.deleteDictionaryEntry(id);
         await loadEntries();
       } catch (error) {
         console.error('Failed to delete dictionary entry:', error);
@@ -143,12 +143,9 @@ export function useDictionary(): UseDictionaryReturn {
   // Handle toggle enabled
   const handleToggleEnabled = useCallback(async (entry: DictionaryEntry) => {
     try {
-      await tauriApi.updateDictionaryEntry({ 
-        id: entry.id, 
-        updates: {
-          ...entry,
-          is_enabled: !entry.is_enabled
-        }
+      await tauriApi.updateDictionaryEntry(entry.id, {
+        ...entry,
+        is_enabled: !entry.is_enabled
       });
       await loadEntries();
     } catch (error) {
@@ -161,7 +158,7 @@ export function useDictionary(): UseDictionaryReturn {
     if (!testText.trim()) return;
     
     try {
-      const result = await tauriApi.testDictionaryReplacement({ text: testText });
+      const result = await tauriApi.testDictionaryReplacement(testText);
       setTestResult(result.replaced_text);
     } catch (error) {
       console.error('Failed to test replacement:', error);

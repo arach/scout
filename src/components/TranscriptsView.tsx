@@ -456,7 +456,6 @@ export const TranscriptsView = memo(function TranscriptsView({
                     </div>
                 </div>
             )}
-          </div>
         </div>
     );
 }); 

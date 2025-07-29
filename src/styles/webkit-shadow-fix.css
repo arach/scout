@@ -1,0 +1,150 @@
+/* WebKit Shadow Fix for Transform Layers */
+/* This file fixes warnings about shadow properties on transform layers in WebKit/macOS */
+
+/* 
+  When elements have both transform properties and box-shadow, WebKit may issue warnings
+  about shadow properties not working on transform layers. This fix uses pseudo-elements
+  or alternative approaches to maintain visual appearance without warnings.
+*/
+
+/* Global fix for elements with both transform and shadow */
+@supports (-webkit-appearance: none) {
+  /* Target elements that commonly have both transform and shadow */
+  .circular-record-button,
+  .record-button,
+  .audio-visualizer-ring,
+  .dropdown-content,
+  .modal-content,
+  .transcript-item,
+  .settings-section,
+  .button,
+  .btn,
+  [class*="button"],
+  [class*="modal"],
+  [class*="dropdown"],
+  [class*="tooltip"] {
+    /* Force elements to not use transform-only layers when shadows are present */
+    -webkit-transform: translateZ(0);
+    -webkit-backface-visibility: hidden;
+    -webkit-perspective: 1000px;
+  }
+
+  /* For elements with will-change: transform, use filter drop-shadow instead */
+  [style*="will-change: transform"],
+  [style*="will-change:transform"],
+  .circular-record-button,
+  .audio-visualizer-ring,
+  .audio-level-fill {
+    /* Remove box-shadow and use filter instead */
+    box-shadow: none !important;
+  }
+
+  /* Apply drop-shadow filter to parent containers */
+  .record-button-container {
+    filter: drop-shadow(0 4px 20px rgba(74, 158, 255, 0.25))
+            drop-shadow(0 2px 8px rgba(74, 158, 255, 0.15));
+  }
+
+  .record-button-container.recording {
+    filter: drop-shadow(0 4px 20px rgba(217, 58, 73, 0.3))
+            drop-shadow(0 2px 8px rgba(217, 58, 73, 0.2));
+  }
+
+  /* For hover states, adjust the filter */
+  .record-button-container:hover {
+    filter: drop-shadow(0 8px 30px rgba(74, 158, 255, 0.4))
+            drop-shadow(0 4px 12px rgba(74, 158, 255, 0.3));
+  }
+
+  .record-button-container.recording:hover {
+    filter: drop-shadow(0 8px 30px rgba(217, 58, 73, 0.4))
+            drop-shadow(0 4px 12px rgba(217, 58, 73, 0.3));
+  }
+
+  /* Alternative: Use pseudo-elements for shadows on transformed elements */
+  .circular-record-button::after,
+  .record-button::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    z-index: -1;
+  }
+
+  /* Disable conflicting animations that cause shadow warnings */
+  @media (prefers-reduced-motion: no-preference) {
+    .audio-visualizer-ring.recording-ring {
+      /* Use opacity animation instead of transform for the pulse effect */
+      animation: recordingPulseOpacity 2s ease-in-out infinite;
+      transform: translate(-50%, -50%);
+    }
+  }
+
+  @keyframes recordingPulseOpacity {
+    0%, 100% { 
+      opacity: 0.6;
+      filter: blur(0px);
+    }
+    50% { 
+      opacity: 1;
+      filter: blur(1px);
+    }
+  }
+}
+
+/* Specific fixes for problematic components */
+
+/* TranscriptDetailPanel shadow fix */
+.transcript-detail-panel {
+  box-shadow: none;
+  position: relative;
+}
+
+.transcript-detail-panel::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -12px;
+  width: 12px;
+  background: linear-gradient(to right, rgba(0, 0, 0, 0.15), transparent);
+  pointer-events: none;
+}
+
+/* Dropdown shadow fix */
+.dropdown-content {
+  filter: drop-shadow(0 10px 15px rgba(0, 0, 0, 0.1)) 
+          drop-shadow(0 4px 6px rgba(0, 0, 0, 0.05));
+  box-shadow: none;
+}
+
+/* Modal shadow fix */
+.modal-backdrop .modal-content {
+  filter: drop-shadow(0 8px 32px rgba(0, 0, 0, 0.2));
+  box-shadow: none;
+}
+
+/* Sidebar shadow fix */
+.sidebar-item:hover {
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.15));
+  box-shadow: none;
+}
+
+/* Button shadow fixes */
+.button:hover,
+.btn:hover,
+[class*="button"]:hover {
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.05));
+  box-shadow: none;
+}
+
+/* Ensure transform-style is flat for problematic elements */
+.circular-record-button,
+.audio-visualizer-ring,
+.sidebar-icon {
+  transform-style: flat !important;
+}

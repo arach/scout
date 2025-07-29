@@ -40,6 +40,49 @@ export function StatsView() {
     try {
       setLoading(true);
       const data = await invokeTyped<Stats>('get_recording_stats');
+      console.log('Stats data received:', data);
+      
+      // Detailed weekly distribution debugging
+      console.log('Weekly distribution type:', typeof data.weekly_distribution);
+      console.log('Weekly distribution is array:', Array.isArray(data.weekly_distribution));
+      console.log('Weekly distribution length:', data.weekly_distribution.length);
+      console.log('Weekly distribution raw:', data.weekly_distribution);
+      
+      if (data.weekly_distribution.length > 0) {
+        const firstItem = data.weekly_distribution[0];
+        console.log('First item:', firstItem);
+        console.log('First item type:', typeof firstItem);
+        console.log('First item is array:', Array.isArray(firstItem));
+        console.log('First item structure:', {
+          '0': firstItem[0],
+          '1': firstItem[1],
+          'keys': Object.keys(firstItem),
+          'stringified': JSON.stringify(firstItem)
+        });
+      }
+      
+      // Check if data might be objects instead of arrays
+      const testEmpty = data.weekly_distribution.every((item: any) => {
+        console.log('Testing item for empty:', item);
+        if (Array.isArray(item)) {
+          console.log('Item is array, value at [1]:', item[1]);
+          return item[1] === 0;
+        } else if (typeof item === 'object') {
+          console.log('Item is object, keys:', Object.keys(item));
+          // Try common property names
+          return item.count === 0 || item.value === 0 || item[1] === 0;
+        }
+        return true;
+      });
+      console.log('Empty check result:', testEmpty);
+      
+      // Debug Saturday data
+      const saturdayActivities = data.daily_activity.filter(day => {
+        const date = new Date(day.date);
+        return date.getDay() === 6; // Saturday
+      });
+      console.log('Saturday activities:', saturdayActivities);
+      
       setStats(data);
     } catch (error) {
       console.error('Failed to load stats:', error);
@@ -128,6 +171,7 @@ export function StatsView() {
 
     // Generate all days
     const currentDate = new Date(calculatedStartDate);
+    let saturdayCount = 0;
     while (currentDate <= today) {
       const dateStr = currentDate.toISOString().split('T')[0];
       const activity = activityMap.get(dateStr) || {
@@ -137,14 +181,23 @@ export function StatsView() {
         words: 0
       };
       
+      const weekday = currentDate.getDay();
+      if (weekday === 6) saturdayCount++;
+      
       grid.push({
         ...activity,
-        weekday: currentDate.getDay(),
+        weekday: weekday,
         week: Math.floor((currentDate.getTime() - calculatedStartDate.getTime()) / (7 * 24 * 60 * 60 * 1000))
       });
       
       currentDate.setDate(currentDate.getDate() + 1);
     }
+    
+    console.log(`Generated ${grid.length} days in heatmap, ${saturdayCount} Saturdays`);
+    
+    // Log Saturday activities
+    const saturdayActivities = grid.filter(d => d.weekday === 6 && d.count > 0);
+    console.log(`Saturday activities with data: ${saturdayActivities.length}`, saturdayActivities);
 
     return { calendarGrid: grid, startDate: calculatedStartDate };
   }, [stats]);
@@ -210,8 +263,6 @@ export function StatsView() {
     );
   }
 
-  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
   return (
     <div className="grid-container" onMouseMove={handleMouseMove}>
       <div className="grid-content">
@@ -246,7 +297,9 @@ export function StatsView() {
                 <div key={week} className="heatmap-week">
                   {[0, 1, 2, 3, 4, 5, 6].map(day => {
                     const dayData = calendarGrid.find(d => d.week === week && d.weekday === day);
-                    if (!dayData) return <div key={`${week}-${day}`} className="heatmap-day empty"></div>;
+                    if (!dayData) {
+                      return <div key={`${week}-${day}`} className="heatmap-day empty"></div>;
+                    }
                     
                     // Check if this is a future date
                     const dayDate = new Date(dayData.date);
@@ -314,16 +367,77 @@ export function StatsView() {
         <div className="stats-insights">
         <div className="insight-card">
           <h3>Weekly Pattern</h3>
-          {stats.weekly_distribution.every(([_, count]) => count === 0) ? (
+          {(() => {
+            // More robust empty check that handles different data structures
+            const isEmpty = !stats.weekly_distribution || 
+              stats.weekly_distribution.length === 0 ||
+              stats.weekly_distribution.every((item: any) => {
+                if (Array.isArray(item)) {
+                  return item[1] === 0;
+                } else if (typeof item === 'object' && item !== null) {
+                  // Handle object format
+                  return (item.count === 0 || item.value === 0 || item[1] === 0);
+                }
+                return true;
+              });
+            
+            console.log('Weekly chart empty check:', { isEmpty, data: stats.weekly_distribution });
+            return isEmpty;
+          })() ? (
             <div className="chart-empty-state">
               <p>No activity data yet</p>
               <p className="empty-state-hint">Start recording to see your weekly patterns</p>
             </div>
           ) : (
             <div className="weekly-chart">
-              {stats.weekly_distribution.map(([day, count]) => {
-                const maxValue = Math.max(...stats.weekly_distribution.map(d => d[1]));
+              {stats.weekly_distribution.map((item: any, index: number) => {
+                // Debug each item
+                console.log(`Processing weekly item ${index}:`, {
+                  item,
+                  type: typeof item,
+                  isArray: Array.isArray(item),
+                  keys: typeof item === 'object' ? Object.keys(item) : null,
+                  values: typeof item === 'object' ? Object.values(item) : null
+                });
+                
+                // Handle both array and object formats
+                let day: string;
+                let count: number;
+                
+                if (Array.isArray(item)) {
+                  [day, count] = item;
+                } else if (typeof item === 'object' && item !== null) {
+                  // Try different possible object structures
+                  // Check if it's an object with numeric keys (like {0: "Monday", 1: 107})
+                  if ('0' in item && '1' in item) {
+                    day = String(item[0]);
+                    count = Number(item[1]) || 0;
+                  } else {
+                    day = item.day || item.name || item.weekday || `Day ${index}`;
+                    count = item.count || item.value || item.total || 0;
+                  }
+                } else {
+                  console.error('Unexpected item format:', item);
+                  return null;
+                }
+                
+                // Ensure count is a number
+                count = Number(count) || 0;
+                
+                const maxValue = Math.max(...stats.weekly_distribution.map((d: any) => {
+                  if (Array.isArray(d)) return Number(d[1]) || 0;
+                  if (typeof d === 'object' && d !== null) {
+                    if ('0' in d && '1' in d) {
+                      return Number(d[1]) || 0;
+                    }
+                    return Number(d.count || d.value || d.total || d[1]) || 0;
+                  }
+                  return 0;
+                }));
+                
                 const height = maxValue > 0 ? (count / maxValue) * 100 : 0;
+                console.log(`Bar for ${day}: count=${count}, maxValue=${maxValue}, height=${height}%`);
+                
                 return (
                   <div key={day} className="weekly-bar">
                     <div 
@@ -333,17 +447,32 @@ export function StatsView() {
                         opacity: height > 0 ? 1 : 0.3
                       }}
                     />
-                    <div className="bar-label">{day.slice(0, 3)}</div>
+                    <div className="bar-label">{String(day).slice(0, 3)}</div>
                   </div>
                 );
-              })}
+              }).filter(Boolean)}
             </div>
           )}
         </div>
 
         <div className="insight-card">
           <h3>Daily Activity</h3>
-          {stats.hourly_distribution.length === 0 || stats.hourly_distribution.every(([_, count]) => count === 0) ? (
+          {(() => {
+            // More robust empty check for hourly distribution
+            const isEmpty = !stats.hourly_distribution || 
+              stats.hourly_distribution.length === 0 ||
+              stats.hourly_distribution.every((item: any) => {
+                if (Array.isArray(item)) {
+                  return item[1] === 0;
+                } else if (typeof item === 'object' && item !== null) {
+                  return (item.count === 0 || item.value === 0 || item[1] === 0);
+                }
+                return true;
+              });
+            
+            console.log('Hourly chart empty check:', { isEmpty, data: stats.hourly_distribution });
+            return isEmpty;
+          })() ? (
             <div className="chart-empty-state">
               <p>No hourly data yet</p>
               <p className="empty-state-hint">Record throughout the day to see your activity patterns</p>
@@ -353,9 +482,35 @@ export function StatsView() {
               <div className="hourly-chart">
                 <div className="hourly-grid">
                   {Array.from({ length: 24 }, (_, hour) => {
-                    const activity = stats.hourly_distribution.find(h => h[0] === hour);
-                    const count = activity?.[1] || 0;
-                    const maxCount = Math.max(...stats.hourly_distribution.map(h => h[1]));
+                    // Find activity for this hour with flexible data structure
+                    const activity = stats.hourly_distribution.find((item: any) => {
+                      if (Array.isArray(item)) {
+                        return item[0] === hour;
+                      } else if (typeof item === 'object' && item !== null) {
+                        return item.hour === hour || item[0] === hour;
+                      }
+                      return false;
+                    });
+                    
+                    // Extract count with flexible structure
+                    let count = 0;
+                    if (activity) {
+                      if (Array.isArray(activity)) {
+                        count = Number(activity[1]) || 0;
+                      } else if (typeof activity === 'object' && activity !== null) {
+                        count = Number(activity.count || activity.value || activity[1]) || 0;
+                      }
+                    }
+                    
+                    // Calculate max count with flexible structure
+                    const maxCount = Math.max(...stats.hourly_distribution.map((item: any) => {
+                      if (Array.isArray(item)) return Number(item[1]) || 0;
+                      if (typeof item === 'object' && item !== null) {
+                        return Number(item.count || item.value || item[1]) || 0;
+                      }
+                      return 0;
+                    }));
+                    
                     const intensity = maxCount > 0 ? count / maxCount : 0;
                     
                     return (

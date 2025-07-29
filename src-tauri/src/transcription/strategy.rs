@@ -200,16 +200,20 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
         info(Component::RingBuffer, &format!("Ring buffer transcription strategy started for: {:?}", output_path));
         info(Component::RingBuffer, "Initializing ring buffer components for real-time processing");
         
-        // Get actual device sample rate from app state instead of hardcoding 48000
-        let device_sample_rate = crate::get_current_device_sample_rate().unwrap_or(48000);
-        info(Component::RingBuffer, &format!("Using device sample rate: {} Hz", device_sample_rate));
+        // Get actual device sample rate from app state
+        // This is set by AudioRecorder when it starts recording
+        let device_sample_rate = crate::get_current_device_sample_rate().unwrap_or_else(|| {
+            warn(Component::RingBuffer, "Device sample rate not available yet, using 48kHz as fallback");
+            48000
+        });
+        info(Component::RingBuffer, &format!("Ring buffer using device sample rate: {} Hz", device_sample_rate));
         
         // Initialize ring buffer recorder with 5-minute capacity
-        // Match the audio recorder's configuration (mono, actual device sample rate)
+        // Audio arrives as mono f32 samples at the device's native sample rate
         let spec = hound::WavSpec {
-            channels: 1,     // Mono recording to match AudioRecorder
-            sample_rate: device_sample_rate, // Use actual device sample rate
-            bits_per_sample: 32,
+            channels: 1,     // Always mono (AudioRecorder converts stereo to mono)
+            sample_rate: device_sample_rate, // Native device sample rate
+            bits_per_sample: 32, // f32 samples from AudioRecorder
             sample_format: hound::SampleFormat::Float,
         };
         
@@ -606,15 +610,20 @@ impl TranscriptionStrategy for ProgressiveTranscriptionStrategy {
         info(Component::Transcription, &format!("Progressive transcription strategy started for: {:?}", output_path));
         info(Component::Transcription, "Using Tiny model for real-time feedback, Medium model for background refinement");
         
-        // Get actual device sample rate from app state instead of hardcoding 48000
-        let device_sample_rate = crate::get_current_device_sample_rate().unwrap_or(48000);
-        info(Component::Transcription, &format!("Using device sample rate: {} Hz", device_sample_rate));
+        // Get actual device sample rate from app state
+        // This is set by AudioRecorder when it starts recording
+        let device_sample_rate = crate::get_current_device_sample_rate().unwrap_or_else(|| {
+            warn(Component::Transcription, "Device sample rate not available yet, using 48kHz as fallback");
+            48000
+        });
+        info(Component::Transcription, &format!("Progressive strategy using device sample rate: {} Hz", device_sample_rate));
         
         // Initialize ring buffer recorder
+        // Audio arrives as mono f32 samples at the device's native sample rate
         let spec = hound::WavSpec {
-            channels: 1,
-            sample_rate: device_sample_rate,
-            bits_per_sample: 32,
+            channels: 1,     // Always mono (AudioRecorder converts stereo to mono)
+            sample_rate: device_sample_rate, // Native device sample rate
+            bits_per_sample: 32, // f32 samples from AudioRecorder
             sample_format: hound::SampleFormat::Float,
         };
         

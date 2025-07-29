@@ -127,7 +127,7 @@
   border-radius: var(--radius-md);
   padding: 24px; /* Match metric card padding */
   width: 100%;
-  overflow: hidden;
+  overflow: visible; /* Allow content to be fully visible */
 }
 
 .stats-section-title {
@@ -185,7 +185,7 @@
 .heatmap-content {
   display: flex;
   gap: var(--spacing-sm);
-  overflow: hidden; /* Prevent overflow */
+  overflow: visible; /* Allow content to be fully visible */
   position: relative;
 }
 
@@ -194,7 +194,7 @@
   gap: 2px;
   justify-content: flex-start;
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: visible; /* Change from hidden to visible */
   max-width: 100%;
   padding-bottom: 4px; /* Add small padding to prevent scrollbar overlap */
 }
@@ -219,8 +219,9 @@
 
 .heatmap-week {
   display: grid;
-  grid-template-rows: repeat(7, 1fr);
+  grid-template-rows: repeat(7, 13px);
   gap: 2px;
+  height: calc(7 * 13px + 6 * 2px); /* 7 cells + 6 gaps */
 }
 
 .heatmap-day {
@@ -234,9 +235,10 @@
 }
 
 .heatmap-day.empty {
-  background: transparent;
+  background: var(--background-secondary);
   cursor: default;
-  border: 1px solid transparent;
+  border: 1px solid rgba(128, 128, 128, 0.2);
+  opacity: 0.3;
 }
 
 .heatmap-day:not(.empty):hover {
@@ -252,6 +254,8 @@
   --stats-heatmap-level-3: #30a14e;
   --stats-heatmap-level-4: #216e39;
   --stats-border-opacity: 0.25;
+  /* Add RGB values for accent color */
+  --accent-rgb: 0, 122, 255; /* Default blue accent */
 }
 
 /* Legend */
@@ -412,6 +416,8 @@
   z-index: 1000;
   pointer-events: none;
   white-space: nowrap;
+  opacity: 0.95;
+  backdrop-filter: blur(8px);
 }
 
 .tooltip-date {
@@ -466,6 +472,7 @@
   --stats-heatmap-level-2: #006d32;
   --stats-heatmap-level-3: #26a641;
   --stats-heatmap-level-4: #39d353;
+  --accent-rgb: 57, 211, 83; /* Green accent */
 }
 
 [data-theme="minimal-light"] {
@@ -474,6 +481,7 @@
   --stats-heatmap-level-2: #a8dba8;
   --stats-heatmap-level-3: #79bd79;
   --stats-heatmap-level-4: #4a9b4a;
+  --accent-rgb: 74, 155, 74; /* Green accent */
 }
 
 /* Minimal theme specific overrides */
@@ -511,6 +519,7 @@
   --stats-heatmap-level-2: #2d5a2d;
   --stats-heatmap-level-3: #3c7a3c;
   --stats-heatmap-level-4: #4a9b4a;
+  --accent-rgb: 74, 155, 74; /* Green accent */
 }
 
 [data-theme="minimal-dark"] .stats-heatmap-container {
@@ -546,4 +555,5 @@
   --stats-heatmap-level-2: #006d32;
   --stats-heatmap-level-3: #26a641;
   --stats-heatmap-level-4: #39d353;
+  --accent-rgb: 0, 122, 255; /* Blue accent */
 }

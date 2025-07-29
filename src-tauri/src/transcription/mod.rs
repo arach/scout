@@ -3,6 +3,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 use crate::logger::{warn, info, Component};
+use crate::audio::WhisperAudioConverter;
 use once_cell::sync::Lazy;
 
 pub mod strategy;
@@ -150,65 +151,13 @@ impl Transcriber {
     }
 
     fn load_audio(&self, audio_path: &Path) -> Result<Vec<f32>, String> {
-        let mut reader = hound::WavReader::open(audio_path)
-            .map_err(|e| format!("Failed to open audio file: {}", e))?;
-
-        let spec = reader.spec();
-        let sample_rate = spec.sample_rate;
-
-        // Whisper expects 16kHz mono audio
-        let target_sample_rate = 16000;
-        let resample_ratio = target_sample_rate as f32 / sample_rate as f32;
-
-        let samples: Vec<f32> = match spec.sample_format {
-            hound::SampleFormat::Float => reader
-                .samples::<f32>()
-                .map(|s| s.unwrap_or(0.0))
-                .collect(),
-            hound::SampleFormat::Int => {
-                let max_value = (1 << (spec.bits_per_sample - 1)) as f32;
-                reader
-                    .samples::<i32>()
-                    .map(|s| s.unwrap_or(0) as f32 / max_value)
-                    .collect()
-            }
-        };
-        
-        // Check if we have any samples
-        if samples.is_empty() {
-            return Err("Audio file contains no samples".to_string());
-        }
-
-        // Convert to mono if stereo
-        let mono_samples = if spec.channels > 1 {
-            samples
-                .chunks(spec.channels as usize)
-                .map(|chunk| chunk.iter().sum::<f32>() / chunk.len() as f32)
-                .collect()
-        } else {
-            samples
-        };
-        
-        // Check if we still have samples after mono conversion
-        if mono_samples.is_empty() {
-            return Err("No audio samples after mono conversion".to_string());
-        }
-
-        // Resample if necessary
-        let resampled = if resample_ratio != 1.0 {
-            self.resample(&mono_samples, resample_ratio)
-        } else {
-            mono_samples
-        };
-        
-        // Final check
-        if resampled.is_empty() {
-            return Err("No audio samples after resampling".to_string());
-        }
-        
-        Ok(resampled)
+        // Use the new conversion pipeline that preserves native formats
+        WhisperAudioConverter::convert_wav_file_for_whisper(audio_path)
     }
 
+    // Resampling is now handled by WhisperAudioConverter
+    // Keeping this for backward compatibility if needed
+    #[allow(dead_code)]
     fn resample(&self, samples: &[f32], ratio: f32) -> Vec<f32> {
         let new_len = (samples.len() as f32 * ratio) as usize;
         let mut resampled = Vec::with_capacity(new_len);

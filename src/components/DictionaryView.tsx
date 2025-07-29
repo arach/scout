@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Book, Plus, Search, Trash2, Edit2, Eye, EyeOff, Hash, TestTube } from 'lucide-react';
+import { Book, Plus, Search, Trash2, Edit2, Eye, EyeOff, Hash } from 'lucide-react';
 import { tauriApi } from '../types/tauri';
 import { DictionaryEntry, DictionaryEntryInput, MatchType } from '../types/dictionary';
 import { Dropdown } from './Dropdown';
@@ -17,9 +17,6 @@ export const DictionaryView: React.FC<DictionaryViewProps> = ({ isExpanded, onTo
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingEntry, setEditingEntry] = useState<DictionaryEntry | null>(null);
-  const [testText, setTestText] = useState('');
-  const [testResult, setTestResult] = useState<string>('');
-  const [showTestPanel, setShowTestPanel] = useState(false);
   
   // Form state
   const [formData, setFormData] = useState<DictionaryEntryInput>({
@@ -72,13 +69,10 @@ export const DictionaryView: React.FC<DictionaryViewProps> = ({ isExpanded, onTo
     try {
       if (editingEntry) {
         // Update existing entry
-        await tauriApi.updateDictionaryEntry({
-          id: editingEntry.id,
-          updates: formData
-        });
+        await tauriApi.updateDictionaryEntry(editingEntry.id, formData);
       } else {
         // Create new entry
-        await tauriApi.saveDictionaryEntry({ entry: formData });
+        await tauriApi.saveDictionaryEntry(formData);
       }
       
       // Reset form and reload entries
@@ -116,7 +110,7 @@ export const DictionaryView: React.FC<DictionaryViewProps> = ({ isExpanded, onTo
   const handleDelete = async (id: number) => {
     if (confirm('Are you sure you want to delete this dictionary entry?')) {
       try {
-        await tauriApi.deleteDictionaryEntry({ id });
+        await tauriApi.deleteDictionaryEntry(id);
         loadEntries();
       } catch (error) {
         console.error('Failed to delete dictionary entry:', error);
@@ -126,9 +120,8 @@ export const DictionaryView: React.FC<DictionaryViewProps> = ({ isExpanded, onTo
 
   const handleToggleEnabled = async (entry: DictionaryEntry) => {
     try {
-      await tauriApi.updateDictionaryEntry({
-        id: entry.id,
-        updates: { is_enabled: !entry.is_enabled }
+      await tauriApi.updateDictionaryEntry(entry.id, {
+        is_enabled: !entry.is_enabled
       });
       loadEntries();
     } catch (error) {
@@ -136,16 +129,6 @@ export const DictionaryView: React.FC<DictionaryViewProps> = ({ isExpanded, onTo
     }
   };
 
-  const handleTest = async () => {
-    if (!testText.trim()) return;
-    
-    try {
-      const result = await tauriApi.testDictionaryReplacement({ text: testText });
-      setTestResult(result.replaced_text);
-    } catch (error) {
-      console.error('Failed to test dictionary replacement:', error);
-    }
-  };
 
   const getMatchTypeLabel = (type: MatchType): string => {
     switch (type) {
@@ -190,14 +173,6 @@ export const DictionaryView: React.FC<DictionaryViewProps> = ({ isExpanded, onTo
             <div className="dictionary-header-actions">
               <button
                 className="dictionary-action-button"
-                onClick={() => setShowTestPanel(!showTestPanel)}
-                title="Test replacements"
-              >
-                <TestTube size={14} />
-                Test
-              </button>
-              <button
-                className="dictionary-action-button"
                 onClick={() => setShowAddForm(true)}
                 title="Add new entry"
               >
@@ -226,29 +201,6 @@ export const DictionaryView: React.FC<DictionaryViewProps> = ({ isExpanded, onTo
                 />
               </div>
 
-              {/* Test Panel */}
-              {showTestPanel && (
-                <div className="dictionary-test-panel">
-                  <h4>Test Dictionary Replacements</h4>
-                  <div className="test-input-group">
-                    <textarea
-                      placeholder="Enter text to test replacements..."
-                      value={testText}
-                      onChange={(e) => setTestText(e.target.value)}
-                      rows={3}
-                    />
-                    <button onClick={handleTest} className="test-button">
-                      Test
-                    </button>
-                  </div>
-                  {testResult && (
-                    <div className="test-result">
-                      <label>Result:</label>
-                      <div className="test-result-text">{testResult}</div>
-                    </div>
-                  )}
-                </div>
-              )}
 
               {/* Add/Edit Form */}
               {showAddForm && (

@@ -5,6 +5,7 @@ use std::sync::mpsc;
 use std::any::TypeId;
 use std::time::Duration;
 use crate::logger::{info, debug, warn, error, Component};
+use super::format::NativeAudioFormat;
 
 // Type alias for sample callback
 pub type SampleCallback = Arc<dyn Fn(&[f32]) + Send + Sync>;
@@ -395,18 +396,16 @@ impl AudioRecorderWorker {
             }
         }
         
-        // Handle known problematic devices that report incorrect sample rates
-        let actual_sample_rate = if device_name_for_metadata.to_lowercase().contains("airpod") && 
-                                   (default_config.sample_rate().0 == 8000 || 
-                                    default_config.sample_rate().0 == 16000 || 
-                                    default_config.sample_rate().0 == 24000) {
-            // AirPods in call mode often report low sample rates but deliver 48kHz audio
-            warn(Component::Recording, &format!("Overriding AirPods sample rate from {} Hz to 48000 Hz", default_config.sample_rate().0));
-            warn(Component::Recording, "AirPods may be in call mode - audio quality may be degraded");
-            cpal::SampleRate(48000)
-        } else {
-            default_config.sample_rate()
-        };
+        // IMPORTANT: We now preserve the exact hardware format
+        // No sample rate overrides - we trust what the device reports
+        let actual_sample_rate = default_config.sample_rate();
+        
+        if device_name_for_metadata.to_lowercase().contains("airpod") && 
+           (actual_sample_rate.0 == 8000 || actual_sample_rate.0 == 16000 || actual_sample_rate.0 == 24000) {
+            warn(Component::Recording, &format!("AirPods reporting {} Hz - this is the actual hardware rate", actual_sample_rate.0));
+            warn(Component::Recording, "AirPods may be in call mode. Audio will be preserved at native quality.");
+            info(Component::Recording, "Conversion to 16kHz for Whisper will happen during transcription.");
+        }
         
         // Try progressive buffer sizes with fallbacks for device compatibility
         let buffer_sizes = [128, 256, 512, 1024];
@@ -440,16 +439,20 @@ impl AudioRecorderWorker {
 
         // Store sample rate, channels, and format for later use
         self.sample_rate = config.sample_rate.0;
-        self.channels = channels;
+        self.channels = config.channels;  // Store actual channel count
         self.sample_format = Some(default_config.sample_format());
         
-        // IMPORTANT: Double-check that we're using the correct sample rate
-        // Some devices (especially Bluetooth) may report one rate but deliver another
-        info(Component::Recording, &format!("Final recording configuration:"));
-        info(Component::Recording, &format!("  Device reports: {} Hz", default_config.sample_rate().0));
-        info(Component::Recording, &format!("  Stream config: {} Hz", config.sample_rate.0));
-        info(Component::Recording, &format!("  WAV will use: {} Hz", config.sample_rate.0));
-        info(Component::Recording, &format!("  Channels: {} (device) -> 1 (WAV file)", channels));
+        // Create native format info
+        let native_format = NativeAudioFormat::new(
+            config.sample_rate.0,
+            config.channels,
+            default_config.sample_format(),
+            device_name_for_metadata.clone()
+        );
+        
+        // Log the native format we're preserving
+        native_format.log_format_info("Recording Configuration");
+        info(Component::Recording, "WAV file will preserve this exact format for archival quality");
         
         // Update global device sample rate cache for transcription strategies
         crate::update_device_sample_rate(config.sample_rate.0);
@@ -467,23 +470,14 @@ impl AudioRecorderWorker {
         // Reset sample count
         *self.sample_count.lock().unwrap() = 0;
 
-        // Match the WAV spec to the actual audio format
-        let (bits_per_sample, sample_format) = match default_config.sample_format() {
-            cpal::SampleFormat::I16 => (16, hound::SampleFormat::Int),
-            cpal::SampleFormat::F32 => (32, hound::SampleFormat::Float),
-            _ => return Err("Unsupported sample format".to_string()),
-        };
+        // Create WAV spec that exactly matches hardware format
+        let spec = native_format.to_wav_spec();
         
-        // DIAGNOSTIC: Verify sample rate consistency
-        info(Component::Recording, &format!("WAV file spec - Sample Rate: {}, Channels: 1 (mono), Bits: {}, Format: {:?}",
-            config.sample_rate.0, bits_per_sample, sample_format));
-        
-        let spec = hound::WavSpec {
-            channels: 1, // Always write mono files (convert from stereo if needed)
-            sample_rate: config.sample_rate.0,
-            bits_per_sample,
-            sample_format,
-        };
+        info(Component::Recording, &format!("WAV file specification:"));
+        info(Component::Recording, &format!("  Sample Rate: {} Hz (native hardware rate)", spec.sample_rate));
+        info(Component::Recording, &format!("  Channels: {} (preserving hardware configuration)", spec.channels));
+        info(Component::Recording, &format!("  Bit Depth: {} bits", spec.bits_per_sample));
+        info(Component::Recording, &format!("  Format: {:?}", spec.sample_format));
 
 
         let writer = hound::WavWriter::create(output_path, spec)
@@ -556,11 +550,12 @@ impl AudioRecorderWorker {
 
         // Check if we need to pad with silence
         let total_samples = *self.sample_count.lock().unwrap();
-        let duration_seconds = total_samples as f32 / self.sample_rate as f32; // Mono samples only
+        let samples_per_second = self.sample_rate as f32 * self.channels as f32; // Account for all channels
+        let duration_seconds = total_samples as f32 / samples_per_second;
         
         if duration_seconds < 1.0 && self.writer.lock().unwrap().is_some() {
             // Calculate how many silence samples we need to reach 1.1 seconds (with a small buffer)
-            let target_samples = (self.sample_rate as f64 * 1.1) as u64; // 1.1 seconds worth of mono samples
+            let target_samples = (samples_per_second * 1.1) as u64; // 1.1 seconds worth of samples (all channels)
             let silence_samples_needed = target_samples.saturating_sub(total_samples);
             
             if silence_samples_needed > 0 {
@@ -616,21 +611,20 @@ impl AudioRecorderWorker {
         
         // Clone config values to move into closure
         let channels = config.channels;
-        let sample_rate_for_log = config.sample_rate.0;
+        let device_sample_rate = config.sample_rate.0;
         
         device
             .build_input_stream(
                 config,
                 move |data: &[T], _: &cpal::InputCallbackInfo| {
                     if *is_recording.lock().unwrap() {
-                        // DIAGNOSTIC: Log first callback to verify actual data rate
+                        // Log first callback to verify actual data rate
                         static FIRST_CALLBACK: std::sync::Once = std::sync::Once::new();
                         FIRST_CALLBACK.call_once(|| {
-                            info(Component::Recording, &format!("First audio callback received - {} samples, {} channels", 
+                            info(Component::Recording, &format!("First audio callback - {} samples, {} channels", 
                                 data.len(), channels));
-                            info(Component::Recording, &format!("Expected samples per callback at {} Hz: ~{}", 
-                                sample_rate_for_log, 
-                                data.len() / channels as usize));
+                            info(Component::Recording, &format!("Preserving native format: {} Hz, {} channel(s)", 
+                                device_sample_rate, channels));
                         });
                         
                         // Calculate RMS (Root Mean Square) level for volume
@@ -668,41 +662,12 @@ impl AudioRecorderWorker {
                         *audio_level.lock().unwrap() = new_level; // Already capped by amplified_rms
                         
                         if let Some(ref mut writer) = *writer.lock().unwrap() {
-                            // Handle channel conversion for recording
-                            if channels == 2 {
-                                // Convert stereo to mono by averaging L and R channels
-                                let mut mono_samples = Vec::with_capacity(data.len() / 2);
-                                
-                                if TypeId::of::<T>() == TypeId::of::<f32>() {
-                                    // For f32 samples
-                                    for chunk in data.chunks_exact(2) {
-                                        let left = unsafe { *(&chunk[0] as *const T as *const f32) };
-                                        let right = unsafe { *(&chunk[1] as *const T as *const f32) };
-                                        let mono = (left + right) / 2.0;
-                                        mono_samples.push(unsafe { *(&mono as *const f32 as *const T) });
-                                    }
-                                } else if TypeId::of::<T>() == TypeId::of::<i16>() {
-                                    // For i16 samples
-                                    for chunk in data.chunks_exact(2) {
-                                        let left = unsafe { *(&chunk[0] as *const T as *const i16) } as i32;
-                                        let right = unsafe { *(&chunk[1] as *const T as *const i16) } as i32;
-                                        let mono = ((left + right) / 2) as i16;
-                                        mono_samples.push(unsafe { *(&mono as *const i16 as *const T) });
-                                    }
-                                }
-                                
-                                // Write mono samples
-                                for &sample in mono_samples.iter() {
-                                    writer.write_sample(sample).ok();
-                                }
-                                *sample_count.lock().unwrap() += mono_samples.len() as u64;
-                            } else {
-                                // Mono recording - write samples directly
-                                for &sample in data.iter() {
-                                    writer.write_sample(sample).ok();
-                                }
-                                *sample_count.lock().unwrap() += data.len() as u64;
+                            // Write samples directly in their native format
+                            // NO conversion, NO resampling, NO channel mixing
+                            for &sample in data.iter() {
+                                writer.write_sample(sample).ok();
                             }
+                            *sample_count.lock().unwrap() += data.len() as u64;
                         }
                         
                         // Call sample callback for ring buffer processing

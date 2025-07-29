@@ -773,7 +773,7 @@ async fn check_microphone_permission() -> Result<String, String> {
     // If we can enumerate devices, we likely have permission
     #[cfg(target_os = "macos")]
     {
-        use cpal::traits::{HostTrait, DeviceTrait};
+        use cpal::traits::HostTrait;
         
         let host = cpal::default_host();
         match host.default_input_device() {
@@ -927,6 +927,14 @@ async fn set_success_sound(sound: String) -> Result<(), String> {
 #[tauri::command]
 async fn preview_sound_flow() -> Result<(), String> {
     sound::SoundPlayer::preview_sound_flow().await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn update_completion_sound_threshold(state: State<'_, AppState>, threshold_ms: i32) -> Result<(), String> {
+    let mut settings = state.settings.lock().await;
+    settings.update(|s| s.ui.completion_sound_threshold_ms = threshold_ms as u64)
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
     Ok(())
 }
 
@@ -2419,6 +2427,7 @@ pub fn run() {
             set_stop_sound,
             set_success_sound,
             preview_sound_flow,
+            update_completion_sound_threshold,
             get_current_shortcut,
             transcribe_file,
             get_available_models,
