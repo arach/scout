@@ -154,7 +154,7 @@ export const renderLLMSpecs = (model: any) => (
   <>
     <div className="model-stat">
       <Brain size={12} className="stat-icon" />
-      <span>{model.parameters}</span>
+      <span>{model.parameters} params</span>
     </div>
     <div className="model-stat">
       <FileText size={12} className="stat-icon" />

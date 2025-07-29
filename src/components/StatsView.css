@@ -278,10 +278,10 @@
 /* Heatmap color levels */
 :root {
   --stats-heatmap-level-0: rgba(128, 128, 128, 0.1);
-  --stats-heatmap-level-1: #9be9a8;
-  --stats-heatmap-level-2: #40c463;
-  --stats-heatmap-level-3: #30a14e;
-  --stats-heatmap-level-4: #216e39;
+  --stats-heatmap-level-1: #dbeafe;
+  --stats-heatmap-level-2: #93c5fd;
+  --stats-heatmap-level-3: #3b82f6;
+  --stats-heatmap-level-4: #1d4ed8;
   --stats-border-opacity: 0.25;
   /* Add RGB values for accent color */
   --accent-rgb: 0, 122, 255; /* Default blue accent */
@@ -292,17 +292,11 @@
   display: flex;
   align-items: center;
   gap: var(--spacing-sm);
-  margin-top: 40px;
-  padding-top: 20px;
-  border-top: 1px solid var(--border);
+  margin-top: 10px;
+  padding: 0;
   font-size: var(--font-size-xs);
   color: var(--text-secondary);
-}
-
-.heatmap-legend::before {
-  content: 'Legend:';
-  font-weight: 500;
-  margin-right: var(--spacing-md);
+  justify-content: flex-end;
 }
 
 .legend-scale {
@@ -527,19 +521,19 @@
 /* Theme adjustments */
 [data-theme="terminal-chic"] {
   --stats-heatmap-level-0: rgba(255, 255, 255, 0.05);
-  --stats-heatmap-level-1: #0e4429;
-  --stats-heatmap-level-2: #006d32;
-  --stats-heatmap-level-3: #26a641;
-  --stats-heatmap-level-4: #39d353;
+  --stats-heatmap-level-1: #1e3a5f;
+  --stats-heatmap-level-2: #2563eb;
+  --stats-heatmap-level-3: #3b82f6;
+  --stats-heatmap-level-4: #60a5fa;
   --accent-rgb: 57, 211, 83; /* Green accent */
 }
 
 [data-theme="minimal-light"] {
   --stats-heatmap-level-0: #f6f6f6;
-  --stats-heatmap-level-1: #e1f5e1;
-  --stats-heatmap-level-2: #a8dba8;
-  --stats-heatmap-level-3: #79bd79;
-  --stats-heatmap-level-4: #4a9b4a;
+  --stats-heatmap-level-1: #dbeafe;
+  --stats-heatmap-level-2: #93c5fd;
+  --stats-heatmap-level-3: #60a5fa;
+  --stats-heatmap-level-4: #3b82f6;
   --accent-rgb: 74, 155, 74; /* Green accent */
 }
 
@@ -574,10 +568,10 @@
 /* Minimal Dark theme */
 [data-theme="minimal-dark"] {
   --stats-heatmap-level-0: rgba(255, 255, 255, 0.03);
-  --stats-heatmap-level-1: #1e3a1e;
-  --stats-heatmap-level-2: #2d5a2d;
-  --stats-heatmap-level-3: #3c7a3c;
-  --stats-heatmap-level-4: #4a9b4a;
+  --stats-heatmap-level-1: #1e3a5f;
+  --stats-heatmap-level-2: #2563eb;
+  --stats-heatmap-level-3: #3b82f6;
+  --stats-heatmap-level-4: #60a5fa;
   --accent-rgb: 74, 155, 74; /* Green accent */
 }
 
@@ -610,10 +604,10 @@
 
 [data-theme="vscode-dark"] {
   --stats-heatmap-level-0: #161616;
-  --stats-heatmap-level-1: #0e4429;
-  --stats-heatmap-level-2: #006d32;
-  --stats-heatmap-level-3: #26a641;
-  --stats-heatmap-level-4: #39d353;
+  --stats-heatmap-level-1: #1e3a5f;
+  --stats-heatmap-level-2: #2563eb;
+  --stats-heatmap-level-3: #3b82f6;
+  --stats-heatmap-level-4: #60a5fa;
   --accent-rgb: 0, 122, 255; /* Blue accent */
 }
 

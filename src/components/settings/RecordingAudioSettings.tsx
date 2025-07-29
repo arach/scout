@@ -157,16 +157,16 @@ export const RecordingAudioSettings = memo(function RecordingAudioSettings() {
       </div>
 
       {/* Sound Settings */}
-      <div className="setting-item with-header">
-        <div className="setting-row">
-          <label>
-            <input
-              type="checkbox"
-              checked={sound.soundEnabled}
-              onChange={actions.toggleSoundEnabled}
-            />
-            Enable sound effects
-          </label>
+      <div className="toggle-setting sound-feedback-toggle">
+        <label htmlFor="sound-feedback">Enable sound feedback</label>
+        <div className="toggle-switch">
+          <input
+            id="sound-feedback"
+            type="checkbox"
+            checked={sound.soundEnabled}
+            onChange={actions.toggleSoundEnabled}
+          />
+          <span className="toggle-switch-slider"></span>
         </div>
       </div>
 

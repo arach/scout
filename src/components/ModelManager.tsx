@@ -140,7 +140,7 @@ export const ModelManager: React.FC = () => {
 
   return (
     <div className="model-manager">
-      <div className="model-list model-grid">
+      <div className="model-grid">
         {models.map(model => {
           const progress = downloading[model.id];
           const isDownloading = !!progress;
