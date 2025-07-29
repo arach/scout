@@ -36,36 +36,23 @@ export const ThemeSelector: React.FC<ThemeSelectorProps> = ({
   
   return (
     <div className={`theme-selector-container ${compact ? 'theme-selector-compact' : ''}`}>
-      <label>Theme</label>
-      <div className="theme-categories">
-        {Object.entries(themeCategories).map(([category, themes]) => (
-          themes.length > 0 && (
-            <div key={category} className="theme-category">
-              <h4 className="theme-category-title">{category}</h4>
-              <div className="theme-options">
-                {themes.map(theme => (
-                  <button
-                    key={theme.id}
-                    className={`theme-option ${currentTheme === theme.id ? 'active' : ''} ${isLoadingTheme && currentTheme === theme.id ? 'loading' : ''}`}
-                    onClick={() => handleThemeChange(theme.id)}
-                    title={theme.name}
-                    disabled={isLoadingTheme}
-                  >
-                    <ThemeIcon themeId={theme.id} />
-                    <span>{theme.name}</span>
-                    {isLoadingTheme && currentTheme === theme.id && (
-                      <span className="theme-loading-indicator">...</span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )
+      <div className="theme-options">
+        {availableThemes.map(theme => (
+          <button
+            key={theme.id}
+            className={`theme-option ${currentTheme === theme.id ? 'active' : ''} ${isLoadingTheme && currentTheme === theme.id ? 'loading' : ''}`}
+            onClick={() => handleThemeChange(theme.id)}
+            title={`${theme.name} (${theme.category})`}
+            disabled={isLoadingTheme}
+          >
+            <ThemeIcon themeId={theme.id} />
+            <span>{theme.name}</span>
+            {isLoadingTheme && currentTheme === theme.id && (
+              <span className="theme-loading-indicator">...</span>
+            )}
+          </button>
         ))}
       </div>
-      <p className="setting-hint">
-        Choose your preferred visual theme. Minimal themes are optimized for overlay display.
-      </p>
     </div>
   );
 };

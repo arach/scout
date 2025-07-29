@@ -1,5 +1,5 @@
 import React, { memo } from 'react';
-import { useSettings } from '../../contexts/SettingsContext';
+import { useEnhancedSettings } from '../../hooks/useEnhancedSettings';
 import { Dropdown } from '../Dropdown';
 import { 
   ArrowUpLeft, ArrowUp, ArrowUpRight, 
@@ -9,7 +9,7 @@ import {
 import './DisplayInterfaceSettings.css';
 
 export const DisplayInterfaceSettings = memo(function DisplayInterfaceSettings() {
-  const { state, actions } = useSettings();
+  const { state, actions } = useEnhancedSettings();
   const { ui } = state;
 
   return (

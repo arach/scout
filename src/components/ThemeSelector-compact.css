@@ -6,44 +6,51 @@
 /* Override default grid for compact mode */
 .theme-selector-compact .theme-options {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
-  gap: 8px; /* Reduced from 12px */
+  grid-template-columns: repeat(4, 1fr); /* 4 columns by default */
+  gap: 12px;
   max-width: 100%;
+  margin-top: 0; /* Remove extra top margin */
 }
 
 /* 5 columns on desktop for maximum horizontal usage */
-@media (min-width: 768px) {
+@media (min-width: 900px) {
   .theme-selector-compact .theme-options {
     grid-template-columns: repeat(5, 1fr);
   }
 }
 
-/* Maintain 5 columns on larger screens */
-@media (min-width: 1200px) {
+/* 6 columns on very wide screens */
+@media (min-width: 1400px) {
   .theme-selector-compact .theme-options {
-    grid-template-columns: repeat(5, 1fr);
-    max-width: 800px; /* Constrain max width */
+    grid-template-columns: repeat(6, 1fr);
   }
 }
 
 /* Compact theme cards */
 .theme-selector-compact .theme-option {
-  aspect-ratio: 4/3; /* More rectangular */
-  min-height: 72px; /* Reduced from ~120px */
-  padding: 8px; /* Reduced from 16px */
-  gap: 4px; /* Reduced from 8px */
+  aspect-ratio: 1; /* Square cards */
+  min-height: 90px; /* Larger cards */
+  padding: 12px;
+  gap: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
 
-/* Smaller icons in compact mode */
+/* Icons in compact mode */
 .theme-selector-compact .theme-option svg {
-  width: 20px; /* Reduced from 24px */
-  height: 20px;
+  width: 28px; /* Larger icons */
+  height: 28px;
 }
 
-/* Smaller text */
+/* Text */
 .theme-selector-compact .theme-option span {
-  font-size: 10px; /* Reduced from 11px */
-  line-height: 1.2;
+  font-size: 11px;
+  line-height: 1.3;
+  text-align: center;
+  max-width: 100%;
+  word-break: break-word;
 }
 
 /* Active state - no blue! */
