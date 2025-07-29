@@ -334,7 +334,8 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 0; /* Remove horizontal padding for full-width appearance */
+    padding: 12px 32px; /* Add horizontal padding to match grid container */
+    margin: 0 -32px; /* Negative margins to extend beyond grid container padding */
     background: transparent; /* Remove background color */
     user-select: none;
     transition: var(--transition);
@@ -459,6 +460,14 @@
 }
 
 /* Dark mode border removed */
+
+/* Mobile responsive adjustments for full-width headers */
+@media (max-width: 768px) {
+    .transcript-group-header {
+        padding: 12px 16px; /* Match mobile grid padding */
+        margin: 0 -16px; /* Adjust negative margins for mobile */
+    }
+}
 
 /* Pagination */
 .load-more-container {
