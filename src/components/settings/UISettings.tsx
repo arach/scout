@@ -1,0 +1,114 @@
+import React, { memo } from 'react';
+import { useSettings } from '../../contexts/SettingsContext';
+import { Dropdown } from '../Dropdown';
+import { ThemeSelector } from '../ThemeSelector';
+import { 
+  ArrowUpLeft, ArrowUp, ArrowUpRight, 
+  ArrowLeft, ArrowRight, 
+  ArrowDownLeft, ArrowDown, ArrowDownRight 
+} from 'lucide-react';
+
+export const UISettings = memo(function UISettings() {
+  const { state, actions } = useSettings();
+  const { ui } = state;
+
+  return (
+    <div className="settings-section">
+      <div className="settings-two-column">
+        <div className="setting-item">
+          <label>Overlay Position</label>
+          <div className="overlay-position-grid">
+            <button
+              className={`position-button ${ui.overlayPosition === 'top-left' ? 'active' : ''}`}
+              onClick={() => actions.updateOverlayPosition('top-left')}
+              title="Top Left"
+            >
+              <ArrowUpLeft size={18} />
+            </button>
+            <button
+              className={`position-button ${ui.overlayPosition === 'top-center' ? 'active' : ''}`}
+              onClick={() => actions.updateOverlayPosition('top-center')}
+              title="Top Center"
+            >
+              <ArrowUp size={18} />
+            </button>
+            <button
+              className={`position-button ${ui.overlayPosition === 'top-right' ? 'active' : ''}`}
+              onClick={() => actions.updateOverlayPosition('top-right')}
+              title="Top Right"
+            >
+              <ArrowUpRight size={18} />
+            </button>
+
+            <button
+              className={`position-button ${ui.overlayPosition === 'left-center' ? 'active' : ''}`}
+              onClick={() => actions.updateOverlayPosition('left-center')}
+              title="Left Center"
+            >
+              <ArrowLeft size={18} />
+            </button>
+            <div className="position-button-spacer"></div>
+            <button
+              className={`position-button ${ui.overlayPosition === 'right-center' ? 'active' : ''}`}
+              onClick={() => actions.updateOverlayPosition('right-center')}
+              title="Right Center"
+            >
+              <ArrowRight size={18} />
+            </button>
+
+            <button
+              className={`position-button ${ui.overlayPosition === 'bottom-left' ? 'active' : ''}`}
+              onClick={() => actions.updateOverlayPosition('bottom-left')}
+              title="Bottom Left"
+            >
+              <ArrowDownLeft size={18} />
+            </button>
+            <button
+              className={`position-button ${ui.overlayPosition === 'bottom-center' ? 'active' : ''}`}
+              onClick={() => actions.updateOverlayPosition('bottom-center')}
+              title="Bottom Center"
+            >
+              <ArrowDown size={18} />
+            </button>
+            <button
+              className={`position-button ${ui.overlayPosition === 'bottom-right' ? 'active' : ''}`}
+              onClick={() => actions.updateOverlayPosition('bottom-right')}
+              title="Bottom Right"
+            >
+              <ArrowDownRight size={18} />
+            </button>
+          </div>
+          <p className="setting-hint">
+            Choose where the recording indicator appears on your screen
+          </p>
+        </div>
+        
+        <div className="setting-item">
+          <label>Overlay Treatment</label>
+          <Dropdown
+            value={ui.overlayTreatment}
+            onChange={actions.updateOverlayTreatment}
+            options={[
+              { value: 'particles', label: 'Particles' },
+              { value: 'pulsingDot', label: 'Pulsing Dot' },
+              { value: 'animatedWaveform', label: 'Waveform' },
+              { value: 'gradientOrb', label: 'Gradient Orb' },
+              { value: 'floatingBubbles', label: 'Floating Bubbles' }
+            ]}
+            style={{ width: '100%' }}
+          />
+          <p className="setting-hint">
+            Visual style of the recording indicator
+          </p>
+        </div>
+        
+        <div className="setting-item">
+          <ThemeSelector 
+            currentTheme={ui.selectedTheme}
+            onThemeChange={actions.updateSelectedTheme}
+          />
+        </div>
+      </div>
+    </div>
+  );
+});
