@@ -168,7 +168,6 @@ export const DictionaryStandalone: React.FC = () => {
     <div className="grid-container">
       <div className="grid-content">
         <div className="page-header">
-          <h1>Dictionary</h1>
           <p>Manage custom text replacements for your transcriptions</p>
         </div>
 

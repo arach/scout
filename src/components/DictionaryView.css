@@ -11,6 +11,7 @@
   display: flex;
   gap: 8px;
   align-items: center;
+  margin-bottom: 16px;
 }
 
 .dictionary-action-button {
@@ -29,6 +30,10 @@
 
 .dictionary-action-button:hover {
   background: var(--button-default-hover-background);
+}
+
+.dictionary-content {
+  /* Content spacing */
 }
 
 /* Dictionary Page Styles */

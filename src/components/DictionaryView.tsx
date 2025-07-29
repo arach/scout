@@ -151,42 +151,19 @@ export const DictionaryView: React.FC<DictionaryViewProps> = ({ isExpanded, onTo
 
   return (
     <div className="settings-section dictionary-section">
-      <div className="collapsible-section">
-        <div className="collapsible-header-wrapper">
-          <div 
-            className="collapsible-header"
-            onClick={onToggleExpand}
-          >
-            <div>
-              <h3>
-                <span className={`collapse-arrow ${isExpanded ? 'expanded' : ''}`}>
-                  ▶
-                </span>
-                Text Dictionary
-              </h3>
-              <p className="collapsible-subtitle">
-                Automatically replace text patterns in your transcripts
-              </p>
-            </div>
-            <Book size={16} className="dictionary-icon" />
-          </div>
-          {isExpanded && (
-            <div className="dictionary-header-actions">
-              <button
-                className="dictionary-action-button"
-                onClick={() => setShowAddForm(true)}
-                title="Add new entry"
-              >
-                <Plus size={14} />
-                Add Entry
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-
       {isExpanded && (
-        <div className="collapsible-content">
+        <>
+          <div className="dictionary-header-actions">
+            <button
+              className="dictionary-action-button"
+              onClick={() => setShowAddForm(true)}
+              title="Add new entry"
+            >
+              <Plus size={14} />
+              Add Entry
+            </button>
+          </div>
+          <div className="dictionary-content">
           {loading ? (
             <div className="dictionary-loading">Loading dictionary entries...</div>
           ) : (
@@ -396,7 +373,8 @@ export const DictionaryView: React.FC<DictionaryViewProps> = ({ isExpanded, onTo
               </div>
             </>
           )}
-        </div>
+          </div>
+        </>
       )}
     </div>
   );
