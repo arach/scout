@@ -78,9 +78,6 @@ export const DisplayInterfaceSettings = memo(function DisplayInterfaceSettings()
               <ArrowDownRight size={18} />
             </button>
           </div>
-          <p className="setting-hint">
-            Choose where the recording indicator appears on your screen
-          </p>
         </div>
         
         <div className="setting-item">
@@ -97,9 +94,6 @@ export const DisplayInterfaceSettings = memo(function DisplayInterfaceSettings()
             ]}
             style={{ width: '100%' }}
           />
-          <p className="setting-hint">
-            Choose how the recording indicator looks while recording
-          </p>
         </div>
       </div>
     </div>

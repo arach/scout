@@ -105,7 +105,7 @@ export const SettingsView = memo(function SettingsView() {
                     <Monitor size={16} className="sparkle-icon" />
                   </h3>
                   <p className="collapsible-subtitle">
-                    Recording indicator appearance and position
+                    Visual feedback shown on screen while actively recording
                   </p>
                 </div>
               </div>
