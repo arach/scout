@@ -1,7 +1,7 @@
 /* Collapsible Section Styles */
 
 .model-manager-full-width {
-  margin-top: 24px;
+  margin-top: 12px;
 }
 
 .collapsible-section {
@@ -9,6 +9,11 @@
   border: 1px solid var(--border-primary);
   border-radius: 8px;
   overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.collapsible-section:last-child {
+  margin-bottom: 0;
 }
 
 .collapsible-header-wrapper {

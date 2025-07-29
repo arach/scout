@@ -62,8 +62,7 @@ export const SettingsView = memo(function SettingsView() {
     <div className="grid-container">
       <div className="grid-content grid-content--settings">
         {/* Recording & Audio - Collapsible */}
-        <div className="settings-section" ref={recordingAudioRef}>
-          <div className="collapsible-section">
+        <div className="collapsible-section" ref={recordingAudioRef}>
             <div className="collapsible-header-wrapper">
               <div 
                 className="collapsible-header"
@@ -88,12 +87,10 @@ export const SettingsView = memo(function SettingsView() {
                 <RecordingAudioSettings />
               </div>
             )}
-          </div>
         </div>
 
         {/* Display & Interface - Collapsible */}
-        <div className="settings-section" ref={displayInterfaceRef}>
-          <div className="collapsible-section">
+        <div className="collapsible-section" ref={displayInterfaceRef}>
             <div className="collapsible-header-wrapper">
               <div 
                 className="collapsible-header"
@@ -118,12 +115,10 @@ export const SettingsView = memo(function SettingsView() {
                 <DisplayInterfaceSettings />
               </div>
             )}
-          </div>
         </div>
 
         {/* Themes - Collapsible */}
-        <div className="settings-section" ref={themesRef}>
-          <div className="collapsible-section">
+        <div className="collapsible-section" ref={themesRef}>
             <div className="collapsible-header-wrapper">
               <div 
                 className="collapsible-header"
@@ -148,12 +143,10 @@ export const SettingsView = memo(function SettingsView() {
                 <ThemesSettings />
               </div>
             )}
-          </div>
         </div>
 
         {/* Model Manager - Full Width Collapsible */}
-        <div className="settings-section model-manager-full-width" ref={modelSectionRef}>
-          <div className="collapsible-section">
+        <div className="collapsible-section model-manager-full-width" ref={modelSectionRef}>
             <div className="collapsible-header-wrapper">
               <div 
                 className="collapsible-header"
@@ -188,12 +181,10 @@ export const SettingsView = memo(function SettingsView() {
                 </Suspense>
               </div>
             )}
-          </div>
         </div>
 
         {/* LLM Settings - Full Width Collapsible */}
-        <div className="settings-section model-manager-full-width" ref={llmSectionRef}>
-          <div className="collapsible-section">
+        <div className="collapsible-section model-manager-full-width" ref={llmSectionRef}>
             <div className="collapsible-header-wrapper">
               <div 
                 className="collapsible-header"
@@ -223,7 +214,6 @@ export const SettingsView = memo(function SettingsView() {
                 </Suspense>
               </div>
             )}
-          </div>
         </div>
 
       </div>
