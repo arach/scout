@@ -468,7 +468,7 @@ export function StatsView() {
         </div>
 
         <div className="insight-card">
-          <h3>Daily Activity</h3>
+          <h3>Hourly Pattern</h3>
           {(() => {
             // More robust empty check for hourly distribution
             const isEmpty = !stats.hourly_distribution || 
@@ -486,68 +486,70 @@ export function StatsView() {
             return isEmpty;
           })() ? (
             <div className="chart-empty-state">
-              <p>No hourly data yet</p>
-              <p className="empty-state-hint">Record throughout the day to see your activity patterns</p>
+              <p>No activity data yet</p>
+              <p className="empty-state-hint">Start recording to see your hourly patterns</p>
             </div>
           ) : (
-            <>
-              <div className="hourly-chart">
-                <div className="hourly-grid">
-                  {Array.from({ length: 24 }, (_, hour) => {
-                    // Find activity for this hour with flexible data structure
-                    const activity = stats.hourly_distribution.find((item: any) => {
-                      if (Array.isArray(item)) {
-                        return item[0] === hour;
-                      } else if (typeof item === 'object' && item !== null) {
-                        return item.hour === hour || item[0] === hour;
-                      }
-                      return false;
-                    });
-                    
-                    // Extract count with flexible structure
-                    let count = 0;
-                    if (activity) {
-                      if (Array.isArray(activity)) {
-                        count = Number(activity[1]) || 0;
-                      } else if (typeof activity === 'object' && activity !== null) {
-                        count = Number((activity as any).count || (activity as any).value || (activity as any)[1]) || 0;
-                      }
-                    }
-                    
-                    // Calculate max count with flexible structure
-                    const maxCount = Math.max(...stats.hourly_distribution.map((item: any) => {
-                      if (Array.isArray(item)) return Number(item[1]) || 0;
-                      if (typeof item === 'object' && item !== null) {
-                        return Number(item.count || item.value || item[1]) || 0;
-                      }
-                      return 0;
-                    }));
-                    
-                    const intensity = maxCount > 0 ? count / maxCount : 0;
-                    
-                    return (
-                      <div 
-                        key={hour} 
-                        className="hour-cell"
-                        style={{ 
-                          backgroundColor: intensity > 0 ? `rgba(var(--accent-rgb), ${intensity * 0.8})` : 'var(--background-tertiary)',
-                          opacity: intensity > 0 ? 1 : 0.5
-                        }}
-                        title={`${hour}:00 - ${count} recordings`}
-                      >
-                        {hour === 0 && '12a'}
-                        {hour === 6 && '6a'}
-                        {hour === 12 && '12p'}
-                        {hour === 18 && '6p'}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-              <div className="chart-info">
-                Most active: {stats.most_active_hour}:00 - {(stats.most_active_hour + 1) % 24}:00
-              </div>
-            </>
+            <div className="hourly-chart">
+              {Array.from({ length: 24 }, (_, hour) => {
+                // Find activity for this hour with flexible data structure
+                const activity = stats.hourly_distribution.find((item: any) => {
+                  if (Array.isArray(item)) {
+                    return item[0] === hour;
+                  } else if (typeof item === 'object' && item !== null) {
+                    return item.hour === hour || item[0] === hour;
+                  }
+                  return false;
+                });
+                
+                // Extract count with flexible structure
+                let count = 0;
+                if (activity) {
+                  if (Array.isArray(activity)) {
+                    count = Number(activity[1]) || 0;
+                  } else if (typeof activity === 'object' && activity !== null) {
+                    count = Number((activity as any).count || (activity as any).value || (activity as any)[1]) || 0;
+                  }
+                }
+                
+                // Calculate max count with flexible structure
+                const maxCount = Math.max(...stats.hourly_distribution.map((item: any) => {
+                  if (Array.isArray(item)) return Number(item[1]) || 0;
+                  if (typeof item === 'object' && item !== null) {
+                    return Number(item.count || item.value || item[1]) || 0;
+                  }
+                  return 0;
+                }));
+                
+                const height = maxCount > 0 ? (count / maxCount) * 100 : 0;
+                const formatHour = (h: number) => {
+                  if (h === 0) return '12a';
+                  if (h < 12) return `${h}a`;
+                  if (h === 12) return '12p';
+                  return `${h - 12}p`;
+                };
+                
+                // Only show label for every 3 hours to reduce clutter
+                const showLabel = hour % 3 === 0;
+                
+                return (
+                  <div key={hour} className="hourly-bar" title={`${formatHour(hour)} - ${count} recordings`}>
+                    <div 
+                      className="bar" 
+                      style={{ 
+                        height: height > 0 ? `${height}%` : '2px',
+                        opacity: height > 0 ? 1 : 0.3,
+                        minHeight: '2px'
+                      }}
+                      data-count={count}
+                      data-height={`${height}%`}
+                    />
+                    <div className="bar-value">{count > 0 ? count : ''}</div>
+                    <div className="bar-label">{showLabel ? formatHour(hour) : ''}</div>
+                  </div>
+                );
+              }).filter(Boolean)}
+            </div>
           )}
           </div>
         </div>
