@@ -465,6 +465,236 @@ const SettingsGroup = ({ label, description, children }) => (
 - Test with keyboard navigation and screen readers
 - Ensure smooth performance on 60fps displays
 
+## Additional Design Improvements
+
+### 9. Compact Theme Grid System (Priority: High)
+
+The current theme selector uses inefficient vertical space. Here's a more compact design that better utilizes horizontal space:
+
+```scss
+// Compact theme grid
+.theme-selector-container {
+  .theme-options {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+    gap: 8px;
+    max-width: 100%;
+    
+    // Force 4-5 items per row on standard screens
+    @media (min-width: 640px) {
+      grid-template-columns: repeat(5, 1fr);
+    }
+    
+    @media (min-width: 768px) {
+      grid-template-columns: repeat(5, 1fr);
+    }
+  }
+  
+  .theme-option {
+    padding: 12px 8px;
+    min-height: 72px;
+    
+    // Smaller icons for compact layout
+    svg {
+      width: 20px;
+      height: 20px;
+    }
+    
+    // Shorter text labels
+    span {
+      font-size: 11px;
+      line-height: 1.2;
+      margin-top: 4px;
+    }
+  }
+}
+
+// Alternative: Horizontal scrolling for ultra-compact
+.theme-selector-compact {
+  .theme-categories {
+    gap: 16px;
+  }
+  
+  .theme-options {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    padding-bottom: 8px;
+    
+    // Custom scrollbar
+    &::-webkit-scrollbar {
+      height: 4px;
+    }
+    
+    &::-webkit-scrollbar-track {
+      background: var(--bg-secondary);
+      border-radius: 2px;
+    }
+    
+    &::-webkit-scrollbar-thumb {
+      background: var(--border-primary);
+      border-radius: 2px;
+      
+      &:hover {
+        background: var(--border-hover);
+      }
+    }
+  }
+  
+  .theme-option {
+    flex: 0 0 auto;
+    width: 90px;
+    scroll-snap-align: start;
+  }
+}
+```
+
+### 10. Recording Indicator Position Selector - Refined Design (Priority: High)
+
+The high contrast arrows need refinement. Here's a design using subtle borders and transparency:
+
+```scss
+// Softer position selector design
+.overlay-position-grid {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  padding: 8px;
+  display: inline-grid;
+  
+  .position-button {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-secondary);
+    position: relative;
+    
+    // Subtle hover state
+    &:hover:not(:disabled) {
+      background: var(--bg-hover);
+      border-color: var(--border-secondary);
+      color: var(--text-primary);
+      
+      // Soft glow instead of harsh border
+      &::after {
+        content: '';
+        position: absolute;
+        inset: -2px;
+        border-radius: 6px;
+        background: var(--accent-primary);
+        opacity: 0.1;
+        pointer-events: none;
+      }
+    }
+    
+    // Selected state - NOT blue
+    &.active {
+      background: var(--bg-tertiary);
+      border-color: var(--border-secondary);
+      color: var(--text-primary);
+      
+      // Subtle inner shadow for depth
+      box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
+      
+      // Accent indicator (small, subtle)
+      &::before {
+        content: '';
+        position: absolute;
+        bottom: 4px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 4px;
+        height: 4px;
+        background: var(--text-secondary);
+        border-radius: 2px;
+      }
+    }
+  }
+  
+  // Center spacer styling
+  .position-button-spacer {
+    background: var(--bg-primary);
+    border: 1px dashed var(--border-primary);
+    border-radius: 4px;
+    opacity: 0.5;
+  }
+}
+
+// Alternative design with icon opacity
+.overlay-position-grid-alt {
+  .position-button {
+    svg {
+      opacity: 0.5;
+      transition: opacity 200ms ease;
+    }
+    
+    &:hover svg {
+      opacity: 0.8;
+    }
+    
+    &.active svg {
+      opacity: 1;
+    }
+  }
+}
+```
+
+### 11. Selected State Color Recommendation (Priority: Medium)
+
+**Recommendation: Avoid blue for selected states in non-CTA contexts**
+
+Blue (--accent-primary) should be reserved for primary call-to-action buttons and interactive elements that trigger actions. For selection states, use neutral indicators:
+
+```scss
+// Selection state color system
+:root {
+  // CTAs and primary actions
+  --action-primary: #3B82F6;      // Blue for buttons, links
+  --action-primary-hover: #2563EB;
+  
+  // Selection states (non-action)
+  --selection-bg: var(--bg-tertiary);
+  --selection-border: var(--border-secondary);
+  --selection-indicator: var(--text-secondary);
+  
+  // Active/current states
+  --state-active-bg: rgba(255, 255, 255, 0.05);
+  --state-active-border: rgba(255, 255, 255, 0.1);
+}
+
+// Usage patterns
+.cta-button {
+  background: var(--action-primary);  // Blue for actions
+}
+
+.position-button.active,
+.theme-option.active,
+.tab.active {
+  background: var(--selection-bg);     // Neutral for selections
+  border-color: var(--selection-border);
+}
+```
+
+### Design Rationale
+
+1. **Compact Theme Grid**: 
+   - 5 columns maximize horizontal space usage
+   - Shows all 8 themes in 2 rows instead of 3-4
+   - Maintains touch-friendly 72px minimum height
+   - Optional horizontal scroll for ultra-compact mode
+
+2. **Refined Position Selector**:
+   - Replaced high-contrast arrows with subtle opacity changes
+   - Used transparency layers instead of solid colors
+   - Added subtle inner shadows for depth
+   - Small dot indicator for selected state (not blue)
+
+3. **Color System Logic**:
+   - Blue reserved for actionable elements (buttons, links)
+   - Neutral grays for selection states
+   - Maintains visual hierarchy without confusion
+   - Consistent with VSCode's selection patterns
+
 ## Conclusion
 
 These improvements will transform the Settings view from a cramped, hard-to-scan interface into a professional, accessible configuration panel. The enhancements maintain the VSCode-inspired aesthetic while significantly improving usability, creating a settings experience that matches Scout's technical excellence and gives users confidence in the tool's capabilities.

@@ -97,7 +97,8 @@
       "mcp__peekaboo__app",
       "Bash(screencapture:*)",
       "mcp__peekaboo__sleep",
-      "mcp__peekaboo__analyze"
+      "mcp__peekaboo__analyze",
+      "Bash(git rm:*)"
     ],
     "deny": []
   },

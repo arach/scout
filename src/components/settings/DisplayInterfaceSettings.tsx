@@ -6,6 +6,7 @@ import {
   ArrowLeft, ArrowRight, 
   ArrowDownLeft, ArrowDown, ArrowDownRight 
 } from 'lucide-react';
+import './DisplayInterfaceSettings.css';
 
 export const DisplayInterfaceSettings = memo(function DisplayInterfaceSettings() {
   const { state, actions } = useSettings();

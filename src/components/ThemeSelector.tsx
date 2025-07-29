@@ -3,15 +3,18 @@ import { ThemeVariant } from '../themes/types';
 import { getAvailableThemes } from '../themes';
 import { useTheme } from '../themes/useTheme';
 import './ThemeSelector.css';
+import './ThemeSelector-compact.css';
 
 interface ThemeSelectorProps {
   currentTheme?: ThemeVariant;
   onThemeChange?: (theme: ThemeVariant) => void;
+  compact?: boolean;
 }
 
 export const ThemeSelector: React.FC<ThemeSelectorProps> = ({ 
   currentTheme: propTheme,
-  onThemeChange 
+  onThemeChange,
+  compact = true // Default to compact mode
 }) => {
   const { theme, setTheme, isLoadingTheme } = useTheme();
   const currentTheme = propTheme || theme.id;
@@ -32,7 +35,7 @@ export const ThemeSelector: React.FC<ThemeSelectorProps> = ({
   }, {} as Record<string, typeof availableThemes>);
   
   return (
-    <div className="theme-selector-container">
+    <div className={`theme-selector-container ${compact ? 'theme-selector-compact' : ''}`}>
       <label>Theme</label>
       <div className="theme-categories">
         {Object.entries(themeCategories).map(([category, themes]) => (
