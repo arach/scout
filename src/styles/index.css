@@ -17,6 +17,9 @@
 @import './tokens/animations.css';
 @import './tokens/z-index.css';
 
+/* WebKit Shadow Fix - Must be imported after tokens */
+@import './webkit-shadow-fix.css';
+
 /* 3. Utilities - Single-purpose helper classes */
 @import './utilities/spacing.css';
 @import './utils.css';

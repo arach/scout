@@ -318,8 +318,16 @@ export const DictionaryView: React.FC<DictionaryViewProps> = ({ isExpanded, onTo
               <div className="dictionary-entries">
                 {Object.keys(groupedEntries).length === 0 ? (
                   <div className="dictionary-empty">
-                    <p>No dictionary entries yet.</p>
-                    <p>Add entries to automatically replace text in your transcripts.</p>
+                    <Book size={48} className="empty-icon" />
+                    <h3>No custom words yet</h3>
+                    <p>Scout will learn new words as you dictate. Custom pronunciations will appear here.</p>
+                    <button
+                      className="empty-state-cta"
+                      onClick={() => setShowAddForm(true)}
+                    >
+                      <Plus size={16} />
+                      Add Your First Entry
+                    </button>
                   </div>
                 ) : (
                   Object.entries(groupedEntries).map(([category, categoryEntries]) => (

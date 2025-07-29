@@ -92,4 +92,20 @@
   --caption-font-size: var(--font-size-xs);
   --caption-line-height: var(--line-height-normal);
   --caption-letter-spacing: var(--letter-spacing-wide);
+  
+  /* Convenient aliases for components */
+  --text-xs: var(--font-size-xs);
+  --text-sm: var(--font-size-sm);
+  --text-base: var(--font-size-base);
+  --text-md: var(--font-size-md);
+  --text-lg: var(--font-size-lg);
+  --text-xl: var(--font-size-xl);
+  --text-2xl: var(--font-size-2xl);
+  
+  --font-normal: var(--font-weight-normal);
+  --font-medium: var(--font-weight-medium);
+  --font-semibold: var(--font-weight-semibold);
+  --font-bold: var(--font-weight-bold);
+  
+  --font-mono: var(--font-family-mono);
 }

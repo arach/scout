@@ -132,4 +132,19 @@
   --transcript-bg-hover: var(--bg-secondary);
   --transcript-bg-selected: var(--bg-tertiary);
   --transcript-border: var(--border-primary);
+  
+  /* Additional UI Elements */
+  --bg-elevated: var(--bg-primary);
+  --bg-input: var(--bg-primary);
+  --bg-input-focus: var(--bg-primary);
+  --border-input: var(--border-primary);
+  --accent-primary-alpha-10: rgba(59, 130, 246, 0.1);
+  --accent-primary-alpha-20: rgba(59, 130, 246, 0.2);
+  
+  /* Keyboard Key Styles */
+  --bg-keyboard-key: #f8f8f8;
+  --border-keyboard-key: #999999;
+  --text-keyboard-key: #000000;
+  --shadow-keyboard-key: 0 2px 4px rgba(0, 0, 0, 0.15), inset 0 -1px 0 rgba(0, 0, 0, 0.1);
+  --text-shadow-keyboard-key: 0 1px 0 rgba(255, 255, 255, 0.8);
 }
