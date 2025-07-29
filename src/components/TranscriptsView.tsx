@@ -210,7 +210,7 @@ export const TranscriptsView = memo(function TranscriptsView({
     const shouldUseVirtualization = transcripts.length > ENABLE_VIRTUALIZATION_THRESHOLD;
     
     return (
-        <div className="grid-container">
+        <div className="grid-container transcripts-view-container">
             {/* 🧠 CSS Grid with search and action buttons */}
             <div className="header-grid mb-4">
                 {/* Search Box - expanded to take more space */}
@@ -331,6 +331,12 @@ export const TranscriptsView = memo(function TranscriptsView({
                                 <div key={group.title} className={`transcript-group ${expandedGroups.has(group.title) ? 'expanded' : ''}`}>
                                     <div className="transcript-group-header">
                                         <div className="group-header-left">
+                                            <button 
+                                                className="group-toggle-btn"
+                                                onClick={() => toggleGroup(group.title)}
+                                            >
+                                                <ChevronDown size={16} className="chevron-icon" />
+                                            </button>
                                             <input
                                                 type="checkbox"
                                                 className="group-checkbox"
@@ -341,12 +347,6 @@ export const TranscriptsView = memo(function TranscriptsView({
                                                     toggleTranscriptGroupSelection(allGroupIds);
                                                 }}
                                             />
-                                            <button 
-                                                className="group-toggle-btn"
-                                                onClick={() => toggleGroup(group.title)}
-                                            >
-                                                <ChevronDown size={16} className="chevron-icon" />
-                                            </button>
                                             <h3 
                                                 className="transcript-group-title"
                                                 onClick={() => toggleGroup(group.title)}
