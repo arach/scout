@@ -162,12 +162,13 @@ export const DictionaryView: React.FC<DictionaryViewProps> = ({ isExpanded, onTo
                 <span className={`collapse-arrow ${isExpanded ? 'expanded' : ''}`}>
                   ▶
                 </span>
-                Text Dictionary <Book size={16} className="dictionary-icon" />
+                Text Dictionary
               </h3>
               <p className="collapsible-subtitle">
                 Automatically replace text patterns in your transcripts
               </p>
             </div>
+            <Book size={16} className="dictionary-icon" />
           </div>
           {isExpanded && (
             <div className="dictionary-header-actions">

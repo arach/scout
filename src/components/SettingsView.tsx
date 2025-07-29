@@ -1,12 +1,13 @@
 import React, { memo, useState, useRef, useEffect, lazy, Suspense } from 'react';
-import { Sparkles, FolderOpen, Brain } from 'lucide-react';
+import { Sparkles, FolderOpen, Brain, Palette } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useSettings } from '../contexts/SettingsContext';
+import { RecordingOutputSettings } from './settings/RecordingOutputSettings';
 import { ShortcutSettings } from './settings/ShortcutSettings';
-import { ClipboardSettings } from './settings/ClipboardSettings';
 import { SoundSettings } from './settings/SoundSettings';
 import { UISettings } from './settings/UISettings';
-import { DictionaryView } from './DictionaryView';
+import { AppearanceSettings } from './settings/AppearanceSettings';
+import './settings/CollapsibleSection.css';
 import '../styles/grid-system.css';
 
 // Lazy load heavy components
@@ -17,10 +18,10 @@ export const SettingsView = memo(function SettingsView() {
   const { state, actions } = useSettings();
   const [isModelManagerExpanded, setIsModelManagerExpanded] = useState(false);
   const [isLLMSettingsExpanded, setIsLLMSettingsExpanded] = useState(false);
-  const [isDictionaryExpanded, setIsDictionaryExpanded] = useState(false);
+  const [isAppearanceExpanded, setIsAppearanceExpanded] = useState(false);
   const modelSectionRef = useRef<HTMLDivElement>(null);
   const llmSectionRef = useRef<HTMLDivElement>(null);
-  const dictionarySectionRef = useRef<HTMLDivElement>(null);
+  const appearanceSectionRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (isModelManagerExpanded && modelSectionRef.current) {
@@ -45,15 +46,16 @@ export const SettingsView = memo(function SettingsView() {
   }, [isLLMSettingsExpanded]);
 
   useEffect(() => {
-    if (isDictionaryExpanded && dictionarySectionRef.current) {
+    if (isAppearanceExpanded && appearanceSectionRef.current) {
       setTimeout(() => {
-        dictionarySectionRef.current?.scrollIntoView({ 
+        appearanceSectionRef.current?.scrollIntoView({ 
           behavior: 'smooth', 
           block: 'nearest'
         });
       }, 100);
     }
-  }, [isDictionaryExpanded]);
+  }, [isAppearanceExpanded]);
+
 
   const openModelsFolder = async () => {
     try {
@@ -66,8 +68,8 @@ export const SettingsView = memo(function SettingsView() {
   return (
     <div className="grid-container">
       <div className="grid-content grid-content--settings">
+        <RecordingOutputSettings />
         <ShortcutSettings />
-        <ClipboardSettings />
         <SoundSettings />
         <UISettings />
 
@@ -84,7 +86,8 @@ export const SettingsView = memo(function SettingsView() {
                     <span className={`collapse-arrow ${isModelManagerExpanded ? 'expanded' : ''}`}>
                       ▶
                     </span>
-                    Transcription Models (AI) <Sparkles size={16} className="sparkle-icon" />
+                    Transcription Models
+                    <Sparkles size={16} className="sparkle-icon" />
                   </h3>
                   <p className="collapsible-subtitle">
                     Download and manage AI models for transcription
@@ -100,14 +103,14 @@ export const SettingsView = memo(function SettingsView() {
                 Open Models Folder
               </button>
             </div>
+            {isModelManagerExpanded && (
+              <div className="collapsible-content">
+                <Suspense fallback={<div>Loading model manager...</div>}>
+                  <ModelManager />
+                </Suspense>
+              </div>
+            )}
           </div>
-          {isModelManagerExpanded && (
-            <div className="collapsible-content">
-              <Suspense fallback={<div>Loading model manager...</div>}>
-                <ModelManager />
-              </Suspense>
-            </div>
-          )}
         </div>
 
         {/* LLM Settings - Full Width Collapsible */}
@@ -123,11 +126,8 @@ export const SettingsView = memo(function SettingsView() {
                     <span className={`collapse-arrow ${isLLMSettingsExpanded ? 'expanded' : ''}`}>
                       ▶
                     </span>
-                    AI Processing
-                    <span className="ai-badge">
-                      (AI)
-                      <Brain size={16} className="sparkle-icon" />
-                    </span>
+                    Post-processing
+                    <Brain size={16} className="sparkle-icon" />
                   </h3>
                   <p className="collapsible-subtitle">
                     Enhance transcripts with summaries and insights
@@ -135,26 +135,49 @@ export const SettingsView = memo(function SettingsView() {
                 </div>
               </div>
             </div>
+            {isLLMSettingsExpanded && (
+              <div className="collapsible-content">
+                <Suspense fallback={<div>Loading LLM settings...</div>}>
+                  <LLMSettings 
+                    settings={state.llm}
+                    onUpdateSettings={actions.updateLLMSettings}
+                  />
+                </Suspense>
+              </div>
+            )}
           </div>
-          {isLLMSettingsExpanded && (
-            <div className="collapsible-content">
-              <Suspense fallback={<div>Loading LLM settings...</div>}>
-                <LLMSettings 
-                  settings={state.llm}
-                  onUpdateSettings={actions.updateLLMSettings}
-                />
-              </Suspense>
-            </div>
-          )}
         </div>
 
-        {/* Dictionary - Full Width Collapsible */}
-        <div className="settings-section model-manager-full-width" ref={dictionarySectionRef}>
-          <DictionaryView 
-            isExpanded={isDictionaryExpanded}
-            onToggleExpand={() => setIsDictionaryExpanded(!isDictionaryExpanded)}
-          />
+        {/* Appearance - Full Width Collapsible */}
+        <div className="settings-section model-manager-full-width" ref={appearanceSectionRef}>
+          <div className="collapsible-section">
+            <div className="collapsible-header-wrapper">
+              <div 
+                className="collapsible-header"
+                onClick={() => setIsAppearanceExpanded(!isAppearanceExpanded)}
+              >
+                <div>
+                  <h3>
+                    <span className={`collapse-arrow ${isAppearanceExpanded ? 'expanded' : ''}`}>
+                      ▶
+                    </span>
+                    Appearance
+                    <Palette size={16} className="sparkle-icon" />
+                  </h3>
+                  <p className="collapsible-subtitle">
+                    Choose your visual theme and display preferences
+                  </p>
+                </div>
+              </div>
+            </div>
+            {isAppearanceExpanded && (
+              <div className="collapsible-content">
+                <AppearanceSettings />
+              </div>
+            )}
+          </div>
         </div>
+
       </div>
     </div>
   );

@@ -30,6 +30,7 @@
   --accent-primary: #3b82f6;
   --accent-hover: #2563eb;
   --accent-active: #1d4ed8;
+  --accent-bg: rgba(59, 130, 246, 0.1);
   
   /* Border colors - Set by theme */
   --border-primary: #e5e7eb;

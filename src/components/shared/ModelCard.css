@@ -1,27 +1,10 @@
-.model-manager {
-  padding: 0;
-}
+/* Shared Model Card Component Styles
+   ===================================
+   Consistent design system for model cards across
+   both transcription and post-processing models
+*/
 
-
-.model-manager-loading {
-  text-align: center;
-  padding: 40px;
-  color: var(--text-muted);
-}
-
-.model-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.model-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
-  width: 100%;
-}
-
+/* Base card styling */
 .model-card {
   background: var(--bg-secondary);
   border: 1px solid var(--border-primary);
@@ -45,13 +28,13 @@
   background: var(--accent-bg);
 }
 
+/* Header section */
 .model-card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
 }
-
 
 .model-name {
   margin: 0;
@@ -60,32 +43,46 @@
   color: var(--text-primary);
 }
 
+/* Status badges - positioned in top-right */
 .model-status {
+  position: absolute;
+  top: 16px;
+  right: 16px;
   display: flex;
   align-items: center;
+  gap: 8px;
+}
+
+.model-badge {
+  display: inline-flex;
+  align-items: center;
   gap: 4px;
+  padding: 4px 10px;
+  border-radius: 6px;
   font-size: 12px;
   font-weight: 500;
-  padding: 2px 8px;
-  border-radius: 6px;
+  transition: all 0.2s ease;
+  white-space: nowrap;
 }
 
-.model-status.active {
-  color: var(--success);
-  background: rgba(22, 130, 93, 0.1);
+.model-badge.active {
+  background: var(--success);
+  color: white;
 }
 
-.model-status.included {
-  color: rgba(0, 0, 0, 0.4);
-  background: rgba(0, 0, 0, 0.04);
-  font-size: 11px;
+.model-badge.included {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-primary);
 }
 
-.model-status.good {
-  color: #16a34a;
-  background: rgba(22, 163, 74, 0.1);
+.model-badge.recommended {
+  background: var(--accent-bg);
+  color: var(--accent-primary);
+  border: 1px solid rgba(59, 130, 246, 0.3);
 }
 
+/* Model details/specs */
 .model-details {
   display: flex;
   flex-direction: column;
@@ -105,6 +102,7 @@
   flex-shrink: 0;
 }
 
+/* Action buttons - positioned in top-right when no status badge */
 .model-actions {
   position: absolute;
   top: 16px;
@@ -114,14 +112,15 @@
   gap: 8px;
 }
 
-.btn {
+/* Shared button styles */
+.model-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 14px;
+  padding: 6px 12px;
   border: none;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -129,80 +128,53 @@
   justify-content: center;
 }
 
-.btn:disabled {
+.model-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.btn-primary {
+.model-btn-primary {
   background: var(--accent-primary);
   color: white;
 }
 
-.btn-primary:hover:not(:disabled) {
+.model-btn-primary:hover:not(:disabled) {
   background: var(--accent-hover);
 }
 
-.btn-secondary {
+.model-btn-secondary {
   background: rgba(0, 0, 0, 0.05);
   color: var(--text-primary);
   border: 1px solid rgba(0, 0, 0, 0.08);
 }
 
-.btn-secondary:hover:not(:disabled) {
+.model-btn-secondary:hover:not(:disabled) {
   background: var(--bg-hover);
   border-color: var(--border-secondary);
 }
 
-.model-active-badge {
-  font-size: 11px;
-  color: var(--text-success);
-  background: var(--bg-success);
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-weight: 600;
-  text-transform: uppercase;
-}
-
-.model-quality-badge {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-weight: 600;
-  text-transform: uppercase;
-}
-
-.model-quality-badge.included {
-  color: var(--text-secondary);
-  background: var(--bg-tertiary);
-}
-
-.model-quality-badge.good {
-  color: var(--accent-primary);
-  background: var(--accent-bg);
-}
-
-.download-progress {
+/* Download progress */
+.model-download-progress {
   display: flex;
   flex-direction: column;
   gap: 4px;
   min-width: 120px;
 }
 
-.progress-bar {
+.model-progress-bar {
   height: 6px;
   background: var(--bg-tertiary);
   border-radius: 3px;
   overflow: hidden;
 }
 
-.progress-fill {
+.model-progress-fill {
   height: 100%;
   background: var(--accent-primary);
   transition: width 0.3s ease;
 }
 
-.progress-text {
+.model-progress-text {
   font-size: 12px;
   color: var(--text-muted);
   text-align: center;
@@ -226,25 +198,40 @@
     background: rgba(79, 70, 229, 0.1);
   }
   
-  .btn-secondary {
+  .model-btn-secondary {
     background: rgba(255, 255, 255, 0.08);
     border-color: rgba(255, 255, 255, 0.1);
   }
   
-  .btn-secondary:hover:not(:disabled) {
+  .model-btn-secondary:hover:not(:disabled) {
     background: rgba(255, 255, 255, 0.12);
     border-color: rgba(255, 255, 255, 0.15);
   }
   
-  .model-status.included {
-    color: rgba(255, 255, 255, 0.3);
-    background: rgba(255, 255, 255, 0.03);
+  .model-badge.included {
+    color: rgba(255, 255, 255, 0.4);
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.1);
   }
   
-  .model-status.good {
+  .model-badge.recommended {
     color: #22c55e;
     background: rgba(34, 197, 94, 0.15);
+    border-color: rgba(34, 197, 94, 0.3);
   }
+  
+  .model-badge.active {
+    background: #22c55e;
+    color: white;
+  }
+}
+
+/* Grid layout for model cards */
+.model-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  width: 100%;
 }
 
 /* Minimal theme specific adjustments */
@@ -258,30 +245,30 @@
   border-color: var(--border-hover);
 }
 
-[data-theme="minimal-overlay"] .btn-primary {
+[data-theme="minimal-overlay"] .model-btn-primary {
   background: var(--accent-primary);
   color: white;
   border: 1px solid var(--accent-primary);
 }
 
-[data-theme="minimal-overlay"] .btn-primary:hover:not(:disabled) {
+[data-theme="minimal-overlay"] .model-btn-primary:hover:not(:disabled) {
   background: var(--accent-hover);
   border-color: var(--accent-hover);
 }
 
-[data-theme="minimal-overlay"] .btn-secondary {
+[data-theme="minimal-overlay"] .model-btn-secondary {
   background: transparent;
   color: var(--text-primary);
   border: 1px solid var(--border-primary);
 }
 
-[data-theme="minimal-overlay"] .btn-secondary:hover:not(:disabled) {
+[data-theme="minimal-overlay"] .model-btn-secondary:hover:not(:disabled) {
   background: var(--bg-hover);
   border-color: var(--border-hover);
   color: var(--text-primary);
 }
 
-[data-theme="minimal-overlay"] .model-status.good {
+[data-theme="minimal-overlay"] .model-badge.recommended {
   color: var(--text-success);
   background: rgba(81, 207, 102, 0.15);
 }

@@ -1,0 +1,129 @@
+/* Sound Settings specific styles */
+
+.sound-settings-wrapper {
+  position: relative;
+}
+
+.settings-section-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.settings-section-header {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+/* Sound flow should be horizontal and compact */
+.sound-flow-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.sound-flow-container {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+
+.sound-flow-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 120px;
+}
+
+.sound-flow-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--secondary-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.sound-flow-arrow {
+  color: var(--muted-foreground);
+  font-size: 16px;
+  padding: 0 4px;
+  align-self: flex-end;
+  margin-bottom: 8px;
+}
+
+/* Preview button styling */
+.preview-sound-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--button-bg);
+  color: var(--button-foreground);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.preview-sound-button:hover:not(:disabled) {
+  background: var(--button-hover-bg);
+  border-color: var(--border-hover);
+}
+
+.preview-sound-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.preview-sound-button.playing {
+  background: var(--accent);
+  color: var(--accent-foreground);
+  border-color: var(--accent);
+}
+
+/* Adjust dropdown styling for compact layout */
+.sound-flow-item .dropdown {
+  min-width: 120px;
+  max-width: 140px;
+}
+
+/* Animation for playing state */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Threshold slider styling */
+.threshold-setting {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.range-input-container {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.range-input-container input[type="range"] {
+  flex: 1;
+  max-width: 300px;
+}
+
+.range-value-display {
+  min-width: 40px;
+  font-weight: 500;
+  color: var(--secondary-foreground);
+}

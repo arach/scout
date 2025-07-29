@@ -1,7 +1,6 @@
 import React, { memo } from 'react';
 import { useSettings } from '../../contexts/SettingsContext';
 import { Dropdown } from '../Dropdown';
-import { ThemeSelector } from '../ThemeSelector';
 import { 
   ArrowUpLeft, ArrowUp, ArrowUpRight, 
   ArrowLeft, ArrowRight, 
@@ -16,7 +15,7 @@ export const UISettings = memo(function UISettings() {
     <div className="settings-section">
       <div className="settings-two-column">
         <div className="setting-item">
-          <label>Overlay Position</label>
+          <label>Recording Indicator Position</label>
           <div className="overlay-position-grid">
             <button
               className={`position-button ${ui.overlayPosition === 'top-left' ? 'active' : ''}`}
@@ -84,7 +83,7 @@ export const UISettings = memo(function UISettings() {
         </div>
         
         <div className="setting-item">
-          <label>Overlay Treatment</label>
+          <label>Recording Indicator Style</label>
           <Dropdown
             value={ui.overlayTreatment}
             onChange={actions.updateOverlayTreatment}
@@ -98,15 +97,8 @@ export const UISettings = memo(function UISettings() {
             style={{ width: '100%' }}
           />
           <p className="setting-hint">
-            Visual style of the recording indicator
+            Choose how the recording indicator looks while recording
           </p>
-        </div>
-        
-        <div className="setting-item">
-          <ThemeSelector 
-            currentTheme={ui.selectedTheme}
-            onThemeChange={actions.updateSelectedTheme}
-          />
         </div>
       </div>
     </div>

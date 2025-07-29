@@ -2,6 +2,7 @@ import React, { memo, useState, useEffect } from 'react';
 import { useSettings } from '../../contexts/SettingsContext';
 import { Dropdown } from '../Dropdown';
 import { invoke } from '@tauri-apps/api/core';
+import './SoundSettings.css';
 
 export const SoundSettings = memo(function SoundSettings() {
   const { state, actions } = useSettings();

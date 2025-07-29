@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { safeEventListen } from '../lib/safeEventListener';
 import { BarChart3, Gauge, Package, CheckCircle, Sparkles, Download } from 'lucide-react';
 import './ModelManager.css';
+import './shared/ModelCard.css';
 
 interface WhisperModel {
   id: string;
@@ -160,8 +161,8 @@ export const ModelManager: React.FC = () => {
               qualityLabel = 'Included';
               qualityClass = 'included';
             } else if (model.id === 'base.en') {
-              qualityLabel = 'Good';
-              qualityClass = 'good';
+              qualityLabel = 'Recommended';
+              qualityClass = 'recommended';
             }
           }
           
@@ -169,80 +170,81 @@ export const ModelManager: React.FC = () => {
             <div key={model.id} className={`model-card ${model.active ? 'active' : ''}`}>
               <div className="model-card-header">
                 <h3 className="model-name">{model.name}</h3>
-                {model.active && (
-                  <div className="model-status active">
-                    <CheckCircle size={14} />
-                    <span>Active</span>
-                  </div>
-                )}
-                {qualityLabel && !model.active && (
-                  <div className={`model-status ${qualityClass}`}>
-                    <Sparkles size={14} />
-                    <span>{qualityLabel}</span>
-                  </div>
-                )}
               </div>
-
+              
+              {/* Status badges positioned in top-right */}
+              {model.active && (
+                <div className="model-status">
+                  <span className="model-badge active">
+                    <CheckCircle size={12} />
+                    Active
+                  </span>
+                </div>
+              )}
+              
+              {qualityLabel && !model.active && model.downloaded && (
+                <div className="model-status">
+                  <span className={`model-badge ${qualityClass}`}>
+                    {qualityLabel}
+                  </span>
+                </div>
+              )}
+              
               <div className="model-details">
                 <div className="model-stat">
-                  <Gauge size={14} className="stat-icon" />
+                  <Gauge size={12} className="stat-icon" />
                   <span>Speed: {model.speed}</span>
                 </div>
                 <div className="model-stat">
-                  <BarChart3 size={14} className="stat-icon" />
+                  <BarChart3 size={12} className="stat-icon" />
                   <span>Accuracy: {model.accuracy}</span>
                 </div>
                 <div className="model-stat">
-                  <Package size={14} className="stat-icon" />
+                  <Package size={12} className="stat-icon" />
                   <span>Size: {formatSize(model.size_mb)}</span>
                 </div>
               </div>
               
-              <div className="model-actions">
-                {!model.downloaded && !isDownloading && (
+              {/* Action buttons positioned in top-right */}
+              {!model.downloaded && !isDownloading && (
+                <div className="model-actions">
                   <button 
-                    className="btn btn-primary"
+                    className="model-btn model-btn-primary"
                     onClick={() => downloadModel(model)}
                   >
-                    <Download size={14} />
+                    <Download size={12} />
                     <span>Download</span>
                   </button>
-                )}
-                
-                {isDownloading && (
-                  <div className="download-progress">
-                    <div className="progress-bar">
+                </div>
+              )}
+              
+              {isDownloading && (
+                <div className="model-actions">
+                  <div className="model-download-progress">
+                    <div className="model-progress-bar">
                       <div 
-                        className="progress-fill"
+                        className="model-progress-fill"
                         style={{ width: `${progress.progress}%` }}
                       />
                     </div>
-                    <span className="progress-text">
+                    <span className="model-progress-text">
                       {progress.downloadedMb.toFixed(1)} / {progress.totalMb.toFixed(1)} MB
                     </span>
                   </div>
-                )}
-                
-                {model.downloaded && !model.active && (
+                </div>
+              )}
+              
+              {model.downloaded && !model.active && (
+                <div className="model-actions">
                   <button 
-                    className="btn btn-secondary"
+                    className="model-btn model-btn-secondary"
                     onClick={() => setActiveModel(model.id)}
                   >
-                    <CheckCircle size={14} />
+                    <CheckCircle size={12} />
                     <span>Use Model</span>
                   </button>
-                )}
-                
-                {model.downloaded && model.active && (
-                  <button 
-                    className="btn btn-secondary"
-                    disabled
-                  >
-                    <CheckCircle size={14} />
-                    <span>Already Active</span>
-                  </button>
-                )}
-              </div>
+                </div>
+              )}
             </div>
           );
         })}

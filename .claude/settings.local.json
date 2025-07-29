@@ -89,8 +89,20 @@
       "Bash(git worktree:*)",
       "Bash(sips:*)",
       "Bash(osascript:*)",
-      "Bash(system_profiler:*)"
+      "Bash(system_profiler:*)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "mcp__peekaboo__see",
+      "mcp__peekaboo__click",
+      "Bash(ANALYZE=true pnpm build)",
+      "mcp__peekaboo__app",
+      "Bash(screencapture:*)",
+      "mcp__peekaboo__sleep",
+      "mcp__peekaboo__analyze"
     ],
     "deny": []
-  }
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "peekaboo"
+  ]
 }
