@@ -211,16 +211,13 @@ export const TranscriptsView = memo(function TranscriptsView({
     
     return (
         <div className="grid-container">
-            {/* 🧠 CSS Grid with specific column sizing */}
+            {/* 🧠 CSS Grid with search and action buttons */}
             <div className="header-grid mb-4">
-                {/* Left: Title */}
-                <h1 className="text-2xl font-semibold text-white m-0">Transcripts</h1>
-                
-                {/* Center: Search Box */}
-                <div className="search-container">
+                {/* Search Box - expanded to take more space */}
+                <div className="search-container-expanded">
                     <input
                         type="text"
-                        className="search-input"
+                        className="search-input-expanded"
                         placeholder="Search transcripts..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
@@ -228,7 +225,7 @@ export const TranscriptsView = memo(function TranscriptsView({
                     />
                 </div>
                 
-                {/* Right: Action Buttons */}
+                {/* Action Buttons */}
                 <div className="header-actions-container">
                     {transcripts.length > 0 && (
                         <>
