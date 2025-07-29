@@ -773,7 +773,7 @@ async fn check_microphone_permission() -> Result<String, String> {
     // If we can enumerate devices, we likely have permission
     #[cfg(target_os = "macos")]
     {
-        use cpal::traits::{HostTrait, DeviceTrait};
+        use cpal::traits::HostTrait;
         
         let host = cpal::default_host();
         match host.default_input_device() {
@@ -927,6 +927,14 @@ async fn set_success_sound(sound: String) -> Result<(), String> {
 #[tauri::command]
 async fn preview_sound_flow() -> Result<(), String> {
     sound::SoundPlayer::preview_sound_flow().await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn update_completion_sound_threshold(state: State<'_, AppState>, threshold_ms: i32) -> Result<(), String> {
+    let mut settings = state.settings.lock().await;
+    settings.update(|s| s.ui.completion_sound_threshold_ms = threshold_ms as u64)
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
     Ok(())
 }
 
@@ -1576,84 +1584,208 @@ struct RecordingStats {
 }
 
 #[tauri::command]
+async fn generate_sample_data(state: State<'_, AppState>) -> Result<String, String> {
+    use chrono::{DateTime, Datelike, Local, Duration, Timelike, Weekday};
+    use std::collections::HashMap;
+    
+    eprintln!("Generating sample transcript data...");
+    
+    let now = Local::now();
+    let mut generated_count = 0;
+    
+    // Generate data for the past 180 days (6 months)
+    for days_ago in 0..180 {
+        let date = now - Duration::days(days_ago);
+        
+        // Skip some days to create realistic streaks and gaps
+        let skip_chance = match date.weekday() {
+            Weekday::Sat | Weekday::Sun => 0.7, // 70% chance to skip weekends
+            _ => 0.2, // 20% chance to skip weekdays
+        };
+        
+        // Use date as seed for consistent randomness
+        let date_seed = (date.day() * date.month() * ((days_ago + 1) as u32)) as f32;
+        if (date_seed % 100.0) / 100.0 < skip_chance {
+            continue;
+        }
+        
+        // Determine number of recordings for this day
+        let base_recordings = match date.weekday() {
+            Weekday::Mon | Weekday::Wed | Weekday::Fri => 3..=7, // Busy days
+            Weekday::Tue | Weekday::Thu => 2..=5, // Normal days
+            Weekday::Sat | Weekday::Sun => 1..=3, // Weekend
+        };
+        
+        let num_recordings = ((date_seed as usize % 5) + base_recordings.start()) 
+            .min(*base_recordings.end());
+        
+        // Generate recordings throughout the day
+        for recording_num in 0..num_recordings {
+            // Distribute recordings during work hours (9am-6pm) with some variation
+            let hour = match recording_num % 5 {
+                0 => 9 + (date_seed as u32 % 2), // Morning (9-10am)
+                1 => 11 + (date_seed as u32 % 2), // Late morning (11am-12pm)
+                2 => 14 + (date_seed as u32 % 2), // Afternoon (2-3pm)
+                3 => 16 + (date_seed as u32 % 2), // Late afternoon (4-5pm)
+                _ => 10 + (date_seed as u32 % 8), // Random throughout day
+            };
+            
+            let minute = (date_seed as u32 * ((recording_num + 1) as u32)) % 60;
+            
+            // Vary duration based on time of day
+            let duration_ms = match hour {
+                9..=11 => 60000 + ((date_seed as i32 * 1000) % 180000), // 1-4 minutes morning
+                14..=16 => 120000 + ((date_seed as i32 * 1500) % 240000), // 2-6 minutes afternoon
+                _ => 90000 + ((date_seed as i32 * 800) % 150000), // 1.5-4 minutes other times
+            };
+            
+            // Calculate approximate words (150-200 words per minute)
+            let words_per_minute = 150 + ((date_seed as i32) % 50);
+            let words = (duration_ms / 60000) * words_per_minute;
+            
+            // Create sample text
+            let text = format!(
+                "Sample recording from {} at {}:{:02}. This is recording {} of {} for the day. \
+                The recording lasted {} seconds and contains approximately {} words of transcribed content. \
+                This demonstrates typical usage patterns with varying activity levels throughout the week.",
+                date.format("%A, %B %d, %Y"),
+                hour,
+                minute,
+                recording_num + 1,
+                num_recordings,
+                duration_ms / 1000,
+                words
+            );
+            
+            // Set created_at timestamp
+            let created_at = date
+                .with_hour(hour)
+                .unwrap()
+                .with_minute(minute)
+                .unwrap()
+                .with_second(0)
+                .unwrap()
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string();
+            
+            // Save to database  
+            match state.database.save_transcript_with_timestamp(&text, duration_ms, None, None, &created_at).await {
+                Ok(_) => generated_count += 1,
+                Err(e) => eprintln!("Failed to create sample transcript: {}", e),
+            }
+        }
+    }
+    
+    Ok(format!("Generated {} sample transcripts over 180 days", generated_count))
+}
+
+#[tauri::command]
 async fn get_recording_stats(state: State<'_, AppState>) -> Result<RecordingStats, String> {
-    use chrono::{DateTime, Datelike, Local, NaiveDate, TimeZone, Timelike, Weekday};
+    use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, TimeZone, Timelike, Weekday, Duration};
     use std::collections::HashMap;
     
     // Log the start of the function
     eprintln!("get_recording_stats called");
-    
-    // First, let's return simple mock data to test if the frontend is working
-    return Ok(RecordingStats {
-        total_recordings: 5,
-        total_duration: 300000, // 5 minutes in ms
-        total_words: 1234,
-        current_streak: 3,
-        longest_streak: 7,
-        average_daily: 2.5,
-        most_active_day: "Monday".to_string(),
-        most_active_hour: 14,
-        daily_activity: vec![
-            DayActivity {
-                date: "2025-01-01".to_string(),
-                count: 2,
-                duration_ms: 120000,
-                words: 500,
-            },
-            DayActivity {
-                date: "2025-01-02".to_string(),
-                count: 3,
-                duration_ms: 180000,
-                words: 734,
-            },
-        ],
-        weekly_distribution: vec![
-            ("Mon".to_string(), 5),
-            ("Tue".to_string(), 3),
-            ("Wed".to_string(), 7),
-            ("Thu".to_string(), 2),
-            ("Fri".to_string(), 4),
-            ("Sat".to_string(), 1),
-            ("Sun".to_string(), 0),
-        ],
-        hourly_distribution: vec![
-            (9, 2),
-            (10, 5),
-            (11, 3),
-            (14, 8),
-            (15, 6),
-            (16, 4),
-        ],
-    });
     
     // Get all transcripts to calculate stats
     let all_transcripts = state.database.get_recent_transcripts(10000).await?;
     eprintln!("Found {} transcripts", all_transcripts.len());
     
     if all_transcripts.is_empty() {
-        eprintln!("Returning empty stats");
+        eprintln!("No transcripts found, returning demo data...");
+        
+        // Return demo data for visualization
+        let now = Local::now();
+        let mut daily_activity = Vec::new();
+        let mut weekly_dist = HashMap::new();
+        let mut hourly_dist = HashMap::new();
+        
+        // Generate activity for the past 90 days
+        for days_ago in 0..90 {
+            let date = now - Duration::days(days_ago);
+            let date_str = date.format("%Y-%m-%d").to_string();
+            
+            // Vary activity based on day of week
+            let (count, duration, words) = match date.weekday() {
+                Weekday::Sat | Weekday::Sun => {
+                    // Weekends: less activity
+                    if days_ago % 3 == 0 {
+                        (1, 60000 + (days_ago as i32 * 1000) % 120000, 200 + (days_ago as i32 * 10) % 300)
+                    } else {
+                        (0, 0, 0)
+                    }
+                }
+                _ => {
+                    // Weekdays: more activity
+                    let base_count = 2 + (days_ago % 3) as i32;
+                    let base_duration = 120000 + (days_ago as i32 * 2000) % 180000;
+                    let base_words = 400 + (days_ago as i32 * 20) % 500;
+                    (base_count, base_duration, base_words)
+                }
+            };
+            
+            if count > 0 {
+                daily_activity.push(DayActivity {
+                    date: date_str,
+                    count,
+                    duration_ms: duration as i64,
+                    words: words as i64,
+                });
+                
+                // Update weekly distribution
+                let weekday = match date.weekday() {
+                    Weekday::Mon => "Mon",
+                    Weekday::Tue => "Tue",
+                    Weekday::Wed => "Wed",
+                    Weekday::Thu => "Thu",
+                    Weekday::Fri => "Fri",
+                    Weekday::Sat => "Sat",
+                    Weekday::Sun => "Sun",
+                }.to_string();
+                *weekly_dist.entry(weekday).or_insert(0) += count;
+                
+                // Update hourly distribution (simulate activity between 9am-6pm)
+                let hour = (9 + (days_ago % 10)) as i32;
+                *hourly_dist.entry(hour).or_insert(0) += count;
+            }
+        }
+        
+        // Convert to sorted vectors
+        let mut weekly_distribution: Vec<(String, i32)> = vec![
+            ("Mon".to_string(), *weekly_dist.get("Mon").unwrap_or(&0)),
+            ("Tue".to_string(), *weekly_dist.get("Tue").unwrap_or(&0)),
+            ("Wed".to_string(), *weekly_dist.get("Wed").unwrap_or(&0)),
+            ("Thu".to_string(), *weekly_dist.get("Thu").unwrap_or(&0)),
+            ("Fri".to_string(), *weekly_dist.get("Fri").unwrap_or(&0)),
+            ("Sat".to_string(), *weekly_dist.get("Sat").unwrap_or(&0)),
+            ("Sun".to_string(), *weekly_dist.get("Sun").unwrap_or(&0)),
+        ];
+        
+        let mut hourly_distribution: Vec<(i32, i32)> = hourly_dist.into_iter().collect();
+        hourly_distribution.sort_by_key(|&(hour, _)| hour);
+        
+        // Calculate totals and streaks
+        let total_recordings = daily_activity.iter().map(|d| d.count).sum();
+        let total_duration = daily_activity.iter().map(|d| d.duration_ms).sum();
+        let total_words = daily_activity.iter().map(|d| d.words).sum();
+        
         return Ok(RecordingStats {
-            total_recordings: 0,
-            total_duration: 0,
-            total_words: 0,
-            current_streak: 0,
-            longest_streak: 0,
-            average_daily: 0.0,
-            most_active_day: "Monday".to_string(),
-            most_active_hour: 0,
-            daily_activity: vec![],
-            weekly_distribution: vec![
-                ("Monday".to_string(), 0),
-                ("Tuesday".to_string(), 0),
-                ("Wednesday".to_string(), 0),
-                ("Thursday".to_string(), 0),
-                ("Friday".to_string(), 0),
-                ("Saturday".to_string(), 0),
-                ("Sunday".to_string(), 0),
-            ],
-            hourly_distribution: (0..24).map(|h| (h, 0)).collect(),
+            total_recordings,
+            total_duration,
+            total_words,
+            current_streak: 3,
+            longest_streak: 12,
+            average_daily: total_recordings as f64 / 90.0,
+            most_active_day: "Wednesday".to_string(),
+            most_active_hour: 14,
+            daily_activity,
+            weekly_distribution,
+            hourly_distribution,
         });
     }
+    
+    // If we have real data, process it normally...
+    eprintln!("Processing {} real transcripts", all_transcripts.len());
     
     // Calculate basic stats
     let total_recordings = all_transcripts.len() as i32;
@@ -1671,11 +1803,14 @@ async fn get_recording_stats(state: State<'_, AppState>) -> Result<RecordingStat
         // Parse created_at timestamp
         let created_at = if let Ok(dt) = DateTime::parse_from_rfc3339(&transcript.created_at) {
             dt.with_timezone(&Local)
+        } else if let Ok(naive_dt) = NaiveDateTime::parse_from_str(&transcript.created_at, "%Y-%m-%d %H:%M:%S") {
+            Local.from_local_datetime(&naive_dt).single()
+                .ok_or_else(|| format!("Ambiguous local time: {}", transcript.created_at))?
         } else if let Ok(naive_dt) = transcript.created_at.parse::<chrono::NaiveDateTime>() {
             Local.from_local_datetime(&naive_dt).single()
                 .ok_or_else(|| format!("Ambiguous local time: {}", transcript.created_at))?
         } else {
-            return Err(format!("Failed to parse timestamp: {}", transcript.created_at));
+            return Err(format!("Failed to parse timestamp: {} (expected RFC3339 or YYYY-MM-DD HH:MM:SS format)", transcript.created_at));
         };
         
         let date_str = created_at.format("%Y-%m-%d").to_string();
@@ -2292,6 +2427,7 @@ pub fn run() {
             set_stop_sound,
             set_success_sound,
             preview_sound_flow,
+            update_completion_sound_threshold,
             get_current_shortcut,
             transcribe_file,
             get_available_models,
@@ -2335,7 +2471,8 @@ pub fn run() {
             delete_dictionary_entry,
             get_dictionary_matches_for_transcript,
             test_dictionary_replacement,
-            get_recording_stats
+            get_recording_stats,
+            generate_sample_data
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

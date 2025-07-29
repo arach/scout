@@ -31,8 +31,12 @@ impl RingBufferRecorder {
         // Calculate max samples for 5 minutes of audio
         let max_samples = (spec.sample_rate as usize * spec.channels as usize) * 300;
         
-        info(Component::RingBuffer, &format!("RingBufferRecorder created with spec: channels={}, sample_rate={}, max_samples={}",
-                 spec.channels, spec.sample_rate, max_samples));
+        info(Component::RingBuffer, &format!("RingBufferRecorder created with native format:"));
+        info(Component::RingBuffer, &format!("  Sample Rate: {} Hz (hardware native)", spec.sample_rate));
+        info(Component::RingBuffer, &format!("  Channels: {} ({})", spec.channels,
+            if spec.channels == 1 { "mono" } else if spec.channels == 2 { "stereo" } else { "multi-channel" }));
+        info(Component::RingBuffer, &format!("  Format: {:?} ({} bits)", spec.sample_format, spec.bits_per_sample));
+        info(Component::RingBuffer, &format!("  Buffer: {} max samples ({} seconds)", max_samples, 300));
         
         Ok(Self {
             samples: Arc::new(Mutex::new(VecDeque::new())),
@@ -45,6 +49,7 @@ impl RingBufferRecorder {
     }
     
     /// Add new audio samples to both the ring buffer and the WAV file
+    /// Samples are expected to be in the device's native format (preserved as-is)
     pub fn add_samples(&self, new_samples: &[f32]) -> Result<(), String> {
         let new_sample_count = new_samples.len();
         
@@ -128,7 +133,8 @@ impl RingBufferRecorder {
         Duration::from_secs_f32(duration_secs)
     }
     
-    /// Save a chunk to a WAV file
+    /// Save a chunk to a WAV file in native format
+    /// The chunk will be saved exactly as recorded (no conversion)
     pub fn save_chunk_to_file(
         &self,
         chunk_data: &[f32],
@@ -159,9 +165,10 @@ impl RingBufferRecorder {
         writer.finalize()
             .map_err(|e| format!("Failed to finalize chunk WAV file: {}", e))?;
         
-        debug(Component::RingBuffer, &format!("Saved chunk with {} samples ({} frames) to {:?}", 
+        debug(Component::RingBuffer, &format!("Saved native format chunk: {} samples ({} frames) at {} Hz to {:?}", 
                  chunk_data.len(), 
                  chunk_data.len() / channels,
+                 self.spec.sample_rate,
                  output_path));
         
         Ok(())
@@ -224,7 +231,7 @@ impl RingBufferRecorder {
     }
 }
 
-/// Helper function to save samples to a WAV file
+/// Helper function to save samples to a WAV file in native format
 pub fn save_samples_to_wav(samples: &[f32], path: &Path, spec: WavSpec) -> Result<(), String> {
     let mut writer = WavWriter::create(path, spec)
         .map_err(|e| format!("Failed to create WAV writer: {}", e))?;
@@ -253,14 +260,14 @@ mod tests {
         
         let spec = WavSpec {
             channels: 1,
-            sample_rate: 48000,
+            sample_rate: 48000, // Use a realistic native sample rate for tests
             bits_per_sample: 32,
             sample_format: SampleFormat::Float,
         };
         
         let recorder = RingBufferRecorder::new(spec, &output_path).unwrap();
         
-        // Add 1 second of samples (silence)
+        // Add 1 second of samples (silence) at 48kHz
         let samples: Vec<f32> = vec![0.1; 48000];
         recorder.add_samples(&samples).unwrap();
         
@@ -268,7 +275,7 @@ mod tests {
         
         // Extract first 0.5 seconds
         let chunk = recorder.extract_chunk(Duration::ZERO, Duration::from_millis(500)).unwrap();
-        assert_eq!(chunk.len(), 24000);
+        assert_eq!(chunk.len(), 24000); // 0.5 seconds at 48kHz
         
         // Finalize
         recorder.finalize_recording().unwrap();

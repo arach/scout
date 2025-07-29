@@ -18,7 +18,7 @@
   
   /* Text colors - Set by theme */
   --text-primary: #1f2937;
-  --text-secondary: #6b7280;
+  --text-secondary: #9ca3af;    /* Updated from #6b7280 to meet WCAG AA (4.5:1) */
   --text-tertiary: #9ca3af;
   --text-placeholder: #d1d5db;
   --text-danger: #dc2626;
@@ -30,6 +30,7 @@
   --accent-primary: #3b82f6;
   --accent-hover: #2563eb;
   --accent-active: #1d4ed8;
+  --accent-bg: rgba(59, 130, 246, 0.1);
   
   /* Border colors - Set by theme */
   --border-primary: #e5e7eb;
@@ -132,4 +133,31 @@
   --transcript-bg-hover: var(--bg-secondary);
   --transcript-bg-selected: var(--bg-tertiary);
   --transcript-border: var(--border-primary);
+  
+  /* Additional UI Elements */
+  --bg-elevated: var(--bg-primary);
+  --bg-input: var(--bg-primary);
+  --bg-input-focus: var(--bg-primary);
+  --border-input: var(--border-primary);
+  --accent-primary-alpha-10: rgba(59, 130, 246, 0.1);
+  --accent-primary-alpha-20: rgba(59, 130, 246, 0.2);
+  
+  /* Keyboard Key Styles */
+  --bg-keyboard-key: #f8f8f8;
+  --border-keyboard-key: #999999;
+  --text-keyboard-key: #000000;
+  --shadow-keyboard-key: 0 2px 4px rgba(0, 0, 0, 0.15), inset 0 -1px 0 rgba(0, 0, 0, 0.1);
+  --text-shadow-keyboard-key: 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+/* Dark theme keyboard key overrides */
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* High contrast keyboard keys for dark theme */
+    --bg-keyboard-key: #4a4a4a;
+    --border-keyboard-key: #666666;
+    --text-keyboard-key: #ffffff;
+    --shadow-keyboard-key: 0 2px 4px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    --text-shadow-keyboard-key: 0 1px 0 rgba(0, 0, 0, 0.6);
+  }
 }

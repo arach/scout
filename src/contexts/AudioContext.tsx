@@ -46,7 +46,10 @@ interface AudioProviderProps {
 }
 
 export function AudioProvider({ children }: AudioProviderProps) {
-  const [selectedMic, setSelectedMic] = useState<string>('Default microphone');
+  // Load saved mic from localStorage or default to 'Default microphone'
+  const [selectedMic, setSelectedMic] = useState<string>(() => {
+    return localStorage.getItem('scout-selected-mic') || 'Default microphone';
+  });
   const audioLevelStoreRef = useRef<AudioLevelStore>();
 
   // Create audio level store instance once
@@ -56,6 +59,7 @@ export function AudioProvider({ children }: AudioProviderProps) {
 
   const handleSetSelectedMic = useCallback((mic: string) => {
     setSelectedMic(mic);
+    localStorage.setItem('scout-selected-mic', mic);
   }, []);
 
   const handleSetAudioLevel = useCallback((level: number) => {

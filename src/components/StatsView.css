@@ -1,11 +1,4 @@
-.stats-view {
-  flex: 1;
-  padding: var(--spacing-xl);
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-xl);
-}
+/* Stats view styles now use grid-system.css */
 
 /* Loading state */
 .stats-loading {
@@ -16,6 +9,7 @@
   min-height: 300px;
   gap: var(--spacing-md);
   color: var(--text-secondary);
+  font-size: 14px;
 }
 
 .loading-spinner {
@@ -34,47 +28,122 @@
 /* Empty state */
 .stats-empty {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 300px;
-  color: var(--text-secondary);
+  min-height: 400px;
   text-align: center;
+  gap: 16px;
 }
 
-/* Metrics Grid */
-.stats-metrics {
+.empty-state-icon {
+  color: var(--text-tertiary);
+  opacity: 0.4;
+  margin-bottom: 8px;
+}
+
+.stats-empty h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.stats-empty p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  max-width: 360px;
+}
+
+.generate-sample-button {
+  padding: var(--spacing-sm) var(--spacing-lg);
+  background: var(--accent);
+  color: var(--background-primary);
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.generate-sample-button:hover {
+  background: var(--accent-hover);
+  transform: translateY(-1px);
+}
+
+.generate-sample-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Metrics Section */
+.stats-metrics-container {
+  width: 100%;
+}
+
+/* Primary Metrics */
+.stats-metrics-primary {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--spacing-lg);
+  width: 100%;
+  padding: 0; /* Remove any default padding */
+}
+
+/* Secondary Metrics */
+.stats-metrics-secondary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
   gap: var(--spacing-md);
-  margin-bottom: var(--spacing-md);
+  width: 100%;
+  padding: 0; /* Remove any default padding */
 }
 
 .metric-card {
   background: var(--background-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: var(--spacing-lg);
-  text-align: center;
-  transition: all 0.2s ease;
+  padding: 16px;
+  text-align: left;
+  transition: all 0.15s ease-out;
 }
 
 .metric-card:hover {
   background: var(--background-tertiary);
   border-color: var(--border-hover);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px var(--shadow-color-subtle);
+}
+
+.metric-card.primary {
+  padding: 24px;
 }
 
 .metric-value {
-  font-size: var(--font-size-2xl);
+  font-size: 24px;
   font-weight: 700;
   color: var(--text-primary);
-  margin-bottom: var(--spacing-xs);
+  margin-bottom: 4px;
+  line-height: 1.2;
+}
+
+.metric-value.primary {
+  font-family: 'Silkscreen', monospace;
+  font-size: 32px;
+  font-weight: 400;
+  color: var(--accent-primary);
 }
 
 .metric-label {
-  font-size: var(--font-size-sm);
+  font-size: 14px;
   color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  font-weight: 500;
 }
 
 /* Heatmap Container */
@@ -82,14 +151,52 @@
   background: var(--background-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: var(--spacing-lg);
+  padding: 24px; /* Match metric card padding */
+  width: 100%;
+  overflow: visible; /* Allow content to be fully visible */
 }
 
 .stats-section-title {
-  font-size: var(--font-size-lg);
+  font-size: 18px;
   font-weight: 600;
   color: var(--text-primary);
-  margin-bottom: var(--spacing-md);
+  margin: 0 0 24px 0;
+  padding: 0;
+  letter-spacing: -0.025em;
+}
+
+.heatmap-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.heatmap-header .stats-section-title {
+  margin-bottom: 0;
+}
+
+.generate-sample-button-inline {
+  padding: var(--spacing-xs) var(--spacing-md);
+  background: var(--background-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.generate-sample-button-inline:hover {
+  background: var(--accent);
+  color: var(--background-primary);
+  border-color: var(--accent);
+}
+
+.generate-sample-button-inline:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Heatmap */
@@ -98,67 +205,86 @@
   flex-direction: column;
   gap: var(--spacing-sm);
   font-size: var(--font-size-xs);
+  width: 100%;
+  position: relative;
 }
 
 .heatmap-content {
   display: flex;
   gap: var(--spacing-sm);
-}
-
-.heatmap-weekdays {
-  display: grid;
-  grid-template-rows: repeat(7, 1fr);
-  gap: 2px;
-  margin-right: var(--spacing-xs);
-}
-
-.weekday-label {
-  height: 11px;
-  display: flex;
-  align-items: center;
-  color: var(--text-secondary);
-  font-size: 10px;
+  overflow: visible; /* Allow content to be fully visible */
+  position: relative;
 }
 
 .heatmap-grid {
   display: flex;
   gap: 2px;
-  flex: 1;
+  justify-content: flex-start;
   overflow-x: auto;
-  padding-bottom: var(--spacing-xs);
+  overflow-y: visible; /* Change from hidden to visible */
+  max-width: 100%;
+  padding-bottom: 4px; /* Add small padding to prevent scrollbar overlap */
+}
+
+/* Hide scrollbar but keep functionality */
+.heatmap-grid::-webkit-scrollbar {
+  height: 4px;
+}
+
+.heatmap-grid::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.heatmap-grid::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
+}
+
+.heatmap-grid::-webkit-scrollbar-thumb:hover {
+  background: var(--border-hover);
 }
 
 .heatmap-week {
   display: grid;
-  grid-template-rows: repeat(7, 1fr);
+  grid-template-rows: repeat(7, 13px);
   gap: 2px;
+  height: calc(7 * 13px + 6 * 2px); /* 7 cells + 6 gaps */
 }
 
 .heatmap-day {
-  width: 11px;
-  height: 11px;
+  width: 13px;
+  height: 13px;
   border-radius: 2px;
   cursor: pointer;
   transition: all 0.1s ease;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  box-sizing: border-box;
 }
 
 .heatmap-day.empty {
-  background: transparent;
+  background: var(--background-secondary);
   cursor: default;
+  border: 1px solid rgba(128, 128, 128, 0.2);
+  opacity: 0.3;
 }
 
 .heatmap-day:not(.empty):hover {
-  outline: 1px solid var(--accent);
+  outline: 2px solid var(--accent-primary);
   outline-offset: 1px;
+  transform: scale(1.2);
+  z-index: 10;
 }
 
 /* Heatmap color levels */
 :root {
-  --stats-heatmap-level-0: var(--background-tertiary);
-  --stats-heatmap-level-1: rgba(var(--accent-rgb), 0.25);
-  --stats-heatmap-level-2: rgba(var(--accent-rgb), 0.5);
-  --stats-heatmap-level-3: rgba(var(--accent-rgb), 0.75);
-  --stats-heatmap-level-4: var(--accent);
+  --stats-heatmap-level-0: rgba(128, 128, 128, 0.1);
+  --stats-heatmap-level-1: #9be9a8;
+  --stats-heatmap-level-2: #40c463;
+  --stats-heatmap-level-3: #30a14e;
+  --stats-heatmap-level-4: #216e39;
+  --stats-border-opacity: 0.25;
+  /* Add RGB values for accent color */
+  --accent-rgb: 0, 122, 255; /* Default blue accent */
 }
 
 /* Legend */
@@ -166,9 +292,17 @@
   display: flex;
   align-items: center;
   gap: var(--spacing-sm);
-  margin-top: var(--spacing-md);
+  margin-top: 40px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
   font-size: var(--font-size-xs);
   color: var(--text-secondary);
+}
+
+.heatmap-legend::before {
+  content: 'Legend:';
+  font-weight: 500;
+  margin-right: var(--spacing-md);
 }
 
 .legend-scale {
@@ -177,30 +311,36 @@
 }
 
 .legend-box {
-  width: 11px;
-  height: 11px;
+  width: 13px;
+  height: 13px;
   border-radius: 2px;
+  border: 1px solid rgba(128, 128, 128, 0.4);
 }
 
 /* Insights */
 .stats-insights {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: var(--spacing-md);
+  gap: var(--spacing-lg);
+  width: 100%;
 }
 
 .insight-card {
   background: var(--background-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: var(--spacing-lg);
+  padding: 24px;
+  transition: all 0.15s ease-out;
 }
 
 .insight-card h3 {
-  font-size: var(--font-size-md);
+  font-size: 16px;
   font-weight: 600;
   color: var(--text-primary);
-  margin-bottom: var(--spacing-md);
+  margin: 0 0 16px 0;
+  padding: 0;
+  line-height: 1.2;
+  letter-spacing: -0.025em;
 }
 
 /* Weekly Chart */
@@ -217,24 +357,45 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--spacing-xs);
+  justify-content: flex-end;
+  gap: 4px;
+  height: 100%;
+  position: relative;
+  padding-top: 20px;
 }
 
 .weekly-bar .bar {
   width: 100%;
-  background: var(--accent);
+  background: var(--accent-primary);
   border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-  transition: background 0.2s ease;
+  transition: all 0.15s ease-out;
   min-height: 2px;
 }
 
 .weekly-bar:hover .bar {
   background: var(--accent-hover);
+  transform: scaleY(1.05);
+  transform-origin: bottom;
+}
+
+.bar-value {
+  position: absolute;
+  top: 0;
+  font-size: 12px;
+  color: var(--text-primary);
+  font-weight: 600;
+  opacity: 0;
+  transition: opacity 0.15s ease-out;
+}
+
+.weekly-bar:hover .bar-value {
+  opacity: 1;
 }
 
 .bar-label {
-  font-size: var(--font-size-xs);
+  font-size: 12px;
   color: var(--text-secondary);
+  font-weight: 500;
 }
 
 /* Hourly Chart */
@@ -256,11 +417,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 9px;
+  font-size: 10px;
   color: var(--text-secondary);
   background: var(--background-primary);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.15s ease-out;
+  border-radius: 2px;
 }
 
 .hour-cell:hover {
@@ -269,9 +431,36 @@
 }
 
 .chart-info {
-  font-size: var(--font-size-sm);
+  font-size: 14px;
   color: var(--text-secondary);
   text-align: center;
+  margin-top: 8px;
+}
+
+/* Chart empty states */
+.chart-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.chart-empty-state p {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.empty-state-hint {
+  margin-top: var(--spacing-xs) !important;
+  font-size: 13px !important;
+  opacity: 0.8;
+  color: var(--text-secondary) !important;
+  font-weight: normal !important;
 }
 
 /* Tooltip */
@@ -285,6 +474,8 @@
   z-index: 1000;
   pointer-events: none;
   white-space: nowrap;
+  opacity: 0.95;
+  backdrop-filter: blur(8px);
 }
 
 .tooltip-date {
@@ -294,8 +485,9 @@
 }
 
 .tooltip-stats {
-  font-size: var(--font-size-sm);
+  font-size: 13px;
   color: var(--text-secondary);
+  line-height: 1.4;
 }
 
 .tooltip-stats > div {
@@ -305,31 +497,159 @@
 /* Responsive adjustments */
 @media (max-width: 768px) {
   .stats-view {
-    padding: var(--spacing-md);
+    padding: 24px 16px 16px 16px; /* Maintain consistent proportions */
   }
 
-  .stats-metrics {
+  .stats-metrics-primary {
+    grid-template-columns: 1fr;
+  }
+
+  .stats-metrics-secondary {
     grid-template-columns: repeat(2, 1fr);
   }
 
   .stats-insights {
     grid-template-columns: 1fr;
   }
+  
+  .heatmap-day,
+  .legend-box {
+    width: 11px;
+    height: 11px;
+  }
+  
+  .weekday-label {
+    height: 11px;
+    font-size: 9px;
+  }
 }
 
 /* Theme adjustments */
 [data-theme="terminal-chic"] {
-  --stats-heatmap-level-0: #0a0a0a;
-  --stats-heatmap-level-1: #1a3a1a;
-  --stats-heatmap-level-2: #2a5a2a;
-  --stats-heatmap-level-3: #3a7a3a;
-  --stats-heatmap-level-4: #4ade80;
+  --stats-heatmap-level-0: rgba(255, 255, 255, 0.05);
+  --stats-heatmap-level-1: #0e4429;
+  --stats-heatmap-level-2: #006d32;
+  --stats-heatmap-level-3: #26a641;
+  --stats-heatmap-level-4: #39d353;
+  --accent-rgb: 57, 211, 83; /* Green accent */
 }
 
 [data-theme="minimal-light"] {
-  --stats-heatmap-level-0: #f5f5f5;
-  --stats-heatmap-level-1: #e3e3ff;
-  --stats-heatmap-level-2: #c1c1ff;
-  --stats-heatmap-level-3: #9f9fff;
-  --stats-heatmap-level-4: #7d7dff;
+  --stats-heatmap-level-0: #f6f6f6;
+  --stats-heatmap-level-1: #e1f5e1;
+  --stats-heatmap-level-2: #a8dba8;
+  --stats-heatmap-level-3: #79bd79;
+  --stats-heatmap-level-4: #4a9b4a;
+  --accent-rgb: 74, 155, 74; /* Green accent */
+}
+
+/* Minimal theme specific overrides */
+[data-theme="minimal-light"] .stats-heatmap-container {
+  background: #fafafa;
+  border-color: #e0e0e0;
+}
+
+[data-theme="minimal-light"] .metric-card {
+  background: #fafafa;
+  border-color: #e0e0e0;
+}
+
+[data-theme="minimal-light"] .insight-card {
+  background: #fafafa;
+  border-color: #e0e0e0;
+}
+
+[data-theme="minimal-light"] .heatmap-day {
+  border-color: rgba(0, 0, 0, 0.12);
+}
+
+[data-theme="minimal-light"] .heatmap-day:not(.empty) {
+  border-color: rgba(0, 0, 0, 0.2);
+}
+
+[data-theme="minimal-light"] .legend-box {
+  border-color: rgba(0, 0, 0, 0.2);
+}
+
+/* Minimal Dark theme */
+[data-theme="minimal-dark"] {
+  --stats-heatmap-level-0: rgba(255, 255, 255, 0.03);
+  --stats-heatmap-level-1: #1e3a1e;
+  --stats-heatmap-level-2: #2d5a2d;
+  --stats-heatmap-level-3: #3c7a3c;
+  --stats-heatmap-level-4: #4a9b4a;
+  --accent-rgb: 74, 155, 74; /* Green accent */
+}
+
+[data-theme="minimal-dark"] .stats-heatmap-container {
+  background: #0f0f0f;
+  border-color: #2a2a2a;
+}
+
+[data-theme="minimal-dark"] .metric-card {
+  background: #0f0f0f;
+  border-color: #2a2a2a;
+}
+
+[data-theme="minimal-dark"] .insight-card {
+  background: #0f0f0f;
+  border-color: #2a2a2a;
+}
+
+[data-theme="minimal-dark"] .heatmap-day {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="minimal-dark"] .heatmap-day:not(.empty) {
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+[data-theme="minimal-dark"] .legend-box {
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+[data-theme="vscode-dark"] {
+  --stats-heatmap-level-0: #161616;
+  --stats-heatmap-level-1: #0e4429;
+  --stats-heatmap-level-2: #006d32;
+  --stats-heatmap-level-3: #26a641;
+  --stats-heatmap-level-4: #39d353;
+  --accent-rgb: 0, 122, 255; /* Blue accent */
+}
+
+/* Focus states for accessibility */
+.generate-sample-button:focus-visible,
+.metric-card:focus-visible,
+.insight-card:focus-visible,
+.weekly-bar:focus-visible,
+.hour-cell:focus-visible,
+.heatmap-day:not(.empty):focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+/* Additional hover states */
+.insight-card:hover {
+  background: var(--background-tertiary);
+  border-color: var(--border-hover);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px var(--shadow-color-subtle);
+}
+
+.heatmap-legend:hover .legend-box {
+  transform: scale(1.1);
+}
+
+.legend-box {
+  transition: transform 0.15s ease-out;
+}
+
+/* Smooth transitions for all interactive elements */
+.metric-card,
+.insight-card,
+.weekly-bar,
+.hour-cell,
+.heatmap-day,
+.generate-sample-button {
+  cursor: pointer;
 }

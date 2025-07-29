@@ -1,228 +1,163 @@
-/* 
- * Settings View - Pixel-Perfect Spacing Adjustments
- * Specific refinements for optimal vertical rhythm and alignment
- */
+/* Settings Section Spacing and Typography
+   =======================================
+   Consistent spacing and title conventions for all settings sections
+*/
 
-/* Sound Settings - Refined spacing for the flow section */
-.sound-flow-container {
-  display: flex;
-  gap: var(--space-2);
-  align-items: flex-start;
-}
-
-.sound-flow-item {
-  flex: 0 0 auto;
-}
-
-.sound-flow-label {
-  font-size: 12px;
-  color: var(--text-secondary);
-  margin-bottom: var(--space-0-5);
-  line-height: var(--line-height-tight);
-  height: 16px; /* Fixed height for consistent alignment */
-}
-
-.sound-flow-arrow {
-  display: flex;
-  align-items: center;
-  height: calc(var(--input-height-md) + 16px + var(--space-0-5)); /* Match total height of dropdown + label */
-  padding-top: calc(16px + var(--space-0-5)); /* Offset to align with dropdown */
-  color: var(--text-tertiary);
-}
-
-/* Checkbox alignment improvements */
-.setting-item label input[type="checkbox"] {
-  margin-top: 2px; /* Optical adjustment for baseline alignment */
-}
-
-/* Optical adjustments for perfect visual balance */
-
-/* Button text should appear centered despite asymmetric padding */
-.hotkey-input-group button,
-.preview-sound-button,
-.delete-modal-footer button {
-  line-height: 1;
-  letter-spacing: 0.01em;
-}
-
-/* Theme selector visual balance */
-.theme-option svg {
-  /* Ensure icons are optically centered */
-  display: block;
-  margin: 0 auto var(--space-0-5) auto;
-}
-
-/* Overlay position button fine-tuning */
-.position-button {
-  /* Subtle shadow for depth */
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-}
-
-.position-button:active:not(.active) {
-  transform: scale(0.98);
-  box-shadow: 0 0 1px rgba(0, 0, 0, 0.08);
-}
-
-/* Dropdown optical refinements */
-.dropdown-trigger {
-  /* Ensure text doesn't feel too close to edges */
-  padding-left: var(--space-1-5);
-  padding-right: var(--space-1);
-}
-
-/* Settings section subtle depth */
+/* Section container */
 .settings-section {
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+  margin-bottom: 12px; /* Reduced spacing between sections */
 }
 
-/* Collapsible header hover state */
-.collapsible-header:hover .collapse-arrow {
-  color: var(--accent-primary);
-}
-
-/* Sound flow visual continuity */
-.sound-flow-arrow {
-  font-size: 18px;
-  opacity: 0.4;
-  transition: opacity 0.2s ease;
-}
-
-.sound-flow-container:hover .sound-flow-arrow {
-  opacity: 0.6;
-}
-
-/* Input focus states for better visual feedback */
-input[type="checkbox"]:focus-visible {
-  outline: 2px solid var(--accent-primary);
-  outline-offset: 2px;
-}
-
-input[type="range"]:focus-visible {
-  outline: 2px solid var(--accent-primary);
-  outline-offset: 4px;
-  border-radius: 4px;
-}
-
-/* Section header alignment with preview button */
-.settings-section-header-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: var(--space-2);
-  min-height: var(--button-height-sm);
-}
-
-.settings-section-header-row h3 {
-  margin: 0;
-  line-height: var(--button-height-sm);
-}
-
-/* Collapsible section refinements */
-.collapsible-header-wrapper {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  min-height: var(--space-6); /* 48px for comfortable touch target */
-}
-
-.collapsible-header {
-  flex: 1;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  padding: var(--space-1) 0;
-}
-
-.collapse-arrow {
-  margin-right: var(--space-1);
-  transition: transform 0.2s ease;
-  display: inline-block;
-  font-size: 12px;
-}
-
-.collapse-arrow.expanded {
-  transform: rotate(90deg);
-}
-
-/* Model folder button alignment */
-.open-models-folder-link {
-  display: flex;
-  align-items: center;
-  gap: var(--space-0-5);
-  padding: var(--space-0-5) var(--space-1);
-  height: var(--button-height-sm);
-  background-color: rgba(0, 0, 0, 0.04);
-  color: #6b7280;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 5px;
-  font-size: 12px;
-  font-weight: 400;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  margin-left: auto;
-  align-self: center;
-}
-
-.open-models-folder-link:hover {
-  background-color: rgba(0, 0, 0, 0.06);
-  border-color: rgba(0, 0, 0, 0.12);
-  color: #4b5563;
-}
-
-/* Range input container alignment */
-.range-input-container {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  max-width: 400px;
-}
-
-.range-input-container input[type="range"] {
-  flex: 1;
-}
-
-.range-value-display {
-  min-width: var(--space-8); /* 64px */
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-/* Settings hint refinement for consistent spacing */
-.setting-hint {
-  display: block;
-  margin-top: var(--space-0-5);
-}
-
-/* Indent hint when following a checkbox */
-.setting-item label:has(input[type="checkbox"]) + .setting-hint {
-  padding-left: calc(16px + var(--space-1)); /* Align with checkbox label text */
-}
-
-/* Checkbox label without hint */
-.setting-item label:has(input[type="checkbox"]):not(:has(+ .setting-hint)) {
+.settings-section:last-child {
   margin-bottom: 0;
 }
 
-/* Two-column responsive adjustments */
-@media (max-width: 768px) {
-  .settings-two-column {
-    grid-template-columns: 1fr;
-    gap: var(--space-3);
+/* Section titles - consistent across all sections */
+.settings-section-title {
+  margin: 0 0 20px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  /* No text-transform or letter-spacing */
+}
+
+/* Header row for sections with action buttons */
+.settings-section-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.settings-section-header-row .settings-section-title {
+  margin-bottom: 0; /* Remove bottom margin when in header row */
+}
+
+/* Setting items */
+.setting-item {
+  margin-bottom: 16px; /* Consistent spacing between settings */
+}
+
+.setting-item:last-child {
+  margin-bottom: 0;
+}
+
+/* Special case for setting items with inline headers */
+.setting-item.with-header {
+  margin-bottom: 8px; /* Reduced margin when followed by sound flow */
+}
+
+.setting-item.with-header .setting-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* Clear button for shortcuts */
+.clear-button {
+  padding: 6px 12px;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.clear-button:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-secondary);
+  color: var(--text-primary);
+}
+
+/* Ensure collapsible sections also follow spacing */
+.model-manager-full-width {
+  margin-bottom: 12px;
+}
+
+.model-manager-full-width:last-child {
+  margin-bottom: 0;
+}
+
+/* Animation for spin state */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
   }
 }
 
-/* Dark mode refinements */
-@media (prefers-color-scheme: dark) {
-  .open-models-folder-link {
-    background-color: rgba(255, 255, 255, 0.04);
-    color: #9ca3af;
-    border-color: rgba(255, 255, 255, 0.08);
-  }
-  
-  .open-models-folder-link:hover {
-    background-color: rgba(255, 255, 255, 0.06);
-    border-color: rgba(255, 255, 255, 0.12);
-    color: #d1d5db;
-  }
+/* Recording & Audio Settings Specific */
+/* ================================== */
+
+/* Two-column grid for shortcuts */
+.shortcuts-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.shortcuts-grid .setting-item {
+  margin-bottom: 0; /* Remove default margin in grid */
+}
+
+/* Auto actions row */
+.auto-actions-row {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 20px;
+}
+
+.auto-actions-row .setting-item.compact {
+  margin-bottom: 0;
+}
+
+.auto-actions-row label {
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.auto-actions-row input[type="checkbox"] {
+  margin-right: 8px;
+}
+
+/* Sound flow wrapper for inline preview button */
+.sound-flow-wrapper {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+}
+
+/* Enhanced keyboard key styling */
+.keyboard-key {
+  display: inline-block;
+  padding: 3px 8px;
+  background-color: var(--bg-keyboard-key);
+  border: 1px solid var(--border-keyboard-key);
+  border-radius: 4px;
+  font-family: "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", monospace;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-keyboard-key);
+  box-shadow: var(--shadow-keyboard-key);
+  text-shadow: var(--text-shadow-keyboard-key);
+  margin: 0 1px;
+  vertical-align: middle;
+}
+
+.key-separator {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  margin: 0 4px;
+  vertical-align: middle;
 }

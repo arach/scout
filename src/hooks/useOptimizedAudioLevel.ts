@@ -113,14 +113,16 @@ export function useOptimizedAudioLevel(options: UseOptimizedAudioLevelOptions = 
     const diff = target - current;
     const newLevel = current + (diff * smoothingFactor);
     
-    // Update state efficiently
-    const newState: AudioLevelState = {
-      level: newLevel,
-      target,
-      timestamp: now,
-    };
-    
-    updateAudioLevel(newState);
+    // Update state only if change is significant
+    if (Math.abs(newLevel - currentRef.current) > 0.001) {
+      const newState: AudioLevelState = {
+        level: newLevel,
+        target,
+        timestamp: now,
+      };
+      
+      updateAudioLevel(newState);
+    }
     
     // Schedule next frame
     animationFrameRef.current = requestAnimationFrame(animate);
@@ -199,18 +201,30 @@ export function useOptimizedAudioLevel(options: UseOptimizedAudioLevelOptions = 
     }
   }, [enabled, deviceName, startMonitoring, stopMonitoring]);
 
-  // Cleanup on unmount
+  // Cleanup on unmount with proper resource management
   useEffect(() => {
     mountedRef.current = true;
     
     return () => {
       mountedRef.current = false;
+      
+      // Cancel any pending animation frames immediately
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = undefined;
       }
-      // Don't await stopMonitoring in cleanup to avoid memory leaks
+      
+      // Reset all refs to prevent stale closures
+      targetRef.current = 0;
+      currentRef.current = 0;
+      lastPollTimeRef.current = 0;
+      monitoringStartedRef.current = false;
+      
+      // Stop backend monitoring without awaiting
       if (monitoringStartedRef.current) {
-        invoke('stop_audio_level_monitoring').catch(() => {});
+        invoke('stop_audio_level_monitoring').catch(() => {
+          // Silently ignore errors during cleanup
+        });
       }
     };
   }, []);

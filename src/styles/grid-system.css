@@ -1,0 +1,132 @@
+/* 
+ * Scout Design System - Unified Grid System
+ * ==========================================
+ * Ensures consistent spacing across all views in the application
+ * Based on an 8pt grid system for pixel-perfect alignment
+ */
+
+:root {
+  /* Grid System Variables */
+  --grid-content-max-width: 1200px;
+  --grid-content-max-width-settings: 800px;
+  
+  /* Consistent padding from viewport edges */
+  --grid-padding-top: 40px;      /* 5 × 8pt - Space from top edge */
+  --grid-padding-horizontal: 32px; /* 4 × 8pt - Space from left/right edges */
+  --grid-padding-bottom: 20px;    /* 2.5 × 8pt - Space from bottom edge */
+  
+  /* Mobile responsive padding */
+  --grid-padding-top-mobile: 24px;       /* 3 × 8pt */
+  --grid-padding-horizontal-mobile: 16px; /* 2 × 8pt */
+  --grid-padding-bottom-mobile: 16px;     /* 2 × 8pt */
+  
+  /* Content area spacing */
+  --grid-section-gap: 32px;       /* 4 × 8pt - Gap between major sections */
+  --grid-section-gap-mobile: 24px; /* 3 × 8pt - Mobile gap */
+  
+  /* Header spacing */
+  --grid-header-margin-bottom: 28px; /* 3.5 × 8pt - Space after headers */
+  --grid-header-padding-bottom: 16px; /* 2 × 8pt - Padding before border */
+}
+
+/* Base Grid Container - Applied to all main views */
+.grid-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: var(--grid-padding-top) var(--grid-padding-horizontal) var(--grid-padding-bottom);
+  box-sizing: border-box;
+  overflow-y: auto;
+}
+
+/* Content wrapper for max-width constraint */
+.grid-content {
+  width: 100%;
+  max-width: var(--grid-content-max-width);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--grid-section-gap);
+}
+
+/* Settings view specific max-width */
+.grid-content.grid-content--settings {
+  max-width: var(--grid-content-max-width-settings);
+}
+
+/* Section spacing within content */
+.grid-section {
+  width: 100%;
+}
+
+/* Header with consistent spacing */
+.grid-header {
+  margin-bottom: var(--grid-header-margin-bottom);
+  padding-bottom: var(--grid-header-padding-bottom);
+  border-bottom: 1px solid var(--border-primary);
+}
+
+/* Two-column grid layout */
+.grid-columns {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-4);
+}
+
+/* Three-column grid layout */
+.grid-columns--three {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+/* Four-column grid layout */
+.grid-columns--four {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+/* Full-width items in grid */
+.grid-item--full {
+  grid-column: 1 / -1;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .grid-container {
+    padding: var(--grid-padding-top-mobile) var(--grid-padding-horizontal-mobile) var(--grid-padding-bottom-mobile);
+  }
+  
+  .grid-content {
+    gap: var(--grid-section-gap-mobile);
+  }
+  
+  /* Stack columns on mobile */
+  .grid-columns,
+  .grid-columns--three,
+  .grid-columns--four {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Utility classes for quick alignment */
+.grid-align-start { align-items: flex-start; }
+.grid-align-center { align-items: center; }
+.grid-align-end { align-items: flex-end; }
+.grid-justify-start { justify-content: flex-start; }
+.grid-justify-center { justify-content: center; }
+.grid-justify-end { justify-content: flex-end; }
+.grid-justify-between { justify-content: space-between; }
+
+/* Debug mode - uncomment to visualize grid */
+/*
+.grid-container {
+  background: rgba(255, 0, 0, 0.05);
+}
+
+.grid-content {
+  background: rgba(0, 255, 0, 0.05);
+}
+
+.grid-section {
+  background: rgba(0, 0, 255, 0.05);
+  border: 1px dashed rgba(0, 0, 255, 0.2);
+}
+*/

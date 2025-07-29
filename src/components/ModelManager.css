@@ -23,25 +23,26 @@
 }
 
 .model-card {
-  background: white;
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
   border-radius: 12px;
   padding: 16px;
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 12px;
   transition: all 0.2s ease;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+  box-shadow: 0 1px 3px var(--shadow-color-subtle);
 }
 
 .model-card:hover {
-  border-color: rgba(0, 0, 0, 0.12);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  border-color: var(--border-secondary);
+  box-shadow: 0 2px 8px var(--shadow-color);
 }
 
 .model-card.active {
   border-color: var(--accent-primary);
-  background: rgba(79, 70, 229, 0.02);
+  background: var(--accent-bg);
 }
 
 .model-card-header {
@@ -50,6 +51,7 @@
   justify-content: space-between;
   gap: 8px;
 }
+
 
 .model-name {
   margin: 0;
@@ -104,10 +106,11 @@
 }
 
 .model-actions {
+  position: absolute;
+  top: 16px;
+  right: 16px;
   display: flex;
   align-items: center;
-  justify-content: flex-start;
-  margin-top: auto;
   gap: 8px;
 }
 
@@ -153,24 +156,42 @@
 
 .model-active-badge {
   font-size: 11px;
-  color: #22c55e;
-  background: rgba(34, 197, 94, 0.1);
+  color: var(--text-success);
+  background: var(--bg-success);
   padding: 2px 8px;
   border-radius: 4px;
   font-weight: 600;
   text-transform: uppercase;
 }
 
+.model-quality-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.model-quality-badge.included {
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+}
+
+.model-quality-badge.good {
+  color: var(--accent-primary);
+  background: var(--accent-bg);
+}
+
 .download-progress {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  width: 200px;
+  gap: 4px;
+  min-width: 120px;
 }
 
 .progress-bar {
   height: 6px;
-  background: var(--background-primary);
+  background: var(--bg-tertiary);
   border-radius: 3px;
   overflow: hidden;
 }

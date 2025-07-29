@@ -9,6 +9,7 @@ import { RecordView } from "./RecordView";
 import { TranscriptsView } from "./TranscriptsView";
 import { SettingsView } from "./SettingsView";
 import { StatsView } from "./StatsView";
+import { DictionaryStandalone } from "./DictionaryStandalone";
 import { AudioErrorBoundary, TranscriptionErrorBoundary, SettingsErrorBoundary } from './ErrorBoundary';
 import { ChevronRight, PanelLeftClose } from 'lucide-react';
 import { useRecording } from '../hooks/useRecording';
@@ -524,6 +525,7 @@ export function AppContent() {
               {currentView === 'transcripts' && 'Transcripts'}
               {currentView === 'settings' && 'Settings'}
               {currentView === 'stats' && 'Stats'}
+              {currentView === 'dictionary' && 'Dictionary'}
             </h1>
           </div>
           <div className="view-header-right">
@@ -576,45 +578,14 @@ export function AppContent() {
         )}
         {currentView === 'settings' && (
           <SettingsErrorBoundary>
-            <SettingsView
-              hotkey={hotkey}
-              isCapturingHotkey={isCapturingHotkey}
-              hotkeyUpdateStatus={hotkeyUpdateStatus}
-              pushToTalkHotkey={pushToTalkHotkey}
-              isCapturingPushToTalkHotkey={isCapturingPushToTalkHotkey}
-              overlayPosition={overlayPosition}
-              overlayTreatment={overlayTreatment}
-              autoCopy={autoCopy}
-              autoPaste={autoPaste}
-              theme={theme}
-              selectedTheme={selectedTheme}
-              soundEnabled={soundEnabled}
-              startSound={startSound}
-              stopSound={stopSound}
-              successSound={successSound}
-              completionSoundThreshold={completionSoundThreshold}
-              llmSettings={llmSettings}
-              stopCapturingHotkey={() => setIsCapturingHotkey(false)}
-              startCapturingHotkey={() => setIsCapturingHotkey(true)}
-              startCapturingPushToTalkHotkey={() => setIsCapturingPushToTalkHotkey(true)}
-              stopCapturingPushToTalkHotkey={() => setIsCapturingPushToTalkHotkey(false)}
-              updateOverlayPosition={updateOverlayPosition}
-              updateOverlayTreatment={updateOverlayTreatment}
-              toggleAutoCopy={toggleAutoCopy}
-              toggleAutoPaste={toggleAutoPaste}
-              updateTheme={updateTheme}
-              updateSelectedTheme={updateSelectedTheme}
-              toggleSoundEnabled={toggleSoundEnabled}
-              updateStartSound={updateStartSound}
-              updateStopSound={updateStopSound}
-              updateSuccessSound={updateSuccessSound}
-              updateCompletionSoundThreshold={updateCompletionSoundThreshold}
-              updateLLMSettings={updateLLMSettings}
-            />
+            <SettingsView />
           </SettingsErrorBoundary>
         )}
         {currentView === 'stats' && (
           <StatsView />
+        )}
+        {currentView === 'dictionary' && (
+          <DictionaryStandalone />
         )}
 
         {/* File drop overlay */}

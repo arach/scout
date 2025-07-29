@@ -1,0 +1,98 @@
+/* Display & Interface Settings Styles
+   ===================================
+   Subtle recording indicator position selector
+*/
+
+/* Position grid container */
+.overlay-position-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0;
+  width: fit-content;
+  margin-top: 8px;
+}
+
+/* Position buttons - more subtle */
+.position-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  padding: 0;
+  width: 40px;
+  height: 40px;
+  margin: 0 0 1px 0;
+}
+
+.position-button:hover {
+  border-color: var(--border-secondary);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* Active state - NOT blue */
+.position-button.active {
+  background: var(--bg-hover);
+  border-color: var(--text-tertiary);
+  color: var(--text-primary);
+  position: relative;
+  box-shadow: 0 0 0 1px var(--text-tertiary);
+}
+
+/* Subtle dot indicator for active state */
+.position-button.active::after {
+  content: '';
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text-primary);
+}
+
+/* Center spacer */
+.position-button-spacer {
+  background: transparent;
+  cursor: default;
+  width: 40px;
+  height: 40px;
+  margin: 0 0 1px 0;
+}
+
+/* Dark mode adjustments */
+@media (prefers-color-scheme: dark) {
+  .position-button {
+    opacity: 0.6;
+  }
+  
+  .position-button:hover {
+    opacity: 1;
+    background: rgba(255, 255, 255, 0.05);
+  }
+  
+  .position-button.active {
+    background: rgba(255, 255, 255, 0.1);
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
+  }
+  
+  .position-button.active::after {
+    background: rgba(255, 255, 255, 0.8);
+  }
+}
+
+/* Alternative: Inner shadow for active state */
+.position-button.active-shadow {
+  box-shadow: inset 0 0 0 2px var(--border-secondary);
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.position-button.active-shadow::after {
+  display: none; /* Don't show dot when using shadow */
+}

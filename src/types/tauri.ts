@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { Transcript } from './transcript';
+import { DictionaryEntry, DictionaryEntryInput, DictionaryEntryUpdate, DictionaryMatch, DictionaryTestResult } from './dictionary';
 
 // Permission types
 export type PermissionStatus = 'granted' | 'denied' | 'undetermined';
@@ -246,6 +247,20 @@ export const tauriApi = {
   // Onboarding commands
   markOnboardingComplete: () => 
     invokeTyped<void>('mark_onboarding_complete'),
+
+  // Dictionary commands
+  getDictionaryEntries: (enabledOnly: boolean = false) => 
+    invokeTyped<DictionaryEntry[]>('get_dictionary_entries', { enabled_only: enabledOnly }),
+  saveDictionaryEntry: (entry: DictionaryEntryInput) => 
+    invokeTyped<DictionaryEntry>('save_dictionary_entry', entry),
+  updateDictionaryEntry: (id: number, updates: DictionaryEntryUpdate) => 
+    invokeTyped<DictionaryEntry>('update_dictionary_entry', { id, ...updates }),
+  deleteDictionaryEntry: (id: number) => 
+    invokeTyped<void>('delete_dictionary_entry', { id }),
+  testDictionaryReplacement: (text: string) => 
+    invokeTyped<DictionaryTestResult>('test_dictionary_replacement', { text }),
+  getDictionaryMatchesForTranscript: (args: { transcriptId: number }) => 
+    invokeTyped<DictionaryMatch[]>('get_dictionary_matches_for_transcript', args),
 };
 
 /**

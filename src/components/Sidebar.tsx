@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { Settings } from 'lucide-react';
 import './Sidebar.css';
 
-type View = 'record' | 'transcripts' | 'settings' | 'stats';
+type View = 'record' | 'transcripts' | 'settings' | 'stats' | 'dictionary';
 
 interface SidebarProps {
   currentView: View;
@@ -41,8 +41,10 @@ export const useSidebarState = (): SidebarState => {
     try {
       const settings = await invoke('get_settings') as Record<string, any>;
       await invoke('update_settings', { 
-        ...settings, 
-        sidebar_expanded: newState 
+        newSettings: {
+          ...settings, 
+          sidebar_expanded: newState 
+        }
       });
     } catch (error) {
       console.error('Failed to save sidebar state:', error);
@@ -93,6 +95,19 @@ export function Sidebar({ currentView, onViewChange, isExpanded }: SidebarProps)
         </svg>
         {isExpanded && <span className="sidebar-label">Stats</span>}
         <span className="sidebar-tooltip">Stats</span>
+      </button>
+      <button
+        className={`sidebar-button sidebar-button-dictionary ${currentView === 'dictionary' ? 'active' : ''}`}
+        onClick={() => onViewChange('dictionary')}
+        aria-label="Dictionary"
+      >
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M4 3C3.44772 3 3 3.44772 3 4V16C3 16.5523 3.44772 17 4 17H15C15.2652 17 15.5196 16.8946 15.7071 16.7071C15.8946 16.5196 16 16.2652 16 16V6L16 4C16 3.44772 15.5523 3 15 3H4Z" stroke="currentColor" strokeWidth="1.5"/>
+          <path d="M16 6C16 6 15 5 13 5H7" stroke="currentColor" strokeWidth="1.5"/>
+          <path d="M6 8H11M6 11H10M6 14H9" stroke="currentColor" strokeWidth="1.5"/>
+        </svg>
+        {isExpanded && <span className="sidebar-label">Dictionary</span>}
+        <span className="sidebar-tooltip">Dictionary</span>
       </button>
       <button
         className={`sidebar-button sidebar-button-settings ${currentView === 'settings' ? 'active' : ''}`}

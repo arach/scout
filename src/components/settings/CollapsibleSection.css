@@ -1,0 +1,147 @@
+/* Collapsible Section Styles */
+
+.model-manager-full-width {
+  margin-top: 12px;
+}
+
+.collapsible-section {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.collapsible-section:last-child {
+  margin-bottom: 0;
+}
+
+.collapsible-header-wrapper {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-primary);
+}
+
+.collapsible-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 1;
+  cursor: pointer;
+  user-select: none;
+}
+
+.collapsible-header > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.collapsible-header h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.collapse-arrow {
+  display: inline-block;
+  transition: transform 0.2s ease;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.collapse-arrow.expanded {
+  transform: rotate(90deg);
+}
+
+.collapsible-subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+/* Icon styling */
+.sparkle-icon,
+.dictionary-icon {
+  display: inline-block;
+  margin-left: 8px;
+  color: var(--accent-primary);
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+/* AI badge styling */
+.ai-badge {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent-primary);
+  background: var(--accent-bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 8px;
+}
+
+/* Open folder button */
+.open-models-folder-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  margin-left: 16px;
+}
+
+.open-models-folder-link:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-secondary);
+  color: var(--text-primary);
+}
+
+/* Collapsible content */
+.collapsible-content {
+  padding: 16px;
+  background: var(--bg-primary);
+  animation: slideDown 0.2s ease-out;
+  border-top: 1px solid var(--border-primary);
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Remove border-bottom when expanded */
+.collapsible-section:has(.collapsible-content) .collapsible-header-wrapper {
+  border-bottom-color: var(--border-primary);
+}
+
+/* Hover effect on header */
+.collapsible-header:hover h3 {
+  color: var(--accent-primary);
+}
+
+.collapsible-header:hover .collapse-arrow {
+  color: var(--accent-primary);
+}

@@ -1,0 +1,133 @@
+/* Compact Theme Selector Styles
+   =============================
+   More dense grid layout to reduce vertical space usage
+*/
+
+/* Override default grid for compact mode */
+.theme-selector-compact .theme-options {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr); /* 4 columns by default */
+  gap: 12px;
+  max-width: 100%;
+  margin-top: 0; /* Remove extra top margin */
+}
+
+/* 5 columns on desktop for maximum horizontal usage */
+@media (min-width: 900px) {
+  .theme-selector-compact .theme-options {
+    grid-template-columns: repeat(5, 1fr);
+  }
+}
+
+/* 6 columns on very wide screens */
+@media (min-width: 1400px) {
+  .theme-selector-compact .theme-options {
+    grid-template-columns: repeat(6, 1fr);
+  }
+}
+
+/* Compact theme cards */
+.theme-selector-compact .theme-option {
+  aspect-ratio: 1; /* Square cards */
+  min-height: 90px; /* Larger cards */
+  padding: 12px;
+  gap: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Icons in compact mode */
+.theme-selector-compact .theme-option svg {
+  width: 28px; /* Larger icons */
+  height: 28px;
+}
+
+/* Text */
+.theme-selector-compact .theme-option span {
+  font-size: 11px;
+  line-height: 1.3;
+  text-align: center;
+  max-width: 100%;
+  word-break: break-word;
+}
+
+/* Active state - no blue! */
+.theme-selector-compact .theme-option.active {
+  background: var(--bg-tertiary);
+  border-color: var(--border-secondary);
+  color: var(--text-primary);
+  position: relative;
+}
+
+/* Add subtle dot indicator for active state */
+.theme-selector-compact .theme-option.active::after {
+  content: '';
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text-primary);
+}
+
+/* Category titles more compact */
+.theme-selector-compact .theme-category {
+  gap: 8px; /* Reduced spacing */
+}
+
+.theme-selector-compact .theme-categories {
+  gap: 16px; /* Reduced from 24px */
+}
+
+/* Alternative: Horizontal scroll for ultra-compact */
+.theme-selector-horizontal {
+  overflow-x: auto;
+  padding-bottom: 8px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.theme-selector-horizontal .theme-options {
+  display: flex;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.theme-selector-horizontal .theme-option {
+  flex: 0 0 100px;
+  min-width: 100px;
+}
+
+/* Custom scrollbar for horizontal mode */
+.theme-selector-horizontal::-webkit-scrollbar {
+  height: 6px;
+}
+
+.theme-selector-horizontal::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+  border-radius: 3px;
+}
+
+.theme-selector-horizontal::-webkit-scrollbar-thumb {
+  background: var(--border-secondary);
+  border-radius: 3px;
+}
+
+.theme-selector-horizontal::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary);
+}
+
+/* Dark mode adjustments */
+@media (prefers-color-scheme: dark) {
+  .theme-selector-compact .theme-option.active {
+    background: rgba(255, 255, 255, 0.1);
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
+  }
+  
+  .theme-selector-compact .theme-option.active::after {
+    background: rgba(255, 255, 255, 0.8);
+  }
+}

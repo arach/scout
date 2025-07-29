@@ -388,6 +388,37 @@ impl Database {
             .ok_or_else(|| "Failed to fetch newly created transcript".to_string())
     }
 
+    pub async fn save_transcript_with_timestamp(
+        &self,
+        text: &str,
+        duration_ms: i32,
+        metadata: Option<&str>,
+        audio_path: Option<&str>,
+        created_at: &str,
+    ) -> Result<Transcript, String> {
+        let result = sqlx::query(
+            r#"
+            INSERT INTO transcripts (text, duration_ms, metadata, audio_path, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            "#
+        )
+        .bind(text)
+        .bind(duration_ms)
+        .bind(metadata)
+        .bind(audio_path)
+        .bind(created_at)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to save transcript with timestamp: {}", e))?;
+
+        let id = result.last_insert_rowid();
+        
+        // Fetch the newly created transcript to return it
+        self.get_transcript(id)
+            .await?
+            .ok_or_else(|| "Failed to fetch newly created transcript".to_string())
+    }
+
     pub async fn get_transcript(&self, id: i64) -> Result<Option<Transcript>, String> {
         let transcript = sqlx::query_as::<_, Transcript>(
             r#"

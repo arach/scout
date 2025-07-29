@@ -149,6 +149,23 @@
   transition-delay: 0.3s;
 }
 
+/* Stats button bounce animation */
+@keyframes statsBounce {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.05); }
+  60% { transform: scale(0.97); }
+  80% { transform: scale(1.02); }
+  100% { transform: scale(1); }
+}
+
+.sidebar-button-stats svg {
+  transform-origin: center;
+}
+
+.sidebar-button-stats:hover svg {
+  animation: statsBounce 0.5s ease-out;
+}
+
 
 /* Whimsical animations */
 @keyframes coinFlipY {

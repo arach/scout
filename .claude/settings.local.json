@@ -87,8 +87,23 @@
       "Bash(rg -n -A 10 \"if.*showFirstRun.*{\" src/App.tsx)",
       "Bash(rg -n -A 10 \"if.*showFirstRun\" src/App.tsx)",
       "Bash(git worktree:*)",
-      "Bash(sips:*)"
+      "Bash(sips:*)",
+      "Bash(osascript:*)",
+      "Bash(system_profiler:*)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "mcp__peekaboo__see",
+      "mcp__peekaboo__click",
+      "Bash(ANALYZE=true pnpm build)",
+      "mcp__peekaboo__app",
+      "Bash(screencapture:*)",
+      "mcp__peekaboo__sleep",
+      "mcp__peekaboo__analyze",
+      "Bash(git rm:*)"
     ],
     "deny": []
-  }
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "peekaboo"
+  ]
 }
