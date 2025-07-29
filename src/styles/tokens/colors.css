@@ -18,7 +18,7 @@
   
   /* Text colors - Set by theme */
   --text-primary: #1f2937;
-  --text-secondary: #6b7280;
+  --text-secondary: #9ca3af;    /* Updated from #6b7280 to meet WCAG AA (4.5:1) */
   --text-tertiary: #9ca3af;
   --text-placeholder: #d1d5db;
   --text-danger: #dc2626;

@@ -7,8 +7,6 @@ import { ClipboardSettings } from './settings/ClipboardSettings';
 import { SoundSettings } from './settings/SoundSettings';
 import { UISettings } from './settings/UISettings';
 import { DictionaryView } from './DictionaryView';
-import './SettingsView.css';
-import './SettingsView-spacing.css';
 import '../styles/grid-system.css';
 
 // Lazy load heavy components

@@ -39,3 +39,6 @@ models/
 
 # MCP configuration with secrets
 mcps.mcp.json
+
+# Build artifacts
+bundle-analysis.json
