@@ -1,13 +1,13 @@
 import React, { memo, useState, useRef, useEffect, lazy, Suspense } from 'react';
-import { Sparkles, FolderOpen, Brain, Palette } from 'lucide-react';
+import { Sparkles, FolderOpen, Brain } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useSettings } from '../contexts/SettingsContext';
-import { RecordingOutputSettings } from './settings/RecordingOutputSettings';
-import { ShortcutSettings } from './settings/ShortcutSettings';
-import { SoundSettings } from './settings/SoundSettings';
-import { UISettings } from './settings/UISettings';
-import { AppearanceSettings } from './settings/AppearanceSettings';
+import { RecordingAudioSettings } from './settings/RecordingAudioSettings';
+import { DisplayInterfaceSettings } from './settings/DisplayInterfaceSettings';
+import { ThemesSettings } from './settings/ThemesSettings';
 import './settings/CollapsibleSection.css';
+import './SettingsView-spacing.css';
+import './settings/SoundSettings.css';
 import '../styles/grid-system.css';
 
 // Lazy load heavy components
@@ -18,10 +18,8 @@ export const SettingsView = memo(function SettingsView() {
   const { state, actions } = useSettings();
   const [isModelManagerExpanded, setIsModelManagerExpanded] = useState(false);
   const [isLLMSettingsExpanded, setIsLLMSettingsExpanded] = useState(false);
-  const [isAppearanceExpanded, setIsAppearanceExpanded] = useState(false);
   const modelSectionRef = useRef<HTMLDivElement>(null);
   const llmSectionRef = useRef<HTMLDivElement>(null);
-  const appearanceSectionRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (isModelManagerExpanded && modelSectionRef.current) {
@@ -45,17 +43,6 @@ export const SettingsView = memo(function SettingsView() {
     }
   }, [isLLMSettingsExpanded]);
 
-  useEffect(() => {
-    if (isAppearanceExpanded && appearanceSectionRef.current) {
-      setTimeout(() => {
-        appearanceSectionRef.current?.scrollIntoView({ 
-          behavior: 'smooth', 
-          block: 'nearest'
-        });
-      }, 100);
-    }
-  }, [isAppearanceExpanded]);
-
 
   const openModelsFolder = async () => {
     try {
@@ -68,10 +55,9 @@ export const SettingsView = memo(function SettingsView() {
   return (
     <div className="grid-container">
       <div className="grid-content grid-content--settings">
-        <RecordingOutputSettings />
-        <ShortcutSettings />
-        <SoundSettings />
-        <UISettings />
+        <RecordingAudioSettings />
+        <DisplayInterfaceSettings />
+        <ThemesSettings />
 
         {/* Model Manager - Full Width Collapsible */}
         <div className="settings-section model-manager-full-width" ref={modelSectionRef}>
@@ -143,36 +129,6 @@ export const SettingsView = memo(function SettingsView() {
                     onUpdateSettings={actions.updateLLMSettings}
                   />
                 </Suspense>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Appearance - Full Width Collapsible */}
-        <div className="settings-section model-manager-full-width" ref={appearanceSectionRef}>
-          <div className="collapsible-section">
-            <div className="collapsible-header-wrapper">
-              <div 
-                className="collapsible-header"
-                onClick={() => setIsAppearanceExpanded(!isAppearanceExpanded)}
-              >
-                <div>
-                  <h3>
-                    <span className={`collapse-arrow ${isAppearanceExpanded ? 'expanded' : ''}`}>
-                      ▶
-                    </span>
-                    Appearance
-                    <Palette size={16} className="sparkle-icon" />
-                  </h3>
-                  <p className="collapsible-subtitle">
-                    Choose your visual theme and display preferences
-                  </p>
-                </div>
-              </div>
-            </div>
-            {isAppearanceExpanded && (
-              <div className="collapsible-content">
-                <AppearanceSettings />
               </div>
             )}
           </div>

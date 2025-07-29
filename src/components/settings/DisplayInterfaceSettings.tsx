@@ -7,12 +7,13 @@ import {
   ArrowDownLeft, ArrowDown, ArrowDownRight 
 } from 'lucide-react';
 
-export const UISettings = memo(function UISettings() {
+export const DisplayInterfaceSettings = memo(function DisplayInterfaceSettings() {
   const { state, actions } = useSettings();
   const { ui } = state;
 
   return (
     <div className="settings-section">
+      <h3 className="settings-section-title">Display & Interface</h3>
       <div className="settings-two-column">
         <div className="setting-item">
           <label>Recording Indicator Position</label>

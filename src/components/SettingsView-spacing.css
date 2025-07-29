@@ -1,0 +1,89 @@
+/* Settings Section Spacing and Typography
+   =======================================
+   Consistent spacing and title conventions for all settings sections
+*/
+
+/* Section container */
+.settings-section {
+  margin-bottom: 24px; /* Consistent spacing between sections */
+}
+
+.settings-section:last-child {
+  margin-bottom: 0;
+}
+
+/* Section titles - consistent across all sections */
+.settings-section-title {
+  margin: 0 0 20px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  /* No text-transform or letter-spacing */
+}
+
+/* Header row for sections with action buttons */
+.settings-section-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.settings-section-header-row .settings-section-title {
+  margin-bottom: 0; /* Remove bottom margin when in header row */
+}
+
+/* Setting items */
+.setting-item {
+  margin-bottom: 16px; /* Consistent spacing between settings */
+}
+
+.setting-item:last-child {
+  margin-bottom: 0;
+}
+
+/* Special case for setting items with inline headers */
+.setting-item.with-header .setting-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+/* Clear button for shortcuts */
+.clear-button {
+  padding: 6px 12px;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.clear-button:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-secondary);
+  color: var(--text-primary);
+}
+
+/* Ensure collapsible sections also follow spacing */
+.model-manager-full-width {
+  margin-bottom: 24px;
+}
+
+.model-manager-full-width:last-child {
+  margin-bottom: 0;
+}
+
+/* Animation for spin state */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
