@@ -317,7 +317,7 @@
 
 /* Group Styles */
 .transcript-group {
-    margin-bottom: 12px; /* 🧠 Reduced from 16px for tighter spacing */
+    margin-bottom: 8px; /* Further reduced for tighter spacing */
     background: var(--bg-tertiary);
     border: 1px solid var(--border-primary);
     border-radius: var(--border-radius, 12px);
@@ -333,11 +333,13 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 14px 16px;
+    padding: 8px 16px;
     background: var(--bg-secondary);
     user-select: none;
     transition: var(--transition);
     border-bottom: 1px solid var(--border-primary);
+    min-height: 36px;
+    box-sizing: border-box;
 }
 
 .transcript-group-header:hover {

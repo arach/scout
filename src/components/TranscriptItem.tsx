@@ -16,6 +16,7 @@ interface TranscriptItemProps {
     onSelectToggle?: (id: number) => void;
     isActive?: boolean;
     variant?: 'default' | 'compact';
+    style?: React.CSSProperties;
 }
 
 export const TranscriptItem = memo(function TranscriptItem({
@@ -27,7 +28,8 @@ export const TranscriptItem = memo(function TranscriptItem({
     isSelected = false,
     onSelectToggle,
     isActive = false,
-    variant = 'default'
+    variant = 'default',
+    style
 }: TranscriptItemProps) {
     const [copied, setCopied] = useState(false);
     const [isPlaying, setIsPlaying] = useState(false);
@@ -147,6 +149,7 @@ export const TranscriptItem = memo(function TranscriptItem({
         <div 
             className={`transcript-item ${variant} ${isSelected ? 'selected' : ''} ${isActive ? 'active' : ''} ${onClick ? 'clickable' : ''}`}
             onClick={handleClick}
+            style={style}
         >
             <div className="transcript-item-content">
                 {showCheckbox && (
