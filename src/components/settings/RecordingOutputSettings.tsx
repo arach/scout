@@ -2,7 +2,6 @@ import React, { memo } from 'react';
 import { useSettings } from '../../contexts/SettingsContext';
 import { useHotkeyCapture } from '../../hooks/useHotkeyCapture';
 import { formatShortcutJSX } from '../../lib/formatShortcutJSX';
-import '../SettingsView.css';
 
 export const RecordingOutputSettings = memo(function RecordingOutputSettings() {
   const { state, actions } = useSettings();
