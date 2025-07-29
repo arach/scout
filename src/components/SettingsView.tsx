@@ -1,5 +1,5 @@
 import React, { memo, useState, useRef, useEffect, lazy, Suspense } from 'react';
-import { Sparkles, FolderOpen, Brain } from 'lucide-react';
+import { Sparkles, FolderOpen, Brain, Mic, Monitor, Palette } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useSettings } from '../contexts/SettingsContext';
 import { RecordingAudioSettings } from './settings/RecordingAudioSettings';
@@ -16,8 +16,14 @@ const LLMSettings = lazy(() => import('./LLMSettings').then(module => ({ default
 
 export const SettingsView = memo(function SettingsView() {
   const { state, actions } = useSettings();
+  const [isRecordingAudioExpanded, setIsRecordingAudioExpanded] = useState(true);
+  const [isDisplayInterfaceExpanded, setIsDisplayInterfaceExpanded] = useState(true);
+  const [isThemesExpanded, setIsThemesExpanded] = useState(true);
   const [isModelManagerExpanded, setIsModelManagerExpanded] = useState(false);
   const [isLLMSettingsExpanded, setIsLLMSettingsExpanded] = useState(false);
+  const recordingAudioRef = useRef<HTMLDivElement>(null);
+  const displayInterfaceRef = useRef<HTMLDivElement>(null);
+  const themesRef = useRef<HTMLDivElement>(null);
   const modelSectionRef = useRef<HTMLDivElement>(null);
   const llmSectionRef = useRef<HTMLDivElement>(null);
 
@@ -55,9 +61,95 @@ export const SettingsView = memo(function SettingsView() {
   return (
     <div className="grid-container">
       <div className="grid-content grid-content--settings">
-        <RecordingAudioSettings />
-        <DisplayInterfaceSettings />
-        <ThemesSettings />
+        {/* Recording & Audio - Collapsible */}
+        <div className="settings-section" ref={recordingAudioRef}>
+          <div className="collapsible-section">
+            <div className="collapsible-header-wrapper">
+              <div 
+                className="collapsible-header"
+                onClick={() => setIsRecordingAudioExpanded(!isRecordingAudioExpanded)}
+              >
+                <div>
+                  <h3>
+                    <span className={`collapse-arrow ${isRecordingAudioExpanded ? 'expanded' : ''}`}>
+                      ▶
+                    </span>
+                    Recording & Audio
+                    <Mic size={16} className="sparkle-icon" />
+                  </h3>
+                  <p className="collapsible-subtitle">
+                    Shortcuts, sounds, and output settings
+                  </p>
+                </div>
+              </div>
+            </div>
+            {isRecordingAudioExpanded && (
+              <div className="collapsible-content">
+                <RecordingAudioSettings />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Display & Interface - Collapsible */}
+        <div className="settings-section" ref={displayInterfaceRef}>
+          <div className="collapsible-section">
+            <div className="collapsible-header-wrapper">
+              <div 
+                className="collapsible-header"
+                onClick={() => setIsDisplayInterfaceExpanded(!isDisplayInterfaceExpanded)}
+              >
+                <div>
+                  <h3>
+                    <span className={`collapse-arrow ${isDisplayInterfaceExpanded ? 'expanded' : ''}`}>
+                      ▶
+                    </span>
+                    Display & Interface
+                    <Monitor size={16} className="sparkle-icon" />
+                  </h3>
+                  <p className="collapsible-subtitle">
+                    Recording indicator appearance and position
+                  </p>
+                </div>
+              </div>
+            </div>
+            {isDisplayInterfaceExpanded && (
+              <div className="collapsible-content">
+                <DisplayInterfaceSettings />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Themes - Collapsible */}
+        <div className="settings-section" ref={themesRef}>
+          <div className="collapsible-section">
+            <div className="collapsible-header-wrapper">
+              <div 
+                className="collapsible-header"
+                onClick={() => setIsThemesExpanded(!isThemesExpanded)}
+              >
+                <div>
+                  <h3>
+                    <span className={`collapse-arrow ${isThemesExpanded ? 'expanded' : ''}`}>
+                      ▶
+                    </span>
+                    Themes
+                    <Palette size={16} className="sparkle-icon" />
+                  </h3>
+                  <p className="collapsible-subtitle">
+                    Choose your visual theme
+                  </p>
+                </div>
+              </div>
+            </div>
+            {isThemesExpanded && (
+              <div className="collapsible-content">
+                <ThemesSettings />
+              </div>
+            )}
+          </div>
+        </div>
 
         {/* Model Manager - Full Width Collapsible */}
         <div className="settings-section model-manager-full-width" ref={modelSectionRef}>

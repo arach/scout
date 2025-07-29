@@ -8,7 +8,7 @@
   display: grid;
   grid-template-columns: repeat(3, 40px);
   grid-template-rows: repeat(3, 40px);
-  gap: 8px;
+  gap: 12px;
   width: fit-content;
   margin-top: 8px;
 }

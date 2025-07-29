@@ -4,6 +4,7 @@ import { useHotkeyCapture } from '../../hooks/useHotkeyCapture';
 import { formatShortcutJSX } from '../../lib/formatShortcutJSX';
 import { Dropdown } from '../Dropdown';
 import { invoke } from '@tauri-apps/api/core';
+import './RecordingAudioSettings.css';
 
 export const RecordingAudioSettings = memo(function RecordingAudioSettings() {
   const { state, actions } = useSettings();
@@ -42,10 +43,7 @@ export const RecordingAudioSettings = memo(function RecordingAudioSettings() {
   };
 
   return (
-    <div className="settings-section">
-      <div className="settings-section-header-row">
-        <h3 className="settings-section-title">Recording & Audio</h3>
-      </div>
+    <div className="recording-audio-settings">
       
       {/* Recording Shortcuts - Two Column Layout */}
       <div className="shortcuts-grid">

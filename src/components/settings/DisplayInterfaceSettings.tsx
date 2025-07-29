@@ -13,8 +13,7 @@ export const DisplayInterfaceSettings = memo(function DisplayInterfaceSettings()
   const { ui } = state;
 
   return (
-    <div className="settings-section">
-      <h3 className="settings-section-title">Display & Interface</h3>
+    <div className="display-interface-settings">
       <div className="settings-two-column">
         <div className="setting-item">
           <label>Recording Indicator Position</label>

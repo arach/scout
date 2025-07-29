@@ -49,9 +49,9 @@ export function TranscriptionOverlay({
   const { theme } = useTheme();
   const { overlayPosition } = useSettings();
   
-  // Calculate position based on theme settings
+  // Calculate position based on user settings (user setting takes precedence over theme)
   const getPositionFromTheme = useCallback(() => {
-    const position = theme.layout.overlayPosition || overlayPosition || 'top-right';
+    const position = overlayPosition || theme.layout.overlayPosition || 'top-right';
     const padding = 20;
     const overlayWidth = 600;
     const overlayHeight = 400;
@@ -68,7 +68,7 @@ export function TranscriptionOverlay({
       case 'bottom-right': return { x: window.innerWidth - overlayWidth - padding, y: window.innerHeight - overlayHeight - padding };
       default: return { x: window.innerWidth - overlayWidth - padding, y: padding }; // Default to top-right
     }
-  }, [theme.layout.overlayPosition, overlayPosition]);
+  }, [overlayPosition, theme.layout.overlayPosition]);
   
   const [transcriptionState, setTranscriptionState] = useState<TranscriptionState>({
     completedText: '',
@@ -178,7 +178,7 @@ export function TranscriptionOverlay({
       // Only auto-update position if user hasn't manually positioned it
       setPosition(getPositionFromTheme());
     }
-  }, [theme.layout.overlayPosition, overlayPosition, isDragging, getPositionFromTheme]);
+  }, [overlayPosition, theme.layout.overlayPosition, isDragging, getPositionFromTheme]);
 
   // Real-time audio level monitoring for immediate speech feedback
   useEffect(() => {

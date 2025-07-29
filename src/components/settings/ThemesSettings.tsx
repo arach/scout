@@ -7,8 +7,7 @@ export const ThemesSettings = memo(function ThemesSettings() {
   const { ui } = state;
 
   return (
-    <div className="settings-section">
-      <h3 className="settings-section-title">Themes</h3>
+    <div className="themes-settings">
       <ThemeSelector 
         currentTheme={ui.selectedTheme}
         onThemeChange={actions.updateSelectedTheme}

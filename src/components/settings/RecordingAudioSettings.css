@@ -1,0 +1,168 @@
+/* Recording & Audio Settings Styles
+   =================================
+*/
+
+/* Two-column grid for shortcuts */
+.shortcuts-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+/* Keyboard key display with high contrast */
+.keyboard-key {
+  display: inline-block;
+  padding: 4px 12px;
+  background: #f0f0f0;
+  border: 1px solid #999;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: #000;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1), inset 0 -1px 0 rgba(0, 0, 0, 0.1);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+/* Dark mode keyboard keys */
+@media (prefers-color-scheme: dark) {
+  .keyboard-key {
+    background: #4a4a4a;
+    border-color: #666;
+    color: #fff;
+    text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
+  }
+}
+
+/* Sound flow wrapper */
+.sound-flow-wrapper {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  width: 100%;
+}
+
+/* Preview button - ensure it looks like a button */
+.preview-sound-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.preview-sound-button:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--border-secondary);
+}
+
+.preview-sound-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.preview-sound-button.playing {
+  background: var(--accent-primary);
+  color: white;
+  border-color: var(--accent-primary);
+}
+
+/* Auto actions in the same grid as shortcuts */
+.actions-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+/* Toggle switch styles */
+.toggle-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+}
+
+.toggle-setting label {
+  font-size: 14px;
+  color: var(--text-primary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggle-switch {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: 11px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.toggle-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-switch-slider {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: white;
+  border-radius: 50%;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  transition: transform 0.2s ease;
+}
+
+.toggle-switch input:checked ~ .toggle-switch-slider {
+  transform: translateX(18px);
+}
+
+.toggle-switch input:checked ~ .toggle-switch {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+
+/* Active toggle state */
+.toggle-setting input:checked + .toggle-switch {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+
+/* Dark mode adjustments */
+@media (prefers-color-scheme: dark) {
+  .toggle-switch {
+    background: var(--bg-secondary);
+  }
+  
+  .toggle-switch-slider {
+    background: var(--bg-tertiary);
+  }
+}
+
+/* Animation for spin */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
