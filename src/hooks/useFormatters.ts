@@ -10,24 +10,29 @@ export const useFormatters = () => {
    * Format milliseconds into human-readable duration
    */
   const formatDuration = useCallback((ms: number): string => {
+    // < 1 second: Show milliseconds (e.g., "450ms")
     if (ms < 1000) {
-      return '< 1s';
+      return `${Math.round(ms)}ms`;
     }
     
-    const seconds = Math.floor(ms / 1000);
+    const totalSeconds = ms / 1000;
+    const seconds = Math.floor(totalSeconds);
     const minutes = Math.floor(seconds / 60);
-    const hours = Math.floor(minutes / 60);
     
-    if (hours > 0) {
-      const remainingMinutes = minutes % 60;
-      const remainingSeconds = seconds % 60;
-      return `${hours}:${remainingMinutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
-    } else if (minutes > 0) {
-      const remainingSeconds = seconds % 60;
-      return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
-    } else {
-      return `${seconds}s`;
+    // 1-10 seconds: Show with 2 decimal places (e.g., "3.45s")
+    if (totalSeconds < 10) {
+      return `${totalSeconds.toFixed(2)}s`;
     }
+    
+    // 10-60 seconds: Show with 1 decimal place (e.g., "25.3s")
+    if (totalSeconds < 60) {
+      return `${totalSeconds.toFixed(1)}s`;
+    }
+    
+    // 1-10 minutes: Show as "2:34" (minutes:seconds)
+    // > 10 minutes: Show as "12:34" (no hours needed for typical recordings)
+    const remainingSeconds = seconds % 60;
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
   }, []);
 
   /**

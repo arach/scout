@@ -3,7 +3,7 @@ import { SimpleAudioPlayer } from './SimpleAudioPlayer';
 import { TranscriptAIInsights } from './TranscriptAIInsights';
 import { PerformanceTimeline } from './PerformanceTimeline';
 import { invoke } from '@tauri-apps/api/core';
-import { parseTranscriptMetadata, Transcript } from '../types/transcript';
+import { parseTranscriptMetadata, parseAudioMetadata, Transcript } from '../types/transcript';
 import { useResizable } from '../hooks/useResizable';
 import './TranscriptDetailPanel.css';
 
@@ -54,6 +54,7 @@ export function TranscriptDetailPanel({
     const [activeTab, setActiveTab] = useState<'transcript' | 'insights' | 'logs' | 'performance'>('transcript');
     const [whisperLogs, setWhisperLogs] = useState<any[]>([]);
     const [loadingLogs, setLoadingLogs] = useState(false);
+    const [expandedSections, setExpandedSections] = useState<{ [key: string]: boolean }>({});
     
     const { width, isResizing, resizeHandleProps } = useResizable({
         minWidth: 400,
@@ -151,10 +152,71 @@ export function TranscriptDetailPanel({
         onExport([transcript!], format);
     };
 
+    const toggleSection = (section: string) => {
+        setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
+    };
+
+    const getDeviceSummary = () => {
+        if (!audioMetadata) return null;
+        const parts = [];
+        
+        // Device name
+        parts.push(audioMetadata.device.name);
+        
+        // Sample rate
+        parts.push(`${audioMetadata.format.sample_rate} Hz`);
+        
+        // OS
+        parts.push(audioMetadata.system.os);
+        
+        return parts.join(' • ');
+    };
+
+    const getDeviceConnectionType = (device: any) => {
+        const name = device.name.toLowerCase();
+        
+        if (device.device_type) {
+            // Map existing device types to better connection descriptions
+            switch (device.device_type.toLowerCase()) {
+                case 'airpods':
+                    return 'Bluetooth';
+                case 'bluetooth':
+                    return 'Bluetooth';
+                case 'usb':
+                    return 'USB';
+                case 'built-in':
+                    return 'Built-in';
+                case 'headset':
+                    // Try to determine connection type from name
+                    if (name.includes('usb')) return 'USB';
+                    if (name.includes('bluetooth') || name.includes('wireless')) return 'Bluetooth';
+                    if (name.includes('3.5mm') || name.includes('jack')) return '3.5mm Jack';
+                    return 'Wired';
+                default:
+                    return device.device_type;
+            }
+        }
+        
+        // Fallback detection from device name
+        if (name.includes('airpod')) return 'Bluetooth';
+        if (name.includes('bluetooth') || name.includes('wireless')) return 'Bluetooth';
+        if (name.includes('usb')) return 'USB';
+        if (name.includes('built-in') || name.includes('internal')) return 'Built-in';
+        if (name.includes('3.5mm') || name.includes('jack') || name.includes('aux')) return '3.5mm Jack';
+        if (name.includes('thunderbolt')) return 'Thunderbolt';
+        if (name.includes('hdmi')) return 'HDMI';
+        if (name.includes('displayport') || name.includes('display port')) return 'DisplayPort';
+        if (name.includes('external')) return 'External';
+        
+        // Default to wired if we can't determine
+        return 'Wired';
+    };
+
     if (!isOpen || !transcript) return null;
 
     // Parse metadata if available
     const metadata = parseTranscriptMetadata(transcript.metadata) || {};
+    const audioMetadata = parseAudioMetadata(transcript.audio_metadata);
 
     return (
         <>
@@ -189,46 +251,25 @@ export function TranscriptDetailPanel({
 
                 <div className="detail-panel-content">
                     <div className="detail-metadata">
+                        {/* Basic Information - Compact date/time display */}
                         <div className="metadata-item">
-                            <span className="metadata-label">Date</span>
+                            <span className="metadata-label">Date & Time</span>
                             <span className="metadata-value">
                                 {new Date(transcript.created_at).toLocaleDateString('en-US', { 
-                                    weekday: 'long', 
-                                    year: 'numeric', 
-                                    month: 'long', 
-                                    day: 'numeric' 
+                                    month: 'short', 
+                                    day: 'numeric',
+                                    year: 'numeric' 
+                                })} at {new Date(transcript.created_at).toLocaleTimeString([], { 
+                                    hour: '2-digit', 
+                                    minute: '2-digit'
                                 })}
                             </span>
                         </div>
-                        <div className="metadata-item">
-                            <span className="metadata-label">Time</span>
-                            <span className="metadata-value">
-                                {new Date(transcript.created_at).toLocaleTimeString()}
-                            </span>
-                        </div>
-                        <div className="metadata-item">
-                            <span className="metadata-label">Duration</span>
-                            <span className="metadata-value">{formatDuration(transcript.duration_ms)}</span>
-                        </div>
-                        {metadata.model_used && (
-                            <div className="metadata-item">
-                                <span className="metadata-label">Model</span>
-                                <span className="metadata-value">{metadata.model_used}</span>
-                            </div>
-                        )}
                         {metadata.filename && (
                             <div className="metadata-item">
                                 <span className="metadata-label">Source</span>
                                 <span className="metadata-value" title={metadata.filename}>
                                     {metadata.filename.split('/').pop()}
-                                </span>
-                            </div>
-                        )}
-                        {metadata.app_context && (
-                            <div className="metadata-item">
-                                <span className="metadata-label">App</span>
-                                <span className="metadata-value" title={metadata.app_context.bundle_id}>
-                                    {metadata.app_context.name}
                                 </span>
                             </div>
                         )}
@@ -279,7 +320,204 @@ export function TranscriptDetailPanel({
                             </div>
                         )}
                         
-                        {/* Performance Metrics */}
+                        {/* Transcription Details - No section header, part of main panel */}
+                        {metadata.model_used && (
+                            <div className="metadata-item">
+                                <span className="metadata-label">Model</span>
+                                <span className="metadata-value" title={metadata.model_used}>
+                                    {metadata.model_used.split('/').pop()?.replace('.bin', '')}
+                                </span>
+                            </div>
+                        )}
+                        
+                        {performanceMetrics && (
+                            <>
+                                {performanceMetrics.transcription_strategy && (
+                                    <div className="metadata-item">
+                                        <span className="metadata-label">Strategy</span>
+                                        <span className="metadata-value">
+                                            {performanceMetrics.transcription_strategy}
+                                            {performanceMetrics.transcription_strategy === 'ring_buffer' && ' (Chunked)'}
+                                            {performanceMetrics.transcription_strategy === 'classic' && ' (Single-pass)'}
+                                        </span>
+                                    </div>
+                                )}
+                                
+                                {performanceMetrics.transcription_time_ms < transcript.duration_ms && (
+                                    <div className="metadata-item">
+                                        <span className="metadata-label">Efficiency</span>
+                                        <span className="metadata-value">
+                                            <span className="metadata-badge success">
+                                                ✅ Faster than real-time
+                                            </span>
+                                        </span>
+                                    </div>
+                                )}
+                                
+                                <div className="metadata-item">
+                                    <span className="metadata-label">Transcription Time</span>
+                                    <span className="metadata-value">
+                                        {formatDuration(performanceMetrics.transcription_time_ms)}
+                                        <span className="metadata-ratio">
+                                            {` (${(performanceMetrics.transcription_time_ms / transcript.duration_ms).toFixed(2)}x speed)`}
+                                        </span>
+                                    </span>
+                                </div>
+                                
+                                {performanceMetrics.user_perceived_latency_ms && (
+                                    <div className="metadata-item">
+                                        <span className="metadata-label">Processing Latency</span>
+                                        <span className="metadata-value">
+                                            {formatDuration(performanceMetrics.user_perceived_latency_ms)}
+                                            {performanceMetrics.user_perceived_latency_ms < 300 && (
+                                                <span className="metadata-badge success"> ⚡ Fast</span>
+                                            )}
+                                            {performanceMetrics.user_perceived_latency_ms >= 1000 && (
+                                                <span className="metadata-badge warning"> ⚠️ Slow</span>
+                                            )}
+                                        </span>
+                                    </div>
+                                )}
+                            </>
+                        )}
+                        
+                        {/* Duration - show prominently at the top */}
+                        <div className="metadata-item">
+                            <span className="metadata-label">Duration</span>
+                            <span className="metadata-value">{formatDuration(transcript.duration_ms)}</span>
+                        </div>
+                        
+                        {/* Active App */}
+                        {metadata.app_context && (
+                            <div className="metadata-item">
+                                <span className="metadata-label">Active App</span>
+                                <span className="metadata-value" title={metadata.app_context.bundle_id}>
+                                    {metadata.app_context.name}
+                                </span>
+                            </div>
+                        )}
+                        
+                        {/* Recording Details Section */}
+                        {(audioMetadata || performanceMetrics || metadata.model_used) && (
+                            <>
+                                <div className="metadata-section-header">
+                                    <h4>Technical Details</h4>
+                                </div>
+                                
+                                {/* Device Summary - only if audio metadata exists */}
+                                {audioMetadata && (
+                                    <div className="metadata-item clickable" onClick={() => toggleSection('device')}>
+                                        <span className="metadata-label">Device</span>
+                                        <span className="metadata-value">
+                                            <span>{getDeviceSummary()}</span>
+                                            <span className="expand-icon">{expandedSections.device ? '▼' : '▶'}</span>
+                                        </span>
+                                    </div>
+                                )}
+                                
+                                {/* Expandable Device Details */}
+                                {expandedSections.device && (
+                                    <div className="metadata-expanded">
+                                        {/* Audio Format */}
+                                        <div className="metadata-item">
+                                            <span className="metadata-label">Format</span>
+                                            <span className="metadata-value">
+                                                {audioMetadata.format.sample_rate} Hz, {audioMetadata.format.channels} ch, {audioMetadata.format.bit_depth}-bit
+                                                {audioMetadata.format.requested_sample_rate && 
+                                                 audioMetadata.format.requested_sample_rate !== audioMetadata.format.sample_rate && (
+                                                    <span className="metadata-badge warning"> ⚠️ Expected {audioMetadata.format.requested_sample_rate} Hz</span>
+                                                )}
+                                            </span>
+                                        </div>
+                                        
+                                        {/* Buffer Configuration */}
+                                        <div className="metadata-item">
+                                            <span className="metadata-label">Buffer</span>
+                                            <span className="metadata-value">
+                                                {audioMetadata.format.buffer_config.buffer_type}
+                                                {audioMetadata.format.buffer_config.estimated_latency_ms && (
+                                                    <span className="metadata-ratio"> ({audioMetadata.format.buffer_config.estimated_latency_ms.toFixed(1)}ms latency)</span>
+                                                )}
+                                            </span>
+                                        </div>
+                                        
+                                        {/* Recording Settings */}
+                                        <div className="metadata-item">
+                                            <span className="metadata-label">Recording Mode</span>
+                                            <span className="metadata-value">
+                                                {audioMetadata.recording.trigger_type === 'manual' && 'Manual'}
+                                                {audioMetadata.recording.trigger_type === 'push-to-talk' && 'Push-to-Talk'}
+                                                {audioMetadata.recording.trigger_type === 'vad' && 'Voice Activated'}
+                                                {audioMetadata.recording.vad_enabled && (
+                                                    <span className="metadata-badge success"> VAD Enabled</span>
+                                                )}
+                                            </span>
+                                        </div>
+                                        
+                                        {/* System Info */}
+                                        <div className="metadata-item">
+                                            <span className="metadata-label">Audio Backend</span>
+                                            <span className="metadata-value">
+                                                {audioMetadata.system.audio_backend}
+                                            </span>
+                                        </div>
+                                        
+                                        {/* Device Connection Type */}
+                                        <div className="metadata-item">
+                                            <span className="metadata-label">Connection</span>
+                                            <span className="metadata-value">
+                                                {getDeviceConnectionType(audioMetadata.device)}
+                                                {audioMetadata.device.is_default && (
+                                                    <span className="metadata-badge info">System Default</span>
+                                                )}
+                                            </span>
+                                        </div>
+                                        
+                                        {/* Device Notes/Warnings */}
+                                        {audioMetadata.device.notes.length > 0 && (
+                                            <div className="metadata-item">
+                                                <span className="metadata-label">Device Notes</span>
+                                                <div className="metadata-value">
+                                                    {audioMetadata.device.notes.map((note, index) => (
+                                                        <div key={index} className="metadata-badge warning">
+                                                            ⚠️ {note}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                        
+                                        {/* Configuration Mismatches */}
+                                        {audioMetadata.mismatches.length > 0 && (
+                                            <div className="metadata-item config-mismatches">
+                                                <span className="metadata-label">Config Issues</span>
+                                                <div className="metadata-value">
+                                                    {audioMetadata.mismatches.map((mismatch, index) => (
+                                                        <div key={index} className="config-mismatch">
+                                                            <div className="mismatch-header">
+                                                                <span className="mismatch-type">{mismatch.mismatch_type}</span>
+                                                                <span className="mismatch-impact">{mismatch.impact}</span>
+                                                            </div>
+                                                            <div className="mismatch-details">
+                                                                <span>Expected: {mismatch.requested}</span>
+                                                                <span>Actual: {mismatch.actual}</span>
+                                                            </div>
+                                                            {mismatch.resolution && (
+                                                                <div className="mismatch-resolution">
+                                                                    💡 {mismatch.resolution}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </>
+                        )}
+                        
+                        {/* Performance Metrics Status - Only show if no metrics */}
                         {loadingMetrics && (
                             <div className="metadata-item">
                                 <span className="metadata-label">Performance</span>
@@ -303,57 +541,6 @@ export function TranscriptDetailPanel({
                                     <span className="metadata-badge warning">⚠️ Error loading metrics</span>
                                 </span>
                             </div>
-                        )}
-                        
-                        {!loadingMetrics && performanceMetrics && (
-                            <>
-                                <div className="metadata-item">
-                                    <span className="metadata-label">Transcription Time</span>
-                                    <span className="metadata-value">
-                                        {formatDuration(performanceMetrics.transcription_time_ms)}
-                                        <span className="metadata-ratio">
-                                            {` (${(performanceMetrics.transcription_time_ms / transcript.duration_ms).toFixed(2)}x speed)`}
-                                        </span>
-                                    </span>
-                                </div>
-                                
-                                {performanceMetrics.transcription_strategy && (
-                                    <div className="metadata-item">
-                                        <span className="metadata-label">Strategy</span>
-                                        <span className="metadata-value">
-                                            {performanceMetrics.transcription_strategy}
-                                            {performanceMetrics.transcription_strategy === 'ring_buffer' && ' (Chunked)'}
-                                            {performanceMetrics.transcription_strategy === 'classic' && ' (Single-pass)'}
-                                        </span>
-                                    </div>
-                                )}
-                                
-                                {performanceMetrics.user_perceived_latency_ms && (
-                                    <div className="metadata-item">
-                                        <span className="metadata-label">Processing Latency</span>
-                                        <span className="metadata-value">
-                                            {formatDuration(performanceMetrics.user_perceived_latency_ms)}
-                                            {performanceMetrics.user_perceived_latency_ms < 300 && (
-                                                <span className="metadata-badge success"> ⚡ Fast</span>
-                                            )}
-                                            {performanceMetrics.user_perceived_latency_ms >= 1000 && (
-                                                <span className="metadata-badge warning"> ⚠️ Slow</span>
-                                            )}
-                                        </span>
-                                    </div>
-                                )}
-                                
-                                {performanceMetrics.transcription_time_ms < transcript.duration_ms && (
-                                    <div className="metadata-item">
-                                        <span className="metadata-label">Efficiency</span>
-                                        <span className="metadata-value">
-                                            <span className="metadata-badge success">
-                                                ✅ Faster than real-time
-                                            </span>
-                                        </span>
-                                    </div>
-                                )}
-                            </>
                         )}
                     </div>
 
