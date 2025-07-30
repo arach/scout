@@ -52,6 +52,11 @@
     border-color: rgba(255, 255, 255, 0.15);
     color: rgba(255, 255, 255, 0.6);
   }
+  
+  /* Time display color for all dark themes */
+  .transcript-time {
+    color: #a1a1aa !important; /* zinc-400 for better visibility */
+  }
 }
 
 /* ==================== Minimal Overlay Theme ==================== */
@@ -71,6 +76,22 @@
   
   .btn:hover {
     background: var(--bg-hover);
+  }
+  
+  /* Dark scrollbars for Minimal Overlay theme */
+  ::-webkit-scrollbar-track {
+    background: #1a1a1a;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    background: #3a3a3a;
+    border: 1px solid transparent;
+    background-clip: content-box;
+  }
+  
+  ::-webkit-scrollbar-thumb:hover {
+    background: #4a4a4a;
+    background-clip: content-box;
   }
 }
 
@@ -119,6 +140,21 @@
   .btn:hover {
     box-shadow: 0 4px 12px rgba(255, 102, 0, 0.3);
     transform: translateY(-1px);
+  }
+  
+  /* Dark scrollbars for Winamp Modern theme */
+  ::-webkit-scrollbar-track {
+    background: #1a1a1a;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    background: #ff6600;
+    opacity: 0.7;
+  }
+  
+  ::-webkit-scrollbar-thumb:hover {
+    background: #ff8833;
+    opacity: 1;
   }
 }
 
@@ -238,16 +274,16 @@
   }
   
   ::-webkit-scrollbar-track {
-    background: var(--bg-primary);
+    background: #1a1a1a; /* Very dark for terminal theme */
   }
   
   ::-webkit-scrollbar-thumb {
-    background: var(--border-primary);
+    background: #4a4a4a; /* Medium gray for good contrast */
     border-radius: 0;
   }
   
   ::-webkit-scrollbar-thumb:hover {
-    background: var(--accent-primary);
+    background: #5a5a5a; /* Slightly lighter on hover */
   }
   
   /* Transcript styling */
@@ -414,7 +450,7 @@
   }
   
   .transcript-time {
-    color: var(--text-secondary) !important;
+    color: #a1a1aa !important; /* zinc-400 - lighter for better visibility in dark theme */
   }
   
   .transcript-empty {

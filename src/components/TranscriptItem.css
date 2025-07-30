@@ -314,11 +314,11 @@
     }
     
     .transcript-time {
-        color: #71717a; /* zinc-500 */
+        color: #a1a1aa; /* zinc-400 - lighter for better visibility */
     }
     
     .transcript-duration {
-        color: #71717a; /* zinc-500 */
+        color: #a1a1aa; /* zinc-400 - lighter for better visibility */
     }
     
     .transcript-text {

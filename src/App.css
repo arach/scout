@@ -76,6 +76,46 @@ body {
   padding: 0;
 }
 
+/* Global Scrollbar Styles */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary, #f1f1f1);
+  border-radius: 0;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-primary, #c0c0c0);
+  border-radius: 0;
+  border: 1px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary, #888);
+  background-clip: content-box;
+}
+
+/* Dark mode scrollbar */
+@media (prefers-color-scheme: dark) {
+  ::-webkit-scrollbar-track {
+    background: #1a1a1a;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    background: #4a4a4a;
+    background-clip: content-box;
+  }
+  
+  ::-webkit-scrollbar-thumb:hover {
+    background: #5a5a5a;
+    background-clip: content-box;
+  }
+}
+
 h1 {
   font-size: 20px;
   font-weight: 400;
