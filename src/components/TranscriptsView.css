@@ -356,10 +356,11 @@
     min-height: 0;
 }
 
-/* When not using virtualization, enable scrolling */
-.transcript-list-container > :not(.transcript-list-virtual) {
+/* Scrollable container for non-virtualized list */
+.transcript-list-scrollable {
     overflow-y: auto;
     flex: 1;
+    min-height: 0;
 }
 
 @media (max-width: 768px) {

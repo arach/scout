@@ -324,6 +324,7 @@ export const TranscriptsView = memo(function TranscriptsView({
                     </div>
                 ) : (
                     <div className="transcript-list-container" ref={listContainerRef}>
+                        <div className="transcript-list-scrollable">
                         {paginatedGroups.map(group => {
                             // Find the full group data for this title
                             const fullGroup = allGroups.find(g => g.title === group.title);
@@ -407,6 +408,7 @@ export const TranscriptsView = memo(function TranscriptsView({
                                 </button>
                             </div>
                         )}
+                        </div>
                     </div>
                 )}
             </div>
