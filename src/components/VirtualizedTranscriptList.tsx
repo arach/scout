@@ -1,5 +1,6 @@
 import { useRef, useCallback, useState, useEffect, memo } from 'react';
 import { VariableSizeList as List } from 'react-window';
+import AutoSizer from 'react-virtualized-auto-sizer';
 import { ChevronDown } from 'lucide-react';
 import { TranscriptItem } from './TranscriptItem';
 import { Transcript } from '../types/transcript';
@@ -21,7 +22,6 @@ interface VirtualizedTranscriptListProps {
     showDeleteConfirmation: (id: number, text: string) => void;
     formatDuration: (ms: number) => string;
     panelTranscriptId?: number;
-    height: number;
     isSelectionMode?: boolean;
 }
 
@@ -45,7 +45,6 @@ export const VirtualizedTranscriptList = memo(function VirtualizedTranscriptList
     showDeleteConfirmation,
     formatDuration,
     panelTranscriptId,
-    height,
     isSelectionMode = false
 }: VirtualizedTranscriptListProps) {
     const listRef = useRef<List>(null);
@@ -177,15 +176,19 @@ export const VirtualizedTranscriptList = memo(function VirtualizedTranscriptList
     };
 
     return (
-        <List
-            ref={listRef}
-            height={height}
-            itemCount={listItems.length}
-            itemSize={getItemSize}
-            width="100%"
-            className="transcript-list-virtual"
-        >
-            {Row}
-        </List>
+        <AutoSizer>
+            {({ height, width }) => (
+                <List
+                    ref={listRef}
+                    height={height}
+                    itemCount={listItems.length}
+                    itemSize={getItemSize}
+                    width={width}
+                    className="transcript-list-virtual"
+                >
+                    {Row}
+                </List>
+            )}
+        </AutoSizer>
     );
 });

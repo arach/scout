@@ -185,7 +185,7 @@
 }
 
 .sidebar-button-stats:hover svg {
-  animation: statsBounce 0.5s ease-out;
+  animation: statsBounce 0.3s ease-out;
 }
 
 /* Dictionary button wiggle animation */
@@ -197,7 +197,7 @@
 }
 
 .sidebar-button-dictionary:hover svg {
-  animation: dictionaryWiggle 0.4s ease-in-out;
+  animation: dictionaryWiggle 0.3s ease-in-out;
 }
 
 
@@ -244,7 +244,7 @@
 
 /* Record button - coin flip on Y axis */
 .sidebar-button-record:hover svg {
-  animation: coinFlipY 0.4s ease-out;
+  animation: coinFlipY 0.3s ease-out;
 }
 
 .sidebar-button-record:active svg {
@@ -253,7 +253,7 @@
 
 /* Transcripts button - flip vertically */
 .sidebar-button-transcripts:hover svg {
-  animation: flipVertical 0.4s ease-out;
+  animation: flipVertical 0.3s ease-out;
 }
 
 .sidebar-button-transcripts:active svg {
@@ -262,7 +262,7 @@
 
 /* Settings button - spin quickly */
 .sidebar-button-settings:hover svg {
-  animation: spinQuick 0.5s ease-out;
+  animation: spinQuick 0.3s ease-out;
 }
 
 .sidebar-button-settings:active svg {

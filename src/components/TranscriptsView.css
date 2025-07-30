@@ -188,6 +188,7 @@
     flex-direction: column;
     height: 100%;
     overflow: hidden;
+    position: relative;
 }
 
 /* Header section with padding */
@@ -202,9 +203,11 @@
 /* Transcripts list section - full width, no padding */
 .transcripts-list-section {
     flex: 1;
-    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
     min-height: 0;
     padding-top: 8px; /* Small top padding for breathing room */
+    overflow: hidden;
 }
 
 /* Transcript items container - adds padding for items only */
@@ -341,12 +344,22 @@
 
 /* List view styles */
 .transcript-list-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
     margin: 0 var(--grid-padding-horizontal);
     background: var(--bg-secondary);
     border: 1px solid var(--border-primary);
     border-radius: 12px;
     overflow: hidden;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    min-height: 0;
+}
+
+/* When not using virtualization, enable scrolling */
+.transcript-list-container > :not(.transcript-list-virtual) {
+    overflow-y: auto;
+    flex: 1;
 }
 
 @media (max-width: 768px) {
@@ -359,18 +372,19 @@
 .transcript-list-virtual {
     scrollbar-width: thin;
     scrollbar-color: #d1d5db #f3f4f6;
-    /* Ensure the virtual list uses full width */
+    /* Ensure the virtual list uses full width and height */
     width: 100% !important;
+    height: 100% !important;
 }
 
 /* Wrapper for transcript items in virtual list - removed, no longer needed */
 
 /* No transcripts state */
 .no-transcripts-container {
+    flex: 1;
     display: flex;
     align-items: center;
     justify-content: center;
-    height: 100%;
     padding: var(--grid-padding-horizontal);
 }
 
@@ -555,7 +569,7 @@
 .transcript-group-items {
     background: transparent;
     padding: 0;
-    margin-top: 4px; /* Add spacing between header and first item */
+    margin-top: 8px; /* Increased spacing between header and first item to prevent overlap */
 }
 
 /* Dark mode border removed */

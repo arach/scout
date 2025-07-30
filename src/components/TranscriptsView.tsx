@@ -186,26 +186,8 @@ export const TranscriptsView = memo(function TranscriptsView({
     // Get all groups (unpaginated) for select all functionality
     const allGroups = useMemo(() => groupTranscriptsByDate(transcripts), [transcripts]);
     
-    // Calculate list container height for virtualization
-    const [listContainerHeight, setListContainerHeight] = useState(600);
+    // Ref for the list container
     const listContainerRef = useRef<HTMLDivElement>(null);
-    
-    useEffect(() => {
-        const updateHeight = () => {
-            if (listContainerRef.current) {
-                const rect = listContainerRef.current.getBoundingClientRect();
-                const viewportHeight = window.innerHeight;
-                const topOffset = rect.top;
-                const bottomPadding = 100; // Space for floating action bar
-                const newHeight = viewportHeight - topOffset - bottomPadding;
-                setListContainerHeight(Math.max(400, newHeight));
-            }
-        };
-        
-        updateHeight();
-        window.addEventListener('resize', updateHeight);
-        return () => window.removeEventListener('resize', updateHeight);
-    }, []);
     
     // Decide whether to use virtualization
     const shouldUseVirtualization = transcripts.length > ENABLE_VIRTUALIZATION_THRESHOLD;
@@ -337,7 +319,6 @@ export const TranscriptsView = memo(function TranscriptsView({
                             showDeleteConfirmation={showDeleteConfirmation}
                             formatDuration={formatDuration}
                             panelTranscriptId={panelState.transcript?.id}
-                            height={listContainerHeight}
                             isSelectionMode={isSelectionMode}
                         />
                     </div>

@@ -94,12 +94,13 @@ h1 {
 /* New main content area after refactoring */
 .app-main {
   flex-grow: 1;
-  overflow-y: auto;
+  overflow: hidden;
   padding: 0;
   background-color: var(--bg-primary);
   position: relative;
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .app-main.sidebar-collapsed {
