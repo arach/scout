@@ -1,7 +1,7 @@
 /* Transcript Item Styles */
 .transcript-item {
     position: relative;
-    background: transparent;
+    background: rgba(255, 255, 255, 0.5);
     border: none;
     border-bottom: 1px solid var(--border-primary);
     padding: 8px 16px; /* Add horizontal padding here instead of container */
@@ -39,7 +39,7 @@
 }
 
 .transcript-item:hover {
-    background: rgba(var(--accent-rgb), 0.05);
+    background: rgba(var(--accent-rgb), 0.03);
     border-bottom-color: rgba(var(--accent-rgb), 0.15);
 }
 

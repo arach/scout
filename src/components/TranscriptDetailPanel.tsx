@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { SimpleAudioPlayer } from './SimpleAudioPlayer';
-import { TranscriptAIInsights } from './TranscriptAIInsights';
 import { PerformanceTimeline } from './PerformanceTimeline';
 import { invoke } from '@tauri-apps/api/core';
 import { parseTranscriptMetadata, parseAudioMetadata, Transcript } from '../types/transcript';
@@ -109,11 +108,12 @@ export function TranscriptDetailPanel({
     const [showExportMenu, setShowExportMenu] = useState(false);
     const [performanceMetrics, setPerformanceMetrics] = useState<PerformanceMetrics | null>(null);
     const [showOriginalTranscript, setShowOriginalTranscript] = useState(false);
-    const [activeTab, setActiveTab] = useState<'transcript' | 'insights' | 'logs' | 'performance'>('transcript');
+    const [activeTab, setActiveTab] = useState<'transcript' | 'logs' | 'performance'>('transcript');
     const [whisperLogs, setWhisperLogs] = useState<any[]>([]);
     const [loadingLogs, setLoadingLogs] = useState(false);
     const [expandedSections, setExpandedSections] = useState<{ [key: string]: boolean }>({});
     const [expandedCards, setExpandedCards] = useState<{ [key: string]: boolean }>({ transcription: true });
+    const [copiedTab, setCopiedTab] = useState<string | null>(null);
     
     const { width, isResizing, resizeHandleProps } = useResizable({
         minWidth: 400,
@@ -211,6 +211,37 @@ export function TranscriptDetailPanel({
     
     const toggleCard = (card: string) => {
         setExpandedCards(prev => ({ ...prev, [card]: !prev[card] }));
+    };
+
+    const copyTranscript = () => {
+        const textToCopy = showOriginalTranscript && metadata.original_transcript 
+            ? metadata.original_transcript 
+            : transcript.text;
+        
+        navigator.clipboard.writeText(textToCopy);
+        setCopiedTab('transcript');
+        setTimeout(() => setCopiedTab(null), 2000);
+    };
+
+    const copyWhisperLogs = () => {
+        const logsText = whisperLogs.map(log => {
+            let text = `[${new Date(log.timestamp).toLocaleTimeString()}] ${log.level} ${log.component}: ${log.message}`;
+            if (log.metadata) {
+                text += '\n' + JSON.stringify(log.metadata, null, 2);
+            }
+            return text;
+        }).join('\n\n');
+        
+        navigator.clipboard.writeText(logsText);
+        setCopiedTab('logs');
+        setTimeout(() => setCopiedTab(null), 2000);
+    };
+
+    const copyPerformance = () => {
+        // This will be handled by the PerformanceTimeline component's own copy function
+        // But we still want to show the copied state
+        setCopiedTab('performance');
+        setTimeout(() => setCopiedTab(null), 2000);
     };
 
     const getDeviceSummary = () => {
@@ -573,128 +604,154 @@ export function TranscriptDetailPanel({
                             className={`tab-button ${activeTab === 'transcript' ? 'active' : ''}`}
                             onClick={() => setActiveTab('transcript')}
                         >
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M3 2C3 1.44772 3.44772 1 4 1H10C10.5523 1 11 1.44772 11 2V12C11 12.5523 10.5523 13 10 13H4C3.44772 13 3 12.5523 3 12V2Z" stroke="currentColor" strokeWidth="1"/>
+                                <path d="M5 4H9M5 6H9M5 8H7" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/>
+                            </svg>
                             Transcript
-                        </button>
-                        <button
-                            className={`tab-button ${activeTab === 'insights' ? 'active' : ''}`}
-                            onClick={() => setActiveTab('insights')}
-                        >
-                            AI Insights
                         </button>
                         <button
                             className={`tab-button ${activeTab === 'logs' ? 'active' : ''}`}
                             onClick={() => setActiveTab('logs')}
                         >
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M1 7H3L5 3L7 11L9 7H11L13 7" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"/>
+                            </svg>
                             Whisper Logs
                         </button>
                         <button
                             className={`tab-button ${activeTab === 'performance' ? 'active' : ''}`}
                             onClick={() => setActiveTab('performance')}
                         >
-                            Performance
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1"/>
+                                <path d="M7 4V7L9 9" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/>
+                                <path d="M7 1V2M7 12V13M1 7H2M12 7H13" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/>
+                            </svg>
+                            Performance Logs
                         </button>
                     </div>
 
                     {activeTab === 'transcript' && (
-                    <div className="detail-transcript">
-                        <div className="transcript-header">
-                            <h3>Transcript</h3>
-                            {metadata.original_transcript && metadata.original_transcript !== transcript.text && (
-                                <div className="transcript-toggle">
-                                    <button 
-                                        className={`toggle-button ${!showOriginalTranscript ? 'active' : ''}`}
-                                        onClick={() => setShowOriginalTranscript(false)}
-                                    >
-                                        Filtered
-                                    </button>
-                                    <button 
-                                        className={`toggle-button ${showOriginalTranscript ? 'active' : ''}`}
-                                        onClick={() => setShowOriginalTranscript(true)}
-                                    >
-                                        Original
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-                        
-                        <div className="transcript-full-text">
-                            {transcript.text === "[BLANK_AUDIO]" ? (
-                                <p className="transcript-empty">No speech detected in this recording.</p>
-                            ) : (
-                                <div className="transcript-content">
-                                    {showOriginalTranscript && metadata.original_transcript ? (
-                                        <div className="transcript-original">
-                                            <p>{metadata.original_transcript}</p>
-                                            {metadata.original_transcript !== transcript.text && (
-                                                <div className="transcript-diff-note">
-                                                    <span className="diff-icon">🚫</span>
-                                                    <span>This version contains content that was filtered from the final transcript</span>
-                                                </div>
-                                            )}
-                                        </div>
-                                    ) : (
-                                        <p>{transcript.text}</p>
-                                    )}
-                                </div>
-                            )}
+                    <div className="tab-content">
+                        <button 
+                            className={`tab-copy-button ${copiedTab === 'transcript' ? 'copied' : ''}`}
+                            onClick={copyTranscript}
+                            title="Copy transcript"
+                        >
+                            📋 {copiedTab === 'transcript' ? 'Copied!' : 'Copy'}
+                        </button>
+                        <div className="detail-transcript">
+                            <div className="transcript-header">
+                                {metadata.original_transcript && metadata.original_transcript !== transcript.text && (
+                                    <div className="transcript-toggle">
+                                        <button 
+                                            className={`toggle-button ${!showOriginalTranscript ? 'active' : ''}`}
+                                            onClick={() => setShowOriginalTranscript(false)}
+                                        >
+                                            Filtered
+                                        </button>
+                                        <button 
+                                            className={`toggle-button ${showOriginalTranscript ? 'active' : ''}`}
+                                            onClick={() => setShowOriginalTranscript(true)}
+                                        >
+                                            Original
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                            
+                            <div className="transcript-full-text">
+                                {transcript.text === "[BLANK_AUDIO]" ? (
+                                    <p className="transcript-empty">No speech detected in this recording.</p>
+                                ) : (
+                                    <div className="transcript-content">
+                                        {showOriginalTranscript && metadata.original_transcript ? (
+                                            <div className="transcript-original">
+                                                <p>{metadata.original_transcript}</p>
+                                                {metadata.original_transcript !== transcript.text && (
+                                                    <div className="transcript-diff-note">
+                                                        <span className="diff-icon">🚫</span>
+                                                        <span>This version contains content that was filtered from the final transcript</span>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ) : (
+                                            <p>{transcript.text}</p>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
                     )}
 
-                    {activeTab === 'insights' && (
-                        <div className="detail-insights">
-                            <TranscriptAIInsights transcriptId={transcript.id} />
-                        </div>
-                    )}
-
                     {activeTab === 'logs' && (
-                        <div className="detail-logs">
-                            <div className="logs-header">
-                                <h3>Whisper Transcription Logs</h3>
-                                <p className="logs-description">Detailed logs from the Whisper transcription process</p>
-                            </div>
-                            
-                            {loadingLogs ? (
-                                <div className="logs-loading">Loading logs...</div>
-                            ) : whisperLogs.length === 0 ? (
-                                <div className="logs-empty">
-                                    <p>No whisper logs found for this transcript.</p>
-                                    <p className="logs-hint">Logs are only available for recent recordings with whisper logging enabled.</p>
-                                </div>
-                            ) : (
-                                <div className="logs-content">
-                                    {whisperLogs.map((log, index) => (
-                                        <div key={index} className={`log-entry log-${log.level.toLowerCase()}`}>
-                                            <div className="log-header">
-                                                <span className="log-timestamp">{new Date(log.timestamp).toLocaleTimeString()}</span>
-                                                <span className="log-level">{log.level}</span>
-                                                <span className="log-component">{log.component}</span>
-                                            </div>
-                                            <div className="log-message">{log.message}</div>
-                                            {log.metadata && (
-                                                <div className="log-metadata">
-                                                    <pre>{JSON.stringify(log.metadata, null, 2)}</pre>
+                        <div className="tab-content">
+                            <button 
+                                className={`tab-copy-button ${copiedTab === 'logs' ? 'copied' : ''}`}
+                                onClick={copyWhisperLogs}
+                                title="Copy logs"
+                                disabled={whisperLogs.length === 0}
+                            >
+                                📋 {copiedTab === 'logs' ? 'Copied!' : 'Copy'}
+                            </button>
+                            <div className="detail-logs">
+                                {loadingLogs ? (
+                                    <div className="logs-loading">Loading logs...</div>
+                                ) : whisperLogs.length === 0 ? (
+                                    <div className="logs-empty">
+                                        <p>No whisper logs found for this transcript.</p>
+                                        <p className="logs-hint">Logs are only available for recent recordings with whisper logging enabled.</p>
+                                    </div>
+                                ) : (
+                                    <div className="logs-content">
+                                        <div className="logs-table">
+                                            {whisperLogs.map((log, index) => (
+                                                <div key={index} className={`log-entry log-${log.level.toLowerCase()}`}>
+                                                    <div className="log-header">
+                                                        <span className="log-timestamp">{new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                                                        <span className={`log-level log-${log.level.toLowerCase()}`}>{log.level}</span>
+                                                        <span className="log-component">{log.component}</span>
+                                                    </div>
+                                                    <div className="log-message">{log.message}</div>
+                                                    {log.metadata && (
+                                                        <div className="log-metadata">
+                                                            <pre>{JSON.stringify(log.metadata, null, 2)}</pre>
+                                                        </div>
+                                                    )}
                                                 </div>
-                                            )}
+                                            ))}
                                         </div>
-                                    ))}
-                                </div>
-                            )}
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     )}
 
                     {activeTab === 'performance' && (
-                        <div className="detail-performance">
-                            <div className="performance-header">
-                                <h3>Performance Timeline</h3>
-                                <p className="performance-description">Detailed timing breakdown of the recording and transcription process</p>
-                            </div>
-                            <div className="performance-content">
-                                <PerformanceTimeline 
-                                    isRecording={false}
-                                    transcriptId={transcript.id}
-                                    onClose={undefined}
-                                />
+                        <div className="tab-content">
+                            <button 
+                                className={`tab-copy-button ${copiedTab === 'performance' ? 'copied' : ''}`}
+                                onClick={() => {
+                                    const button = document.querySelector('.performance-copy-trigger') as HTMLButtonElement;
+                                    if (button) {
+                                        button.click();
+                                        copyPerformance();
+                                    }
+                                }}
+                                title="Copy performance timeline"
+                            >
+                                📋 {copiedTab === 'performance' ? 'Copied!' : 'Copy'}
+                            </button>
+                            <div className="detail-performance">
+                                <div className="performance-content">
+                                    <PerformanceTimeline 
+                                        isRecording={false}
+                                        transcriptId={transcript.id}
+                                        onClose={undefined}
+                                    />
+                                </div>
                             </div>
                         </div>
                     )}
@@ -713,7 +770,7 @@ export function TranscriptDetailPanel({
                         
                         <div className="export-dropdown">
                             <button 
-                                className="action-button"
+                                className="action-button secondary"
                                 onClick={() => setShowExportMenu(!showExportMenu)}
                             >
                                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
