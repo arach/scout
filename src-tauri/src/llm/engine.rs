@@ -7,7 +7,7 @@ use candle_transformers::models::llama::{Config, Cache, Llama};
 use std::path::Path;
 use tokenizers::Tokenizer;
 use tokio::sync::mpsc::{channel, Receiver};
-use crate::logger::{info, debug, warn, error, Component};
+use crate::logger::{info, Component};
 
 pub struct CandleEngine {
     model: Option<Llama>,

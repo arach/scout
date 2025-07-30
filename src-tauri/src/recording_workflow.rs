@@ -394,6 +394,7 @@ impl RecordingWorkflow {
                                 let whisper_log_path_clone = active_recording.whisper_log_path.clone();
                                 let _app_context_clone = active_recording.app_context.clone();
                                 let recording_start_time = active_recording.start_time;
+                                let device_info_result = device_info.clone();
                                 
                                 // Clone performance tracker for async task
                                 let perf_tracker_clone = performance_tracker_for_iter.clone();
@@ -464,12 +465,20 @@ impl RecordingWorkflow {
                                         
                                         let metadata = metadata_json.to_string();
                                         
-                                        // Save filtered transcript to database
+                                        // Get audio metadata if available
+                                        let audio_metadata_json = if let Some(ref device_info) = device_info_result {
+                                            device_info.metadata.as_ref().and_then(|m| m.to_json().ok())
+                                        } else {
+                                            None
+                                        };
+                                        
+                                        // Save filtered transcript to database with audio metadata
                                         perf_tracker_clone.track_event("db_save", "Saving transcript to database").await;
-                                        match database_clone.save_transcript(
+                                        match database_clone.save_transcript_with_audio_metadata(
                                             &filtered_transcript,
                                             duration_ms,
                                             Some(&metadata),
+                                            audio_metadata_json.as_deref(),
                                             Some(&recordings_dir_clone.join(&filename_clone).to_string_lossy()),
                                             None // TODO: Calculate actual file size
                                         ).await {
@@ -478,7 +487,7 @@ impl RecordingWorkflow {
                                                 perf_tracker_clone.track_event("db_saved", &format!("Transcript saved with ID: {}", transcript.id)).await;
                                                 
                                                 // Save performance metrics using the consolidated service
-                                                let performance_data = crate::performance_metrics_service::PerformanceDataBuilder::new(
+                                                let mut perf_builder = crate::performance_metrics_service::PerformanceDataBuilder::new(
                                                     duration_ms,
                                                     transcription_result.processing_time_ms as i32,
                                                     model_name.clone(),
@@ -488,8 +497,14 @@ impl RecordingWorkflow {
                                                 .with_audio_info(None, Some("wav".to_string()))
                                                 .with_strategy_metadata(serde_json::json!({
                                                     "strategy_used": transcription_result.strategy_used
-                                                }))
-                                                .build();
+                                                }));
+                                                
+                                                // Add device info if available
+                                                if let Some(ref device_info) = device_info_result {
+                                                    perf_builder = perf_builder.with_device_info(device_info);
+                                                }
+                                                
+                                                let performance_data = perf_builder.build();
                                                 
                                                 if let Err(e) = post_processing.save_performance_metrics(transcript.id, performance_data).await {
                                                     error(Component::Processing, &format!("Failed to save performance metrics: {}", e));

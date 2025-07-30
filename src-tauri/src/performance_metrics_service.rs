@@ -25,6 +25,16 @@ pub struct TranscriptionPerformanceData {
     pub audio_file_size_bytes: Option<i64>,
     pub audio_format: Option<String>,
     
+    // Audio device and configuration
+    pub audio_device_name: Option<String>,
+    pub audio_sample_rate: Option<i32>,
+    pub audio_channels: Option<i32>,
+    pub audio_bit_depth: Option<i32>,
+    pub audio_buffer_size: Option<String>,
+    pub audio_input_gain: Option<f32>,
+    pub requested_sample_rate: Option<i32>,
+    pub requested_channels: Option<i32>,
+    
     // Success/failure
     pub success: bool,
     pub error_message: Option<String>,
@@ -32,6 +42,9 @@ pub struct TranscriptionPerformanceData {
     // Strategy-specific metadata
     pub chunks_processed: Option<usize>,
     pub strategy_metadata: Option<serde_json::Value>,
+    
+    // Audio configuration metadata
+    pub audio_metadata: Option<crate::audio::AudioMetadata>,
 }
 
 impl PerformanceMetricsService {
@@ -68,8 +81,19 @@ impl PerformanceMetricsService {
         
         let metadata_str = metadata.to_string();
         
-        // Save to database
-        match self.database.save_performance_metrics(
+        // Extract audio metadata values if available
+        if let Some(ref audio_meta) = performance_data.audio_metadata {
+            metadata["audio_metadata"] = serde_json::json!({
+                "device": audio_meta.device,
+                "format": audio_meta.format,
+                "recording": audio_meta.recording,
+                "system": audio_meta.system,
+                "mismatches": audio_meta.mismatches,
+            });
+        }
+        
+        // Save to database with audio details
+        let metrics_id = match self.database.save_performance_metrics_with_audio_details(
             Some(transcript_id),
             performance_data.recording_duration_ms,
             performance_data.transcription_time_ms,
@@ -79,6 +103,14 @@ impl PerformanceMetricsService {
             Some(&performance_data.transcription_strategy),
             performance_data.audio_file_size_bytes,
             performance_data.audio_format.as_deref(),
+            performance_data.audio_device_name.as_deref(),
+            performance_data.audio_sample_rate,
+            performance_data.audio_channels,
+            performance_data.audio_bit_depth,
+            performance_data.audio_buffer_size.as_deref(),
+            performance_data.audio_input_gain,
+            performance_data.requested_sample_rate,
+            performance_data.requested_channels,
             performance_data.success,
             performance_data.error_message.as_deref(),
             Some(&metadata_str),
@@ -87,15 +119,20 @@ impl PerformanceMetricsService {
                 info(Component::Processing, &format!(
                     "✅ Performance metrics saved successfully (ID: {})", metrics_id
                 ));
-                Ok(metrics_id)
+                metrics_id
             }
             Err(e) => {
                 error(Component::Processing, &format!(
                     "❌ Failed to save performance metrics: {}", e
                 ));
-                Err(e)
+                return Err(e);
             }
-        }
+        };
+        
+        // Audio metadata is already saved in the performance_metrics table
+        // No need for separate mismatch tracking
+        
+        Ok(metrics_id)
     }
     
     /// Log performance warnings and recommendations
@@ -178,10 +215,19 @@ impl PerformanceDataBuilder {
                 processing_queue_time_ms: None,
                 audio_file_size_bytes: None,
                 audio_format: None,
+                audio_device_name: None,
+                audio_sample_rate: None,
+                audio_channels: None,
+                audio_bit_depth: None,
+                audio_buffer_size: None,
+                audio_input_gain: None,
+                requested_sample_rate: None,
+                requested_channels: None,
                 success: true,
                 error_message: None,
                 chunks_processed: None,
                 strategy_metadata: None,
+                audio_metadata: None,
             }
         }
     }
@@ -215,6 +261,34 @@ impl PerformanceDataBuilder {
     pub fn with_error(mut self, error_message: String) -> Self {
         self.data.success = false;
         self.data.error_message = Some(error_message);
+        self
+    }
+    
+    pub fn with_audio_metadata(mut self, metadata: crate::audio::AudioMetadata) -> Self {
+        // Extract values from metadata for individual fields
+        self.data.audio_device_name = Some(metadata.device.name.clone());
+        self.data.audio_sample_rate = Some(metadata.format.sample_rate as i32);
+        self.data.audio_channels = Some(metadata.format.channels as i32);
+        self.data.audio_bit_depth = Some(metadata.format.bit_depth as i32);
+        self.data.audio_buffer_size = Some(serde_json::to_string(&metadata.format.buffer_config).unwrap_or_default());
+        self.data.audio_input_gain = metadata.recording.input_gain;
+        self.data.requested_sample_rate = metadata.format.requested_sample_rate.map(|r| r as i32);
+        self.data.requested_channels = metadata.format.requested_channels.map(|c| c as i32);
+        
+        // Store full metadata object
+        self.data.audio_metadata = Some(metadata);
+        self
+    }
+    
+    pub fn with_device_info(mut self, device_info: &crate::audio::recorder::DeviceInfo) -> Self {
+        if let Some(metadata) = &device_info.metadata {
+            self = self.with_audio_metadata(metadata.clone());
+        } else {
+            // Set basic device info even without full metadata
+            self.data.audio_device_name = Some(device_info.name.clone());
+            self.data.audio_sample_rate = Some(device_info.sample_rate as i32);
+            self.data.audio_channels = Some(device_info.channels as i32);
+        }
         self
     }
     

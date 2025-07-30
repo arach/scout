@@ -463,7 +463,7 @@ impl ProgressiveTranscriptionStrategy {
     fn start_refinement_task(
         &mut self,
         ring_buffer: Arc<crate::audio::ring_buffer_recorder::RingBufferRecorder>,
-        recording_path: std::path::PathBuf,
+        _recording_path: std::path::PathBuf,
     ) {
         let medium_transcriber = self.medium_transcriber.clone();
         let temp_dir = self.temp_dir.clone();
@@ -672,7 +672,7 @@ impl TranscriptionStrategy for ProgressiveTranscriptionStrategy {
         let _recording_start_time = self.start_time.take()
             .ok_or("Recording was not started")?;
         
-        let recording_path = self.recording_path.take()
+        let _recording_path = self.recording_path.take()
             .ok_or("Recording path was not set")?;
         
         info(Component::Transcription, "Finishing progressive transcription");

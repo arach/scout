@@ -6,6 +6,7 @@ use std::any::TypeId;
 use std::time::Duration;
 use crate::logger::{info, debug, warn, error, Component};
 use super::format::NativeAudioFormat;
+use super::metadata::AudioMetadata;
 
 // Type alias for sample callback
 pub type SampleCallback = Arc<dyn Fn(&[f32]) + Send + Sync>;
@@ -25,6 +26,7 @@ pub struct DeviceInfo {
     pub name: String,
     pub sample_rate: u32,
     pub channels: u16,
+    pub metadata: Option<AudioMetadata>,
 }
 
 enum RecorderCommand {
@@ -54,6 +56,12 @@ impl AudioRecorder {
                 error(Component::Recording, "Failed to acquire device info lock - returning None");
                 None
             })
+    }
+    
+    pub fn get_current_metadata(&self) -> Option<AudioMetadata> {
+        self.current_device_info.lock()
+            .ok()
+            .and_then(|guard| guard.as_ref().and_then(|info| info.metadata.clone()))
     }
     
     pub fn get_current_audio_level(&self) -> f32 {
@@ -232,6 +240,8 @@ struct AudioRecorderWorker {
     current_device_info: Arc<Mutex<Option<DeviceInfo>>>,
     sample_callback: Arc<Mutex<Option<SampleCallback>>>,
     recording_state_changed: Arc<Condvar>,
+    current_metadata: Option<AudioMetadata>,
+    requested_config: Option<cpal::StreamConfig>,
 }
 
 impl AudioRecorderWorker {
@@ -249,6 +259,8 @@ impl AudioRecorderWorker {
             current_device_info: device_info,
             sample_callback,
             recording_state_changed,
+            current_metadata: None,
+            requested_config: None,
         }
     }
 
@@ -442,6 +454,41 @@ impl AudioRecorderWorker {
         self.channels = config.channels;  // Store actual channel count
         self.sample_format = Some(default_config.sample_format());
         
+        // Store the requested config for metadata tracking
+        self.requested_config = Some(cpal::StreamConfig {
+            channels: default_config.channels(),
+            sample_rate: default_config.sample_rate(),
+            buffer_size: cpal::BufferSize::Default,
+        });
+        
+        // Create comprehensive audio metadata
+        let is_default = device_name.is_none();
+        let mut audio_metadata = AudioMetadata::new(
+            device_name_for_metadata.clone(),
+            self.requested_config.as_ref(),
+            &config,
+            default_config.sample_format(),
+            &config.buffer_size,
+            is_default,
+        );
+        
+        // Set recording-specific information
+        audio_metadata.set_recording_info(
+            false, // VAD will be set later if enabled
+            "manual", // Will be updated based on actual trigger
+            None, // Silence padding will be set if applied
+        );
+        
+        // Log metadata issues if any
+        if audio_metadata.has_critical_issues() {
+            error(Component::Recording, &format!("Critical audio issues detected: {}", audio_metadata.get_issues_summary()));
+        } else if !audio_metadata.mismatches.is_empty() {
+            warn(Component::Recording, &format!("Audio configuration notes: {}", audio_metadata.get_issues_summary()));
+        }
+        
+        // Store the metadata
+        self.current_metadata = Some(audio_metadata.clone());
+        
         // Create native format info
         let native_format = NativeAudioFormat::new(
             config.sample_rate.0,
@@ -457,11 +504,12 @@ impl AudioRecorderWorker {
         // Update global device sample rate cache for transcription strategies
         crate::update_device_sample_rate(config.sample_rate.0);
         
-        // Store device info for metadata
+        // Store device info with metadata
         let device_info = DeviceInfo {
             name: device_name_for_metadata.clone(),
             sample_rate: config.sample_rate.0,
             channels,
+            metadata: Some(audio_metadata),
         };
         *self.current_device_info.lock().unwrap() = Some(device_info);
         
@@ -553,12 +601,23 @@ impl AudioRecorderWorker {
         let samples_per_second = self.sample_rate as f32 * self.channels as f32; // Account for all channels
         let duration_seconds = total_samples as f32 / samples_per_second;
         
+        let mut silence_padding_applied = false;
+        let mut silence_padding_ms = 0u32;
+        
         if duration_seconds < 1.0 && self.writer.lock().unwrap().is_some() {
             // Calculate how many silence samples we need to reach 1.1 seconds (with a small buffer)
             let target_samples = (samples_per_second * 1.1) as u64; // 1.1 seconds worth of samples (all channels)
             let silence_samples_needed = target_samples.saturating_sub(total_samples);
             
             if silence_samples_needed > 0 {
+                silence_padding_applied = true;
+                silence_padding_ms = ((silence_samples_needed as f32 / samples_per_second) * 1000.0) as u32;
+                
+                // Update metadata with silence padding info
+                if let Some(ref mut metadata) = self.current_metadata {
+                    metadata.recording.silence_padding_ms = Some(silence_padding_ms);
+                    metadata.recording.processing_applied.push("silence_padding".to_string());
+                }
                 
                 // Write silence samples
                 if let Some(ref mut writer) = *self.writer.lock().unwrap() {
