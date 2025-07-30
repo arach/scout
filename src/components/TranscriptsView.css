@@ -187,8 +187,11 @@
     display: flex;
     flex-direction: column;
     height: 100%;
+    flex: 1;
     overflow: hidden;
     position: relative;
+    width: 100%;
+    min-height: 0;
 }
 
 /* Header section with padding */
@@ -202,17 +205,20 @@
 
 /* Transcripts list section - full width, no padding */
 .transcripts-list-section {
-    flex: 1;
+    flex: 1 1 auto;
     display: flex;
     flex-direction: column;
     min-height: 0;
     padding-top: 8px; /* Small top padding for breathing room */
     overflow: hidden;
+    position: relative;
 }
 
 /* Transcript items container - adds padding for items only */
 .transcript-items-container {
     padding: 0; /* Remove padding to allow full-width hover */
+    display: block;
+    position: relative;
 }
 
 /* Mobile responsive adjustments */
@@ -344,7 +350,7 @@
 
 /* List view styles */
 .transcript-list-container {
-    flex: 1;
+    flex: 1 1 auto;
     display: flex;
     flex-direction: column;
     margin: 0 var(--grid-padding-horizontal);
@@ -353,8 +359,14 @@
     border-radius: 12px;
     overflow: hidden;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-    min-height: 0;
+    min-height: 200px; /* Ensure minimum height */
     position: relative;
+}
+
+/* Virtualized container needs explicit height for AutoSizer */
+.transcript-list-container.virtualized {
+    height: 100%;
+    max-height: 100%;
 }
 
 /* Scrollable container for non-virtualized list */
@@ -362,6 +374,8 @@
     overflow-y: auto;
     flex: 1;
     min-height: 0;
+    height: 100%;
+    position: relative;
 }
 
 @media (max-width: 768px) {
@@ -377,6 +391,21 @@
     /* Ensure the virtual list uses full width and height */
     width: 100% !important;
     height: 100% !important;
+    overflow-y: auto !important;
+}
+
+/* Fix AutoSizer wrapper div that has 0x0 dimensions */
+.transcript-list-container.virtualized > div:first-child {
+    width: 100% !important;
+    height: 100% !important;
+    overflow: visible !important;
+}
+
+/* Target AutoSizer wrapper more specifically */
+.virtualized-list-wrapper > div {
+    width: 100% !important;
+    height: 100% !important;
+    overflow: visible !important;
 }
 
 /* Wrapper for transcript items in virtual list - removed, no longer needed */
@@ -439,7 +468,7 @@
     align-items: center;
     justify-content: space-between;
     padding: 8px 16px; /* Reduced vertical padding */
-    margin: 0 -1px; /* Extend to container edges to cover border */
+    margin: 0; /* Removed negative margin that could cause issues */
     background: var(--bg-tertiary, rgba(0, 0, 0, 0.02));
     user-select: none;
     transition: var(--transition);
@@ -448,6 +477,7 @@
     box-sizing: border-box;
     position: relative;
     font-weight: 500;
+    z-index: 1; /* Ensure header is above items */
 }
 
 @media (prefers-color-scheme: dark) {
@@ -572,6 +602,8 @@
     background: transparent;
     padding: 0;
     margin-top: 8px; /* Increased spacing between header and first item to prevent overlap */
+    display: block;
+    position: relative;
 }
 
 /* Dark mode border removed */

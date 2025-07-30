@@ -176,20 +176,45 @@ export const VirtualizedTranscriptList = memo(function VirtualizedTranscriptList
     };
 
     return (
-        <div style={{ flex: 1, minHeight: 0 }}>
+        <div 
+            className="virtualized-list-wrapper"
+            style={{ 
+                width: '100%', 
+                height: '100%', 
+                position: 'relative',
+                display: 'flex',
+                flexDirection: 'column',
+                minHeight: 0
+            }}
+        >
             <AutoSizer>
-                {({ height, width }) => (
-                    <List
-                        ref={listRef}
-                        height={height}
-                        itemCount={listItems.length}
-                        itemSize={getItemSize}
-                        width={width}
-                        className="transcript-list-virtual"
-                    >
-                        {Row}
-                    </List>
-                )}
+                {({ height, width }) => {
+                    console.log('AutoSizer dimensions:', { height, width });
+                    
+                    // Ensure we have valid dimensions
+                    if (!height || !width || height === 0 || width === 0) {
+                        console.warn('AutoSizer returned invalid dimensions');
+                        return (
+                            <div style={{ padding: '20px', textAlign: 'center' }}>
+                                Loading transcripts...
+                            </div>
+                        );
+                    }
+                    
+                    return (
+                        <List
+                            ref={listRef}
+                            height={height}
+                            itemCount={listItems.length}
+                            itemSize={getItemSize}
+                            width={width}
+                            className="transcript-list-virtual"
+                            style={{ overflow: 'auto' }}
+                        >
+                            {Row}
+                        </List>
+                    );
+                }}
             </AutoSizer>
         </div>
     );

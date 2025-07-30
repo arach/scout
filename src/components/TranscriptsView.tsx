@@ -304,7 +304,7 @@ export const TranscriptsView = memo(function TranscriptsView({
                         </div>
                     </div>
                 ) : shouldUseVirtualization ? (
-                    <div className="transcript-list-container" ref={listContainerRef}>
+                    <div className="transcript-list-container virtualized" ref={listContainerRef}>
                         <VirtualizedTranscriptList
                             groups={allGroups.map((group, idx) => ({
                                 ...group,
