@@ -108,14 +108,12 @@ export function TranscriptDetailPanel({
     const [canRenderPlayer, setCanRenderPlayer] = useState(false);
     const [showExportMenu, setShowExportMenu] = useState(false);
     const [performanceMetrics, setPerformanceMetrics] = useState<PerformanceMetrics | null>(null);
-    const [loadingMetrics, setLoadingMetrics] = useState(false);
-    const [metricsError, setMetricsError] = useState<string | null>(null);
     const [showOriginalTranscript, setShowOriginalTranscript] = useState(false);
     const [activeTab, setActiveTab] = useState<'transcript' | 'insights' | 'logs' | 'performance'>('transcript');
     const [whisperLogs, setWhisperLogs] = useState<any[]>([]);
     const [loadingLogs, setLoadingLogs] = useState(false);
     const [expandedSections, setExpandedSections] = useState<{ [key: string]: boolean }>({});
-    const [expandedCards, setExpandedCards] = useState<{ [key: string]: boolean }>({});
+    const [expandedCards, setExpandedCards] = useState<{ [key: string]: boolean }>({ transcription: true });
     
     const { width, isResizing, resizeHandleProps } = useResizable({
         minWidth: 400,
@@ -169,22 +167,16 @@ export function TranscriptDetailPanel({
     // Fetch performance metrics when transcript changes
     useEffect(() => {
         if (isOpen && transcript) {
-            setLoadingMetrics(true);
             setPerformanceMetrics(null);
-            setMetricsError(null);
             setShowOriginalTranscript(false); // Reset to filtered view
             
             invoke<PerformanceMetrics | null>('get_performance_metrics_for_transcript', {
                 transcriptId: transcript.id
             }).then((metrics) => {
                 setPerformanceMetrics(metrics);
-                setMetricsError(null);
             }).catch((error) => {
                 console.error('Failed to fetch performance metrics:', error);
-                setMetricsError(error.toString());
                 setPerformanceMetrics(null);
-            }).finally(() => {
-                setLoadingMetrics(false);
             });
         }
     }, [isOpen, transcript?.id]);
@@ -303,252 +295,171 @@ export function TranscriptDetailPanel({
             >
                 <div className="resize-handle" {...resizeHandleProps} />
                 <div className="detail-panel-header">
-                    <h2>Transcript Details</h2>
+                    <div className="header-content">
+                        <h2 className="transcript-id">ID #{transcript.id}</h2>
+                        <span className="transcript-datetime">
+                            {new Date(transcript.created_at).toLocaleDateString('en-US', { 
+                                month: 'short', 
+                                day: 'numeric',
+                                year: 'numeric' 
+                            })} at {new Date(transcript.created_at).toLocaleTimeString([], { 
+                                hour: '2-digit', 
+                                minute: '2-digit'
+                            })}
+                        </span>
+                    </div>
                     <button className="close-button" onClick={(e) => {
                         e.stopPropagation();
                         onClose();
                     }} title="Close (ESC)">
-                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M10.5 3.5L3.5 10.5M3.5 3.5L10.5 10.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                        </svg>
+                        ×
                     </button>
                 </div>
 
                 <div className="detail-panel-content">
-                    {/* Card Grid for Metadata */}
+                    {/* Transcription Details Card */}
                     <div className="card-grid">
-                        {/* Date & Time Card */}
-                        <div className="info-card">
-                            <div className="card-header">
-                                <div className="card-icon">
-                                    <CalendarIcon />
-                                </div>
-                                <h3 className="card-title">Date & Time</h3>
-                            </div>
-                            <div className="card-content">
-                                <div className="card-value">
-                                    {new Date(transcript.created_at).toLocaleDateString('en-US', { 
-                                        month: 'short', 
-                                        day: 'numeric',
-                                        year: 'numeric' 
-                                    })}
-                                </div>
-                                <div className="card-subtitle">
-                                    {new Date(transcript.created_at).toLocaleTimeString([], { 
-                                        hour: '2-digit', 
-                                        minute: '2-digit'
-                                    })}
-                                </div>
-                            </div>
-                        </div>
-                        
-                        {/* Duration Card */}
-                        <div className="info-card">
+                        <div className="info-card full-width expandable" onClick={() => toggleCard('transcription')}>
                             <div className="card-header">
                                 <div className="card-icon">
                                     <ClockIcon />
                                 </div>
-                                <h3 className="card-title">Duration</h3>
+                                <h3 className="card-title">Recording Info</h3>
+                                <button className="card-expand-indicator">
+                                    <ExpandIcon expanded={expandedCards.transcription} />
+                                </button>
                             </div>
                             <div className="card-content">
-                                <div className="card-value">{formatDuration(transcript.duration_ms)}</div>
-                                {transcript.duration_ms > 60000 && (
-                                    <div className="card-subtitle">
-                                        {Math.round(transcript.duration_ms / 60000)} minutes
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                        
-                        {/* File Info Card */}
-                        {(metadata.filename || transcript.file_size) && (
-                            <div className="info-card">
-                                <div className="card-header">
-                                    <div className="card-icon">
-                                        <FileIcon />
-                                    </div>
-                                    <h3 className="card-title">File Info</h3>
-                                </div>
-                                <div className="card-content">
-                                    {metadata.filename && (
-                                        <div className="card-value" title={metadata.filename}>
-                                            {metadata.filename.split('/').pop()}
-                                        </div>
+                                <div className="card-value">
+                                    {formatDuration(transcript.duration_ms)}
+                                    {performanceMetrics && metadata.model_used && (
+                                        <span className="card-subtitle" style={{ marginLeft: '12px', fontSize: '14px', fontWeight: '500' }}>
+                                            • {metadata.model_used.split('/').pop()?.replace('.bin', '')}
+                                        </span>
                                     )}
-                                    {transcript.file_size && formatFileSize && (
-                                        <div className="card-subtitle">
-                                            {formatFileSize(transcript.file_size)}
-                                        </div>
+                                </div>
+                                <div className="card-subtitle">
+                                    {metadata.filename ? metadata.filename.split('/').pop() : 'Recording'} • {transcript.file_size && formatFileSize ? formatFileSize(transcript.file_size) : 'No file size'}
+                                    {performanceMetrics && performanceMetrics.transcription_time_ms && (
+                                        <> • {(performanceMetrics.transcription_time_ms / transcript.duration_ms).toFixed(2)}x speed</>
                                     )}
                                 </div>
                             </div>
-                        )}
-                        
-                        {/* Content Filter Card */}
-                        {metadata.original_transcript && (
-                            <div className={`info-card ${metadata.original_transcript !== transcript.text ? 'card-warning' : 'card-success'}`}>
-                                <div className="card-header">
-                                    <div className="card-icon">
-                                        <ShieldCheckIcon />
-                                    </div>
-                                    <h3 className="card-title">Content Filter</h3>
-                                </div>
-                                <div className="card-content">
-                                    <div className="card-value">
-                                        {metadata.original_transcript !== transcript.text ? (
-                                            <>🚫 Filtered</>
-                                        ) : metadata.filter_analysis && metadata.filter_analysis.length > 0 ? (
-                                            <>✅ Clean with notes</>
-                                        ) : (
-                                            <>✅ Clean</>
+                            {expandedCards.transcription && (
+                                <div className="card-expanded-content">
+                                    <div className="detail-grid">
+                                        <div className="detail-item">
+                                            <span className="detail-label">Duration</span>
+                                            <span className="detail-value">{formatDuration(transcript.duration_ms)}</span>
+                                        </div>
+                                        {metadata.filename && (
+                                            <div className="detail-item">
+                                                <span className="detail-label">Source File</span>
+                                                <span className="detail-value" title={metadata.filename}>
+                                                    {metadata.filename.split('/').pop()}
+                                                </span>
+                                            </div>
+                                        )}
+                                        {transcript.file_size && formatFileSize && (
+                                            <div className="detail-item">
+                                                <span className="detail-label">File Size</span>
+                                                <span className="detail-value">
+                                                    {formatFileSize(transcript.file_size)}
+                                                </span>
+                                            </div>
+                                        )}
+                                        {metadata.original_transcript && (
+                                            <div className="detail-item">
+                                                <span className="detail-label">Content Filter</span>
+                                                <span className="detail-value">
+                                                    {metadata.original_transcript !== transcript.text ? (
+                                                        <span className="badge badge-warning">🚫 Filtered</span>
+                                                    ) : metadata.filter_analysis && metadata.filter_analysis.length > 0 ? (
+                                                        <span className="badge badge-info">✅ Clean with notes</span>
+                                                    ) : (
+                                                        <span className="badge badge-success">✅ Clean</span>
+                                                    )}
+                                                </span>
+                                            </div>
+                                        )}
+                                        {performanceMetrics && (
+                                            <>
+                                                {metadata.model_used && (
+                                                    <div className="detail-item">
+                                                        <span className="detail-label">AI Model</span>
+                                                        <span className="detail-value" title={metadata.model_used}>
+                                                            {metadata.model_used.split('/').pop()?.replace('.bin', '')}
+                                                            {performanceMetrics.transcription_strategy && (
+                                                                <span className="text-muted"> ({performanceMetrics.transcription_strategy === 'ring_buffer' ? 'Chunked' : 'Single-pass'})</span>
+                                                            )}
+                                                        </span>
+                                                    </div>
+                                                )}
+                                                <div className="detail-item">
+                                                    <span className="detail-label">Processing Speed</span>
+                                                    <span className="detail-value">
+                                                        {(performanceMetrics.transcription_time_ms / transcript.duration_ms).toFixed(2)}x
+                                                        <span className="text-muted"> ({performanceMetrics.transcription_time_ms < transcript.duration_ms ? 'Faster than real-time' : 'Slower than real-time'})</span>
+                                                    </span>
+                                                </div>
+                                                <div className="detail-item">
+                                                    <span className="detail-label">Transcription Time</span>
+                                                    <span className="detail-value">
+                                                        {formatDuration(performanceMetrics.transcription_time_ms)}
+                                                    </span>
+                                                </div>
+                                                {performanceMetrics.user_perceived_latency_ms && (
+                                                    <div className="detail-item">
+                                                        <span className="detail-label">Processing Latency</span>
+                                                        <span className="detail-value">
+                                                            {formatDuration(performanceMetrics.user_perceived_latency_ms)}
+                                                            <span className="text-muted"> ({performanceMetrics.user_perceived_latency_ms < 300 ? 'Fast' : performanceMetrics.user_perceived_latency_ms >= 1000 ? 'Slow' : 'Normal'})</span>
+                                                        </span>
+                                                    </div>
+                                                )}
+                                            </>
+                                        )}
+                                        {metadata.app_context && (
+                                            <div className="detail-item">
+                                                <span className="detail-label">Active App</span>
+                                                <span className="detail-value" title={metadata.app_context.bundle_id}>
+                                                    {metadata.app_context.name}
+                                                </span>
+                                            </div>
                                         )}
                                     </div>
+                                    
+                                    {/* Filter Analysis Notes */}
                                     {metadata.filter_analysis && metadata.filter_analysis.length > 0 && (
-                                        <button 
-                                            className="card-expand-btn" 
-                                            onClick={() => toggleCard('filter')}
-                                        >
-                                            View notes <ExpandIcon expanded={expandedCards.filter} />
-                                        </button>
-                                    )}
-                                </div>
-                                {expandedCards.filter && metadata.filter_analysis && (
-                                    <div className="card-expanded-content">
-                                        {metadata.filter_analysis.map((log, index) => (
-                                            <div key={index} className="filter-log">
-                                                {log}
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                    {/* Performance Metrics Card Grid */}
-                    {performanceMetrics && (
-                        <>
-                            <h4 className="section-title">Performance Metrics</h4>
-                            <div className="card-grid">
-                                {/* Model Card */}
-                                {metadata.model_used && (
-                                    <div className="info-card">
-                                        <div className="card-header">
-                                            <div className="card-icon">
-                                                <ChipIcon />
-                                            </div>
-                                            <h3 className="card-title">AI Model</h3>
-                                        </div>
-                                        <div className="card-content">
-                                            <div className="card-value" title={metadata.model_used}>
-                                                {metadata.model_used.split('/').pop()?.replace('.bin', '')}
-                                            </div>
-                                            {performanceMetrics.transcription_strategy && (
-                                                <div className="card-subtitle">
-                                                    {performanceMetrics.transcription_strategy === 'ring_buffer' ? 'Chunked' : 'Single-pass'}
+                                        <div className="card-warnings">
+                                            <h4 className="warnings-title">Filter Analysis</h4>
+                                            {metadata.filter_analysis.map((log, index) => (
+                                                <div key={index} className="warning-item">
+                                                    <span className="warning-icon">ℹ️</span>
+                                                    <span>{log}</span>
                                                 </div>
-                                            )}
+                                            ))}
                                         </div>
-                                    </div>
-                                )}
-                                
-                                {/* Speed Card */}
-                                <div className={`info-card ${performanceMetrics.transcription_time_ms < transcript.duration_ms ? 'card-success' : ''}`}>
-                                    <div className="card-header">
-                                        <div className="card-icon">
-                                            <SpeedIcon />
-                                        </div>
-                                        <h3 className="card-title">Processing Speed</h3>
-                                    </div>
-                                    <div className="card-content">
-                                        <div className="card-value">
-                                            {(performanceMetrics.transcription_time_ms / transcript.duration_ms).toFixed(2)}x
-                                        </div>
-                                        <div className="card-subtitle">
-                                            {performanceMetrics.transcription_time_ms < transcript.duration_ms ? 'Faster than real-time' : 'Processing time'}
-                                        </div>
-                                        <div className="progress-bar">
-                                            <div 
-                                                className="progress-fill"
-                                                style={{ 
-                                                    width: `${Math.min(100, (transcript.duration_ms / performanceMetrics.transcription_time_ms) * 100)}%` 
-                                                }}
+                                    )}
+                                    
+                                    {/* Audio Player */}
+                                    {transcript.audio_path && canRenderPlayer && (
+                                        <div style={{ marginTop: '16px' }}>
+                                            <SimpleAudioPlayer
+                                                audioPath={transcript.audio_path}
+                                                duration={transcript.duration_ms}
+                                                formatDuration={formatDuration}
                                             />
                                         </div>
-                                    </div>
+                                    )}
                                 </div>
-                                
-                                {/* Latency Card */}
-                                {performanceMetrics.user_perceived_latency_ms && (
-                                    <div className={`info-card ${performanceMetrics.user_perceived_latency_ms < 300 ? 'card-success' : performanceMetrics.user_perceived_latency_ms >= 1000 ? 'card-warning' : ''}`}>
-                                        <div className="card-header">
-                                            <div className="card-icon">
-                                                <ClockIcon />
-                                            </div>
-                                            <h3 className="card-title">Processing Latency</h3>
-                                        </div>
-                                        <div className="card-content">
-                                            <div className="card-value">
-                                                {formatDuration(performanceMetrics.user_perceived_latency_ms)}
-                                            </div>
-                                            <div className="card-subtitle">
-                                                {performanceMetrics.user_perceived_latency_ms < 300 ? '⚡ Fast' : 
-                                                 performanceMetrics.user_perceived_latency_ms >= 1000 ? '⚠️ Slow' : 'Normal'}
-                                            </div>
-                                            <div className="latency-indicator">
-                                                <div className={`indicator-dot ${performanceMetrics.user_perceived_latency_ms < 300 ? 'fast' : performanceMetrics.user_perceived_latency_ms >= 1000 ? 'slow' : 'normal'}`} />
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
-                                
-                                {/* Transcription Time Card */}
-                                <div className="info-card">
-                                    <div className="card-header">
-                                        <div className="card-icon">
-                                            <ClockIcon />
-                                        </div>
-                                        <h3 className="card-title">Transcription Time</h3>
-                                    </div>
-                                    <div className="card-content">
-                                        <div className="card-value">
-                                            {formatDuration(performanceMetrics.transcription_time_ms)}
-                                        </div>
-                                        <div className="card-subtitle">
-                                            Total processing
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </>
-                    )}
-                        
-                    {/* Active App Card */}
-                    {metadata.app_context && (
-                        <div className="card-grid">
-                            <div className="info-card full-width">
-                                <div className="card-header">
-                                    <div className="card-icon">
-                                        <FileIcon />
-                                    </div>
-                                    <h3 className="card-title">Active Application</h3>
-                                </div>
-                                <div className="card-content">
-                                    <div className="card-value" title={metadata.app_context.bundle_id}>
-                                        {metadata.app_context.name}
-                                    </div>
-                                    <div className="card-subtitle">
-                                        {metadata.app_context.bundle_id}
-                                    </div>
-                                </div>
-                            </div>
+                            )}
                         </div>
-                    )}
-                        
-                    {/* Technical Details - Audio Device Card */}
+                    </div>
+                    
+                    {/* Audio Device Card */}
                     {audioMetadata && (
-                        <>
-                            <h4 className="section-title">Technical Details</h4>
-                            <div className="card-grid">
+                        <div className="card-grid" style={{ marginTop: '16px' }}>
                                 <div className="info-card full-width expandable" onClick={() => toggleCard('device')}>
                                     <div className="card-header">
                                         <div className="card-icon">
@@ -653,50 +564,7 @@ export function TranscriptDetailPanel({
                                         </div>
                                     )}
                                 </div>
-                            </div>
-                        </>
-                    )}
-                        
-                    {/* Performance Metrics Loading States */}
-                    {loadingMetrics && (
-                        <div className="card-grid">
-                            <div className="info-card loading">
-                                <div className="card-content">
-                                    <div className="loading-spinner" />
-                                    <div className="card-subtitle">Loading performance metrics...</div>
-                                </div>
-                            </div>
                         </div>
-                    )}
-                    
-                    {!loadingMetrics && !performanceMetrics && !metricsError && (
-                        <div className="card-grid">
-                            <div className="info-card card-info">
-                                <div className="card-content">
-                                    <div className="card-value">📊 No metrics available</div>
-                                    <div className="card-subtitle">Performance data not recorded for this transcript</div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                    
-                    {!loadingMetrics && metricsError && (
-                        <div className="card-grid">
-                            <div className="info-card card-warning">
-                                <div className="card-content">
-                                    <div className="card-value">⚠️ Error loading metrics</div>
-                                    <div className="card-subtitle">Could not retrieve performance data</div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {transcript.audio_path && canRenderPlayer && (
-                        <SimpleAudioPlayer
-                            audioPath={transcript.audio_path}
-                            duration={transcript.duration_ms}
-                            formatDuration={formatDuration}
-                        />
                     )}
 
                     {/* Tabs */}
