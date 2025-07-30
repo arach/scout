@@ -3,8 +3,8 @@
     position: fixed;
     top: 0;
     left: 0;
-    right: 0;
-    bottom: 0;
+    width: 100vw;
+    height: 100vh;
     background-color: rgba(0, 0, 0, 0.3);
     z-index: 999;
     cursor: pointer;
@@ -16,6 +16,7 @@
     top: 0;
     right: 0;
     bottom: 0;
+    height: 100vh;
     background-color: var(--bg-primary);
     border-left: 1px solid var(--border-primary);
     box-shadow: -4px 0 12px rgba(0, 0, 0, 0.15);
@@ -24,11 +25,27 @@
     flex-direction: column;
     animation: slideInRight 0.2s ease-out;
     transition: box-shadow 0.2s;
+    /* Ensure it's always flush with the right edge */
+    margin: 0;
+    padding: 0;
+    /* Force GPU acceleration for smooth animations */
+    -webkit-transform: translateZ(0);
+    transform: translateZ(0);
+    will-change: transform, width;
+    /* Override any inherited positioning */
+    position: fixed !important;
+    right: 0 !important;
 }
 
 .transcript-detail-panel.resizing {
     user-select: none;
     box-shadow: -8px 0 24px rgba(0, 0, 0, 0.3);
+}
+
+/* Ensure proper stacking context */
+.transcript-detail-panel > * {
+    position: relative;
+    z-index: 1;
 }
 
 /* Resize handle */
@@ -414,6 +431,26 @@
 @media (prefers-color-scheme: dark) {
     .transcript-detail-panel {
         box-shadow: -4px 0 12px rgba(0, 0, 0, 0.4);
+    }
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .transcript-detail-panel {
+        width: 100% !important;
+        max-width: 100vw;
+    }
+}
+
+@media (min-width: 769px) and (max-width: 1024px) {
+    .transcript-detail-panel {
+        max-width: 80vw;
+    }
+}
+
+@media (min-width: 1025px) {
+    .transcript-detail-panel {
+        max-width: 50vw;
     }
 }
 /* Tabs */

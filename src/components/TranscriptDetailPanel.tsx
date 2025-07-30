@@ -161,11 +161,18 @@ export function TranscriptDetailPanel({
             <div className="detail-panel-backdrop" onClick={(e) => {
                 e.stopPropagation();
                 onClose();
-            }} />
+            }} style={{ position: 'fixed', inset: 0 }} />
             <div 
                 className={`transcript-detail-panel ${isResizing ? 'resizing' : ''}`} 
                 onClick={(e) => e.stopPropagation()}
-                style={{ width: `${width}px` }}
+                style={{ 
+                    width: `${width}px`,
+                    position: 'fixed',
+                    top: 0,
+                    right: 0,
+                    bottom: 0,
+                    height: '100vh'
+                }}
             >
                 <div className="resize-handle" {...resizeHandleProps} />
                 <div className="detail-panel-header">
