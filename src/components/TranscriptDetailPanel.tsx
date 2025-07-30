@@ -7,6 +7,66 @@ import { parseTranscriptMetadata, parseAudioMetadata, Transcript } from '../type
 import { useResizable } from '../hooks/useResizable';
 import './TranscriptDetailPanel.css';
 
+// Icon components for better visual scanning
+const CalendarIcon = () => (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="2" y="3" width="12" height="11" rx="1" stroke="currentColor" strokeWidth="1.5"/>
+        <path d="M2 6H14" stroke="currentColor" strokeWidth="1.5"/>
+        <path d="M5 1V3M11 1V3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+    </svg>
+);
+
+const FileIcon = () => (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M3 2C3 1.44772 3.44772 1 4 1H9L13 5V13C13 13.5523 12.5523 14 12 14H4C3.44772 14 3 13.5523 3 13V2Z" stroke="currentColor" strokeWidth="1.5"/>
+        <path d="M9 1V5H13" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+    </svg>
+);
+
+const ClockIcon = () => (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5"/>
+        <path d="M8 4V8L10.5 10.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+    </svg>
+);
+
+const ChipIcon = () => (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="4" y="4" width="8" height="8" rx="1" stroke="currentColor" strokeWidth="1.5"/>
+        <path d="M2 6H4M2 10H4M12 6H14M12 10H14M6 2V4M10 2V4M6 12V14M10 12V14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+    </svg>
+);
+
+const MicrophoneIcon = () => (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="6" y="2" width="4" height="7" rx="2" stroke="currentColor" strokeWidth="1.5"/>
+        <path d="M4 7V8C4 10.2091 5.79086 12 8 12C10.2091 12 12 10.2091 12 8V7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+        <path d="M8 12V14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+    </svg>
+);
+
+const SpeedIcon = () => (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M2 8C2 4.68629 4.68629 2 8 2C11.3137 2 14 4.68629 14 8C14 9.88457 13.2096 11.5837 11.9497 12.75H4.05025C2.79036 11.5837 2 9.88457 2 8Z" stroke="currentColor" strokeWidth="1.5"/>
+        <path d="M8 8L10.5 5.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+        <circle cx="8" cy="8" r="1" fill="currentColor"/>
+    </svg>
+);
+
+const ShieldCheckIcon = () => (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M8 1L3 3V7C3 10.5 5.5 13.5 8 14C10.5 13.5 13 10.5 13 7V3L8 1Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+        <path d="M6 8L7.5 9.5L10 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+);
+
+const ExpandIcon = ({ expanded }: { expanded: boolean }) => (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" 
+         style={{ transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
+        <path d="M4 3L7 6L4 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+);
+
 interface PerformanceMetrics {
     id: number;
     transcript_id: number | null;
@@ -55,6 +115,7 @@ export function TranscriptDetailPanel({
     const [whisperLogs, setWhisperLogs] = useState<any[]>([]);
     const [loadingLogs, setLoadingLogs] = useState(false);
     const [expandedSections, setExpandedSections] = useState<{ [key: string]: boolean }>({});
+    const [expandedCards, setExpandedCards] = useState<{ [key: string]: boolean }>({});
     
     const { width, isResizing, resizeHandleProps } = useResizable({
         minWidth: 400,
@@ -155,6 +216,10 @@ export function TranscriptDetailPanel({
     const toggleSection = (section: string) => {
         setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
     };
+    
+    const toggleCard = (card: string) => {
+        setExpandedCards(prev => ({ ...prev, [card]: !prev[card] }));
+    };
 
     const getDeviceSummary = () => {
         if (!audioMetadata) return null;
@@ -250,250 +315,324 @@ export function TranscriptDetailPanel({
                 </div>
 
                 <div className="detail-panel-content">
-                    <div className="detail-metadata">
-                        {/* Basic Information - Compact date/time display */}
-                        <div className="metadata-item">
-                            <span className="metadata-label">Date & Time</span>
-                            <span className="metadata-value">
-                                {new Date(transcript.created_at).toLocaleDateString('en-US', { 
-                                    month: 'short', 
-                                    day: 'numeric',
-                                    year: 'numeric' 
-                                })} at {new Date(transcript.created_at).toLocaleTimeString([], { 
-                                    hour: '2-digit', 
-                                    minute: '2-digit'
-                                })}
-                            </span>
+                    {/* Card Grid for Metadata */}
+                    <div className="card-grid">
+                        {/* Date & Time Card */}
+                        <div className="info-card">
+                            <div className="card-header">
+                                <div className="card-icon">
+                                    <CalendarIcon />
+                                </div>
+                                <h3 className="card-title">Date & Time</h3>
+                            </div>
+                            <div className="card-content">
+                                <div className="card-value">
+                                    {new Date(transcript.created_at).toLocaleDateString('en-US', { 
+                                        month: 'short', 
+                                        day: 'numeric',
+                                        year: 'numeric' 
+                                    })}
+                                </div>
+                                <div className="card-subtitle">
+                                    {new Date(transcript.created_at).toLocaleTimeString([], { 
+                                        hour: '2-digit', 
+                                        minute: '2-digit'
+                                    })}
+                                </div>
+                            </div>
                         </div>
-                        {metadata.filename && (
-                            <div className="metadata-item">
-                                <span className="metadata-label">Source</span>
-                                <span className="metadata-value" title={metadata.filename}>
-                                    {metadata.filename.split('/').pop()}
-                                </span>
-                            </div>
-                        )}
-                        {transcript.file_size && formatFileSize && (
-                            <div className="metadata-item">
-                                <span className="metadata-label">File Size</span>
-                                <span className="metadata-value">
-                                    {formatFileSize(transcript.file_size)}
-                                </span>
-                            </div>
-                        )}
                         
-                        {/* Profanity Filter Status */}
-                        {metadata.original_transcript && (
-                            <div className="metadata-item">
-                                <span className="metadata-label">Content Filter</span>
-                                <span className="metadata-value">
-                                    {metadata.original_transcript !== transcript.text ? (
-                                        <span className="metadata-badge warning">
-                                            🚫 Filtered
-                                        </span>
-                                    ) : metadata.filter_analysis && metadata.filter_analysis.length > 0 ? (
-                                        <span className="metadata-badge info">
-                                            ✅ Clean with notes
-                                        </span>
-                                    ) : (
-                                        <span className="metadata-badge success">
-                                            ✅ Clean
-                                        </span>
+                        {/* Duration Card */}
+                        <div className="info-card">
+                            <div className="card-header">
+                                <div className="card-icon">
+                                    <ClockIcon />
+                                </div>
+                                <h3 className="card-title">Duration</h3>
+                            </div>
+                            <div className="card-content">
+                                <div className="card-value">{formatDuration(transcript.duration_ms)}</div>
+                                {transcript.duration_ms > 60000 && (
+                                    <div className="card-subtitle">
+                                        {Math.round(transcript.duration_ms / 60000)} minutes
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                        
+                        {/* File Info Card */}
+                        {(metadata.filename || transcript.file_size) && (
+                            <div className="info-card">
+                                <div className="card-header">
+                                    <div className="card-icon">
+                                        <FileIcon />
+                                    </div>
+                                    <h3 className="card-title">File Info</h3>
+                                </div>
+                                <div className="card-content">
+                                    {metadata.filename && (
+                                        <div className="card-value" title={metadata.filename}>
+                                            {metadata.filename.split('/').pop()}
+                                        </div>
                                     )}
-                                </span>
+                                    {transcript.file_size && formatFileSize && (
+                                        <div className="card-subtitle">
+                                            {formatFileSize(transcript.file_size)}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         )}
                         
-                        {/* Filter Analysis */}
-                        {metadata.filter_analysis && metadata.filter_analysis.length > 0 && (
-                            <div className="metadata-item filter-analysis">
-                                <span className="metadata-label">Filter Notes</span>
-                                <div className="metadata-value">
-                                    <div className="filter-analysis-logs">
+                        {/* Content Filter Card */}
+                        {metadata.original_transcript && (
+                            <div className={`info-card ${metadata.original_transcript !== transcript.text ? 'card-warning' : 'card-success'}`}>
+                                <div className="card-header">
+                                    <div className="card-icon">
+                                        <ShieldCheckIcon />
+                                    </div>
+                                    <h3 className="card-title">Content Filter</h3>
+                                </div>
+                                <div className="card-content">
+                                    <div className="card-value">
+                                        {metadata.original_transcript !== transcript.text ? (
+                                            <>🚫 Filtered</>
+                                        ) : metadata.filter_analysis && metadata.filter_analysis.length > 0 ? (
+                                            <>✅ Clean with notes</>
+                                        ) : (
+                                            <>✅ Clean</>
+                                        )}
+                                    </div>
+                                    {metadata.filter_analysis && metadata.filter_analysis.length > 0 && (
+                                        <button 
+                                            className="card-expand-btn" 
+                                            onClick={() => toggleCard('filter')}
+                                        >
+                                            View notes <ExpandIcon expanded={expandedCards.filter} />
+                                        </button>
+                                    )}
+                                </div>
+                                {expandedCards.filter && metadata.filter_analysis && (
+                                    <div className="card-expanded-content">
                                         {metadata.filter_analysis.map((log, index) => (
                                             <div key={index} className="filter-log">
                                                 {log}
                                             </div>
                                         ))}
                                     </div>
-                                </div>
+                                )}
                             </div>
                         )}
-                        
-                        {/* Transcription Details - No section header, part of main panel */}
-                        {metadata.model_used && (
-                            <div className="metadata-item">
-                                <span className="metadata-label">Model</span>
-                                <span className="metadata-value" title={metadata.model_used}>
-                                    {metadata.model_used.split('/').pop()?.replace('.bin', '')}
-                                </span>
-                            </div>
-                        )}
-                        
-                        {performanceMetrics && (
-                            <>
-                                {performanceMetrics.transcription_strategy && (
-                                    <div className="metadata-item">
-                                        <span className="metadata-label">Strategy</span>
-                                        <span className="metadata-value">
-                                            {performanceMetrics.transcription_strategy}
-                                            {performanceMetrics.transcription_strategy === 'ring_buffer' && ' (Chunked)'}
-                                            {performanceMetrics.transcription_strategy === 'classic' && ' (Single-pass)'}
-                                        </span>
+                    </div>
+                    {/* Performance Metrics Card Grid */}
+                    {performanceMetrics && (
+                        <>
+                            <h4 className="section-title">Performance Metrics</h4>
+                            <div className="card-grid">
+                                {/* Model Card */}
+                                {metadata.model_used && (
+                                    <div className="info-card">
+                                        <div className="card-header">
+                                            <div className="card-icon">
+                                                <ChipIcon />
+                                            </div>
+                                            <h3 className="card-title">AI Model</h3>
+                                        </div>
+                                        <div className="card-content">
+                                            <div className="card-value" title={metadata.model_used}>
+                                                {metadata.model_used.split('/').pop()?.replace('.bin', '')}
+                                            </div>
+                                            {performanceMetrics.transcription_strategy && (
+                                                <div className="card-subtitle">
+                                                    {performanceMetrics.transcription_strategy === 'ring_buffer' ? 'Chunked' : 'Single-pass'}
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
                                 )}
                                 
-                                {performanceMetrics.transcription_time_ms < transcript.duration_ms && (
-                                    <div className="metadata-item">
-                                        <span className="metadata-label">Efficiency</span>
-                                        <span className="metadata-value">
-                                            <span className="metadata-badge success">
-                                                ✅ Faster than real-time
-                                            </span>
-                                        </span>
+                                {/* Speed Card */}
+                                <div className={`info-card ${performanceMetrics.transcription_time_ms < transcript.duration_ms ? 'card-success' : ''}`}>
+                                    <div className="card-header">
+                                        <div className="card-icon">
+                                            <SpeedIcon />
+                                        </div>
+                                        <h3 className="card-title">Processing Speed</h3>
                                     </div>
-                                )}
-                                
-                                <div className="metadata-item">
-                                    <span className="metadata-label">Transcription Time</span>
-                                    <span className="metadata-value">
-                                        {formatDuration(performanceMetrics.transcription_time_ms)}
-                                        <span className="metadata-ratio">
-                                            {` (${(performanceMetrics.transcription_time_ms / transcript.duration_ms).toFixed(2)}x speed)`}
-                                        </span>
-                                    </span>
+                                    <div className="card-content">
+                                        <div className="card-value">
+                                            {(performanceMetrics.transcription_time_ms / transcript.duration_ms).toFixed(2)}x
+                                        </div>
+                                        <div className="card-subtitle">
+                                            {performanceMetrics.transcription_time_ms < transcript.duration_ms ? 'Faster than real-time' : 'Processing time'}
+                                        </div>
+                                        <div className="progress-bar">
+                                            <div 
+                                                className="progress-fill"
+                                                style={{ 
+                                                    width: `${Math.min(100, (transcript.duration_ms / performanceMetrics.transcription_time_ms) * 100)}%` 
+                                                }}
+                                            />
+                                        </div>
+                                    </div>
                                 </div>
                                 
+                                {/* Latency Card */}
                                 {performanceMetrics.user_perceived_latency_ms && (
-                                    <div className="metadata-item">
-                                        <span className="metadata-label">Processing Latency</span>
-                                        <span className="metadata-value">
-                                            {formatDuration(performanceMetrics.user_perceived_latency_ms)}
-                                            {performanceMetrics.user_perceived_latency_ms < 300 && (
-                                                <span className="metadata-badge success"> ⚡ Fast</span>
-                                            )}
-                                            {performanceMetrics.user_perceived_latency_ms >= 1000 && (
-                                                <span className="metadata-badge warning"> ⚠️ Slow</span>
-                                            )}
-                                        </span>
+                                    <div className={`info-card ${performanceMetrics.user_perceived_latency_ms < 300 ? 'card-success' : performanceMetrics.user_perceived_latency_ms >= 1000 ? 'card-warning' : ''}`}>
+                                        <div className="card-header">
+                                            <div className="card-icon">
+                                                <ClockIcon />
+                                            </div>
+                                            <h3 className="card-title">Processing Latency</h3>
+                                        </div>
+                                        <div className="card-content">
+                                            <div className="card-value">
+                                                {formatDuration(performanceMetrics.user_perceived_latency_ms)}
+                                            </div>
+                                            <div className="card-subtitle">
+                                                {performanceMetrics.user_perceived_latency_ms < 300 ? '⚡ Fast' : 
+                                                 performanceMetrics.user_perceived_latency_ms >= 1000 ? '⚠️ Slow' : 'Normal'}
+                                            </div>
+                                            <div className="latency-indicator">
+                                                <div className={`indicator-dot ${performanceMetrics.user_perceived_latency_ms < 300 ? 'fast' : performanceMetrics.user_perceived_latency_ms >= 1000 ? 'slow' : 'normal'}`} />
+                                            </div>
+                                        </div>
                                     </div>
                                 )}
-                            </>
-                        )}
-                        
-                        {/* Duration - show prominently at the top */}
-                        <div className="metadata-item">
-                            <span className="metadata-label">Duration</span>
-                            <span className="metadata-value">{formatDuration(transcript.duration_ms)}</span>
-                        </div>
-                        
-                        {/* Active App */}
-                        {metadata.app_context && (
-                            <div className="metadata-item">
-                                <span className="metadata-label">Active App</span>
-                                <span className="metadata-value" title={metadata.app_context.bundle_id}>
-                                    {metadata.app_context.name}
-                                </span>
-                            </div>
-                        )}
-                        
-                        {/* Recording Details Section */}
-                        {(audioMetadata || performanceMetrics || metadata.model_used) && (
-                            <>
-                                <div className="metadata-section-header">
-                                    <h4>Technical Details</h4>
+                                
+                                {/* Transcription Time Card */}
+                                <div className="info-card">
+                                    <div className="card-header">
+                                        <div className="card-icon">
+                                            <ClockIcon />
+                                        </div>
+                                        <h3 className="card-title">Transcription Time</h3>
+                                    </div>
+                                    <div className="card-content">
+                                        <div className="card-value">
+                                            {formatDuration(performanceMetrics.transcription_time_ms)}
+                                        </div>
+                                        <div className="card-subtitle">
+                                            Total processing
+                                        </div>
+                                    </div>
                                 </div>
-                                
-                                {/* Device Summary - only if audio metadata exists */}
-                                {audioMetadata && (
-                                    <div className="metadata-item clickable" onClick={() => toggleSection('device')}>
-                                        <span className="metadata-label">Device</span>
-                                        <span className="metadata-value">
-                                            <span>{getDeviceSummary()}</span>
-                                            <span className="expand-icon">{expandedSections.device ? '▼' : '▶'}</span>
-                                        </span>
+                            </div>
+                        </>
+                    )}
+                        
+                    {/* Active App Card */}
+                    {metadata.app_context && (
+                        <div className="card-grid">
+                            <div className="info-card full-width">
+                                <div className="card-header">
+                                    <div className="card-icon">
+                                        <FileIcon />
                                     </div>
-                                )}
-                                
-                                {/* Expandable Device Details */}
-                                {expandedSections.device && (
-                                    <div className="metadata-expanded">
-                                        {/* Audio Format */}
-                                        <div className="metadata-item">
-                                            <span className="metadata-label">Format</span>
-                                            <span className="metadata-value">
-                                                {audioMetadata.format.sample_rate} Hz, {audioMetadata.format.channels} ch, {audioMetadata.format.bit_depth}-bit
-                                                {audioMetadata.format.requested_sample_rate && 
-                                                 audioMetadata.format.requested_sample_rate !== audioMetadata.format.sample_rate && (
-                                                    <span className="metadata-badge warning"> ⚠️ Expected {audioMetadata.format.requested_sample_rate} Hz</span>
-                                                )}
-                                            </span>
+                                    <h3 className="card-title">Active Application</h3>
+                                </div>
+                                <div className="card-content">
+                                    <div className="card-value" title={metadata.app_context.bundle_id}>
+                                        {metadata.app_context.name}
+                                    </div>
+                                    <div className="card-subtitle">
+                                        {metadata.app_context.bundle_id}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                        
+                    {/* Technical Details - Audio Device Card */}
+                    {audioMetadata && (
+                        <>
+                            <h4 className="section-title">Technical Details</h4>
+                            <div className="card-grid">
+                                <div className="info-card full-width expandable" onClick={() => toggleCard('device')}>
+                                    <div className="card-header">
+                                        <div className="card-icon">
+                                            <MicrophoneIcon />
                                         </div>
-                                        
-                                        {/* Buffer Configuration */}
-                                        <div className="metadata-item">
-                                            <span className="metadata-label">Buffer</span>
-                                            <span className="metadata-value">
-                                                {audioMetadata.format.buffer_config.buffer_type}
-                                                {audioMetadata.format.buffer_config.estimated_latency_ms && (
-                                                    <span className="metadata-ratio"> ({audioMetadata.format.buffer_config.estimated_latency_ms.toFixed(1)}ms latency)</span>
-                                                )}
-                                            </span>
+                                        <h3 className="card-title">Audio Device</h3>
+                                        <button className="card-expand-indicator">
+                                            <ExpandIcon expanded={expandedCards.device} />
+                                        </button>
+                                    </div>
+                                    <div className="card-content">
+                                        <div className="card-value">
+                                            {audioMetadata.device.name}
                                         </div>
-                                        
-                                        {/* Recording Settings */}
-                                        <div className="metadata-item">
-                                            <span className="metadata-label">Recording Mode</span>
-                                            <span className="metadata-value">
-                                                {audioMetadata.recording.trigger_type === 'manual' && 'Manual'}
-                                                {audioMetadata.recording.trigger_type === 'push-to-talk' && 'Push-to-Talk'}
-                                                {audioMetadata.recording.trigger_type === 'vad' && 'Voice Activated'}
-                                                {audioMetadata.recording.vad_enabled && (
-                                                    <span className="metadata-badge success"> VAD Enabled</span>
-                                                )}
-                                            </span>
+                                        <div className="card-subtitle">
+                                            {audioMetadata.format.sample_rate} Hz • {audioMetadata.system.os} • {getDeviceConnectionType(audioMetadata.device)}
                                         </div>
-                                        
-                                        {/* System Info */}
-                                        <div className="metadata-item">
-                                            <span className="metadata-label">Audio Backend</span>
-                                            <span className="metadata-value">
-                                                {audioMetadata.system.audio_backend}
-                                            </span>
-                                        </div>
-                                        
-                                        {/* Device Connection Type */}
-                                        <div className="metadata-item">
-                                            <span className="metadata-label">Connection</span>
-                                            <span className="metadata-value">
-                                                {getDeviceConnectionType(audioMetadata.device)}
+                                    </div>
+                                    {expandedCards.device && (
+                                        <div className="card-expanded-content">
+                                            <div className="detail-grid">
+                                                <div className="detail-item">
+                                                    <span className="detail-label">Audio Format</span>
+                                                    <span className="detail-value">
+                                                        {audioMetadata.format.sample_rate} Hz, {audioMetadata.format.channels} ch, {audioMetadata.format.bit_depth}-bit
+                                                    </span>
+                                                </div>
+                                                <div className="detail-item">
+                                                    <span className="detail-label">Buffer</span>
+                                                    <span className="detail-value">
+                                                        {audioMetadata.format.buffer_config.buffer_type}
+                                                        {audioMetadata.format.buffer_config.estimated_latency_ms && (
+                                                            <span className="text-muted"> ({audioMetadata.format.buffer_config.estimated_latency_ms.toFixed(1)}ms)</span>
+                                                        )}
+                                                    </span>
+                                                </div>
+                                                <div className="detail-item">
+                                                    <span className="detail-label">Recording Mode</span>
+                                                    <span className="detail-value">
+                                                        {audioMetadata.recording.trigger_type === 'manual' && 'Manual'}
+                                                        {audioMetadata.recording.trigger_type === 'push-to-talk' && 'Push-to-Talk'}
+                                                        {audioMetadata.recording.trigger_type === 'vad' && 'Voice Activated'}
+                                                        {audioMetadata.recording.vad_enabled && ' (VAD)'}
+                                                    </span>
+                                                </div>
+                                                <div className="detail-item">
+                                                    <span className="detail-label">Audio Backend</span>
+                                                    <span className="detail-value">
+                                                        {audioMetadata.system.audio_backend}
+                                                    </span>
+                                                </div>
                                                 {audioMetadata.device.is_default && (
-                                                    <span className="metadata-badge info">System Default</span>
+                                                    <div className="detail-item">
+                                                        <span className="detail-label">Status</span>
+                                                        <span className="detail-value">
+                                                            <span className="badge badge-info">System Default</span>
+                                                        </span>
+                                                    </div>
                                                 )}
-                                            </span>
-                                        </div>
-                                        
-                                        {/* Device Notes/Warnings */}
-                                        {audioMetadata.device.notes.length > 0 && (
-                                            <div className="metadata-item">
-                                                <span className="metadata-label">Device Notes</span>
-                                                <div className="metadata-value">
+                                            </div>
+                                            
+                                            {/* Warnings Section */}
+                                            {(audioMetadata.device.notes.length > 0 || audioMetadata.mismatches.length > 0 || 
+                                              (audioMetadata.format.requested_sample_rate && audioMetadata.format.requested_sample_rate !== audioMetadata.format.sample_rate)) && (
+                                                <div className="card-warnings">
+                                                    <h4 className="warnings-title">Warnings & Issues</h4>
+                                                    
+                                                    {audioMetadata.format.requested_sample_rate && 
+                                                     audioMetadata.format.requested_sample_rate !== audioMetadata.format.sample_rate && (
+                                                        <div className="warning-item">
+                                                            <span className="warning-icon">⚠️</span>
+                                                            <span>Sample rate mismatch: Expected {audioMetadata.format.requested_sample_rate} Hz, got {audioMetadata.format.sample_rate} Hz</span>
+                                                        </div>
+                                                    )}
+                                                    
                                                     {audioMetadata.device.notes.map((note, index) => (
-                                                        <div key={index} className="metadata-badge warning">
-                                                            ⚠️ {note}
+                                                        <div key={index} className="warning-item">
+                                                            <span className="warning-icon">⚠️</span>
+                                                            <span>{note}</span>
                                                         </div>
                                                     ))}
-                                                </div>
-                                            </div>
-                                        )}
-                                        
-                                        {/* Configuration Mismatches */}
-                                        {audioMetadata.mismatches.length > 0 && (
-                                            <div className="metadata-item config-mismatches">
-                                                <span className="metadata-label">Config Issues</span>
-                                                <div className="metadata-value">
+                                                    
                                                     {audioMetadata.mismatches.map((mismatch, index) => (
-                                                        <div key={index} className="config-mismatch">
+                                                        <div key={index} className="mismatch-card">
                                                             <div className="mismatch-header">
                                                                 <span className="mismatch-type">{mismatch.mismatch_type}</span>
                                                                 <span className="mismatch-impact">{mismatch.impact}</span>
@@ -510,39 +649,47 @@ export function TranscriptDetailPanel({
                                                         </div>
                                                     ))}
                                                 </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-                            </>
-                        )}
-                        
-                        {/* Performance Metrics Status - Only show if no metrics */}
-                        {loadingMetrics && (
-                            <div className="metadata-item">
-                                <span className="metadata-label">Performance</span>
-                                <span className="metadata-value">Loading metrics...</span>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
-                        )}
+                        </>
+                    )}
                         
-                        {!loadingMetrics && !performanceMetrics && !metricsError && (
-                            <div className="metadata-item">
-                                <span className="metadata-label">Performance</span>
-                                <span className="metadata-value">
-                                    <span className="metadata-badge info">📊 No metrics available</span>
-                                </span>
+                    {/* Performance Metrics Loading States */}
+                    {loadingMetrics && (
+                        <div className="card-grid">
+                            <div className="info-card loading">
+                                <div className="card-content">
+                                    <div className="loading-spinner" />
+                                    <div className="card-subtitle">Loading performance metrics...</div>
+                                </div>
                             </div>
-                        )}
-                        
-                        {!loadingMetrics && metricsError && (
-                            <div className="metadata-item">
-                                <span className="metadata-label">Performance</span>
-                                <span className="metadata-value">
-                                    <span className="metadata-badge warning">⚠️ Error loading metrics</span>
-                                </span>
+                        </div>
+                    )}
+                    
+                    {!loadingMetrics && !performanceMetrics && !metricsError && (
+                        <div className="card-grid">
+                            <div className="info-card card-info">
+                                <div className="card-content">
+                                    <div className="card-value">📊 No metrics available</div>
+                                    <div className="card-subtitle">Performance data not recorded for this transcript</div>
+                                </div>
                             </div>
-                        )}
-                    </div>
+                        </div>
+                    )}
+                    
+                    {!loadingMetrics && metricsError && (
+                        <div className="card-grid">
+                            <div className="info-card card-warning">
+                                <div className="card-content">
+                                    <div className="card-value">⚠️ Error loading metrics</div>
+                                    <div className="card-subtitle">Could not retrieve performance data</div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     {transcript.audio_path && canRenderPlayer && (
                         <SimpleAudioPlayer
