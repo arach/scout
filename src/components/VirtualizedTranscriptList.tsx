@@ -176,19 +176,21 @@ export const VirtualizedTranscriptList = memo(function VirtualizedTranscriptList
     };
 
     return (
-        <AutoSizer>
-            {({ height, width }) => (
-                <List
-                    ref={listRef}
-                    height={height}
-                    itemCount={listItems.length}
-                    itemSize={getItemSize}
-                    width={width}
-                    className="transcript-list-virtual"
-                >
-                    {Row}
-                </List>
-            )}
-        </AutoSizer>
+        <div style={{ flex: 1, minHeight: 0 }}>
+            <AutoSizer>
+                {({ height, width }) => (
+                    <List
+                        ref={listRef}
+                        height={height}
+                        itemCount={listItems.length}
+                        itemSize={getItemSize}
+                        width={width}
+                        className="transcript-list-virtual"
+                    >
+                        {Row}
+                    </List>
+                )}
+            </AutoSizer>
+        </div>
     );
 });

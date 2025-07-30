@@ -192,6 +192,14 @@ export const TranscriptsView = memo(function TranscriptsView({
     // Decide whether to use virtualization
     const shouldUseVirtualization = transcripts.length > ENABLE_VIRTUALIZATION_THRESHOLD;
     
+    // Debug log
+    console.log('TranscriptsView:', {
+        transcriptsCount: transcripts.length,
+        shouldUseVirtualization,
+        paginatedGroupsCount: paginatedGroups.length,
+        allGroupsCount: allGroups.length
+    });
+    
     return (
         <div className="transcripts-view-wrapper">
             {/* Header section with search and actions - uses grid padding */}
