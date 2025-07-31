@@ -3,7 +3,6 @@ import { SimpleAudioPlayer } from './SimpleAudioPlayer';
 import { PerformanceTimeline } from './PerformanceTimeline';
 import { invoke } from '@tauri-apps/api/core';
 import { save } from '@tauri-apps/plugin-dialog';
-import { copyFile } from '@tauri-apps/plugin-fs';
 import { parseTranscriptMetadata, parseAudioMetadata, Transcript } from '../types/transcript';
 import { useResizable } from '../hooks/useResizable';
 import './TranscriptDetailPanel.css';
@@ -230,8 +229,11 @@ export function TranscriptDetailPanel({
             });
             
             if (filePath) {
-                // Copy the file
-                await copyFile(transcript.audio_path, filePath);
+                // Use the backend command to copy the file
+                await invoke('export_audio_file', {
+                    sourcePath: transcript.audio_path,
+                    destinationPath: filePath
+                });
                 console.log('Audio file exported successfully to:', filePath);
             }
         } catch (error) {

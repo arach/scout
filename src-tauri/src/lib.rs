@@ -907,6 +907,24 @@ async fn export_transcripts(
     }
 }
 
+#[tauri::command]
+async fn export_audio_file(
+    source_path: String,
+    destination_path: String,
+) -> Result<(), String> {
+    // Verify source exists
+    let source = Path::new(&source_path);
+    if !source.exists() {
+        return Err("Source audio file not found".to_string());
+    }
+    
+    // Copy the file
+    std::fs::copy(&source_path, &destination_path)
+        .map_err(|e| format!("Failed to copy audio file: {}", e))?;
+    
+    Ok(())
+}
+
 fn format_duration(ms: i32) -> String {
     let seconds = ms / 1000;
     let minutes = seconds / 60;
@@ -2441,6 +2459,7 @@ pub fn run() {
             delete_transcript,
             delete_transcripts,
             export_transcripts,
+            export_audio_file,
             update_global_shortcut,
             subscribe_to_progress,
             get_overlay_position,
