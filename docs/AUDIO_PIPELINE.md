@@ -4,7 +4,14 @@ This document provides a comprehensive overview of Scout's audio capture and pro
 
 ## Overview
 
-Scout's audio pipeline is designed for low-latency, high-quality audio capture with real-time processing capabilities. The pipeline handles everything from device selection to format conversion, with automatic stereo-to-mono conversion and configurable sample rates.
+Scout's audio pipeline is optimized for speech transcription with minimal file sizes and maximum efficiency. As of v0.3.0, the pipeline uses 16kHz mono recording when supported by the device, reducing file sizes by ~12x while maintaining perfect quality for speech transcription.
+
+### Key Optimizations (v0.3.0+)
+- **Direct 16kHz mono capture**: No post-processing needed
+- **12x smaller files**: 750KB vs 9MB for 25 seconds
+- **66% less memory**: Ring buffer reduced to 19.2MB
+- **Lower CPU usage**: No real-time conversion needed
+- **Fallback support**: Gracefully handles devices without 16kHz mono
 
 ## Audio Pipeline Flow
 
@@ -35,9 +42,9 @@ Scout's audio pipeline is designed for low-latency, high-quality audio capture w
 
 **Configuration:**
 ```rust
-// Default configuration
-sample_rate: 48000 Hz (device default)
-channels: 1 or 2 (prefers stereo, falls back to mono)
+// Optimized speech configuration (as of v0.3.0)
+sample_rate: 16000 Hz (when supported, otherwise device default)
+channels: 1 (mono for optimal file size)
 buffer_size: Default (platform-specific)
 ```
 
@@ -60,11 +67,9 @@ buffer_size: Default (platform-specific)
 
 2. **Sample Processing** (in callback)
    ```rust
-   // Stereo to mono conversion happens here
-   if channels == 2 {
-       // Average left and right channels
-       mono_sample = (left + right) / 2.0
-   }
+   // Direct mono recording when device supports it
+   // No conversion needed - already optimized at capture
+   // Falls back to device native format if needed
    ```
 
 3. **Output Distribution**
@@ -88,10 +93,11 @@ buffer_size: Default (platform-specific)
 ```
 
 **Key Features:**
-- Fixed-size buffer (5 minutes @ 48kHz mono = ~57.6MB)
+- Fixed-size buffer (5 minutes @ 16kHz mono = ~19.2MB)
 - Lock-free write operations
 - Chunk-based reading for transcription
 - Automatic old data overwriting
+- 66% memory reduction with optimized format
 
 ### 4. Voice Activity Detection (VAD)
 
@@ -126,14 +132,16 @@ Input Format → Normalize to f32 → Resample to 16kHz → Mono conversion → 
 ## Audio Quality Considerations
 
 ### Sample Rate Strategy
-- **Recording:** 48kHz (or device default)
-- **Transcription:** 16kHz (Whisper requirement)
-- **Rationale:** Higher recording rate preserves quality, downsampling for transcription
+- **Recording:** 16kHz mono (when device supports it)
+- **Fallback:** Device default rate if 16kHz not supported
+- **Transcription:** 16kHz (Whisper native rate)
+- **Rationale:** Direct 16kHz recording reduces file size by ~12x without quality loss for speech
 
 ### Channel Configuration
-- **Preferred:** Stereo recording → mono conversion
-- **Fallback:** Direct mono recording
-- **Conversion:** Average of L+R channels for balanced audio
+- **Preferred:** Direct mono recording (optimal for speech)
+- **Fallback:** Device native channels if mono not supported
+- **File Size:** Mono reduces storage by 50% vs stereo
+- **Quality:** No loss for speech transcription use case
 
 ### Buffer Sizes
 - **Low Latency:** Small buffers (256-512 samples)
@@ -152,16 +160,16 @@ Total audio pipeline latency:  ~10-20ms + chunk time
 ```
 
 ### Memory Usage
-- Ring Buffer: ~57.6MB (5 min @ 48kHz mono)
+- Ring Buffer: ~19.2MB (5 min @ 16kHz mono)
 - Audio processing buffers: ~1-2MB
 - Device stream overhead: ~1MB
-- Total: ~60MB baseline
+- Total: ~22MB baseline (66% reduction from 48kHz)
 
 ### CPU Usage
 - Audio callback: <1% (typical)
-- Stereo→mono conversion: <0.5%
+- No conversion needed (direct mono capture)
 - Ring buffer operations: <0.5%
-- Total: 1-2% during recording
+- Total: <1% during recording (optimized)
 
 ## Error Handling
 
@@ -227,10 +235,14 @@ The audio pipeline feeds directly into the transcription system:
 
 ### Developer Settings
 ```rust
-// In AudioRecorder
+// In AudioRecorder (v0.3.0+)
 const RING_BUFFER_SECONDS: f32 = 300.0;  // 5 minutes
-const CHANNELS: u16 = 1;  // Mono output
-const WHISPER_SAMPLE_RATE: u32 = 16000;
+const OPTIMAL_SAMPLE_RATE: u32 = 16000;  // Direct capture at Whisper rate
+const OPTIMAL_CHANNELS: u16 = 1;         // Mono for speech
+const BITS_PER_SAMPLE: u16 = 16;         // 16-bit PCM
+
+// File size calculation:
+// 16kHz * 1 channel * 2 bytes = 32KB/s (vs 384KB/s for 48kHz stereo 32-bit)
 ```
 
 ## Future Enhancements
