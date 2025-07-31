@@ -10,24 +10,52 @@ export const useFormatters = () => {
    * Format milliseconds into human-readable duration
    */
   const formatDuration = useCallback((ms: number): string => {
-    if (ms < 1000) {
-      return '< 1s';
+    // < 100ms: Show exact milliseconds (e.g., "87ms")
+    if (ms < 100) {
+      return `${Math.round(ms)}ms`;
     }
     
-    const seconds = Math.floor(ms / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const hours = Math.floor(minutes / 60);
+    // 100ms - 1s: Show milliseconds rounded to nearest 10 (e.g., "450ms")
+    if (ms < 1000) {
+      return `${Math.round(ms / 10) * 10}ms`;
+    }
     
+    // 1s - 5s: Show milliseconds (e.g., "1,234ms" or "1.234s")
+    if (ms < 5000) {
+      // Show as milliseconds with comma separator
+      return `${Math.round(ms).toLocaleString()}ms`;
+    }
+    
+    const totalSeconds = ms / 1000;
+    const seconds = Math.floor(totalSeconds);
+    const minutes = Math.floor(seconds / 60);
+    
+    // 5s - 10s: Show with 2 decimal places (e.g., "7.45s")
+    if (totalSeconds < 10) {
+      return `${totalSeconds.toFixed(2)}s`;
+    }
+    
+    // 10s - 60s: Show with 1 decimal place (e.g., "25.3s")
+    if (totalSeconds < 60) {
+      return `${totalSeconds.toFixed(1)}s`;
+    }
+    
+    // 1min - 10min: Show as "2:34" with seconds
+    if (minutes < 10) {
+      const remainingSeconds = seconds % 60;
+      return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+    }
+    
+    // >= 10min: Show as "12:34" (standard time format)
+    const hours = Math.floor(minutes / 60);
     if (hours > 0) {
       const remainingMinutes = minutes % 60;
       const remainingSeconds = seconds % 60;
       return `${hours}:${remainingMinutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
-    } else if (minutes > 0) {
-      const remainingSeconds = seconds % 60;
-      return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
-    } else {
-      return `${seconds}s`;
     }
+    
+    const remainingSeconds = seconds % 60;
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
   }, []);
 
   /**

@@ -15,12 +15,43 @@
   font-weight: var(--font-weight-normal, 400);
   color: var(--text-primary);
   background-color: var(--bg-primary);
+  
+  /* Type scale for consistency */
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-base: 13px;
+  --font-size-md: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 20px;
+  --font-size-2xl: 24px;
 }
 
 .app-container {
   display: flex;
   height: 100vh;
   overflow: visible;
+  position: relative;
+}
+
+/* Header - positioned only over main content area */
+.app-header {
+  position: absolute;
+  top: 0;
+  left: 200px; /* Start after expanded sidebar */
+  right: 0;
+  display: flex;
+  align-items: center;
+  height: 48px;
+  background-color: var(--bg-secondary);
+  z-index: 100;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04),
+              0 2px 6px rgba(0, 0, 0, 0.02);
+  transition: left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Adjust header position when sidebar is collapsed */
+.app-container:has(.sidebar.collapsed) .app-header {
+  left: 52px; /* Start after collapsed sidebar */
 }
 
 /* Dark mode drag overlay adjustments - theme-independent */
@@ -76,6 +107,46 @@ body {
   padding: 0;
 }
 
+/* Global Scrollbar Styles */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary, #f1f1f1);
+  border-radius: 0;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-primary, #c0c0c0);
+  border-radius: 0;
+  border: 1px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary, #888);
+  background-clip: content-box;
+}
+
+/* Dark mode scrollbar */
+@media (prefers-color-scheme: dark) {
+  ::-webkit-scrollbar-track {
+    background: #1a1a1a;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    background: #4a4a4a;
+    background-clip: content-box;
+  }
+  
+  ::-webkit-scrollbar-thumb:hover {
+    background: #5a5a5a;
+    background-clip: content-box;
+  }
+}
+
 h1 {
   font-size: 20px;
   font-weight: 400;
@@ -94,45 +165,50 @@ h1 {
 /* New main content area after refactoring */
 .app-main {
   flex-grow: 1;
-  overflow-y: auto;
+  overflow: hidden;
   padding: 0;
+  padding-top: 48px; /* Account for header - IMPORTANT! */
   background-color: var(--bg-primary);
   position: relative;
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .app-main.sidebar-collapsed {
   /* Add any specific styles when sidebar is collapsed */
 }
 
-/* View header */
+/* View header - now inside app-header */
 .view-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--border-primary);
-  background-color: var(--bg-secondary);
-  min-height: 40px;
-  height: 40px; /* Increased height for more breathing room */
-  box-sizing: border-box;
-  position: relative; /* This fixed the alignment issue */
+  padding: 0 16px;
+  flex: 1;
+  height: 100%;
 }
 
 .view-header-left,
 .view-header-right {
   display: flex;
   align-items: center;
-  width: 32px; /* Fixed width to keep buttons in same position */
+  width: 40px; /* Increased to match button size */
   height: 24px;
+  flex-shrink: 0; /* Prevent shrinking */
 }
 
 .view-header-center {
-  flex: 1;
+  position: absolute;
+  left: 50%; /* True center since header is full width */
+  transform: translateX(-50%);
   display: flex;
   justify-content: center;
   align-items: center;
+  pointer-events: none; /* Prevent blocking button clicks */
+}
+
+.view-header-center > * {
+  pointer-events: auto; /* Re-enable pointer events for title content */
 }
 
 .view-title {
@@ -479,28 +555,29 @@ h1 {
 }
 
 .record-button {
-  font-size: 16px;
-  font-weight: 500;
-  padding: 16px 32px;
-  border-radius: 6px;
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  padding: 18px 36px;
+  border-radius: 12px;
   border: 2px solid var(--border-primary);
   background-color: var(--bg-primary);
   color: var(--text-primary);
   cursor: pointer;
-  transition: transform 0.1s ease, box-shadow 0.1s ease;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
   display: inline-flex;
   align-items: center;
   gap: 12px;
-  min-width: 200px;
+  min-width: 220px;
   justify-content: center;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  letter-spacing: -0.01em;
 }
 
 .record-button:hover {
   background-color: var(--bg-hover);
   border-color: var(--accent-primary);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
 }
 
 .record-button:active {
@@ -786,11 +863,12 @@ h1 {
 .no-transcripts {
   color: var(--text-secondary);
   text-align: center;
-  padding: 64px 32px;
+  padding: 80px 32px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
+  gap: 20px;
+  animation: fadeIn 0.4s ease-out;
 }
 
 .no-transcripts svg {
@@ -799,9 +877,10 @@ h1 {
 
 .no-transcripts h3 {
   margin: 0;
-  font-size: 18px;
-  font-weight: 500;
+  font-size: var(--font-size-xl);
+  font-weight: 600;
   color: var(--text-primary);
+  letter-spacing: -0.02em;
 }
 
 .no-transcripts p {

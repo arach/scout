@@ -19,36 +19,36 @@
     width: 300px;
 }
 
-/* 🧠 Header grid layout */
+/* 🧠 Header grid layout - adjusted for no title */
 .header-grid {
     display: grid;
-    grid-template-columns: 150px 1fr 400px;
+    grid-template-columns: 1fr auto;
     align-items: center;
     gap: 16px;
     padding-bottom: 8px;
 }
 
-.search-container {
+.search-container-expanded {
     display: flex;
-    justify-content: center;
+    justify-content: flex-start;
 }
 
-/* 🧠 Search input for new layout */
-.search-input {
-    width: 240px;
+/* 🧠 Search input - expanded width */
+.search-input-expanded {
+    width: 400px;
     padding: 6px 12px;
-    border: 1px solid var(--border-primary, #e5e7eb);
+    border: 1px solid #e5e7eb !important;
     border-radius: 6px;
     font-size: 13px;
-    background: var(--bg-primary, white);
-    color: var(--text-primary, #111827);
+    background: white !important;
+    color: #111827 !important;
     outline: none;
     transition: border-color 0.2s ease, box-shadow 0.2s ease;
     height: 32px;
     box-sizing: border-box;
 }
 
-.search-input:focus {
+.search-input-expanded:focus {
     border-color: #3b82f6;
     box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
@@ -63,21 +63,36 @@
     min-width: 0;
 }
 
-/* 🧠 Header action buttons - copy style from floating action bar */
+/* 🧠 Header action buttons - unified button style */
 .header-action-btn {
-    padding: 6px 12px;
-    border: none;
-    border-radius: 8px;
-    font-size: 13px;
+    padding: 6px 14px;
+    border: 1px solid var(--border-primary);
+    border-radius: 6px;
+    font-size: var(--font-size-base);
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all 0.15s ease;
     display: flex;
     align-items: center;
     gap: 6px;
     height: 32px;
     white-space: nowrap;
     flex-shrink: 0;
+    background: white;
+    color: var(--text-primary);
+}
+
+.header-action-btn.select-mode {
+    background: var(--bg-primary, white);
+    color: var(--text-primary, #111827);
+    border: 1px solid var(--border-primary, #E5E7EB);
+}
+
+.header-action-btn.select-mode:hover {
+    background: #F3F4F6;
+    border-color: #3B82F6;
+    color: #3B82F6;
+    transform: scale(1.02);
 }
 
 .header-action-btn.select-all {
@@ -117,19 +132,31 @@
 }
 
 @media (prefers-color-scheme: dark) {
-    .search-input {
+    .search-input-expanded {
         background: #3f3f46; /* zinc-700 */
         border-color: #52525b; /* zinc-600 */
         color: #f4f4f5; /* zinc-100 */
     }
     
-    .search-input:focus {
+    .search-input-expanded:focus {
         border-color: #60a5fa; /* blue-400 */
         box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.1);
     }
     
-    .search-input::placeholder {
+    .search-input-expanded::placeholder {
         color: #a1a1aa; /* zinc-400 */
+    }
+    
+    .header-action-btn.select-mode {
+        background: #3f3f46; /* zinc-700 */
+        color: #f4f4f5; /* zinc-100 */
+        border: 1px solid #52525b; /* zinc-600 */
+    }
+    
+    .header-action-btn.select-mode:hover {
+        background: #52525b; /* zinc-600 */
+        border-color: #71717a; /* zinc-500 */
+        transform: scale(1.02);
     }
     
     .header-action-btn.select-all {
@@ -157,8 +184,89 @@
     }
 }
 
-.transcripts-list {
-    flex-grow: 1;
+/* Light theme override - MUST come after media query */
+[data-theme="vscode-light"] .search-input-expanded {
+    background: white !important;
+    border-color: #e5e7eb !important;
+    color: #111827 !important;
+}
+
+[data-theme="vscode-light"] .search-input-expanded:focus {
+    border-color: #3b82f6 !important;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1) !important;
+}
+
+[data-theme="vscode-light"] .search-input-expanded::placeholder {
+    color: #9ca3af !important;
+}
+
+/* Prevent dark mode override when in light theme */
+@media (prefers-color-scheme: dark) {
+    [data-theme="vscode-light"] .search-input-expanded {
+        background: white !important;
+        border-color: #e5e7eb !important;  
+        color: #111827 !important;
+    }
+    
+    [data-theme="vscode-light"] .search-input-expanded:focus {
+        border-color: #3b82f6 !important;
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1) !important;
+    }
+    
+    [data-theme="vscode-light"] .search-input-expanded::placeholder {
+        color: #9ca3af !important;
+    }
+}
+
+/* Transcript view wrapper - fills entire view */
+.transcripts-view-wrapper {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+    width: 100%;
+    min-height: 0;
+}
+
+/* Header section with padding */
+.transcripts-view-header {
+    padding: var(--grid-padding-top) var(--grid-padding-horizontal) 0;
+    max-width: 1400px;
+    margin: 0 auto;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* Transcripts list section - full width, no padding */
+.transcripts-list-section {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    padding-top: 8px; /* Small top padding for breathing room */
+    padding-bottom: 8px; /* Small bottom padding to create visual gap */
+    overflow: hidden;
+    position: relative;
+}
+
+/* Transcript items container - adds padding for items only */
+.transcript-items-container {
+    padding: 0; /* Remove padding to allow full-width hover */
+    display: block;
+    position: relative;
+}
+
+/* Mobile responsive adjustments */
+@media (max-width: 768px) {
+    .transcripts-view-header {
+        padding: var(--grid-padding-top-mobile) var(--grid-padding-horizontal-mobile) 0;
+    }
+    
+    .transcript-items-container {
+        padding: 0; /* Keep full-width hover on mobile too */
+    }
 }
 
 /* Actions bar */
@@ -279,14 +387,99 @@
 
 /* List view styles */
 .transcript-list-container {
-    margin-top: 0;
-    background: transparent;
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    margin: 0 var(--grid-padding-horizontal);
+    background: #f3f4f6;
+    border: 1px solid var(--border-primary);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    min-height: 200px; /* Ensure minimum height */
+    position: relative;
+}
+
+/* Virtualized container needs explicit height for AutoSizer */
+.transcript-list-container.virtualized {
+    height: 100%;
+    max-height: 100%;
+}
+
+/* Scrollable container for non-virtualized list */
+.transcript-list-scrollable {
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+    height: 100%;
+    position: relative;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-primary, #d1d5db) var(--bg-secondary, #f3f4f6);
+}
+
+/* Scrollbar styling for non-virtualized list */
+.transcript-list-scrollable::-webkit-scrollbar {
+    width: 8px;
+}
+
+.transcript-list-scrollable::-webkit-scrollbar-track {
+    background: var(--bg-secondary, #f3f4f6);
+}
+
+.transcript-list-scrollable::-webkit-scrollbar-thumb {
+    background: var(--border-primary, #d1d5db);
+    border-radius: 4px;
+}
+
+.transcript-list-scrollable::-webkit-scrollbar-thumb:hover {
+    background: var(--border-secondary, #9ca3af);
+}
+
+@media (max-width: 768px) {
+    .transcript-list-container {
+        margin: 0 var(--grid-padding-horizontal-mobile);
+    }
 }
 
 /* Virtualized list styles */
 .transcript-list-virtual {
     scrollbar-width: thin;
-    scrollbar-color: #d1d5db #f3f4f6;
+    scrollbar-color: var(--border-primary, #d1d5db) var(--bg-secondary, #f3f4f6);
+    /* Ensure the virtual list uses full width and height */
+    width: 100% !important;
+    height: 100% !important;
+    overflow-y: auto !important;
+}
+
+/* Fix AutoSizer wrapper div that has 0x0 dimensions */
+.transcript-list-container.virtualized > div:first-child {
+    width: 100% !important;
+    height: 100% !important;
+    overflow: visible !important;
+}
+
+/* Target AutoSizer wrapper more specifically */
+.virtualized-list-wrapper > div {
+    width: 100% !important;
+    height: 100% !important;
+    overflow: visible !important;
+}
+
+/* Wrapper for transcript items in virtual list - removed, no longer needed */
+
+/* No transcripts state */
+.no-transcripts-container {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--grid-padding-horizontal);
+}
+
+@media (max-width: 768px) {
+    .no-transcripts-container {
+        padding: var(--grid-padding-horizontal-mobile);
+    }
 }
 
 .transcript-list-virtual::-webkit-scrollbar {
@@ -294,62 +487,137 @@
 }
 
 .transcript-list-virtual::-webkit-scrollbar-track {
-    background: #f3f4f6;
+    background: var(--bg-secondary, #f3f4f6);
 }
 
 .transcript-list-virtual::-webkit-scrollbar-thumb {
-    background: #d1d5db;
+    background: var(--border-primary, #d1d5db);
     border-radius: 4px;
 }
 
 .transcript-list-virtual::-webkit-scrollbar-thumb:hover {
-    background: #9ca3af;
+    background: var(--border-secondary, #9ca3af);
 }
 
-/* Date grouping styles */
-.transcript-group {
-    margin-bottom: 32px;
-}
-
-.transcript-group:first-child {
-    border-top: none;
-}
+/* Date grouping styles - removed duplicate */
 
 /* Group Styles */
 .transcript-group {
-    margin-bottom: 8px; /* Further reduced for tighter spacing */
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border-primary);
-    border-radius: var(--border-radius, 12px);
-    overflow: hidden;
-    box-shadow: 0 1px 3px var(--shadow-color);
+    margin-bottom: 32px; /* Increased spacing between groups */
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    overflow: visible;
+    box-shadow: none;
 }
 
 .transcript-group:first-child {
-    margin-top: 0; /* 🧠 Remove any top margin from first group */
+    margin-top: 0;
+}
+
+.transcript-group:first-child .transcript-group-header {
+    border-top-left-radius: 12px;
+    border-top-right-radius: 12px;
 }
 
 .transcript-group-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 16px;
-    background: var(--bg-secondary);
+    padding: 12px 16px; /* Increased vertical padding for better breathing room */
+    margin: 0;
+    background: transparent; /* No background - container already has one */
     user-select: none;
     transition: var(--transition);
     border-bottom: 1px solid var(--border-primary);
-    min-height: 36px;
+    min-height: 44px; /* Increased height for better touch targets */
     box-sizing: border-box;
+    position: relative;
+    font-weight: 500;
+    z-index: 1;
+}
+
+@media (prefers-color-scheme: dark) {
+    .transcript-group-header {
+        background: transparent; /* Keep transparent in dark mode too */
+        border-bottom-color: var(--border-primary);
+    }
 }
 
 .transcript-group-header:hover {
-    background: var(--bg-hover);
+    background: rgba(0, 0, 0, 0.02); /* Very subtle hover */
+}
+
+@media (prefers-color-scheme: dark) {
+    .transcript-group-header:hover {
+        background: rgba(255, 255, 255, 0.02); /* Very subtle hover */
+    }
+}
+
+/* Light theme overrides for group headers - removed backgrounds to prevent overlap */
+
+/* Light theme text colors for group headers */
+[data-theme="vscode-light"] .transcript-group-title {
+    color: #111827 !important; /* gray-900 */
+}
+
+[data-theme="vscode-light"] .group-count {
+    color: #6B7280 !important; /* gray-500 */
+}
+
+[data-theme="vscode-light"] .group-toggle-btn {
+    color: #6B7280 !important; /* gray-500 */
+}
+
+[data-theme="vscode-light"] .group-clear-btn {
+    color: #6B7280 !important; /* gray-500 */
+}
+
+[data-theme="vscode-light"] .group-clear-btn:hover {
+    background: rgba(0, 0, 0, 0.05) !important;
+    color: #111827 !important; /* gray-900 */
 }
 
 .group-header-left {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 0; /* Remove gap to control spacing manually */
+    min-height: 20px; /* Ensure consistent height */
+}
+
+/* Chevron button - positioned before checkbox */
+.group-toggle-btn {
+    background: none;
+    border: none;
+    padding: 4px;
+    margin-right: 2px; /* Tighter space before checkbox */
+    margin-left: -4px; /* Pull slightly left for better alignment */
+    cursor: pointer;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    border-radius: 4px;
+}
+
+.group-toggle-btn:hover {
+    background: rgba(0, 0, 0, 0.05);
+}
+
+@media (prefers-color-scheme: dark) {
+    .group-toggle-btn:hover {
+        background: rgba(255, 255, 255, 0.05);
+    }
+}
+
+.group-toggle-btn .chevron-icon {
+    transition: transform 0.2s ease;
+    transform: rotate(-90deg); /* Default collapsed state */
+}
+
+.transcript-group.expanded .group-toggle-btn .chevron-icon {
+    transform: rotate(0deg); /* Expanded state - pointing down */
 }
 
 .group-checkbox {
@@ -357,37 +625,25 @@
     width: 14px;
     height: 14px;
     flex-shrink: 0;
-    margin-left: 2px;
-    margin-right: 10px;
-}
-
-.group-toggle-btn {
-    background: none;
-    border: none;
-    padding: 0;
-    cursor: pointer;
-    color: var(--text-secondary);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: transform 0.2s ease;
-}
-
-.group-toggle-btn .chevron-icon {
-    transition: transform 0.2s ease;
-}
-
-.transcript-group.expanded .group-toggle-btn .chevron-icon {
-    transform: rotate(180deg);
+    margin-right: 12px; /* Space after checkbox */
+    margin-left: 12px; /* Fixed left margin for alignment */
+    align-self: center; /* Center vertically */
 }
 
 .transcript-group-title {
-    font-size: var(--font-size-large);
-    font-weight: var(--font-weight-bold);
+    font-size: 14px;
+    font-weight: 600;
     color: var(--text-primary);
     margin: 0;
     cursor: pointer;
     user-select: none;
+    letter-spacing: -0.01em;
+    margin-left: 12px; /* Default margin when no checkbox */
+}
+
+/* When checkbox is present, remove the margin */
+.group-checkbox + .transcript-group-title {
+    margin-left: 0;
 }
 
 .transcript-group-title:hover {
@@ -395,8 +651,10 @@
 }
 
 .group-count {
-    font-size: var(--font-size-small);
+    font-size: 13px;
     color: var(--text-tertiary);
+    font-weight: 400;
+    margin-left: 8px;
 }
 
 .group-clear-btn {
@@ -411,12 +669,31 @@
 }
 
 .group-clear-btn:hover {
-    background: var(--bg-hover, #F3F4F6);
+    background: rgba(0, 0, 0, 0.05);
     color: var(--text-primary, #111827);
 }
 
+@media (prefers-color-scheme: dark) {
+    .group-clear-btn:hover {
+        background: rgba(255, 255, 255, 0.05);
+    }
+}
+
 .transcript-group-items {
-    background: var(--bg-tertiary);
+    background: transparent;
+    padding: 0;
+    margin-top: 0;
+    display: block;
+    position: relative;
+}
+
+/* Dark mode border removed */
+
+/* Mobile responsive adjustments */
+@media (max-width: 768px) {
+    .transcript-group-header {
+        padding: 12px 16px;
+    }
 }
 
 /* Pagination */

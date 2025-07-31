@@ -16,7 +16,7 @@ const getMatchTypeLabel = (type: MatchType): string => {
   }
 };
 
-export const DictionaryStandalone: React.FC = () => {
+const Dictionary: React.FC = () => {
   const [entries, setEntries] = useState<DictionaryEntry[]>([]);
   const [filteredEntries, setFilteredEntries] = useState<DictionaryEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -167,10 +167,6 @@ export const DictionaryStandalone: React.FC = () => {
   return (
     <div className="grid-container">
       <div className="grid-content">
-        <div className="page-header">
-          <h1>Dictionary</h1>
-          <p>Manage custom text replacements for your transcriptions</p>
-        </div>
 
       {/* Notification */}
       {notification && (
@@ -466,3 +462,5 @@ export const DictionaryStandalone: React.FC = () => {
     </div>
   );
 };
+
+export default Dictionary;

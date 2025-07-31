@@ -33,10 +33,10 @@ impl Default for TranscriptionConfig {
     fn default() -> Self {
         Self {
             enable_chunking: true,
-            chunking_threshold_secs: 10,
-            chunk_duration_secs: 10,
+            chunking_threshold_secs: 5,  // Start chunking after 5 seconds (original design)
+            chunk_duration_secs: 5,      // 5-second chunks for better coverage
             force_strategy: None,
-            refinement_chunk_secs: Some(10), // Engineering decision: 10s optimal balance
+            refinement_chunk_secs: Some(10), // 10-second chunks for Medium model refinement
         }
     }
 }
@@ -184,12 +184,9 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
             return false;
         }
         
-        // Ring buffer strategy is beneficial for longer recordings
-        if let Some(duration) = duration_estimate {
-            duration.as_secs() > config.chunking_threshold_secs
-        } else {
-            true // We don't know duration yet, so we can handle it
-        }
+        // Ring buffer strategy works for any recording when chunking is enabled
+        // We'll start chunking after the threshold is reached
+        true
     }
     
     async fn start_recording(&mut self, output_path: &Path, config: &TranscriptionConfig) -> Result<(), String> {
@@ -217,9 +214,13 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
             sample_format: hound::SampleFormat::Float,
         };
         
+        // Create a separate file for ring buffer to avoid overwriting the main recording
+        let ring_buffer_path = output_path.with_file_name(
+            format!("ring_buffer_{}", output_path.file_name().unwrap().to_string_lossy())
+        );
         let ring_buffer = Arc::new(crate::audio::ring_buffer_recorder::RingBufferRecorder::new(
             spec,
-            output_path,
+            &ring_buffer_path,
         )?);
         
         // Initialize ring buffer transcriber
@@ -463,7 +464,7 @@ impl ProgressiveTranscriptionStrategy {
     fn start_refinement_task(
         &mut self,
         ring_buffer: Arc<crate::audio::ring_buffer_recorder::RingBufferRecorder>,
-        recording_path: std::path::PathBuf,
+        _recording_path: std::path::PathBuf,
     ) {
         let medium_transcriber = self.medium_transcriber.clone();
         let temp_dir = self.temp_dir.clone();
@@ -627,15 +628,20 @@ impl TranscriptionStrategy for ProgressiveTranscriptionStrategy {
             sample_format: hound::SampleFormat::Float,
         };
         
+        // Create a separate file for ring buffer to avoid overwriting the main recording
+        let ring_buffer_path = output_path.with_file_name(
+            format!("ring_buffer_{}", output_path.file_name().unwrap().to_string_lossy())
+        );
         let ring_buffer = Arc::new(crate::audio::ring_buffer_recorder::RingBufferRecorder::new(
             spec,
-            output_path,
+            &ring_buffer_path,
         )?);
         
-        // Initialize ring buffer transcriber with TINY model for real-time
+        // TEMPORARY: Use Medium model for real-time chunks due to Tiny model hallucinations
+        // TODO: Fix Tiny model hallucinations with longer chunks or better parameters
         let ring_transcriber = crate::transcription::ring_buffer_transcriber::RingBufferTranscriber::new(
             ring_buffer.clone(),
-            self.tiny_transcriber.clone(), // Use Tiny model for real-time
+            self.medium_transcriber.clone(), // Use Medium model temporarily
             self.temp_dir.clone(),
         );
         
@@ -672,7 +678,7 @@ impl TranscriptionStrategy for ProgressiveTranscriptionStrategy {
         let _recording_start_time = self.start_time.take()
             .ok_or("Recording was not started")?;
         
-        let recording_path = self.recording_path.take()
+        let _recording_path = self.recording_path.take()
             .ok_or("Recording path was not set")?;
         
         info(Component::Transcription, "Finishing progressive transcription");
@@ -827,8 +833,9 @@ impl TranscriptionStrategySelector {
             info(Component::Transcription, &format!("Tiny model exists: {}", tiny_exists));
             info(Component::Transcription, &format!("Medium model exists: {}", medium_exists));
             
-            // Only attempt progressive strategy if BOTH models are available
-            if tiny_exists && medium_exists {
+            // TEMPORARY: Skip progressive strategy due to Tiny model hallucinations
+            // Just use ring buffer with Medium model for now
+            if false && tiny_exists && medium_exists {
                 match ProgressiveTranscriptionStrategy::new(models_dir, temp_dir.clone()).await {
                     Ok(mut strategy) => {
                         if let Some(ref app_handle) = app_handle {
@@ -842,7 +849,7 @@ impl TranscriptionStrategySelector {
                     }
                 }
             } else {
-                info(Component::Transcription, "Progressive strategy requires both Tiny and Medium models, falling back to ring buffer");
+                info(Component::Transcription, "Skipping progressive strategy, using ring buffer with Medium model");
             }
         } else {
             info(Component::Transcription, "Chunking disabled, skipping progressive strategy");

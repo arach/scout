@@ -250,7 +250,7 @@ export const tauriApi = {
 
   // Dictionary commands
   getDictionaryEntries: (enabledOnly: boolean = false) => 
-    invokeTyped<DictionaryEntry[]>('get_dictionary_entries', { enabled_only: enabledOnly }),
+    invokeTyped<DictionaryEntry[]>('get_dictionary_entries', { enabledOnly }),
   saveDictionaryEntry: (entry: DictionaryEntryInput) => 
     invokeTyped<DictionaryEntry>('save_dictionary_entry', entry),
   updateDictionaryEntry: (id: number, updates: DictionaryEntryUpdate) => 

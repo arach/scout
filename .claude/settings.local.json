@@ -98,7 +98,9 @@
       "Bash(screencapture:*)",
       "mcp__peekaboo__sleep",
       "mcp__peekaboo__analyze",
-      "Bash(git rm:*)"
+      "Bash(git rm:*)",
+      "Bash(PORT=3001 pnpm tauri dev)",
+      "Bash(ffprobe:*)"
     ],
     "deny": []
   },

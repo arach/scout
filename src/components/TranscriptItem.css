@@ -1,19 +1,37 @@
 /* Transcript Item Styles */
 .transcript-item {
     position: relative;
-    background: transparent;
+    background: rgba(255, 255, 255, 0.5); /* Light background for better visibility */
     border: none;
     border-bottom: 1px solid var(--border-primary);
-    padding: 8px 16px;
+    padding: 12px 16px; /* Increased vertical padding */
+    padding-left: 16px; /* Default padding without checkbox */
     margin-bottom: 0;
-    transition: all 150ms ease;
+    transition: background-color 150ms ease, border-color 150ms ease;
     cursor: default;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 16px;
-    min-height: 48px;
+    min-height: 48px; /* Increased for better touch targets */
     box-sizing: border-box;
+}
+
+/* When checkbox is visible, adjust padding */
+.transcript-item:has(.transcript-checkbox-wrapper) {
+    padding-left: 56px; /* Adjusted for checkbox alignment with new padding */
+}
+
+/* Mobile responsive adjustments */
+@media (max-width: 768px) {
+    .transcript-item {
+        padding: 8px 16px;
+        padding-left: 16px;
+    }
+    
+    .transcript-item:has(.transcript-checkbox-wrapper) {
+        padding-left: 56px;
+    }
 }
 
 .transcript-item.clickable {
@@ -21,8 +39,8 @@
 }
 
 .transcript-item:hover {
-    background: rgba(var(--accent-rgb), 0.05);
-    border-bottom-color: rgba(var(--accent-rgb), 0.15);
+    background: rgba(var(--accent-rgb), 0.03); /* Subtle accent tint on hover */
+    border-bottom-color: var(--border-primary);
 }
 
 .transcript-item.selected {
@@ -38,8 +56,24 @@
 /* Compact variant for recent transcripts */
 .transcript-item.compact {
     padding: 6px 16px;
+    padding-left: 16px;
     font-size: 13px;
-    min-height: 36px;
+    min-height: 32px; /* Reduced for compact items */
+}
+
+.transcript-item.compact:has(.transcript-checkbox-wrapper) {
+    padding-left: 56px;
+}
+
+@media (max-width: 768px) {
+    .transcript-item.compact {
+        padding: 6px 16px;
+        padding-left: 16px;
+    }
+    
+    .transcript-item.compact:has(.transcript-checkbox-wrapper) {
+        padding-left: 56px;
+    }
 }
 
 .transcript-item.compact .transcript-text {
@@ -57,6 +91,11 @@
     border-bottom: none;
 }
 
+/* First item in group - standard padding (spacing handled by virtualization) */
+.transcript-group-items .transcript-item:first-child {
+    padding-top: 12px; /* Same as regular items */
+}
+
 /* Content Layout */
 .transcript-item-content {
     display: flex;
@@ -70,7 +109,7 @@
 .transcript-checkbox-wrapper {
     flex-shrink: 0;
     padding: 4px 8px 4px 4px;
-    margin: -4px -8px -4px -4px;
+    margin: -4px 0 -4px -44px; /* Adjusted for new padding to align with group header checkbox */
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -85,6 +124,8 @@
 .transcript-checkbox {
     cursor: pointer;
     pointer-events: none; /* Let the wrapper handle clicks */
+    width: 14px;
+    height: 14px;
 }
 
 /* Time column */
@@ -158,7 +199,7 @@
 }
 
 .transcript-action-button {
-    background: white;
+    background: rgba(255, 255, 255, 0.95);
     border: 1px solid #E5E7EB;
     border-radius: 6px;
     padding: 6px 8px;
@@ -169,12 +210,15 @@
     justify-content: center;
     color: #6B7280;
     font-size: 12px;
+    backdrop-filter: blur(8px);
 }
 
 .transcript-action-button:hover:not(:disabled) {
-    background: rgba(var(--accent-rgb), 0.05);
+    background: rgba(255, 255, 255, 0.95);
     border-color: var(--accent-primary);
     color: var(--accent-primary);
+    box-shadow: 0 0 0 1px var(--accent-primary);
+    transform: translateY(-1px);
 }
 
 .transcript-action-button:active:not(:disabled) {
@@ -190,7 +234,8 @@
 .transcript-action-button.play:hover:not(:disabled) {
     color: var(--accent-primary);
     border-color: var(--accent-primary);
-    background: rgba(var(--accent-rgb), 0.05);
+    background: rgba(255, 255, 255, 0.95);
+    box-shadow: 0 0 0 1px var(--accent-primary);
 }
 
 .transcript-action-button.play:disabled {
@@ -202,31 +247,39 @@
 .transcript-action-button.download:hover:not(:disabled) {
     color: var(--accent-primary);
     border-color: var(--accent-primary);
+    background: rgba(255, 255, 255, 0.95);
+    box-shadow: 0 0 0 1px var(--accent-primary);
 }
 
 /* Copy button states */
 .transcript-action-button.copy.copied {
     color: #10B981;
     border-color: #10B981;
-    background: rgba(16, 185, 129, 0.05);
+    background: rgba(255, 255, 255, 0.95);
+    box-shadow: 0 0 0 1px #10B981;
 }
 
 .transcript-action-button.copy:hover:not(:disabled):not(.copied) {
     color: var(--accent-primary);
     border-color: var(--accent-primary);
+    background: rgba(255, 255, 255, 0.95);
+    box-shadow: 0 0 0 1px var(--accent-primary);
 }
 
 /* View Details button */
 .transcript-action-button.view-details:hover:not(:disabled) {
     color: var(--accent-primary);
     border-color: var(--accent-primary);
+    background: rgba(255, 255, 255, 0.95);
+    box-shadow: 0 0 0 1px var(--accent-primary);
 }
 
 /* Delete button */
 .transcript-action-button.delete:hover {
     color: var(--error-color, #EF4444);
     border-color: var(--error-color, #EF4444);
-    background: rgba(239, 68, 68, 0.05);
+    background: rgba(255, 255, 255, 0.95);
+    box-shadow: 0 0 0 1px var(--error-color, #EF4444);
 }
 
 /* Animations */
@@ -266,11 +319,11 @@
     }
     
     .transcript-time {
-        color: #71717a; /* zinc-500 */
+        color: #a1a1aa; /* zinc-400 - lighter for better visibility */
     }
     
     .transcript-duration {
-        color: #71717a; /* zinc-500 */
+        color: #a1a1aa; /* zinc-400 - lighter for better visibility */
     }
     
     .transcript-text {
@@ -282,19 +335,110 @@
     }
     
     .transcript-action-button {
-        background: #3f3f46; /* zinc-700 */
+        background: rgba(63, 63, 70, 0.95); /* zinc-700 with opacity */
         border-color: #52525b; /* zinc-600 */
         color: #e4e4e7; /* zinc-200 */
+        backdrop-filter: blur(8px);
     }
     
     .transcript-action-button:hover:not(:disabled) {
-        background: #52525b; /* zinc-600 */
-        border-color: #71717a; /* zinc-500 */
-        color: #f4f4f5; /* zinc-100 */
+        background: rgba(63, 63, 70, 0.95); /* maintain same opacity */
+        border-color: #60a5fa; /* blue-400 */
+        color: #60a5fa; /* blue-400 */
+        box-shadow: 0 0 0 1px #60a5fa;
+        transform: translateY(-1px);
     }
     
     .transcript-checkbox-wrapper:hover {
         background: rgba(63, 63, 70, 0.5); /* zinc-700 with opacity */
+    }
+}
+
+/* Light theme overrides - must come after dark mode */
+[data-theme="vscode-light"] .transcript-item {
+    background: rgba(255, 255, 255, 0.5) !important;
+    border-color: var(--border-primary) !important;
+}
+
+[data-theme="vscode-light"] .transcript-item:hover {
+    background: rgba(59, 130, 246, 0.03) !important;
+}
+
+[data-theme="vscode-light"] .transcript-item.selected,
+[data-theme="vscode-light"] .transcript-item.active {
+    background: rgba(59, 130, 246, 0.08) !important;
+}
+
+[data-theme="vscode-light"] .transcript-text {
+    color: #111827 !important; /* gray-900 for dark text */
+}
+
+[data-theme="vscode-light"] .transcript-time {
+    color: #6B7280 !important; /* gray-500 for secondary text */
+}
+
+[data-theme="vscode-light"] .transcript-empty {
+    color: #6B7280 !important; /* gray-500 for empty state */
+}
+
+[data-theme="vscode-light"] .transcript-actions {
+    background: linear-gradient(to left, transparent, transparent 15%, rgba(255, 255, 255, 0.9) 40%) !important;
+}
+
+[data-theme="vscode-light"] .transcript-action-button {
+    background: rgba(255, 255, 255, 0.95) !important;
+    border-color: #E5E7EB !important;
+    color: #6B7280 !important;
+}
+
+[data-theme="vscode-light"] .transcript-action-button:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.95) !important;
+    border-color: var(--accent-primary) !important;
+    color: var(--accent-primary) !important;
+}
+
+/* Override dark mode when in light theme */
+@media (prefers-color-scheme: dark) {
+    [data-theme="vscode-light"] .transcript-item {
+        background: rgba(255, 255, 255, 0.5) !important;
+        border-color: var(--border-primary) !important;
+    }
+    
+    [data-theme="vscode-light"] .transcript-item:hover {
+        background: rgba(59, 130, 246, 0.03) !important;
+    }
+    
+    [data-theme="vscode-light"] .transcript-item.selected,
+    [data-theme="vscode-light"] .transcript-item.active {
+        background: rgba(59, 130, 246, 0.08) !important;
+    }
+    
+    [data-theme="vscode-light"] .transcript-text {
+        color: #111827 !important;
+    }
+    
+    [data-theme="vscode-light"] .transcript-time {
+        color: #6B7280 !important;
+    }
+    
+    [data-theme="vscode-light"] .transcript-empty {
+        color: #6B7280 !important;
+    }
+    
+    [data-theme="vscode-light"] .transcript-actions {
+        background: linear-gradient(to left, transparent, transparent 15%, rgba(255, 255, 255, 0.9) 40%) !important;
+    }
+    
+    [data-theme="vscode-light"] .transcript-action-button {
+        background: rgba(255, 255, 255, 0.95) !important;
+        border-color: #E5E7EB !important;
+        color: #6B7280 !important;
+    }
+    
+    [data-theme="vscode-light"] .transcript-action-button:hover:not(:disabled) {
+        background: rgba(255, 255, 255, 0.95) !important;
+        border-color: var(--accent-primary) !important;
+        color: var(--accent-primary) !important;
     }
 }
 

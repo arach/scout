@@ -5,7 +5,7 @@
 
 /* Section container */
 .settings-section {
-  margin-bottom: 12px; /* Reduced spacing between sections */
+  margin-bottom: 8px; /* Reduced spacing between sections by 30% */
 }
 
 .settings-section:last-child {
@@ -74,7 +74,7 @@
 
 /* Ensure collapsible sections also follow spacing */
 .model-manager-full-width {
-  margin-bottom: 12px;
+  margin-bottom: 8px; /* Reduced by 30% */
 }
 
 .model-manager-full-width:last-child {

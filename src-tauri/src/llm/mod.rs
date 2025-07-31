@@ -55,5 +55,5 @@ pub struct ModelInfo {
 }
 
 pub use engine::CandleEngine;
-pub use models::{LLMModel, ModelManager};
+pub use models::ModelManager;
 pub use prompts::{PromptTemplate, PromptManager};

@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result as AnyhowResult};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::fs;
-use crate::logger::{info, debug, warn, error, Component};
+use crate::logger::{info, Component};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LLMModel {

@@ -28,7 +28,6 @@ pub struct AudioSettings {
     pub sample_rate: u32,
     pub channels: u16,
     pub buffer_size: usize,
-    pub silence_threshold: f32,
     pub min_recording_duration_ms: u64,
 }
 
@@ -97,7 +96,6 @@ impl Default for AudioSettings {
             sample_rate: 16000,
             channels: 1,
             buffer_size: 1024,
-            silence_threshold: 0.01,
             min_recording_duration_ms: 500,
         }
     }

@@ -2,12 +2,15 @@
   display: flex;
   flex-direction: column;
   background-color: var(--bg-secondary);
-  border-right: 1px solid var(--border-primary);
-  padding-top: 8px;
-  transition: width 0.2s ease;
+  border-right: none; /* Remove hard border */
+  padding-top: 0; /* No top padding - chevron flush with top */
+  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
   flex-shrink: 0;
   overflow: visible;
+  height: 100vh; /* Full viewport height */
+  z-index: 101; /* Above the header */
+  /* No shadow - unified with header */
 }
 
 .sidebar.collapsed {
@@ -17,6 +20,8 @@
 .sidebar.expanded {
   width: 200px;
 }
+
+/* Removed gradient overlay to ensure color consistency with header */
 
 .sidebar-button {
   display: flex;
@@ -33,6 +38,47 @@
   gap: 12px;
   width: 100%;
   overflow: visible;
+}
+
+/* Sidebar toggle zone */
+.sidebar-toggle-zone {
+  height: 48px; /* Match header height exactly */
+  width: 100%;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  color: var(--text-secondary);
+  gap: 8px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.sidebar.collapsed .sidebar-toggle-zone {
+  justify-content: center;
+  padding: 0;
+}
+
+.sidebar.expanded .sidebar-toggle-zone {
+  justify-content: space-between;
+}
+
+.sidebar-toggle-zone:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.sidebar-app-name {
+  font-family: 'Silkscreen', monospace;
+  font-size: 14px;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  flex-grow: 1;
+  text-align: left;
 }
 
 .sidebar.collapsed .sidebar-button {
@@ -54,14 +100,36 @@
 .sidebar-button:hover {
   opacity: 0.8;
   color: var(--text-primary);
+  /* Remove background-color to prevent CATransformLayer conflicts */
+}
+
+/* Use pseudo-element for hover background to avoid transform layer conflicts */
+.sidebar-button::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: transparent;
+  transition: background-color 0.15s ease;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.sidebar-button:hover::after {
   background-color: var(--bg-hover);
 }
 
 .sidebar-button.active {
   opacity: 1;
   color: var(--accent-primary);
-  background-color: var(--bg-active);
+  /* Remove background-color to prevent CATransformLayer conflicts */
   position: relative;
+}
+
+.sidebar-button.active::after {
+  background-color: var(--bg-active);
 }
 
 .sidebar-button.active::before {
@@ -146,15 +214,15 @@
 .sidebar.collapsed .sidebar-button:hover .sidebar-tooltip {
   visibility: visible;
   opacity: 1;
-  transition-delay: 0.3s;
+  transition-delay: 0.6s; /* Delay tooltip until after animations complete (longest is 0.5s) */
 }
 
 /* Stats button bounce animation */
 @keyframes statsBounce {
   0% { transform: scale(1); }
-  40% { transform: scale(1.05); }
-  60% { transform: scale(0.97); }
-  80% { transform: scale(1.02); }
+  40% { transform: scale(1.15); }
+  60% { transform: scale(0.95); }
+  80% { transform: scale(1.05); }
   100% { transform: scale(1); }
 }
 
@@ -163,7 +231,19 @@
 }
 
 .sidebar-button-stats:hover svg {
-  animation: statsBounce 0.5s ease-out;
+  animation: statsBounce 0.3s ease-out;
+}
+
+/* Dictionary button wiggle animation */
+@keyframes dictionaryWiggle {
+  0% { transform: rotate(0deg); }
+  25% { transform: rotate(-15deg); }
+  75% { transform: rotate(15deg); }
+  100% { transform: rotate(0deg); }
+}
+
+.sidebar-button-dictionary:hover svg {
+  animation: dictionaryWiggle 0.3s ease-in-out;
 }
 
 
@@ -205,13 +285,12 @@
 .sidebar-button svg,
 .sidebar-button > * {
   transition: transform 0.15s ease;
-  transform-style: preserve-3d;
-  perspective: 1000px;
+  transform-style: flat; /* Use flat instead of preserve-3d to prevent CATransformLayer conflicts */
 }
 
 /* Record button - coin flip on Y axis */
 .sidebar-button-record:hover svg {
-  animation: coinFlipY 0.4s ease-out;
+  animation: coinFlipY 0.3s ease-out;
 }
 
 .sidebar-button-record:active svg {
@@ -220,7 +299,7 @@
 
 /* Transcripts button - flip vertically */
 .sidebar-button-transcripts:hover svg {
-  animation: flipVertical 0.4s ease-out;
+  animation: flipVertical 0.3s ease-out;
 }
 
 .sidebar-button-transcripts:active svg {
@@ -229,7 +308,7 @@
 
 /* Settings button - spin quickly */
 .sidebar-button-settings:hover svg {
-  animation: spinQuick 0.5s ease-out;
+  animation: spinQuick 0.3s ease-out;
 }
 
 .sidebar-button-settings:active svg {
@@ -238,11 +317,11 @@
 
 /* Dark mode adjustments */
 @media (prefers-color-scheme: dark) {
-  .sidebar-button.active {
+  .sidebar-button.active::after {
     background-color: rgba(74, 158, 255, 0.1);
   }
   
-  .sidebar-button:hover:not(.active) {
+  .sidebar-button:hover:not(.active)::after {
     background-color: rgba(255, 255, 255, 0.05);
   }
   

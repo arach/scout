@@ -57,6 +57,7 @@
 /* Settings view specific max-width */
 .grid-content.grid-content--settings {
   max-width: var(--grid-content-max-width-settings);
+  margin: 0; /* Remove auto-centering for settings to align with transcripts */
 }
 
 /* Section spacing within content */

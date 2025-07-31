@@ -3,12 +3,26 @@ use std::sync::{Arc, Mutex, Condvar};
 use std::thread;
 use std::sync::mpsc;
 use std::any::TypeId;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use crate::logger::{info, debug, warn, error, Component};
 use super::format::NativeAudioFormat;
+use super::metadata::AudioMetadata;
+use super::validation::{AudioFormatValidator, ValidationResult, CallbackInfo};
+use super::device_monitor::{DeviceCapabilityChecker, CapabilityCheckResult};
+use super::notifications::{notify_airpods_detected, notify_bluetooth_detected, notify_sample_rate_mismatch, NotificationSeverity};
 
 // Type alias for sample callback
 pub type SampleCallback = Arc<dyn Fn(&[f32]) + Send + Sync>;
+
+// Validation data passed from callback to worker
+#[derive(Debug)]
+struct CallbackValidationData {
+    samples: Vec<f32>,
+    callback_time: Instant,
+    sample_count: usize,
+}
+
+type ValidationDataSender = Arc<Mutex<Option<std::sync::mpsc::Sender<CallbackValidationData>>>>;
 
 pub struct AudioRecorder {
     control_tx: Option<mpsc::Sender<RecorderCommand>>,
@@ -25,6 +39,7 @@ pub struct DeviceInfo {
     pub name: String,
     pub sample_rate: u32,
     pub channels: u16,
+    pub metadata: Option<AudioMetadata>,
 }
 
 enum RecorderCommand {
@@ -54,6 +69,12 @@ impl AudioRecorder {
                 error(Component::Recording, "Failed to acquire device info lock - returning None");
                 None
             })
+    }
+    
+    pub fn get_current_metadata(&self) -> Option<AudioMetadata> {
+        self.current_device_info.lock()
+            .ok()
+            .and_then(|guard| guard.as_ref().and_then(|info| info.metadata.clone()))
     }
     
     pub fn get_current_audio_level(&self) -> f32 {
@@ -232,6 +253,15 @@ struct AudioRecorderWorker {
     current_device_info: Arc<Mutex<Option<DeviceInfo>>>,
     sample_callback: Arc<Mutex<Option<SampleCallback>>>,
     recording_state_changed: Arc<Condvar>,
+    current_metadata: Option<AudioMetadata>,
+    requested_config: Option<cpal::StreamConfig>,
+    // New validation and monitoring components
+    format_validator: Option<AudioFormatValidator>,
+    capability_checker: Option<DeviceCapabilityChecker>,
+    last_callback_time: Instant,
+    callback_count: u64,
+    // Channel for receiving validation data from audio callback
+    validation_rx: Option<std::sync::mpsc::Receiver<CallbackValidationData>>,
 }
 
 impl AudioRecorderWorker {
@@ -249,6 +279,13 @@ impl AudioRecorderWorker {
             current_device_info: device_info,
             sample_callback,
             recording_state_changed,
+            current_metadata: None,
+            requested_config: None,
+            format_validator: None,
+            capability_checker: None,
+            last_callback_time: Instant::now(),
+            callback_count: 0,
+            validation_rx: None,
         }
     }
 
@@ -300,10 +337,11 @@ impl AudioRecorderWorker {
                 let device_name = default_device.name().unwrap_or_else(|_| "Unknown".to_string());
                 info(Component::Recording, &format!("Default device: '{}'", device_name));
                 
-                // Log if this looks like AirPods
+                // Log if this looks like AirPods and send notification
                 if device_name.to_lowercase().contains("airpod") {
                     warn(Component::Recording, "AirPods detected - may experience audio quality issues");
                     info(Component::Recording, "Recommendation: Use a wired microphone for best results");
+                    // Note: We'll notify about AirPods after we get the device configuration
                 }
                 
                 default_device
@@ -329,11 +367,10 @@ impl AudioRecorderWorker {
         info(Component::Recording, &format!("  Channels: {}", default_config.channels()));
         info(Component::Recording, &format!("  Format: {:?}", default_config.sample_format()));
 
-        // Improved device capability detection
-        let mut channels = default_config.channels(); // Start with device default
-        let mut can_use_stereo = false;
+        // Device capability detection - ALWAYS use device's native configuration
+        let device_channels = default_config.channels(); // Store original device channels
         
-        // Check if device supports stereo recording
+        // Log supported device configurations for diagnostics
         if let Ok(supported_configs) = device.supported_input_configs() {
             let supported_vec: Vec<_> = supported_configs.collect();
             
@@ -346,33 +383,12 @@ impl AudioRecorderWorker {
                     config.max_sample_rate().0,
                     config.sample_format()));
             }
-            
-            // Check stereo support
-            for supported_range in supported_vec.iter() {
-                if supported_range.channels() >= 2 &&
-                   supported_range.min_sample_rate().0 <= default_config.sample_rate().0 &&
-                   supported_range.max_sample_rate().0 >= default_config.sample_rate().0 {
-                    can_use_stereo = true;
-                    break;
-                }
-            }
-            
-            if can_use_stereo && channels == 1 {
-                // Device supports stereo but defaults to mono - prefer stereo for better quality
-                channels = 2;
-                info(Component::Recording, "Device supports stereo, upgrading from mono for better audio quality");
-            } else if !can_use_stereo && channels > 1 {
-                // Device defaults to stereo but we can't reliably support it
-                channels = 1;
-                info(Component::Recording, "Device stereo capability uncertain, using mono for compatibility");
-            }
         } else {
-            warn(Component::Recording, "Cannot determine device capabilities - using device default");
-            info(Component::Recording, &format!("Device default: {} channel(s)", channels));
+            warn(Component::Recording, "Cannot enumerate device capabilities - using device default");
         }
         
-        info(Component::Recording, &format!("Final audio configuration: {} channel(s), {} Hz", 
-             channels, default_config.sample_rate().0));
+        info(Component::Recording, &format!("Audio configuration: Using device native format - {} channel(s), {} Hz", 
+             device_channels, default_config.sample_rate().0));
 
         // DIAGNOSTIC: Check for common problematic configurations
         if device_name_for_metadata.to_lowercase().contains("airpod") {
@@ -384,6 +400,9 @@ impl AudioRecorderWorker {
                 // This mismatch causes the chipmunk effect
             }
             warn(Component::Recording, "For best results, use wired headphones or ensure AirPods are in high-quality mode");
+            
+            // Send notification to frontend about AirPods detection
+            notify_airpods_detected(device_name_for_metadata.clone(), default_config.sample_rate().0);
         }
         
         // Additional check for other Bluetooth devices
@@ -407,26 +426,59 @@ impl AudioRecorderWorker {
             info(Component::Recording, "Conversion to 16kHz for Whisper will happen during transcription.");
         }
         
-        // Try progressive buffer sizes with fallbacks for device compatibility
-        let buffer_sizes = [128, 256, 512, 1024];
-        let mut config = cpal::StreamConfig {
-            channels,
-            sample_rate: actual_sample_rate,
-            buffer_size: cpal::BufferSize::Default, // Start with default as final fallback
+        // For speech recording, we want to optimize for file size
+        // 16kHz mono is perfect for speech and Whisper works great with it
+        let optimal_sample_rate = cpal::SampleRate(16000);
+        let optimal_channels = 1; // Mono is all we need for speech
+        
+        // Check if device supports our optimal configuration
+        let mut use_optimal_config = false;
+        if let Ok(supported_configs) = device.supported_input_configs() {
+            for config in supported_configs {
+                // Check if device supports 16kHz AND mono
+                if config.min_sample_rate() <= optimal_sample_rate && 
+                   config.max_sample_rate() >= optimal_sample_rate &&
+                   config.channels() == optimal_channels {
+                    use_optimal_config = true;
+                    info(Component::Recording, "Device supports 16kHz mono - using optimal speech recording settings");
+                    break;
+                }
+            }
+        }
+        
+        // Use optimal config if supported, otherwise fall back to device default
+        let recording_sample_rate = if use_optimal_config { 
+            optimal_sample_rate 
+        } else { 
+            warn(Component::Recording, &format!("Device doesn't support 16kHz, using {} Hz", actual_sample_rate.0));
+            actual_sample_rate 
         };
         
-        // Try to find a working buffer size, starting with lowest latency
+        // Build config based on whether we can use optimal settings
+        let mut config = if use_optimal_config {
+            // Device supports our optimal settings
+            cpal::StreamConfig {
+                channels: optimal_channels, // Record mono
+                sample_rate: recording_sample_rate,
+                buffer_size: cpal::BufferSize::Default,
+            }
+        } else {
+            // Use device's native config
+            cpal::StreamConfig {
+                channels: device_channels, // Use device's native channels
+                sample_rate: default_config.sample_rate(),
+                buffer_size: cpal::BufferSize::Default,
+            }
+        };
+        
+        // Try progressive buffer sizes for lower latency
+        let buffer_sizes = [128, 256, 512, 1024];
         let mut buffer_size_used = "Default".to_string();
         for &size in &buffer_sizes {
-            let test_config = cpal::StreamConfig {
-                channels,
-                sample_rate: default_config.sample_rate(),
-                buffer_size: cpal::BufferSize::Fixed(size),
-            };
+            config.buffer_size = cpal::BufferSize::Fixed(size);
             
             // Test if this buffer size works by trying to create a dummy stream
             if let Ok(_) = device.supported_input_configs() {
-                config = test_config;
                 buffer_size_used = format!("Fixed({})", size);
                 info(Component::Recording, &format!("Using buffer size: {} samples", size));
                 break;
@@ -434,21 +486,82 @@ impl AudioRecorderWorker {
         }
         
         if buffer_size_used == "Default" {
+            config.buffer_size = cpal::BufferSize::Default;
             info(Component::Recording, "Using default buffer size (device-dependent latency)");
         }
 
         // Store sample rate, channels, and format for later use
         self.sample_rate = config.sample_rate.0;
-        self.channels = config.channels;  // Store actual channel count
+        self.channels = config.channels;  // Store the actual recording channels (1 for mono, or device channels)
         self.sample_format = Some(default_config.sample_format());
         
-        // Create native format info
+        // Log what we're actually using
+        info(Component::Recording, &format!("Final recording config: {} Hz, {} channel(s), format: {:?}",
+            self.sample_rate, self.channels, self.sample_format));
+        
+        // Store the requested config for metadata tracking
+        self.requested_config = Some(cpal::StreamConfig {
+            channels: default_config.channels(),
+            sample_rate: default_config.sample_rate(),
+            buffer_size: cpal::BufferSize::Default,
+        });
+        
+        // Create comprehensive audio metadata
+        let is_default = device_name.is_none();
+        let mut audio_metadata = AudioMetadata::new(
+            device_name_for_metadata.clone(),
+            self.requested_config.as_ref(),
+            &config,
+            default_config.sample_format(),
+            &config.buffer_size,
+            is_default,
+        );
+        
+        // Set recording-specific information
+        audio_metadata.set_recording_info(
+            false, // VAD will be set later if enabled
+            "manual", // Will be updated based on actual trigger
+            None, // Silence padding will be set if applied
+        );
+        
+        // Log metadata issues if any
+        if audio_metadata.has_critical_issues() {
+            error(Component::Recording, &format!("Critical audio issues detected: {}", audio_metadata.get_issues_summary()));
+        } else if !audio_metadata.mismatches.is_empty() {
+            warn(Component::Recording, &format!("Audio configuration notes: {}", audio_metadata.get_issues_summary()));
+        }
+        
+        // Store the metadata
+        self.current_metadata = Some(audio_metadata.clone());
+        
+        // Initialize format validator for real-time validation
+        self.format_validator = Some(AudioFormatValidator::new(
+            config.sample_rate.0,
+            config.channels
+        ));
+        
+        // Initialize capability checker for periodic device monitoring
+        let validation_frequency = audio_metadata.get_validation_frequency_ms();
+        self.capability_checker = Some(DeviceCapabilityChecker::new(
+            device_name_for_metadata.clone(),
+            Duration::from_millis(validation_frequency)
+        ));
+        
+        info(Component::Recording, &format!("Initialized validation systems - frequency: {}ms", validation_frequency));
+        
+        // Create native format info with actual recording format
         let native_format = NativeAudioFormat::new(
             config.sample_rate.0,
-            config.channels,
+            config.channels,  // Use actual recording channels (1 for mono optimization)
             default_config.sample_format(),
             device_name_for_metadata.clone()
         );
+        
+        // DEBUG: Log the channel configuration details
+        info(Component::Recording, &format!(
+            "Channel configuration - Device: {} channels, Config: {} channels, Native format: {} channels", 
+            default_config.channels(), config.channels, native_format.channels
+        ));
         
         // Log the native format we're preserving
         native_format.log_format_info("Recording Configuration");
@@ -457,11 +570,12 @@ impl AudioRecorderWorker {
         // Update global device sample rate cache for transcription strategies
         crate::update_device_sample_rate(config.sample_rate.0);
         
-        // Store device info for metadata
+        // Store device info with metadata
         let device_info = DeviceInfo {
             name: device_name_for_metadata.clone(),
             sample_rate: config.sample_rate.0,
-            channels,
+            channels: config.channels,  // Use the actual config channels, not the potentially modified variable
+            metadata: Some(audio_metadata),
         };
         *self.current_device_info.lock().unwrap() = Some(device_info);
         
@@ -478,6 +592,15 @@ impl AudioRecorderWorker {
         info(Component::Recording, &format!("  Channels: {} (preserving hardware configuration)", spec.channels));
         info(Component::Recording, &format!("  Bit Depth: {} bits", spec.bits_per_sample));
         info(Component::Recording, &format!("  Format: {:?}", spec.sample_format));
+        
+        // CRITICAL: Verify channel count matches between config and WAV spec
+        if spec.channels != config.channels {
+            error(Component::Recording, &format!(
+                "CHANNEL MISMATCH DETECTED! Config channels: {}, WAV spec channels: {}", 
+                config.channels, spec.channels
+            ));
+            error(Component::Recording, "This will cause chipmunk effect! Audio data and header don't match.");
+        }
 
 
         let writer = hound::WavWriter::create(output_path, spec)
@@ -526,11 +649,32 @@ impl AudioRecorderWorker {
 
         
         self.stream = Some(stream);
+        
+        // Start periodic validation thread for device capability checking
+        if let Some(ref metadata) = self.current_metadata {
+            if metadata.needs_special_handling() {
+                info(Component::Recording, "Device requires special handling - starting enhanced monitoring");
+                self.start_validation_monitoring();
+            }
+        }
+        
         Ok(())
     }
 
     fn stop_recording(&mut self) -> Result<(), String> {
         info(Component::Recording, &format!("AudioRecorder::stop_recording called at {}", chrono::Local::now().format("%H:%M:%S%.3f")));
+        
+        // Log final recording statistics for debugging
+        let total_samples = *self.sample_count.lock().unwrap();
+        let expected_channels = self.channels;
+        let sample_rate = self.sample_rate;
+        let total_frames = total_samples / expected_channels as u64;
+        let duration_seconds = total_frames as f32 / sample_rate as f32;
+        
+        info(Component::Recording, &format!(
+            "Recording statistics - Total samples: {}, Channels: {}, Sample rate: {} Hz, Frames: {}, Duration: {:.2}s",
+            total_samples, expected_channels, sample_rate, total_frames, duration_seconds
+        ));
         
         // Set recording to false and notify waiting threads
         {
@@ -553,12 +697,23 @@ impl AudioRecorderWorker {
         let samples_per_second = self.sample_rate as f32 * self.channels as f32; // Account for all channels
         let duration_seconds = total_samples as f32 / samples_per_second;
         
+        let mut silence_padding_applied = false;
+        let mut silence_padding_ms = 0u32;
+        
         if duration_seconds < 1.0 && self.writer.lock().unwrap().is_some() {
             // Calculate how many silence samples we need to reach 1.1 seconds (with a small buffer)
             let target_samples = (samples_per_second * 1.1) as u64; // 1.1 seconds worth of samples (all channels)
             let silence_samples_needed = target_samples.saturating_sub(total_samples);
             
             if silence_samples_needed > 0 {
+                silence_padding_applied = true;
+                silence_padding_ms = ((silence_samples_needed as f32 / samples_per_second) * 1000.0) as u32;
+                
+                // Update metadata with silence padding info
+                if let Some(ref mut metadata) = self.current_metadata {
+                    metadata.recording.silence_padding_ms = Some(silence_padding_ms);
+                    metadata.recording.processing_applied.push("silence_padding".to_string());
+                }
                 
                 // Write silence samples
                 if let Some(ref mut writer) = *self.writer.lock().unwrap() {
@@ -591,6 +746,102 @@ impl AudioRecorderWorker {
         }
 
         Ok(())
+    }
+    
+    /// Perform periodic capability checking during recording
+    fn check_device_capabilities(&mut self) -> Result<(), String> {
+        if let Some(ref mut checker) = self.capability_checker {
+            if checker.should_check() {
+                match checker.check_capabilities() {
+                    Ok(CapabilityCheckResult::FirstCheck(_)) => {
+                        info(Component::Recording, "First capability check completed");
+                        if let Some(ref mut metadata) = self.current_metadata {
+                            metadata.update_monitoring(true, false);
+                        }
+                    },
+                    Ok(CapabilityCheckResult::Unchanged) => {
+                        debug(Component::Recording, "Device capabilities unchanged");
+                        if let Some(ref mut metadata) = self.current_metadata {
+                            metadata.update_monitoring(true, false);
+                        }
+                    },
+                    Ok(CapabilityCheckResult::Changed { old: _, new: _ }) => {
+                        warn(Component::Recording, "Device capabilities changed during recording!");
+                        if let Some(ref mut metadata) = self.current_metadata {
+                            metadata.update_monitoring(true, true);
+                        }
+                        // TODO: Emit device change event to frontend
+                    },
+                    Err(e) => {
+                        error(Component::Recording, &format!("Capability check failed: {}", e));
+                        // Device might have been disconnected
+                        return Err(format!("Device capability check failed: {}", e));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+    
+    /// Update validation statistics from callback data
+    fn update_validation_from_callback(&mut self, samples: &[f32], callback_duration: Duration) {
+        if let Some(ref mut validator) = self.format_validator {
+            let frames = samples.len() / self.channels as usize;
+            let callback_info = CallbackInfo {
+                frames,
+                samples_received: samples.len(),
+                time_since_last: callback_duration,
+            };
+            
+            match validator.process_callback(samples, &callback_info) {
+                ValidationResult::Ok => {
+                    // All good, update statistics
+                    if let Some(ref mut metadata) = self.current_metadata {
+                        if let Some(pattern_analysis) = validator.generate_pattern_analysis() {
+                            metadata.update_validation(1, 0, Some(pattern_analysis));
+                        }
+                    }
+                },
+                ValidationResult::IssuesDetected(issues, severity) => {
+                    warn(Component::Recording, &format!("Audio validation issues detected: {} issues, max severity: {:?}", 
+                        issues.len(), severity));
+                    
+                    for issue in &issues {
+                        match issue.severity {
+                            super::validation::InconsistencySeverity::Critical => {
+                                error(Component::Recording, &format!("CRITICAL audio issue: {}", issue.details));
+                            },
+                            super::validation::InconsistencySeverity::High => {
+                                error(Component::Recording, &format!("HIGH audio issue: {}", issue.details));
+                            },
+                            super::validation::InconsistencySeverity::Medium => {
+                                warn(Component::Recording, &format!("MEDIUM audio issue: {}", issue.details));
+                            },
+                            super::validation::InconsistencySeverity::Low => {
+                                info(Component::Recording, &format!("LOW audio issue: {}", issue.details));
+                            },
+                        }
+                    }
+                    
+                    if let Some(ref mut metadata) = self.current_metadata {
+                        metadata.update_validation(1, issues.len() as u32, validator.generate_pattern_analysis());
+                    }
+                },
+                ValidationResult::InsufficientData => {
+                    // Normal during startup
+                },
+            }
+        }
+        
+        self.callback_count += 1;
+    }
+    
+    /// Start validation monitoring thread for problematic devices
+    fn start_validation_monitoring(&self) {
+        info(Component::Recording, "Starting validation monitoring thread for enhanced device checking");
+        // TODO: Implement validation monitoring thread
+        // This would periodically check device capabilities and emit warnings
+        // For now, we'll rely on the capability checker integration
     }
 
     fn build_input_stream<T>(
@@ -667,41 +918,30 @@ impl AudioRecorderWorker {
                             for &sample in data.iter() {
                                 writer.write_sample(sample).ok();
                             }
+                            let prev_count = *sample_count.lock().unwrap();
                             *sample_count.lock().unwrap() += data.len() as u64;
+                            
+                            // Periodic validation logging
+                            if prev_count == 0 {
+                                debug(Component::Recording, &format!(
+                                    "First write - {} samples written, expected {} channels",
+                                    data.len(), channels
+                                ));
+                            }
                         }
                         
                         // Call sample callback for ring buffer processing
                         if let Some(ref callback) = *sample_callback.lock().unwrap() {
-                            // Convert samples to f32 and handle stereo-to-mono conversion
-                            let f32_samples: Vec<f32> = if channels == 2 {
-                                // Convert stereo to mono for callback
-                                if TypeId::of::<T>() == TypeId::of::<f32>() {
-                                    data.chunks_exact(2).map(|chunk| {
-                                        let left = unsafe { *(&chunk[0] as *const T as *const f32) };
-                                        let right = unsafe { *(&chunk[1] as *const T as *const f32) };
-                                        (left + right) / 2.0
-                                    }).collect()
-                                } else if TypeId::of::<T>() == TypeId::of::<i16>() {
-                                    data.chunks_exact(2).map(|chunk| {
-                                        let left = unsafe { *(&chunk[0] as *const T as *const i16) } as f32 / 32768.0;
-                                        let right = unsafe { *(&chunk[1] as *const T as *const i16) } as f32 / 32768.0;
-                                        (left + right) / 2.0
-                                    }).collect()
-                                } else {
-                                    Vec::new()
-                                }
+                            // Convert samples to f32 - data is already mono if we're recording in mono
+                            let f32_samples: Vec<f32> = if TypeId::of::<T>() == TypeId::of::<f32>() {
+                                data.iter().map(|&sample| unsafe { *(&sample as *const T as *const f32) }).collect()
+                            } else if TypeId::of::<T>() == TypeId::of::<i16>() {
+                                data.iter().map(|&sample| {
+                                    let s = unsafe { *(&sample as *const T as *const i16) };
+                                    s as f32 / 32768.0
+                                }).collect()
                             } else {
-                                // Mono samples - convert directly
-                                if TypeId::of::<T>() == TypeId::of::<f32>() {
-                                    data.iter().map(|&sample| unsafe { *(&sample as *const T as *const f32) }).collect()
-                                } else if TypeId::of::<T>() == TypeId::of::<i16>() {
-                                    data.iter().map(|&sample| {
-                                        let s = unsafe { *(&sample as *const T as *const i16) };
-                                        s as f32 / 32768.0
-                                    }).collect()
-                                } else {
-                                    Vec::new()
-                                }
+                                Vec::new()
                             };
                             
                             if !f32_samples.is_empty() {

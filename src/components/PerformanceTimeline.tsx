@@ -184,18 +184,12 @@ export function PerformanceTimeline({ isRecording, transcriptId, onClose }: Perf
 
     return (
         <div className="performance-timeline-container">
-            <div className="performance-timeline-header">
-                <h3>Performance Timeline</h3>
-                <div className="timeline-actions">
-                    <button className="copy-button" onClick={copyTimeline} title="Copy timeline to clipboard">
-                        📋 Copy
-                    </button>
-                    {onClose && (
-                        <button className="close-button" onClick={onClose}>×</button>
-                    )}
-                </div>
-            </div>
-            
+            {/* Hidden button for parent component to trigger copy */}
+            <button 
+                className="performance-copy-trigger" 
+                onClick={copyTimeline} 
+                style={{ display: 'none' }} 
+            />
             {error && (
                 <div className="timeline-error">
                     <span className="error-icon">⚠️</span>
@@ -241,7 +235,7 @@ export function PerformanceTimeline({ isRecording, transcriptId, onClose }: Perf
                     
                     {displayEvents.length > 0 && displayEvents[displayEvents.length - 1].duration_from_start_ms && (
                         <div className="timeline-total">
-                            Total time: {formatTimestamp(displayEvents[displayEvents.length - 1].duration_from_start_ms)}
+                            TOTAL TIME: {formatTimestamp(displayEvents[displayEvents.length - 1].duration_from_start_ms)}
                         </div>
                     )}
                 </>

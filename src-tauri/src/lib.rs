@@ -631,11 +631,51 @@ async fn get_performance_timeline(
 }
 
 #[tauri::command]
+async fn get_performance_timeline_for_transcript(
+    state: State<'_, AppState>,
+    transcript_id: i64,
+) -> Result<Vec<serde_json::Value>, String> {
+    state.database.get_performance_timeline_for_transcript(transcript_id).await
+}
+
+#[tauri::command]
 async fn get_transcript(
     state: State<'_, AppState>,
     transcript_id: i64,
 ) -> Result<Option<db::Transcript>, String> {
     state.database.get_transcript(transcript_id).await
+}
+
+#[derive(serde::Serialize)]
+struct TranscriptWithAudioDetails {
+    transcript: db::Transcript,
+    audio_metadata: Option<serde_json::Value>,
+    performance_metrics: Option<db::PerformanceMetrics>,
+}
+
+#[tauri::command]
+async fn get_transcript_with_audio_details(
+    state: State<'_, AppState>,
+    transcript_id: i64,
+) -> Result<Option<TranscriptWithAudioDetails>, String> {
+    // Get the transcript
+    let transcript = match state.database.get_transcript(transcript_id).await? {
+        Some(t) => t,
+        None => return Ok(None),
+    };
+    
+    // Parse audio metadata if available
+    let audio_metadata = transcript.audio_metadata.as_ref()
+        .and_then(|json_str| serde_json::from_str::<serde_json::Value>(json_str).ok());
+    
+    // Get performance metrics
+    let performance_metrics = state.database.get_performance_metrics_for_transcript(transcript_id).await?;
+    
+    Ok(Some(TranscriptWithAudioDetails {
+        transcript,
+        audio_metadata,
+        performance_metrics,
+    }))
 }
 
 #[tauri::command]
@@ -712,7 +752,6 @@ async fn download_model(
     model_url: String,
 ) -> Result<(), String> {
     use tauri::Emitter;
-    use std::path::Path;
     
     let models_dir = app.path().app_data_dir()
         .map_err(|e| format!("Failed to get app data dir: {}", e))?
@@ -808,7 +847,7 @@ async fn open_system_preferences_audio() -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn mark_onboarding_complete(state: State<'_, AppState>) -> Result<(), String> {
+async fn mark_onboarding_complete(_state: State<'_, AppState>) -> Result<(), String> {
     // Could store this in settings if needed
     Ok(())
 }
@@ -866,6 +905,24 @@ async fn export_transcripts(
         }
         _ => Err("Invalid export format".to_string())
     }
+}
+
+#[tauri::command]
+async fn export_audio_file(
+    source_path: String,
+    destination_path: String,
+) -> Result<(), String> {
+    // Verify source exists
+    let source = Path::new(&source_path);
+    if !source.exists() {
+        return Err("Source audio file not found".to_string());
+    }
+    
+    // Copy the file
+    std::fs::copy(&source_path, &destination_path)
+        .map_err(|e| format!("Failed to copy audio file: {}", e))?;
+    
+    Ok(())
 }
 
 fn format_duration(ms: i32) -> String {
@@ -1238,14 +1295,6 @@ async fn get_whisper_logs_for_transcript(
     limit: Option<i32>,
 ) -> Result<Vec<serde_json::Value>, String> {
     state.database.get_whisper_logs_for_transcript(transcript_id, limit).await
-}
-
-#[tauri::command]
-async fn get_performance_timeline_for_transcript(
-    state: State<'_, AppState>,
-    transcript_id: i64,
-) -> Result<Vec<serde_json::Value>, String> {
-    state.database.get_performance_timeline_for_transcript(transcript_id).await
 }
 
 #[tauri::command]
@@ -2401,13 +2450,16 @@ pub fn run() {
             get_performance_metrics,
             get_performance_metrics_for_transcript,
             get_performance_timeline,
+            get_performance_timeline_for_transcript,
             get_transcript,
+            get_transcript_with_audio_details,
             get_recent_transcripts,
             search_transcripts,
             read_audio_file,
             delete_transcript,
             delete_transcripts,
             export_transcripts,
+            export_audio_file,
             update_global_shortcut,
             subscribe_to_progress,
             get_overlay_position,
@@ -2446,7 +2498,6 @@ pub fn run() {
             get_llm_outputs_for_transcript,
             get_whisper_logs_for_session,
             get_whisper_logs_for_transcript,
-            get_performance_timeline_for_transcript,
             get_llm_prompt_templates,
             save_llm_prompt_template,
             delete_llm_prompt_template,

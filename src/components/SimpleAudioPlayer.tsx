@@ -15,6 +15,15 @@ export function SimpleAudioPlayer({ audioPath, duration, formatDuration }: Simpl
     const [currentTime, setCurrentTime] = useState(0);
     const [actualDuration, setActualDuration] = useState(duration);
     
+    // Format time for consistent player display
+    // Always use MM:SS format for audio players for consistency
+    const formatPlayerTime = (ms: number): string => {
+        const totalSeconds = Math.floor(ms / 1000);
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    };
+    
     const { blob, isLoading, error } = useAudioBlob(audioPath);
     
     // Create blob URL for audio element
@@ -99,7 +108,7 @@ export function SimpleAudioPlayer({ audioPath, duration, formatDuration }: Simpl
                 <audio ref={audioRef} src={audioUrl} preload="metadata" />
             )}
             
-            <div className="audio-controls">
+            <div className="audio-player-inline">
                 <button 
                     onClick={togglePlayPause} 
                     className="audio-control-button play-pause"
@@ -109,9 +118,9 @@ export function SimpleAudioPlayer({ audioPath, duration, formatDuration }: Simpl
                     {isLoading ? (
                         <div className="loading-spinner" />
                     ) : isPlaying ? (
-                        <Pause size={20} />
+                        <Pause size={16} />
                     ) : (
-                        <Play size={20} />
+                        <Play size={16} />
                     )}
                 </button>
                 
@@ -121,30 +130,30 @@ export function SimpleAudioPlayer({ audioPath, duration, formatDuration }: Simpl
                     disabled={isLoading || !audioUrl}
                     title="Restart"
                 >
-                    <RotateCcw size={16} />
+                    <RotateCcw size={14} />
                 </button>
                 
-                <div className="time-display">
-                    <span className="current-time">{formatDuration(currentTime)}</span>
-                    <span className="time-separator">/</span>
-                    <span className="total-time">{formatDuration(actualDuration)}</span>
+                <div className="progress-container">
+                    <input
+                        type="range"
+                        className="progress-slider"
+                        min="0"
+                        max={actualDuration}
+                        value={currentTime}
+                        onChange={handleSeek}
+                        disabled={isLoading || !audioUrl}
+                    />
+                    <div 
+                        className="progress-bar"
+                        style={{ width: `${(currentTime / actualDuration) * 100}%` }}
+                    />
                 </div>
-            </div>
-            
-            <div className="progress-container">
-                <input
-                    type="range"
-                    className="progress-slider"
-                    min="0"
-                    max={actualDuration}
-                    value={currentTime}
-                    onChange={handleSeek}
-                    disabled={isLoading || !audioUrl}
-                />
-                <div 
-                    className="progress-bar"
-                    style={{ width: `${(currentTime / actualDuration) * 100}%` }}
-                />
+                
+                <div className="time-display">
+                    <span className="current-time">{formatPlayerTime(currentTime)}</span>
+                    <span className="time-separator">/</span>
+                    <span className="total-time">{formatPlayerTime(actualDuration)}</span>
+                </div>
             </div>
         </div>
     );

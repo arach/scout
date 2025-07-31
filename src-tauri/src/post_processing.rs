@@ -46,7 +46,7 @@ impl PostProcessingHooks {
         
         // Execute dictionary replacements first (before other processing)
         let dictionary_processor = DictionaryProcessor::new(self.database.clone());
-        let (dict_processed_transcript, dict_matches) = match dictionary_processor.process_transcript(transcript, transcript_id).await {
+        let (dict_processed_transcript, _dict_matches) = match dictionary_processor.process_transcript(transcript, transcript_id).await {
             Ok((processed, matches)) => {
                 if !matches.is_empty() {
                     info(Component::Processing, &format!("📖 Dictionary processing: {} replacements made", matches.len()));

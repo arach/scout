@@ -1,7 +1,6 @@
 use rdev::{EventType, Key, Event};
 use std::sync::{Arc, Mutex};
 use std::collections::HashSet;
-use std::panic::AssertUnwindSafe;
 use tauri::{AppHandle, Emitter};
 use crate::logger::{info, debug, warn, error, Component};
 

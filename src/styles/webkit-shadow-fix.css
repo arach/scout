@@ -98,22 +98,8 @@
 
 /* Specific fixes for problematic components */
 
-/* TranscriptDetailPanel shadow fix */
-.transcript-detail-panel {
-  box-shadow: none;
-  position: relative;
-}
-
-.transcript-detail-panel::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -12px;
-  width: 12px;
-  background: linear-gradient(to right, rgba(0, 0, 0, 0.15), transparent);
-  pointer-events: none;
-}
+/* TranscriptDetailPanel shadow fix - no longer needed as shadows work properly */
+/* Keeping this file for potential future webkit-specific fixes */
 
 /* Dropdown shadow fix */
 .dropdown-content {

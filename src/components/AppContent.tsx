@@ -9,7 +9,7 @@ import { RecordView } from "./RecordView";
 import { TranscriptsView } from "./TranscriptsView";
 import { SettingsView } from "./SettingsView";
 import { StatsView } from "./StatsView";
-import { DictionaryStandalone } from "./DictionaryStandalone";
+import Dictionary from "./Dictionary";
 import { AudioErrorBoundary, TranscriptionErrorBoundary, SettingsErrorBoundary } from './ErrorBoundary';
 import { ChevronRight, PanelLeftClose } from 'lucide-react';
 import { useRecording } from '../hooks/useRecording';
@@ -18,6 +18,7 @@ import { useFileDrop } from '../hooks/useFileDrop';
 import { useTranscriptEvents } from '../hooks/useTranscriptEvents';
 import { useProcessingStatus } from '../hooks/useProcessingStatus';
 import { useNativeOverlay } from '../hooks/useNativeOverlay';
+import { useFormatters } from '../hooks/useFormatters';
 import { DevTools } from './DevTools';
 import { TranscriptionOverlay } from './TranscriptionOverlay';
 import { useAudioContext } from '../contexts/AudioContext';
@@ -229,39 +230,8 @@ export function AppContent() {
     [transcripts, sessionStartTime]
   );
 
-  // Utility functions
-  const formatDuration = useCallback((ms: number): string => {
-    if (ms < 1000) return '< 1s';
-    const seconds = Math.floor(ms / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const hours = Math.floor(minutes / 60);
-    
-    if (hours > 0) {
-      return `${hours}:${(minutes % 60).toString().padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}`;
-    } else if (minutes > 0) {
-      return `${minutes}:${(seconds % 60).toString().padStart(2, '0')}`;
-    } else {
-      return `${seconds}s`;
-    }
-  }, []);
-
-  const formatRecordingTimer = useCallback((ms: number): string => {
-    const totalSeconds = Math.floor(ms / 1000);
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = totalSeconds % 60;
-    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-  }, []);
-
-  const formatFileSize = useCallback((bytes?: number): string => {
-    if (!bytes) return 'Unknown';
-    const kb = bytes / 1024;
-    const mb = kb / 1024;
-    if (mb >= 1) {
-      return `${mb.toFixed(1)} MB`;
-    } else {
-      return `${kb.toFixed(1)} KB`;
-    }
-  }, []);
+  // Get formatters from the hook
+  const { formatDuration, formatFileSize, formatRecordingTimer } = useFormatters();
 
   // Event handlers
   const handleFileUpload = useCallback(async () => {
@@ -492,32 +462,10 @@ export function AppContent() {
 
   return (
     <div className="app-container">
-      <Sidebar
-        currentView={currentView}
-        onViewChange={setCurrentView}
-        isExpanded={isSidebarExpanded}
-      />
-      
-      <main className={`app-main ${!isSidebarExpanded ? 'sidebar-collapsed' : ''}`}>
+      <header className="app-header">
         <div className="view-header">
           <div className="view-header-left">
-            {!isSidebarExpanded ? (
-              <button
-                className="sidebar-toggle-button"
-                onClick={toggleSidebar}
-                title="Show Sidebar"
-              >
-                <ChevronRight size={16} />
-              </button>
-            ) : (
-              <button
-                className="sidebar-close-button"
-                onClick={toggleSidebar}
-                title="Hide Sidebar"
-              >
-                <PanelLeftClose size={16} />
-              </button>
-            )}
+            {/* Sidebar toggle moved to sidebar itself */}
           </div>
           <div className="view-header-center">
             <h1 className="view-title">
@@ -532,6 +480,16 @@ export function AppContent() {
             {/* Empty for now, but available for future controls */}
           </div>
         </div>
+      </header>
+      
+      <Sidebar
+        currentView={currentView}
+        onViewChange={setCurrentView}
+        isExpanded={isSidebarExpanded}
+        onToggleExpanded={toggleSidebar}
+      />
+      
+      <main className={`app-main ${!isSidebarExpanded ? 'sidebar-collapsed' : ''}`}>
 
         {currentView === 'record' && (
           <AudioErrorBoundary>
@@ -585,7 +543,7 @@ export function AppContent() {
           <StatsView />
         )}
         {currentView === 'dictionary' && (
-          <DictionaryStandalone />
+          <Dictionary />
         )}
 
         {/* File drop overlay */}

@@ -125,9 +125,9 @@ export function StatsView() {
   // Format large numbers
   const formatNumber = useCallback((num: number): string => {
     if (num >= 1000000) {
-      return `${(num / 1000000).toFixed(1)}M`;
+      return `${(num / 1000000).toFixed(1)}m`;
     } else if (num >= 1000) {
-      return `${(num / 1000).toFixed(1)}K`;
+      return `${(num / 1000).toFixed(1)}k`;
     }
     return num.toString();
   }, []);
@@ -278,8 +278,8 @@ export function StatsView() {
         <div className="stats-metrics-container">
           <div className="stats-metrics-primary">
           <div className="metric-card primary">
-            <div className="metric-value primary">{stats.current_streak}</div>
-            <div className="metric-label">Day Streak 🔥</div>
+            <div className="metric-value primary">{stats.current_streak}d</div>
+            <div className="metric-label">Streak 🔥</div>
           </div>
           <div className="metric-card primary">
             <div className="metric-value primary">{formatNumber(stats.total_recordings)}</div>
@@ -353,7 +353,7 @@ export function StatsView() {
         <div className="stats-metrics-container">
         <div className="stats-metrics-secondary">
           <div className="metric-card">
-            <div className="metric-value">{stats.longest_streak}</div>
+            <div className="metric-value">{stats.longest_streak}d</div>
             <div className="metric-label">Best Streak</div>
           </div>
           <div className="metric-card">
@@ -365,7 +365,7 @@ export function StatsView() {
             <div className="metric-label">Daily Avg</div>
           </div>
           <div className="metric-card">
-            <div className="metric-value">{stats.most_active_hour}:00</div>
+            <div className="metric-value">{stats.most_active_hour > 12 ? `${stats.most_active_hour - 12} pm` : stats.most_active_hour === 12 ? '12 pm' : stats.most_active_hour === 0 ? '12 am' : `${stats.most_active_hour} am`}</div>
             <div className="metric-label">Peak Hour</div>
           </div>
           </div>

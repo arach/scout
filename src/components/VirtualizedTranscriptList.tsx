@@ -1,5 +1,6 @@
 import { useRef, useCallback, useState, useEffect, memo } from 'react';
 import { VariableSizeList as List } from 'react-window';
+import AutoSizer from 'react-virtualized-auto-sizer';
 import { ChevronDown } from 'lucide-react';
 import { TranscriptItem } from './TranscriptItem';
 import { Transcript } from '../types/transcript';
@@ -21,15 +22,16 @@ interface VirtualizedTranscriptListProps {
     showDeleteConfirmation: (id: number, text: string) => void;
     formatDuration: (ms: number) => string;
     panelTranscriptId?: number;
-    height: number;
+    isSelectionMode?: boolean;
 }
 
 const GROUP_HEADER_HEIGHT = 36;
 const TRANSCRIPT_ITEM_HEIGHT = 48;
+const SPACER_HEIGHT = 12; // Space between header and first item (12px for better breathing room)
 
 interface ListItem {
-    type: 'header' | 'transcript';
-    data: TranscriptGroup | Transcript;
+    type: 'header' | 'transcript' | 'spacer';
+    data: TranscriptGroup | Transcript | null;
     groupTitle?: string;
 }
 
@@ -44,7 +46,7 @@ export const VirtualizedTranscriptList = memo(function VirtualizedTranscriptList
     showDeleteConfirmation,
     formatDuration,
     panelTranscriptId,
-    height
+    isSelectionMode = false
 }: VirtualizedTranscriptListProps) {
     const listRef = useRef<List>(null);
     const [listItems, setListItems] = useState<ListItem[]>([]);
@@ -63,6 +65,13 @@ export const VirtualizedTranscriptList = memo(function VirtualizedTranscriptList
             
             // Add transcripts if group is expanded
             if (expandedGroups.has(group.title)) {
+                // Add spacer after header before first item
+                items.push({
+                    type: 'spacer',
+                    data: null,
+                    groupTitle: group.title
+                });
+                
                 group.transcripts.forEach(transcript => {
                     items.push({
                         type: 'transcript',
@@ -93,7 +102,15 @@ export const VirtualizedTranscriptList = memo(function VirtualizedTranscriptList
         const item = listItems[index];
         if (!item) return TRANSCRIPT_ITEM_HEIGHT;
         
-        const size = item.type === 'header' ? GROUP_HEADER_HEIGHT : TRANSCRIPT_ITEM_HEIGHT;
+        let size: number;
+        if (item.type === 'header') {
+            size = GROUP_HEADER_HEIGHT;
+        } else if (item.type === 'spacer') {
+            size = SPACER_HEIGHT;
+        } else {
+            size = TRANSCRIPT_ITEM_HEIGHT;
+        }
+        
         itemSizeCache.current[index] = size;
         return size;
     }, [listItems]);
@@ -102,52 +119,61 @@ export const VirtualizedTranscriptList = memo(function VirtualizedTranscriptList
         const item = listItems[index];
         if (!item) return null;
 
+        if (item.type === 'spacer') {
+            // Render empty spacer
+            return <div style={style} />;
+        }
+
         if (item.type === 'header') {
             const group = item.data as TranscriptGroup;
             const fullGroupTranscripts = groups.find(g => g.title === group.title)?.transcripts || [];
             
             return (
-                <div style={style} className="transcript-group-header">
-                    <div className="group-header-left">
-                        <input
-                            type="checkbox"
-                            className="group-checkbox"
-                            checked={fullGroupTranscripts.every(t => selectedTranscripts.has(t.id))}
-                            onChange={(e) => {
-                                e.stopPropagation();
-                                const allGroupIds = fullGroupTranscripts.map(t => t.id);
-                                toggleTranscriptGroupSelection(allGroupIds);
-                            }}
-                        />
-                        <button 
-                            className="group-toggle-btn"
-                            onClick={() => toggleGroup(group.title)}
-                        >
-                            <ChevronDown 
-                                size={16} 
-                                className={`chevron-icon ${expandedGroups.has(group.title) ? 'expanded' : ''}`} 
-                            />
-                        </button>
-                        <h3 
-                            className="transcript-group-title"
-                            onClick={() => toggleGroup(group.title)}
-                        >
-                            {group.title}
-                        </h3>
-                        <span className="group-count">({fullGroupTranscripts.length})</span>
+                <div style={style} className={`transcript-group ${expandedGroups.has(group.title) ? 'expanded' : ''}`}>
+                    <div className="transcript-group-header">
+                        <div className="group-header-left">
+                            <button 
+                                className="group-toggle-btn"
+                                onClick={() => toggleGroup(group.title)}
+                            >
+                                <ChevronDown 
+                                    size={16} 
+                                    className="chevron-icon"
+                                />
+                            </button>
+                            {isSelectionMode && (
+                                <input
+                                    type="checkbox"
+                                    className="group-checkbox"
+                                    checked={fullGroupTranscripts.every(t => selectedTranscripts.has(t.id))}
+                                    onChange={(e) => {
+                                        e.stopPropagation();
+                                        const allGroupIds = fullGroupTranscripts.map(t => t.id);
+                                        toggleTranscriptGroupSelection(allGroupIds);
+                                    }}
+                                />
+                            )}
+                            <h3 
+                                className="transcript-group-title"
+                                onClick={() => toggleGroup(group.title)}
+                            >
+                                {group.title}
+                            </h3>
+                            <span className="group-count">({fullGroupTranscripts.length})</span>
+                        </div>
+                        {fullGroupTranscripts.some(t => selectedTranscripts.has(t.id)) && (
+                            <button 
+                                className="group-clear-btn"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    const selectedInGroup = fullGroupTranscripts.filter(t => selectedTranscripts.has(t.id));
+                                    toggleTranscriptGroupSelection(selectedInGroup.map(t => t.id));
+                                }}
+                            >
+                                Clear
+                            </button>
+                        )}
                     </div>
-                    {fullGroupTranscripts.some(t => selectedTranscripts.has(t.id)) && (
-                        <button 
-                            className="group-clear-btn"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                const selectedInGroup = fullGroupTranscripts.filter(t => selectedTranscripts.has(t.id));
-                                toggleTranscriptGroupSelection(selectedInGroup.map(t => t.id));
-                            }}
-                        >
-                            Clear
-                        </button>
-                    )}
                 </div>
             );
         } else {
@@ -159,7 +185,7 @@ export const VirtualizedTranscriptList = memo(function VirtualizedTranscriptList
                     formatDuration={formatDuration}
                     onDelete={showDeleteConfirmation}
                     onClick={openDetailPanel}
-                    showCheckbox={true}
+                    showCheckbox={isSelectionMode}
                     isSelected={selectedTranscripts.has(transcript.id)}
                     onSelectToggle={toggleTranscriptSelection}
                     isActive={panelTranscriptId === transcript.id}
@@ -171,15 +197,46 @@ export const VirtualizedTranscriptList = memo(function VirtualizedTranscriptList
     };
 
     return (
-        <List
-            ref={listRef}
-            height={height}
-            itemCount={listItems.length}
-            itemSize={getItemSize}
-            width="100%"
-            className="transcript-list-virtual"
+        <div 
+            className="virtualized-list-wrapper"
+            style={{ 
+                width: '100%', 
+                height: '100%', 
+                position: 'relative',
+                display: 'flex',
+                flexDirection: 'column',
+                minHeight: 0
+            }}
         >
-            {Row}
-        </List>
+            <AutoSizer>
+                {({ height, width }) => {
+                    console.log('AutoSizer dimensions:', { height, width });
+                    
+                    // Ensure we have valid dimensions
+                    if (!height || !width || height === 0 || width === 0) {
+                        console.warn('AutoSizer returned invalid dimensions');
+                        return (
+                            <div style={{ padding: '20px', textAlign: 'center' }}>
+                                Loading transcripts...
+                            </div>
+                        );
+                    }
+                    
+                    return (
+                        <List
+                            ref={listRef}
+                            height={height}
+                            itemCount={listItems.length}
+                            itemSize={getItemSize}
+                            width={width}
+                            className="transcript-list-virtual"
+                            style={{ overflow: 'auto' }}
+                        >
+                            {Row}
+                        </List>
+                    );
+                }}
+            </AutoSizer>
+        </div>
     );
 });

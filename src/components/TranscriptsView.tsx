@@ -55,6 +55,7 @@ export const TranscriptsView = memo(function TranscriptsView({
     const [displayedItems, setDisplayedItems] = useState(ITEMS_PER_PAGE);
     const [showExportMenu, setShowExportMenu] = useState(false);
     const [showFloatingExportMenu, setShowFloatingExportMenu] = useState(false);
+    const [isSelectionMode, setIsSelectionMode] = useState(false);
 
     const openDetailPanel = useCallback((transcript: Transcript) => {
         setPanelState({ transcript: transcript, isOpen: true });
@@ -185,59 +186,53 @@ export const TranscriptsView = memo(function TranscriptsView({
     // Get all groups (unpaginated) for select all functionality
     const allGroups = useMemo(() => groupTranscriptsByDate(transcripts), [transcripts]);
     
-    // Calculate list container height for virtualization
-    const [listContainerHeight, setListContainerHeight] = useState(600);
+    // Ref for the list container
     const listContainerRef = useRef<HTMLDivElement>(null);
-    
-    useEffect(() => {
-        const updateHeight = () => {
-            if (listContainerRef.current) {
-                const rect = listContainerRef.current.getBoundingClientRect();
-                const viewportHeight = window.innerHeight;
-                const topOffset = rect.top;
-                const bottomPadding = 100; // Space for floating action bar
-                const newHeight = viewportHeight - topOffset - bottomPadding;
-                setListContainerHeight(Math.max(400, newHeight));
-            }
-        };
-        
-        updateHeight();
-        window.addEventListener('resize', updateHeight);
-        return () => window.removeEventListener('resize', updateHeight);
-    }, []);
     
     // Decide whether to use virtualization
     const shouldUseVirtualization = transcripts.length > ENABLE_VIRTUALIZATION_THRESHOLD;
     
     return (
-        <div className="grid-container">
-            {/* 🧠 CSS Grid with specific column sizing */}
-            <div className="header-grid mb-4">
-                {/* Left: Title */}
-                <h1 className="text-2xl font-semibold text-white m-0">Transcripts</h1>
-                
-                {/* Center: Search Box */}
-                <div className="search-container">
-                    <input
-                        type="text"
-                        className="search-input"
-                        placeholder="Search transcripts..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        onKeyPress={(e) => e.key === 'Enter' && searchTranscripts()}
-                    />
-                </div>
-                
-                {/* Right: Action Buttons */}
-                <div className="header-actions-container">
+        <div className="transcripts-view-wrapper">
+            {/* Header section with search and actions - uses grid padding */}
+            <div className="transcripts-view-header">
+                <div className="header-grid mb-4">
+                    {/* Search Box - expanded to take more space */}
+                    <div className="search-container-expanded">
+                        <input
+                            type="text"
+                            className="search-input-expanded"
+                            placeholder="Search transcripts..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            onKeyPress={(e) => e.key === 'Enter' && searchTranscripts()}
+                        />
+                    </div>
+                    
+                    {/* Action Buttons */}
+                    <div className="header-actions-container">
                     {transcripts.length > 0 && (
                         <>
                             <button
-                                className="header-action-btn select-all"
-                                onClick={selectAllTranscripts}
+                                className="header-action-btn select-mode"
+                                onClick={() => {
+                                    setIsSelectionMode(!isSelectionMode);
+                                    // Clear selections when exiting selection mode
+                                    if (isSelectionMode && selectedTranscripts.size > 0) {
+                                        selectAllTranscripts(); // This will deselect all
+                                    }
+                                }}
                             >
-                                {selectedTranscripts.size === transcripts.length ? 'Deselect All' : 'Select All'}
+                                {isSelectionMode ? 'Cancel' : 'Select'}
                             </button>
+                            {isSelectionMode && (
+                                <button
+                                    className="header-action-btn select-all"
+                                    onClick={selectAllTranscripts}
+                                >
+                                    {selectedTranscripts.size === transcripts.length ? 'Deselect All' : 'Select All'}
+                                </button>
+                            )}
                             {selectedTranscripts.size > 0 && (
                                 <>
                                     <button
@@ -289,23 +284,27 @@ export const TranscriptsView = memo(function TranscriptsView({
                             )}
                         </>
                     )}
+                    </div>
                 </div>
             </div>
 
-            <div className="transcripts-list">
+            {/* Transcripts section - full width for headers */}
+            <div className="transcripts-list-section">
                 {transcripts.length === 0 ? (
-                    <div className="no-transcripts">
-                        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.3">
-                            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
-                            <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                            <line x1="12" y1="19" x2="12" y2="22" />
-                            <line x1="8" y1="22" x2="16" y2="22" />
-                        </svg>
-                        <h3>No transcripts yet</h3>
-                        <p>Press <span title={hotkey}>{formatShortcut(hotkey)}</span> or click "Start Recording" to begin</p>
+                    <div className="no-transcripts-container">
+                        <div className="no-transcripts">
+                            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.3">
+                                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
+                                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                                <line x1="12" y1="19" x2="12" y2="22" />
+                                <line x1="8" y1="22" x2="16" y2="22" />
+                            </svg>
+                            <h3>No transcripts yet</h3>
+                            <p>Press <span title={hotkey}>{formatShortcut(hotkey)}</span> or click "Start Recording" to begin</p>
+                        </div>
                     </div>
                 ) : shouldUseVirtualization ? (
-                    <div className="transcript-list-container" ref={listContainerRef}>
+                    <div className="transcript-list-container virtualized" ref={listContainerRef}>
                         <VirtualizedTranscriptList
                             groups={allGroups.map((group, idx) => ({
                                 ...group,
@@ -320,11 +319,12 @@ export const TranscriptsView = memo(function TranscriptsView({
                             showDeleteConfirmation={showDeleteConfirmation}
                             formatDuration={formatDuration}
                             panelTranscriptId={panelState.transcript?.id}
-                            height={listContainerHeight}
+                            isSelectionMode={isSelectionMode}
                         />
                     </div>
                 ) : (
                     <div className="transcript-list-container" ref={listContainerRef}>
+                        <div className="transcript-list-scrollable">
                         {paginatedGroups.map(group => {
                             // Find the full group data for this title
                             const fullGroup = allGroups.find(g => g.title === group.title);
@@ -334,22 +334,24 @@ export const TranscriptsView = memo(function TranscriptsView({
                                 <div key={group.title} className={`transcript-group ${expandedGroups.has(group.title) ? 'expanded' : ''}`}>
                                     <div className="transcript-group-header">
                                         <div className="group-header-left">
-                                            <input
-                                                type="checkbox"
-                                                className="group-checkbox"
-                                                checked={fullGroupTranscripts.every(t => selectedTranscripts.has(t.id))}
-                                                onChange={(e) => {
-                                                    e.stopPropagation();
-                                                    const allGroupIds = fullGroupTranscripts.map(t => t.id);
-                                                    toggleTranscriptGroupSelection(allGroupIds);
-                                                }}
-                                            />
                                             <button 
                                                 className="group-toggle-btn"
                                                 onClick={() => toggleGroup(group.title)}
                                             >
                                                 <ChevronDown size={16} className="chevron-icon" />
                                             </button>
+                                            {isSelectionMode && (
+                                                <input
+                                                    type="checkbox"
+                                                    className="group-checkbox"
+                                                    checked={fullGroupTranscripts.every(t => selectedTranscripts.has(t.id))}
+                                                    onChange={(e) => {
+                                                        e.stopPropagation();
+                                                        const allGroupIds = fullGroupTranscripts.map(t => t.id);
+                                                        toggleTranscriptGroupSelection(allGroupIds);
+                                                    }}
+                                                />
+                                            )}
                                             <h3 
                                                 className="transcript-group-title"
                                                 onClick={() => toggleGroup(group.title)}
@@ -373,22 +375,24 @@ export const TranscriptsView = memo(function TranscriptsView({
                                     </div>
                                 {expandedGroups.has(group.title) && (
                                     <div className="transcript-group-items">
-                                        {group.transcripts.map((transcript) => {
-                                            return (
-                                                <TranscriptItem
-                                                    key={transcript.id}
-                                                    transcript={transcript}
-                                                    formatDuration={formatDuration}
-                                                    onDelete={showDeleteConfirmation}
-                                                    onClick={openDetailPanel}
-                                                    showCheckbox={true}
-                                                    isSelected={selectedTranscripts.has(transcript.id)}
-                                                    onSelectToggle={toggleTranscriptSelection}
-                                                    isActive={panelState.transcript?.id === transcript.id}
-                                                    variant="default"
-                                                />
-                                            );
-                                        })}
+                                        <div className="transcript-items-container">
+                                            {group.transcripts.map((transcript) => {
+                                                return (
+                                                    <TranscriptItem
+                                                        key={transcript.id}
+                                                        transcript={transcript}
+                                                        formatDuration={formatDuration}
+                                                        onDelete={showDeleteConfirmation}
+                                                        onClick={openDetailPanel}
+                                                        showCheckbox={isSelectionMode}
+                                                        isSelected={selectedTranscripts.has(transcript.id)}
+                                                        onSelectToggle={toggleTranscriptSelection}
+                                                        isActive={panelState.transcript?.id === transcript.id}
+                                                        variant="default"
+                                                    />
+                                                );
+                                            })}
+                                        </div>
                                     </div>
                                 )}
                                 </div>
@@ -404,6 +408,7 @@ export const TranscriptsView = memo(function TranscriptsView({
                                 </button>
                             </div>
                         )}
+                        </div>
                     </div>
                 )}
             </div>

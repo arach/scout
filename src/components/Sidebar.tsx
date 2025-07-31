@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Settings } from 'lucide-react';
+import { Settings, ChevronLeft, ChevronRight } from 'lucide-react';
 import './Sidebar.css';
 
 type View = 'record' | 'transcripts' | 'settings' | 'stats' | 'dictionary';
@@ -9,6 +9,7 @@ interface SidebarProps {
   currentView: View;
   onViewChange: (view: View) => void;
   isExpanded: boolean;
+  onToggleExpanded: () => void;
 }
 
 interface SidebarState {
@@ -54,9 +55,24 @@ export const useSidebarState = (): SidebarState => {
   return { isExpanded, toggleExpanded };
 };
 
-export function Sidebar({ currentView, onViewChange, isExpanded }: SidebarProps) {
+export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpanded }: SidebarProps) {
   return (
     <div className={`sidebar ${isExpanded ? 'expanded' : 'collapsed'}`}>
+      <button 
+        className="sidebar-toggle-zone"
+        onClick={onToggleExpanded}
+        aria-label={isExpanded ? "Collapse sidebar" : "Expand sidebar"}
+      >
+        {isExpanded ? (
+          <>
+            <span className="sidebar-app-name">Scout</span>
+            <ChevronLeft size={16} />
+          </>
+        ) : (
+          <ChevronRight size={16} />
+        )}
+      </button>
+      
       <button
         className={`sidebar-button sidebar-button-record ${currentView === 'record' ? 'active' : ''}`}
         onClick={() => onViewChange('record')}
