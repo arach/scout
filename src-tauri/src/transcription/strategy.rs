@@ -34,7 +34,7 @@ impl Default for TranscriptionConfig {
         Self {
             enable_chunking: true,
             chunking_threshold_secs: 5,  // Start chunking after 5 seconds (original design)
-            chunk_duration_secs: 10,     // 10-second chunks to reduce hallucinations
+            chunk_duration_secs: 5,      // 5-second chunks for better coverage
             force_strategy: None,
             refinement_chunk_secs: Some(10), // 10-second chunks for Medium model refinement
         }
@@ -833,8 +833,9 @@ impl TranscriptionStrategySelector {
             info(Component::Transcription, &format!("Tiny model exists: {}", tiny_exists));
             info(Component::Transcription, &format!("Medium model exists: {}", medium_exists));
             
-            // Only attempt progressive strategy if BOTH models are available
-            if tiny_exists && medium_exists {
+            // TEMPORARY: Skip progressive strategy due to Tiny model hallucinations
+            // Just use ring buffer with Medium model for now
+            if false && tiny_exists && medium_exists {
                 match ProgressiveTranscriptionStrategy::new(models_dir, temp_dir.clone()).await {
                     Ok(mut strategy) => {
                         if let Some(ref app_handle) = app_handle {
@@ -848,7 +849,7 @@ impl TranscriptionStrategySelector {
                     }
                 }
             } else {
-                info(Component::Transcription, "Progressive strategy requires both Tiny and Medium models, falling back to ring buffer");
+                info(Component::Transcription, "Skipping progressive strategy, using ring buffer with Medium model");
             }
         } else {
             info(Component::Transcription, "Chunking disabled, skipping progressive strategy");
