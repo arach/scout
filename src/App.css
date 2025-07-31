@@ -28,8 +28,28 @@
 
 .app-container {
   display: flex;
+  flex-direction: column;
   height: 100vh;
   overflow: visible;
+}
+
+/* Full width header */
+.app-header {
+  display: flex;
+  align-items: center;
+  height: 48px;
+  background-color: var(--bg-secondary);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04),
+              0 2px 6px rgba(0, 0, 0, 0.02);
+  z-index: 100;
+  flex-shrink: 0;
+}
+
+/* Container for sidebar and main content */
+.app-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
 }
 
 /* Dark mode drag overlay adjustments - theme-independent */
@@ -156,17 +176,13 @@ h1 {
   /* Add any specific styles when sidebar is collapsed */
 }
 
-/* View header */
+/* View header - now inside app-header */
 .view-header {
   display: flex;
   align-items: center;
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--border-primary);
-  background-color: var(--bg-secondary);
-  min-height: 40px;
-  height: 40px;
-  box-sizing: border-box;
-  position: relative;
+  padding: 0 16px;
+  flex: 1;
+  height: 100%;
 }
 
 .view-header-left,

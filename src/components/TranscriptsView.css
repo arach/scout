@@ -526,7 +526,7 @@
     justify-content: space-between;
     padding: 12px 16px; /* Increased vertical padding for better breathing room */
     margin: 0;
-    background: rgba(0, 0, 0, 0.02);
+    background: transparent; /* No background - container already has one */
     user-select: none;
     transition: var(--transition);
     border-bottom: 1px solid var(--border-primary);
@@ -539,19 +539,43 @@
 
 @media (prefers-color-scheme: dark) {
     .transcript-group-header {
-        background: var(--bg-tertiary, rgba(255, 255, 255, 0.02));
+        background: transparent; /* Keep transparent in dark mode too */
         border-bottom-color: var(--border-primary);
     }
 }
 
 .transcript-group-header:hover {
-    background: rgba(0, 0, 0, 0.04); /* Subtle hover */
+    background: rgba(0, 0, 0, 0.02); /* Very subtle hover */
 }
 
 @media (prefers-color-scheme: dark) {
     .transcript-group-header:hover {
-        background: var(--bg-hover, rgba(255, 255, 255, 0.04)); /* Subtle hover */
+        background: rgba(255, 255, 255, 0.02); /* Very subtle hover */
     }
+}
+
+/* Light theme overrides for group headers - removed backgrounds to prevent overlap */
+
+/* Light theme text colors for group headers */
+[data-theme="vscode-light"] .transcript-group-title {
+    color: #111827 !important; /* gray-900 */
+}
+
+[data-theme="vscode-light"] .group-count {
+    color: #6B7280 !important; /* gray-500 */
+}
+
+[data-theme="vscode-light"] .group-toggle-btn {
+    color: #6B7280 !important; /* gray-500 */
+}
+
+[data-theme="vscode-light"] .group-clear-btn {
+    color: #6B7280 !important; /* gray-500 */
+}
+
+[data-theme="vscode-light"] .group-clear-btn:hover {
+    background: rgba(0, 0, 0, 0.05) !important;
+    color: #111827 !important; /* gray-900 */
 }
 
 .group-header-left {

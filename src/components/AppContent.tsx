@@ -462,13 +462,7 @@ export function AppContent() {
 
   return (
     <div className="app-container">
-      <Sidebar
-        currentView={currentView}
-        onViewChange={setCurrentView}
-        isExpanded={isSidebarExpanded}
-      />
-      
-      <main className={`app-main ${!isSidebarExpanded ? 'sidebar-collapsed' : ''}`}>
+      <header className="app-header">
         <div className="view-header">
           <div className="view-header-left">
             {!isSidebarExpanded ? (
@@ -502,6 +496,16 @@ export function AppContent() {
             {/* Empty for now, but available for future controls */}
           </div>
         </div>
+      </header>
+      
+      <div className="app-body">
+        <Sidebar
+          currentView={currentView}
+          onViewChange={setCurrentView}
+          isExpanded={isSidebarExpanded}
+        />
+        
+        <main className={`app-main ${!isSidebarExpanded ? 'sidebar-collapsed' : ''}`}>
 
         {currentView === 'record' && (
           <AudioErrorBoundary>
@@ -621,6 +625,7 @@ export function AppContent() {
           </div>
         )}
       </main>
+      </div>
 
       {/* Dev Tools */}
       <DevTools
