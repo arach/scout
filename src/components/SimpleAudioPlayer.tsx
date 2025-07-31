@@ -6,10 +6,9 @@ import { useAudioBlob } from '../hooks/useAudioBlob';
 interface SimpleAudioPlayerProps {
     audioPath: string;
     duration: number;
-    formatDuration: (ms: number) => string;
 }
 
-export function SimpleAudioPlayer({ audioPath, duration, formatDuration }: SimpleAudioPlayerProps) {
+export function SimpleAudioPlayer({ audioPath, duration }: SimpleAudioPlayerProps) {
     const audioRef = useRef<HTMLAudioElement>(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);

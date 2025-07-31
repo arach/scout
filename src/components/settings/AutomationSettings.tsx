@@ -2,7 +2,7 @@ import { memo } from 'react';
 import { useSettingsContext } from '../../contexts/SettingsContext';
 
 export const AutomationSettings = memo(function AutomationSettings() {
-  const { autoCopy, autoPaste, toggleAutoCopy, toggleAutoPaste } = useSettingsContext();
+  const { state, actions } = useSettingsContext();
   
   return (
     <div className="settings-section">
@@ -11,8 +11,8 @@ export const AutomationSettings = memo(function AutomationSettings() {
           <label>
             <input
               type="checkbox"
-              checked={autoCopy}
-              onChange={toggleAutoCopy}
+              checked={state.clipboard.autoCopy}
+              onChange={actions.toggleAutoCopy}
               aria-describedby="auto-copy-hint"
             />
             Auto-copy to clipboard
@@ -26,8 +26,8 @@ export const AutomationSettings = memo(function AutomationSettings() {
           <label>
             <input
               type="checkbox"
-              checked={autoPaste}
-              onChange={toggleAutoPaste}
+              checked={state.clipboard.autoPaste}
+              onChange={actions.toggleAutoPaste}
               aria-describedby="auto-paste-hint"
             />
             Auto-paste

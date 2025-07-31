@@ -34,10 +34,6 @@ export interface ModelCardProps<T extends BaseModel> {
     downloadedMb: number;
     totalMb: number;
   };
-  qualityLabel?: {
-    text: string;
-    className: string;
-  };
   onDownload: (model: T) => void;
   onSelect: (modelId: string) => void;
   renderSpecs?: (model: T) => React.ReactNode;
@@ -48,9 +44,7 @@ export function ModelCard<T extends BaseModel>({
   model,
   isDownloading,
   downloadProgress,
-  qualityLabel,
   onDownload,
-  onSelect,
   renderSpecs,
   isDownloadingCoreML
 }: ModelCardProps<T>) {
@@ -61,17 +55,36 @@ export function ModelCard<T extends BaseModel>({
     return `${Math.round(mb)} MB`;
   };
 
+  const isClickableForDownload = !model.downloaded && !isDownloading;
+
   return (
-    <div className={`model-card ${model.active ? 'active' : ''}`}>
+    <div 
+      className={`model-card ${model.active ? 'active' : ''} ${isClickableForDownload ? 'not-installed' : ''}`}
+      onClick={isClickableForDownload ? () => onDownload(model) : undefined}
+    >
       <div className="model-card-header">
         <h3 className="model-name">
-          {model.name}
-          {model.active && (
-            <span className="model-status-pill active">
-              <CheckCircle size={10} />
-              Active
-            </span>
-          )}
+          <span>{model.name}</span>
+          <div className="model-status-pills">
+            {model.downloaded && (
+              <span className="model-status-pill installed">
+                <CheckCircle size={10} />
+                Installed
+              </span>
+            )}
+            {model.downloaded && model.coreml_downloaded && (
+              <span className="model-status-pill accelerated">
+                <Zap size={10} />
+                CoreML Accelerated
+              </span>
+            )}
+            {isClickableForDownload && (
+              <span className="model-status-pill download-hint">
+                <Download size={10} />
+                Click to Install
+              </span>
+            )}
+          </div>
         </h3>
       </div>
       
@@ -94,37 +107,19 @@ export function ModelCard<T extends BaseModel>({
       {/* Spacer to push buttons to bottom */}
       <div className="model-spacer" />
       
-      {/* Action section - always at bottom */}
-      <div className="model-actions">
-        {!model.downloaded && !isDownloading && (
-          <button 
-            className="model-btn model-btn-primary"
-            onClick={() => onDownload(model)}
-          >
-            <Download size={14} />
-            <span>Download Model</span>
-          </button>
-        )}
-        
-        {model.downloaded && !model.coreml_downloaded && model.coreml_url && !isDownloading && (
+      {/* Action section - only show when there are actions */}
+      {(model.downloaded || isDownloading) && (
+        <div className="model-actions">
+          {model.downloaded && !model.coreml_downloaded && model.coreml_url && !isDownloading && (
           <button 
             className="model-btn model-btn-secondary"
             onClick={() => onDownload(model)}
           >
             <Zap size={14} />
-            <span>Add Core ML</span>
+            <span>Apply Acceleration</span>
           </button>
         )}
         
-        {model.downloaded && !model.active && !isDownloading && (
-          <button 
-            className="model-btn model-btn-primary"
-            onClick={() => onSelect(model.id)}
-          >
-            <CheckCircle size={14} />
-            <span>Use Model</span>
-          </button>
-        )}
       
         {isDownloading && downloadProgress && (
           <div className="model-download-progress">
@@ -139,7 +134,8 @@ export function ModelCard<T extends BaseModel>({
             </span>
           </div>
         )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -151,18 +147,6 @@ export const renderWhisperSpecs = (model: any) => (
       <BarChart3 size={12} className="stat-icon" />
       <span>Accuracy: {model.accuracy}</span>
     </div>
-    {model.coreml_downloaded && (
-      <div className="model-stat">
-        <Zap size={12} className="stat-icon" style={{ color: 'var(--accent-primary)' }} />
-        <span style={{ color: 'var(--accent-primary)' }}>Core ML Accelerated</span>
-      </div>
-    )}
-    {model.downloaded && !model.coreml_downloaded && model.coreml_url && (
-      <div className="model-stat">
-        <Zap size={12} className="stat-icon" style={{ color: 'rgb(251, 191, 36)' }} />
-        <span style={{ color: 'rgb(251, 191, 36)' }}>Core ML Available</span>
-      </div>
-    )}
   </>
 );
 

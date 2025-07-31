@@ -61,6 +61,7 @@ export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpande
   const sidebarRef = useRef<HTMLDivElement>(null);
   const MIN_WIDTH = 150;
   const MAX_WIDTH = 400;
+  
 
   // Load saved width
   useEffect(() => {
@@ -135,7 +136,7 @@ export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpande
     <div 
       ref={sidebarRef}
       className={`sidebar ${isExpanded ? 'expanded' : 'collapsed'} ${isResizing ? 'resizing' : ''}`}
-      style={isExpanded ? { width: `${width}px` } : {}}
+      style={{}}
     >
       <button 
         className="sidebar-toggle-zone"

@@ -1,4 +1,4 @@
-import React, { memo, useState, useRef, useEffect, lazy, Suspense } from 'react';
+import { memo, useState, useRef, useEffect, lazy, Suspense } from 'react';
 import { Sparkles, FolderOpen, Brain, Mic, Monitor, Palette } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useSettings } from '../contexts/SettingsContext';

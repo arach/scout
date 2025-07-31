@@ -14,6 +14,7 @@ use crate::logger::{info, debug, warn, error, Component};
 use crate::whisper_logger;
 use crate::whisper_log_interceptor::WhisperLogInterceptor;
 use crate::performance_tracker::PerformanceTracker;
+use crate::model_state::ModelStateManager;
 
 #[derive(Debug)]
 pub enum RecordingCommand {
@@ -67,6 +68,7 @@ impl RecordingWorkflow {
         app_handle: tauri::AppHandle,
         settings: Arc<tokio::sync::Mutex<SettingsManager>>,
         performance_tracker: Arc<PerformanceTracker>,
+        model_state_manager: Arc<ModelStateManager>,
     ) -> Self {
         let (command_tx, mut command_rx) = mpsc::channel::<RecordingCommand>(100);
         
@@ -132,10 +134,11 @@ impl RecordingWorkflow {
                         drop(settings_guard);
                         
                         // Initialize transcription context for real-time chunking
-                        let transcription_context = match TranscriptionContext::new_from_db(
+                        let transcription_context = match TranscriptionContext::new_from_db_with_readiness(
                             database_for_iter.clone(),
                             models_dir.clone(),
                             &current_settings,
+                            Some(model_state_manager.clone()),
                         ).await {
                             Ok(ctx) => ctx.with_app_handle(app_handle_for_iter.clone()),
                             Err(e) => {
@@ -431,9 +434,11 @@ impl RecordingWorkflow {
                                         info(Component::UI, "Emitted transcribing status for native overlay");
                                     }
                                     // Add timeout to prevent hanging
+                                    // Note: Core ML initialization for large models can take 2-3 minutes on first run
                                     perf_tracker_clone.track_event("transcription_finish", "Calling finish_recording on transcription context").await;
+                                    info(Component::Transcription, "Starting transcription (Core ML first run may take 2-3 minutes)...");
                                     let finish_timeout = tokio::time::timeout(
-                                        tokio::time::Duration::from_secs(45), // 45 second timeout
+                                        tokio::time::Duration::from_secs(180), // 3 minute timeout for Core ML initialization
                                         transcription_context.finish_recording()
                                     ).await;
                                 
@@ -668,7 +673,9 @@ impl RecordingWorkflow {
                                         info(Component::Transcription, "=======================================");
                                     }
                                     Err(_) => {
-                                        error(Component::Transcription, "Transcription timeout after 45 seconds!");
+                                        error(Component::Transcription, "Transcription timeout after 3 minutes!");
+                                        error(Component::Transcription, "This usually happens on first run with large Core ML models.");
+                                        error(Component::Transcription, "Try recording again - subsequent runs will be much faster.");
                                         info(Component::Transcription, "Would fall back to processing queue, but we already sent response");
                                     }
                                     }

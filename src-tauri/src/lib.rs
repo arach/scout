@@ -25,6 +25,7 @@ mod llm;
 mod whisper_logger;
 mod whisper_log_interceptor;
 mod performance_tracker;
+mod model_state;
 #[cfg(target_os = "macos")]
 mod macos;
 
@@ -49,6 +50,7 @@ use std::path::Path;
 use crate::logger::{info, debug, warn, error, Component};
 use crate::transcription::Transcriber;
 use crate::performance_tracker::PerformanceTracker;
+use crate::model_state::ModelStateManager;
 use std::sync::OnceLock;
 
 /// Global storage for the current device sample rate
@@ -99,6 +101,7 @@ pub struct AppState {
     pub transcriber: Arc<Mutex<Option<Transcriber>>>,
     pub current_model_path: Arc<Mutex<Option<PathBuf>>>,
     pub performance_tracker: Arc<PerformanceTracker>,
+    pub model_state_manager: Arc<ModelStateManager>,
     #[cfg(target_os = "macos")]
     pub native_overlay: Arc<Mutex<macos::MacOSOverlay>>,
     #[cfg(target_os = "macos")]
@@ -778,10 +781,21 @@ async fn download_model(
     // Download the GGML model
     download_file_with_progress(&app, &model_url, &dest_path, "model").await?;
     
+    // Get model state manager from app state
+    let state: State<AppState> = app.state();
+    
     // On macOS, also download the Core ML model
     #[cfg(target_os = "macos")]
     {
-        download_coreml_model(&app, &model_name, &models_dir).await?;
+        let has_coreml = download_coreml_model(&app, &model_name, &models_dir).await.is_ok();
+        // Mark model as downloaded
+        state.model_state_manager.mark_model_downloaded(&model_name, has_coreml).await;
+    }
+    
+    #[cfg(not(target_os = "macos"))]
+    {
+        // Mark model as downloaded without Core ML
+        state.model_state_manager.mark_model_downloaded(&model_name, false).await;
     }
     
     Ok(())
@@ -1201,6 +1215,15 @@ async fn set_active_model(state: State<'_, AppState>, model_id: String) -> Resul
 async fn get_models_dir(state: State<'_, AppState>) -> Result<String, String> {
     let path = state.models_dir.to_string_lossy().to_string();
     Ok(path)
+}
+
+#[tauri::command]
+async fn get_model_coreml_status(state: State<'_, AppState>, model_id: String) -> Result<crate::model_state::CoreMLState, String> {
+    if let Some(model_state) = state.model_state_manager.get_state(&model_id).await {
+        Ok(model_state.coreml_state)
+    } else {
+        Ok(crate::model_state::CoreMLState::NotDownloaded)
+    }
 }
 
 #[tauri::command]
@@ -2182,6 +2205,9 @@ pub fn run() {
                 error(Component::Transcription, "Models directory was not created properly!");
             }
             
+            // Initialize model state manager
+            let model_state_manager = Arc::new(ModelStateManager::new(&app_data_dir));
+            
             // Initialize whisper logger
             if let Err(e) = whisper_logger::init_whisper_logger(&app_data_dir) {
                 error(Component::Transcription, &format!("Failed to initialize whisper logger: {}", e));
@@ -2229,6 +2255,7 @@ pub fn run() {
                 app.handle().clone(),
                 settings_arc.clone(),
                 performance_tracker.clone(),
+                model_state_manager.clone(),
             ));
             
             // Audio level monitoring is done via polling from frontend, not events
@@ -2277,7 +2304,7 @@ pub fn run() {
                 database: database_arc,
                 app_data_dir: app_data_dir.clone(),
                 recordings_dir,
-                models_dir,
+                models_dir: models_dir.clone(),
                 settings: settings_arc.clone(),
                 is_recording_overlay_active: Arc::new(AtomicBool::new(false)),
                 current_recording_file: Arc::new(Mutex::new(None)),
@@ -2288,6 +2315,7 @@ pub fn run() {
                 transcriber,
                 current_model_path,
                 performance_tracker,
+                model_state_manager: model_state_manager.clone(),
                 #[cfg(target_os = "macos")]
                 native_overlay: native_overlay.clone(),
                 #[cfg(target_os = "macos")]
@@ -2295,6 +2323,17 @@ pub fn run() {
             };
             
             app.manage(state);
+            
+            // Start background Core ML model warming
+            {
+                let model_state_manager_clone = model_state_manager.clone();
+                let models_dir_clone = models_dir.clone();
+                tauri::async_runtime::spawn(async move {
+                    // Wait a bit for app to fully initialize
+                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                    model_state::warm_coreml_models(model_state_manager_clone, models_dir_clone).await;
+                });
+            }
             
             // Set up progress tracking listener to update native panel overlay
             {
@@ -2616,6 +2655,7 @@ pub fn run() {
             download_model,
             check_and_download_missing_coreml_models,
             download_coreml_for_model,
+            get_model_coreml_status,
             check_microphone_permission,
             request_microphone_permission,
             open_system_preferences_audio,

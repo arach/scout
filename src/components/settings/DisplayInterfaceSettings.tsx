@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import { memo } from 'react';
 import { useEnhancedSettings } from '../../hooks/useEnhancedSettings';
 import { Dropdown } from '../Dropdown';
 import { 
@@ -84,7 +84,7 @@ export const DisplayInterfaceSettings = memo(function DisplayInterfaceSettings()
           <label>Recording Indicator Style</label>
           <Dropdown
             value={ui.overlayTreatment}
-            onChange={actions.updateOverlayTreatment}
+            onChange={(value) => actions.updateOverlayTreatment(value as any)}
             options={[
               { value: 'particles', label: 'Particles' },
               { value: 'pulsingDot', label: 'Pulsing Dot' },

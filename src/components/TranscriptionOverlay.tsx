@@ -60,9 +60,8 @@ export function TranscriptionOverlay({
       case 'top-left': return { x: padding, y: padding };
       case 'top-center': return { x: window.innerWidth / 2 - overlayWidth / 2, y: padding };
       case 'top-right': return { x: window.innerWidth - overlayWidth - padding, y: padding };
-      case 'center-left': return { x: padding, y: window.innerHeight / 2 - overlayHeight / 2 };
-      case 'center': return { x: window.innerWidth / 2 - overlayWidth / 2, y: window.innerHeight / 2 - overlayHeight / 2 };
-      case 'center-right': return { x: window.innerWidth - overlayWidth - padding, y: window.innerHeight / 2 - overlayHeight / 2 };
+      case 'left-center': return { x: padding, y: window.innerHeight / 2 - overlayHeight / 2 };
+      case 'right-center': return { x: window.innerWidth - overlayWidth - padding, y: window.innerHeight / 2 - overlayHeight / 2 };
       case 'bottom-left': return { x: padding, y: window.innerHeight - overlayHeight - padding };
       case 'bottom-center': return { x: window.innerWidth / 2 - overlayWidth / 2, y: window.innerHeight - overlayHeight - padding };
       case 'bottom-right': return { x: window.innerWidth - overlayWidth - padding, y: window.innerHeight - overlayHeight - padding };

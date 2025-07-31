@@ -6,7 +6,6 @@ import { SettingsView } from '../SettingsView';
 import { StatsView } from '../StatsView';
 import Dictionary from '../Dictionary';
 import type { ViewType } from './types';
-import type { ThemeVariant } from '../../themes/types';
 
 interface ViewRouterProps {
   currentView: ViewType;
@@ -40,38 +39,6 @@ interface ViewRouterProps {
   exportTranscripts: (format: 'json' | 'markdown' | 'text') => Promise<void>;
   copyTranscript: (text: string) => Promise<void>;
   formatFileSize: (bytes?: number) => string;
-  // SettingsView props
-  isCapturingHotkey: boolean;
-  hotkeyUpdateStatus?: any;
-  isCapturingPushToTalkHotkey: boolean;
-  overlayPosition: any;
-  overlayTreatment: any;
-  autoCopy: boolean;
-  autoPaste: boolean;
-  theme: 'system' | 'light' | 'dark';
-  selectedTheme: ThemeVariant | undefined;
-  soundEnabled: boolean;
-  startSound: string;
-  stopSound: string;
-  successSound: string;
-  completionSoundThreshold: number;
-  llmSettings: any;
-  stopCapturingHotkey: () => void;
-  startCapturingHotkey: () => void;
-  startCapturingPushToTalkHotkey: () => void;
-  stopCapturingPushToTalkHotkey: () => void;
-  updateOverlayPosition: (position: any) => void;
-  updateOverlayTreatment: (treatment: any) => void;
-  toggleAutoCopy: () => void;
-  toggleAutoPaste: () => void;
-  updateTheme: (theme: string) => void;
-  updateSelectedTheme: (theme: string) => void;
-  toggleSoundEnabled: () => void;
-  updateStartSound: (sound: string) => void;
-  updateStopSound: (sound: string) => void;
-  updateSuccessSound: (sound: string) => void;
-  updateCompletionSoundThreshold: (threshold: number) => void;
-  updateLLMSettings: (settings: any) => void;
 }
 
 export const ViewRouter = memo<ViewRouterProps>(({
@@ -106,38 +73,6 @@ export const ViewRouter = memo<ViewRouterProps>(({
   exportTranscripts,
   copyTranscript,
   formatFileSize,
-  // SettingsView props
-  isCapturingHotkey,
-  hotkeyUpdateStatus,
-  isCapturingPushToTalkHotkey,
-  overlayPosition,
-  overlayTreatment,
-  autoCopy,
-  autoPaste,
-  theme,
-  selectedTheme,
-  soundEnabled,
-  startSound,
-  stopSound,
-  successSound,
-  completionSoundThreshold,
-  llmSettings,
-  stopCapturingHotkey,
-  startCapturingHotkey,
-  startCapturingPushToTalkHotkey,
-  stopCapturingPushToTalkHotkey,
-  updateOverlayPosition,
-  updateOverlayTreatment,
-  toggleAutoCopy,
-  toggleAutoPaste,
-  updateTheme,
-  updateSelectedTheme,
-  toggleSoundEnabled,
-  updateStartSound,
-  updateStopSound,
-  updateSuccessSound,
-  updateCompletionSoundThreshold,
-  updateLLMSettings,
 }) => {
   switch (currentView) {
     case 'record':
@@ -188,41 +123,7 @@ export const ViewRouter = memo<ViewRouterProps>(({
     case 'settings':
       return (
         <SettingsErrorBoundary>
-          <SettingsView
-            hotkey={hotkey}
-            isCapturingHotkey={isCapturingHotkey}
-            hotkeyUpdateStatus={hotkeyUpdateStatus}
-            pushToTalkHotkey={pushToTalkHotkey}
-            isCapturingPushToTalkHotkey={isCapturingPushToTalkHotkey}
-            overlayPosition={overlayPosition}
-            overlayTreatment={overlayTreatment}
-            autoCopy={autoCopy}
-            autoPaste={autoPaste}
-            theme={theme}
-            selectedTheme={selectedTheme}
-            soundEnabled={soundEnabled}
-            startSound={startSound}
-            stopSound={stopSound}
-            successSound={successSound}
-            completionSoundThreshold={completionSoundThreshold}
-            llmSettings={llmSettings}
-            stopCapturingHotkey={stopCapturingHotkey}
-            startCapturingHotkey={startCapturingHotkey}
-            startCapturingPushToTalkHotkey={startCapturingPushToTalkHotkey}
-            stopCapturingPushToTalkHotkey={stopCapturingPushToTalkHotkey}
-            updateOverlayPosition={updateOverlayPosition}
-            updateOverlayTreatment={updateOverlayTreatment}
-            toggleAutoCopy={toggleAutoCopy}
-            toggleAutoPaste={toggleAutoPaste}
-            updateTheme={updateTheme}
-            updateSelectedTheme={updateSelectedTheme}
-            toggleSoundEnabled={toggleSoundEnabled}
-            updateStartSound={updateStartSound}
-            updateStopSound={updateStopSound}
-            updateSuccessSound={updateSuccessSound}
-            updateCompletionSoundThreshold={updateCompletionSoundThreshold}
-            updateLLMSettings={updateLLMSettings}
-          />
+          <SettingsView />
         </SettingsErrorBoundary>
       );
     case 'stats':

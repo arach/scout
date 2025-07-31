@@ -4,41 +4,45 @@
   background-color: var(--bg-secondary);
   border-right: none; /* Remove hard border */
   padding-top: 0; /* No top padding - chevron flush with top */
-  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1), transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
-  flex-shrink: 0;
+  flex: 0 0 auto;
   overflow: visible;
   height: 100vh; /* Full viewport height */
   z-index: 101;
   /* No shadow - unified design */
+  width: 52px;
+  max-width: 52px;
+  transition: width 0.4s cubic-bezier(0.23, 1, 0.32, 1) !important;
 }
 
 .sidebar.collapsed {
   width: 52px;
+  max-width: 52px;
 }
 
 .sidebar.expanded {
-  width: 200px; /* Default width, overridden by inline style */
-  min-width: 150px;
-  max-width: 400px;
+  width: 200px;
+  max-width: 200px;
 }
 
 /* Smooth width animation for content */
 .sidebar * {
-  transition: opacity 0.25s ease;
+  transition: opacity 0.2s ease;
 }
 
 .sidebar.collapsed .sidebar-label {
   opacity: 0;
   width: 0;
   overflow: hidden;
-  transition: opacity 0.15s ease, width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: opacity 0.15s ease, transform 0.2s ease;
+  transform: translateX(-10px);
 }
 
 .sidebar.expanded .sidebar-label {
   opacity: 1;
   width: auto;
-  transition: opacity 0.25s ease 0.1s, width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1) 0.15s, transform 0.3s cubic-bezier(0.4, 0, 0.2, 1) 0.1s;
+  transform: translateX(0);
 }
 
 /* Removed gradient overlay to ensure color consistency with header */
@@ -52,7 +56,7 @@
   cursor: pointer;
   height: 52px;
   position: relative;
-  transition: color 0.15s ease, background-color 0.15s ease, opacity 0.15s ease;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   opacity: 0.6;
   padding: 0 16px;
   gap: 12px;
@@ -92,9 +96,14 @@
   color: var(--text-primary);
 }
 
+/* Add subtle glow effect on hover */
+.sidebar-toggle-zone:hover .sidebar-app-name {
+  text-shadow: 0 0 10px rgba(var(--accent-rgb), 0.3);
+}
+
 /* Smooth chevron rotation animation */
 .sidebar-toggle-zone svg {
-  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .sidebar.expanded .sidebar-toggle-zone svg:last-child {
@@ -114,14 +123,14 @@
   flex-grow: 1;
   text-align: left;
   opacity: 0;
-  transform: translateX(-10px);
-  transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transform: translateX(-15px) scale(0.9);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .sidebar.expanded .sidebar-app-name {
   opacity: 1;
-  transform: translateX(0);
-  transition-delay: 0.1s;
+  transform: translateX(0) scale(1);
+  transition-delay: 0.08s;
 }
 
 .sidebar.collapsed .sidebar-button {
@@ -180,11 +189,16 @@
   position: absolute;
   left: 0;
   top: 50%;
-  transform: translateY(-50%);
+  transform: translateY(-50%) scaleY(0);
   width: 3px;
   height: 24px;
   background-color: var(--accent-primary);
   border-radius: 0 2px 2px 0;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar-button.active::before {
+  transform: translateY(-50%) scaleY(1);
 }
 
 /* Label for expanded state */
@@ -330,19 +344,11 @@
 /* Apply animations to button icons on hover and click */
 .sidebar-button svg,
 .sidebar-button > * {
-  transition: transform 0.15s ease, opacity 0.25s ease;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease;
   transform-style: flat; /* Use flat instead of preserve-3d to prevent CATransformLayer conflicts */
 }
 
-/* Icon slide animation on expand/collapse */
-.sidebar.collapsed .sidebar-button svg {
-  transform: scale(1);
-}
-
-.sidebar.expanded .sidebar-button svg {
-  transform: scale(1);
-  transition-delay: 0.05s;
-}
+/* Remove global icon bounce on expand to allow individual hover animations */
 
 /* Record button - coin flip on Y axis */
 .sidebar-button-record:hover svg {
@@ -406,13 +412,15 @@
   height: 100%;
   cursor: col-resize;
   background: transparent;
-  transition: background-color 0.15s ease;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   z-index: 102;
 }
 
 .sidebar-resize-handle:hover {
   background-color: var(--accent-primary);
-  opacity: 0.5;
+  opacity: 0.3;
+  width: 8px;
+  right: -4px;
 }
 
 .sidebar-resize-handle:active,
@@ -423,11 +431,11 @@
 
 /* Disable transitions while resizing */
 .sidebar.resizing {
-  transition: none;
+  transition: none !important;
 }
 
 .sidebar.resizing * {
-  transition: none;
+  transition: none !important;
 }
 
 /* Visual indicator when resizing */

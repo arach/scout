@@ -100,7 +100,10 @@
       "mcp__peekaboo__analyze",
       "Bash(git rm:*)",
       "Bash(PORT=3001 pnpm tauri dev)",
-      "Bash(ffprobe:*)"
+      "Bash(ffprobe:*)",
+      "Bash(gh pr create:*)",
+      "Bash(npm run build:*)",
+      "Bash(npx next:*)"
     ],
     "deny": []
   },
