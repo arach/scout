@@ -426,26 +426,59 @@ impl AudioRecorderWorker {
             info(Component::Recording, "Conversion to 16kHz for Whisper will happen during transcription.");
         }
         
-        // Try progressive buffer sizes with fallbacks for device compatibility
-        let buffer_sizes = [128, 256, 512, 1024];
-        let mut config = cpal::StreamConfig {
-            channels: device_channels, // ALWAYS use original device channels for recording
-            sample_rate: actual_sample_rate,
-            buffer_size: cpal::BufferSize::Default, // Start with default as final fallback
+        // For speech recording, we want to optimize for file size
+        // 16kHz mono is perfect for speech and Whisper works great with it
+        let optimal_sample_rate = cpal::SampleRate(16000);
+        let optimal_channels = 1; // Mono is all we need for speech
+        
+        // Check if device supports our optimal configuration
+        let mut use_optimal_config = false;
+        if let Ok(supported_configs) = device.supported_input_configs() {
+            for config in supported_configs {
+                // Check if device supports 16kHz AND mono
+                if config.min_sample_rate() <= optimal_sample_rate && 
+                   config.max_sample_rate() >= optimal_sample_rate &&
+                   config.channels() == optimal_channels {
+                    use_optimal_config = true;
+                    info(Component::Recording, "Device supports 16kHz mono - using optimal speech recording settings");
+                    break;
+                }
+            }
+        }
+        
+        // Use optimal config if supported, otherwise fall back to device default
+        let recording_sample_rate = if use_optimal_config { 
+            optimal_sample_rate 
+        } else { 
+            warn(Component::Recording, &format!("Device doesn't support 16kHz, using {} Hz", actual_sample_rate.0));
+            actual_sample_rate 
         };
         
-        // Try to find a working buffer size, starting with lowest latency
+        // Build config based on whether we can use optimal settings
+        let mut config = if use_optimal_config {
+            // Device supports our optimal settings
+            cpal::StreamConfig {
+                channels: optimal_channels, // Record mono
+                sample_rate: recording_sample_rate,
+                buffer_size: cpal::BufferSize::Default,
+            }
+        } else {
+            // Use device's native config
+            cpal::StreamConfig {
+                channels: device_channels, // Use device's native channels
+                sample_rate: default_config.sample_rate(),
+                buffer_size: cpal::BufferSize::Default,
+            }
+        };
+        
+        // Try progressive buffer sizes for lower latency
+        let buffer_sizes = [128, 256, 512, 1024];
         let mut buffer_size_used = "Default".to_string();
         for &size in &buffer_sizes {
-            let test_config = cpal::StreamConfig {
-                channels: device_channels, // Use original device channels
-                sample_rate: default_config.sample_rate(),
-                buffer_size: cpal::BufferSize::Fixed(size),
-            };
+            config.buffer_size = cpal::BufferSize::Fixed(size);
             
             // Test if this buffer size works by trying to create a dummy stream
             if let Ok(_) = device.supported_input_configs() {
-                config = test_config;
                 buffer_size_used = format!("Fixed({})", size);
                 info(Component::Recording, &format!("Using buffer size: {} samples", size));
                 break;
@@ -453,13 +486,18 @@ impl AudioRecorderWorker {
         }
         
         if buffer_size_used == "Default" {
+            config.buffer_size = cpal::BufferSize::Default;
             info(Component::Recording, "Using default buffer size (device-dependent latency)");
         }
 
         // Store sample rate, channels, and format for later use
         self.sample_rate = config.sample_rate.0;
-        self.channels = config.channels;  // This now correctly stores device_channels
+        self.channels = config.channels;  // Store the actual recording channels (1 for mono, or device channels)
         self.sample_format = Some(default_config.sample_format());
+        
+        // Log what we're actually using
+        info(Component::Recording, &format!("Final recording config: {} Hz, {} channel(s), format: {:?}",
+            self.sample_rate, self.channels, self.sample_format));
         
         // Store the requested config for metadata tracking
         self.requested_config = Some(cpal::StreamConfig {
@@ -511,10 +549,10 @@ impl AudioRecorderWorker {
         
         info(Component::Recording, &format!("Initialized validation systems - frequency: {}ms", validation_frequency));
         
-        // Create native format info
+        // Create native format info with actual recording format
         let native_format = NativeAudioFormat::new(
             config.sample_rate.0,
-            config.channels,
+            config.channels,  // Use actual recording channels (1 for mono optimization)
             default_config.sample_format(),
             device_name_for_metadata.clone()
         );
@@ -894,36 +932,16 @@ impl AudioRecorderWorker {
                         
                         // Call sample callback for ring buffer processing
                         if let Some(ref callback) = *sample_callback.lock().unwrap() {
-                            // Convert samples to f32 and handle stereo-to-mono conversion
-                            let f32_samples: Vec<f32> = if channels == 2 {
-                                // Convert stereo to mono for callback
-                                if TypeId::of::<T>() == TypeId::of::<f32>() {
-                                    data.chunks_exact(2).map(|chunk| {
-                                        let left = unsafe { *(&chunk[0] as *const T as *const f32) };
-                                        let right = unsafe { *(&chunk[1] as *const T as *const f32) };
-                                        (left + right) / 2.0
-                                    }).collect()
-                                } else if TypeId::of::<T>() == TypeId::of::<i16>() {
-                                    data.chunks_exact(2).map(|chunk| {
-                                        let left = unsafe { *(&chunk[0] as *const T as *const i16) } as f32 / 32768.0;
-                                        let right = unsafe { *(&chunk[1] as *const T as *const i16) } as f32 / 32768.0;
-                                        (left + right) / 2.0
-                                    }).collect()
-                                } else {
-                                    Vec::new()
-                                }
+                            // Convert samples to f32 - data is already mono if we're recording in mono
+                            let f32_samples: Vec<f32> = if TypeId::of::<T>() == TypeId::of::<f32>() {
+                                data.iter().map(|&sample| unsafe { *(&sample as *const T as *const f32) }).collect()
+                            } else if TypeId::of::<T>() == TypeId::of::<i16>() {
+                                data.iter().map(|&sample| {
+                                    let s = unsafe { *(&sample as *const T as *const i16) };
+                                    s as f32 / 32768.0
+                                }).collect()
                             } else {
-                                // Mono samples - convert directly
-                                if TypeId::of::<T>() == TypeId::of::<f32>() {
-                                    data.iter().map(|&sample| unsafe { *(&sample as *const T as *const f32) }).collect()
-                                } else if TypeId::of::<T>() == TypeId::of::<i16>() {
-                                    data.iter().map(|&sample| {
-                                        let s = unsafe { *(&sample as *const T as *const i16) };
-                                        s as f32 / 32768.0
-                                    }).collect()
-                                } else {
-                                    Vec::new()
-                                }
+                                Vec::new()
                             };
                             
                             if !f32_samples.is_empty() {
