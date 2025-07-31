@@ -153,7 +153,7 @@ impl RingBufferMonitor {
         // If no chunks were processed during recording (short recording), process the entire recording as one chunk
         if self.completed_chunks.is_empty() && self.chunked_transcriber.is_none() {
             let buffer_duration = self.ring_buffer.get_duration();
-            if buffer_duration > Duration::from_millis(500) { // Only process if > 500ms
+            if buffer_duration > Duration::from_millis(100) { // Process anything > 100ms
                 info(Component::RingBuffer, &format!("Short recording detected ({:?}), processing as single chunk", buffer_duration));
                 
                 // Use the initial transcriber that was stored for short recordings
@@ -175,7 +175,7 @@ impl RingBufferMonitor {
             let remaining_duration = buffer_duration.saturating_sub(self.last_chunk_time);
             
             // Process any remaining audio as a final chunk
-            if remaining_duration > Duration::from_millis(500) { // Only process if > 500ms
+            if remaining_duration > Duration::from_millis(100) { // Process anything > 100ms
                 info(Component::RingBuffer, &format!("Processing final ring buffer chunk (start: {:?}, duration: {:?})", 
                          self.last_chunk_time, remaining_duration));
                 
