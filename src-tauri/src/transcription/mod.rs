@@ -4,7 +4,7 @@ use tokio::sync::Mutex;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 use crate::logger::{warn, info, Component};
 use crate::audio::WhisperAudioConverter;
-use crate::model_state::{ModelStateManager, CoreMLState};
+use crate::model_state::ModelStateManager;
 use once_cell::sync::Lazy;
 
 pub mod strategy;

@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 use cpal::traits::{DeviceTrait, HostTrait};
-use crate::logger::{info, warn, error, Component};
+use crate::logger::{info, error, Component};
 
 /// Device change event types
 #[derive(Debug, Clone)]

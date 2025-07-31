@@ -9,7 +9,7 @@ use super::format::NativeAudioFormat;
 use super::metadata::AudioMetadata;
 use super::validation::{AudioFormatValidator, ValidationResult, CallbackInfo};
 use super::device_monitor::{DeviceCapabilityChecker, CapabilityCheckResult};
-use super::notifications::{notify_airpods_detected, notify_bluetooth_detected, notify_sample_rate_mismatch, NotificationSeverity};
+use super::notifications::notify_airpods_detected;
 
 // Type alias for sample callback
 pub type SampleCallback = Arc<dyn Fn(&[f32]) + Send + Sync>;

@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
-use crate::logger::{info, warn, error, Component};
-use super::metadata::{AudioPatternAnalysis, AudioMetadata};
+use crate::logger::Component;
+use super::metadata::AudioPatternAnalysis;
 
 /// Real-time audio format validator
 pub struct AudioFormatValidator {
