@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { SimpleAudioPlayer } from './SimpleAudioPlayer';
 import { PerformanceTimeline } from './PerformanceTimeline';
 import { invoke } from '@tauri-apps/api/core';
+import { save } from '@tauri-apps/plugin-dialog';
+import { copyFile } from '@tauri-apps/plugin-fs';
 import { parseTranscriptMetadata, parseAudioMetadata, Transcript } from '../types/transcript';
 import { useResizable } from '../hooks/useResizable';
 import './TranscriptDetailPanel.css';
@@ -212,21 +214,29 @@ export function TranscriptDetailPanel({
         }
 
         try {
-            // Use the read_audio_file command to get the WAV data
-            const audioData: number[] = await invoke('read_audio_file', { audioPath: transcript.audio_path });
-            const blob = new Blob([new Uint8Array(audioData)], { type: 'audio/wav' });
+            // Generate a nice filename with date
+            const date = new Date(transcript.created_at);
+            const dateStr = date.toISOString().split('T')[0]; // YYYY-MM-DD
+            const timeStr = date.toTimeString().split(' ')[0].replace(/:/g, '-'); // HH-MM-SS
+            const defaultFilename = `scout_recording_${dateStr}_${timeStr}.wav`;
             
-            // Create download link
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `recording_${transcript.id}.wav`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
+            // Show save dialog
+            const filePath = await save({
+                defaultPath: defaultFilename,
+                filters: [{
+                    name: 'Audio',
+                    extensions: ['wav']
+                }]
+            });
+            
+            if (filePath) {
+                // Copy the file
+                await copyFile(transcript.audio_path, filePath);
+                console.log('Audio file exported successfully to:', filePath);
+            }
         } catch (error) {
             console.error('Failed to export audio:', error);
+            alert(`Failed to export audio: ${error}`);
         }
     };
 
