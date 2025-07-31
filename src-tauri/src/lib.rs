@@ -111,9 +111,6 @@ pub struct AppState {
 
 #[tauri::command]
 async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle, device_name: Option<String>) -> Result<String, String> {
-    // Play start sound immediately, before any async operations
-    sound::SoundPlayer::play_start();
-    
     // Check if already recording
     if state.progress_tracker.is_busy() {
         warn(Component::Recording, "Attempted to start recording while already recording");
@@ -128,6 +125,9 @@ async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle, devi
         return Err("Audio recorder is already active".to_string());
     }
     drop(recorder);
+    
+    // Play start sound after we've confirmed we can record
+    sound::SoundPlayer::play_start();
     
     
     // Use the recording workflow to start recording
