@@ -475,13 +475,20 @@ impl RecordingWorkflow {
                                         // Add app context to metadata if available
                                         #[cfg(target_os = "macos")]
                                         if let Some(ref ctx) = active_recording.app_context {
+                                            info(Component::Recording, &format!("Adding app context to metadata: {} ({})", ctx.name, ctx.bundle_id));
                                             metadata_json["app_context"] = serde_json::json!({
                                                 "name": ctx.name,
                                                 "bundle_id": ctx.bundle_id,
                                             });
+                                        } else {
+                                            info(Component::Recording, "No app context available to add to metadata");
                                         }
                                         
+                                        #[cfg(not(target_os = "macos"))]
+                                        info(Component::Recording, "App context not available on non-macOS platform");
+                                        
                                         let metadata = metadata_json.to_string();
+                                        debug(Component::Recording, &format!("Final metadata JSON: {}", metadata));
                                         
                                         // Get audio metadata if available
                                         let audio_metadata_json = if let Some(ref device_info) = device_info_result {
