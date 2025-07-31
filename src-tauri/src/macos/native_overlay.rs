@@ -1,6 +1,6 @@
+use once_cell::sync::Lazy;
 #[cfg(target_os = "macos")]
 use std::sync::Mutex;
-use once_cell::sync::Lazy;
 
 // FFI declarations for Swift functions
 #[cfg(target_os = "macos")]
@@ -76,48 +76,48 @@ impl NativeOverlay {
             native_overlay_set_stop_recording_callback(stop_recording_callback);
             native_overlay_set_cancel_recording_callback(cancel_recording_callback);
         }
-        
+
         NativeOverlay
     }
-    
+
     pub fn show(&self) {
         #[cfg(target_os = "macos")]
         unsafe {
             native_overlay_show();
         }
     }
-    
+
     pub fn hide(&self) {
         #[cfg(target_os = "macos")]
         unsafe {
             native_overlay_hide();
         }
     }
-    
+
     pub fn set_recording_state(&self, recording: bool) {
         #[cfg(target_os = "macos")]
         unsafe {
             native_overlay_set_recording_state(recording);
         }
     }
-    
+
     pub fn set_processing_state(&self, processing: bool) {
         #[cfg(target_os = "macos")]
         unsafe {
             native_overlay_set_processing_state(processing);
         }
     }
-    
+
     pub fn set_idle_state(&self) {
         #[cfg(target_os = "macos")]
         unsafe {
             native_overlay_set_idle_state();
         }
     }
-    
-    pub fn set_on_start_recording<F>(&self, callback: F) 
-    where 
-        F: Fn() + Send + Sync + 'static
+
+    pub fn set_on_start_recording<F>(&self, callback: F)
+    where
+        F: Fn() + Send + Sync + 'static,
     {
         #[cfg(target_os = "macos")]
         {
@@ -126,10 +126,10 @@ impl NativeOverlay {
             }
         }
     }
-    
+
     pub fn set_on_stop_recording<F>(&self, callback: F)
     where
-        F: Fn() + Send + Sync + 'static
+        F: Fn() + Send + Sync + 'static,
     {
         #[cfg(target_os = "macos")]
         {
@@ -138,10 +138,10 @@ impl NativeOverlay {
             }
         }
     }
-    
+
     pub fn set_on_cancel_recording<F>(&self, callback: F)
     where
-        F: Fn() + Send + Sync + 'static
+        F: Fn() + Send + Sync + 'static,
     {
         #[cfg(target_os = "macos")]
         {
@@ -150,14 +150,14 @@ impl NativeOverlay {
             }
         }
     }
-    
+
     pub fn set_volume_level(&self, level: f32) {
         #[cfg(target_os = "macos")]
         unsafe {
             native_overlay_set_volume_level(level.clamp(0.0, 1.0));
         }
     }
-    
+
     pub fn set_position(&self, position: &str) {
         #[cfg(target_os = "macos")]
         unsafe {
@@ -165,7 +165,7 @@ impl NativeOverlay {
             native_overlay_set_position(c_string.as_ptr());
         }
     }
-    
+
     pub fn get_current_state(&self) -> String {
         #[cfg(target_os = "macos")]
         unsafe {
@@ -182,7 +182,7 @@ impl NativeOverlay {
         #[cfg(not(target_os = "macos"))]
         "unknown".to_string()
     }
-    
+
     pub fn set_waveform_style(&self, style: &str) {
         #[cfg(target_os = "macos")]
         unsafe {
@@ -198,17 +198,31 @@ impl NativeOverlay {
     pub fn new() -> Self {
         NativeOverlay
     }
-    
+
     pub fn show(&self) {}
     pub fn hide(&self) {}
     pub fn set_recording_state(&self, _recording: bool) {}
     pub fn set_processing_state(&self, _processing: bool) {}
     pub fn set_idle_state(&self) {}
-    pub fn set_on_start_recording<F>(&self, _callback: F) where F: Fn() + Send + Sync + 'static {}
-    pub fn set_on_stop_recording<F>(&self, _callback: F) where F: Fn() + Send + Sync + 'static {}
-    pub fn set_on_cancel_recording<F>(&self, _callback: F) where F: Fn() + Send + Sync + 'static {}
+    pub fn set_on_start_recording<F>(&self, _callback: F)
+    where
+        F: Fn() + Send + Sync + 'static,
+    {
+    }
+    pub fn set_on_stop_recording<F>(&self, _callback: F)
+    where
+        F: Fn() + Send + Sync + 'static,
+    {
+    }
+    pub fn set_on_cancel_recording<F>(&self, _callback: F)
+    where
+        F: Fn() + Send + Sync + 'static,
+    {
+    }
     pub fn set_volume_level(&self, _level: f32) {}
     pub fn set_position(&self, _position: &str) {}
-    pub fn get_current_state(&self) -> String { "unknown".to_string() }
+    pub fn get_current_state(&self) -> String {
+        "unknown".to_string()
+    }
     pub fn set_waveform_style(&self, _style: &str) {}
 }

@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
 use std::fs;
-use serde_json;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelConfig {
@@ -139,11 +138,16 @@ impl WhisperModel {
             for entry in entries.flatten() {
                 if let Some(filename) = entry.file_name().to_str() {
                     // Check if it's a .bin file and not already in our list
-                    if filename.ends_with(".bin") && !models.iter().any(|m| m.filename == filename) {
+                    if filename.ends_with(".bin") && !models.iter().any(|m| m.filename == filename)
+                    {
                         // This is a custom model
                         let id = format!("custom_{}", filename.trim_end_matches(".bin"));
-                        let file_size = entry.metadata().ok().map(|m| m.len() / 1_048_576).unwrap_or(0) as u32;
-                        
+                        let file_size = entry
+                            .metadata()
+                            .ok()
+                            .map(|m| m.len() / 1_048_576)
+                            .unwrap_or(0) as u32;
+
                         models.push(WhisperModel {
                             id: id.clone(),
                             name: format!("Custom: {}", filename),
@@ -166,46 +170,50 @@ impl WhisperModel {
 
         // Check which models are downloaded and which is active
         let active_model = Self::get_active_model_id(settings);
-        
-        models.into_iter().map(|mut model| {
-            let model_path = models_dir.join(&model.filename);
-            model.downloaded = model_path.exists();
-            
-            // Check if Core ML model is downloaded (only on macOS)
-            #[cfg(target_os = "macos")]
-            if let Some(ref coreml_filename) = model.coreml_filename {
-                let coreml_path = models_dir.join(coreml_filename);
-                model.coreml_downloaded = coreml_path.exists();
-            }
-            
-            model.active = Some(&model.id) == active_model.as_ref();
-            model
-        }).collect()
+
+        models
+            .into_iter()
+            .map(|mut model| {
+                let model_path = models_dir.join(&model.filename);
+                model.downloaded = model_path.exists();
+
+                // Check if Core ML model is downloaded (only on macOS)
+                #[cfg(target_os = "macos")]
+                if let Some(ref coreml_filename) = model.coreml_filename {
+                    let coreml_path = models_dir.join(coreml_filename);
+                    model.coreml_downloaded = coreml_path.exists();
+                }
+
+                model.active = Some(&model.id) == active_model.as_ref();
+                model
+            })
+            .collect()
     }
 
     pub fn get_active_model_id(settings: &crate::settings::AppSettings) -> Option<String> {
         Some(settings.models.active_model_id.clone())
     }
 
-    pub fn get_active_model_path(models_dir: &Path, settings: &crate::settings::AppSettings) -> PathBuf {
-        
+    pub fn get_active_model_path(
+        models_dir: &Path,
+        settings: &crate::settings::AppSettings,
+    ) -> PathBuf {
         let model_id = Self::get_active_model_id(settings).unwrap_or_else(|| "tiny.en".to_string());
-        
+
         let models = Self::all(models_dir, settings);
-        
+
         // First try to find the requested model
         if let Some(model) = models.iter().find(|m| m.id == model_id && m.downloaded) {
             let path = models_dir.join(&model.filename);
             return path;
         }
-        
-        
+
         // Fallback to any available model
         if let Some(model) = models.iter().find(|m| m.downloaded) {
             let path = models_dir.join(&model.filename);
             return path;
         }
-        
+
         // Last resort - return expected path even if not downloaded
         let fallback = models_dir.join("ggml-tiny.en.bin");
         fallback

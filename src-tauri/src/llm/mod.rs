@@ -1,13 +1,13 @@
 pub mod engine;
 pub mod models;
-pub mod prompts;
 pub mod pipeline;
+pub mod prompts;
 
 use anyhow::Result;
-use std::path::Path;
-use tokio::sync::mpsc::Receiver;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
+use tokio::sync::mpsc::Receiver;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Token {
@@ -41,7 +41,11 @@ impl Default for GenerationOptions {
 pub trait LLMEngine: Send + Sync {
     async fn load_model(&mut self, model_path: &Path) -> Result<()>;
     async fn generate(&self, prompt: &str, options: GenerationOptions) -> Result<String>;
-    async fn stream_generate(&self, prompt: &str, options: GenerationOptions) -> Result<Receiver<Token>>;
+    async fn stream_generate(
+        &self,
+        prompt: &str,
+        options: GenerationOptions,
+    ) -> Result<Receiver<Token>>;
     fn is_loaded(&self) -> bool;
     fn model_info(&self) -> Option<ModelInfo>;
 }
@@ -56,4 +60,4 @@ pub struct ModelInfo {
 
 pub use engine::CandleEngine;
 pub use models::ModelManager;
-pub use prompts::{PromptTemplate, PromptManager};
+pub use prompts::{PromptManager, PromptTemplate};

@@ -1,6 +1,6 @@
+use crate::logger::Component;
+use serde::{Deserialize, Serialize};
 use std::ffi::{c_char, CStr};
-use serde::{Serialize, Deserialize};
-use crate::logger::{info, debug, warn, Component};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppContext {
@@ -22,23 +22,19 @@ pub fn get_active_app_context() -> Option<AppContext> {
     unsafe {
         let name_ptr = get_active_app_name();
         let bundle_id_ptr = get_active_app_bundle_id();
-        
+
         if name_ptr.is_null() || bundle_id_ptr.is_null() {
             return None;
         }
-        
-        let name = CStr::from_ptr(name_ptr)
-            .to_string_lossy()
-            .to_string();
-        
-        let bundle_id = CStr::from_ptr(bundle_id_ptr)
-            .to_string_lossy()
-            .to_string();
-        
+
+        let name = CStr::from_ptr(name_ptr).to_string_lossy().to_string();
+
+        let bundle_id = CStr::from_ptr(bundle_id_ptr).to_string_lossy().to_string();
+
         // Free the allocated strings
         free_app_string(name_ptr);
         free_app_string(bundle_id_ptr);
-        
+
         Some(AppContext {
             name,
             bundle_id,
@@ -65,7 +61,7 @@ mod tests {
             let context = get_active_app_context();
             // We should get some app context (even if it's the test runner)
             assert!(context.is_some());
-            
+
             if let Some(ctx) = context {
                 assert!(!ctx.name.is_empty());
                 assert!(!ctx.bundle_id.is_empty());

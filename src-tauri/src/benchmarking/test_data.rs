@@ -1,8 +1,8 @@
-use std::path::PathBuf;
-use sqlx::Row;
-use crate::db::Database;
 use crate::benchmarking::{BenchmarkTest, ContentType, RecordingLength};
-use crate::logger::{info, error, Component};
+use crate::db::Database;
+use crate::logger::{error, info, Component};
+use sqlx::Row;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 pub struct TestDataExtractor {
@@ -16,17 +16,35 @@ impl TestDataExtractor {
 
     /// Extract test recordings from the database categorized by length
     pub async fn extract_test_recordings(&self) -> Result<Vec<BenchmarkTest>, String> {
-        info(Component::Processing, "📊 Extracting test recordings from database");
+        info(
+            Component::Processing,
+            "📊 Extracting test recordings from database",
+        );
 
         let mut tests = Vec::new();
 
         // Get recordings from different length categories
-        tests.extend(self.extract_by_length_category(RecordingLength::UltraShort, 500, 2000).await?);
-        tests.extend(self.extract_by_length_category(RecordingLength::Short, 2000, 5000).await?);
-        tests.extend(self.extract_by_length_category(RecordingLength::Medium, 5000, 15000).await?);
-        tests.extend(self.extract_by_length_category(RecordingLength::Long, 15000, 60000).await?);
+        tests.extend(
+            self.extract_by_length_category(RecordingLength::UltraShort, 500, 2000)
+                .await?,
+        );
+        tests.extend(
+            self.extract_by_length_category(RecordingLength::Short, 2000, 5000)
+                .await?,
+        );
+        tests.extend(
+            self.extract_by_length_category(RecordingLength::Medium, 5000, 15000)
+                .await?,
+        );
+        tests.extend(
+            self.extract_by_length_category(RecordingLength::Long, 15000, 60000)
+                .await?,
+        );
 
-        info(Component::Processing, &format!("📋 Extracted {} test recordings", tests.len()));
+        info(
+            Component::Processing,
+            &format!("📋 Extracted {} test recordings", tests.len()),
+        );
         Ok(tests)
     }
 
@@ -38,8 +56,8 @@ impl TestDataExtractor {
     ) -> Result<Vec<BenchmarkTest>, String> {
         let query = "
             SELECT id, text, duration_ms, audio_path, created_at
-            FROM transcripts 
-            WHERE duration_ms >= ? AND duration_ms <= ? 
+            FROM transcripts
+            WHERE duration_ms >= ? AND duration_ms <= ?
             AND audio_path IS NOT NULL
             ORDER BY created_at DESC
             LIMIT 5
@@ -62,7 +80,7 @@ impl TestDataExtractor {
 
             if let Some(path) = audio_path {
                 let audio_file = PathBuf::from(path.clone());
-                
+
                 // Check if file exists
                 if audio_file.exists() {
                     let test = BenchmarkTest {
@@ -75,25 +93,38 @@ impl TestDataExtractor {
                     };
                     tests.push(test);
                 } else {
-                    error(Component::Processing, &format!("❌ Audio file not found: {}", path));
+                    error(
+                        Component::Processing,
+                        &format!("❌ Audio file not found: {}", path),
+                    );
                 }
             }
         }
 
-        info(Component::Processing, &format!("📊 Found {} {:?} recordings", tests.len(), category));
+        info(
+            Component::Processing,
+            &format!("📊 Found {} {:?} recordings", tests.len(), category),
+        );
         Ok(tests)
     }
 
     fn classify_content_type(&self, text: &str) -> ContentType {
         let lower_text = text.to_lowercase();
-        
+
         // Simple heuristic-based classification
-        if lower_text.contains("function") || lower_text.contains("variable") || 
-           lower_text.contains("api") || lower_text.contains("code") ||
-           lower_text.contains("rust") || lower_text.contains("javascript") {
+        if lower_text.contains("function")
+            || lower_text.contains("variable")
+            || lower_text.contains("api")
+            || lower_text.contains("code")
+            || lower_text.contains("rust")
+            || lower_text.contains("javascript")
+        {
             ContentType::Technical
-        } else if lower_text.contains("hello") || lower_text.contains("how are you") ||
-                  lower_text.contains("thanks") || lower_text.contains("yeah") {
+        } else if lower_text.contains("hello")
+            || lower_text.contains("how are you")
+            || lower_text.contains("thanks")
+            || lower_text.contains("yeah")
+        {
             ContentType::Conversational
         } else if lower_text.chars().filter(|c| c.is_numeric()).count() > 3 {
             ContentType::Numbers
@@ -124,13 +155,18 @@ impl TestDataExtractor {
         tests.push(BenchmarkTest {
             name: "synthetic_technical_medium".to_string(),
             audio_file: PathBuf::from("test_data/synthetic_technical.wav"),
-            expected_transcript: Some("Define a function called process data that takes a vector of integers".to_string()),
+            expected_transcript: Some(
+                "Define a function called process data that takes a vector of integers".to_string(),
+            ),
             duration_ms: 5000,
             content_type: ContentType::Technical,
             recording_length_category: RecordingLength::Short,
         });
 
-        info(Component::Processing, &format!("🧪 Created {} synthetic test cases", tests.len()));
+        info(
+            Component::Processing,
+            &format!("🧪 Created {} synthetic test cases", tests.len()),
+        );
         Ok(tests)
     }
 }

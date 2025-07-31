@@ -1,8 +1,8 @@
-use rdev::{EventType, Key, Event};
-use std::sync::{Arc, Mutex};
+use crate::logger::{debug, error, info, warn, Component};
+use rdev::{Event, EventType, Key};
 use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
-use crate::logger::{info, debug, warn, error, Component};
 
 #[cfg(not(target_os = "macos"))]
 use std::thread;
@@ -30,7 +30,10 @@ impl KeyboardMonitor {
         let key = Self::parse_shortcut_to_key(shortcut);
         if let Ok(mut ptk) = self.push_to_talk_key.lock() {
             *ptk = key;
-            info(Component::UI, &format!("Push-to-talk key set to: {:?}", key));
+            info(
+                Component::UI,
+                &format!("Push-to-talk key set to: {:?}", key),
+            );
         }
     }
 
@@ -90,45 +93,54 @@ impl KeyboardMonitor {
             // to avoid dispatch queue assertion failures
             self.start_monitoring_macos();
         }
-        
+
         #[cfg(not(target_os = "macos"))]
         {
             // On other platforms, use the original implementation
             self.start_monitoring_other();
         }
     }
-    
+
     #[cfg(target_os = "macos")]
     fn start_monitoring_macos(self: Arc<Self>) {
         // On macOS, rdev has threading issues that can cause crashes
         // For now, we'll disable keyboard monitoring and rely on global shortcuts only
-        warn(Component::UI, "Keyboard event monitoring temporarily disabled on macOS due to threading issues");
-        warn(Component::UI, "Push-to-talk will work but key release detection is not available");
-        warn(Component::UI, "You'll need to use the same shortcut or stop button to end recording");
-        
+        warn(
+            Component::UI,
+            "Keyboard event monitoring temporarily disabled on macOS due to threading issues",
+        );
+        warn(
+            Component::UI,
+            "Push-to-talk will work but key release detection is not available",
+        );
+        warn(
+            Component::UI,
+            "You'll need to use the same shortcut or stop button to end recording",
+        );
+
         // Emit a warning event to the frontend
-        let _ = self.app_handle.emit("keyboard-monitor-unavailable", 
+        let _ = self.app_handle.emit("keyboard-monitor-unavailable",
             "Push-to-talk key release detection is temporarily disabled on macOS. Use the same shortcut or stop button to end recording.");
     }
-    
+
     #[cfg(not(target_os = "macos"))]
     fn start_monitoring_other(self: Arc<Self>) {
         let monitor = self.clone();
         let app_handle_for_emit = self.app_handle.clone();
-        
+
         // Spawn a thread to handle keyboard events with panic catching
         match thread::Builder::new()
             .name("keyboard-monitor".to_string())
             .spawn(move || {
                 // Small delay to let the app fully initialize
                 thread::sleep(std::time::Duration::from_millis(1000));
-                
+
                 info(Component::UI, "Keyboard monitor thread started");
-                
+
                 // Catch any panics to prevent app crash
                 let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
                     debug(Component::UI, "Attempting to start keyboard event listener...");
-                    
+
                     // Try to start the listener
                     let monitor_for_listen = monitor.clone();
                     match rdev::listen(move |event: Event| {
@@ -143,19 +155,19 @@ impl KeyboardMonitor {
                         Err(e) => {
                             warn(Component::UI, &format!("Keyboard monitoring not available: {:?}", e));
                             warn(Component::UI, "Push-to-talk will work but won't auto-stop on key release.");
-                            
+
                             // Emit a warning event to the frontend
-                            let _ = app_handle_for_emit.emit("keyboard-monitor-unavailable", 
+                            let _ = app_handle_for_emit.emit("keyboard-monitor-unavailable",
                                 "Push-to-talk key release detection is not available. Grant accessibility permissions to enable.");
                         }
                     }
                 }));
-                
+
                 if let Err(e) = result {
                     error(Component::UI, &format!("Keyboard monitor error: {:?}", e));
                     warn(Component::UI, "Push-to-talk key release detection disabled.");
                 }
-                
+
                 info(Component::UI, "Keyboard monitor thread ending");
             }) {
             Ok(handle) => {
@@ -173,12 +185,16 @@ impl KeyboardMonitor {
         #[cfg(all(debug_assertions, not(target_os = "macos")))]
         {
             match &event.event_type {
-                EventType::KeyPress(key) => debug(Component::UI, &format!("Key press detected: {:?}", key)),
-                EventType::KeyRelease(key) => debug(Component::UI, &format!("Key release detected: {:?}", key)),
+                EventType::KeyPress(key) => {
+                    debug(Component::UI, &format!("Key press detected: {:?}", key))
+                }
+                EventType::KeyRelease(key) => {
+                    debug(Component::UI, &format!("Key release detected: {:?}", key))
+                }
                 _ => {}
             }
         }
-        
+
         #[cfg(all(debug_assertions, target_os = "macos"))]
         {
             match &event.event_type {
@@ -187,7 +203,7 @@ impl KeyboardMonitor {
                 _ => {}
             }
         }
-        
+
         match event.event_type {
             EventType::KeyPress(key) => {
                 if let Ok(mut pressed) = self.pressed_keys.lock() {
@@ -196,14 +212,20 @@ impl KeyboardMonitor {
                     error(Component::UI, "Failed to lock pressed_keys for press");
                     return;
                 }
-                
+
                 // Check if this is the push-to-talk key
-                match (self.push_to_talk_key.lock(), self.is_push_to_talk_active.lock()) {
+                match (
+                    self.push_to_talk_key.lock(),
+                    self.is_push_to_talk_active.lock(),
+                ) {
                     (Ok(ptk), Ok(mut is_active)) => {
                         if let Some(push_key) = *ptk {
                             if key == push_key && !*is_active {
                                 *is_active = true;
-                                info(Component::UI, &format!("Push-to-talk key pressed: {:?}", key));
+                                info(
+                                    Component::UI,
+                                    &format!("Push-to-talk key pressed: {:?}", key),
+                                );
                                 // Note: The actual recording start is handled by the existing global shortcut
                                 // This just tracks the state for release detection
                             }
@@ -221,23 +243,38 @@ impl KeyboardMonitor {
                     error(Component::UI, "Failed to lock pressed_keys for release");
                     return;
                 }
-                
+
                 // Check if this is the push-to-talk key being released
-                match (self.push_to_talk_key.lock(), self.is_push_to_talk_active.lock()) {
+                match (
+                    self.push_to_talk_key.lock(),
+                    self.is_push_to_talk_active.lock(),
+                ) {
                     (Ok(ptk), Ok(mut is_active)) => {
                         if let Some(push_key) = *ptk {
                             if key == push_key && *is_active {
                                 *is_active = false;
-                                info(Component::UI, &format!("Push-to-talk key released: {:?}", key));
+                                info(
+                                    Component::UI,
+                                    &format!("Push-to-talk key released: {:?}", key),
+                                );
                                 // Emit event to stop recording
                                 if let Err(e) = self.app_handle.emit("push-to-talk-released", ()) {
-                                    error(Component::UI, &format!("Failed to emit push-to-talk-released event: {}", e));
+                                    error(
+                                        Component::UI,
+                                        &format!(
+                                            "Failed to emit push-to-talk-released event: {}",
+                                            e
+                                        ),
+                                    );
                                 }
                             }
                         }
                     }
                     _ => {
-                        error(Component::UI, "Failed to lock push-to-talk state for release");
+                        error(
+                            Component::UI,
+                            "Failed to lock push-to-talk state for release",
+                        );
                     }
                 }
             }
@@ -246,6 +283,9 @@ impl KeyboardMonitor {
     }
 
     pub fn is_push_to_talk_active(&self) -> bool {
-        self.is_push_to_talk_active.lock().map(|active| *active).unwrap_or(false)
+        self.is_push_to_talk_active
+            .lock()
+            .map(|active| *active)
+            .unwrap_or(false)
     }
 }

@@ -1,23 +1,23 @@
-use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
-use std::fs;
 use crate::logger::{error, Component};
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppSettings {
     // Audio settings
     pub audio: AudioSettings,
-    
+
     // Model settings
     pub models: ModelSettings,
-    
+
     // UI settings
     pub ui: UISettings,
-    
+
     // Processing settings
     pub processing: ProcessingSettings,
-    
+
     // LLM settings
     pub llm: LLMSettings,
 }
@@ -168,56 +168,56 @@ pub struct SettingsManager {
 impl SettingsManager {
     pub fn new(app_data_dir: &Path) -> Result<Self, String> {
         let settings_path = app_data_dir.join("settings.json");
-        
+
         // Load settings or create default
         let settings = match fs::read_to_string(&settings_path) {
-            Ok(contents) => {
-                serde_json::from_str(&contents)
-                    .unwrap_or_else(|e| {
-                        error(Component::UI, &format!("Failed to parse settings.json: {}, using defaults", e));
-                        AppSettings::default()
-                    })
-            }
+            Ok(contents) => serde_json::from_str(&contents).unwrap_or_else(|e| {
+                error(
+                    Component::UI,
+                    &format!("Failed to parse settings.json: {}, using defaults", e),
+                );
+                AppSettings::default()
+            }),
             Err(_) => {
                 let default_settings = AppSettings::default();
-                
+
                 // Save default settings
                 if let Ok(json) = serde_json::to_string_pretty(&default_settings) {
                     let _ = fs::write(&settings_path, json);
                 }
-                
+
                 default_settings
             }
         };
-        
+
         Ok(Self {
             settings_path,
             settings,
         })
     }
-    
+
     pub fn get(&self) -> &AppSettings {
         &self.settings
     }
-    
-    pub fn update<F>(&mut self, updater: F) -> Result<(), String> 
+
+    pub fn update<F>(&mut self, updater: F) -> Result<(), String>
     where
-        F: FnOnce(&mut AppSettings)
+        F: FnOnce(&mut AppSettings),
     {
         updater(&mut self.settings);
         self.save()
     }
-    
+
     pub fn save(&self) -> Result<(), String> {
         let json = serde_json::to_string_pretty(&self.settings)
             .map_err(|e| format!("Failed to serialize settings: {}", e))?;
-            
+
         fs::write(&self.settings_path, json)
             .map_err(|e| format!("Failed to save settings: {}", e))?;
-            
+
         Ok(())
     }
-    
+
     pub fn reload(&mut self) -> Result<(), String> {
         match fs::read_to_string(&self.settings_path) {
             Ok(contents) => {
@@ -225,7 +225,7 @@ impl SettingsManager {
                     .map_err(|e| format!("Failed to parse settings: {}", e))?;
                 Ok(())
             }
-            Err(e) => Err(format!("Failed to read settings: {}", e))
+            Err(e) => Err(format!("Failed to read settings: {}", e)),
         }
     }
 }

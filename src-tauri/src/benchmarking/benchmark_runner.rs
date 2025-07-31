@@ -1,8 +1,8 @@
+use crate::logger::{error, info, Component};
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use serde::{Deserialize, Serialize};
 use tokio::fs;
-use crate::logger::{info, error, Component};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BenchmarkTest {
@@ -84,22 +84,37 @@ impl BenchmarkRunner {
         Self { output_dir }
     }
 
-    pub async fn run_benchmark_suite(&self, tests: Vec<BenchmarkTest>) -> Result<BenchmarkReport, String> {
-        info(Component::Processing, &format!("🚀 Starting benchmark suite with {} tests", tests.len()));
+    pub async fn run_benchmark_suite(
+        &self,
+        tests: Vec<BenchmarkTest>,
+    ) -> Result<BenchmarkReport, String> {
+        info(
+            Component::Processing,
+            &format!("🚀 Starting benchmark suite with {} tests", tests.len()),
+        );
 
         let mut results = Vec::new();
         let start_time = Instant::now();
 
         for test in tests {
-            info(Component::Processing, &format!("📊 Running test: {}", test.name));
-            
+            info(
+                Component::Processing,
+                &format!("📊 Running test: {}", test.name),
+            );
+
             match self.run_single_test(&test).await {
                 Ok(result) => {
-                    info(Component::Processing, &format!("✅ Test '{}' completed successfully", test.name));
+                    info(
+                        Component::Processing,
+                        &format!("✅ Test '{}' completed successfully", test.name),
+                    );
                     results.push(result);
                 }
                 Err(e) => {
-                    error(Component::Processing, &format!("❌ Test '{}' failed: {}", test.name, e));
+                    error(
+                        Component::Processing,
+                        &format!("❌ Test '{}' failed: {}", test.name, e),
+                    );
                     results.push(BenchmarkResult {
                         test_name: test.name.clone(),
                         strategy_used: "unknown".to_string(),
@@ -123,7 +138,10 @@ impl BenchmarkRunner {
         }
 
         let total_duration = start_time.elapsed();
-        info(Component::Processing, &format!("🏁 Benchmark suite completed in {:?}", total_duration));
+        info(
+            Component::Processing,
+            &format!("🏁 Benchmark suite completed in {:?}", total_duration),
+        );
 
         let summary = self.generate_summary(&results);
         let report = BenchmarkReport {
@@ -140,20 +158,26 @@ impl BenchmarkRunner {
 
     async fn run_single_test(&self, test: &BenchmarkTest) -> Result<BenchmarkResult, String> {
         let start_time = Instant::now();
-        
+
         // Read audio file
-        let audio_data = fs::read(&test.audio_file).await
+        let audio_data = fs::read(&test.audio_file)
+            .await
             .map_err(|e| format!("Failed to read audio file: {}", e))?;
 
-        info(Component::Processing, &format!("📁 Audio file loaded: {} bytes", audio_data.len()));
+        info(
+            Component::Processing,
+            &format!("📁 Audio file loaded: {} bytes", audio_data.len()),
+        );
 
         // For now, we'll run a simple processing queue strategy
         // TODO: Implement different strategies (ring buffer, progressive, etc.)
         let strategy_used = "processing_queue".to_string();
-        
+
         // Simulate transcription (replace with actual transcription call)
         let transcription_start = Instant::now();
-        let transcribed_text = self.run_transcription_strategy(&audio_data, &strategy_used).await?;
+        let transcribed_text = self
+            .run_transcription_strategy(&audio_data, &strategy_used)
+            .await?;
         let transcription_duration = transcription_start.elapsed();
 
         let total_duration = start_time.elapsed();
@@ -178,40 +202,52 @@ impl BenchmarkRunner {
         })
     }
 
-    async fn run_transcription_strategy(&self, _audio_data: &[u8], strategy: &str) -> Result<String, String> {
+    async fn run_transcription_strategy(
+        &self,
+        _audio_data: &[u8],
+        strategy: &str,
+    ) -> Result<String, String> {
         // TODO: Implement actual transcription strategies
         // For now, return a placeholder
-        info(Component::Processing, &format!("🎯 Running transcription strategy: {}", strategy));
-        
+        info(
+            Component::Processing,
+            &format!("🎯 Running transcription strategy: {}", strategy),
+        );
+
         // Simulate processing time
         tokio::time::sleep(Duration::from_millis(100)).await;
-        
+
         Ok("This is a placeholder transcription result".to_string())
     }
 
     fn generate_summary(&self, results: &[BenchmarkResult]) -> BenchmarkSummary {
         let successful_tests = results.iter().filter(|r| r.success).count();
         let failed_tests = results.len() - successful_tests;
-        
+
         let avg_time_to_first_result = if successful_tests > 0 {
-            results.iter()
+            results
+                .iter()
                 .filter(|r| r.success)
                 .map(|r| r.timing_metrics.time_to_first_result_ms as f32)
-                .sum::<f32>() / successful_tests as f32
+                .sum::<f32>()
+                / successful_tests as f32
         } else {
             0.0
         };
 
         let avg_total_time = if successful_tests > 0 {
-            results.iter()
+            results
+                .iter()
                 .filter(|r| r.success)
                 .map(|r| r.timing_metrics.total_transcription_time_ms as f32)
-                .sum::<f32>() / successful_tests as f32
+                .sum::<f32>()
+                / successful_tests as f32
         } else {
             0.0
         };
 
-        let strategies_tested: Vec<String> = results.iter()
+        let strategies_tested: Vec<String> = results
+            .iter()
             .map(|r| r.strategy_used.clone())
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
@@ -221,7 +257,7 @@ impl BenchmarkRunner {
             total_tests: results.len(),
             successful_tests,
             failed_tests,
-            avg_time_to_first_result: avg_time_to_first_result,
+            avg_time_to_first_result,
             avg_total_time,
             strategies_tested,
         }
@@ -229,7 +265,8 @@ impl BenchmarkRunner {
 
     async fn save_report(&self, report: &BenchmarkReport) -> Result<(), String> {
         // Ensure output directory exists
-        tokio::fs::create_dir_all(&self.output_dir).await
+        tokio::fs::create_dir_all(&self.output_dir)
+            .await
             .map_err(|e| format!("Failed to create output directory: {}", e))?;
 
         let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
@@ -239,10 +276,14 @@ impl BenchmarkRunner {
         let json_content = serde_json::to_string_pretty(report)
             .map_err(|e| format!("Failed to serialize report: {}", e))?;
 
-        tokio::fs::write(&filepath, json_content).await
+        tokio::fs::write(&filepath, json_content)
+            .await
             .map_err(|e| format!("Failed to write report file: {}", e))?;
 
-        info(Component::Processing, &format!("📄 Benchmark report saved to: {}", filepath.display()));
+        info(
+            Component::Processing,
+            &format!("📄 Benchmark report saved to: {}", filepath.display()),
+        );
         Ok(())
     }
 }

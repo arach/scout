@@ -4,7 +4,7 @@ mod native_overlay;
 pub use native_overlay::NativeOverlay;
 
 mod app_context;
-pub use app_context::{AppContext, get_active_app_context};
+pub use app_context::{get_active_app_context, AppContext};
 
 #[cfg(target_os = "macos")]
 use std::ffi::c_void;
@@ -37,48 +37,62 @@ impl MacOSOverlay {
         //     let overlay = create_overlay_window();
         //     Self { overlay }
         // }
-        Self { overlay: std::ptr::null_mut() }
+        Self {
+            overlay: std::ptr::null_mut(),
+        }
     }
-    
+
     pub fn show(&self) {
-        if self.overlay.is_null() { return; }
+        if self.overlay.is_null() {
+            return;
+        }
         unsafe {
             show_overlay_window(self.overlay);
         }
     }
-    
+
     // Minimizes overlay to pill state - does NOT completely hide the window
     pub fn minimize(&self) {
-        if self.overlay.is_null() { return; }
+        if self.overlay.is_null() {
+            return;
+        }
         unsafe {
             minimize_overlay_window(self.overlay);
         }
     }
-    
+
     pub fn position_at(&self, x: f64, y: f64) {
-        if self.overlay.is_null() { return; }
+        if self.overlay.is_null() {
+            return;
+        }
         unsafe {
             position_overlay_window(self.overlay, x, y);
         }
     }
-    
+
     pub fn ensure_visible(&self) {
-        if self.overlay.is_null() { return; }
+        if self.overlay.is_null() {
+            return;
+        }
         unsafe {
             ensure_overlay_visible(self.overlay);
         }
     }
-    
+
     pub fn set_position(&self, position: &str) {
-        if self.overlay.is_null() { return; }
+        if self.overlay.is_null() {
+            return;
+        }
         unsafe {
             let c_string = std::ffi::CString::new(position).unwrap();
             set_overlay_position(self.overlay, c_string.as_ptr());
         }
     }
-    
+
     pub fn update_progress(&self, progress_state: &str) {
-        if self.overlay.is_null() { return; }
+        if self.overlay.is_null() {
+            return;
+        }
         unsafe {
             let c_string = std::ffi::CString::new(progress_state).unwrap();
             update_overlay_progress(self.overlay, c_string.as_ptr());
@@ -89,7 +103,9 @@ impl MacOSOverlay {
 #[cfg(target_os = "macos")]
 impl Drop for MacOSOverlay {
     fn drop(&mut self) {
-        if self.overlay.is_null() { return; }
+        if self.overlay.is_null() {
+            return;
+        }
         unsafe {
             destroy_overlay_window(self.overlay);
         }
@@ -107,7 +123,9 @@ pub struct MacOSOverlay;
 
 #[cfg(not(target_os = "macos"))]
 impl MacOSOverlay {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
     pub fn show(&self) {}
     pub fn minimize(&self) {}
     pub fn position_at(&self, _x: f64, _y: f64) {}

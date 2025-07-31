@@ -1,13 +1,13 @@
 use super::{GenerationOptions, LLMEngine, ModelInfo, Token};
+use crate::logger::{info, Component};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use candle_core::{Device, Tensor, DType};
+use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
-use candle_transformers::models::llama::{Config, Cache, Llama};
+use candle_transformers::models::llama::{Cache, Config, Llama};
 use std::path::Path;
 use tokenizers::Tokenizer;
 use tokio::sync::mpsc::{channel, Receiver};
-use crate::logger::{info, Component};
 
 pub struct CandleEngine {
     model: Option<Llama>,
@@ -23,9 +23,12 @@ impl CandleEngine {
         // For now, use CPU to avoid dependency issues
         // TODO: Re-enable Metal support when dependency conflicts are resolved
         let device = Device::Cpu;
-        
-        info(Component::Processing, &format!("Initialized Candle with device: {:?}", device));
-        
+
+        info(
+            Component::Processing,
+            &format!("Initialized Candle with device: {:?}", device),
+        );
+
         Ok(Self {
             model: None,
             tokenizer: None,
@@ -35,23 +38,24 @@ impl CandleEngine {
             cache: None,
         })
     }
-    
+
     async fn load_tinyllama_model(&mut self, model_path: &Path) -> Result<()> {
         info(Component::Processing, "Loading TinyLlama model...");
-        
+
         // Load tokenizer - try both naming conventions
-        let parent_dir = model_path.parent()
+        let parent_dir = model_path
+            .parent()
             .ok_or_else(|| anyhow!("Invalid model path"))?;
-        
+
         let tokenizer_path = if parent_dir.join("tinyllama-1.1b_tokenizer.json").exists() {
             parent_dir.join("tinyllama-1.1b_tokenizer.json")
         } else {
             parent_dir.join("tokenizer.json")
         };
-            
+
         let tokenizer = Tokenizer::from_file(&tokenizer_path)
             .map_err(|e| anyhow!("Failed to load tokenizer: {}", e))?;
-        
+
         // TinyLlama configuration for Candle 0.9
         let config = Config {
             hidden_size: 2048,
@@ -69,15 +73,15 @@ impl CandleEngine {
             tie_word_embeddings: false,
             use_flash_attn: false,
         };
-        
+
         // Load model weights
         let vb = unsafe {
             VarBuilder::from_mmaped_safetensors(&[model_path], DType::F16, &self.device)?
         };
-        
+
         let model = Llama::load(vb, &config)?;
         let cache = Cache::new(false, DType::F16, &config, &self.device)?;
-        
+
         self.model = Some(model);
         self.tokenizer = Some(tokenizer);
         self.config = Some(config.clone());
@@ -88,11 +92,11 @@ impl CandleEngine {
             context_length: config.max_position_embeddings,
             model_type: "llama".to_string(),
         });
-        
+
         info(Component::Processing, "TinyLlama model loaded successfully");
         Ok(())
     }
-    
+
     fn apply_chat_template(&self, prompt: &str) -> String {
         // TinyLlama chat template
         format!(
@@ -109,70 +113,80 @@ impl LLMEngine for CandleEngine {
         // Future: detect model type from config.json
         self.load_tinyllama_model(model_path).await
     }
-    
+
     async fn generate(&self, prompt: &str, options: GenerationOptions) -> Result<String> {
         // Since we need mutable access to cache, we'll create a new one for each generation
         // This is not ideal but works for now. In production, you'd want a better solution.
-        let model = self.model.as_ref()
+        let model = self
+            .model
+            .as_ref()
             .ok_or_else(|| anyhow!("Model not loaded"))?;
-        let tokenizer = self.tokenizer.as_ref()
+        let tokenizer = self
+            .tokenizer
+            .as_ref()
             .ok_or_else(|| anyhow!("Tokenizer not loaded"))?;
-        let config = self.config.as_ref()
+        let config = self
+            .config
+            .as_ref()
             .ok_or_else(|| anyhow!("Config not loaded"))?;
-        
+
         // Apply chat template
         let formatted_prompt = self.apply_chat_template(prompt);
-        
+
         // Tokenize input
-        let tokens = tokenizer.encode(formatted_prompt.as_str(), true)
+        let tokens = tokenizer
+            .encode(formatted_prompt.as_str(), true)
             .map_err(|e| anyhow!("Tokenization failed: {}", e))?;
         let input_ids = tokens.get_ids();
-        
+
         let mut token_ids = input_ids.to_vec();
         let mut generated_text = String::new();
-        
+
         // Create a new cache for this generation
         let mut cache = Cache::new(false, DType::F16, config, &self.device)?;
-        
+
         // Generate tokens
         for idx in 0..options.max_tokens {
-            let input = Tensor::new(token_ids.as_slice(), &self.device)?
-                .unsqueeze(0)?;
-            
+            let input = Tensor::new(token_ids.as_slice(), &self.device)?.unsqueeze(0)?;
+
             let logits = model.forward(&input, idx, &mut cache)?;
             let logits = logits.squeeze(0)?;
-            
+
             // Get last token logits
             let last_logits = logits.get(logits.dims()[0] - 1)?;
-            
+
             // Apply temperature
             let temp_tensor = Tensor::new(&[options.temperature], &self.device)?;
             let scaled_logits = last_logits.div(&temp_tensor)?;
-            
+
             // Sample next token
             let probs = candle_nn::ops::softmax_last_dim(&scaled_logits)?;
             let next_token = sample_token(&probs, options.top_p)?;
-            
+
             // Check for EOS
             if next_token == tokenizer.token_to_id("</s>").unwrap_or(2) {
                 break;
             }
-            
+
             token_ids.push(next_token);
-            
+
             // Decode the new token
             if let Ok(piece) = tokenizer.decode(&[next_token], false) {
                 generated_text.push_str(&piece);
             }
         }
-        
+
         Ok(generated_text.trim().to_string())
     }
-    
-    async fn stream_generate(&self, prompt: &str, options: GenerationOptions) -> Result<Receiver<Token>> {
+
+    async fn stream_generate(
+        &self,
+        prompt: &str,
+        options: GenerationOptions,
+    ) -> Result<Receiver<Token>> {
         // TODO: Implement streaming generation
         let (tx, rx) = channel(100);
-        
+
         // For now, just generate normally and send as one token
         let result = self.generate(prompt, options).await?;
         let token = Token {
@@ -180,18 +194,18 @@ impl LLMEngine for CandleEngine {
             id: 0,
             logprob: None,
         };
-        
+
         tokio::spawn(async move {
             let _ = tx.send(token).await;
         });
-        
+
         Ok(rx)
     }
-    
+
     fn is_loaded(&self) -> bool {
         self.model.is_some() && self.tokenizer.is_some()
     }
-    
+
     fn model_info(&self) -> Option<ModelInfo> {
         self.model_info.clone()
     }
@@ -200,19 +214,16 @@ impl LLMEngine for CandleEngine {
 fn sample_token(probs: &Tensor, top_p: f32) -> Result<u32> {
     // Simple top-p sampling
     let probs_vec: Vec<f32> = probs.to_vec1()?;
-    
+
     // Sort probabilities
-    let mut indexed_probs: Vec<(usize, f32)> = probs_vec
-        .iter()
-        .enumerate()
-        .map(|(i, &p)| (i, p))
-        .collect();
+    let mut indexed_probs: Vec<(usize, f32)> =
+        probs_vec.iter().enumerate().map(|(i, &p)| (i, p)).collect();
     indexed_probs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-    
+
     // Calculate cumulative probability
     let mut cumsum = 0.0;
     let mut cutoff_idx = indexed_probs.len();
-    
+
     for (i, (_, prob)) in indexed_probs.iter().enumerate() {
         cumsum += prob;
         if cumsum >= top_p {
@@ -220,7 +231,7 @@ fn sample_token(probs: &Tensor, top_p: f32) -> Result<u32> {
             break;
         }
     }
-    
+
     // Sample from top-p tokens
     let top_tokens = &indexed_probs[..cutoff_idx];
     let selected_idx = if top_tokens.is_empty() {
@@ -230,6 +241,6 @@ fn sample_token(probs: &Tensor, top_p: f32) -> Result<u32> {
         // In production, you'd want proper sampling here
         top_tokens[0].0
     };
-    
+
     Ok(selected_idx as u32)
 }

@@ -1,5 +1,5 @@
-use sqlx::{migrate::MigrateDatabase, Pool, Sqlite, SqlitePool, Row};
 use serde::{Deserialize, Serialize};
+use sqlx::{migrate::MigrateDatabase, Pool, Row, Sqlite, SqlitePool};
 use std::path::Path;
 
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
@@ -110,7 +110,6 @@ impl Database {
             .await
             .map_err(|e| format!("Failed to connect to database: {}", e))?;
 
-        
         // Create tables and run migrations
         sqlx::query(
             r#"
@@ -123,10 +122,10 @@ impl Database {
                 audio_path TEXT,
                 file_size INTEGER
             );
-            
+
             CREATE INDEX IF NOT EXISTS idx_transcripts_created_at ON transcripts(created_at);
             CREATE INDEX IF NOT EXISTS idx_transcripts_text ON transcripts(text);
-            "#
+            "#,
         )
         .execute(&pool)
         .await
@@ -145,7 +144,7 @@ impl Database {
 
         // Check if performance_metrics table exists and handle migration properly
         let table_exists = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='performance_metrics'"
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='performance_metrics'",
         )
         .fetch_one(&pool)
         .await
@@ -180,7 +179,7 @@ impl Database {
                     metadata TEXT,
                     FOREIGN KEY (transcript_id) REFERENCES transcripts(id) ON DELETE CASCADE
                 );
-                "#
+                "#,
             )
             .execute(&pool)
             .await
@@ -196,12 +195,14 @@ impl Database {
 
             if column_exists == 0 {
                 // Add missing column
-                sqlx::query("ALTER TABLE performance_metrics ADD COLUMN transcription_strategy TEXT")
-                    .execute(&pool)
-                    .await
-                    .map_err(|e| format!("Failed to add transcription_strategy column: {}", e))?;
+                sqlx::query(
+                    "ALTER TABLE performance_metrics ADD COLUMN transcription_strategy TEXT",
+                )
+                .execute(&pool)
+                .await
+                .map_err(|e| format!("Failed to add transcription_strategy column: {}", e))?;
             }
-            
+
             // Add new audio metadata columns if they don't exist
             let audio_columns = [
                 ("audio_device_name", "TEXT"),
@@ -213,7 +214,7 @@ impl Database {
                 ("requested_sample_rate", "INTEGER"),
                 ("requested_channels", "INTEGER"),
             ];
-            
+
             for (column_name, column_type) in &audio_columns {
                 let column_check = sqlx::query_scalar::<_, i64>(&format!(
                     "SELECT COUNT(*) FROM pragma_table_info('performance_metrics') WHERE name='{}'",
@@ -222,7 +223,7 @@ impl Database {
                 .fetch_one(&pool)
                 .await
                 .unwrap_or(0);
-                
+
                 if column_check == 0 {
                     let _ = sqlx::query(&format!(
                         "ALTER TABLE performance_metrics ADD COLUMN {} {}",
@@ -267,11 +268,11 @@ impl Database {
                 metadata TEXT,
                 FOREIGN KEY (transcript_id) REFERENCES transcripts(id) ON DELETE CASCADE
             );
-            
+
             CREATE INDEX IF NOT EXISTS idx_llm_outputs_transcript_id ON llm_outputs(transcript_id);
             CREATE INDEX IF NOT EXISTS idx_llm_outputs_prompt_id ON llm_outputs(prompt_id);
             CREATE INDEX IF NOT EXISTS idx_llm_outputs_created_at ON llm_outputs(created_at);
-            
+
             CREATE TABLE IF NOT EXISTS llm_prompt_templates (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -283,7 +284,7 @@ impl Database {
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-            "#
+            "#,
         )
         .execute(&pool)
         .await
@@ -332,7 +333,7 @@ impl Database {
                 FOREIGN KEY (transcript_id) REFERENCES transcripts(id) ON DELETE CASCADE,
                 FOREIGN KEY (performance_metric_id) REFERENCES performance_metrics(id) ON DELETE CASCADE
             );
-            
+
             CREATE INDEX IF NOT EXISTS idx_audio_mismatches_transcript ON audio_config_mismatches(transcript_id);
             CREATE INDEX IF NOT EXISTS idx_audio_mismatches_type ON audio_config_mismatches(mismatch_type);
             "#
@@ -356,7 +357,7 @@ impl Database {
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (transcript_id) REFERENCES transcripts(id) ON DELETE CASCADE
             );
-            "#
+            "#,
         )
         .execute(&pool)
         .await
@@ -379,11 +380,11 @@ impl Database {
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-            
+
             CREATE INDEX IF NOT EXISTS idx_dictionary_original ON dictionary_entries(original_text);
             CREATE INDEX IF NOT EXISTS idx_dictionary_enabled ON dictionary_entries(enabled);
             CREATE INDEX IF NOT EXISTS idx_dictionary_category ON dictionary_entries(category);
-            
+
             CREATE TABLE IF NOT EXISTS dictionary_match_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 transcript_id INTEGER NOT NULL,
@@ -396,7 +397,7 @@ impl Database {
                 FOREIGN KEY (transcript_id) REFERENCES transcripts(id) ON DELETE CASCADE,
                 FOREIGN KEY (entry_id) REFERENCES dictionary_entries(id) ON DELETE CASCADE
             );
-            
+
             CREATE INDEX IF NOT EXISTS idx_match_history_transcript ON dictionary_match_history(transcript_id);
             CREATE INDEX IF NOT EXISTS idx_match_history_entry ON dictionary_match_history(entry_id);
             "#
@@ -432,7 +433,7 @@ impl Database {
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (transcript_id) REFERENCES transcripts(id) ON DELETE CASCADE
             );
-            
+
             CREATE INDEX IF NOT EXISTS idx_performance_timeline_transcript_id ON performance_timeline_events(transcript_id);
             CREATE INDEX IF NOT EXISTS idx_performance_timeline_session_id ON performance_timeline_events(session_id);
             CREATE INDEX IF NOT EXISTS idx_performance_timeline_timestamp ON performance_timeline_events(timestamp);
@@ -461,7 +462,7 @@ impl Database {
             r#"
             INSERT INTO transcripts (text, duration_ms, metadata, audio_path, file_size)
             VALUES (?1, ?2, ?3, ?4, ?5)
-            "#
+            "#,
         )
         .bind(text)
         .bind(duration_ms)
@@ -473,7 +474,7 @@ impl Database {
         .map_err(|e| format!("Failed to save transcript: {}", e))?;
 
         let id = result.last_insert_rowid();
-        
+
         // Fetch the newly created transcript to return it
         self.get_transcript(id)
             .await?
@@ -492,7 +493,7 @@ impl Database {
             r#"
             INSERT INTO transcripts (text, duration_ms, metadata, audio_path, created_at)
             VALUES (?1, ?2, ?3, ?4, ?5)
-            "#
+            "#,
         )
         .bind(text)
         .bind(duration_ms)
@@ -504,13 +505,13 @@ impl Database {
         .map_err(|e| format!("Failed to save transcript with timestamp: {}", e))?;
 
         let id = result.last_insert_rowid();
-        
+
         // Fetch the newly created transcript to return it
         self.get_transcript(id)
             .await?
             .ok_or_else(|| "Failed to fetch newly created transcript".to_string())
     }
-    
+
     pub async fn save_transcript_with_audio_metadata(
         &self,
         text: &str,
@@ -537,7 +538,7 @@ impl Database {
         .map_err(|e| format!("Failed to save transcript with audio metadata: {}", e))?;
 
         let id = result.last_insert_rowid();
-        
+
         // Fetch the newly created transcript to return it
         self.get_transcript(id)
             .await?
@@ -601,7 +602,7 @@ impl Database {
             .execute(&self.pool)
             .await
             .map_err(|e| format!("Failed to delete transcript: {}", e))?;
-        
+
         Ok(())
     }
 
@@ -612,18 +613,21 @@ impl Database {
 
         // Build placeholders for the query
         let placeholders: Vec<String> = ids.iter().map(|_| "?".to_string()).collect();
-        let query = format!("DELETE FROM transcripts WHERE id IN ({})", placeholders.join(", "));
-        
+        let query = format!(
+            "DELETE FROM transcripts WHERE id IN ({})",
+            placeholders.join(", ")
+        );
+
         let mut query_builder = sqlx::query(&query);
         for id in ids {
             query_builder = query_builder.bind(id);
         }
-        
+
         query_builder
             .execute(&self.pool)
             .await
             .map_err(|e| format!("Failed to delete transcripts: {}", e))?;
-        
+
         Ok(())
     }
 
@@ -647,11 +651,11 @@ impl Database {
             INSERT INTO performance_metrics (
                 transcript_id, recording_duration_ms, transcription_time_ms,
                 user_perceived_latency_ms, processing_queue_time_ms, model_used,
-                transcription_strategy, audio_file_size_bytes, audio_format, 
+                transcription_strategy, audio_file_size_bytes, audio_format,
                 success, error_message, metadata
             )
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
-            "#
+            "#,
         )
         .bind(transcript_id)
         .bind(recording_duration_ms)
@@ -671,7 +675,7 @@ impl Database {
 
         Ok(result.last_insert_rowid())
     }
-    
+
     pub async fn save_performance_metrics_with_audio_details(
         &self,
         transcript_id: Option<i64>,
@@ -736,13 +740,16 @@ impl Database {
         Ok(result.last_insert_rowid())
     }
 
-    pub async fn get_recent_performance_metrics(&self, limit: i32) -> Result<Vec<PerformanceMetrics>, String> {
+    pub async fn get_recent_performance_metrics(
+        &self,
+        limit: i32,
+    ) -> Result<Vec<PerformanceMetrics>, String> {
         let metrics = sqlx::query_as::<_, PerformanceMetrics>(
             r#"
             SELECT * FROM performance_metrics
             ORDER BY created_at DESC
             LIMIT ?1
-            "#
+            "#,
         )
         .bind(limit)
         .fetch_all(&self.pool)
@@ -752,14 +759,17 @@ impl Database {
         Ok(metrics)
     }
 
-    pub async fn get_performance_metrics_for_transcript(&self, transcript_id: i64) -> Result<Option<PerformanceMetrics>, String> {
+    pub async fn get_performance_metrics_for_transcript(
+        &self,
+        transcript_id: i64,
+    ) -> Result<Option<PerformanceMetrics>, String> {
         let metrics = sqlx::query_as::<_, PerformanceMetrics>(
             r#"
             SELECT * FROM performance_metrics
             WHERE transcript_id = ?1
             ORDER BY created_at DESC
             LIMIT 1
-            "#
+            "#,
         )
         .bind(transcript_id)
         .fetch_optional(&self.pool)
@@ -770,14 +780,22 @@ impl Database {
     }
 
     // Whisper log methods
-    pub async fn insert_whisper_logs(&self, entries: Vec<(String, Option<i64>, crate::whisper_logger::WhisperLogEntry)>) -> Result<(), String> {
-        let mut tx = self.pool.begin()
+    pub async fn insert_whisper_logs(
+        &self,
+        entries: Vec<(String, Option<i64>, crate::whisper_logger::WhisperLogEntry)>,
+    ) -> Result<(), String> {
+        let mut tx = self
+            .pool
+            .begin()
             .await
             .map_err(|e| format!("Failed to begin transaction: {}", e))?;
 
         for (session_id, transcript_id, entry) in entries {
-            let metadata_json = entry.metadata.map(|m| serde_json::to_string(&m).ok()).flatten();
-            
+            let metadata_json = entry
+                .metadata
+                .map(|m| serde_json::to_string(&m).ok())
+                .flatten();
+
             sqlx::query(
                 r#"
                 INSERT INTO whisper_logs (session_id, transcript_id, timestamp, level, component, message, metadata)
@@ -803,7 +821,11 @@ impl Database {
         Ok(())
     }
 
-    pub async fn get_whisper_logs_for_transcript(&self, transcript_id: i64, limit: Option<i32>) -> Result<Vec<serde_json::Value>, String> {
+    pub async fn get_whisper_logs_for_transcript(
+        &self,
+        transcript_id: i64,
+        limit: Option<i32>,
+    ) -> Result<Vec<serde_json::Value>, String> {
         let query = if let Some(limit) = limit {
             sqlx::query(
                 r#"
@@ -812,7 +834,7 @@ impl Database {
                 WHERE transcript_id = ?1
                 ORDER BY timestamp ASC
                 LIMIT ?2
-                "#
+                "#,
             )
             .bind(transcript_id)
             .bind(limit)
@@ -823,16 +845,16 @@ impl Database {
                 FROM whisper_logs
                 WHERE transcript_id = ?1
                 ORDER BY timestamp ASC
-                "#
+                "#,
             )
             .bind(transcript_id)
         };
-        
+
         let rows = query
             .fetch_all(&self.pool)
             .await
             .map_err(|e| format!("Failed to get whisper logs: {}", e))?;
-        
+
         let logs: Vec<serde_json::Value> = rows.into_iter().map(|row| {
             serde_json::json!({
                 "id": row.get::<i64, _>("id"),
@@ -845,11 +867,15 @@ impl Database {
                 "metadata": row.get::<Option<String>, _>("metadata").and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()),
             })
         }).collect();
-        
+
         Ok(logs)
     }
-    
-    pub async fn get_whisper_logs_for_session(&self, session_id: &str, limit: Option<i32>) -> Result<Vec<serde_json::Value>, String> {
+
+    pub async fn get_whisper_logs_for_session(
+        &self,
+        session_id: &str,
+        limit: Option<i32>,
+    ) -> Result<Vec<serde_json::Value>, String> {
         let query = if let Some(limit) = limit {
             sqlx::query(
                 r#"
@@ -858,7 +884,7 @@ impl Database {
                 WHERE session_id = ?1
                 ORDER BY timestamp DESC
                 LIMIT ?2
-                "#
+                "#,
             )
             .bind(session_id)
             .bind(limit)
@@ -869,7 +895,7 @@ impl Database {
                 FROM whisper_logs
                 WHERE session_id = ?1
                 ORDER BY timestamp DESC
-                "#
+                "#,
             )
             .bind(session_id)
         };
@@ -902,10 +928,12 @@ impl Database {
         session_id: &str,
         events: Vec<(String, String, String, Option<i64>)>, // (timestamp, event_type, details, duration_from_start_ms)
     ) -> Result<(), String> {
-        let mut tx = self.pool.begin()
+        let mut tx = self
+            .pool
+            .begin()
             .await
             .map_err(|e| format!("Failed to begin transaction: {}", e))?;
-        
+
         for (timestamp, event_type, details, duration_from_start_ms) in events {
             sqlx::query(
                 r#"
@@ -923,14 +951,14 @@ impl Database {
             .await
             .map_err(|e| format!("Failed to insert performance event: {}", e))?;
         }
-        
+
         tx.commit()
             .await
             .map_err(|e| format!("Failed to commit transaction: {}", e))?;
-        
+
         Ok(())
     }
-    
+
     // LLM Output methods
     pub async fn save_llm_output(
         &self,
@@ -954,7 +982,7 @@ impl Database {
                 temperature, max_tokens, metadata
             )
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-            "#
+            "#,
         )
         .bind(transcript_id)
         .bind(prompt_id)
@@ -974,13 +1002,16 @@ impl Database {
         Ok(result.last_insert_rowid())
     }
 
-    pub async fn get_llm_outputs_for_transcript(&self, transcript_id: i64) -> Result<Vec<LLMOutput>, String> {
+    pub async fn get_llm_outputs_for_transcript(
+        &self,
+        transcript_id: i64,
+    ) -> Result<Vec<LLMOutput>, String> {
         let outputs = sqlx::query_as::<_, LLMOutput>(
             r#"
             SELECT * FROM llm_outputs
             WHERE transcript_id = ?1
             ORDER BY created_at ASC
-            "#
+            "#,
         )
         .bind(transcript_id)
         .fetch_all(&self.pool)
@@ -995,7 +1026,7 @@ impl Database {
             r#"
             SELECT * FROM llm_prompt_templates
             ORDER BY category, name
-            "#
+            "#,
         )
         .fetch_all(&self.pool)
         .await
@@ -1010,7 +1041,7 @@ impl Database {
             SELECT * FROM llm_prompt_templates
             WHERE enabled = 1
             ORDER BY category, name
-            "#
+            "#,
         )
         .fetch_all(&self.pool)
         .await
@@ -1030,10 +1061,10 @@ impl Database {
     ) -> Result<(), String> {
         sqlx::query(
             r#"
-            INSERT OR REPLACE INTO llm_prompt_templates 
+            INSERT OR REPLACE INTO llm_prompt_templates
             (id, name, description, template, category, enabled, is_custom, updated_at)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, CURRENT_TIMESTAMP)
-            "#
+            "#,
         )
         .bind(id)
         .bind(name)
@@ -1051,9 +1082,9 @@ impl Database {
     pub async fn delete_llm_prompt_template(&self, id: &str) -> Result<(), String> {
         sqlx::query(
             r#"
-            DELETE FROM llm_prompt_templates 
+            DELETE FROM llm_prompt_templates
             WHERE id = ?1 AND is_custom = 1
-            "#
+            "#,
         )
         .bind(id)
         .execute(&self.pool)
@@ -1063,7 +1094,10 @@ impl Database {
         Ok(())
     }
 
-    pub async fn get_performance_timeline_for_transcript(&self, transcript_id: i64) -> Result<Vec<serde_json::Value>, String> {
+    pub async fn get_performance_timeline_for_transcript(
+        &self,
+        transcript_id: i64,
+    ) -> Result<Vec<serde_json::Value>, String> {
         let rows = sqlx::query(
             r#"
             SELECT id, transcript_id, session_id, timestamp, event_type, details, duration_from_start_ms, created_at
@@ -1076,20 +1110,23 @@ impl Database {
         .fetch_all(&self.pool)
         .await
         .map_err(|e| format!("Failed to get performance timeline: {}", e))?;
-        
-        let events: Vec<serde_json::Value> = rows.into_iter().map(|row| {
-            serde_json::json!({
-                "id": row.get::<i64, _>("id"),
-                "transcript_id": row.get::<i64, _>("transcript_id"),
-                "session_id": row.get::<String, _>("session_id"),
-                "timestamp": row.get::<String, _>("timestamp"),
-                "event_type": row.get::<String, _>("event_type"),
-                "details": row.get::<String, _>("details"),
-                "duration_from_start_ms": row.get::<Option<i64>, _>("duration_from_start_ms"),
-                "created_at": row.get::<String, _>("created_at"),
+
+        let events: Vec<serde_json::Value> = rows
+            .into_iter()
+            .map(|row| {
+                serde_json::json!({
+                    "id": row.get::<i64, _>("id"),
+                    "transcript_id": row.get::<i64, _>("transcript_id"),
+                    "session_id": row.get::<String, _>("session_id"),
+                    "timestamp": row.get::<String, _>("timestamp"),
+                    "event_type": row.get::<String, _>("event_type"),
+                    "details": row.get::<String, _>("details"),
+                    "duration_from_start_ms": row.get::<Option<i64>, _>("duration_from_start_ms"),
+                    "created_at": row.get::<String, _>("created_at"),
+                })
             })
-        }).collect();
-        
+            .collect();
+
         Ok(events)
     }
 
@@ -1100,7 +1137,7 @@ impl Database {
             SELECT * FROM dictionary_entries
             WHERE enabled = 1
             ORDER BY original_text
-            "#
+            "#,
         )
         .fetch_all(&self.pool)
         .await
@@ -1114,7 +1151,7 @@ impl Database {
             r#"
             SELECT * FROM dictionary_entries
             ORDER BY category, original_text
-            "#
+            "#,
         )
         .fetch_all(&self.pool)
         .await
@@ -1140,7 +1177,7 @@ impl Database {
                 phonetic_pattern, category, description
             )
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-            "#
+            "#,
         )
         .bind(original_text)
         .bind(replacement_text)
@@ -1170,12 +1207,12 @@ impl Database {
     ) -> Result<(), String> {
         sqlx::query(
             r#"
-            UPDATE dictionary_entries 
+            UPDATE dictionary_entries
             SET original_text = ?1, replacement_text = ?2, match_type = ?3,
                 is_case_sensitive = ?4, phonetic_pattern = ?5, category = ?6,
                 description = ?7, enabled = ?8, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?9
-            "#
+            "#,
         )
         .bind(original_text)
         .bind(replacement_text)
@@ -1206,10 +1243,10 @@ impl Database {
     pub async fn increment_dictionary_usage(&self, entry_id: i64) -> Result<(), String> {
         sqlx::query(
             r#"
-            UPDATE dictionary_entries 
+            UPDATE dictionary_entries
             SET usage_count = usage_count + 1
             WHERE id = ?1
-            "#
+            "#,
         )
         .bind(entry_id)
         .execute(&self.pool)
@@ -1224,7 +1261,9 @@ impl Database {
         transcript_id: i64,
         matches: &[DictionaryMatch],
     ) -> Result<(), String> {
-        let mut tx = self.pool.begin()
+        let mut tx = self
+            .pool
+            .begin()
             .await
             .map_err(|e| format!("Failed to begin transaction: {}", e))?;
 
@@ -1236,7 +1275,7 @@ impl Database {
                     position_start, position_end
                 )
                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                "#
+                "#,
             )
             .bind(transcript_id)
             .bind(m.entry_id)
@@ -1251,10 +1290,10 @@ impl Database {
             // Increment usage count
             sqlx::query(
                 r#"
-                UPDATE dictionary_entries 
+                UPDATE dictionary_entries
                 SET usage_count = usage_count + 1
                 WHERE id = ?1
-                "#
+                "#,
             )
             .bind(m.entry_id)
             .execute(&mut *tx)
@@ -1269,7 +1308,10 @@ impl Database {
         Ok(())
     }
 
-    pub async fn get_dictionary_matches_for_transcript(&self, transcript_id: i64) -> Result<Vec<serde_json::Value>, String> {
+    pub async fn get_dictionary_matches_for_transcript(
+        &self,
+        transcript_id: i64,
+    ) -> Result<Vec<serde_json::Value>, String> {
         let rows = sqlx::query(
             r#"
             SELECT dmh.*, de.original_text, de.replacement_text, de.category
@@ -1277,31 +1319,34 @@ impl Database {
             JOIN dictionary_entries de ON dmh.entry_id = de.id
             WHERE dmh.transcript_id = ?1
             ORDER BY dmh.position_start
-            "#
+            "#,
         )
         .bind(transcript_id)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| format!("Failed to get dictionary matches: {}", e))?;
 
-        let matches: Vec<serde_json::Value> = rows.into_iter().map(|row| {
-            serde_json::json!({
-                "id": row.get::<i64, _>("id"),
-                "entry_id": row.get::<i64, _>("entry_id"),
-                "matched_text": row.get::<String, _>("matched_text"),
-                "replaced_with": row.get::<String, _>("replaced_with"),
-                "position_start": row.get::<i64, _>("position_start"),
-                "position_end": row.get::<i64, _>("position_end"),
-                "original_text": row.get::<String, _>("original_text"),
-                "replacement_text": row.get::<String, _>("replacement_text"),
-                "category": row.get::<Option<String>, _>("category"),
-                "created_at": row.get::<String, _>("created_at"),
+        let matches: Vec<serde_json::Value> = rows
+            .into_iter()
+            .map(|row| {
+                serde_json::json!({
+                    "id": row.get::<i64, _>("id"),
+                    "entry_id": row.get::<i64, _>("entry_id"),
+                    "matched_text": row.get::<String, _>("matched_text"),
+                    "replaced_with": row.get::<String, _>("replaced_with"),
+                    "position_start": row.get::<i64, _>("position_start"),
+                    "position_end": row.get::<i64, _>("position_end"),
+                    "original_text": row.get::<String, _>("original_text"),
+                    "replacement_text": row.get::<String, _>("replacement_text"),
+                    "category": row.get::<Option<String>, _>("category"),
+                    "created_at": row.get::<String, _>("created_at"),
+                })
             })
-        }).collect();
+            .collect();
 
         Ok(matches)
     }
-    
+
     // Audio configuration mismatch methods
     pub async fn save_audio_config_mismatch(
         &self,
@@ -1319,7 +1364,7 @@ impl Database {
                 requested_value, actual_value, potential_impact
             )
             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-            "#
+            "#,
         )
         .bind(transcript_id)
         .bind(performance_metric_id)
@@ -1333,14 +1378,16 @@ impl Database {
 
         Ok(result.last_insert_rowid())
     }
-    
+
     pub async fn save_audio_config_mismatches(
         &self,
         transcript_id: Option<i64>,
         performance_metric_id: Option<i64>,
         mismatches: &[crate::audio::metadata::ConfigMismatch],
     ) -> Result<(), String> {
-        let mut tx = self.pool.begin()
+        let mut tx = self
+            .pool
+            .begin()
             .await
             .map_err(|e| format!("Failed to begin transaction: {}", e))?;
 
@@ -1352,7 +1399,7 @@ impl Database {
                     requested_value, actual_value, potential_impact
                 )
                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                "#
+                "#,
             )
             .bind(transcript_id)
             .bind(performance_metric_id)
@@ -1371,32 +1418,38 @@ impl Database {
 
         Ok(())
     }
-    
-    pub async fn get_audio_config_mismatches_for_transcript(&self, transcript_id: i64) -> Result<Vec<serde_json::Value>, String> {
+
+    pub async fn get_audio_config_mismatches_for_transcript(
+        &self,
+        transcript_id: i64,
+    ) -> Result<Vec<serde_json::Value>, String> {
         let rows = sqlx::query(
             r#"
             SELECT * FROM audio_config_mismatches
             WHERE transcript_id = ?1
             ORDER BY created_at DESC
-            "#
+            "#,
         )
         .bind(transcript_id)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| format!("Failed to get audio config mismatches: {}", e))?;
 
-        let mismatches: Vec<serde_json::Value> = rows.into_iter().map(|row| {
-            serde_json::json!({
-                "id": row.get::<i64, _>("id"),
-                "transcript_id": row.get::<Option<i64>, _>("transcript_id"),
-                "performance_metric_id": row.get::<Option<i64>, _>("performance_metric_id"),
-                "mismatch_type": row.get::<String, _>("mismatch_type"),
-                "requested_value": row.get::<String, _>("requested_value"),
-                "actual_value": row.get::<String, _>("actual_value"),
-                "potential_impact": row.get::<String, _>("potential_impact"),
-                "created_at": row.get::<String, _>("created_at"),
+        let mismatches: Vec<serde_json::Value> = rows
+            .into_iter()
+            .map(|row| {
+                serde_json::json!({
+                    "id": row.get::<i64, _>("id"),
+                    "transcript_id": row.get::<Option<i64>, _>("transcript_id"),
+                    "performance_metric_id": row.get::<Option<i64>, _>("performance_metric_id"),
+                    "mismatch_type": row.get::<String, _>("mismatch_type"),
+                    "requested_value": row.get::<String, _>("requested_value"),
+                    "actual_value": row.get::<String, _>("actual_value"),
+                    "potential_impact": row.get::<String, _>("potential_impact"),
+                    "created_at": row.get::<String, _>("created_at"),
+                })
             })
-        }).collect();
+            .collect();
 
         Ok(mismatches)
     }

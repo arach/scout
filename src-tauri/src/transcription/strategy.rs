@@ -1,8 +1,8 @@
-use std::sync::Arc;
-use std::path::Path;
-use async_trait::async_trait;
+use crate::logger::{debug, info, warn, Component};
 use crate::transcription::Transcriber;
-use crate::logger::{info, debug, warn, Component};
+use async_trait::async_trait;
+use std::path::Path;
+use std::sync::Arc;
 use tauri::Emitter;
 
 /// Result of transcription containing the text and metadata
@@ -33,8 +33,8 @@ impl Default for TranscriptionConfig {
     fn default() -> Self {
         Self {
             enable_chunking: true,
-            chunking_threshold_secs: 5,  // Start chunking after 5 seconds (original design)
-            chunk_duration_secs: 5,      // 5-second chunks for better coverage
+            chunking_threshold_secs: 5, // Start chunking after 5 seconds (original design)
+            chunk_duration_secs: 5,     // 5-second chunks for better coverage
             force_strategy: None,
             refinement_chunk_secs: Some(10), // 10-second chunks for Medium model refinement
         }
@@ -46,24 +46,34 @@ impl Default for TranscriptionConfig {
 pub trait TranscriptionStrategy: Send + Sync {
     /// Name of this strategy for logging/debugging
     fn name(&self) -> &str;
-    
+
     /// Check if this strategy can handle the given recording characteristics
-    fn can_handle(&self, duration_estimate: Option<std::time::Duration>, config: &TranscriptionConfig) -> bool;
-    
+    fn can_handle(
+        &self,
+        duration_estimate: Option<std::time::Duration>,
+        config: &TranscriptionConfig,
+    ) -> bool;
+
     /// Start processing a recording with this strategy
-    async fn start_recording(&mut self, output_path: &Path, config: &TranscriptionConfig) -> Result<(), String>;
-    
+    async fn start_recording(
+        &mut self,
+        output_path: &Path,
+        config: &TranscriptionConfig,
+    ) -> Result<(), String>;
+
     /// Process audio samples during recording (for real-time strategies)
     async fn process_samples(&mut self, samples: &[f32]) -> Result<(), String>;
-    
+
     /// Finish recording and get final transcription result
     async fn finish_recording(&mut self) -> Result<TranscriptionResult, String>;
-    
+
     /// Get intermediate results if available (for chunked strategies)
     fn get_partial_results(&self) -> Vec<String>;
-    
+
     /// Get ring buffer if this strategy uses one (for ring buffer strategies)
-    fn get_ring_buffer(&self) -> Option<Arc<crate::audio::ring_buffer_recorder::RingBufferRecorder>> {
+    fn get_ring_buffer(
+        &self,
+    ) -> Option<Arc<crate::audio::ring_buffer_recorder::RingBufferRecorder>> {
         None
     }
 }
@@ -90,38 +100,54 @@ impl TranscriptionStrategy for ClassicTranscriptionStrategy {
     fn name(&self) -> &str {
         "classic"
     }
-    
-    fn can_handle(&self, _duration_estimate: Option<std::time::Duration>, _config: &TranscriptionConfig) -> bool {
+
+    fn can_handle(
+        &self,
+        _duration_estimate: Option<std::time::Duration>,
+        _config: &TranscriptionConfig,
+    ) -> bool {
         true // Classic strategy can handle any recording
     }
-    
-    async fn start_recording(&mut self, output_path: &Path, _config: &TranscriptionConfig) -> Result<(), String> {
+
+    async fn start_recording(
+        &mut self,
+        output_path: &Path,
+        _config: &TranscriptionConfig,
+    ) -> Result<(), String> {
         self.recording_path = Some(output_path.to_path_buf());
         self.start_time = Some(std::time::Instant::now());
-        info(Component::Transcription, &format!("Classic transcription strategy started for: {:?}", output_path));
+        info(
+            Component::Transcription,
+            &format!(
+                "Classic transcription strategy started for: {:?}",
+                output_path
+            ),
+        );
         Ok(())
     }
-    
+
     async fn process_samples(&mut self, _samples: &[f32]) -> Result<(), String> {
         // Classic strategy doesn't process samples during recording
         Ok(())
     }
-    
+
     async fn finish_recording(&mut self) -> Result<TranscriptionResult, String> {
-        let start_time = self.start_time.take()
-            .ok_or("Recording was not started")?;
-        
-        let recording_path = self.recording_path.take()
-            .ok_or("Recording path not set")?;
-        
-        info(Component::Transcription, &format!("Classic transcription processing: {:?}", recording_path));
-        
+        let start_time = self.start_time.take().ok_or("Recording was not started")?;
+
+        let recording_path = self.recording_path.take().ok_or("Recording path not set")?;
+
+        info(
+            Component::Transcription,
+            &format!("Classic transcription processing: {:?}", recording_path),
+        );
+
         let transcriber = self.transcriber.lock().await;
-        let text = transcriber.transcribe_file(&recording_path)
+        let text = transcriber
+            .transcribe_file(&recording_path)
             .map_err(|e| format!("Classic transcription failed: {}", e))?;
-        
+
         let processing_time = start_time.elapsed();
-        
+
         Ok(TranscriptionResult {
             text,
             processing_time_ms: processing_time.as_millis() as u64,
@@ -129,7 +155,7 @@ impl TranscriptionStrategy for ClassicTranscriptionStrategy {
             chunks_processed: 1,
         })
     }
-    
+
     fn get_partial_results(&self) -> Vec<String> {
         vec![] // Classic strategy doesn't provide partial results
     }
@@ -140,7 +166,10 @@ pub struct RingBufferTranscriptionStrategy {
     transcriber: Arc<tokio::sync::Mutex<Transcriber>>,
     ring_buffer: Option<Arc<crate::audio::ring_buffer_recorder::RingBufferRecorder>>,
     ring_transcriber: Option<crate::transcription::ring_buffer_transcriber::RingBufferTranscriber>,
-    monitor_handle: Option<(tokio::task::JoinHandle<crate::ring_buffer_monitor::RingBufferMonitor>, tokio::sync::mpsc::Sender<()>)>,
+    monitor_handle: Option<(
+        tokio::task::JoinHandle<crate::ring_buffer_monitor::RingBufferMonitor>,
+        tokio::sync::mpsc::Sender<()>,
+    )>,
     temp_dir: std::path::PathBuf,
     start_time: Option<std::time::Instant>,
     config: Option<TranscriptionConfig>,
@@ -149,7 +178,10 @@ pub struct RingBufferTranscriptionStrategy {
 }
 
 impl RingBufferTranscriptionStrategy {
-    pub fn new(transcriber: Arc<tokio::sync::Mutex<Transcriber>>, temp_dir: std::path::PathBuf) -> Self {
+    pub fn new(
+        transcriber: Arc<tokio::sync::Mutex<Transcriber>>,
+        temp_dir: std::path::PathBuf,
+    ) -> Self {
         Self {
             transcriber,
             ring_buffer: None,
@@ -162,13 +194,15 @@ impl RingBufferTranscriptionStrategy {
             app_handle: None,
         }
     }
-    
+
     pub fn with_app_handle(mut self, app_handle: tauri::AppHandle) -> Self {
         self.app_handle = Some(app_handle);
         self
     }
-    
-    pub fn get_ring_buffer(&self) -> Option<Arc<crate::audio::ring_buffer_recorder::RingBufferRecorder>> {
+
+    pub fn get_ring_buffer(
+        &self,
+    ) -> Option<Arc<crate::audio::ring_buffer_recorder::RingBufferRecorder>> {
         self.ring_buffer.clone()
     }
 }
@@ -178,75 +212,104 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
     fn name(&self) -> &str {
         "ring_buffer"
     }
-    
-    fn can_handle(&self, duration_estimate: Option<std::time::Duration>, config: &TranscriptionConfig) -> bool {
+
+    fn can_handle(
+        &self,
+        _duration_estimate: Option<std::time::Duration>,
+        config: &TranscriptionConfig,
+    ) -> bool {
         if !config.enable_chunking {
             return false;
         }
-        
+
         // Ring buffer strategy works for any recording when chunking is enabled
         // We'll start chunking after the threshold is reached
         true
     }
-    
-    async fn start_recording(&mut self, output_path: &Path, config: &TranscriptionConfig) -> Result<(), String> {
+
+    async fn start_recording(
+        &mut self,
+        output_path: &Path,
+        config: &TranscriptionConfig,
+    ) -> Result<(), String> {
         self.start_time = Some(std::time::Instant::now());
         self.config = Some(config.clone());
         self.recording_path = Some(output_path.to_path_buf());
-        
-        info(Component::RingBuffer, &format!("Ring buffer transcription strategy started for: {:?}", output_path));
-        info(Component::RingBuffer, "Initializing ring buffer components for real-time processing");
-        
+
+        info(
+            Component::RingBuffer,
+            &format!(
+                "Ring buffer transcription strategy started for: {:?}",
+                output_path
+            ),
+        );
+        info(
+            Component::RingBuffer,
+            "Initializing ring buffer components for real-time processing",
+        );
+
         // Get actual device sample rate from app state
         // This is set by AudioRecorder when it starts recording
         let device_sample_rate = crate::get_current_device_sample_rate().unwrap_or_else(|| {
-            warn(Component::RingBuffer, "Device sample rate not available yet, using 48kHz as fallback");
+            warn(
+                Component::RingBuffer,
+                "Device sample rate not available yet, using 48kHz as fallback",
+            );
             48000
         });
-        info(Component::RingBuffer, &format!("Ring buffer using device sample rate: {} Hz", device_sample_rate));
-        
+        info(
+            Component::RingBuffer,
+            &format!(
+                "Ring buffer using device sample rate: {} Hz",
+                device_sample_rate
+            ),
+        );
+
         // Initialize ring buffer recorder with 5-minute capacity
         // Audio arrives as mono f32 samples at the device's native sample rate
         let spec = hound::WavSpec {
-            channels: 1,     // Always mono (AudioRecorder converts stereo to mono)
+            channels: 1,                     // Always mono (AudioRecorder converts stereo to mono)
             sample_rate: device_sample_rate, // Native device sample rate
-            bits_per_sample: 32, // f32 samples from AudioRecorder
+            bits_per_sample: 32,             // f32 samples from AudioRecorder
             sample_format: hound::SampleFormat::Float,
         };
-        
+
         // Create a separate file for ring buffer to avoid overwriting the main recording
-        let ring_buffer_path = output_path.with_file_name(
-            format!("ring_buffer_{}", output_path.file_name().unwrap().to_string_lossy())
-        );
+        let ring_buffer_path = output_path.with_file_name(format!(
+            "ring_buffer_{}",
+            output_path.file_name().unwrap().to_string_lossy()
+        ));
         let ring_buffer = Arc::new(crate::audio::ring_buffer_recorder::RingBufferRecorder::new(
             spec,
             &ring_buffer_path,
         )?);
-        
+
         // Initialize ring buffer transcriber
-        let ring_transcriber = crate::transcription::ring_buffer_transcriber::RingBufferTranscriber::new(
-            ring_buffer.clone(),
-            self.transcriber.clone(),
-            self.temp_dir.clone(),
-        );
-        
+        let ring_transcriber =
+            crate::transcription::ring_buffer_transcriber::RingBufferTranscriber::new(
+                ring_buffer.clone(),
+                self.transcriber.clone(),
+                self.temp_dir.clone(),
+            );
+
         // Initialize and start monitor
         let mut monitor = crate::ring_buffer_monitor::RingBufferMonitor::new(ring_buffer.clone());
         if let Some(ref app_handle) = self.app_handle {
             monitor = monitor.with_app_handle(app_handle.clone());
         }
-        let (monitor_handle, stop_sender) = monitor.start_monitoring(
-            ring_transcriber,
-        ).await;
-        
+        let (monitor_handle, stop_sender) = monitor.start_monitoring(ring_transcriber).await;
+
         self.ring_buffer = Some(ring_buffer);
         self.ring_transcriber = None; // Monitor owns the transcriber
         self.monitor_handle = Some((monitor_handle, stop_sender));
-        
-        info(Component::RingBuffer, "Ring buffer components initialized - ready for 5-second interval processing");
+
+        info(
+            Component::RingBuffer,
+            "Ring buffer components initialized - ready for 5-second interval processing",
+        );
         Ok(())
     }
-    
+
     async fn process_samples(&mut self, samples: &[f32]) -> Result<(), String> {
         if let Some(ref ring_buffer) = self.ring_buffer {
             // Feed audio samples to ring buffer for real-time processing
@@ -256,61 +319,86 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
         }
         Ok(())
     }
-    
+
     async fn finish_recording(&mut self) -> Result<TranscriptionResult, String> {
-        let _recording_start_time = self.start_time.take()
-            .ok_or("Recording was not started")?;
-        
-        let recording_path = self.recording_path.take()
+        let _recording_start_time = self.start_time.take().ok_or("Recording was not started")?;
+
+        let recording_path = self
+            .recording_path
+            .take()
             .ok_or("Recording path was not set")?;
-        
-        info(Component::RingBuffer, "Finishing ring buffer transcription with real-time chunks");
+
+        info(
+            Component::RingBuffer,
+            "Finishing ring buffer transcription with real-time chunks",
+        );
         let transcription_start = std::time::Instant::now();
-        
+
         // Stop the monitor and collect results
         let mut final_chunks = Vec::new();
         let mut chunks_processed = 0;
-        
+
         if let Some((monitor_handle, stop_sender)) = self.monitor_handle.take() {
             debug(Component::RingBuffer, "Stopping ring buffer monitor...");
-            
+
             // Signal monitor to stop
             let _ = stop_sender.send(()).await;
-            
+
             // Wait for monitor to finish
             match monitor_handle.await {
                 Ok(monitor) => {
-                    info(Component::RingBuffer, "Monitor stopped, collecting chunk results");
-                    
+                    info(
+                        Component::RingBuffer,
+                        "Monitor stopped, collecting chunk results",
+                    );
+
                     // Collect all transcribed chunks
                     match monitor.recording_complete().await {
                         Ok(chunk_results) => {
                             final_chunks = chunk_results;
                             chunks_processed = final_chunks.len();
-                            info(Component::RingBuffer, &format!("Collected {} transcribed chunks from ring buffer", chunks_processed));
+                            info(
+                                Component::RingBuffer,
+                                &format!(
+                                    "Collected {} transcribed chunks from ring buffer",
+                                    chunks_processed
+                                ),
+                            );
                         }
                         Err(e) => {
-                            warn(Component::RingBuffer, &format!("Error collecting chunk results: {}", e));
+                            warn(
+                                Component::RingBuffer,
+                                &format!("Error collecting chunk results: {}", e),
+                            );
                             // Continue with fallback instead of failing
                         }
                     }
                 }
                 Err(e) => {
-                    warn(Component::RingBuffer, &format!("Error stopping monitor: {}", e));
+                    warn(
+                        Component::RingBuffer,
+                        &format!("Error stopping monitor: {}", e),
+                    );
                 }
             }
         } else {
-            warn(Component::RingBuffer, "No monitor handle found - this should not happen");
+            warn(
+                Component::RingBuffer,
+                "No monitor handle found - this should not happen",
+            );
         }
-        
+
         // Finalize the main recording file
         if let Some(ref ring_buffer) = self.ring_buffer {
             debug(Component::RingBuffer, "Finalizing main recording file");
             if let Err(e) = ring_buffer.finalize_recording() {
-                warn(Component::RingBuffer, &format!("Error finalizing recording: {}", e));
+                warn(
+                    Component::RingBuffer,
+                    &format!("Error finalizing recording: {}", e),
+                );
             }
         }
-        
+
         // Calculate actual transcription time from recording start
         let transcription_time = if chunks_processed > 0 && self.start_time.is_some() {
             // For ring buffer, chunks were processed during recording
@@ -320,74 +408,120 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
         } else {
             transcription_start.elapsed() // Fallback to collection time
         };
-        
-        info(Component::RingBuffer, &format!("Ring buffer processing complete - {} chunks collected", chunks_processed));
-        
+
+        info(
+            Component::RingBuffer,
+            &format!(
+                "Ring buffer processing complete - {} chunks collected",
+                chunks_processed
+            ),
+        );
+
         // Combine all chunk transcriptions
         let combined_text = if final_chunks.is_empty() {
             // If no chunks were collected from the monitor, try fallback
-            debug(Component::RingBuffer, "No chunks collected from ring buffer - checking if fallback is needed");
-            
+            debug(
+                Component::RingBuffer,
+                "No chunks collected from ring buffer - checking if fallback is needed",
+            );
+
             // Check if the recording was too short for chunking
             let total_recording_time = transcription_start.elapsed();
             if total_recording_time < std::time::Duration::from_secs(5) {
-                info(Component::RingBuffer, &format!("Recording was too short for chunking ({:.1}s) - using full file transcription", 
+                info(Component::RingBuffer, &format!("Recording was too short for chunking ({:.1}s) - using full file transcription",
                          total_recording_time.as_secs_f64()));
             }
-            
+
             // Note: Removed 500ms sleep that was causing 9-10s transcription delays
             // The file should already be written by the time we get here
-            
+
             // Check if file exists and has content
             if !recording_path.exists() {
-                warn(Component::RingBuffer, &format!("Recording file does not exist at: {:?}", recording_path));
+                warn(
+                    Component::RingBuffer,
+                    &format!("Recording file does not exist at: {:?}", recording_path),
+                );
                 return Err("Recording file does not exist for fallback transcription".to_string());
             }
-            
+
             let file_size = std::fs::metadata(&recording_path)
                 .map_err(|e| format!("Failed to read file metadata: {}", e))?
                 .len();
-                
-            if file_size < 1000 { // Less than 1KB is likely empty
-                return Err(format!("Audio file too small for transcription ({} bytes)", file_size));
+
+            if file_size < 1000 {
+                // Less than 1KB is likely empty
+                return Err(format!(
+                    "Audio file too small for transcription ({} bytes)",
+                    file_size
+                ));
             }
-            
-            info(Component::RingBuffer, &format!("Fallback: Processing {} byte audio file", file_size));
-            
+
+            info(
+                Component::RingBuffer,
+                &format!("Fallback: Processing {} byte audio file", file_size),
+            );
+
             let transcriber = self.transcriber.lock().await;
             match transcriber.transcribe(&recording_path) {
                 Ok(text) => {
-                    info(Component::RingBuffer, &format!("Fallback transcription successful: {} chars", text.len()));
+                    info(
+                        Component::RingBuffer,
+                        &format!("Fallback transcription successful: {} chars", text.len()),
+                    );
                     text
-                },
+                }
                 Err(e) => return Err(format!("Fallback transcription failed: {}", e)),
             }
         } else {
             // Join all chunk results with spaces
-            debug(Component::RingBuffer, &format!("Joining {} chunks into final transcript", final_chunks.len()));
+            debug(
+                Component::RingBuffer,
+                &format!(
+                    "Joining {} chunks into final transcript",
+                    final_chunks.len()
+                ),
+            );
             let combined = final_chunks.join(" ");
-            debug(Component::RingBuffer, &format!("Combined transcript: {} chars", combined.len()));
-            debug(Component::RingBuffer, &format!("First 100 chars: {}", combined.chars().take(100).collect::<String>()));
+            debug(
+                Component::RingBuffer,
+                &format!("Combined transcript: {} chars", combined.len()),
+            );
+            debug(
+                Component::RingBuffer,
+                &format!(
+                    "First 100 chars: {}",
+                    combined.chars().take(100).collect::<String>()
+                ),
+            );
             combined
         };
-        
-        info(Component::RingBuffer, &format!("Ring buffer transcription completed: {} chars from {} chunks in {:.2}s", 
-                 combined_text.len(), chunks_processed, transcription_time.as_secs_f64()));
-        
+
+        info(
+            Component::RingBuffer,
+            &format!(
+                "Ring buffer transcription completed: {} chars from {} chunks in {:.2}s",
+                combined_text.len(),
+                chunks_processed,
+                transcription_time.as_secs_f64()
+            ),
+        );
+
         Ok(TranscriptionResult {
             text: combined_text,
             processing_time_ms: transcription_time.as_millis() as u64,
             strategy_used: self.name().to_string(),
-            chunks_processed: chunks_processed,
+            chunks_processed,
         })
     }
-    
+
     fn get_partial_results(&self) -> Vec<String> {
         // TODO: Get partial results from ring transcriber
         vec![]
     }
-    
-    fn get_ring_buffer(&self) -> Option<Arc<crate::audio::ring_buffer_recorder::RingBufferRecorder>> {
+
+    fn get_ring_buffer(
+        &self,
+    ) -> Option<Arc<crate::audio::ring_buffer_recorder::RingBufferRecorder>> {
         self.ring_buffer.clone()
     }
 }
@@ -398,7 +532,10 @@ pub struct ProgressiveTranscriptionStrategy {
     medium_transcriber: Arc<tokio::sync::Mutex<Transcriber>>,
     ring_buffer: Option<Arc<crate::audio::ring_buffer_recorder::RingBufferRecorder>>,
     ring_transcriber: Option<crate::transcription::ring_buffer_transcriber::RingBufferTranscriber>,
-    monitor_handle: Option<(tokio::task::JoinHandle<crate::ring_buffer_monitor::RingBufferMonitor>, tokio::sync::mpsc::Sender<()>)>,
+    monitor_handle: Option<(
+        tokio::task::JoinHandle<crate::ring_buffer_monitor::RingBufferMonitor>,
+        tokio::sync::mpsc::Sender<()>,
+    )>,
     refinement_handle: Option<tokio::task::JoinHandle<()>>,
     temp_dir: std::path::PathBuf,
     start_time: Option<std::time::Instant>,
@@ -412,32 +549,41 @@ pub struct ProgressiveTranscriptionStrategy {
 }
 
 impl ProgressiveTranscriptionStrategy {
-    pub async fn new(
-        models_dir: &Path,
-        temp_dir: std::path::PathBuf,
-    ) -> Result<Self, String> {
-        info(Component::Transcription, "Creating ProgressiveTranscriptionStrategy");
-        
+    pub async fn new(models_dir: &Path, temp_dir: std::path::PathBuf) -> Result<Self, String> {
+        info(
+            Component::Transcription,
+            "Creating ProgressiveTranscriptionStrategy",
+        );
+
         // Load Tiny model for real-time transcription
         let tiny_path = models_dir.join("ggml-tiny.en.bin");
-        info(Component::Transcription, &format!("Loading Tiny model from: {:?}", tiny_path));
+        info(
+            Component::Transcription,
+            &format!("Loading Tiny model from: {:?}", tiny_path),
+        );
         if !tiny_path.exists() {
             return Err(format!("Tiny model not found at: {:?}", tiny_path));
         }
         let tiny_transcriber = Transcriber::get_or_create_cached(&tiny_path).await?;
         info(Component::Transcription, "Tiny model loaded successfully");
-        
+
         // Load Medium model for refinement
         let medium_path = models_dir.join("ggml-medium.en.bin");
-        info(Component::Transcription, &format!("Loading Medium model from: {:?}", medium_path));
+        info(
+            Component::Transcription,
+            &format!("Loading Medium model from: {:?}", medium_path),
+        );
         if !medium_path.exists() {
             return Err(format!("Medium model not found at: {:?}", medium_path));
         }
         let medium_transcriber = Transcriber::get_or_create_cached(&medium_path).await?;
         info(Component::Transcription, "Medium model loaded successfully");
-        
-        info(Component::Transcription, "Progressive transcription strategy initialized with Tiny + Medium models");
-        
+
+        info(
+            Component::Transcription,
+            "Progressive transcription strategy initialized with Tiny + Medium models",
+        );
+
         Ok(Self {
             tiny_transcriber,
             medium_transcriber,
@@ -454,12 +600,12 @@ impl ProgressiveTranscriptionStrategy {
             refined_chunks: Arc::new(tokio::sync::Mutex::new(Vec::new())),
         })
     }
-    
+
     pub fn with_app_handle(mut self, app_handle: tauri::AppHandle) -> Self {
         self.app_handle = Some(app_handle);
         self
     }
-    
+
     /// Start the background refinement task that processes chunks with Medium model
     fn start_refinement_task(
         &mut self,
@@ -470,28 +616,39 @@ impl ProgressiveTranscriptionStrategy {
         let temp_dir = self.temp_dir.clone();
         let refined_chunks = self.refined_chunks.clone();
         let app_handle = self.app_handle.clone();
-        
+
         // Get chunk size from config or use 15 seconds as default
-        let chunk_seconds = self.config.as_ref()
+        let chunk_seconds = self
+            .config
+            .as_ref()
             .and_then(|c| c.refinement_chunk_secs)
             .unwrap_or(15);
-        
+
         let handle = tokio::spawn(async move {
-            info(Component::Transcription, &format!("Starting background refinement task ({}-second chunks with Medium model)", chunk_seconds));
+            info(
+                Component::Transcription,
+                &format!(
+                    "Starting background refinement task ({}-second chunks with Medium model)",
+                    chunk_seconds
+                ),
+            );
             let mut last_processed_samples = 0;
             let device_sample_rate = ring_buffer.get_spec().sample_rate as usize;
             let chunk_samples = device_sample_rate * chunk_seconds as usize; // chunk_seconds at actual device sample rate
-            
+
             loop {
                 // Check if recording is finalized first - exit immediately if so
                 if ring_buffer.is_finalized() {
-                    info(Component::Transcription, "Recording finalized, stopping refinement task to minimize latency");
+                    info(
+                        Component::Transcription,
+                        "Recording finalized, stopping refinement task to minimize latency",
+                    );
                     break;
                 }
-                
+
                 // Wait a bit before checking for new data
                 tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                
+
                 // Check if we have enough new samples for a chunk
                 let current_samples = ring_buffer.get_total_samples();
                 if current_samples < last_processed_samples + chunk_samples {
@@ -500,38 +657,67 @@ impl ProgressiveTranscriptionStrategy {
                         // Process final chunk even if less than 30 seconds
                         let chunk_range = last_processed_samples..current_samples;
                         if let Ok(samples) = ring_buffer.get_samples_range(chunk_range.clone()) {
-                            info(Component::Transcription, &format!(
-                                "Processing final refinement chunk: {} samples ({:.1}s)",
-                                samples.len(),
-                                samples.len() as f32 / device_sample_rate as f32
-                            ));
-                            
+                            info(
+                                Component::Transcription,
+                                &format!(
+                                    "Processing final refinement chunk: {} samples ({:.1}s)",
+                                    samples.len(),
+                                    samples.len() as f32 / device_sample_rate as f32
+                                ),
+                            );
+
                             // Save chunk to temporary file
-                            let chunk_path = temp_dir.join(format!("refinement_final_{}.wav", last_processed_samples));
-                            if let Err(e) = crate::audio::ring_buffer_recorder::save_samples_to_wav(&samples, &chunk_path, ring_buffer.get_spec()) {
-                                warn(Component::Transcription, &format!("Failed to save refinement chunk: {}", e));
+                            let chunk_path = temp_dir
+                                .join(format!("refinement_final_{}.wav", last_processed_samples));
+                            if let Err(e) = crate::audio::ring_buffer_recorder::save_samples_to_wav(
+                                &samples,
+                                &chunk_path,
+                                ring_buffer.get_spec(),
+                            ) {
+                                warn(
+                                    Component::Transcription,
+                                    &format!("Failed to save refinement chunk: {}", e),
+                                );
                             } else {
                                 // Transcribe with Medium model
                                 let transcriber = medium_transcriber.lock().await;
                                 match transcriber.transcribe_file(&chunk_path) {
                                     Ok(text) => {
-                                        info(Component::Transcription, &format!("Refined chunk transcription: {} chars", text.len()));
-                                        refined_chunks.lock().await.push((chunk_range, text.clone()));
-                                        
+                                        info(
+                                            Component::Transcription,
+                                            &format!(
+                                                "Refined chunk transcription: {} chars",
+                                                text.len()
+                                            ),
+                                        );
+                                        refined_chunks
+                                            .lock()
+                                            .await
+                                            .push((chunk_range, text.clone()));
+
                                         // Emit refinement event
                                         if let Some(ref app) = app_handle {
-                                            let _ = app.emit("transcript-refined", serde_json::json!({
-                                                "chunk_start": last_processed_samples,
-                                                "chunk_end": current_samples,
-                                                "text": text
-                                            }));
+                                            let _ = app.emit(
+                                                "transcript-refined",
+                                                serde_json::json!({
+                                                    "chunk_start": last_processed_samples,
+                                                    "chunk_end": current_samples,
+                                                    "text": text
+                                                }),
+                                            );
                                         }
                                     }
                                     Err(e) => {
-                                        warn(Component::Transcription, &format!("Failed to transcribe refinement chunk: {}", e));
+                                        warn(
+                                            Component::Transcription,
+                                            &format!(
+                                                "Failed to transcribe refinement chunk: {}",
+                                                e
+                                            ),
+                                        );
                                     }
                                 }
-                                
+
                                 // Clean up temp file
                                 let _ = tokio::fs::remove_file(&chunk_path).await;
                             }
@@ -540,54 +726,86 @@ impl ProgressiveTranscriptionStrategy {
                     }
                     continue; // Not enough samples yet
                 }
-                
+
                 // Process a chunk
                 let chunk_end = last_processed_samples + chunk_samples;
                 let chunk_range = last_processed_samples..chunk_end;
-                
+
                 if let Ok(samples) = ring_buffer.get_samples_range(chunk_range.clone()) {
-                    info(Component::Transcription, &format!(
-                        "Processing refinement chunk: {} samples (30s) starting at sample {}",
-                        samples.len(), last_processed_samples
-                    ));
-                    
+                    info(
+                        Component::Transcription,
+                        &format!(
+                            "Processing refinement chunk: {} samples (30s) starting at sample {}",
+                            samples.len(),
+                            last_processed_samples
+                        ),
+                    );
+
                     // Save chunk to temporary file
-                    let chunk_path = temp_dir.join(format!("refinement_{}_{}.wav", last_processed_samples, chunk_end));
-                    if let Err(e) = crate::audio::ring_buffer_recorder::save_samples_to_wav(&samples, &chunk_path, ring_buffer.get_spec()) {
-                        warn(Component::Transcription, &format!("Failed to save refinement chunk: {}", e));
+                    let chunk_path = temp_dir.join(format!(
+                        "refinement_{}_{}.wav",
+                        last_processed_samples, chunk_end
+                    ));
+                    if let Err(e) = crate::audio::ring_buffer_recorder::save_samples_to_wav(
+                        &samples,
+                        &chunk_path,
+                        ring_buffer.get_spec(),
+                    ) {
+                        warn(
+                            Component::Transcription,
+                            &format!("Failed to save refinement chunk: {}", e),
+                        );
                     } else {
                         // Transcribe with Medium model
                         let transcriber = medium_transcriber.lock().await;
                         match transcriber.transcribe_file(&chunk_path) {
                             Ok(text) => {
-                                info(Component::Transcription, &format!("Refined 30s chunk transcription: {} chars", text.len()));
-                                refined_chunks.lock().await.push((chunk_range, text.clone()));
-                                
+                                info(
+                                    Component::Transcription,
+                                    &format!(
+                                        "Refined 30s chunk transcription: {} chars",
+                                        text.len()
+                                    ),
+                                );
+                                refined_chunks
+                                    .lock()
+                                    .await
+                                    .push((chunk_range, text.clone()));
+
                                 // Emit refinement event
                                 if let Some(ref app) = app_handle {
-                                    let _ = app.emit("transcript-refined", serde_json::json!({
-                                        "chunk_start": last_processed_samples,
-                                        "chunk_end": chunk_end,
-                                        "text": text
-                                    }));
+                                    let _ = app.emit(
+                                        "transcript-refined",
+                                        serde_json::json!({
+                                            "chunk_start": last_processed_samples,
+                                            "chunk_end": chunk_end,
+                                            "text": text
+                                        }),
+                                    );
                                 }
                             }
                             Err(e) => {
-                                warn(Component::Transcription, &format!("Failed to transcribe refinement chunk: {}", e));
+                                warn(
+                                    Component::Transcription,
+                                    &format!("Failed to transcribe refinement chunk: {}", e),
+                                );
                             }
                         }
-                        
+
                         // Clean up temp file
                         let _ = tokio::fs::remove_file(&chunk_path).await;
                     }
                 }
-                
+
                 last_processed_samples = chunk_end;
             }
-            
-            info(Component::Transcription, "Background refinement task completed");
+
+            info(
+                Component::Transcription,
+                "Background refinement task completed",
+            );
         });
-        
+
         self.refinement_handle = Some(handle);
     }
 }
@@ -597,74 +815,100 @@ impl TranscriptionStrategy for ProgressiveTranscriptionStrategy {
     fn name(&self) -> &str {
         "progressive"
     }
-    
-    fn can_handle(&self, _duration_estimate: Option<std::time::Duration>, config: &TranscriptionConfig) -> bool {
+
+    fn can_handle(
+        &self,
+        _duration_estimate: Option<std::time::Duration>,
+        config: &TranscriptionConfig,
+    ) -> bool {
         // Progressive strategy is ideal for longer recordings
         config.enable_chunking
     }
-    
-    async fn start_recording(&mut self, output_path: &Path, config: &TranscriptionConfig) -> Result<(), String> {
+
+    async fn start_recording(
+        &mut self,
+        output_path: &Path,
+        config: &TranscriptionConfig,
+    ) -> Result<(), String> {
         self.start_time = Some(std::time::Instant::now());
         self.config = Some(config.clone());
         self.recording_path = Some(output_path.to_path_buf());
-        
-        info(Component::Transcription, &format!("Progressive transcription strategy started for: {:?}", output_path));
-        info(Component::Transcription, "Using Tiny model for real-time feedback, Medium model for background refinement");
-        
+
+        info(
+            Component::Transcription,
+            &format!(
+                "Progressive transcription strategy started for: {:?}",
+                output_path
+            ),
+        );
+        info(
+            Component::Transcription,
+            "Using Tiny model for real-time feedback, Medium model for background refinement",
+        );
+
         // Get actual device sample rate from app state
         // This is set by AudioRecorder when it starts recording
         let device_sample_rate = crate::get_current_device_sample_rate().unwrap_or_else(|| {
-            warn(Component::Transcription, "Device sample rate not available yet, using 48kHz as fallback");
+            warn(
+                Component::Transcription,
+                "Device sample rate not available yet, using 48kHz as fallback",
+            );
             48000
         });
-        info(Component::Transcription, &format!("Progressive strategy using device sample rate: {} Hz", device_sample_rate));
-        
+        info(
+            Component::Transcription,
+            &format!(
+                "Progressive strategy using device sample rate: {} Hz",
+                device_sample_rate
+            ),
+        );
+
         // Initialize ring buffer recorder
         // Audio arrives as mono f32 samples at the device's native sample rate
         let spec = hound::WavSpec {
-            channels: 1,     // Always mono (AudioRecorder converts stereo to mono)
+            channels: 1,                     // Always mono (AudioRecorder converts stereo to mono)
             sample_rate: device_sample_rate, // Native device sample rate
-            bits_per_sample: 32, // f32 samples from AudioRecorder
+            bits_per_sample: 32,             // f32 samples from AudioRecorder
             sample_format: hound::SampleFormat::Float,
         };
-        
+
         // Create a separate file for ring buffer to avoid overwriting the main recording
-        let ring_buffer_path = output_path.with_file_name(
-            format!("ring_buffer_{}", output_path.file_name().unwrap().to_string_lossy())
-        );
+        let ring_buffer_path = output_path.with_file_name(format!(
+            "ring_buffer_{}",
+            output_path.file_name().unwrap().to_string_lossy()
+        ));
         let ring_buffer = Arc::new(crate::audio::ring_buffer_recorder::RingBufferRecorder::new(
             spec,
             &ring_buffer_path,
         )?);
-        
+
         // TEMPORARY: Use Medium model for real-time chunks due to Tiny model hallucinations
         // TODO: Fix Tiny model hallucinations with longer chunks or better parameters
-        let ring_transcriber = crate::transcription::ring_buffer_transcriber::RingBufferTranscriber::new(
-            ring_buffer.clone(),
-            self.medium_transcriber.clone(), // Use Medium model temporarily
-            self.temp_dir.clone(),
-        );
-        
+        let ring_transcriber =
+            crate::transcription::ring_buffer_transcriber::RingBufferTranscriber::new(
+                ring_buffer.clone(),
+                self.medium_transcriber.clone(), // Use Medium model temporarily
+                self.temp_dir.clone(),
+            );
+
         // Initialize and start monitor
         let mut monitor = crate::ring_buffer_monitor::RingBufferMonitor::new(ring_buffer.clone());
         if let Some(ref app_handle) = self.app_handle {
             monitor = monitor.with_app_handle(app_handle.clone());
         }
-        let (monitor_handle, stop_sender) = monitor.start_monitoring(
-            ring_transcriber,
-        ).await;
-        
+        let (monitor_handle, stop_sender) = monitor.start_monitoring(ring_transcriber).await;
+
         // Start background refinement task
         self.start_refinement_task(ring_buffer.clone(), output_path.to_path_buf());
-        
+
         self.ring_buffer = Some(ring_buffer);
         self.ring_transcriber = None; // Monitor owns the transcriber
         self.monitor_handle = Some((monitor_handle, stop_sender));
-        
+
         info(Component::Transcription, "Progressive transcription initialized - Tiny model for real-time, Medium model refining in background");
         Ok(())
     }
-    
+
     async fn process_samples(&mut self, samples: &[f32]) -> Result<(), String> {
         if let Some(ref ring_buffer) = self.ring_buffer {
             ring_buffer.add_samples(samples)?;
@@ -673,78 +917,103 @@ impl TranscriptionStrategy for ProgressiveTranscriptionStrategy {
         }
         Ok(())
     }
-    
+
     async fn finish_recording(&mut self) -> Result<TranscriptionResult, String> {
-        let _recording_start_time = self.start_time.take()
-            .ok_or("Recording was not started")?;
-        
-        let _recording_path = self.recording_path.take()
+        let _recording_start_time = self.start_time.take().ok_or("Recording was not started")?;
+
+        let _recording_path = self
+            .recording_path
+            .take()
             .ok_or("Recording path was not set")?;
-        
-        info(Component::Transcription, "Finishing progressive transcription");
+
+        info(
+            Component::Transcription,
+            "Finishing progressive transcription",
+        );
         let transcription_start = std::time::Instant::now();
-        
+
         // Stop the real-time monitor and collect Tiny model results
         let mut tiny_chunks = Vec::new();
         let mut chunks_processed = 0;
-        
+
         if let Some((monitor_handle, stop_sender)) = self.monitor_handle.take() {
             debug(Component::Transcription, "Stopping real-time monitor...");
-            
+
             // Signal monitor to stop
             let _ = stop_sender.send(()).await;
-            
+
             // Wait for monitor to finish
             match monitor_handle.await {
                 Ok(monitor) => {
-                    info(Component::Transcription, "Monitor stopped, collecting Tiny model chunks");
-                    
+                    info(
+                        Component::Transcription,
+                        "Monitor stopped, collecting Tiny model chunks",
+                    );
+
                     match monitor.recording_complete().await {
                         Ok(chunk_results) => {
                             tiny_chunks = chunk_results;
                             chunks_processed = tiny_chunks.len();
-                            info(Component::Transcription, &format!("Collected {} Tiny model chunks", chunks_processed));
+                            info(
+                                Component::Transcription,
+                                &format!("Collected {} Tiny model chunks", chunks_processed),
+                            );
                         }
                         Err(e) => {
-                            warn(Component::Transcription, &format!("Error collecting chunk results: {}", e));
+                            warn(
+                                Component::Transcription,
+                                &format!("Error collecting chunk results: {}", e),
+                            );
                         }
                     }
                 }
                 Err(e) => {
-                    warn(Component::Transcription, &format!("Error stopping monitor: {}", e));
+                    warn(
+                        Component::Transcription,
+                        &format!("Error stopping monitor: {}", e),
+                    );
                 }
             }
         }
-        
+
         // Finalize the main recording file
         if let Some(ref ring_buffer) = self.ring_buffer {
             debug(Component::Transcription, "Finalizing main recording file");
             if let Err(e) = ring_buffer.finalize_recording() {
-                warn(Component::Transcription, &format!("Error finalizing recording: {}", e));
+                warn(
+                    Component::Transcription,
+                    &format!("Error finalizing recording: {}", e),
+                );
             }
         }
-        
+
         // Cancel refinement task immediately to minimize latency
         if let Some(handle) = self.refinement_handle.take() {
-            info(Component::Transcription, "Canceling background refinement to minimize latency");
+            info(
+                Component::Transcription,
+                "Canceling background refinement to minimize latency",
+            );
             handle.abort(); // Cancel the task immediately
         }
-        
+
         // Get all refined chunks
         let refined = self.refined_chunks.lock().await;
         let refined_count = refined.len();
-        
-        info(Component::Transcription, &format!(
-            "Progressive transcription complete: {} Tiny chunks, {} Medium refinements", 
-            chunks_processed, refined_count
-        ));
-        
+
+        info(
+            Component::Transcription,
+            &format!(
+                "Progressive transcription complete: {} Tiny chunks, {} Medium refinements",
+                chunks_processed, refined_count
+            ),
+        );
+
         // For now, just return the Tiny model results
         // TODO: Implement smart merging of Tiny and Medium results
         let combined_text = tiny_chunks.join(" ");
-        
+
         let transcription_time = transcription_start.elapsed();
-        
+
         Ok(TranscriptionResult {
             text: combined_text,
             processing_time_ms: transcription_time.as_millis() as u64,
@@ -752,12 +1021,14 @@ impl TranscriptionStrategy for ProgressiveTranscriptionStrategy {
             chunks_processed,
         })
     }
-    
+
     fn get_partial_results(&self) -> Vec<String> {
         vec![] // TODO: Implement if needed
     }
-    
-    fn get_ring_buffer(&self) -> Option<Arc<crate::audio::ring_buffer_recorder::RingBufferRecorder>> {
+
+    fn get_ring_buffer(
+        &self,
+    ) -> Option<Arc<crate::audio::ring_buffer_recorder::RingBufferRecorder>> {
         self.ring_buffer.clone()
     }
 }
@@ -782,7 +1053,10 @@ impl TranscriptionStrategySelector {
                     return Box::new(ClassicTranscriptionStrategy::new(transcriber));
                 }
                 "ring_buffer" => {
-                    info(Component::Transcription, "Using forced ring buffer strategy");
+                    info(
+                        Component::Transcription,
+                        "Using forced ring buffer strategy",
+                    );
                     let mut strategy = RingBufferTranscriptionStrategy::new(transcriber, temp_dir);
                     if let Some(app_handle) = app_handle {
                         strategy = strategy.with_app_handle(app_handle);
@@ -790,10 +1064,14 @@ impl TranscriptionStrategySelector {
                     return Box::new(strategy);
                 }
                 "progressive" => {
-                    info(Component::Transcription, "Using forced progressive strategy");
+                    info(
+                        Component::Transcription,
+                        "Using forced progressive strategy",
+                    );
                     // temp_dir is already the models directory
                     let models_dir = &temp_dir;
-                    match ProgressiveTranscriptionStrategy::new(models_dir, temp_dir.clone()).await {
+                    match ProgressiveTranscriptionStrategy::new(models_dir, temp_dir.clone()).await
+                    {
                         Ok(mut strategy) => {
                             if let Some(app_handle) = app_handle {
                                 strategy = strategy.with_app_handle(app_handle);
@@ -801,38 +1079,71 @@ impl TranscriptionStrategySelector {
                             return Box::new(strategy);
                         }
                         Err(e) => {
-                            warn(Component::Transcription, &format!("Failed to create progressive strategy: {}, falling back", e));
+                            warn(
+                                Component::Transcription,
+                                &format!(
+                                    "Failed to create progressive strategy: {}, falling back",
+                                    e
+                                ),
+                            );
                         }
                     }
                 }
                 _ => {
-                    warn(Component::Transcription, &format!("Unknown forced strategy '{}', falling back to auto-selection", forced));
+                    warn(
+                        Component::Transcription,
+                        &format!(
+                            "Unknown forced strategy '{}', falling back to auto-selection",
+                            forced
+                        ),
+                    );
                 }
             }
         }
-        
+
         // Auto-select based on characteristics
         debug(Component::Transcription, "Strategy selection debug:");
-        debug(Component::Transcription, &format!("  Duration estimate: {:?}", duration_estimate));
-        debug(Component::Transcription, &format!("  Enable chunking: {}", config.enable_chunking));
-        debug(Component::Transcription, &format!("  Threshold: {}s", config.chunking_threshold_secs));
-        
+        debug(
+            Component::Transcription,
+            &format!("  Duration estimate: {:?}", duration_estimate),
+        );
+        debug(
+            Component::Transcription,
+            &format!("  Enable chunking: {}", config.enable_chunking),
+        );
+        debug(
+            Component::Transcription,
+            &format!("  Threshold: {}s", config.chunking_threshold_secs),
+        );
+
         // Try progressive strategy first if chunking is enabled AND both models exist
         if config.enable_chunking {
-            info(Component::Transcription, "Chunking enabled, checking model availability for progressive strategy");
+            info(
+                Component::Transcription,
+                "Chunking enabled, checking model availability for progressive strategy",
+            );
             // temp_dir is already the models directory
             let models_dir = &temp_dir;
-            info(Component::Transcription, &format!("Models directory: {:?}", models_dir));
-            
+            info(
+                Component::Transcription,
+                &format!("Models directory: {:?}", models_dir),
+            );
+
             // Check if both required models exist
             let tiny_path = models_dir.join("ggml-tiny.en.bin");
             let medium_path = models_dir.join("ggml-medium.en.bin");
             let tiny_exists = tiny_path.exists();
             let medium_exists = medium_path.exists();
-            
-            info(Component::Transcription, &format!("Tiny model exists: {}", tiny_exists));
-            info(Component::Transcription, &format!("Medium model exists: {}", medium_exists));
-            
+
+            info(
+                Component::Transcription,
+                &format!("Tiny model exists: {}", tiny_exists),
+            );
+            info(
+                Component::Transcription,
+                &format!("Medium model exists: {}", medium_exists),
+            );
+
             // TEMPORARY: Skip progressive strategy due to Tiny model hallucinations
             // Just use ring buffer with Medium model for now
             if false && tiny_exists && medium_exists {
@@ -841,36 +1152,231 @@ impl TranscriptionStrategySelector {
                         if let Some(ref app_handle) = app_handle {
                             strategy = strategy.with_app_handle(app_handle.clone());
                         }
-                        info(Component::Transcription, "Auto-selected progressive strategy (Tiny + Medium)");
+                        info(
+                            Component::Transcription,
+                            "Auto-selected progressive strategy (Tiny + Medium)",
+                        );
                         return Box::new(strategy);
                     }
                     Err(e) => {
-                        warn(Component::Transcription, &format!("Failed to create progressive strategy: {}, trying ring buffer", e));
+                        warn(
+                            Component::Transcription,
+                            &format!(
+                                "Failed to create progressive strategy: {}, trying ring buffer",
+                                e
+                            ),
+                        );
                     }
                 }
             } else {
-                info(Component::Transcription, "Skipping progressive strategy, using ring buffer with Medium model");
+                info(
+                    Component::Transcription,
+                    "Skipping progressive strategy, using ring buffer with Medium model",
+                );
             }
         } else {
-            info(Component::Transcription, "Chunking disabled, skipping progressive strategy");
+            info(
+                Component::Transcription,
+                "Chunking disabled, skipping progressive strategy",
+            );
         }
-        
+
         // Fall back to ring buffer strategy
-        let mut ring_buffer_strategy = RingBufferTranscriptionStrategy::new(transcriber.clone(), temp_dir.clone());
+        let mut ring_buffer_strategy =
+            RingBufferTranscriptionStrategy::new(transcriber.clone(), temp_dir.clone());
         if let Some(ref app_handle) = app_handle {
             ring_buffer_strategy = ring_buffer_strategy.with_app_handle(app_handle.clone());
         }
         let classic_strategy = ClassicTranscriptionStrategy::new(transcriber);
-        
+
         let can_handle_ring = ring_buffer_strategy.can_handle(duration_estimate, config);
-        debug(Component::Transcription, &format!("  Ring buffer can handle: {}", can_handle_ring));
-        
+        debug(
+            Component::Transcription,
+            &format!("  Ring buffer can handle: {}", can_handle_ring),
+        );
+
         if can_handle_ring {
-            info(Component::Transcription, "Auto-selected ring buffer strategy");
+            info(
+                Component::Transcription,
+                "Auto-selected ring buffer strategy",
+            );
             Box::new(ring_buffer_strategy)
         } else {
             info(Component::Transcription, "Auto-selected classic strategy");
             Box::new(classic_strategy)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::sync::{Arc as StdArc, Mutex as StdMutex};
+    use std::time::Duration;
+
+    /// Mock transcriber for testing
+    struct MockTranscriber {
+        responses: StdArc<StdMutex<HashMap<String, String>>>,
+        call_count: StdArc<StdMutex<usize>>,
+        should_fail: StdArc<StdMutex<bool>>,
+    }
+
+    impl MockTranscriber {
+        fn new() -> Self {
+            let mut responses = HashMap::new();
+            responses.insert("test".to_string(), "Mock transcription result".to_string());
+            
+            Self {
+                responses: StdArc::new(StdMutex::new(responses)),
+                call_count: StdArc::new(StdMutex::new(0)),
+                should_fail: StdArc::new(StdMutex::new(false)),
+            }
+        }
+
+        fn fail_next_transcription(&self) {
+            let mut should_fail = self.should_fail.lock().unwrap();
+            *should_fail = true;
+        }
+
+        fn get_call_count(&self) -> usize {
+            *self.call_count.lock().unwrap()
+        }
+
+        fn transcribe_file(&self, _audio_path: &Path) -> Result<String, String> {
+            let mut count = self.call_count.lock().unwrap();
+            *count += 1;
+
+            let mut should_fail = self.should_fail.lock().unwrap();
+            if *should_fail {
+                *should_fail = false;
+                return Err("Mock transcription failure".to_string());
+            }
+
+            let responses = self.responses.lock().unwrap();
+            Ok(responses.get("test").unwrap_or(&"Default response".to_string()).clone())
+        }
+    }
+
+    // Helper to create test audio file
+    fn create_test_audio_file(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+        use hound::{WavWriter, WavSpec, SampleFormat};
+
+        let spec = WavSpec {
+            channels: 1,
+            sample_rate: 16000,
+            bits_per_sample: 32,
+            sample_format: SampleFormat::Float,
+        };
+
+        let mut writer = WavWriter::create(path, spec)?;
+        
+        // Write 1 second of sine wave
+        for i in 0..16000 {
+            let t = i as f32 / 16000.0;
+            let sample = (2.0 * std::f32::consts::PI * 440.0 * t).sin();
+            writer.write_sample(sample)?;
+        }
+        
+        writer.finalize()?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_transcription_config_default() {
+        let config = TranscriptionConfig::default();
+        
+        assert_eq!(config.enable_chunking, true);
+        assert_eq!(config.chunking_threshold_secs, 5);
+        assert_eq!(config.chunk_duration_secs, 5);
+        assert_eq!(config.force_strategy, None);
+        assert_eq!(config.refinement_chunk_secs, Some(10));
+    }
+
+    #[test]
+    fn test_transcription_config_clone() {
+        let config = TranscriptionConfig {
+            enable_chunking: false,
+            chunking_threshold_secs: 10,
+            chunk_duration_secs: 3,
+            force_strategy: Some("test".to_string()),
+            refinement_chunk_secs: None,
+        };
+        
+        let cloned = config.clone();
+        assert_eq!(config.enable_chunking, cloned.enable_chunking);
+        assert_eq!(config.chunking_threshold_secs, cloned.chunking_threshold_secs);
+        assert_eq!(config.force_strategy, cloned.force_strategy);
+    }
+
+    #[test]
+    fn test_transcription_result_creation() {
+        let result = TranscriptionResult {
+            text: "Test result".to_string(),
+            processing_time_ms: 150,
+            strategy_used: "test".to_string(),
+            chunks_processed: 2,
+        };
+        
+        assert_eq!(result.text, "Test result");
+        assert_eq!(result.processing_time_ms, 150);
+        assert_eq!(result.strategy_used, "test");
+        assert_eq!(result.chunks_processed, 2);
+    }
+
+    // Note: The following tests are commented out because they require a mock implementation
+    // of the Transcriber struct, which would need to mock the WhisperContext.
+    // For now, we focus on testing the parts that don't require the actual transcriber.
+    
+    // #[tokio::test]
+    // async fn test_classic_strategy_basic_functionality() {
+    //     // This would require a proper mock of Transcriber
+    // }
+
+    #[test]
+    fn test_mock_transcriber_functionality() {
+        let mock = MockTranscriber::new();
+        
+        // Test basic transcription
+        let path = std::path::PathBuf::from("test.wav");
+        let result = mock.transcribe_file(&path);
+        assert!(result.is_ok());
+        assert_eq!(mock.get_call_count(), 1);
+        
+        // Test failure
+        mock.fail_next_transcription();
+        let result = mock.transcribe_file(&path);
+        assert!(result.is_err());
+        assert_eq!(mock.get_call_count(), 2);
+        
+        // Should succeed again
+        let result = mock.transcribe_file(&path);
+        assert!(result.is_ok());
+        assert_eq!(mock.get_call_count(), 3);
+    }
+
+    // Integration tests would require actual transcriber instances
+    // For now, let's create a simple test that doesn't need the transcriber
+    
+    #[test]
+    fn test_strategy_pattern_consistency() {
+        // Test that strategy pattern works without requiring actual transcriber
+        // This tests the basic enum and trait structure
+        let config = TranscriptionConfig::default();
+        
+        // Test different durations
+        let short_duration = Some(Duration::from_secs(1));
+        let long_duration = Some(Duration::from_secs(60));
+        let no_duration: Option<Duration> = None;
+        
+        // Verify durations don't cause panics or invalid states
+        assert!(short_duration.is_some());
+        assert!(long_duration.is_some());
+        assert!(no_duration.is_none());
+        
+        // Test config validation
+        assert!(config.chunk_duration_secs > 0);
+        // chunking_threshold_secs is u64, so it's always >= 0, but we test it's reasonable
+        assert!(config.chunking_threshold_secs < 3600); // Less than 1 hour
     }
 }

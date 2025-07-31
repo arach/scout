@@ -1,8 +1,8 @@
+use crate::logger::{info, Component};
 use anyhow::{anyhow, Result as AnyhowResult};
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
 use std::fs;
-use crate::logger::{info, Component};
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LLMModel {
@@ -116,7 +116,7 @@ impl LLMModel {
             // NOTE: Models above use GGUF format which requires different loading code
             // TODO: Add GGUF support to use quantized models
         ];
-        
+
         // Check which models are downloaded and which is active
         models.iter_mut().for_each(|model| {
             let model_path = models_dir.join(&model.filename);
@@ -124,14 +124,15 @@ impl LLMModel {
             model.downloaded = model_path.exists() && tokenizer_path.exists();
             model.active = model.id == active_model_id;
         });
-        
+
         models
     }
-    
+
     pub fn get_active_model_path(models_dir: &Path, active_model_id: &str) -> Option<PathBuf> {
         let models = Self::all(models_dir, active_model_id);
-        
-        models.iter()
+
+        models
+            .iter()
             .find(|m| m.id == active_model_id && m.downloaded)
             .map(|m| models_dir.join(&m.filename))
     }
@@ -143,193 +144,227 @@ pub struct ModelManager {
 
 impl ModelManager {
     pub fn new(models_dir: PathBuf) -> Self {
-        Self { 
-            models_dir,
-        }
+        Self { models_dir }
     }
-    
+
     pub async fn download_model(&self, model: &LLMModel) -> AnyhowResult<()> {
         self.download_model_with_progress(model, None).await
     }
-    
+
     pub async fn download_model_with_progress(
-        &self, 
+        &self,
         model: &LLMModel,
-        app_handle: Option<&tauri::AppHandle>
+        app_handle: Option<&tauri::AppHandle>,
     ) -> AnyhowResult<()> {
         // Create models directory if it doesn't exist
         fs::create_dir_all(&self.models_dir)?;
-        
-        info(Component::Processing, &format!("Downloading LLM model: {}", model.name));
-        
+
+        info(
+            Component::Processing,
+            &format!("Downloading LLM model: {}", model.name),
+        );
+
         // Download model file
         let model_path = self.models_dir.join(&model.filename);
         if !model_path.exists() {
-            self.download_file_with_progress(&model.model_url, &model_path, &model.id, app_handle).await?;
+            self.download_file_with_progress(&model.model_url, &model_path, &model.id, app_handle)
+                .await?;
         } else {
-            info(Component::Processing, &format!("Model file already exists: {}", model.filename));
+            info(
+                Component::Processing,
+                &format!("Model file already exists: {}", model.filename),
+            );
         }
-        
+
         // Download tokenizer
         let tokenizer_path = self.models_dir.join(format!("{}_tokenizer.json", model.id));
         if !tokenizer_path.exists() {
             info(Component::Processing, "Downloading tokenizer...");
-            self.download_file(&model.tokenizer_url, &tokenizer_path).await?;
+            self.download_file(&model.tokenizer_url, &tokenizer_path)
+                .await?;
         } else {
             info(Component::Processing, "Tokenizer already exists");
         }
-        
-        info(Component::Processing, &format!("Model {} downloaded successfully", model.name));
+
+        info(
+            Component::Processing,
+            &format!("Model {} downloaded successfully", model.name),
+        );
         Ok(())
     }
-    
+
     async fn download_file(&self, url: &str, dest: &Path) -> AnyhowResult<()> {
         use futures_util::StreamExt;
         use std::io::Write;
-        
+
         info(Component::Processing, &format!("Downloading from: {}", url));
-        
+
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(300)) // 5 minute timeout
             .build()?;
-            
+
         let response = client
             .get(url)
             .header("User-Agent", "Scout/1.0")
             .send()
             .await
             .map_err(|e| anyhow!("Failed to start download: {}", e))?;
-        
+
         if !response.status().is_success() {
-            return Err(anyhow!("Download failed with status: {}", response.status()));
+            return Err(anyhow!(
+                "Download failed with status: {}",
+                response.status()
+            ));
         }
-        
+
         let total_size = response
             .content_length()
             .ok_or_else(|| anyhow!("Failed to get content length"))?;
-        
-        info(Component::Processing, &format!("File size: {} MB", total_size / (1024 * 1024)));
-        
+
+        info(
+            Component::Processing,
+            &format!("File size: {} MB", total_size / (1024 * 1024)),
+        );
+
         let mut file = std::fs::File::create(dest)?;
         let mut downloaded = 0u64;
         let mut stream = response.bytes_stream();
         let mut last_progress = 0;
-        
+
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|e| anyhow!("Download failed: {}", e))?;
             file.write_all(&chunk)?;
             downloaded += chunk.len() as u64;
-            
+
             // Log progress every 5%
             let progress = (downloaded as f64 / total_size as f64) * 100.0;
             let progress_int = progress as i32;
             if progress_int >= last_progress + 5 {
-                info(Component::Processing, &format!("Download progress: {:.1}% ({} MB / {} MB)", 
-                    progress, 
-                    downloaded / (1024 * 1024),
-                    total_size / (1024 * 1024)
-                ));
+                info(
+                    Component::Processing,
+                    &format!(
+                        "Download progress: {:.1}% ({} MB / {} MB)",
+                        progress,
+                        downloaded / (1024 * 1024),
+                        total_size / (1024 * 1024)
+                    ),
+                );
                 last_progress = progress_int;
             }
         }
-        
+
         file.sync_all()?;
         info(Component::Processing, "Download completed successfully");
-        
+
         Ok(())
     }
-    
+
     async fn download_file_with_progress(
-        &self, 
-        url: &str, 
-        dest: &Path, 
+        &self,
+        url: &str,
+        dest: &Path,
         model_id: &str,
-        app_handle: Option<&tauri::AppHandle>
+        app_handle: Option<&tauri::AppHandle>,
     ) -> AnyhowResult<()> {
         use futures_util::StreamExt;
         use std::io::Write;
         use tauri::Emitter;
-        
+
         info(Component::Processing, &format!("Downloading from: {}", url));
-        
+
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(300)) // 5 minute timeout
             .build()?;
-            
+
         let response = client
             .get(url)
             .header("User-Agent", "Scout/1.0")
             .send()
             .await
             .map_err(|e| anyhow!("Failed to start download: {}", e))?;
-        
+
         if !response.status().is_success() {
-            return Err(anyhow!("Download failed with status: {}", response.status()));
+            return Err(anyhow!(
+                "Download failed with status: {}",
+                response.status()
+            ));
         }
-        
+
         let total_size = response
             .content_length()
             .ok_or_else(|| anyhow!("Failed to get content length"))?;
-        
-        info(Component::Processing, &format!("File size: {} MB", total_size / (1024 * 1024)));
-        
+
+        info(
+            Component::Processing,
+            &format!("File size: {} MB", total_size / (1024 * 1024)),
+        );
+
         let mut file = std::fs::File::create(dest)?;
         let mut downloaded = 0u64;
         let mut stream = response.bytes_stream();
         let mut last_progress = 0;
-        
+
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|e| anyhow!("Download failed: {}", e))?;
             file.write_all(&chunk)?;
             downloaded += chunk.len() as u64;
-            
+
             let progress = (downloaded as f64 / total_size as f64) * 100.0;
             let progress_int = progress as i32;
-            
+
             // Only emit progress events every 1% to avoid overwhelming the UI
             if progress_int > last_progress {
                 if let Some(app) = app_handle {
-                    let _ = app.emit("llm-download-progress", serde_json::json!({
-                        "model_id": model_id,
-                        "progress": progress,
-                        "downloaded_bytes": downloaded,
-                        "total_bytes": total_size,
-                    }));
+                    let _ = app.emit(
+                        "llm-download-progress",
+                        serde_json::json!({
+                            "model_id": model_id,
+                            "progress": progress,
+                            "downloaded_bytes": downloaded,
+                            "total_bytes": total_size,
+                        }),
+                    );
                 }
-                
+
                 // Log progress every 5%
                 if progress_int >= last_progress + 5 || progress_int - last_progress >= 5 {
-                    info(Component::Processing, &format!("Download progress: {:.1}% ({} MB / {} MB)", 
-                        progress, 
-                        downloaded / (1024 * 1024),
-                        total_size / (1024 * 1024)
-                    ));
+                    info(
+                        Component::Processing,
+                        &format!(
+                            "Download progress: {:.1}% ({} MB / {} MB)",
+                            progress,
+                            downloaded / (1024 * 1024),
+                            total_size / (1024 * 1024)
+                        ),
+                    );
                 }
-                
+
                 last_progress = progress_int;
             }
         }
-        
+
         file.sync_all()?;
         info(Component::Processing, "Download completed successfully");
-        
+
         Ok(())
     }
-    
+
     pub fn list_models(&self, active_model_id: &str) -> Vec<LLMModel> {
         LLMModel::all(&self.models_dir, active_model_id)
     }
-    
+
     pub fn get_model_path(&self, model_id: &str) -> Option<PathBuf> {
         let models = self.list_models(model_id);
-        models.iter()
+        models
+            .iter()
             .find(|m| m.id == model_id && m.downloaded)
             .map(|m| self.models_dir.join(&m.filename))
     }
-    
+
     pub fn get_tokenizer_path(&self, model_id: &str) -> Option<PathBuf> {
         let models = self.list_models(model_id);
-        models.iter()
+        models
+            .iter()
             .find(|m| m.id == model_id && m.downloaded)
             .map(|m| self.models_dir.join(format!("{}_tokenizer.json", m.id)))
     }

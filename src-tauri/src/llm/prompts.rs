@@ -38,7 +38,7 @@ impl PromptManager {
         manager.load_default_templates();
         manager
     }
-    
+
     fn load_default_templates(&mut self) {
         let default_templates = vec![
             PromptTemplate {
@@ -90,27 +90,24 @@ impl PromptManager {
                 category: PromptCategory::Extraction,
             },
         ];
-        
+
         for template in default_templates {
             self.templates.insert(template.id.clone(), template);
         }
     }
-    
+
     pub fn get_template(&self, id: &str) -> Option<&PromptTemplate> {
         self.templates.get(id)
     }
-    
+
     pub fn get_enabled_templates(&self) -> Vec<&PromptTemplate> {
-        self.templates
-            .values()
-            .filter(|t| t.enabled)
-            .collect()
+        self.templates.values().filter(|t| t.enabled).collect()
     }
-    
+
     pub fn get_all_templates(&self) -> Vec<&PromptTemplate> {
         self.templates.values().collect()
     }
-    
+
     pub fn add_custom_template(&mut self, template: PromptTemplate) -> Result<(), String> {
         if self.templates.contains_key(&template.id) {
             return Err("Template with this ID already exists".to_string());
@@ -118,7 +115,7 @@ impl PromptManager {
         self.templates.insert(template.id.clone(), template);
         Ok(())
     }
-    
+
     pub fn update_template(&mut self, id: &str, template: PromptTemplate) -> Result<(), String> {
         if !self.templates.contains_key(id) {
             return Err("Template not found".to_string());
@@ -126,7 +123,7 @@ impl PromptManager {
         self.templates.insert(id.to_string(), template);
         Ok(())
     }
-    
+
     pub fn toggle_template(&mut self, id: &str) -> Result<(), String> {
         match self.templates.get_mut(id) {
             Some(template) => {
@@ -136,7 +133,7 @@ impl PromptManager {
             None => Err("Template not found".to_string()),
         }
     }
-    
+
     pub fn delete_custom_template(&mut self, id: &str) -> Result<(), String> {
         // Only allow deletion of custom templates
         if let Some(template) = self.templates.get(id) {

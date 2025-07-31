@@ -1,9 +1,9 @@
 use chrono::Local;
+use once_cell::sync::Lazy;
 use std::fs::{File, OpenOptions};
-use std::io::{Write, BufWriter};
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use once_cell::sync::Lazy;
 
 /// Log levels for Scout application
 #[derive(Debug, Clone, Copy)]
@@ -35,8 +35,8 @@ impl Component {
             Component::Transcription => "TRNS",
             Component::RingBuffer => "RING",
             Component::Processing => "PROC",
-            Component::FFI => "FFI ",  // Extra space for alignment
-            Component::UI => "UI  ",   // Extra spaces for alignment
+            Component::FFI => "FFI ", // Extra space for alignment
+            Component::UI => "UI  ",  // Extra spaces for alignment
             Component::Models => "MODL",
         }
     }
@@ -51,7 +51,7 @@ impl LogLevel {
             LogLevel::Error => "❌",
         }
     }
-    
+
     fn as_str(&self) -> &'static str {
         match self {
             LogLevel::Debug => "DEBUG",
@@ -74,38 +74,54 @@ impl Logger {
             log_file_path: Arc::new(Mutex::new(None)),
         }
     }
-    
+
     fn initialize(&self, app_data_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
         let logs_dir = app_data_dir.join("logs");
         std::fs::create_dir_all(&logs_dir)?;
-        
+
         let log_file_name = format!("scout-{}.log", Local::now().format("%Y%m%d"));
         let log_file_path = logs_dir.join(log_file_name);
-        
+
         let file = OpenOptions::new()
             .create(true)
             .append(true)
             .open(&log_file_path)?;
-            
+
         let writer = BufWriter::new(file);
-        
+
         *self.writer.lock().unwrap() = Some(writer);
         *self.log_file_path.lock().unwrap() = Some(log_file_path.clone());
-        
+
         // Log initialization message
-        self.write_log_entry("INIT", "INFO ", "📊", "Logger initialized", &format!("Log file: {:?}", log_file_path));
-        
+        self.write_log_entry(
+            "INIT",
+            "INFO ",
+            "📊",
+            "Logger initialized",
+            &format!("Log file: {:?}", log_file_path),
+        );
+
         Ok(())
     }
-    
-    fn write_log_entry(&self, component: &str, level: &str, emoji: &str, message: &str, context: &str) {
+
+    fn write_log_entry(
+        &self,
+        component: &str,
+        level: &str,
+        emoji: &str,
+        message: &str,
+        context: &str,
+    ) {
         let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
         let log_line = if context.is_empty() {
             format!("[{}] {} [{}] {}\n", timestamp, level, component, message)
         } else {
-            format!("[{}] {} [{}] {} - {}\n", timestamp, level, component, message, context)
+            format!(
+                "[{}] {} [{}] {} - {}\n",
+                timestamp, level, component, message, context
+            )
         };
-        
+
         // Write to file
         if let Ok(mut writer_guard) = self.writer.lock() {
             if let Some(ref mut writer) = *writer_guard {
@@ -117,14 +133,20 @@ impl Logger {
                 }
             }
         }
-        
+
         // Also write to console with emoji for development
         let timestamp_str = timestamp.to_string();
         let short_timestamp = timestamp_str.split(' ').nth(1).unwrap_or(&timestamp_str);
         let console_line = if context.is_empty() {
-            format!("[{}] {} [{}] {}", short_timestamp, emoji, component, message)
+            format!(
+                "[{}] {} [{}] {}",
+                short_timestamp, emoji, component, message
+            )
         } else {
-            format!("[{}] {} [{}] {} - {}", short_timestamp, emoji, component, message, context)
+            format!(
+                "[{}] {} [{}] {} - {}",
+                short_timestamp, emoji, component, message, context
+            )
         };
         println!("{}", console_line);
     }
@@ -144,12 +166,24 @@ pub fn get_log_file_path() -> Option<PathBuf> {
 
 /// Log a message with timestamp, component, and level
 pub fn log(component: Component, level: LogLevel, message: &str) {
-    LOGGER.write_log_entry(component.as_str(), level.as_str(), level.emoji(), message, "");
+    LOGGER.write_log_entry(
+        component.as_str(),
+        level.as_str(),
+        level.emoji(),
+        message,
+        "",
+    );
 }
 
 /// Log with additional context/details
 pub fn log_with_context(component: Component, level: LogLevel, message: &str, context: &str) {
-    LOGGER.write_log_entry(component.as_str(), level.as_str(), level.emoji(), message, context);
+    LOGGER.write_log_entry(
+        component.as_str(),
+        level.as_str(),
+        level.emoji(),
+        message,
+        context,
+    );
 }
 
 // Convenience functions
