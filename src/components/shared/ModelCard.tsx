@@ -22,6 +22,7 @@ export interface BaseModel {
   active: boolean;
   speed: string;
   coreml_downloaded?: boolean;
+  coreml_url?: string;
 }
 
 export interface ModelCardProps<T extends BaseModel> {
@@ -40,6 +41,7 @@ export interface ModelCardProps<T extends BaseModel> {
   onDownload: (model: T) => void;
   onSelect: (modelId: string) => void;
   renderSpecs?: (model: T) => React.ReactNode;
+  isDownloadingCoreML?: boolean;
 }
 
 export function ModelCard<T extends BaseModel>({
@@ -49,7 +51,8 @@ export function ModelCard<T extends BaseModel>({
   qualityLabel,
   onDownload,
   onSelect,
-  renderSpecs
+  renderSpecs,
+  isDownloadingCoreML
 }: ModelCardProps<T>) {
   const formatSize = (mb: number): string => {
     if (mb >= 1000) {
@@ -61,26 +64,16 @@ export function ModelCard<T extends BaseModel>({
   return (
     <div className={`model-card ${model.active ? 'active' : ''}`}>
       <div className="model-card-header">
-        <h3 className="model-name">{model.name}</h3>
+        <h3 className="model-name">
+          {model.name}
+          {model.active && (
+            <span className="model-status-pill active">
+              <CheckCircle size={10} />
+              Active
+            </span>
+          )}
+        </h3>
       </div>
-      
-      {/* Status badges */}
-      {model.active && (
-        <div className="model-status">
-          <span className="model-badge active">
-            <CheckCircle size={12} />
-            Active
-          </span>
-        </div>
-      )}
-      
-      {qualityLabel && !model.active && model.downloaded && (
-        <div className="model-status">
-          <span className={`model-badge ${qualityLabel.className}`}>
-            {qualityLabel.text}
-          </span>
-        </div>
-      )}
       
       {/* Model description */}
       <p className="model-description">{model.description}</p>
@@ -98,21 +91,42 @@ export function ModelCard<T extends BaseModel>({
         {renderSpecs && renderSpecs(model)}
       </div>
       
-      {/* Action buttons */}
-      {!model.downloaded && !isDownloading && (
-        <div className="model-actions">
+      {/* Spacer to push buttons to bottom */}
+      <div className="model-spacer" />
+      
+      {/* Action section - always at bottom */}
+      <div className="model-actions">
+        {!model.downloaded && !isDownloading && (
           <button 
             className="model-btn model-btn-primary"
             onClick={() => onDownload(model)}
           >
-            <Download size={12} />
-            <span>Download</span>
+            <Download size={14} />
+            <span>Download Model</span>
           </button>
-        </div>
-      )}
+        )}
+        
+        {model.downloaded && !model.coreml_downloaded && model.coreml_url && !isDownloading && (
+          <button 
+            className="model-btn model-btn-secondary"
+            onClick={() => onDownload(model)}
+          >
+            <Zap size={14} />
+            <span>Add Core ML</span>
+          </button>
+        )}
+        
+        {model.downloaded && !model.active && !isDownloading && (
+          <button 
+            className="model-btn model-btn-primary"
+            onClick={() => onSelect(model.id)}
+          >
+            <CheckCircle size={14} />
+            <span>Use Model</span>
+          </button>
+        )}
       
-      {isDownloading && downloadProgress && (
-        <div className="model-actions">
+        {isDownloading && downloadProgress && (
           <div className="model-download-progress">
             <div className="model-progress-bar">
               <div 
@@ -121,23 +135,11 @@ export function ModelCard<T extends BaseModel>({
               />
             </div>
             <span className="model-progress-text">
-              {formatSize(downloadProgress.downloadedMb)} / {formatSize(downloadProgress.totalMb)}
+              {isDownloadingCoreML ? 'Core ML: ' : ''}{formatSize(downloadProgress.downloadedMb)} / {formatSize(downloadProgress.totalMb)}
             </span>
           </div>
-        </div>
-      )}
-      
-      {model.downloaded && !model.active && (
-        <div className="model-actions">
-          <button 
-            className="model-btn model-btn-secondary"
-            onClick={() => onSelect(model.id)}
-          >
-            <CheckCircle size={12} />
-            <span>Use Model</span>
-          </button>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
@@ -153,6 +155,12 @@ export const renderWhisperSpecs = (model: any) => (
       <div className="model-stat">
         <Zap size={12} className="stat-icon" style={{ color: 'var(--accent-primary)' }} />
         <span style={{ color: 'var(--accent-primary)' }}>Core ML Accelerated</span>
+      </div>
+    )}
+    {model.downloaded && !model.coreml_downloaded && model.coreml_url && (
+      <div className="model-stat">
+        <Zap size={12} className="stat-icon" style={{ color: 'rgb(251, 191, 36)' }} />
+        <span style={{ color: 'rgb(251, 191, 36)' }}>Core ML Available</span>
       </div>
     )}
   </>

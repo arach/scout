@@ -32,10 +32,7 @@
 
 /* Header section */
 .model-card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  margin-bottom: 8px;
 }
 
 .model-name {
@@ -43,52 +40,31 @@
   font-size: 15px;
   font-weight: 600;
   color: var(--text-primary);
-}
-
-/* Status badges - positioned in top-right */
-.model-status {
-  position: absolute;
-  top: 16px;
-  right: 16px;
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.model-badge {
+/* Status pills - inline with name */
+.model-status-pill {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  border-radius: 6px;
-  font-size: 12px;
+  gap: 3px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
   font-weight: 500;
-  transition: all 0.2s ease;
-  white-space: nowrap;
+  line-height: 1;
+  cursor: default;
+  user-select: none;
 }
 
-.model-badge.active {
-  background: var(--success);
-  color: white;
+.model-status-pill.active {
+  background: rgba(34, 197, 94, 0.15);
+  color: rgb(34, 197, 94);
 }
 
-.model-badge.coreml {
-  background: var(--accent-bg);
-  color: var(--accent-primary);
-  border: 1px solid rgba(59, 130, 246, 0.3);
-}
-
-.model-badge.included {
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-  border: 1px solid var(--border-primary);
-}
-
-.model-badge.recommended {
-  background: var(--accent-bg);
-  color: var(--accent-primary);
-  border: 1px solid rgba(59, 130, 246, 0.3);
-}
+/* Remove old badge styles - no longer used */
 
 /* Model description */
 .model-description {
@@ -118,28 +94,35 @@
   flex-shrink: 0;
 }
 
-/* Action buttons - positioned in top-right when no status badge */
+/* Spacer to push actions to bottom */
+.model-spacer {
+  flex: 1;
+  min-height: 8px;
+}
+
+/* Action section - always at bottom */
 .model-actions {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 8px;
-  margin-top: auto; /* Push to bottom of card */
-  padding-top: 8px; /* Add spacing from content above */
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-primary);
 }
 
 /* Shared button styles */
 .model-btn {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px;
+  padding: 8px 16px;
   border: none;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
-  width: auto;
+  width: 100%;
   justify-content: center;
 }
 

@@ -766,22 +766,112 @@ async fn download_model(
     
     // Check if model already exists
     if dest_path.exists() {
+        // Even if GGML exists, check if we need to download Core ML
+        #[cfg(target_os = "macos")]
+        {
+            // Download Core ML if not present
+            download_coreml_model(&app, &model_name, &models_dir).await?;
+        }
         return Ok(());
     }
     
-    // Download the model
-    let response = reqwest::get(&model_url).await
-        .map_err(|e| format!("Failed to download model: {}", e))?;
+    // Download the GGML model
+    download_file_with_progress(&app, &model_url, &dest_path, "model").await?;
+    
+    // On macOS, also download the Core ML model
+    #[cfg(target_os = "macos")]
+    {
+        download_coreml_model(&app, &model_name, &models_dir).await?;
+    }
+    
+    Ok(())
+}
+
+// Helper function to download Core ML models
+#[cfg(target_os = "macos")]
+async fn download_coreml_model(
+    app: &tauri::AppHandle,
+    model_name: &str,
+    models_dir: &std::path::Path,
+) -> Result<(), String> {
+    use tauri::Emitter;
+    
+    // Construct Core ML URL based on model name
+    let coreml_url = format!(
+        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{}-encoder.mlmodelc.zip?download=true",
+        model_name
+    );
+    
+    let coreml_filename = format!("ggml-{}-encoder.mlmodelc", model_name);
+    let coreml_path = models_dir.join(&coreml_filename);
+    
+    // Check if Core ML model already exists
+    if coreml_path.exists() {
+        info(Component::Transcription, &format!("Core ML model already exists: {}", coreml_filename));
+        return Ok(());
+    }
+    
+    info(Component::Transcription, &format!("Downloading Core ML model for {}", model_name));
+    
+    // Download the zip file
+    let zip_path = models_dir.join(format!("{}.zip", coreml_filename));
+    download_file_with_progress(app, &coreml_url, &zip_path, "coreml").await?;
+    
+    // Extract the zip file
+    extract_coreml_model(&zip_path, &coreml_path)?;
+    
+    // Clean up zip file
+    let _ = std::fs::remove_file(&zip_path);
+    
+    info(Component::Transcription, &format!("Core ML model downloaded and extracted: {}", coreml_filename));
+    
+    Ok(())
+}
+
+// Helper function to extract Core ML model from zip
+#[cfg(target_os = "macos")]
+fn extract_coreml_model(zip_path: &std::path::Path, dest_path: &std::path::Path) -> Result<(), String> {
+    use std::process::Command;
+    
+    // Use system unzip command for simplicity
+    let output = Command::new("unzip")
+        .arg("-q") // Quiet mode
+        .arg("-o") // Overwrite
+        .arg(zip_path)
+        .arg("-d")
+        .arg(dest_path.parent().unwrap())
+        .output()
+        .map_err(|e| format!("Failed to run unzip: {}", e))?;
+    
+    if !output.status.success() {
+        return Err(format!("Failed to extract Core ML model: {}", 
+            String::from_utf8_lossy(&output.stderr)));
+    }
+    
+    Ok(())
+}
+
+// Generic file download helper
+async fn download_file_with_progress(
+    app: &tauri::AppHandle,
+    url: &str,
+    dest_path: &std::path::Path,
+    file_type: &str,
+) -> Result<(), String> {
+    use tauri::Emitter;
+    use futures_util::StreamExt;
+    use std::io::Write;
+    
+    let response = reqwest::get(url).await
+        .map_err(|e| format!("Failed to download {}: {}", file_type, e))?;
     
     let total_size = response.content_length().unwrap_or(0);
     let mut downloaded = 0u64;
     
-    let mut file = std::fs::File::create(&dest_path)
+    let mut file = std::fs::File::create(dest_path)
         .map_err(|e| format!("Failed to create file: {}", e))?;
     
     let mut stream = response.bytes_stream();
-    use futures_util::StreamExt;
-    use std::io::Write;
     
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("Failed to read chunk: {}", e))?;
@@ -795,15 +885,73 @@ async fn download_model(
             0
         };
         
-        // Emit download progress
-        app.emit("model-download-progress", serde_json::json!({
+        // Emit download progress with file type and URL
+        app.emit("download-progress", serde_json::json!({
+            "url": url,
             "progress": progress,
             "downloaded": downloaded,
             "total": total_size,
+            "fileType": file_type,
         })).ok();
     }
     
     Ok(())
+}
+
+#[tauri::command]
+async fn check_and_download_missing_coreml_models(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>
+) -> Result<Vec<String>, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let models_dir = state.models_dir.clone();
+        let settings_manager = state.settings.lock().await;
+        let settings = settings_manager.get();
+        let models = models::WhisperModel::all(&models_dir, settings);
+        drop(settings_manager);
+        
+        let mut downloaded_models = Vec::new();
+        
+        for model in models {
+            // Check if GGML model is downloaded but Core ML is not
+            if model.downloaded && !model.coreml_downloaded && model.coreml_url.is_some() {
+                info(Component::Models, &format!("Found model {} with missing Core ML, downloading...", model.id));
+                
+                // Download the Core ML model
+                if let Err(e) = download_coreml_model(&app, &model.id, &models_dir).await {
+                    error(Component::Models, &format!("Failed to download Core ML for {}: {}", model.id, e));
+                } else {
+                    downloaded_models.push(model.id.clone());
+                }
+            }
+        }
+        
+        Ok(downloaded_models)
+    }
+    
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(Vec::new())
+    }
+}
+
+#[tauri::command]
+async fn download_coreml_for_model(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    model_id: String
+) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let models_dir = state.models_dir.clone();
+        download_coreml_model(&app, &model_id, &models_dir).await
+    }
+    
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("Core ML is only supported on macOS".to_string())
+    }
 }
 
 #[tauri::command]
@@ -2466,6 +2614,8 @@ pub fn run() {
             set_overlay_position,
             set_overlay_treatment,
             download_model,
+            check_and_download_missing_coreml_models,
+            download_coreml_for_model,
             check_microphone_permission,
             request_microphone_permission,
             open_system_preferences_audio,

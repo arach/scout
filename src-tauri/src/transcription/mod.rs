@@ -49,12 +49,35 @@ impl Transcriber {
     pub fn new(model_path: &Path) -> Result<Self, String> {
         let model_path_str = model_path.to_str().ok_or("Invalid model path")?;
         
+        // Check if Core ML model exists alongside GGML model
+        let model_stem = model_path.file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        let coreml_path = model_path.parent()
+            .map(|p| p.join(format!("{}-encoder.mlmodelc", model_stem)))
+            .unwrap_or_default();
+        
+        let has_coreml = coreml_path.exists();
+        
+        info(Component::Transcription, &format!(
+            "Initializing model: {} (Core ML available: {})", 
+            model_path.file_name().unwrap_or_default().to_string_lossy(),
+            has_coreml
+        ));
+        
         // Try Core ML first (faster, more efficient on macOS)
         let context = match WhisperContext::new_with_params(
             model_path_str,
-            WhisperContextParameters::default(), // Uses Core ML on macOS
+            WhisperContextParameters::default(), // Uses Core ML on macOS if available
         ) {
             Ok(ctx) => {
+                if has_coreml {
+                    info(Component::Transcription, "✅ Core ML acceleration enabled - using Apple Neural Engine");
+                    info(Component::Transcription, "Expected performance: 3x+ faster encoder, 1.5-2x overall speedup");
+                } else {
+                    info(Component::Transcription, "⚠️ Core ML model not found - using CPU mode");
+                    info(Component::Transcription, &format!("To enable Core ML, download: {}", coreml_path.display()));
+                }
                 ctx
             }
             Err(core_ml_error) => {

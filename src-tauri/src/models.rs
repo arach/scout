@@ -27,9 +27,15 @@ pub struct WhisperModel {
     pub description: String,
     pub url: String,
     pub filename: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub coreml_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub coreml_filename: Option<String>,
     pub speed: String,
     pub accuracy: String,
     pub downloaded: bool,
+    #[serde(default)]
+    pub coreml_downloaded: bool,
     pub active: bool,
 }
 
@@ -43,9 +49,12 @@ impl WhisperModel {
                 description: "Fastest model, good for quick drafts".to_string(),
                 url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin".to_string(),
                 filename: "ggml-tiny.en.bin".to_string(),
+                coreml_url: Some("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en-encoder.mlmodelc.zip?download=true".to_string()),
+                coreml_filename: Some("ggml-tiny.en-encoder.mlmodelc".to_string()),
                 speed: "~10x realtime".to_string(),
                 accuracy: "Basic (WER ~15%)".to_string(),
                 downloaded: false,
+                coreml_downloaded: false,
                 active: false,
             },
             WhisperModel {
@@ -55,9 +64,12 @@ impl WhisperModel {
                 description: "Good balance of speed and accuracy".to_string(),
                 url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin".to_string(),
                 filename: "ggml-base.en.bin".to_string(),
+                coreml_url: Some("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en-encoder.mlmodelc.zip?download=true".to_string()),
+                coreml_filename: Some("ggml-base.en-encoder.mlmodelc".to_string()),
                 speed: "~5x realtime".to_string(),
                 accuracy: "Good (WER ~10%)".to_string(),
                 downloaded: false,
+                coreml_downloaded: false,
                 active: false,
             },
             WhisperModel {
@@ -67,9 +79,12 @@ impl WhisperModel {
                 description: "Better accuracy, handles accents and noise well".to_string(),
                 url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin".to_string(),
                 filename: "ggml-small.en.bin".to_string(),
+                coreml_url: Some("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en-encoder.mlmodelc.zip?download=true".to_string()),
+                coreml_filename: Some("ggml-small.en-encoder.mlmodelc".to_string()),
                 speed: "~3x realtime".to_string(),
                 accuracy: "Very Good (WER ~7%)".to_string(),
                 downloaded: false,
+                coreml_downloaded: false,
                 active: false,
             },
             WhisperModel {
@@ -79,9 +94,27 @@ impl WhisperModel {
                 description: "Excellent accuracy for professional use".to_string(),
                 url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.en.bin".to_string(),
                 filename: "ggml-medium.en.bin".to_string(),
+                coreml_url: Some("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.en-encoder.mlmodelc.zip?download=true".to_string()),
+                coreml_filename: Some("ggml-medium.en-encoder.mlmodelc".to_string()),
                 speed: "~1x realtime".to_string(),
                 accuracy: "Excellent (WER ~5%)".to_string(),
                 downloaded: false,
+                coreml_downloaded: false,
+                active: false,
+            },
+            WhisperModel {
+                id: "large-v3-turbo".to_string(),
+                name: "Large v3 Turbo".to_string(),
+                size_mb: 1644,
+                description: "Optimized for speed with near-large accuracy".to_string(),
+                url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin".to_string(),
+                filename: "ggml-large-v3-turbo.bin".to_string(),
+                coreml_url: Some("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-encoder.mlmodelc.zip?download=true".to_string()),
+                coreml_filename: Some("ggml-large-v3-turbo-encoder.mlmodelc".to_string()),
+                speed: "~2x realtime".to_string(),
+                accuracy: "Excellent (WER ~5%)".to_string(),
+                downloaded: false,
+                coreml_downloaded: false,
                 active: false,
             },
             WhisperModel {
@@ -91,9 +124,12 @@ impl WhisperModel {
                 description: "State-of-the-art accuracy, multilingual".to_string(),
                 url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin".to_string(),
                 filename: "ggml-large-v3.bin".to_string(),
+                coreml_url: Some("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-encoder.mlmodelc.zip?download=true".to_string()),
+                coreml_filename: Some("ggml-large-v3-encoder.mlmodelc".to_string()),
                 speed: "~0.5x realtime".to_string(),
                 accuracy: "Best (WER ~3%)".to_string(),
                 downloaded: false,
+                coreml_downloaded: false,
                 active: false,
             },
         ];
@@ -115,9 +151,12 @@ impl WhisperModel {
                             description: "User-provided custom model".to_string(),
                             url: String::new(), // No URL for custom models
                             filename: filename.to_string(),
+                            coreml_url: None,
+                            coreml_filename: None,
                             speed: "Unknown".to_string(),
                             accuracy: "Unknown".to_string(),
                             downloaded: true, // Already exists
+                            coreml_downloaded: false,
                             active: false,
                         });
                     }
@@ -131,6 +170,14 @@ impl WhisperModel {
         models.into_iter().map(|mut model| {
             let model_path = models_dir.join(&model.filename);
             model.downloaded = model_path.exists();
+            
+            // Check if Core ML model is downloaded (only on macOS)
+            #[cfg(target_os = "macos")]
+            if let Some(ref coreml_filename) = model.coreml_filename {
+                let coreml_path = models_dir.join(coreml_filename);
+                model.coreml_downloaded = coreml_path.exists();
+            }
+            
             model.active = Some(&model.id) == active_model.as_ref();
             model
         }).collect()
