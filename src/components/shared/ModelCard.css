@@ -72,6 +72,12 @@
   color: white;
 }
 
+.model-badge.coreml {
+  background: var(--accent-bg);
+  color: var(--accent-primary);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
 .model-badge.included {
   background: var(--bg-tertiary);
   color: var(--text-secondary);

@@ -6,7 +6,8 @@ import {
   CheckCircle, 
   Download,
   Brain,
-  FileText
+  FileText,
+  Zap
 } from 'lucide-react';
 import './ModelCard.css';
 
@@ -20,6 +21,7 @@ export interface BaseModel {
   downloaded: boolean;
   active: boolean;
   speed: string;
+  coreml_downloaded?: boolean;
 }
 
 export interface ModelCardProps<T extends BaseModel> {
@@ -147,6 +149,12 @@ export const renderWhisperSpecs = (model: any) => (
       <BarChart3 size={12} className="stat-icon" />
       <span>Accuracy: {model.accuracy}</span>
     </div>
+    {model.coreml_downloaded && (
+      <div className="model-stat">
+        <Zap size={12} className="stat-icon" style={{ color: 'var(--accent-primary)' }} />
+        <span style={{ color: 'var(--accent-primary)' }}>Core ML Accelerated</span>
+      </div>
+    )}
   </>
 );
 

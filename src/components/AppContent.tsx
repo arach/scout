@@ -462,26 +462,6 @@ export function AppContent() {
 
   return (
     <div className="app-container">
-      <header className="app-header">
-        <div className="view-header">
-          <div className="view-header-left">
-            {/* Sidebar toggle moved to sidebar itself */}
-          </div>
-          <div className="view-header-center">
-            <h1 className="view-title">
-              {currentView === 'record' && 'Recording'}
-              {currentView === 'transcripts' && 'Transcripts'}
-              {currentView === 'settings' && 'Settings'}
-              {currentView === 'stats' && 'Stats'}
-              {currentView === 'dictionary' && 'Dictionary'}
-            </h1>
-          </div>
-          <div className="view-header-right">
-            {/* Empty for now, but available for future controls */}
-          </div>
-        </div>
-      </header>
-      
       <Sidebar
         currentView={currentView}
         onViewChange={setCurrentView}

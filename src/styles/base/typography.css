@@ -3,6 +3,9 @@
    Default typography styles for semantic HTML elements
 */
 
+/* Import Silkscreen font for headers and special UI elements */
+@import url('https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&display=swap');
+
 /* Headings */
 h1, h2, h3, h4, h5, h6 {
   font-weight: var(--font-weight-medium);

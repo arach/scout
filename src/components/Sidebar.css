@@ -4,13 +4,13 @@
   background-color: var(--bg-secondary);
   border-right: none; /* Remove hard border */
   padding-top: 0; /* No top padding - chevron flush with top */
-  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1), transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
   flex-shrink: 0;
   overflow: visible;
   height: 100vh; /* Full viewport height */
-  z-index: 101; /* Above the header */
-  /* No shadow - unified with header */
+  z-index: 101;
+  /* No shadow - unified design */
 }
 
 .sidebar.collapsed {
@@ -18,7 +18,27 @@
 }
 
 .sidebar.expanded {
-  width: 200px;
+  width: 200px; /* Default width, overridden by inline style */
+  min-width: 150px;
+  max-width: 400px;
+}
+
+/* Smooth width animation for content */
+.sidebar * {
+  transition: opacity 0.25s ease;
+}
+
+.sidebar.collapsed .sidebar-label {
+  opacity: 0;
+  width: 0;
+  overflow: hidden;
+  transition: opacity 0.15s ease, width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar.expanded .sidebar-label {
+  opacity: 1;
+  width: auto;
+  transition: opacity 0.25s ease 0.1s, width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Removed gradient overlay to ensure color consistency with header */
@@ -32,7 +52,7 @@
   cursor: pointer;
   height: 52px;
   position: relative;
-  transition: color 0.15s ease, background-color 0.15s ease;
+  transition: color 0.15s ease, background-color 0.15s ease, opacity 0.15s ease;
   opacity: 0.6;
   padding: 0 16px;
   gap: 12px;
@@ -50,11 +70,12 @@
   background: transparent;
   border: none;
   cursor: pointer;
-  transition: background-color 0.15s ease;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   color: var(--text-secondary);
   gap: 8px;
   margin: 0;
   font-size: 14px;
+  overflow: hidden;
 }
 
 .sidebar.collapsed .sidebar-toggle-zone {
@@ -71,6 +92,19 @@
   color: var(--text-primary);
 }
 
+/* Smooth chevron rotation animation */
+.sidebar-toggle-zone svg {
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar.expanded .sidebar-toggle-zone svg:last-child {
+  transform: rotate(0deg);
+}
+
+.sidebar.collapsed .sidebar-toggle-zone svg {
+  transform: rotate(0deg);
+}
+
 .sidebar-app-name {
   font-family: 'Silkscreen', monospace;
   font-size: 14px;
@@ -79,6 +113,15 @@
   letter-spacing: 0.08em;
   flex-grow: 1;
   text-align: left;
+  opacity: 0;
+  transform: translateX(-10px);
+  transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar.expanded .sidebar-app-name {
+  opacity: 1;
+  transform: translateX(0);
+  transition-delay: 0.1s;
 }
 
 .sidebar.collapsed .sidebar-button {
@@ -146,8 +189,11 @@
 
 /* Label for expanded state */
 .sidebar-label {
-  font-size: 13px;
-  font-weight: 500;
+  font-family: 'Silkscreen', monospace;
+  font-size: 12px;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -284,8 +330,18 @@
 /* Apply animations to button icons on hover and click */
 .sidebar-button svg,
 .sidebar-button > * {
-  transition: transform 0.15s ease;
+  transition: transform 0.15s ease, opacity 0.25s ease;
   transform-style: flat; /* Use flat instead of preserve-3d to prevent CATransformLayer conflicts */
+}
+
+/* Icon slide animation on expand/collapse */
+.sidebar.collapsed .sidebar-button svg {
+  transform: scale(1);
+}
+
+.sidebar.expanded .sidebar-button svg {
+  transform: scale(1);
+  transition-delay: 0.05s;
 }
 
 /* Record button - coin flip on Y axis */
@@ -339,4 +395,49 @@
   .sidebar.collapsed .sidebar-button .sidebar-tooltip::after {
     border-color: transparent var(--bg-tertiary) transparent transparent;
   }
+}
+
+/* Resize handle */
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  background: transparent;
+  transition: background-color 0.15s ease;
+  z-index: 102;
+}
+
+.sidebar-resize-handle:hover {
+  background-color: var(--accent-primary);
+  opacity: 0.5;
+}
+
+.sidebar-resize-handle:active,
+.sidebar.resizing .sidebar-resize-handle {
+  background-color: var(--accent-primary);
+  opacity: 0.8;
+}
+
+/* Disable transitions while resizing */
+.sidebar.resizing {
+  transition: none;
+}
+
+.sidebar.resizing * {
+  transition: none;
+}
+
+/* Visual indicator when resizing */
+.sidebar.resizing::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 1px;
+  background-color: var(--accent-primary);
+  opacity: 0.5;
 } 
