@@ -353,7 +353,7 @@ export default function DocsPageContent() {
                     {section.title}
                   </h3>
                   <ul className="space-y-1">
-                    {section.items.map(item => (
+                    {section.items.map((item: any) => (
                       <li key={item.id}>
                         <button
                           onClick={() => setSelectedSection(item.id)}

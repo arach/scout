@@ -4,7 +4,7 @@ import { RecordView } from '../RecordView';
 import { TranscriptsView } from '../TranscriptsView';
 import { SettingsView } from '../SettingsView';
 import { StatsView } from '../StatsView';
-import { DictionaryStandalone } from '../DictionaryStandalone';
+import Dictionary from '../Dictionary';
 import type { ViewType } from './types';
 import type { ThemeVariant } from '../../themes/types';
 
@@ -228,7 +228,7 @@ export const ViewRouter = memo<ViewRouterProps>(({
     case 'stats':
       return <StatsView />;
     case 'dictionary':
-      return <DictionaryStandalone />;
+      return <Dictionary />;
     default:
       return null;
   }

@@ -115,23 +115,23 @@ export const TranscriptItem = memo(function TranscriptItem({
         // Always show just time for Today items
         if (isToday) {
             return date.toLocaleTimeString([], { 
-                hour: '2-digit', 
+                hour: 'numeric', 
                 minute: '2-digit'
             });
         }
         
-        // For other dates, show full date and time
-        const yearPart = date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined;
+        // For other dates, use a more compact format
+        const yearPart = date.getFullYear() !== now.getFullYear() ? '2-digit' : undefined;
         const formatted = date.toLocaleDateString([], { 
             month: 'short', 
             day: 'numeric',
             year: yearPart
         });
         const time = date.toLocaleTimeString([], {
-            hour: '2-digit',
+            hour: 'numeric',
             minute: '2-digit'
         });
-        return `${formatted} at ${time}`;
+        return `${formatted}, ${time}`;
     };
     
     const handleCopy = async (e: React.MouseEvent) => {

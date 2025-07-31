@@ -192,8 +192,7 @@ export default async function BlogPost({ params }: { params: Promise<{ slug: str
           "
           dangerouslySetInnerHTML={{ __html: html }}
         />
-      </article>
-    </>
+    </article>
   );
 }
 

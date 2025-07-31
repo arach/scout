@@ -529,7 +529,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 16px;
+    padding: 8px 16px 8px 12px; /* Less padding on left for better alignment */
     margin: 0;
     background: transparent;
     user-select: none;
