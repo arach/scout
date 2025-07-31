@@ -88,9 +88,13 @@ export const TranscriptItem = memo(function TranscriptItem({
     }, [showDownloadMenu]);
     
     const formatTime = (dateString: string) => {
-        const date = new Date(dateString);
-        // Remove console.log to avoid spam
-
+        // Parse the UTC timestamp correctly
+        // If the dateString doesn't include timezone info, append 'Z' to indicate UTC
+        const utcDateString = dateString.includes('Z') || dateString.includes('+') || dateString.includes('T') 
+            ? dateString 
+            : dateString.replace(' ', 'T') + 'Z';
+        const date = new Date(utcDateString);
+        
         // Always use time-only format for compact variant
         if (variant === 'compact') {
             return date.toLocaleTimeString([], { 

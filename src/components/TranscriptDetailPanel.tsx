@@ -350,32 +350,37 @@ export function TranscriptDetailPanel({
                 <div className="detail-panel-content">
                     {/* Transcription Details Card */}
                     <div className="card-grid">
-                        <div className="info-card full-width expandable" onClick={() => toggleCard('transcription')}>
-                            <div className="card-header">
+                        <div className="info-card full-width expandable">
+                            <div className="card-header" onClick={() => toggleCard('transcription')}>
                                 <div className="card-icon">
                                     <ClockIcon />
                                 </div>
                                 <h3 className="card-title">Recording Info</h3>
-                                <button className="card-expand-indicator">
+                                <button className="card-expand-indicator" onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleCard('transcription');
+                                }}>
                                     <ExpandIcon expanded={expandedCards.transcription} />
                                 </button>
                             </div>
-                            <div className="card-content">
-                                <div className="card-value">
-                                    {formatDuration(transcript.duration_ms)}
-                                    {performanceMetrics && metadata.model_used && (
-                                        <span className="card-subtitle" style={{ marginLeft: '12px', fontSize: '14px', fontWeight: '500' }}>
-                                            • {metadata.model_used.split('/').pop()?.replace('.bin', '')}
-                                        </span>
-                                    )}
+                            {!expandedCards.transcription && (
+                                <div className="card-content">
+                                    <div className="card-value">
+                                        {formatDuration(transcript.duration_ms)}
+                                        {performanceMetrics && metadata.model_used && (
+                                            <span className="card-subtitle" style={{ marginLeft: '12px', fontSize: '14px', fontWeight: '500' }}>
+                                                • {metadata.model_used.split('/').pop()?.replace('.bin', '')}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div className="card-subtitle">
+                                        {metadata.filename ? metadata.filename.split('/').pop() : 'Recording'} • {transcript.file_size && formatFileSize ? formatFileSize(transcript.file_size) : 'No file size'}
+                                        {performanceMetrics && performanceMetrics.transcription_time_ms && (
+                                            <> • {(performanceMetrics.transcription_time_ms / transcript.duration_ms).toFixed(2)}x speed</>
+                                        )}
+                                    </div>
                                 </div>
-                                <div className="card-subtitle">
-                                    {metadata.filename ? metadata.filename.split('/').pop() : 'Recording'} • {transcript.file_size && formatFileSize ? formatFileSize(transcript.file_size) : 'No file size'}
-                                    {performanceMetrics && performanceMetrics.transcription_time_ms && (
-                                        <> • {(performanceMetrics.transcription_time_ms / transcript.duration_ms).toFixed(2)}x speed</>
-                                    )}
-                                </div>
-                            </div>
+                            )}
                             {expandedCards.transcription && (
                                 <div className="card-expanded-content">
                                     <div className="detail-grid">
@@ -491,13 +496,16 @@ export function TranscriptDetailPanel({
                     {/* Audio Device Card */}
                     {audioMetadata && (
                         <div className="card-grid" style={{ marginTop: '16px' }}>
-                                <div className="info-card full-width expandable" onClick={() => toggleCard('device')}>
-                                    <div className="card-header">
+                                <div className="info-card full-width expandable">
+                                    <div className="card-header" onClick={() => toggleCard('device')}>
                                         <div className="card-icon">
                                             <MicrophoneIcon />
                                         </div>
                                         <h3 className="card-title">Audio Device</h3>
-                                        <button className="card-expand-indicator">
+                                        <button className="card-expand-indicator" onClick={(e) => {
+                                            e.stopPropagation();
+                                            toggleCard('device');
+                                        }}>
                                             <ExpandIcon expanded={expandedCards.device} />
                                         </button>
                                     </div>

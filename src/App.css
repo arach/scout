@@ -15,6 +15,15 @@
   font-weight: var(--font-weight-normal, 400);
   color: var(--text-primary);
   background-color: var(--bg-primary);
+  
+  /* Type scale for consistency */
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-base: 13px;
+  --font-size-md: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 20px;
+  --font-size-2xl: 24px;
 }
 
 .app-container {
@@ -151,29 +160,41 @@ h1 {
 .view-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   padding: 8px 16px;
   border-bottom: 1px solid var(--border-primary);
   background-color: var(--bg-secondary);
   min-height: 40px;
-  height: 40px; /* Increased height for more breathing room */
+  height: 40px;
   box-sizing: border-box;
-  position: relative; /* This fixed the alignment issue */
+  position: relative;
 }
 
 .view-header-left,
 .view-header-right {
   display: flex;
   align-items: center;
-  width: 32px; /* Fixed width to keep buttons in same position */
+  width: 40px; /* Increased to match button size */
   height: 24px;
+  flex-shrink: 0; /* Prevent shrinking */
 }
 
 .view-header-center {
-  flex: 1;
+  position: absolute;
+  left: calc(50% + 100px); /* Default: 50% + half of expanded sidebar (200px / 2) */
+  transform: translateX(-50%);
   display: flex;
   justify-content: center;
   align-items: center;
+  pointer-events: none; /* Prevent blocking button clicks */
+}
+
+/* Adjust for collapsed sidebar */
+.app-main.sidebar-collapsed .view-header-center {
+  left: calc(50% + 26px); /* 50% + half of collapsed sidebar (52px / 2) */
+}
+
+.view-header-center > * {
+  pointer-events: auto; /* Re-enable pointer events for title content */
 }
 
 .view-title {
@@ -520,28 +541,29 @@ h1 {
 }
 
 .record-button {
-  font-size: 16px;
-  font-weight: 500;
-  padding: 16px 32px;
-  border-radius: 6px;
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  padding: 18px 36px;
+  border-radius: 12px;
   border: 2px solid var(--border-primary);
   background-color: var(--bg-primary);
   color: var(--text-primary);
   cursor: pointer;
-  transition: transform 0.1s ease, box-shadow 0.1s ease;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
   display: inline-flex;
   align-items: center;
   gap: 12px;
-  min-width: 200px;
+  min-width: 220px;
   justify-content: center;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  letter-spacing: -0.01em;
 }
 
 .record-button:hover {
   background-color: var(--bg-hover);
   border-color: var(--accent-primary);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
 }
 
 .record-button:active {
@@ -827,11 +849,12 @@ h1 {
 .no-transcripts {
   color: var(--text-secondary);
   text-align: center;
-  padding: 64px 32px;
+  padding: 80px 32px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
+  gap: 20px;
+  animation: fadeIn 0.4s ease-out;
 }
 
 .no-transcripts svg {
@@ -840,9 +863,10 @@ h1 {
 
 .no-transcripts h3 {
   margin: 0;
-  font-size: 18px;
-  font-weight: 500;
+  font-size: var(--font-size-xl);
+  font-weight: 600;
   color: var(--text-primary);
+  letter-spacing: -0.02em;
 }
 
 .no-transcripts p {

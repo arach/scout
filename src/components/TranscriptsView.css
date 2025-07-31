@@ -37,11 +37,11 @@
 .search-input-expanded {
     width: 400px;
     padding: 6px 12px;
-    border: 1px solid var(--border-primary, #e5e7eb);
+    border: 1px solid #e5e7eb !important;
     border-radius: 6px;
     font-size: 13px;
-    background: var(--bg-primary, white);
-    color: var(--text-primary, #111827);
+    background: white !important;
+    color: #111827 !important;
     outline: none;
     transition: border-color 0.2s ease, box-shadow 0.2s ease;
     height: 32px;
@@ -63,21 +63,23 @@
     min-width: 0;
 }
 
-/* 🧠 Header action buttons - copy style from floating action bar */
+/* 🧠 Header action buttons - unified button style */
 .header-action-btn {
-    padding: 6px 12px;
-    border: none;
-    border-radius: 8px;
-    font-size: 13px;
+    padding: 6px 14px;
+    border: 1px solid var(--border-primary);
+    border-radius: 6px;
+    font-size: var(--font-size-base);
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all 0.15s ease;
     display: flex;
     align-items: center;
     gap: 6px;
     height: 32px;
     white-space: nowrap;
     flex-shrink: 0;
+    background: white;
+    color: var(--text-primary);
 }
 
 .header-action-btn.select-mode {
@@ -179,6 +181,40 @@
         background: #52525b; /* zinc-600 */
         border-color: #71717a; /* zinc-500 */
         transform: scale(1.02);
+    }
+}
+
+/* Light theme override - MUST come after media query */
+[data-theme="vscode-light"] .search-input-expanded {
+    background: white !important;
+    border-color: #e5e7eb !important;
+    color: #111827 !important;
+}
+
+[data-theme="vscode-light"] .search-input-expanded:focus {
+    border-color: #3b82f6 !important;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1) !important;
+}
+
+[data-theme="vscode-light"] .search-input-expanded::placeholder {
+    color: #9ca3af !important;
+}
+
+/* Prevent dark mode override when in light theme */
+@media (prefers-color-scheme: dark) {
+    [data-theme="vscode-light"] .search-input-expanded {
+        background: white !important;
+        border-color: #e5e7eb !important;  
+        color: #111827 !important;
+    }
+    
+    [data-theme="vscode-light"] .search-input-expanded:focus {
+        border-color: #3b82f6 !important;
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1) !important;
+    }
+    
+    [data-theme="vscode-light"] .search-input-expanded::placeholder {
+        color: #9ca3af !important;
     }
 }
 
@@ -355,7 +391,7 @@
     display: flex;
     flex-direction: column;
     margin: 0 var(--grid-padding-horizontal);
-    background: var(--bg-secondary);
+    background: #f3f4f6;
     border: 1px solid var(--border-primary);
     border-radius: 12px;
     overflow: hidden;
@@ -467,7 +503,7 @@
 
 /* Group Styles */
 .transcript-group {
-    margin-bottom: 24px; /* Standard spacing between groups */
+    margin-bottom: 32px; /* Increased spacing between groups */
     background: transparent;
     border: none;
     border-radius: 0;
@@ -476,7 +512,7 @@
 }
 
 .transcript-group:first-child {
-    margin-top: 0; /* 🧠 Remove any top margin from first group */
+    margin-top: 0;
 }
 
 .transcript-group:first-child .transcript-group-header {
@@ -488,17 +524,17 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 16px; /* Reduced vertical padding */
-    margin: 0; /* Removed negative margin that could cause issues */
-    background: var(--bg-tertiary, rgba(0, 0, 0, 0.02));
+    padding: 12px 16px; /* Increased vertical padding for better breathing room */
+    margin: 0;
+    background: rgba(0, 0, 0, 0.02);
     user-select: none;
     transition: var(--transition);
     border-bottom: 1px solid var(--border-primary);
-    min-height: 36px; /* Reduced height */
+    min-height: 44px; /* Increased height for better touch targets */
     box-sizing: border-box;
     position: relative;
     font-weight: 500;
-    z-index: 1; /* Ensure header is above items */
+    z-index: 1;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -509,7 +545,7 @@
 }
 
 .transcript-group-header:hover {
-    background: var(--bg-hover, rgba(0, 0, 0, 0.04)); /* Subtle hover */
+    background: rgba(0, 0, 0, 0.04); /* Subtle hover */
 }
 
 @media (prefers-color-scheme: dark) {
@@ -622,7 +658,7 @@
 .transcript-group-items {
     background: transparent;
     padding: 0;
-    margin-top: 8px; /* Increased spacing between header and first item to prevent overlap */
+    margin-top: 0;
     display: block;
     position: relative;
 }

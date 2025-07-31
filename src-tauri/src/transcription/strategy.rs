@@ -33,10 +33,10 @@ impl Default for TranscriptionConfig {
     fn default() -> Self {
         Self {
             enable_chunking: true,
-            chunking_threshold_secs: 3,  // Start chunking after 3 seconds for faster feedback
-            chunk_duration_secs: 3,      // 3-second chunks for responsive transcription
+            chunking_threshold_secs: 5,  // Start chunking after 5 seconds (original design)
+            chunk_duration_secs: 5,      // 5-second chunks for Tiny model (original design)
             force_strategy: None,
-            refinement_chunk_secs: Some(10), // Engineering decision: 10s optimal balance
+            refinement_chunk_secs: Some(10), // 10-second chunks for Medium model refinement
         }
     }
 }

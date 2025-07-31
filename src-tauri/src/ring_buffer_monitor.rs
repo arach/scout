@@ -28,8 +28,8 @@ impl RingBufferMonitor {
             chunked_transcriber: None,
             initial_transcriber: None,
             last_chunk_time: Duration::ZERO,
-            chunk_duration: Duration::from_secs(3), // 3-second chunks for faster feedback
-            threshold_duration: Duration::from_secs(0), // Start chunking immediately
+            chunk_duration: Duration::from_secs(5), // 5-second chunks for Tiny model
+            threshold_duration: Duration::from_secs(5), // Start chunking after 5 seconds
             recording_start_time: Instant::now(),
             completed_chunks: Vec::new(),
             next_chunk_id: 0,
@@ -79,9 +79,10 @@ impl RingBufferMonitor {
                              elapsed.as_secs_f64(), buffer_duration.as_secs_f64(), sample_count));
                 }
                 
-                // Start chunking immediately when we have audio
-                if buffer_duration > Duration::ZERO && self.chunked_transcriber.is_none() {
-                    info(Component::RingBuffer, "Starting real-time ring buffer transcription");
+                // Start chunking after threshold duration
+                if elapsed > self.threshold_duration && self.chunked_transcriber.is_none() {
+                    info(Component::RingBuffer, &format!("Recording exceeds {}s, starting ring buffer transcription", 
+                             self.threshold_duration.as_secs()));
                     
                     if sample_count == 0 {
                         warn(Component::RingBuffer, "Ring buffer has no samples - audio may not be flowing to ring buffer");

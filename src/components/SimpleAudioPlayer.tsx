@@ -15,6 +15,15 @@ export function SimpleAudioPlayer({ audioPath, duration, formatDuration }: Simpl
     const [currentTime, setCurrentTime] = useState(0);
     const [actualDuration, setActualDuration] = useState(duration);
     
+    // Format time for consistent player display
+    // Always use MM:SS format for audio players for consistency
+    const formatPlayerTime = (ms: number): string => {
+        const totalSeconds = Math.floor(ms / 1000);
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    };
+    
     const { blob, isLoading, error } = useAudioBlob(audioPath);
     
     // Create blob URL for audio element
@@ -141,9 +150,9 @@ export function SimpleAudioPlayer({ audioPath, duration, formatDuration }: Simpl
                 </div>
                 
                 <div className="time-display">
-                    <span className="current-time">{formatDuration(currentTime)}</span>
+                    <span className="current-time">{formatPlayerTime(currentTime)}</span>
                     <span className="time-separator">/</span>
-                    <span className="total-time">{formatDuration(actualDuration)}</span>
+                    <span className="total-time">{formatPlayerTime(actualDuration)}</span>
                 </div>
             </div>
         </div>

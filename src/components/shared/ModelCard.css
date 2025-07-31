@@ -16,6 +16,8 @@
   gap: 12px;
   transition: all 0.2s ease;
   box-shadow: 0 1px 3px var(--shadow-color-subtle);
+  min-height: 220px; /* Ensure minimum height to prevent overlap */
+  justify-content: space-between; /* Ensure proper spacing */
 }
 
 .model-card:hover {
@@ -112,12 +114,11 @@
 
 /* Action buttons - positioned in top-right when no status badge */
 .model-actions {
-  position: absolute;
-  top: 16px;
-  right: 16px;
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-top: auto; /* Push to bottom of card */
+  padding-top: 8px; /* Add spacing from content above */
 }
 
 /* Shared button styles */
@@ -240,6 +241,7 @@
   grid-template-columns: repeat(2, 1fr);
   gap: 12px;
   width: 100%;
+  margin-bottom: 24px; /* Add bottom margin to prevent overlap with content below */
 }
 
 /* Minimal theme specific adjustments */

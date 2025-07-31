@@ -194,15 +194,15 @@
 .info-card {
     background-color: rgba(0, 0, 0, 0.015);
     border: 1px solid var(--border-primary);
-    border-radius: 8px;
-    padding: 12px 14px;
+    border-radius: 10px;
+    padding: 16px;
     transition: all 0.2s ease;
     position: relative;
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    gap: 10px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
 .info-card:hover {
@@ -246,6 +246,10 @@
     display: flex;
     align-items: center;
     gap: 10px;
+}
+
+.info-card.expandable .card-header {
+    cursor: pointer;
 }
 
 .card-icon {
@@ -311,10 +315,11 @@
 }
 
 .card-value {
-    font-size: 17px;
+    font-size: var(--font-size-lg, 16px);
     font-weight: 600;
     color: var(--text-primary);
-    line-height: 1.15;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
 }
 
 .card-subtitle {
@@ -673,7 +678,7 @@
     padding: 8px 16px;
     border: 1px solid rgba(0, 0, 0, 0.15);
     border-radius: 4px;
-    background-color: rgba(0, 0, 0, 0.03);
+    background-color: white;
     color: var(--text-primary);
     font-size: 13px;
     font-weight: 500;
@@ -706,7 +711,7 @@
 }
 
 .action-button.secondary:hover {
-    background-color: var(--bg-hover);
+    background-color: rgba(0, 0, 0, 0.05);
     border-color: rgba(0, 0, 0, 0.3);
     color: var(--text-primary);
     box-shadow: 0 3px 10px rgba(0, 0, 0, 0.15);
@@ -988,8 +993,8 @@
     top: 0;
     right: 0;
     padding: 6px 12px;
-    background: rgba(255, 255, 255, 0.95);
-    border: 1px solid var(--border-primary);
+    background: white;
+    border: 1px solid rgba(0, 0, 0, 0.1);
     border-radius: 4px;
     color: var(--text-secondary);
     font-size: 11px;
@@ -1003,7 +1008,7 @@
 }
 
 .tab-copy-button:hover {
-    background: var(--bg-hover);
+    background: rgba(var(--accent-rgb), 0.05);
     color: var(--text-primary);
     border-color: var(--accent-primary);
     transform: translateY(-1px);
@@ -1038,6 +1043,19 @@
         border-color: var(--accent-primary);
         color: var(--accent-primary);
     }
+}
+
+/* Light theme override for copy button */
+[data-theme="vscode-light"] .tab-copy-button {
+    background: white !important;
+    border-color: rgba(0, 0, 0, 0.1) !important;
+    color: var(--text-secondary) !important;
+}
+
+[data-theme="vscode-light"] .tab-copy-button:hover {
+    background: rgba(59, 130, 246, 0.05) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--accent-primary) !important;
 }
 
 .detail-insights {
@@ -1094,7 +1112,7 @@
 }
 
 .logs-table {
-    background: var(--bg-secondary);
+    background: rgba(0, 0, 0, 0.015);
     border: 1px solid var(--border-primary);
     border-radius: 6px;
     overflow: hidden;

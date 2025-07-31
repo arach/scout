@@ -27,10 +27,11 @@ interface VirtualizedTranscriptListProps {
 
 const GROUP_HEADER_HEIGHT = 36;
 const TRANSCRIPT_ITEM_HEIGHT = 48;
+const SPACER_HEIGHT = 12; // Space between header and first item (12px for better breathing room)
 
 interface ListItem {
-    type: 'header' | 'transcript';
-    data: TranscriptGroup | Transcript;
+    type: 'header' | 'transcript' | 'spacer';
+    data: TranscriptGroup | Transcript | null;
     groupTitle?: string;
 }
 
@@ -64,6 +65,13 @@ export const VirtualizedTranscriptList = memo(function VirtualizedTranscriptList
             
             // Add transcripts if group is expanded
             if (expandedGroups.has(group.title)) {
+                // Add spacer after header before first item
+                items.push({
+                    type: 'spacer',
+                    data: null,
+                    groupTitle: group.title
+                });
+                
                 group.transcripts.forEach(transcript => {
                     items.push({
                         type: 'transcript',
@@ -94,7 +102,15 @@ export const VirtualizedTranscriptList = memo(function VirtualizedTranscriptList
         const item = listItems[index];
         if (!item) return TRANSCRIPT_ITEM_HEIGHT;
         
-        const size = item.type === 'header' ? GROUP_HEADER_HEIGHT : TRANSCRIPT_ITEM_HEIGHT;
+        let size: number;
+        if (item.type === 'header') {
+            size = GROUP_HEADER_HEIGHT;
+        } else if (item.type === 'spacer') {
+            size = SPACER_HEIGHT;
+        } else {
+            size = TRANSCRIPT_ITEM_HEIGHT;
+        }
+        
         itemSizeCache.current[index] = size;
         return size;
     }, [listItems]);
@@ -102,6 +118,11 @@ export const VirtualizedTranscriptList = memo(function VirtualizedTranscriptList
     const Row = ({ index, style }: { index: number; style: React.CSSProperties }) => {
         const item = listItems[index];
         if (!item) return null;
+
+        if (item.type === 'spacer') {
+            // Render empty spacer
+            return <div style={style} />;
+        }
 
         if (item.type === 'header') {
             const group = item.data as TranscriptGroup;
