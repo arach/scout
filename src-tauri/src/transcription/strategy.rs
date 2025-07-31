@@ -34,7 +34,7 @@ impl Default for TranscriptionConfig {
         Self {
             enable_chunking: true,
             chunking_threshold_secs: 5,  // Start chunking after 5 seconds (original design)
-            chunk_duration_secs: 5,      // 5-second chunks for Tiny model (original design)
+            chunk_duration_secs: 10,     // 10-second chunks to reduce hallucinations
             force_strategy: None,
             refinement_chunk_secs: Some(10), // 10-second chunks for Medium model refinement
         }
@@ -637,10 +637,11 @@ impl TranscriptionStrategy for ProgressiveTranscriptionStrategy {
             &ring_buffer_path,
         )?);
         
-        // Initialize ring buffer transcriber with TINY model for real-time
+        // TEMPORARY: Use Medium model for real-time chunks due to Tiny model hallucinations
+        // TODO: Fix Tiny model hallucinations with longer chunks or better parameters
         let ring_transcriber = crate::transcription::ring_buffer_transcriber::RingBufferTranscriber::new(
             ring_buffer.clone(),
-            self.tiny_transcriber.clone(), // Use Tiny model for real-time
+            self.medium_transcriber.clone(), // Use Medium model temporarily
             self.temp_dir.clone(),
         );
         
