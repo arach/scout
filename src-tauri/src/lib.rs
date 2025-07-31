@@ -111,6 +111,9 @@ pub struct AppState {
 
 #[tauri::command]
 async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle, device_name: Option<String>) -> Result<String, String> {
+    // Play start sound immediately, before any async operations
+    sound::SoundPlayer::play_start();
+    
     // Check if already recording
     if state.progress_tracker.is_busy() {
         warn(Component::Recording, "Attempted to start recording while already recording");
@@ -125,8 +128,6 @@ async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle, devi
         return Err("Audio recorder is already active".to_string());
     }
     drop(recorder);
-    // Play start sound
-    sound::SoundPlayer::play_start();
     
     
     // Use the recording workflow to start recording
@@ -2323,6 +2324,18 @@ pub fn run() {
             };
             
             app.manage(state);
+            
+            // Preload sounds to avoid first-play delay
+            sound::SoundPlayer::preload_sounds();
+            
+            // Warm up audio system to avoid first-record delay
+            {
+                use cpal::traits::{DeviceTrait, HostTrait};
+                if let Some(device) = cpal::default_host().default_input_device() {
+                    let _ = device.name(); // Just accessing device warms up the audio subsystem
+                    info(Component::Recording, "Audio system warmed up");
+                }
+            }
             
             // Start background Core ML model warming
             {

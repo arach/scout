@@ -9,6 +9,8 @@ static SOUND_ENABLED: OnceLock<bool> = OnceLock::new();
 static START_SOUND: OnceLock<Mutex<String>> = OnceLock::new();
 static STOP_SOUND: OnceLock<Mutex<String>> = OnceLock::new();
 static SUCCESS_SOUND: OnceLock<Mutex<String>> = OnceLock::new();
+// Cache resolved sound paths to avoid repeated file system checks
+static SOUND_PATH_CACHE: OnceLock<Mutex<std::collections::HashMap<String, String>>> = OnceLock::new();
 
 impl SoundPlayer {
     fn init_defaults() {
@@ -18,6 +20,25 @@ impl SoundPlayer {
     }
     
     fn resolve_sound_path(sound_name: &str) -> String {
+        // Check cache first
+        let cache = SOUND_PATH_CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
+        if let Ok(cache_guard) = cache.lock() {
+            if let Some(cached_path) = cache_guard.get(sound_name) {
+                return cached_path.clone();
+            }
+        }
+        
+        let resolved_path = Self::resolve_sound_path_uncached(sound_name);
+        
+        // Store in cache
+        if let Ok(mut cache_guard) = cache.lock() {
+            cache_guard.insert(sound_name.to_string(), resolved_path.clone());
+        }
+        
+        resolved_path
+    }
+    
+    fn resolve_sound_path_uncached(sound_name: &str) -> String {
         // If it's already a full path, use it directly
         if sound_name.starts_with('/') {
             return sound_name.to_string();
@@ -70,6 +91,32 @@ impl SoundPlayer {
         
         // Default to system sounds
         format!("/System/Library/Sounds/{}.aiff", sound_name)
+    }
+    
+    /// Preload sounds on app startup to avoid first-play delays
+    pub fn preload_sounds() {
+        Self::init_defaults();
+        
+        // Resolve all sound paths to populate cache
+        if let Ok(start_sound) = START_SOUND.get().unwrap().lock() {
+            let _ = Self::resolve_sound_path(&start_sound);
+        }
+        if let Ok(stop_sound) = STOP_SOUND.get().unwrap().lock() {
+            let _ = Self::resolve_sound_path(&stop_sound);
+        }
+        if let Ok(success_sound) = SUCCESS_SOUND.get().unwrap().lock() {
+            let _ = Self::resolve_sound_path(&success_sound);
+        }
+        
+        // On macOS, do a silent pre-run of afplay to warm it up
+        #[cfg(target_os = "macos")]
+        {
+            let _ = std::process::Command::new("afplay")
+                .arg("-v")
+                .arg("0") // Volume 0 for silent
+                .arg("/System/Library/Sounds/Tink.aiff")
+                .spawn();
+        }
     }
     
     pub fn play_start() {
