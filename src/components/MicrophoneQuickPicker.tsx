@@ -88,7 +88,7 @@ export function MicrophoneQuickPicker({
         <>
           <div className="mic-quick-picker-header">Select Microphone</div>
           <div className="mic-quick-picker-list">
-            {availableMics.map((mic) => (
+            {availableMics?.map((mic) => (
               <button
                 key={mic}
                 className={`mic-quick-picker-item ${mic === selectedMic ? 'selected' : ''}`}

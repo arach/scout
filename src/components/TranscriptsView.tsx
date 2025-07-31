@@ -218,7 +218,7 @@ export const TranscriptsView = memo(function TranscriptsView({
                                 onClick={() => {
                                     setIsSelectionMode(!isSelectionMode);
                                     // Clear selections when exiting selection mode
-                                    if (isSelectionMode && selectedTranscripts.size > 0) {
+                                    if (isSelectionMode && selectedTranscripts?.size > 0) {
                                         selectAllTranscripts(); // This will deselect all
                                     }
                                 }}
@@ -230,16 +230,16 @@ export const TranscriptsView = memo(function TranscriptsView({
                                     className="header-action-btn select-all"
                                     onClick={selectAllTranscripts}
                                 >
-                                    {selectedTranscripts.size === transcripts.length ? 'Deselect All' : 'Select All'}
+                                    {selectedTranscripts?.size === transcripts.length ? 'Deselect All' : 'Select All'}
                                 </button>
                             )}
-                            {selectedTranscripts.size > 0 && (
+                            {selectedTranscripts?.size > 0 && (
                                 <>
                                     <button
                                         className="header-action-btn delete"
                                         onClick={showBulkDeleteConfirmation}
                                     >
-                                        Delete ({selectedTranscripts.size})
+                                        Delete ({selectedTranscripts?.size || 0})
                                     </button>
                                     <div className="export-menu relative">
                                         <button 
@@ -424,10 +424,10 @@ export const TranscriptsView = memo(function TranscriptsView({
                 formatFileSize={formatFileSize}
             />
             
-            {selectedTranscripts.size > 0 && (
+            {selectedTranscripts?.size > 0 && (
                 <div className="floating-action-bar">
                     <span className="selection-count">
-                        {selectedTranscripts.size} selected
+                        {selectedTranscripts?.size || 0} selected
                     </span>
                     <button 
                         className="action-btn delete"
