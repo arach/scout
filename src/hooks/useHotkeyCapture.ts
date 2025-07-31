@@ -3,18 +3,18 @@ import { invoke } from '@tauri-apps/api/core';
 import { useSettings } from '../contexts/SettingsContext';
 
 export function useHotkeyCapture() {
-  const { state, actions } = useSettings();
+  const { state, dispatch, actions } = useSettings();
   const [capturedKeys, setCapturedKeys] = useState<string[]>([]);
 
   const startCapturingHotkey = useCallback(() => {
     actions.startCapturingHotkey();
     setCapturedKeys([]);
-  }, [actions]);
+  }, [actions, dispatch]);
 
   const startCapturingPushToTalkHotkey = useCallback(() => {
     actions.startCapturingPushToTalkHotkey();
     setCapturedKeys([]);
-  }, [actions]);
+  }, [actions, dispatch]);
 
   const updateHotkey = useCallback(async (newHotkey: string) => {
     try {
@@ -23,17 +23,17 @@ export function useHotkeyCapture() {
       
       // Clear the status after 3 seconds
       setTimeout(() => {
-        actions.dispatch({ type: 'SET_HOTKEY_UPDATE_STATUS', payload: 'idle' });
+        dispatch({ type: 'SET_HOTKEY_UPDATE_STATUS', payload: 'idle' });
       }, 3000);
     } catch (error) {
       console.error('Failed to update shortcut:', error);
-      actions.dispatch({ type: 'SET_HOTKEY_UPDATE_STATUS', payload: 'error' });
+      dispatch({ type: 'SET_HOTKEY_UPDATE_STATUS', payload: 'error' });
       
       setTimeout(() => {
-        actions.dispatch({ type: 'SET_HOTKEY_UPDATE_STATUS', payload: 'idle' });
+        dispatch({ type: 'SET_HOTKEY_UPDATE_STATUS', payload: 'idle' });
       }, 3000);
     }
-  }, [actions]);
+  }, [actions, dispatch]);
 
   const updatePushToTalkHotkey = useCallback(async (newHotkey: string) => {
     try {
@@ -41,17 +41,17 @@ export function useHotkeyCapture() {
       localStorage.setItem('scout-push-to-talk-hotkey', newHotkey);
       
       setTimeout(() => {
-        actions.dispatch({ type: 'SET_HOTKEY_UPDATE_STATUS', payload: 'idle' });
+        dispatch({ type: 'SET_HOTKEY_UPDATE_STATUS', payload: 'idle' });
       }, 3000);
     } catch (error) {
       console.error('Failed to update push-to-talk shortcut:', error);
-      actions.dispatch({ type: 'SET_HOTKEY_UPDATE_STATUS', payload: 'error' });
+      dispatch({ type: 'SET_HOTKEY_UPDATE_STATUS', payload: 'error' });
       
       setTimeout(() => {
-        actions.dispatch({ type: 'SET_HOTKEY_UPDATE_STATUS', payload: 'idle' });
+        dispatch({ type: 'SET_HOTKEY_UPDATE_STATUS', payload: 'idle' });
       }, 3000);
     }
-  }, [actions]);
+  }, [actions, dispatch]);
 
   const stopCapturingHotkey = useCallback(() => {
     actions.stopCapturingHotkey();
@@ -64,7 +64,7 @@ export function useHotkeyCapture() {
         return key;
       });
       const newHotkey = convertedKeys.join('+');
-      actions.dispatch({ type: 'UPDATE_CAPTURED_HOTKEY', payload: newHotkey });
+      dispatch({ type: 'UPDATE_CAPTURED_HOTKEY', payload: newHotkey });
       // Auto-save the hotkey
       updateHotkey(newHotkey);
     }
@@ -79,7 +79,7 @@ export function useHotkeyCapture() {
         return key;
       });
       const newHotkey = convertedKeys.join('+');
-      actions.dispatch({ type: 'UPDATE_CAPTURED_PUSH_TO_TALK_HOTKEY', payload: newHotkey });
+      dispatch({ type: 'UPDATE_CAPTURED_PUSH_TO_TALK_HOTKEY', payload: newHotkey });
       // Auto-save the hotkey
       updatePushToTalkHotkey(newHotkey);
     }

@@ -7,21 +7,6 @@ import { parseTranscriptMetadata, parseAudioMetadata, Transcript } from '../type
 import { useResizable } from '../hooks/useResizable';
 import './TranscriptDetailPanel.css';
 
-// Icon components for better visual scanning
-const CalendarIcon = () => (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <rect x="2" y="3" width="12" height="11" rx="1" stroke="currentColor" strokeWidth="1.5"/>
-        <path d="M2 6H14" stroke="currentColor" strokeWidth="1.5"/>
-        <path d="M5 1V3M11 1V3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-    </svg>
-);
-
-const FileIcon = () => (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M3 2C3 1.44772 3.44772 1 4 1H9L13 5V13C13 13.5523 12.5523 14 12 14H4C3.44772 14 3 13.5523 3 13V2Z" stroke="currentColor" strokeWidth="1.5"/>
-        <path d="M9 1V5H13" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
-    </svg>
-);
 
 const ClockIcon = () => (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -30,12 +15,6 @@ const ClockIcon = () => (
     </svg>
 );
 
-const ChipIcon = () => (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <rect x="4" y="4" width="8" height="8" rx="1" stroke="currentColor" strokeWidth="1.5"/>
-        <path d="M2 6H4M2 10H4M12 6H14M12 10H14M6 2V4M10 2V4M6 12V14M10 12V14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-    </svg>
-);
 
 const MicrophoneIcon = () => (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -45,20 +24,6 @@ const MicrophoneIcon = () => (
     </svg>
 );
 
-const SpeedIcon = () => (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M2 8C2 4.68629 4.68629 2 8 2C11.3137 2 14 4.68629 14 8C14 9.88457 13.2096 11.5837 11.9497 12.75H4.05025C2.79036 11.5837 2 9.88457 2 8Z" stroke="currentColor" strokeWidth="1.5"/>
-        <path d="M8 8L10.5 5.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-        <circle cx="8" cy="8" r="1" fill="currentColor"/>
-    </svg>
-);
-
-const ShieldCheckIcon = () => (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M8 1L3 3V7C3 10.5 5.5 13.5 8 14C10.5 13.5 13 10.5 13 7V3L8 1Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
-        <path d="M6 8L7.5 9.5L10 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-    </svg>
-);
 
 const ExpandIcon = ({ expanded }: { expanded: boolean }) => (
     <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" 
@@ -112,7 +77,6 @@ export function TranscriptDetailPanel({
     const [activeTab, setActiveTab] = useState<'transcript' | 'logs' | 'performance'>('transcript');
     const [whisperLogs, setWhisperLogs] = useState<any[]>([]);
     const [loadingLogs, setLoadingLogs] = useState(false);
-    const [expandedSections, setExpandedSections] = useState<{ [key: string]: boolean }>({});
     const [expandedCards, setExpandedCards] = useState<{ [key: string]: boolean }>({ transcription: true });
     const [copiedTab, setCopiedTab] = useState<string | null>(null);
     
@@ -242,15 +206,13 @@ export function TranscriptDetailPanel({
         }
     };
 
-    const toggleSection = (section: string) => {
-        setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
-    };
-    
     const toggleCard = (card: string) => {
         setExpandedCards(prev => ({ ...prev, [card]: !prev[card] }));
     };
 
     const copyTranscript = () => {
+        if (!transcript) return;
+        
         const textToCopy = showOriginalTranscript && metadata.original_transcript 
             ? metadata.original_transcript 
             : transcript.text;
@@ -281,26 +243,11 @@ export function TranscriptDetailPanel({
         setTimeout(() => setCopiedTab(null), 2000);
     };
 
-    const getDeviceSummary = () => {
-        if (!audioMetadata) return null;
-        const parts = [];
-        
-        // Device name
-        parts.push(audioMetadata.device.name);
-        
-        // Sample rate
-        parts.push(`${audioMetadata.format.sample_rate} Hz`);
-        
-        // OS
-        parts.push(audioMetadata.system.os);
-        
-        return parts.join(' • ');
-    };
 
     const getDeviceConnectionType = (device: any) => {
         const name = device.name.toLowerCase();
         
-        if (device.device_type) {
+        if (device?.device_type) {
             // Map existing device types to better connection descriptions
             switch (device.device_type.toLowerCase()) {
                 case 'airpods':
@@ -521,7 +468,6 @@ export function TranscriptDetailPanel({
                                             <SimpleAudioPlayer
                                                 audioPath={transcript.audio_path}
                                                 duration={transcript.duration_ms}
-                                                formatDuration={formatDuration}
                                             />
                                         </div>
                                     )}

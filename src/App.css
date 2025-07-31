@@ -33,26 +33,7 @@
   position: relative;
 }
 
-/* Header - positioned only over main content area */
-.app-header {
-  position: absolute;
-  top: 0;
-  left: 200px; /* Start after expanded sidebar */
-  right: 0;
-  display: flex;
-  align-items: center;
-  height: 48px;
-  background-color: var(--bg-secondary);
-  z-index: 100;
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04),
-              0 2px 6px rgba(0, 0, 0, 0.02);
-  transition: left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-/* Adjust header position when sidebar is collapsed */
-.app-container:has(.sidebar.collapsed) .app-header {
-  left: 52px; /* Start after collapsed sidebar */
-}
+/* Header removed - sidebar now handles all navigation */
 
 /* Dark mode drag overlay adjustments - theme-independent */
 @media (prefers-color-scheme: dark) {
@@ -167,7 +148,6 @@ h1 {
   flex-grow: 1;
   overflow: hidden;
   padding: 0;
-  padding-top: 48px; /* Account for header - IMPORTANT! */
   background-color: var(--bg-primary);
   position: relative;
   display: flex;
@@ -179,126 +159,9 @@ h1 {
   /* Add any specific styles when sidebar is collapsed */
 }
 
-/* View header - now inside app-header */
-.view-header {
-  display: flex;
-  align-items: center;
-  padding: 0 16px;
-  flex: 1;
-  height: 100%;
-}
+/* View header styles removed - now using sidebar section labels */
 
-.view-header-left,
-.view-header-right {
-  display: flex;
-  align-items: center;
-  width: 40px; /* Increased to match button size */
-  height: 24px;
-  flex-shrink: 0; /* Prevent shrinking */
-}
-
-.view-header-center {
-  position: absolute;
-  left: 50%; /* True center since header is full width */
-  transform: translateX(-50%);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  pointer-events: none; /* Prevent blocking button clicks */
-}
-
-.view-header-center > * {
-  pointer-events: auto; /* Re-enable pointer events for title content */
-}
-
-.view-title {
-  font-family: 'Silkscreen', monospace;
-  font-size: 20px;
-  font-weight: 400;
-  color: var(--text-primary);
-  margin: 0;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  line-height: 1;
-  display: flex;
-  align-items: center;
-  height: 20px; /* Explicit height */
-}
-
-/* Both left and right containers should left-align their content 
-   so the buttons appear in the same spot */
-
-.sidebar-toggle-button,
-.sidebar-close-button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  color: var(--text-tertiary);
-  cursor: pointer;
-  transition: all 0.15s ease;
-  padding: 0;
-  /* Ensure consistent icon positioning */
-  position: relative;
-}
-
-/* Ensure icons are perfectly centered */
-.sidebar-toggle-button svg,
-.sidebar-close-button svg {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-}
-
-.sidebar-toggle-button:hover,
-.sidebar-close-button:hover {
-  background: var(--bg-hover);
-  color: var(--text-secondary);
-  border-color: var(--border-primary);
-}
-
-.sidebar-toggle-button:active,
-.sidebar-close-button:active {
-  background: var(--bg-active);
-}
-
-/* Sidebar toggle button in main content */
-.sidebar-toggle-main {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  width: 24px;
-  height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  color: var(--text-tertiary);
-  cursor: pointer;
-  transition: all 0.15s ease;
-  z-index: 10;
-  opacity: 0.5;
-  padding: 0;
-}
-
-.sidebar-toggle-main:hover {
-  opacity: 0.8;
-  background: var(--bg-hover);
-  color: var(--text-secondary);
-  border-color: var(--border-primary);
-}
-
-.sidebar-toggle-main:active {
-  opacity: 1;
-  background: var(--bg-active);
-}
+/* Toggle button styles removed - sidebar handles its own toggle */
 
 .recording-section {
   background-color: var(--bg-secondary);

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useReducer, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useReducer, useMemo } from 'react';
 import { LLMSettings } from '../types/llm';
 import { ThemeVariant } from '../themes/types';
 
@@ -274,3 +274,6 @@ export function useSettings() {
   }
   return context;
 }
+
+// Alias for backwards compatibility
+export const useSettingsContext = useSettings;

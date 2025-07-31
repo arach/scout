@@ -245,8 +245,8 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
-    padding-top: 8px; /* Small top padding for breathing room */
-    padding-bottom: 8px; /* Small bottom padding to create visual gap */
+    padding-top: 16px; /* Increased top padding for better alignment */
+    padding-bottom: 16px; /* Increased bottom padding for visual balance */
     overflow: hidden;
     position: relative;
 }
@@ -503,7 +503,7 @@
 
 /* Group Styles */
 .transcript-group {
-    margin-bottom: 32px; /* Increased spacing between groups */
+    margin-bottom: 24px;
     background: transparent;
     border: none;
     border-radius: 0;
@@ -511,46 +511,46 @@
     box-shadow: none;
 }
 
-.transcript-group:first-child {
-    margin-top: 0;
+/* When group is collapsed (no .expanded class), adjust spacing */
+.transcript-group:not(.expanded) {
+    margin-bottom: 12px; /* Reduced spacing for collapsed groups */
 }
 
-.transcript-group:first-child .transcript-group-header {
-    border-top-left-radius: 12px;
-    border-top-right-radius: 12px;
+/* Add extra spacing to container for collapsed groups */
+.transcript-group:not(.expanded) .transcript-group-header {
+    margin-bottom: 0; /* Remove any bottom margin */
+}
+
+.transcript-group:first-child {
+    margin-top: 0;
 }
 
 .transcript-group-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 16px; /* Increased vertical padding for better breathing room */
+    padding: 8px 16px 8px 12px; /* Less padding on left for better alignment */
     margin: 0;
-    background: transparent; /* No background - container already has one */
+    background: transparent;
     user-select: none;
     transition: var(--transition);
-    border-bottom: 1px solid var(--border-primary);
-    min-height: 44px; /* Increased height for better touch targets */
+    border: none;
+    border-radius: 0;
+    min-height: 32px;
     box-sizing: border-box;
     position: relative;
     font-weight: 500;
     z-index: 1;
-}
-
-@media (prefers-color-scheme: dark) {
-    .transcript-group-header {
-        background: transparent; /* Keep transparent in dark mode too */
-        border-bottom-color: var(--border-primary);
-    }
+    cursor: pointer;
 }
 
 .transcript-group-header:hover {
-    background: rgba(0, 0, 0, 0.02); /* Very subtle hover */
+    background: rgba(0, 0, 0, 0.02);
 }
 
 @media (prefers-color-scheme: dark) {
     .transcript-group-header:hover {
-        background: rgba(255, 255, 255, 0.02); /* Very subtle hover */
+        background: rgba(255, 255, 255, 0.02);
     }
 }
 
@@ -558,7 +558,7 @@
 
 /* Light theme text colors for group headers */
 [data-theme="vscode-light"] .transcript-group-title {
-    color: #111827 !important; /* gray-900 */
+    color: #6B7280 !important; /* gray-500 */
 }
 
 [data-theme="vscode-light"] .group-count {
@@ -590,8 +590,8 @@
     background: none;
     border: none;
     padding: 4px;
-    margin-right: 2px; /* Tighter space before checkbox */
-    margin-left: -4px; /* Pull slightly left for better alignment */
+    margin-right: 8px; /* Space before checkbox */
+    margin-left: 0; /* Remove negative margin */
     cursor: pointer;
     color: var(--text-secondary);
     display: flex;
@@ -626,7 +626,7 @@
     height: 14px;
     flex-shrink: 0;
     margin-right: 12px; /* Space after checkbox */
-    margin-left: 12px; /* Fixed left margin for alignment */
+    margin-left: 0; /* No left margin - chevron provides the spacing */
     align-self: center; /* Center vertically */
 }
 
@@ -692,7 +692,7 @@
 /* Mobile responsive adjustments */
 @media (max-width: 768px) {
     .transcript-group-header {
-        padding: 12px 16px;
+        padding: 8px 16px;
     }
 }
 

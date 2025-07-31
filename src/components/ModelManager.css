@@ -9,6 +9,26 @@
   color: var(--text-muted);
 }
 
+.model-manager-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.braille-spinner {
+  display: inline-block;
+  font-family: monospace;
+  font-size: 16px;
+  color: var(--accent-primary);
+}
+
 .model-list {
   display: flex;
   flex-direction: column;

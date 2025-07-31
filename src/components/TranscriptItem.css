@@ -130,12 +130,20 @@
 
 /* Time column */
 .transcript-time {
-    font-size: 13px;
-    color: var(--text-secondary);
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 11px;
+    color: var(--text-tertiary);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "SF Pro Text", "Roboto", sans-serif;
     flex-shrink: 0;
-    min-width: 85px;
-    text-align: right;
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    font-weight: 400;
+    letter-spacing: -0.01em;
+    margin-right: 12px;
+}
+
+.transcript-item:hover .transcript-time {
+    opacity: 0.6;
 }
 
 /* Duration column - removed to improve layout alignment */
@@ -152,15 +160,15 @@
 .transcript-text-container {
     flex: 1;
     min-width: 0;
-    padding: 0 16px; /* Increased left padding for better spacing */
-    padding-right: 0; /* Remove right padding so text extends full width */
+    padding: 0;
+    margin-right: 8px; /* Small gap before time */
 }
 
 .transcript-text {
     margin: 0;
     color: var(--text-primary);
-    font-size: 12px;
-    line-height: 1.4;
+    font-size: 13px;
+    line-height: 1.5;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     font-weight: 400;
     letter-spacing: -0.01em;
@@ -169,6 +177,7 @@
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+    text-align: left;
 }
 
 .transcript-empty {
@@ -322,6 +331,10 @@
         color: #a1a1aa; /* zinc-400 - lighter for better visibility */
     }
     
+    .transcript-item:hover .transcript-time {
+        opacity: 0.5;
+    }
+    
     .transcript-duration {
         color: #a1a1aa; /* zinc-400 - lighter for better visibility */
     }
@@ -377,6 +390,10 @@
     color: #6B7280 !important; /* gray-500 for secondary text */
 }
 
+[data-theme="vscode-light"] .transcript-item:hover .transcript-time {
+    opacity: 0.6 !important;
+}
+
 [data-theme="vscode-light"] .transcript-empty {
     color: #6B7280 !important; /* gray-500 for empty state */
 }
@@ -419,6 +436,10 @@
     
     [data-theme="vscode-light"] .transcript-time {
         color: #6B7280 !important;
+    }
+    
+    [data-theme="vscode-light"] .transcript-item:hover .transcript-time {
+        opacity: 0.6 !important;
     }
     
     [data-theme="vscode-light"] .transcript-empty {

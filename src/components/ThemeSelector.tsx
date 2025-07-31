@@ -25,14 +25,6 @@ export const ThemeSelector: React.FC<ThemeSelectorProps> = ({
     onThemeChange?.(themeId);
   };
   
-  // Group themes by category
-  const themeCategories = availableThemes.reduce((acc, theme) => {
-    if (!acc[theme.category]) {
-      acc[theme.category] = [];
-    }
-    acc[theme.category].push(theme);
-    return acc;
-  }, {} as Record<string, typeof availableThemes>);
   
   return (
     <div className={`theme-selector-container ${compact ? 'theme-selector-compact' : ''}`}>

@@ -24,6 +24,7 @@ pub enum Component {
     Processing,
     FFI,
     UI,
+    Models,
 }
 
 impl Component {
@@ -36,6 +37,7 @@ impl Component {
             Component::Processing => "PROC",
             Component::FFI => "FFI ",  // Extra space for alignment
             Component::UI => "UI  ",   // Extra spaces for alignment
+            Component::Models => "MODL",
         }
     }
 }

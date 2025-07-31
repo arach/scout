@@ -21,7 +21,7 @@ interface PerformanceTimelineProps {
     onClose?: () => void;
 }
 
-export function PerformanceTimeline({ isRecording, transcriptId, onClose }: PerformanceTimelineProps) {
+export function PerformanceTimeline({ isRecording, transcriptId }: PerformanceTimelineProps) {
     const [timeline, setTimeline] = useState<PerformanceTimeline | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);

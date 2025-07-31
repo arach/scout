@@ -4,6 +4,7 @@ use tokio::sync::Mutex;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 use crate::logger::{warn, info, Component};
 use crate::audio::WhisperAudioConverter;
+use crate::model_state::{ModelStateManager, CoreMLState};
 use once_cell::sync::Lazy;
 
 pub mod strategy;
@@ -24,6 +25,76 @@ pub struct Transcriber {
 }
 
 impl Transcriber {
+    /// Get or create a cached transcriber instance with Core ML readiness check
+    pub async fn get_or_create_cached_with_readiness(
+        model_path: &Path, 
+        model_state_manager: Option<Arc<ModelStateManager>>
+    ) -> Result<Arc<Mutex<Self>>, String> {
+        // Extract model ID from path
+        let model_id = model_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .and_then(|s| s.strip_prefix("ggml-"))
+            .unwrap_or("");
+            
+        // Check if Core ML is ready
+        let use_coreml = if let Some(manager) = &model_state_manager {
+            manager.should_use_coreml(model_id).await
+        } else {
+            true // Default behavior if no manager
+        };
+        
+        if !use_coreml {
+            info(Component::Transcription, &format!(
+                "Core ML not ready for {}, using CPU-only mode", model_id
+            ));
+        }
+        
+        let mut cache = TRANSCRIBER_CACHE.lock().await;
+        
+        // Create a cache key that includes Core ML readiness
+        let cache_key = if use_coreml {
+            model_path.to_path_buf()
+        } else {
+            // Use a different cache key for CPU-only mode
+            model_path.parent()
+                .map(|p| p.join(format!("{}_cpu_only", model_path.file_name().unwrap_or_default().to_string_lossy())))
+                .unwrap_or_else(|| model_path.to_path_buf())
+        };
+        
+        // Check if we have a cached transcriber for this configuration
+        if let Some(cached_transcriber) = cache.get(&cache_key) {
+            info(Component::Transcription, &format!(
+                "Reusing cached transcriber instance for {:?} (Core ML: {})", 
+                model_path, use_coreml
+            ));
+            return Ok(cached_transcriber.clone());
+        }
+        
+        // Create new transcriber
+        info(Component::Transcription, &format!(
+            "Creating new transcriber for model: {:?} (Core ML enabled: {})", 
+            model_path, use_coreml
+        ));
+        
+        let transcriber = if use_coreml {
+            Self::new(model_path)?
+        } else {
+            Self::new_cpu_only(model_path)?
+        };
+        
+        let transcriber_arc = Arc::new(Mutex::new(transcriber));
+        
+        // Update cache
+        cache.insert(cache_key, transcriber_arc.clone());
+        info(Component::Transcription, &format!(
+            "Cached transcriber for {:?}. Total cached models: {}", 
+            model_path, cache.len()
+        ));
+        
+        Ok(transcriber_arc)
+    }
+    
     /// Get or create a cached transcriber instance to avoid CoreML reinitialization
     pub async fn get_or_create_cached(model_path: &Path) -> Result<Arc<Mutex<Self>>, String> {
         let mut cache = TRANSCRIBER_CACHE.lock().await;
@@ -49,12 +120,35 @@ impl Transcriber {
     pub fn new(model_path: &Path) -> Result<Self, String> {
         let model_path_str = model_path.to_str().ok_or("Invalid model path")?;
         
+        // Check if Core ML model exists alongside GGML model
+        let model_stem = model_path.file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        let coreml_path = model_path.parent()
+            .map(|p| p.join(format!("{}-encoder.mlmodelc", model_stem)))
+            .unwrap_or_default();
+        
+        let has_coreml = coreml_path.exists();
+        
+        info(Component::Transcription, &format!(
+            "Initializing model: {} (Core ML available: {})", 
+            model_path.file_name().unwrap_or_default().to_string_lossy(),
+            has_coreml
+        ));
+        
         // Try Core ML first (faster, more efficient on macOS)
         let context = match WhisperContext::new_with_params(
             model_path_str,
-            WhisperContextParameters::default(), // Uses Core ML on macOS
+            WhisperContextParameters::default(), // Uses Core ML on macOS if available
         ) {
             Ok(ctx) => {
+                if has_coreml {
+                    info(Component::Transcription, "✅ Core ML acceleration enabled - using Apple Neural Engine");
+                    info(Component::Transcription, "Expected performance: 3x+ faster encoder, 1.5-2x overall speedup");
+                } else {
+                    info(Component::Transcription, "⚠️ Core ML model not found - using CPU mode");
+                    info(Component::Transcription, &format!("To enable Core ML, download: {}", coreml_path.display()));
+                }
                 ctx
             }
             Err(core_ml_error) => {
@@ -72,6 +166,26 @@ impl Transcriber {
             }
         };
 
+        Ok(Self { context })
+    }
+    
+    pub fn new_cpu_only(model_path: &Path) -> Result<Self, String> {
+        let model_path_str = model_path.to_str().ok_or("Invalid model path")?;
+        
+        info(Component::Transcription, &format!(
+            "Initializing model in CPU-only mode: {}", 
+            model_path.file_name().unwrap_or_default().to_string_lossy()
+        ));
+        
+        // Force CPU-only mode
+        let mut params = WhisperContextParameters::default();
+        params.use_gpu(false);
+        
+        let context = WhisperContext::new_with_params(model_path_str, params)
+            .map_err(|e| format!("Failed to initialize CPU-only model: {}", e))?;
+            
+        info(Component::Transcription, "Model initialized in CPU-only mode");
+        
         Ok(Self { context })
     }
 
@@ -119,8 +233,11 @@ impl Transcriber {
         let mut state = {
             let _lock = COREML_INIT_LOCK.lock().unwrap();
             info(Component::Transcription, "Creating whisper state (with CoreML lock)");
+            info(Component::Transcription, "Note: First Core ML initialization for large models can take 2-3 minutes");
+            let start_time = std::time::Instant::now();
             let state_result = self.context.create_state().map_err(|e| format!("Failed to create state: {}", e));
-            info(Component::Transcription, "Whisper state created successfully");
+            let elapsed = start_time.elapsed();
+            info(Component::Transcription, &format!("Whisper state created successfully in {:.2}s", elapsed.as_secs_f64()));
             state_result?
         };
         

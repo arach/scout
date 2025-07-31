@@ -11,7 +11,6 @@ import { SettingsView } from "./SettingsView";
 import { StatsView } from "./StatsView";
 import Dictionary from "./Dictionary";
 import { AudioErrorBoundary, TranscriptionErrorBoundary, SettingsErrorBoundary } from './ErrorBoundary';
-import { ChevronRight, PanelLeftClose } from 'lucide-react';
 import { useRecording } from '../hooks/useRecording';
 import { useSettings } from '../hooks/useSettings';
 import { useFileDrop } from '../hooks/useFileDrop';
@@ -49,16 +48,11 @@ export function AppContent() {
     currentView, 
     showTranscriptionOverlay, 
     showFirstRun, 
-    isCapturingHotkey, 
-    isCapturingPushToTalkHotkey, 
     deleteConfirmation, 
-    hotkeyUpdateStatus, 
     uploadProgress,
     setCurrentView, 
     setShowTranscriptionOverlay, 
     setShowFirstRun, 
-    setIsCapturingHotkey, 
-    setIsCapturingPushToTalkHotkey, 
     setDeleteConfirmation, 
     setUploadProgress 
   } = useUIContext();
@@ -68,32 +62,10 @@ export function AppContent() {
 
   // Settings hook
   const {
-    overlayPosition,
-    overlayTreatment,
     hotkey,
     pushToTalkHotkey,
-    theme,
-    selectedTheme,
     soundEnabled,
-    startSound,
-    stopSound,
-    successSound,
     completionSoundThreshold,
-    llmSettings,
-    autoCopy,
-    autoPaste,
-    updateOverlayPosition,
-    updateOverlayTreatment,
-    updateTheme,
-    updateSelectedTheme,
-    toggleSoundEnabled,
-    updateStartSound,
-    updateStopSound,
-    updateSuccessSound,
-    updateCompletionSoundThreshold,
-    updateLLMSettings,
-    toggleAutoCopy,
-    toggleAutoPaste,
   } = useSettings();
 
   // Load transcripts functions
@@ -462,26 +434,6 @@ export function AppContent() {
 
   return (
     <div className="app-container">
-      <header className="app-header">
-        <div className="view-header">
-          <div className="view-header-left">
-            {/* Sidebar toggle moved to sidebar itself */}
-          </div>
-          <div className="view-header-center">
-            <h1 className="view-title">
-              {currentView === 'record' && 'Recording'}
-              {currentView === 'transcripts' && 'Transcripts'}
-              {currentView === 'settings' && 'Settings'}
-              {currentView === 'stats' && 'Stats'}
-              {currentView === 'dictionary' && 'Dictionary'}
-            </h1>
-          </div>
-          <div className="view-header-right">
-            {/* Empty for now, but available for future controls */}
-          </div>
-        </div>
-      </header>
-      
       <Sidebar
         currentView={currentView}
         onViewChange={setCurrentView}

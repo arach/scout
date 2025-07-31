@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Settings, ChevronLeft, ChevronRight } from 'lucide-react';
 import './Sidebar.css';
@@ -56,8 +56,88 @@ export const useSidebarState = (): SidebarState => {
 };
 
 export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpanded }: SidebarProps) {
+  const [width, setWidth] = useState(200);
+  const [isResizing, setIsResizing] = useState(false);
+  const sidebarRef = useRef<HTMLDivElement>(null);
+  const MIN_WIDTH = 150;
+  const MAX_WIDTH = 400;
+  
+
+  // Load saved width
+  useEffect(() => {
+    const loadSidebarWidth = async () => {
+      try {
+        const settings = await invoke<{ sidebar_width?: number }>('get_settings');
+        if (settings.sidebar_width) {
+          setWidth(settings.sidebar_width);
+        }
+      } catch (error) {
+        console.error('Failed to load sidebar width:', error);
+      }
+    };
+    if (isExpanded) {
+      loadSidebarWidth();
+    }
+  }, [isExpanded]);
+
+  // Save width when resizing stops
+  const saveWidth = useCallback(async (newWidth: number) => {
+    try {
+      const settings = await invoke('get_settings') as Record<string, any>;
+      await invoke('update_settings', { 
+        newSettings: {
+          ...settings, 
+          sidebar_width: newWidth 
+        }
+      });
+    } catch (error) {
+      console.error('Failed to save sidebar width:', error);
+    }
+  }, []);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+  }, []);
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (!isResizing) return;
+    
+    const newWidth = e.clientX;
+    if (newWidth >= MIN_WIDTH && newWidth <= MAX_WIDTH) {
+      setWidth(newWidth);
+    }
+  }, [isResizing]);
+
+  const handleMouseUp = useCallback(() => {
+    if (isResizing) {
+      setIsResizing(false);
+      saveWidth(width);
+    }
+  }, [isResizing, width, saveWidth]);
+
+  useEffect(() => {
+    if (isResizing) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      };
+    }
+  }, [isResizing, handleMouseMove, handleMouseUp]);
+
   return (
-    <div className={`sidebar ${isExpanded ? 'expanded' : 'collapsed'}`}>
+    <div 
+      ref={sidebarRef}
+      className={`sidebar ${isExpanded ? 'expanded' : 'collapsed'} ${isResizing ? 'resizing' : ''}`}
+      style={{}}
+    >
       <button 
         className="sidebar-toggle-zone"
         onClick={onToggleExpanded}
@@ -134,6 +214,13 @@ export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpande
         {isExpanded && <span className="sidebar-label">Settings</span>}
         <span className="sidebar-tooltip">Settings</span>
       </button>
+      
+      {isExpanded && (
+        <div 
+          className="sidebar-resize-handle"
+          onMouseDown={handleMouseDown}
+        />
+      )}
     </div>
   );
 } 

@@ -10,7 +10,7 @@ interface DictionaryViewProps {
   onToggleExpand: () => void;
 }
 
-export const DictionaryView: React.FC<DictionaryViewProps> = ({ isExpanded, onToggleExpand }) => {
+export const DictionaryView: React.FC<DictionaryViewProps> = ({ isExpanded }) => {
   const [entries, setEntries] = useState<DictionaryEntry[]>([]);
   const [filteredEntries, setFilteredEntries] = useState<DictionaryEntry[]>([]);
   const [loading, setLoading] = useState(true);

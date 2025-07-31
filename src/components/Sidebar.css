@@ -4,21 +4,45 @@
   background-color: var(--bg-secondary);
   border-right: none; /* Remove hard border */
   padding-top: 0; /* No top padding - chevron flush with top */
-  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
-  flex-shrink: 0;
+  flex: 0 0 auto;
   overflow: visible;
   height: 100vh; /* Full viewport height */
-  z-index: 101; /* Above the header */
-  /* No shadow - unified with header */
+  z-index: 101;
+  /* No shadow - unified design */
+  width: 52px;
+  max-width: 52px;
+  transition: width 0.4s cubic-bezier(0.23, 1, 0.32, 1) !important;
 }
 
 .sidebar.collapsed {
   width: 52px;
+  max-width: 52px;
 }
 
 .sidebar.expanded {
   width: 200px;
+  max-width: 200px;
+}
+
+/* Smooth width animation for content */
+.sidebar * {
+  transition: opacity 0.2s ease;
+}
+
+.sidebar.collapsed .sidebar-label {
+  opacity: 0;
+  width: 0;
+  overflow: hidden;
+  transition: opacity 0.15s ease, transform 0.2s ease;
+  transform: translateX(-10px);
+}
+
+.sidebar.expanded .sidebar-label {
+  opacity: 1;
+  width: auto;
+  transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1) 0.15s, transform 0.3s cubic-bezier(0.4, 0, 0.2, 1) 0.1s;
+  transform: translateX(0);
 }
 
 /* Removed gradient overlay to ensure color consistency with header */
@@ -32,7 +56,7 @@
   cursor: pointer;
   height: 52px;
   position: relative;
-  transition: color 0.15s ease, background-color 0.15s ease;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   opacity: 0.6;
   padding: 0 16px;
   gap: 12px;
@@ -50,11 +74,12 @@
   background: transparent;
   border: none;
   cursor: pointer;
-  transition: background-color 0.15s ease;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   color: var(--text-secondary);
   gap: 8px;
   margin: 0;
   font-size: 14px;
+  overflow: hidden;
 }
 
 .sidebar.collapsed .sidebar-toggle-zone {
@@ -71,6 +96,24 @@
   color: var(--text-primary);
 }
 
+/* Add subtle glow effect on hover */
+.sidebar-toggle-zone:hover .sidebar-app-name {
+  text-shadow: 0 0 10px rgba(var(--accent-rgb), 0.3);
+}
+
+/* Smooth chevron rotation animation */
+.sidebar-toggle-zone svg {
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar.expanded .sidebar-toggle-zone svg:last-child {
+  transform: rotate(0deg);
+}
+
+.sidebar.collapsed .sidebar-toggle-zone svg {
+  transform: rotate(0deg);
+}
+
 .sidebar-app-name {
   font-family: 'Silkscreen', monospace;
   font-size: 14px;
@@ -79,6 +122,15 @@
   letter-spacing: 0.08em;
   flex-grow: 1;
   text-align: left;
+  opacity: 0;
+  transform: translateX(-15px) scale(0.9);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar.expanded .sidebar-app-name {
+  opacity: 1;
+  transform: translateX(0) scale(1);
+  transition-delay: 0.08s;
 }
 
 .sidebar.collapsed .sidebar-button {
@@ -137,17 +189,25 @@
   position: absolute;
   left: 0;
   top: 50%;
-  transform: translateY(-50%);
+  transform: translateY(-50%) scaleY(0);
   width: 3px;
   height: 24px;
   background-color: var(--accent-primary);
   border-radius: 0 2px 2px 0;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar-button.active::before {
+  transform: translateY(-50%) scaleY(1);
 }
 
 /* Label for expanded state */
 .sidebar-label {
-  font-size: 13px;
-  font-weight: 500;
+  font-family: 'Silkscreen', monospace;
+  font-size: 12px;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -284,9 +344,11 @@
 /* Apply animations to button icons on hover and click */
 .sidebar-button svg,
 .sidebar-button > * {
-  transition: transform 0.15s ease;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease;
   transform-style: flat; /* Use flat instead of preserve-3d to prevent CATransformLayer conflicts */
 }
+
+/* Remove global icon bounce on expand to allow individual hover animations */
 
 /* Record button - coin flip on Y axis */
 .sidebar-button-record:hover svg {
@@ -339,4 +401,51 @@
   .sidebar.collapsed .sidebar-button .sidebar-tooltip::after {
     border-color: transparent var(--bg-tertiary) transparent transparent;
   }
+}
+
+/* Resize handle */
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  background: transparent;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 102;
+}
+
+.sidebar-resize-handle:hover {
+  background-color: var(--accent-primary);
+  opacity: 0.3;
+  width: 8px;
+  right: -4px;
+}
+
+.sidebar-resize-handle:active,
+.sidebar.resizing .sidebar-resize-handle {
+  background-color: var(--accent-primary);
+  opacity: 0.8;
+}
+
+/* Disable transitions while resizing */
+.sidebar.resizing {
+  transition: none !important;
+}
+
+.sidebar.resizing * {
+  transition: none !important;
+}
+
+/* Visual indicator when resizing */
+.sidebar.resizing::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 1px;
+  background-color: var(--accent-primary);
+  opacity: 0.5;
 } 

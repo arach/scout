@@ -345,9 +345,7 @@
   }
   
   /* Slower animations for sidebar and view transitions */
-  .sidebar {
-    transition: width 0.3s ease !important;
-  }
+  /* Removed sidebar transition override to allow custom timing */
   
   .sidebar-button {
     transition: all 0.25s ease !important;

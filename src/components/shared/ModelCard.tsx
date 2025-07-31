@@ -6,7 +6,8 @@ import {
   CheckCircle, 
   Download,
   Brain,
-  FileText
+  FileText,
+  Zap
 } from 'lucide-react';
 import './ModelCard.css';
 
@@ -20,6 +21,8 @@ export interface BaseModel {
   downloaded: boolean;
   active: boolean;
   speed: string;
+  coreml_downloaded?: boolean;
+  coreml_url?: string;
 }
 
 export interface ModelCardProps<T extends BaseModel> {
@@ -31,23 +34,19 @@ export interface ModelCardProps<T extends BaseModel> {
     downloadedMb: number;
     totalMb: number;
   };
-  qualityLabel?: {
-    text: string;
-    className: string;
-  };
   onDownload: (model: T) => void;
   onSelect: (modelId: string) => void;
   renderSpecs?: (model: T) => React.ReactNode;
+  isDownloadingCoreML?: boolean;
 }
 
 export function ModelCard<T extends BaseModel>({
   model,
   isDownloading,
   downloadProgress,
-  qualityLabel,
   onDownload,
-  onSelect,
-  renderSpecs
+  renderSpecs,
+  isDownloadingCoreML
 }: ModelCardProps<T>) {
   const formatSize = (mb: number): string => {
     if (mb >= 1000) {
@@ -56,29 +55,38 @@ export function ModelCard<T extends BaseModel>({
     return `${Math.round(mb)} MB`;
   };
 
+  const isClickableForDownload = !model.downloaded && !isDownloading;
+
   return (
-    <div className={`model-card ${model.active ? 'active' : ''}`}>
+    <div 
+      className={`model-card ${model.active ? 'active' : ''} ${isClickableForDownload ? 'not-installed' : ''}`}
+      onClick={isClickableForDownload ? () => onDownload(model) : undefined}
+    >
       <div className="model-card-header">
-        <h3 className="model-name">{model.name}</h3>
+        <h3 className="model-name">
+          <span>{model.name}</span>
+          <div className="model-status-pills">
+            {model.downloaded && (
+              <span className="model-status-pill installed">
+                <CheckCircle size={10} />
+                Installed
+              </span>
+            )}
+            {model.downloaded && model.coreml_downloaded && (
+              <span className="model-status-pill accelerated">
+                <Zap size={10} />
+                CoreML Accelerated
+              </span>
+            )}
+            {isClickableForDownload && (
+              <span className="model-status-pill download-hint">
+                <Download size={10} />
+                Click to Install
+              </span>
+            )}
+          </div>
+        </h3>
       </div>
-      
-      {/* Status badges */}
-      {model.active && (
-        <div className="model-status">
-          <span className="model-badge active">
-            <CheckCircle size={12} />
-            Active
-          </span>
-        </div>
-      )}
-      
-      {qualityLabel && !model.active && model.downloaded && (
-        <div className="model-status">
-          <span className={`model-badge ${qualityLabel.className}`}>
-            {qualityLabel.text}
-          </span>
-        </div>
-      )}
       
       {/* Model description */}
       <p className="model-description">{model.description}</p>
@@ -96,21 +104,24 @@ export function ModelCard<T extends BaseModel>({
         {renderSpecs && renderSpecs(model)}
       </div>
       
-      {/* Action buttons */}
-      {!model.downloaded && !isDownloading && (
+      {/* Spacer to push buttons to bottom */}
+      <div className="model-spacer" />
+      
+      {/* Action section - only show when there are actions */}
+      {(model.downloaded || isDownloading) && (
         <div className="model-actions">
+          {model.downloaded && !model.coreml_downloaded && model.coreml_url && !isDownloading && (
           <button 
-            className="model-btn model-btn-primary"
+            className="model-btn model-btn-secondary"
             onClick={() => onDownload(model)}
           >
-            <Download size={12} />
-            <span>Download</span>
+            <Zap size={14} />
+            <span>Apply Acceleration</span>
           </button>
-        </div>
-      )}
+        )}
+        
       
-      {isDownloading && downloadProgress && (
-        <div className="model-actions">
+        {isDownloading && downloadProgress && (
           <div className="model-download-progress">
             <div className="model-progress-bar">
               <div 
@@ -119,21 +130,10 @@ export function ModelCard<T extends BaseModel>({
               />
             </div>
             <span className="model-progress-text">
-              {formatSize(downloadProgress.downloadedMb)} / {formatSize(downloadProgress.totalMb)}
+              {isDownloadingCoreML ? 'Core ML: ' : ''}{formatSize(downloadProgress.downloadedMb)} / {formatSize(downloadProgress.totalMb)}
             </span>
           </div>
-        </div>
-      )}
-      
-      {model.downloaded && !model.active && (
-        <div className="model-actions">
-          <button 
-            className="model-btn model-btn-secondary"
-            onClick={() => onSelect(model.id)}
-          >
-            <CheckCircle size={12} />
-            <span>Use Model</span>
-          </button>
+        )}
         </div>
       )}
     </div>

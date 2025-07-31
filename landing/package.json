@@ -4,11 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "pnpm build:docs && next build",
+    "build": "npm run build:docs && next build",
     "build:docs": "node scripts/build-docs.js",
     "start": "next start",
     "lint": "next lint",
-    "deploy:gh-pages": "NODE_ENV=production pnpm build && touch out/.nojekyll && echo 'scout-app.dev' > out/CNAME"
+    "deploy:gh-pages": "NODE_ENV=production npm run build && touch out/.nojekyll && echo 'scout-app.dev' > out/CNAME"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.1.0",
