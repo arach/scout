@@ -365,6 +365,24 @@ impl RecordingWorkflow {
                             info(Component::Recording, "recorder.stop_recording() succeeded");
                             drop(recorder); // Release lock
                             
+                            // Validate the WAV file
+                            let wav_path = recordings_dir_for_iter.join(&active_recording.filename);
+                            match crate::audio::WavValidator::validate_wav_file(&wav_path) {
+                                Ok(validation_result) => {
+                                    validation_result.log_issues();
+                                    if validation_result.has_errors() {
+                                        error(Component::Recording, "WAV file validation found errors - audio may have issues");
+                                    } else if validation_result.has_warnings() {
+                                        warn(Component::Recording, "WAV file validation found warnings - check logs for details");
+                                    } else {
+                                        info(Component::Recording, "WAV file validation passed - no issues detected");
+                                    }
+                                }
+                                Err(e) => {
+                                    error(Component::Recording, &format!("Failed to validate WAV file: {}", e));
+                                }
+                            }
+                            
                             // Send immediate response for UI responsiveness
                             performance_tracker_for_iter.track_event("response_sent", "Sent immediate response to UI").await;
                             let immediate_result = RecordingResult {

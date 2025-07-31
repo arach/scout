@@ -217,9 +217,13 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
             sample_format: hound::SampleFormat::Float,
         };
         
+        // Create a separate file for ring buffer to avoid overwriting the main recording
+        let ring_buffer_path = output_path.with_file_name(
+            format!("ring_buffer_{}", output_path.file_name().unwrap().to_string_lossy())
+        );
         let ring_buffer = Arc::new(crate::audio::ring_buffer_recorder::RingBufferRecorder::new(
             spec,
-            output_path,
+            &ring_buffer_path,
         )?);
         
         // Initialize ring buffer transcriber
@@ -627,9 +631,13 @@ impl TranscriptionStrategy for ProgressiveTranscriptionStrategy {
             sample_format: hound::SampleFormat::Float,
         };
         
+        // Create a separate file for ring buffer to avoid overwriting the main recording
+        let ring_buffer_path = output_path.with_file_name(
+            format!("ring_buffer_{}", output_path.file_name().unwrap().to_string_lossy())
+        );
         let ring_buffer = Arc::new(crate::audio::ring_buffer_recorder::RingBufferRecorder::new(
             spec,
-            output_path,
+            &ring_buffer_path,
         )?);
         
         // Initialize ring buffer transcriber with TINY model for real-time
