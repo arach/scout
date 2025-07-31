@@ -465,23 +465,7 @@ export function AppContent() {
       <header className="app-header">
         <div className="view-header">
           <div className="view-header-left">
-            {!isSidebarExpanded ? (
-              <button
-                className="sidebar-toggle-button"
-                onClick={toggleSidebar}
-                title="Show Sidebar"
-              >
-                <ChevronRight size={16} />
-              </button>
-            ) : (
-              <button
-                className="sidebar-close-button"
-                onClick={toggleSidebar}
-                title="Hide Sidebar"
-              >
-                <PanelLeftClose size={16} />
-              </button>
-            )}
+            {/* Sidebar toggle moved to sidebar itself */}
           </div>
           <div className="view-header-center">
             <h1 className="view-title">
@@ -498,14 +482,14 @@ export function AppContent() {
         </div>
       </header>
       
-      <div className="app-body">
-        <Sidebar
-          currentView={currentView}
-          onViewChange={setCurrentView}
-          isExpanded={isSidebarExpanded}
-        />
-        
-        <main className={`app-main ${!isSidebarExpanded ? 'sidebar-collapsed' : ''}`}>
+      <Sidebar
+        currentView={currentView}
+        onViewChange={setCurrentView}
+        isExpanded={isSidebarExpanded}
+        onToggleExpanded={toggleSidebar}
+      />
+      
+      <main className={`app-main ${!isSidebarExpanded ? 'sidebar-collapsed' : ''}`}>
 
         {currentView === 'record' && (
           <AudioErrorBoundary>
@@ -625,7 +609,6 @@ export function AppContent() {
           </div>
         )}
       </main>
-      </div>
 
       {/* Dev Tools */}
       <DevTools

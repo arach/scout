@@ -28,28 +28,30 @@
 
 .app-container {
   display: flex;
-  flex-direction: column;
   height: 100vh;
   overflow: visible;
+  position: relative;
 }
 
-/* Full width header */
+/* Header - positioned only over main content area */
 .app-header {
+  position: absolute;
+  top: 0;
+  left: 200px; /* Start after expanded sidebar */
+  right: 0;
   display: flex;
   align-items: center;
   height: 48px;
   background-color: var(--bg-secondary);
+  z-index: 100;
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04),
               0 2px 6px rgba(0, 0, 0, 0.02);
-  z-index: 100;
-  flex-shrink: 0;
+  transition: left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Container for sidebar and main content */
-.app-body {
-  display: flex;
-  flex: 1;
-  overflow: hidden;
+/* Adjust header position when sidebar is collapsed */
+.app-container:has(.sidebar.collapsed) .app-header {
+  left: 52px; /* Start after collapsed sidebar */
 }
 
 /* Dark mode drag overlay adjustments - theme-independent */
@@ -165,6 +167,7 @@ h1 {
   flex-grow: 1;
   overflow: hidden;
   padding: 0;
+  padding-top: 48px; /* Account for header - IMPORTANT! */
   background-color: var(--bg-primary);
   position: relative;
   display: flex;
@@ -196,17 +199,12 @@ h1 {
 
 .view-header-center {
   position: absolute;
-  left: calc(50% + 100px); /* Default: 50% + half of expanded sidebar (200px / 2) */
+  left: 50%; /* True center since header is full width */
   transform: translateX(-50%);
   display: flex;
   justify-content: center;
   align-items: center;
   pointer-events: none; /* Prevent blocking button clicks */
-}
-
-/* Adjust for collapsed sidebar */
-.app-main.sidebar-collapsed .view-header-center {
-  left: calc(50% + 26px); /* 50% + half of collapsed sidebar (52px / 2) */
 }
 
 .view-header-center > * {
