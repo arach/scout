@@ -205,6 +205,31 @@ export function TranscriptDetailPanel({
         onExport([transcript!], format);
     };
 
+    const handleExportAudio = async () => {
+        if (!transcript?.audio_path) {
+            console.error('No audio path available');
+            return;
+        }
+
+        try {
+            // Use the read_audio_file command to get the WAV data
+            const audioData: number[] = await invoke('read_audio_file', { audioPath: transcript.audio_path });
+            const blob = new Blob([new Uint8Array(audioData)], { type: 'audio/wav' });
+            
+            // Create download link
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `recording_${transcript.id}.wav`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch (error) {
+            console.error('Failed to export audio:', error);
+        }
+    };
+
     const toggleSection = (section: string) => {
         setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
     };
@@ -801,6 +826,12 @@ export function TranscriptDetailPanel({
                                         handleExport('text');
                                         setShowExportMenu(false);
                                     }}>Export as Text</button>
+                                    {transcript.audio_path && (
+                                        <button onClick={() => {
+                                            handleExportAudio();
+                                            setShowExportMenu(false);
+                                        }}>Export as WAV</button>
+                                    )}
                                 </div>
                             )}
                         </div>
