@@ -28,8 +28,8 @@ impl RingBufferMonitor {
             chunked_transcriber: None,
             initial_transcriber: None,
             last_chunk_time: Duration::ZERO,
-            chunk_duration: Duration::from_secs(5), // 5-second chunks
-            threshold_duration: Duration::from_secs(5), // Start chunking after 5 seconds
+            chunk_duration: Duration::from_secs(3), // 3-second chunks for faster feedback
+            threshold_duration: Duration::from_secs(0), // Start chunking immediately
             recording_start_time: Instant::now(),
             completed_chunks: Vec::new(),
             next_chunk_id: 0,
@@ -55,8 +55,8 @@ impl RingBufferMonitor {
             // Store the ring transcriber for later use
             self.initial_transcriber = Some(ring_transcriber);
             
-            // Check every 2 seconds
-            let mut interval = time::interval(Duration::from_secs(2));
+            // Check every 1 second for more responsive processing
+            let mut interval = time::interval(Duration::from_secs(1));
             
             loop {
                 tokio::select! {
@@ -79,10 +79,9 @@ impl RingBufferMonitor {
                              elapsed.as_secs_f64(), buffer_duration.as_secs_f64(), sample_count));
                 }
                 
-                // Check if we should start chunking
-                if elapsed > self.threshold_duration && self.chunked_transcriber.is_none() {
-                    info(Component::RingBuffer, &format!("Recording exceeds {}s, starting ring buffer transcription", 
-                             self.threshold_duration.as_secs()));
+                // Start chunking immediately when we have audio
+                if buffer_duration > Duration::ZERO && self.chunked_transcriber.is_none() {
+                    info(Component::RingBuffer, "Starting real-time ring buffer transcription");
                     
                     if sample_count == 0 {
                         warn(Component::RingBuffer, "Ring buffer has no samples - audio may not be flowing to ring buffer");
@@ -96,10 +95,8 @@ impl RingBufferMonitor {
                 
                 // Check if we should create a new chunk
                 if let Some(ref mut chunked) = self.chunked_transcriber {
-                    let time_since_last_chunk = elapsed - self.last_chunk_time;
-                    
-                    if time_since_last_chunk >= self.chunk_duration && 
-                       buffer_duration > self.last_chunk_time + self.chunk_duration {
+                    // Process chunk as soon as we have enough audio
+                    if buffer_duration >= self.last_chunk_time + self.chunk_duration {
                         
                         info(Component::RingBuffer, &format!("Creating ring buffer chunk at {:?}", self.last_chunk_time));
                         

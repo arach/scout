@@ -33,8 +33,8 @@ impl Default for TranscriptionConfig {
     fn default() -> Self {
         Self {
             enable_chunking: true,
-            chunking_threshold_secs: 10,
-            chunk_duration_secs: 10,
+            chunking_threshold_secs: 3,  // Start chunking after 3 seconds for faster feedback
+            chunk_duration_secs: 3,      // 3-second chunks for responsive transcription
             force_strategy: None,
             refinement_chunk_secs: Some(10), // Engineering decision: 10s optimal balance
         }
@@ -184,12 +184,9 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
             return false;
         }
         
-        // Ring buffer strategy is beneficial for longer recordings
-        if let Some(duration) = duration_estimate {
-            duration.as_secs() > config.chunking_threshold_secs
-        } else {
-            true // We don't know duration yet, so we can handle it
-        }
+        // Ring buffer strategy works for any recording when chunking is enabled
+        // We'll start chunking after the threshold is reached
+        true
     }
     
     async fn start_recording(&mut self, output_path: &Path, config: &TranscriptionConfig) -> Result<(), String> {

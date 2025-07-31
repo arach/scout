@@ -1,5 +1,6 @@
 use std::ffi::{c_char, CStr};
 use serde::{Serialize, Deserialize};
+use crate::logger::{info, debug, warn, Component};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppContext {
