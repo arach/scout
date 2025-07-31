@@ -48,8 +48,14 @@ export interface PerformanceMetrics {
   model_used: string | null;
 }
 
+export interface PerformanceEvent {
+  timestamp: number;
+  event_type: string;
+  data?: Record<string, unknown>;
+}
+
 export interface PerformanceTimeline {
-  events: any[];
+  events: PerformanceEvent[];
   duration_ms: number;
 }
 
@@ -62,7 +68,16 @@ export interface SoundSettings {
 
 export interface Settings {
   sidebar_expanded?: boolean;
-  [key: string]: any;
+  theme?: string;
+  hotkey?: string;
+  push_to_talk_hotkey?: string;
+  sound_enabled?: boolean;
+  auto_copy_enabled?: boolean;
+  auto_paste_enabled?: boolean;
+  completion_sound_threshold?: number;
+  overlay_position?: string;
+  overlay_treatment?: string;
+  [key: string]: unknown;
 }
 
 /**
@@ -187,7 +202,7 @@ export const tauriApi = {
     invokeTyped<void>('set_auto_paste_enabled', args),
   updateCompletionSoundThreshold: (args: { thresholdMs: number }) => 
     invokeTyped<void>('update_completion_sound_threshold', args),
-  updateLLMSettings: (args: { settings: any }) => 
+  updateLLMSettings: (args: { settings: Record<string, unknown> }) => 
     invokeTyped<void>('update_llm_settings', args),
 
   // Shortcut commands
