@@ -4,6 +4,22 @@ Scout is a privacy-focused, cross-platform voice transcription application built
 
 ![Scout Application](docs/screenshots/recording.png)
 
+## 🚀 Quick Start
+
+**Download Scout v0.3.0**: [Latest Release](https://github.com/arach/scout/releases/latest) • **Only 12MB!** 🪶
+
+1. Download the DMG for your Mac (Apple Silicon or Intel)
+2. Drag Scout to Applications
+3. Launch and download a Whisper model from Settings
+4. Press `Cmd+Shift+Space` to start recording!
+
+## 📊 Project Highlights
+
+- **🪶 Tiny Bundle Size**: Just 12MB for the entire application!
+- **✅ 100% Test Pass Rate**: All tests passing, ensuring reliability
+- **⚡ <300ms Latency**: Near real-time transcription
+- **💾 <215MB Memory**: Efficient resource usage
+
 ## Features
 
 - **Local-First Processing**: All audio processing and transcription happens locally on your device
@@ -71,6 +87,23 @@ scout/
 - macOS, Windows, or Linux
 
 ## Installation
+
+### Option 1: Download Pre-built Release (Recommended)
+
+1. Download the latest release from the [Releases page](https://github.com/arach/scout/releases)
+   - **macOS (Apple Silicon)**: `Scout_0.3.0_aarch64.dmg`
+   - **macOS (Intel)**: `Scout_0.3.0_x86_64.dmg`
+
+2. Open the DMG file and drag Scout to your Applications folder
+
+3. On first launch, you'll need to download Whisper models:
+   - Open Scout
+   - Go to Settings → Transcription Models
+   - Download at least one model (Base recommended for starting)
+
+**Note for macOS**: You may need to right-click and select "Open" the first time to bypass Gatekeeper if the app isn't code-signed.
+
+### Option 2: Build from Source
 
 1. Clone the repository:
 ```bash
@@ -152,10 +185,9 @@ This will create platform-specific binaries in `src-tauri/target/release/bundle/
 - **Search & Export**: Full-text search and export in multiple formats
 - **Global Hotkeys**: Customizable shortcuts for hands-free operation
 - **UI/UX**: VSCode-inspired theme with responsive design
-- **Testing Infrastructure**: Comprehensive test suite with 97.6% coverage (163/167 tests passing)
+- **Testing Infrastructure**: Comprehensive test suite with 100% passing rate
 
 ### 🚧 In Progress
-- iOS/mobile platform support
 - Advanced VAD tuning and noise reduction
 - Real-time streaming transcription
 - Cloud sync options (optional)

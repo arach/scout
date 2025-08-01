@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderWithSettings, render, screen, fireEvent, waitFor } from '../test/test-utils';
 import { SettingsView } from './SettingsView';
-import { createMockSettings } from '../test/test-utils';
+// import { createMockSettings } from '../test/test-utils';
 import '../test/mocks';
 
 // Mock the lazy-loaded components
