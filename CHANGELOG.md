@@ -69,16 +69,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enhanced development workflow with proper tooling
 - Set up test infrastructure with Vitest
 
-## [0.3.0] - 2024-12-01
+## [0.3.0] - Previous Release
 - Initial Tauri v2 migration
 - Basic recording functionality
 - SQLite database integration
 
-## [0.2.0] - 2024-10-01
+## [0.2.0] - Previous Release
 - Improved UI design
 - Enhanced audio processing
 
-## [0.1.0] - 2024-08-01
+## [0.1.0] - Initial Release
 - Basic audio recording
 - Whisper transcription
 - Simple UI
