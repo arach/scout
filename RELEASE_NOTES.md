@@ -17,10 +17,10 @@ Scout 0.4.0 brings a complete UI overhaul inspired by VSCode's design language, 
 - Real-time audio level visualization
 - Improved typography and spacing
 
-**🔊 Voice Activity Detection (VAD)**
-- Automatically detects when you're speaking
-- Reduces silent periods in recordings
-- Improves transcription accuracy
+**🔊 Real-time Audio Monitoring**
+- Live audio level visualization during recording
+- Visual feedback for microphone input
+- Helps ensure your voice is being captured
 
 **⚡ Performance Improvements**
 - <300ms transcription latency with ring buffer architecture
