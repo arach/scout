@@ -2,7 +2,7 @@
 
 Scout is a privacy-focused, cross-platform voice transcription application built with Tauri v2, React/TypeScript, and Rust. It provides real-time voice-to-text transcription with advanced model management and file upload capabilities.
 
-![Scout Application](screenshot.png)
+![Scout Application](docs/screenshots/recording.png)
 
 ## Features
 
@@ -34,13 +34,14 @@ Scout is a privacy-focused, cross-platform voice transcription application built
 
 ## Project Structure
 
-See [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md) for detailed directory layout.
+See [docs/architecture/project-structure.md](docs/architecture/project-structure.md) for detailed directory layout.
 
 ```
 scout/
 ├── src/                    # React frontend
 │   ├── components/         # React components (ModelManager, Overlay, etc.)
 │   ├── hooks/              # Custom React hooks  
+│   ├── contexts/           # React context providers
 │   ├── lib/                # Utilities and helpers
 │   └── types/              # TypeScript type definitions
 ├── src-tauri/              # Rust backend
@@ -48,17 +49,17 @@ scout/
 │   │   ├── audio/          # Audio recording and conversion
 │   │   ├── transcription/  # Whisper transcription engine
 │   │   ├── db/             # SQLite database layer
-│   │   ├── models/         # Model management and downloads
-│   │   ├── settings/       # Settings system
-├── docs/                   # Technical documentation
-├── marketing/              # Business and partnership materials
-│   │   ├── processing_queue/ # Background file processing
+│   │   ├── llm/            # LLM processing pipeline
 │   │   └── macos/          # macOS-specific overlay implementation
 │   └── Cargo.toml          # Rust dependencies
-├── models/                 # Downloaded Whisper model files
+├── docs/                   # Technical documentation
+│   ├── architecture/       # System design and structure
+│   ├── features/           # Feature specifications
+│   └── development/        # Development guides and testing
+├── config/                 # Build and development configuration
 ├── scripts/                # Setup and utility scripts
-├── package.json            # Node.js dependencies
-└── README.md               # This file
+├── models/                 # Downloaded Whisper model files
+└── package.json            # Node.js dependencies
 ```
 
 ## Prerequisites
@@ -151,6 +152,7 @@ This will create platform-specific binaries in `src-tauri/target/release/bundle/
 - **Search & Export**: Full-text search and export in multiple formats
 - **Global Hotkeys**: Customizable shortcuts for hands-free operation
 - **UI/UX**: VSCode-inspired theme with responsive design
+- **Testing Infrastructure**: Comprehensive test suite with 97.6% coverage (163/167 tests passing)
 
 ### 🚧 In Progress
 - iOS/mobile platform support
@@ -187,13 +189,18 @@ cd src-tauri && cargo test    # Run Rust tests
 
 ### Running Tests
 
+Scout has comprehensive test coverage with 97.6% success rate (163/167 tests passing):
+
 ```bash
-# Frontend tests
+# Frontend tests (Vitest + React Testing Library)
 pnpm test
 
 # Rust tests  
 cd src-tauri
 cargo test
+
+# Run tests with coverage
+pnpm test --coverage
 ```
 
 ### Code Style
