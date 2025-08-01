@@ -1,6 +1,6 @@
 [package]
 name = "scout"
-version = "0.3.0"
+version = "0.4.0"
 description = "Scout - Cross-platform local-first dictation app"
 authors = ["Scout Team"]
 edition = "2021"

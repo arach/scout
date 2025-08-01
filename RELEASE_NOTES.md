@@ -1,8 +1,8 @@
-# Scout v0.3.0 Release Notes
+# Scout v0.4.0 Release Notes
 
 ## 🎉 Major Release: VSCode-Inspired UI & Push-to-Talk
 
-Scout 0.3.0 brings a complete UI overhaul inspired by VSCode's design language, along with powerful new features for better voice transcription control.
+Scout 0.4.0 brings a complete UI overhaul inspired by VSCode's design language, along with powerful new features for better voice transcription control.
 
 ### ✨ Key Features
 
@@ -44,8 +44,8 @@ Scout 0.3.0 brings a complete UI overhaul inspired by VSCode's design language, 
 ### 📦 Installation
 
 Download the DMG file for macOS (Apple Silicon or Intel):
-- `Scout_0.3.0_aarch64.dmg` - For Apple Silicon Macs (M1/M2/M3)
-- `Scout_0.3.0_x86_64.dmg` - For Intel Macs
+- `Scout_0.4.0_aarch64.dmg` - For Apple Silicon Macs (M1/M2/M3)
+- `Scout_0.4.0_x86_64.dmg` - For Intel Macs
 
 **Note**: First-time users need to download Whisper models:
 ```bash
@@ -70,4 +70,4 @@ Thank you to all contributors and testers who helped make this release possible!
 
 ---
 
-**Full Changelog**: [v0.2.0...v0.3.0](https://github.com/yourusername/scout/compare/v0.2.0...v0.3.0)
+**Full Changelog**: [v0.3.0...v0.4.0](https://github.com/yourusername/scout/compare/v0.3.0...v0.4.0)

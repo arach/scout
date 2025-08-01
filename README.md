@@ -6,7 +6,7 @@ Scout is a privacy-focused, cross-platform voice transcription application built
 
 ## 🚀 Quick Start
 
-**Download Scout v0.3.0**: [Latest Release](https://github.com/arach/scout/releases/latest) • **Only 12MB!** 🪶
+**Download Scout v0.4.0**: [Latest Release](https://github.com/arach/scout/releases/latest) • **Only 12MB!** 🪶
 
 1. Download the DMG for your Mac (Apple Silicon or Intel)
 2. Drag Scout to Applications
@@ -91,8 +91,8 @@ scout/
 ### Option 1: Download Pre-built Release (Recommended)
 
 1. Download the latest release from the [Releases page](https://github.com/arach/scout/releases)
-   - **macOS (Apple Silicon)**: `Scout_0.3.0_aarch64.dmg`
-   - **macOS (Intel)**: `Scout_0.3.0_x86_64.dmg`
+   - **macOS (Apple Silicon)**: `Scout_0.4.0_aarch64.dmg`
+   - **macOS (Intel)**: `Scout_0.4.0_x86_64.dmg`
 
 2. Open the DMG file and drag Scout to your Applications folder
 

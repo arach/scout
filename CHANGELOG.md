@@ -5,7 +5,7 @@ All notable changes to Scout will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.0] - 2025-01-08
+## [0.4.0] - 2025-01-08
 
 ### ✨ New Features
 - Push-to-talk recording with global hotkey support
@@ -69,12 +69,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enhanced development workflow with proper tooling
 - Set up test infrastructure with Vitest
 
-## [0.2.0] - Previous Release
+## [0.3.0] - 2024-12-01
 - Initial Tauri v2 migration
 - Basic recording functionality
 - SQLite database integration
 
-## [0.1.0] - Initial Release
+## [0.2.0] - 2024-10-01
+- Improved UI design
+- Enhanced audio processing
+
+## [0.1.0] - 2024-08-01
 - Basic audio recording
 - Whisper transcription
 - Simple UI
