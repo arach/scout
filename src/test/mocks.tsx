@@ -36,6 +36,35 @@ vi.mock('@tauri-apps/api/core', () => ({
         return Promise.resolve();
       case 'get_audio_level':
         return Promise.resolve(0);
+      case 'get_overlay_position':
+        return Promise.resolve('top-right');
+      case 'set_overlay_position':
+        return Promise.resolve();
+      case 'get_current_shortcut':
+        return Promise.resolve('CmdOrCtrl+Shift+R');
+      case 'get_push_to_talk_shortcut':
+        return Promise.resolve('CmdOrCtrl+Space');
+      case 'set_overlay_treatment':
+        return Promise.resolve();
+      case 'is_sound_enabled':
+        return Promise.resolve(true);
+      case 'get_sound_settings':
+        return Promise.resolve({
+          startSound: 'start.wav',
+          stopSound: 'stop.wav',
+          successSound: 'success.wav'
+        });
+      case 'get_output_directory':
+        return Promise.resolve('/tmp/scout-output');
+      case 'get_transcript_template':
+        return Promise.resolve('{{text}}');
+      case 'get_llm_settings':
+        return Promise.resolve({
+          provider: 'openai',
+          model: 'gpt-4',
+          apiKey: '',
+          enabled: false
+        });
       default:
         return Promise.resolve();
     }
@@ -51,91 +80,7 @@ vi.mock('@tauri-apps/api/event', () => ({
   once: vi.fn().mockResolvedValue(undefined),
 }));
 
-// Mock the custom hooks
-vi.mock('../hooks/useRecording', () => ({
-  useRecording: vi.fn().mockReturnValue({
-    isRecording: false,
-    recordingStartTime: null,
-    toggleRecording: vi.fn(),
-    startRecording: vi.fn(),
-    stopRecording: vi.fn(),
-    cancelRecording: vi.fn(),
-  }),
-}));
-
-vi.mock('../hooks/useTranscriptManagement', () => ({
-  useTranscriptManagement: vi.fn().mockReturnValue({
-    loadRecentTranscripts: vi.fn().mockResolvedValue([]),
-    loadAllTranscripts: vi.fn().mockResolvedValue([]),
-    deleteTranscript: vi.fn().mockResolvedValue(true),
-    searchTranscripts: vi.fn().mockResolvedValue([]),
-    exportTranscripts: vi.fn().mockResolvedValue(true),
-    copyTranscript: vi.fn().mockResolvedValue(true),
-  }),
-}));
-
-vi.mock('../hooks/useSettings', () => ({
-  useSettings: vi.fn().mockReturnValue({
-    state: {
-      recording: {
-        hotkey: 'CmdOrCtrl+Shift+R',
-        pushToTalkHotkey: 'CmdOrCtrl+Space',
-        selectedMicrophone: 'Default microphone',
-        soundEnabled: true,
-      },
-      ui: {
-        theme: 'vscode',
-      },
-    },
-    actions: {
-      updateRecordingSettings: vi.fn(),
-      updateUISettings: vi.fn(),
-    },
-  }),
-}));
-
-// Mock audio level context
-vi.mock('../contexts/AudioContext', () => ({
-  useAudioLevel: vi.fn().mockReturnValue(0),
-  AudioProvider: ({ children }: { children: React.ReactNode }) => children,
-}));
-
-// Mock recording context
-vi.mock('../contexts/RecordingContext', () => ({
-  useRecordingContext: vi.fn().mockReturnValue({
-    state: {
-      isRecording: false,
-      isStarting: false,
-    },
-    canStartRecording: vi.fn().mockReturnValue(true),
-    setRecording: vi.fn(),
-    setStarting: vi.fn(),
-    reset: vi.fn(),
-  }),
-  RecordingProvider: ({ children }: { children: React.ReactNode }) => children,
-}));
-
-// Mock settings context
-vi.mock('../contexts/SettingsContext', () => ({
-  useSettings: vi.fn().mockReturnValue({
-    state: {
-      recording: {
-        hotkey: 'CmdOrCtrl+Shift+R',
-        pushToTalkHotkey: 'CmdOrCtrl+Space',
-        selectedMicrophone: 'Default microphone',
-        soundEnabled: true,
-      },
-      ui: {
-        theme: 'vscode',
-      },
-    },
-    actions: {
-      updateRecordingSettings: vi.fn(),
-      updateUISettings: vi.fn(),
-    },
-  }),
-  SettingsProvider: ({ children }: { children: React.ReactNode }) => children,
-}));
+// Note: Hooks and contexts are mocked individually in test files to avoid conflicts
 
 // Mock theme context
 vi.mock('../themes/useTheme', () => ({

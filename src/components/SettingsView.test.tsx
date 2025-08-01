@@ -37,30 +37,56 @@ vi.mock('./settings/ThemesSettings', () => ({
 }));
 
 // Mock the invoke function for opening models folder
-const mockInvoke = vi.fn();
 vi.mock('@tauri-apps/api/core', () => ({
-  invoke: mockInvoke,
+  invoke: vi.fn(),
 }));
 
 // Mock the settings context
 const mockSettingsContext = {
-  state: createMockSettings(),
+  state: {
+    ...createMockSettings(),
+    sound: {
+      soundEnabled: true,
+      startSound: 'start.wav',
+      stopSound: 'stop.wav', 
+      successSound: 'success.wav',
+    },
+  },
   actions: {
     updateRecordingSettings: vi.fn(),
     updateTranscriptionSettings: vi.fn(),
     updateUISettings: vi.fn(),
     updateLLMSettings: vi.fn(),
     loadSettings: vi.fn(),
+    toggleSoundEnabled: vi.fn(),
+    updateStartSound: vi.fn(),
+    updateStopSound: vi.fn(),
+    updateSuccessSound: vi.fn(),
+    updateHotkey: vi.fn(),
+    updatePushToTalkHotkey: vi.fn(),
+    updateTheme: vi.fn(),
+    updateSelectedTheme: vi.fn(),
+    updateOverlayPosition: vi.fn(),
+    updateOverlayTreatment: vi.fn(),
   },
 };
 
 vi.mock('../contexts/SettingsContext', () => ({
   useSettings: () => mockSettingsContext,
+  SettingsProvider: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="mock-settings-provider">{children}</div>
+  ),
 }));
 
 describe('SettingsView', () => {
-  beforeEach(() => {
+  let mockInvoke: any;
+  
+  beforeEach(async () => {
     vi.clearAllMocks();
+    
+    // Get the mocked invoke function
+    const coreModule = await import('@tauri-apps/api/core');
+    mockInvoke = vi.mocked(coreModule.invoke);
     mockInvoke.mockResolvedValue(undefined);
   });
 
@@ -269,7 +295,11 @@ describe('SettingsView', () => {
 
     it('handles errors when opening models folder', async () => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      mockInvoke.mockRejectedValue(new Error('Failed to open folder'));
+      
+      // Get the mocked invoke function and set it to reject
+      const coreModule = await import('@tauri-apps/api/core');
+      const mockInvokeLocal = vi.mocked(coreModule.invoke);
+      mockInvokeLocal.mockRejectedValue(new Error('Failed to open folder'));
       
       render(<SettingsView />);
       
