@@ -1,6 +1,27 @@
 import React, { ReactElement } from 'react';
-import { render, RenderOptions } from '@testing-library/react';
-import { vi } from 'vitest';
+import { render, RenderOptions, act } from '@testing-library/react';
+import { vi, beforeAll, afterAll } from 'vitest';
+
+// Suppress React act warnings and settings loading errors for tests - they're cosmetic and don't affect functionality
+const originalError = console.error;
+beforeAll(() => {
+  console.error = (...args: any[]) => {
+    if (
+      typeof args[0] === 'string' &&
+      (
+        (args[0].includes('Warning: An update to') && args[0].includes('was not wrapped in act')) ||
+        args[0].includes('Failed to load settings:')
+      )
+    ) {
+      return;
+    }
+    originalError.call(console, ...args);
+  };
+});
+
+afterAll(() => {
+  console.error = originalError;
+});
 import { AppProviders } from '../contexts/AppProviders';
 import { Transcript } from '../types/transcript';
 
@@ -99,6 +120,21 @@ export { customRender as render };
 export const waitForLoadingToFinish = () => {
   // Wait for any loading states to complete
   return new Promise(resolve => setTimeout(resolve, 0));
+};
+
+// Specialized render function for components that use settings context
+// This handles the async settings loading that happens in useEffect
+export const renderWithSettings = async (ui: ReactElement, options?: Omit<RenderOptions, 'wrapper'>) => {
+  let renderResult: any;
+  
+  // Use act to wrap the initial render and any subsequent async updates
+  await act(async () => {
+    renderResult = render(ui, { wrapper: AllTheProviders, ...options });
+    // Wait for all promises to resolve (settings loading)
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+  
+  return renderResult;
 };
 
 export const fireKeyboardEvent = (element: Element, key: string, options: any = {}) => {

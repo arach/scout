@@ -1,19 +1,78 @@
 # Scout Documentation
 
-This directory contains the technical documentation for Scout. The documentation is automatically built and integrated into the Scout website.
+Welcome to the Scout documentation. This directory contains technical documentation, architecture guides, and development resources for the Scout dictation application.
 
-## Documentation Structure
+## 📁 Directory Structure
 
-```
-docs/
-├── AUDIO_PIPELINE.md              # Audio capture and processing pipeline
-├── PIPELINE_OVERVIEW.md           # High-level pipeline overview
-├── TRANSCRIPTION_ARCHITECTURE.md  # Transcription strategies and architecture
-├── AGENT_REPORT_AUDIO_SYSTEM.md   # Performance analysis
-├── WHISPER_IMPROVEMENTS.md        # Whisper optimization details
-└── features/
-    └── transcription-overlay.md   # Feature-specific documentation
-```
+### `/architecture`
+Technical architecture documentation and system design
+- `audio-pipeline.md` - Audio processing pipeline architecture
+- `transcription-architecture.md` - Transcription system design
+- `pipeline-overview.md` - Overall data flow and processing pipeline
+- `project-structure.md` - Codebase organization and structure
+- `audio-metadata.md` - Audio metadata handling and storage
+- `progressive-transcription-architecture.md` - Progressive transcription implementation
+
+### `/features`
+Feature specifications and documentation
+- `dictionary-feature.md` - Dictionary replacement feature
+- `active-app-detection.md` - Active application detection
+- `overlay-hover.md` - Overlay hover interactions
+- `onboarding-spec.md` - Onboarding flow specification
+- `transcription-overlay.md` - Transcription overlay feature
+
+### `/development`
+Development guides and implementation notes
+- `debug-logging.md` - Debugging and logging guide
+- `open-overlay-devtools.md` - Overlay DevTools usage
+- `css-architecture-migration.md` - CSS architecture migration guide
+- `backend-agent.md` - Backend agent documentation
+- `audio-recorder-changes.md` - Audio recorder implementation changes
+- `progressive-transcription-implementation.md` - Progressive transcription implementation details
+- `progressive-transcription-testing.md` - Testing progressive transcription
+
+### `/analysis`
+Technical analysis and reports
+- `agent-reports-summary.md` - Summary of agent analysis reports
+- `agent-report-ai-pipeline.md` - AI pipeline analysis
+- `agent-report-audio-system.md` - Audio system analysis
+- `agent-report-state-management.md` - State management analysis
+- `agent-report-system-integration.md` - System integration analysis
+- `agent-report-ui-components.md` - UI components analysis
+
+### `/guides`
+User and developer guides
+- `performance.md` - Performance optimization guide
+- `performance-optimization-summary.md` - Performance optimization summary
+- `whisper-improvements.md` - Whisper model improvements
+- `dictionary-marketing.md` - Dictionary feature marketing guide
+
+### `/design-system`
+Design system documentation
+- `settings-ui.md` - Settings UI design documentation
+
+### `/screenshots`
+Application screenshots for documentation
+- Various UI screenshots
+
+### `/archive`
+Historical documentation and outdated specifications
+- Contains older documentation for reference purposes
+
+## 🚀 Getting Started
+
+If you're new to Scout development, start with:
+1. `/architecture/project-structure.md` - Understand the codebase
+2. `/architecture/pipeline-overview.md` - Learn the data flow
+3. `/development/debug-logging.md` - Set up debugging
+
+## 📝 Contributing
+
+When adding new documentation:
+- Use lowercase filenames with hyphens (e.g., `feature-name.md`)
+- Place documents in the appropriate subdirectory
+- Update this README if adding new categories
+- Move outdated docs to `/archive` rather than deleting
 
 ## Building Documentation
 

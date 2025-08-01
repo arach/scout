@@ -8,6 +8,8 @@ This directory contains historical documentation, analyses, and release notes th
 - `scout-architecture-analysis.md` - Initial architecture analysis
 - `scout-architecture-review.md` - Architecture review findings
 - `progressive-analysis-results.md` - Progressive transcription analysis
+- `header-alignment-research.md` - Header alignment research and findings
+- `onboarding-spacing-analysis.md` - Onboarding spacing analysis
 
 ### Implementation Documentation
 - `EVENT_LISTENER_FIX_SUMMARY.md` - Event listener bug fixes
@@ -20,6 +22,8 @@ This directory contains historical documentation, analyses, and release notes th
 - `ONBOARDING_DESIGN_SUMMARY.md` - Onboarding design decisions
 - `DESIGN_IMPROVEMENTS.md` - UI/UX improvement plans
 - `COPY_IMAGE_INSTRUCTION.md` - Image handling instructions
+- `design-critique-dictionary-stats.md` - Dictionary feature design critique
+- `design-critique-settings.md` - Settings UI design critique
 
 ### Testing Documentation
 - `PROGRESSIVE_TESTING.md` - Progressive transcription testing approach
@@ -29,9 +33,13 @@ This directory contains historical documentation, analyses, and release notes th
 - `RELEASE_NOTES_v0.2.0.md` - Version 0.2.0 release notes
 - `RELEASE_STATUS.md` - Release status tracking
 - `GITHUB_RELEASE.md` - GitHub release procedures
+- `ROADMAP.md` - Product roadmap (historical)
 
 ### Blog & Marketing
 - `blog-post-progressive-transcription.md` - Blog post draft
+
+### Other
+- `trigger-onboarding.md` - Onboarding trigger documentation
 
 ## Note
 

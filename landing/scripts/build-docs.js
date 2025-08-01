@@ -39,17 +39,17 @@ const DOCS_CONFIG = {
       id: 'architecture',
       title: 'Architecture',
       files: [
-        { file: 'PIPELINE_OVERVIEW.md', title: 'Pipeline Overview', id: 'pipeline-overview' },
-        { file: 'AUDIO_PIPELINE.md', title: 'Audio Pipeline', id: 'audio-pipeline' },
-        { file: 'TRANSCRIPTION_ARCHITECTURE.md', title: 'Transcription Architecture', id: 'transcription-architecture' }
+        { file: 'architecture/pipeline-overview.md', title: 'Pipeline Overview', id: 'pipeline-overview' },
+        { file: 'architecture/audio-pipeline.md', title: 'Audio Pipeline', id: 'audio-pipeline' },
+        { file: 'architecture/transcription-architecture.md', title: 'Transcription Architecture', id: 'transcription-architecture' }
       ]
     },
     {
       id: 'performance',
       title: 'Performance',
       files: [
-        { file: 'AGENT_REPORT_AUDIO_SYSTEM.md', title: 'Audio System Analysis', id: 'audio-system-analysis' },
-        { file: 'WHISPER_IMPROVEMENTS.md', title: 'Whisper Optimizations', id: 'whisper-optimizations' }
+        { file: 'analysis/agent-report-audio-system.md', title: 'Audio System Analysis', id: 'audio-system-analysis' },
+        { file: 'guides/whisper-improvements.md', title: 'Whisper Optimizations', id: 'whisper-optimizations' }
       ]
     },
     {

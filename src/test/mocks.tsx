@@ -65,6 +65,20 @@ vi.mock('@tauri-apps/api/core', () => ({
           apiKey: '',
           enabled: false
         });
+      case 'is_auto_copy_enabled':
+        return Promise.resolve(false);
+      case 'is_auto_paste_enabled':
+        return Promise.resolve(false);
+      case 'set_start_sound':
+        return Promise.resolve();
+      case 'set_stop_sound':
+        return Promise.resolve();
+      case 'set_success_sound':
+        return Promise.resolve();
+      case 'update_completion_sound_threshold':
+        return Promise.resolve();
+      case 'update_llm_settings':
+        return Promise.resolve();
       default:
         return Promise.resolve();
     }
@@ -120,6 +134,147 @@ vi.mock('lucide-react', () => {
 // Mock CSS modules
 vi.mock('*.module.css', () => ({
   default: {},
+}));
+
+// Mock both useSettings hooks to prevent async loading issues
+vi.mock('../hooks/useSettings', () => ({
+  useSettings: vi.fn().mockReturnValue({
+    overlayPosition: 'top-right',
+    overlayTreatment: 'particles', 
+    hotkey: 'CmdOrCtrl+Shift+R',
+    pushToTalkHotkey: 'CmdOrCtrl+Space',
+    theme: 'system',
+    selectedTheme: 'vscode',
+    soundEnabled: true,
+    startSound: 'start.wav',
+    stopSound: 'stop.wav', 
+    successSound: 'success.wav',
+    completionSoundThreshold: 3000,
+    llmSettings: {
+      enabled: false,
+      model_id: 'tinyllama-1.1b',
+      temperature: 0.7,
+      max_tokens: 200,
+      auto_download_model: false,
+      enabled_prompts: ['summarize', 'bullet_points', 'action_items', 'fix_grammar']
+    },
+    autoCopy: false,
+    autoPaste: false,
+    setHotkey: vi.fn(),
+    setPushToTalkHotkey: vi.fn(),
+    updateOverlayPosition: vi.fn(),
+    updateOverlayTreatment: vi.fn(),
+    updateTheme: vi.fn(),
+    updateSelectedTheme: vi.fn(),
+    toggleSoundEnabled: vi.fn(),
+    updateStartSound: vi.fn(),
+    updateStopSound: vi.fn(),
+    updateSuccessSound: vi.fn(),
+    updateCompletionSoundThreshold: vi.fn(),
+    updateLLMSettings: vi.fn(),
+    toggleAutoCopy: vi.fn(),
+    toggleAutoPaste: vi.fn(),
+    settings: {
+      overlayPosition: 'top-right',
+      overlayTreatment: 'particles',
+      hotkey: 'CmdOrCtrl+Shift+R',
+      pushToTalkHotkey: 'CmdOrCtrl+Space',
+      theme: 'system',
+      selectedTheme: 'vscode',
+      soundEnabled: true,
+      startSound: 'start.wav',
+      stopSound: 'stop.wav',
+      successSound: 'success.wav',
+      completionSoundThreshold: 3000,
+      llmSettings: {
+        enabled: false,
+        model_id: 'tinyllama-1.1b',
+        temperature: 0.7,
+        max_tokens: 200,
+        auto_download_model: false,
+        enabled_prompts: ['summarize', 'bullet_points', 'action_items', 'fix_grammar']
+      },
+      autoCopy: false,
+      autoPaste: false,
+    },
+    updateSettings: vi.fn(),
+  }),
+}));
+
+// Create a comprehensive mock that completely bypasses the async loading
+vi.mock('../hooks/useSettingsContext', () => {
+  const mockUseSettings = vi.fn().mockReturnValue({
+    overlayPosition: 'top-right',
+    overlayTreatment: 'particles', 
+    hotkey: 'CmdOrCtrl+Shift+R',
+    pushToTalkHotkey: 'CmdOrCtrl+Space',
+    theme: 'system',
+    selectedTheme: 'vscode',
+    soundEnabled: true,
+    startSound: 'start.wav',
+    stopSound: 'stop.wav', 
+    successSound: 'success.wav',
+    completionSoundThreshold: 3000,
+    llmSettings: {
+      enabled: false,
+      model_id: 'tinyllama-1.1b',
+      temperature: 0.7,
+      max_tokens: 200,
+      auto_download_model: false,
+      enabled_prompts: ['summarize', 'bullet_points', 'action_items', 'fix_grammar']
+    },
+    autoCopy: false,
+    autoPaste: false,
+    setHotkey: vi.fn(),
+    setPushToTalkHotkey: vi.fn(),
+    updateOverlayPosition: vi.fn().mockResolvedValue(undefined),
+    updateOverlayTreatment: vi.fn().mockResolvedValue(undefined),
+    updateTheme: vi.fn(),
+    updateSelectedTheme: vi.fn(),
+    toggleSoundEnabled: vi.fn().mockResolvedValue(undefined),
+    updateStartSound: vi.fn().mockResolvedValue(undefined),
+    updateStopSound: vi.fn().mockResolvedValue(undefined),
+    updateSuccessSound: vi.fn().mockResolvedValue(undefined),
+    updateCompletionSoundThreshold: vi.fn().mockResolvedValue(undefined),
+    updateLLMSettings: vi.fn().mockResolvedValue(undefined),
+    toggleAutoCopy: vi.fn().mockResolvedValue(undefined),
+    toggleAutoPaste: vi.fn().mockResolvedValue(undefined),
+    settings: {
+      overlayPosition: 'top-right',
+      overlayTreatment: 'particles',
+      hotkey: 'CmdOrCtrl+Shift+R',
+      pushToTalkHotkey: 'CmdOrCtrl+Space',
+      theme: 'system',
+      selectedTheme: 'vscode',
+      soundEnabled: true,
+      startSound: 'start.wav',
+      stopSound: 'stop.wav',
+      successSound: 'success.wav',
+      completionSoundThreshold: 3000,
+      llmSettings: {
+        enabled: false,
+        model_id: 'tinyllama-1.1b',
+        temperature: 0.7,
+        max_tokens: 200,
+        auto_download_model: false,
+        enabled_prompts: ['summarize', 'bullet_points', 'action_items', 'fix_grammar']
+      },
+      autoCopy: false,
+      autoPaste: false,
+    },
+    updateSettings: vi.fn(),
+  });
+  
+  return {
+    useSettings: mockUseSettings,
+  };
+});
+
+// Mock ThemeProvider to prevent useSettings from being called
+vi.mock('../themes/ThemeProvider', () => ({
+  ThemeProvider: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="mock-theme-provider">{children}</div>
+  ),
 }));
 
 // Export mocks for use in tests

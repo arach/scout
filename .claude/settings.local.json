@@ -2,9 +2,8 @@
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
     "allow": [
-      "Bash(PIPELINE_OVERVIEW.md architecture/pipeline-overview.md )",
-      "Bash(PROJECT_STRUCTURE.md architecture/project-structure.md )",
-      "Bash(AUDIO_METADATA.md architecture/audio-metadata.md )"
+      "Bash(progressive-transcription-implementation.md development/ )",
+      "Bash(progressive-transcription-testing.md development/)"
     ],
     "deny": []
   },
