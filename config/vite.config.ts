@@ -24,7 +24,7 @@ export default defineConfig(async () => {
     // CSS configuration
     css: {
       // Use PostCSS for processing if config exists
-      postcss: './postcss.config.js',
+      postcss: './config/postcss.config.js',
       modules: {
         // Enable CSS modules for .module.css files
         localsConvention: 'camelCase',

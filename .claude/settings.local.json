@@ -3,7 +3,8 @@
   "permissions": {
     "allow": [
       "Bash(progressive-transcription-implementation.md development/ )",
-      "Bash(progressive-transcription-testing.md development/)"
+      "Bash(progressive-transcription-testing.md development/)",
+      "Bash(git mv:*)"
     ],
     "deny": []
   },
