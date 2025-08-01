@@ -45,7 +45,11 @@ export default defineConfig({
     },
     // Mock Tauri APIs since they won't be available in test environment
     deps: {
-      inline: ['@tauri-apps/api']
+      optimizer: {
+        web: {
+          include: ['@tauri-apps/api']
+        }
+      }
     }
   },
   resolve: {
