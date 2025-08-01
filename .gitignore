@@ -42,3 +42,6 @@ mcps.mcp.json
 
 # Build artifacts
 bundle-analysis.json
+
+# Claude Code files (not relevant for other developers)
+CLAUDE.md
