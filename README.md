@@ -1,4 +1,4 @@
-# Scout - Cross-Platform Local-First Dictation App
+# Local & Open Source AI Dictation App (MacOS)
 
 Scout is a privacy-focused, cross-platform voice transcription application built with Tauri v2, React/TypeScript, and Rust. It provides real-time voice-to-text transcription with advanced model management and file upload capabilities.
 
