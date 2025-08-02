@@ -1,6 +1,7 @@
 ---
 name: backend-engineer-david
 description: Use this agent when you need expert guidance on Rust systems programming, Tauri v2 desktop applications, audio processing, AI/ML integration (especially whisper.cpp/whisper-rs), Swift native development, or cross-platform native development. This includes tasks like optimizing Rust performance, implementing Tauri IPC architecture, integrating audio capture with cpal, setting up whisper transcription, managing SQLite/PostgreSQL databases, bridging Swift-Rust code, or implementing CoreML acceleration. Examples: <example>Context: User is working on a Tauri app with audio recording features. user: "I need to implement low-latency audio recording in my Tauri app" assistant: "I'll use the backend-engineer-david agent to help you implement efficient audio recording with cpal and proper Tauri command integration" <commentary>Since this involves Rust audio processing and Tauri integration, the backend-engineer-david agent is the right choice.</commentary></example> <example>Context: User needs help with whisper.cpp integration. user: "How do I optimize whisper transcription performance with CoreML?" assistant: "Let me consult the backend-engineer-david agent for guidance on whisper-rs and CoreML optimization" <commentary>The user needs expertise in whisper integration and performance optimization, which is a core competency of this agent.</commentary></example>
+model: opus
 color: yellow
 ---
 

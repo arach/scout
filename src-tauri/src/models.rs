@@ -12,8 +12,12 @@ pub struct ModelConfig {
 impl Default for ModelConfig {
     fn default() -> Self {
         Self {
+            // Default to base.en for best balance of speed and accuracy for real-time use
             active_model_id: "base.en".to_string(),
-            model_preferences: serde_json::json!({}),
+            model_preferences: serde_json::json!({
+                "performance_priority": true,
+                "real_time_optimized": true
+            }),
         }
     }
 }
@@ -45,12 +49,12 @@ impl WhisperModel {
                 id: "tiny.en".to_string(),
                 name: "Tiny English".to_string(),
                 size_mb: 39,
-                description: "Fastest model, good for quick drafts".to_string(),
+                description: "✅ RECOMMENDED: Ultra-fast, perfect for real-time transcription".to_string(),
                 url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin".to_string(),
                 filename: "ggml-tiny.en.bin".to_string(),
                 coreml_url: Some("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en-encoder.mlmodelc.zip?download=true".to_string()),
                 coreml_filename: Some("ggml-tiny.en-encoder.mlmodelc".to_string()),
-                speed: "~10x realtime".to_string(),
+                speed: "✅ ~10x faster than realtime".to_string(),
                 accuracy: "Basic (WER ~15%)".to_string(),
                 downloaded: false,
                 coreml_downloaded: false,
@@ -60,12 +64,12 @@ impl WhisperModel {
                 id: "base.en".to_string(),
                 name: "Base English".to_string(),
                 size_mb: 142,
-                description: "Good balance of speed and accuracy".to_string(),
+                description: "✅ RECOMMENDED: Excellent balance of speed and accuracy for real-time use".to_string(),
                 url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin".to_string(),
                 filename: "ggml-base.en.bin".to_string(),
                 coreml_url: Some("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en-encoder.mlmodelc.zip?download=true".to_string()),
                 coreml_filename: Some("ggml-base.en-encoder.mlmodelc".to_string()),
-                speed: "~5x realtime".to_string(),
+                speed: "✅ ~5x faster than realtime".to_string(),
                 accuracy: "Good (WER ~10%)".to_string(),
                 downloaded: false,
                 coreml_downloaded: false,
@@ -75,12 +79,12 @@ impl WhisperModel {
                 id: "small.en".to_string(),
                 name: "Small English".to_string(),
                 size_mb: 466,
-                description: "Better accuracy, handles accents and noise well".to_string(),
+                description: "Good accuracy, borderline for real-time use".to_string(),
                 url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin".to_string(),
                 filename: "ggml-small.en.bin".to_string(),
                 coreml_url: Some("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en-encoder.mlmodelc.zip?download=true".to_string()),
                 coreml_filename: Some("ggml-small.en-encoder.mlmodelc".to_string()),
-                speed: "~3x realtime".to_string(),
+                speed: "~3x faster than realtime".to_string(),
                 accuracy: "Very Good (WER ~7%)".to_string(),
                 downloaded: false,
                 coreml_downloaded: false,
@@ -90,12 +94,12 @@ impl WhisperModel {
                 id: "medium.en".to_string(),
                 name: "Medium English".to_string(),
                 size_mb: 1533,
-                description: "Excellent accuracy for professional use".to_string(),
+                description: "⚠️ SLOW: Borderline for real-time use (10+ seconds delay)".to_string(),
                 url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.en.bin".to_string(),
                 filename: "ggml-medium.en.bin".to_string(),
                 coreml_url: Some("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.en-encoder.mlmodelc.zip?download=true".to_string()),
                 coreml_filename: Some("ggml-medium.en-encoder.mlmodelc".to_string()),
-                speed: "~1x realtime".to_string(),
+                speed: "⚠️ ~1x realtime (slow)".to_string(),
                 accuracy: "Excellent (WER ~5%)".to_string(),
                 downloaded: false,
                 coreml_downloaded: false,
@@ -105,12 +109,12 @@ impl WhisperModel {
                 id: "large-v3-turbo".to_string(),
                 name: "Large v3 Turbo".to_string(),
                 size_mb: 1644,
-                description: "Optimized for speed with near-large accuracy".to_string(),
+                description: "⚠️ VERY SLOW: 15-20x slower than real-time (2+ minutes for 10s audio)".to_string(),
                 url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin".to_string(),
                 filename: "ggml-large-v3-turbo.bin".to_string(),
                 coreml_url: Some("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-encoder.mlmodelc.zip?download=true".to_string()),
                 coreml_filename: Some("ggml-large-v3-turbo-encoder.mlmodelc".to_string()),
-                speed: "~2x realtime".to_string(),
+                speed: "⚠️ 15-20x SLOWER than realtime".to_string(),
                 accuracy: "Excellent (WER ~5%)".to_string(),
                 downloaded: false,
                 coreml_downloaded: false,
@@ -120,12 +124,12 @@ impl WhisperModel {
                 id: "large-v3".to_string(),
                 name: "Large v3".to_string(),
                 size_mb: 3094,
-                description: "State-of-the-art accuracy, multilingual".to_string(),
+                description: "❌ EXTREMELY SLOW: Only for batch processing (minutes for seconds of audio)".to_string(),
                 url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin".to_string(),
                 filename: "ggml-large-v3.bin".to_string(),
                 coreml_url: Some("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-encoder.mlmodelc.zip?download=true".to_string()),
                 coreml_filename: Some("ggml-large-v3-encoder.mlmodelc".to_string()),
-                speed: "~0.5x realtime".to_string(),
+                speed: "❌ 2-3x SLOWER than realtime".to_string(),
                 accuracy: "Best (WER ~3%)".to_string(),
                 downloaded: false,
                 coreml_downloaded: false,
@@ -198,7 +202,7 @@ impl WhisperModel {
         models_dir: &Path,
         settings: &crate::settings::AppSettings,
     ) -> PathBuf {
-        let model_id = Self::get_active_model_id(settings).unwrap_or_else(|| "tiny.en".to_string());
+        let model_id = Self::get_active_model_id(settings).unwrap_or_else(|| "base.en".to_string());
 
         let models = Self::all(models_dir, settings);
 
@@ -208,14 +212,34 @@ impl WhisperModel {
             return path;
         }
 
-        // Fallback to any available model
-        if let Some(model) = models.iter().find(|m| m.downloaded) {
+        // Fallback to performance-optimized model selection
+        if let Some(model) = Self::get_performance_fallback_model(&models) {
             let path = models_dir.join(&model.filename);
             return path;
         }
 
         // Last resort - return expected path even if not downloaded
-        let fallback = models_dir.join("ggml-tiny.en.bin");
+        let fallback = models_dir.join("ggml-base.en.bin");
         fallback
+    }
+
+    /// Get the best available model optimized for real-time performance
+    pub fn get_performance_fallback_model(models: &[WhisperModel]) -> Option<&WhisperModel> {
+        // Priority order for real-time performance
+        let preferred_models = ["tiny.en", "base.en", "small.en"];
+        
+        for model_id in &preferred_models {
+            if let Some(model) = models.iter().find(|m| m.id == *model_id && m.downloaded) {
+                return Some(model);
+            }
+        }
+        
+        // If none of the preferred models are available, find any downloaded model
+        models.iter().find(|m| m.downloaded)
+    }
+
+    /// Check if a model is suitable for real-time transcription
+    pub fn is_realtime_suitable(model_id: &str) -> bool {
+        matches!(model_id, "tiny.en" | "base.en" | "small.en")
     }
 }

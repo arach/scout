@@ -121,31 +121,21 @@ impl TranscriptionContext {
                 ),
             );
 
-            // Warn if using a slow model - CRITICAL for user experience
-            if settings.models.active_model_id.contains("medium")
-                || settings.models.active_model_id.contains("large")
-            {
+            // Performance check and automatic fallback for slow models
+            if !crate::models::WhisperModel::is_realtime_suitable(&settings.models.active_model_id) {
                 error(
                     Component::Transcription,
                     &format!(
-                        "🚨 CRITICAL: {} model is TOO SLOW for real-time use!",
+                        "🚨 CRITICAL PERFORMANCE ISSUE: {} model is TOO SLOW for real-time use!",
                         settings.models.active_model_id
                     ),
                 );
-                error(
-                    Component::Transcription,
-                    "Expected: <2s delay | Actual: 2+ MINUTE delay for 10s audio",
-                );
-                warn(
-                    Component::Transcription,
-                    "STRONGLY RECOMMENDED: Switch to 'tiny.en' or 'base.en' model immediately",
-                );
                 
-                // Log expected performance
+                // Log specific performance characteristics
                 if settings.models.active_model_id.contains("large-v3-turbo") {
                     error(
                         Component::Transcription,
-                        "large-v3-turbo: 15-20x SLOWER than real-time (2+ min for 10s audio)",
+                        "large-v3-turbo: 15-20x SLOWER than real-time (2+ minutes for 10s audio)",
                     );
                 } else if settings.models.active_model_id.contains("large") {
                     error(
@@ -155,9 +145,47 @@ impl TranscriptionContext {
                 } else if settings.models.active_model_id.contains("medium") {
                     warn(
                         Component::Transcription,
-                        "medium models: ~1x real-time (10s for 10s audio) - borderline slow",
+                        "medium models: ~1x real-time (10s for 10s audio) - borderline for real-time",
                     );
                 }
+                
+                // Check if we can fall back to a faster model
+                let models = crate::models::WhisperModel::all(&models_dir, settings);
+                if let Some(fallback_model) = crate::models::WhisperModel::get_performance_fallback_model(&models) {
+                    warn(
+                        Component::Transcription,
+                        &format!(
+                            "🔄 PERFORMANCE OPTIMIZATION: Fallback available: {} model ({})",
+                            fallback_model.id, fallback_model.speed
+                        ),
+                    );
+                    warn(
+                        Component::Transcription,
+                        "Consider switching to a faster model for better user experience",
+                    );
+                } else {
+                    error(
+                        Component::Transcription,
+                        "❌ No fast models available! Download tiny.en or base.en for real-time performance",
+                    );
+                }
+                
+                error(
+                    Component::Transcription,
+                    "Expected: <2s delay | Actual: Up to 2+ MINUTE delay for short audio clips",
+                );
+                warn(
+                    Component::Transcription,
+                    "STRONGLY RECOMMENDED: Switch to 'tiny.en' or 'base.en' model immediately",
+                );
+            } else {
+                info(
+                    Component::Transcription,
+                    &format!(
+                        "✅ PERFORMANCE OPTIMIZED: Using {} model for real-time transcription", 
+                        settings.models.active_model_id
+                    ),
+                );
             }
 
             let transcriber = match Transcriber::get_or_create_cached_with_readiness(

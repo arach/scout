@@ -65,6 +65,7 @@ pub struct ProcessingSettings {
     pub max_retries: u32,
     pub retry_delay_ms: u64,
     pub auto_cleanup_temp_files: bool,
+    pub use_simplified_workflow: bool, // Feature flag for new simplified workflow
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -139,6 +140,7 @@ impl Default for ProcessingSettings {
             max_retries: 30,
             retry_delay_ms: 100,
             auto_cleanup_temp_files: true,
+            use_simplified_workflow: true, // Enable by default for performance
         }
     }
 }

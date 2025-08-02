@@ -122,6 +122,11 @@ export function AppContent() {
     }
   }, [showFirstRun, isOnboardingTourStep]);
 
+  const onProcessingStartCallback = useCallback(() => {
+    loggers.recording.debug('Processing started, setting isProcessing=true');
+    setIsProcessing(true);
+  }, [setIsProcessing]);
+
   // Recording hook
   const { 
     isRecording, 
@@ -134,6 +139,7 @@ export function AppContent() {
     onTranscriptCreated: showFirstRun ? undefined : onTranscriptCreatedCallback,
     onRecordingComplete: showFirstRun ? undefined : onRecordingCompleteCallback,
     onRecordingStart: onRecordingStartCallback, // Always pass the callback to handle onboarding
+    onProcessingStart: showFirstRun ? undefined : onProcessingStartCallback,
     soundEnabled,
     selectedMic,
     pushToTalkShortcut: (showFirstRun && !isOnboardingTourStep) ? '' : pushToTalkHotkey, // Enable shortcuts only on tour step

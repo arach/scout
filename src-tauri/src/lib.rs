@@ -8,6 +8,7 @@ mod overlay_position;
 mod sound;
 mod models;
 mod settings;
+mod simple_session_manager; // New simplified session manager
 mod clipboard;
 mod ring_buffer_monitor;
 mod transcription_context;
@@ -36,6 +37,7 @@ use processing_queue::{ProcessingQueue, ProcessingStatus};
 use recording_progress::ProgressTracker;
 use recording_workflow::{RecordingWorkflow, RecordingResult};
 use settings::SettingsManager;
+use simple_session_manager::SimpleSessionManager;
 use keyboard_monitor::KeyboardMonitor;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -123,6 +125,7 @@ pub struct AppState {
     pub current_recording_file: Arc<Mutex<Option<String>>>,
     pub progress_tracker: Arc<ProgressTracker>,
     pub recording_workflow: Arc<RecordingWorkflow>,
+    pub simple_session_manager: Option<Arc<Mutex<SimpleSessionManager>>>, // New simplified manager
     pub processing_queue: Arc<ProcessingQueue>,
     pub keyboard_monitor: Arc<KeyboardMonitor>,
     pub transcriber: Arc<Mutex<Option<Transcriber>>>,
@@ -144,6 +147,14 @@ async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle, devi
         return Err("Recording already in progress".to_string());
     }
     
+    // Use simplified workflow if available
+    if let Some(ref simple_manager) = state.simple_session_manager {
+        info(Component::Recording, "Using simplified recording workflow");
+        let manager = simple_manager.lock().await;
+        // SimpleSessionManager handles sound playback and event emission
+        return manager.start_recording(device_name).await;
+    }
+    
     // Double-check with the audio recorder
     let recorder = state.recorder.lock().await;
     if recorder.is_recording() {
@@ -153,7 +164,7 @@ async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle, devi
     }
     drop(recorder);
     
-    // Play start sound after we've confirmed we can record
+    // Play start sound after we've confirmed we can record (only for legacy workflow)
     sound::SoundPlayer::play_start();
     
     
@@ -239,6 +250,12 @@ async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle, devi
 
 #[tauri::command]
 async fn cancel_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<(), String> {
+    // Use simplified workflow if available
+    if let Some(ref simple_manager) = state.simple_session_manager {
+        info(Component::Recording, "Canceling recording with simplified workflow");
+        let manager = simple_manager.lock().await;
+        return manager.cancel_recording().await;
+    }
     
     // Cancel recording without queueing for processing
     state.recording_workflow.cancel_recording().await?;
@@ -261,11 +278,31 @@ async fn cancel_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> 
 
 #[tauri::command]
 async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<RecordingResult, String> {
+    // Use simplified workflow if available
+    if let Some(ref simple_manager) = state.simple_session_manager {
+        info(Component::Recording, "Stopping recording with simplified workflow");
+        let manager = simple_manager.lock().await;
+        // SimpleSessionManager handles sound playback and event emission
+        let session_result = manager.stop_recording().await?;
+        
+        // Convert SessionResult to RecordingResult
+        return Ok(RecordingResult {
+            filename: session_result.file_path.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string(),
+            transcript: session_result.transcription.map(|t| t.text),
+            duration_ms: session_result.total_duration_ms as i32,
+            device_name: None, // Will be available from recording_info if needed
+            sample_rate: Some(session_result.recording_info.sample_rate),
+            channels: Some(session_result.recording_info.channels),
+        });
+    }
     
     // Use the recording workflow to stop recording
     let result = state.recording_workflow.stop_recording().await?;
     
-    // Play stop sound
+    // Play stop sound (only for legacy workflow)
     sound::SoundPlayer::play_stop();
     
     // Set native overlay to processing state instead of idle
@@ -325,6 +362,12 @@ async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Re
 
 #[tauri::command]
 async fn is_recording(state: State<'_, AppState>) -> Result<bool, String> {
+    // Use simplified workflow if available
+    if let Some(ref simple_manager) = state.simple_session_manager {
+        let manager = simple_manager.lock().await;
+        return Ok(manager.is_recording().await);
+    }
+    
     // Check progress tracker state first - it's the most authoritative source
     let progress = state.progress_tracker.current_state();
     match progress {
@@ -2358,6 +2401,36 @@ pub fn run() {
             // Create keyboard monitor
             let keyboard_monitor = Arc::new(KeyboardMonitor::new(app.handle().clone()));
             
+            // Conditionally create SimpleSessionManager based on settings
+            // Note: We need to block on async operation in setup context
+            let simple_session_manager = {
+                let use_simplified = {
+                    let settings = tauri::async_runtime::block_on(settings_arc.lock());
+                    settings.get().processing.use_simplified_workflow
+                };
+                
+                if use_simplified {
+                    info(Component::Init, "Initializing simplified recording workflow");
+                    match tauri::async_runtime::block_on(SimpleSessionManager::new(
+                        recorder_arc.clone(),
+                        recordings_dir.clone(),
+                        models_dir.clone(),
+                        model_state_manager.clone(),
+                        settings_arc.clone(),
+                        app.handle().clone(),
+                    )) {
+                        Ok(manager) => Some(Arc::new(Mutex::new(manager))),
+                        Err(e) => {
+                            error(Component::Init, &format!("Failed to create SimpleSessionManager: {}", e));
+                            None
+                        }
+                    }
+                } else {
+                    info(Component::Init, "Using legacy ring buffer workflow");
+                    None
+                }
+            };
+            
             let state = AppState {
                 recorder: recorder_arc,
                 database: database_arc,
@@ -2369,6 +2442,7 @@ pub fn run() {
                 current_recording_file: Arc::new(Mutex::new(None)),
                 progress_tracker,
                 recording_workflow,
+                simple_session_manager,
                 processing_queue: processing_queue_arc,
                 keyboard_monitor: keyboard_monitor.clone(),
                 transcriber,

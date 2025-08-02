@@ -17,6 +17,7 @@ pub enum LogLevel {
 /// Components in Scout application
 #[derive(Debug, Clone, Copy)]
 pub enum Component {
+    Init,  // Application initialization
     Overlay,
     Recording,
     Transcription,
@@ -31,6 +32,7 @@ pub enum Component {
 impl Component {
     fn as_str(&self) -> &'static str {
         match self {
+            Component::Init => "INIT",
             Component::Overlay => "OVLY",
             Component::Recording => "RCRD",
             Component::Transcription => "TRNS",

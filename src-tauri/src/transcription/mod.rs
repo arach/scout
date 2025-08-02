@@ -8,6 +8,7 @@ use tokio::sync::Mutex;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 pub mod ring_buffer_transcriber;
+pub mod simple_transcriber; // New simplified, high-performance transcription service
 pub mod strategy;
 
 pub use strategy::{

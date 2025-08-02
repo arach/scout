@@ -9,8 +9,8 @@ import { loggers } from '../utils/logger';
 interface RecordingProgress {
   Idle?: any;
   Recording?: {
-    filename: string;
-    start_time: number;
+    duration_ms: number;
+    session_id: string;
   };
   Stopping?: {
     filename: string;
@@ -21,6 +21,7 @@ interface UseRecordingOptions {
   onTranscriptCreated?: () => void;
   onRecordingComplete?: () => void;
   onRecordingStart?: () => void;
+  onProcessingStart?: () => void;
   soundEnabled?: boolean;
   selectedMic?: string;
   pushToTalkShortcut?: string;
@@ -32,6 +33,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
     onTranscriptCreated,
     onRecordingComplete,
     onRecordingStart,
+    onProcessingStart,
     soundEnabled = true,
     selectedMic = 'Default microphone',
     pushToTalkShortcut = '',
@@ -311,17 +313,20 @@ export function useRecording(options: UseRecordingOptions = {}) {
             recordingContext.setRecording(false);
             setRecordingStartTime(null);
           }
+        } else if (state === "processing") {
+          // Backend says we're processing/transcribing
+          loggers.recording.debug('Recording processing started');
+          onProcessingStart?.();
         }
       });
       cleanupFunctions.push(cleanupRecordingState);
 
       const cleanupProgress = await safeEventListen<RecordingProgress>('recording-progress', (event) => {
         if (!mounted) return;
-        if (event.payload.Recording) {
-          // Update start time from backend
-          setRecordingStartTime(event.payload.Recording.start_time);
-        } else if (event.payload.Idle || event.payload.Stopping) {
-          // Clear start time
+        // Recording progress events are just for monitoring - we don't need to update start time
+        // The start time is already set when we begin recording in startRecording()
+        if (event.payload.Idle || event.payload.Stopping) {
+          // Clear start time when recording stops
           setRecordingStartTime(null);
         }
       });
@@ -346,6 +351,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
 
       const cleanupProcessingComplete = await safeEventListen('processing-complete', () => {
         if (!mounted) return;
+        loggers.recording.debug('Processing completed');
         onTranscriptCreated?.();
       });
       cleanupFunctions.push(cleanupProcessingComplete);

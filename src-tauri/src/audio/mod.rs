@@ -5,6 +5,7 @@ pub mod metadata;
 pub mod notifications;
 pub mod recorder;
 pub mod ring_buffer_recorder;
+pub mod simple_recorder; // New simplified, high-performance recorder
 pub mod validation;
 pub mod wav_validator;
 

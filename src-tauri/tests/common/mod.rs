@@ -5,6 +5,9 @@ use hound::{WavSpec, SampleFormat, WavWriter};
 use std::fs::File;
 use std::path::Path;
 
+// Add simplified pipeline module
+pub mod simplified_pipeline;
+
 /// Create a test audio buffer with a sine wave
 pub fn create_test_audio_buffer(duration_secs: f32, sample_rate: u32, frequency: f32) -> Vec<f32> {
     let num_samples = (duration_secs * sample_rate as f32) as usize;

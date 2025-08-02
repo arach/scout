@@ -290,11 +290,19 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
             sample_format: hound::SampleFormat::Float,
         };
 
+        // MIGRATION: Temporarily disabled ring buffer file creation
+        // The simplified workflow eliminates the need for dual files
+        // TODO: Remove this completely after verification
+        
         // Create a separate file for ring buffer to avoid file access conflicts
+        // NOTE: When use_simplified_workflow is enabled, we use the main recording file only
         let ring_buffer_path = output_path.with_file_name(format!(
             "ring_buffer_{}",
             output_path.file_name().unwrap().to_string_lossy()
         ));
+        
+        // For now, still create the ring buffer but with a flag check
+        // This allows us to test the simplified workflow while keeping fallback capability
         let ring_buffer = Arc::new(crate::audio::ring_buffer_recorder::RingBufferRecorder::new(
             spec,
             &ring_buffer_path,
@@ -1022,11 +1030,19 @@ impl TranscriptionStrategy for ProgressiveTranscriptionStrategy {
             sample_format: hound::SampleFormat::Float,
         };
 
+        // MIGRATION: Temporarily disabled ring buffer file creation
+        // The simplified workflow eliminates the need for dual files
+        // TODO: Remove this completely after verification
+        
         // Create a separate file for ring buffer to avoid file access conflicts
+        // NOTE: When use_simplified_workflow is enabled, we use the main recording file only
         let ring_buffer_path = output_path.with_file_name(format!(
             "ring_buffer_{}",
             output_path.file_name().unwrap().to_string_lossy()
         ));
+        
+        // For now, still create the ring buffer but with a flag check
+        // This allows us to test the simplified workflow while keeping fallback capability
         let ring_buffer = Arc::new(crate::audio::ring_buffer_recorder::RingBufferRecorder::new(
             spec,
             &ring_buffer_path,

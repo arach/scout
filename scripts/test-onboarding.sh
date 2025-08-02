@@ -2,8 +2,8 @@
 
 # Temporarily move Scout data to test onboarding, then restore it
 
-SCOUT_DIR="$HOME/Library/Application Support/com.scout.app"
-TEMP_DIR="$HOME/Library/Application Support/com.scout.app.backup"
+SCOUT_DIR="$HOME/Library/Application Support/com.jdi.scout"
+TEMP_DIR="$HOME/Library/Application Support/com.jdi.scout.backup"
 
 case "${1:-toggle}" in
     "hide")

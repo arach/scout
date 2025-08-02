@@ -1,0 +1,223 @@
+name: Test Simplified Audio Pipeline
+
+on:
+  push:
+    branches: [ main, master, architecture-redesign ]
+    paths:
+      - 'src-tauri/src/audio/simple_recorder.rs'
+      - 'src-tauri/src/transcription/simple_transcriber.rs'
+      - 'src-tauri/src/simple_session_manager.rs'
+      - 'src-tauri/tests/**'
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - 'src-tauri/src/audio/simple_recorder.rs'
+      - 'src-tauri/src/transcription/simple_transcriber.rs'
+      - 'src-tauri/src/simple_session_manager.rs'
+      - 'src-tauri/tests/**'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test-simplified-pipeline:
+    name: Test Simplified Pipeline
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        rust: [stable]
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: ${{ matrix.rust }}
+        profile: minimal
+        override: true
+        components: clippy, rustfmt
+
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Cache cargo index
+      uses: actions/cache@v3
+      with:
+        path: ~/.cargo/git
+        key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Cache cargo build
+      uses: actions/cache@v3
+      with:
+        path: src-tauri/target
+        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Install system dependencies (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libasound2-dev pkg-config
+
+    - name: Check Rust formatting
+      working-directory: src-tauri
+      run: cargo fmt --all -- --check
+
+    - name: Run Clippy linting
+      working-directory: src-tauri
+      run: cargo clippy --all-targets --all-features -- -D warnings
+
+    - name: Run unit tests
+      working-directory: src-tauri
+      run: |
+        echo "Running simplified pipeline unit tests..."
+        cargo test --test simplified_pipeline_tests --verbose
+        echo "Running simple recorder unit tests..."
+        cargo test simple_recorder --verbose
+
+    - name: Run integration tests
+      working-directory: src-tauri
+      run: |
+        echo "Running simplified pipeline integration tests..."
+        cargo test integration --verbose --test simplified_pipeline_tests
+
+    - name: Run performance benchmarks (no-run)
+      working-directory: src-tauri
+      run: |
+        echo "Verifying performance benchmarks compile..."
+        cargo test --test simplified_pipeline_tests bench_ --no-run
+
+    - name: Check memory usage target
+      working-directory: src-tauri
+      run: |
+        echo "Running memory usage validation..."
+        cargo test test_memory_usage_under_target --verbose --test simplified_pipeline_tests
+
+    - name: Verify no ring buffer files created
+      working-directory: src-tauri
+      run: |
+        echo "Validating simplified workflow creates single files only..."
+        cargo test test_no_ring_buffer_files_created --verbose --test simplified_pipeline_tests
+
+    - name: Run stress tests (if not Windows)
+      if: matrix.os != 'windows-latest'
+      working-directory: src-tauri
+      run: |
+        echo "Running stress tests..."
+        cargo test stress_test --verbose --test simplified_pipeline_tests
+
+  performance-regression-check:
+    name: Performance Regression Check
+    runs-on: ubuntu-latest
+    needs: test-simplified-pipeline
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        profile: minimal
+        override: true
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libasound2-dev pkg-config
+
+    - name: Run performance benchmarks
+      working-directory: src-tauri
+      run: |
+        echo "Running performance regression tests..."
+        cargo test --test simplified_pipeline_tests --release -- bench_ --nocapture
+        
+    - name: Check performance targets
+      working-directory: src-tauri
+      run: |
+        echo "Validating performance targets:"
+        echo "- Recording startup: <100ms"
+        echo "- Memory usage: <215MB"
+        echo "- Transcription RTF: <0.3"
+        cargo test test_performance_targets --release --test simplified_pipeline_tests -- --nocapture
+
+  code-coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        profile: minimal
+        override: true
+        components: llvm-tools-preview
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libasound2-dev pkg-config
+
+    - name: Install cargo-llvm-cov
+      run: cargo install cargo-llvm-cov
+
+    - name: Generate code coverage
+      working-directory: src-tauri
+      run: |
+        cargo llvm-cov --test simplified_pipeline_tests --lcov --output-path lcov.info
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: src-tauri/lcov.info
+        flags: simplified-pipeline
+        name: simplified-pipeline-coverage
+        fail_ci_if_error: false
+
+  notify-on-failure:
+    name: Notify on Test Failure
+    runs-on: ubuntu-latest
+    needs: [test-simplified-pipeline, performance-regression-check]
+    if: failure()
+    
+    steps:
+    - name: Report test failure
+      run: |
+        echo "❌ Simplified pipeline tests failed!"
+        echo "This indicates potential issues with:"
+        echo "- Audio recording performance (<100ms startup target)"
+        echo "- Memory usage (<215MB target)"
+        echo "- Single-file recording (no ring buffers)"
+        echo "- Transcription performance (<0.3 RTF target)"
+        echo ""
+        echo "Please review the test results and fix any regressions."
+
+  success-summary:
+    name: Test Success Summary
+    runs-on: ubuntu-latest
+    needs: [test-simplified-pipeline, performance-regression-check, code-coverage]
+    if: success()
+    
+    steps:
+    - name: Report success
+      run: |
+        echo "✅ All simplified pipeline tests passed!"
+        echo "Validated improvements:"
+        echo "- ✅ No ring buffer files created"
+        echo "- ✅ Recording startup <100ms"
+        echo "- ✅ Memory usage <215MB"
+        echo "- ✅ Transcription RTF <0.3"
+        echo "- ✅ Cross-platform compatibility"
+        echo "- ✅ Stress test stability"
+        echo ""
+        echo "The simplified audio pipeline is ready for deployment! 🚀"
