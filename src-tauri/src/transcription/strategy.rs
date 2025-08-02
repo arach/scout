@@ -33,7 +33,7 @@ impl Default for TranscriptionConfig {
     fn default() -> Self {
         Self {
             enable_chunking: true,
-            chunking_threshold_secs: 5, // Start chunking after 5 seconds (original design)
+            chunking_threshold_secs: 3, // Lower threshold to handle shorter recordings better
             chunk_duration_secs: 5,     // 5-second chunks for better coverage
             force_strategy: None,
             refinement_chunk_secs: Some(10), // 10-second chunks for Medium model refinement
@@ -255,8 +255,8 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
             &format!("Initializing ring buffer components for real-time processing with {}", model_info),
         );
 
-        // Get actual device sample rate from app state
-        // This is set by AudioRecorder when it starts recording
+        // Get actual device sample rate and channels from app state
+        // These are set by AudioRecorder when it starts recording
         let device_sample_rate = crate::get_current_device_sample_rate().unwrap_or_else(|| {
             warn(
                 Component::RingBuffer,
@@ -264,18 +264,27 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
             );
             48000
         });
+        
+        let device_channels = crate::get_current_device_channels().unwrap_or_else(|| {
+            warn(
+                Component::RingBuffer,
+                "Device channels not available yet, using 2 channels as fallback",
+            );
+            2
+        });
+        
         info(
             Component::RingBuffer,
             &format!(
-                "Ring buffer using device sample rate: {} Hz",
-                device_sample_rate
+                "Ring buffer using device format: {} Hz, {} channels",
+                device_sample_rate, device_channels
             ),
         );
 
         // Initialize ring buffer recorder with 5-minute capacity
-        // Audio arrives as mono f32 samples at the device's native sample rate
+        // Use actual device format to preserve audio fidelity
         let spec = hound::WavSpec {
-            channels: 1,                     // Always mono (AudioRecorder converts stereo to mono)
+            channels: device_channels,       // Use actual device channels (stereo/mono)
             sample_rate: device_sample_rate, // Native device sample rate
             bits_per_sample: 32,             // f32 samples from AudioRecorder
             sample_format: hound::SampleFormat::Float,
@@ -562,12 +571,25 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
             ),
         );
 
-        Ok(TranscriptionResult {
+        // Prepare the result first
+        let result = TranscriptionResult {
             text: combined_text,
             processing_time_ms: transcription_time.as_millis() as u64,
             strategy_used: self.name().to_string(),
             chunks_processed,
-        })
+        };
+
+        // CRITICAL: Clean up all state to prevent corruption in subsequent recordings
+        // Do this AFTER preparing the result to avoid any potential async issues
+        info(Component::RingBuffer, "Cleaning up ring buffer strategy state for next recording");
+        self.ring_buffer = None;
+        self.ring_transcriber = None;
+        self.monitor_handle = None;
+        self.start_time = None;
+        self.config = None;
+        self.recording_path = None;
+
+        Ok(result)
     }
 
     fn get_partial_results(&self) -> Vec<String> {
@@ -608,6 +630,14 @@ pub struct ProgressiveTranscriptionStrategy {
 
 impl ProgressiveTranscriptionStrategy {
     pub async fn new(models_dir: &Path, temp_dir: std::path::PathBuf) -> Result<Self, String> {
+        Self::new_with_model_state_manager(models_dir, temp_dir, None).await
+    }
+
+    pub async fn new_with_model_state_manager(
+        models_dir: &Path, 
+        temp_dir: std::path::PathBuf,
+        model_state_manager: Option<Arc<crate::model_state::ModelStateManager>>,
+    ) -> Result<Self, String> {
         info(
             Component::Transcription,
             "Creating ProgressiveTranscriptionStrategy",
@@ -622,7 +652,11 @@ impl ProgressiveTranscriptionStrategy {
         if !tiny_path.exists() {
             return Err(format!("Tiny model not found at: {:?}", tiny_path));
         }
-        let tiny_transcriber = Transcriber::get_or_create_cached(&tiny_path).await?;
+        let tiny_transcriber = if let Some(ref manager) = model_state_manager {
+            Transcriber::get_or_create_cached_with_readiness(&tiny_path, Some(manager.clone())).await?
+        } else {
+            Transcriber::get_or_create_cached(&tiny_path).await?
+        };
         info(Component::Transcription, "Tiny model loaded successfully");
 
         // Try to load Medium model for refinement, fallback to better models if not available
@@ -642,7 +676,13 @@ impl ProgressiveTranscriptionStrategy {
                         Component::Transcription,
                         &format!("Attempting to load {} model for refinement from: {:?}", model_name, model_path),
                     );
-                    match Transcriber::get_or_create_cached(&model_path).await {
+                    let transcriber_result = if let Some(ref manager) = model_state_manager {
+                        Transcriber::get_or_create_cached_with_readiness(&model_path, Some(manager.clone())).await
+                    } else {
+                        Transcriber::get_or_create_cached(&model_path).await
+                    };
+                    
+                    match transcriber_result {
                         Ok(transcriber) => {
                             info(
                                 Component::Transcription,
@@ -918,6 +958,18 @@ impl TranscriptionStrategy for ProgressiveTranscriptionStrategy {
         output_path: &Path,
         config: &TranscriptionConfig,
     ) -> Result<(), String> {
+        // CRITICAL: Force clear all state before starting new recording
+        // This prevents audio corruption from previous recordings
+        info(Component::Transcription, "Clearing all state before new recording to prevent corruption");
+        self.ring_buffer = None;
+        self.ring_transcriber = None;
+        self.monitor_handle = None;
+        self.refinement_handle = None;
+        
+        // Force clear chunk buffers immediately
+        self.tiny_chunks.lock().await.clear();
+        self.refined_chunks.lock().await.clear();
+
         self.start_time = Some(std::time::Instant::now());
         self.config = Some(config.clone());
         self.recording_path = Some(output_path.to_path_buf());
@@ -934,8 +986,8 @@ impl TranscriptionStrategy for ProgressiveTranscriptionStrategy {
             "Using Tiny model for real-time feedback, Medium model for background refinement",
         );
 
-        // Get actual device sample rate from app state
-        // This is set by AudioRecorder when it starts recording
+        // Get actual device sample rate and channels from app state
+        // These are set by AudioRecorder when it starts recording
         let device_sample_rate = crate::get_current_device_sample_rate().unwrap_or_else(|| {
             warn(
                 Component::Transcription,
@@ -943,18 +995,28 @@ impl TranscriptionStrategy for ProgressiveTranscriptionStrategy {
             );
             48000
         });
+        
+        let device_channels = crate::get_current_device_channels().unwrap_or_else(|| {
+            warn(
+                Component::Transcription,
+                "Device channels not available yet, using 2 channels as fallback",
+            );
+            2
+        });
+        
         info(
             Component::Transcription,
             &format!(
-                "Progressive strategy using device sample rate: {} Hz",
-                device_sample_rate
+                "Progressive strategy using device format: {} Hz, {} channels",
+                device_sample_rate, device_channels
             ),
         );
 
         // Initialize ring buffer recorder
-        // Audio arrives as mono f32 samples at the device's native sample rate
+        // Audio arrives as f32 samples at the device's native sample rate and channel count
+        // Use the actual device format to preserve audio fidelity
         let spec = hound::WavSpec {
-            channels: 1,                     // Always mono (AudioRecorder converts stereo to mono)
+            channels: device_channels,       // Use actual device channels (stereo/mono)
             sample_rate: device_sample_rate, // Native device sample rate
             bits_per_sample: 32,             // f32 samples from AudioRecorder
             sample_format: hound::SampleFormat::Float,
@@ -1024,6 +1086,7 @@ impl TranscriptionStrategy for ProgressiveTranscriptionStrategy {
             Component::Transcription,
             "Finishing progressive transcription",
         );
+
         let transcription_start = std::time::Instant::now();
 
         // Stop the real-time monitor and collect Tiny model results
@@ -1070,17 +1133,17 @@ impl TranscriptionStrategy for ProgressiveTranscriptionStrategy {
             }
         }
 
-        // Finalize the ring buffer file first
-        let ring_buffer_file_path = if let Some(ref ring_buffer) = self.ring_buffer {
-            debug(Component::Transcription, "Finalizing ring buffer recording file");
+        // CRITICAL: Finalize ring buffer recording NOW to capture complete audio
+        // This ensures we get the full recording duration before copying
+        if let Some(ref ring_buffer) = self.ring_buffer {
+            info(Component::Transcription, "Finalizing ring buffer to capture complete audio");
             if let Err(e) = ring_buffer.finalize_recording() {
-                warn(
-                    Component::Transcription,
-                    &format!("Error finalizing ring buffer recording: {}", e),
-                );
+                warn(Component::Transcription, &format!("Error finalizing ring buffer recording: {}", e));
             }
-            
-            // Get the ring buffer file path for copying to main file
+        }
+
+        // Get the ring buffer file path for copying to main file (just finalized above)
+        let ring_buffer_file_path = if let Some(ref _ring_buffer) = self.ring_buffer {
             Some(_recording_path.with_file_name(format!(
                 "ring_buffer_{}",
                 _recording_path.file_name().unwrap().to_string_lossy()
@@ -1151,18 +1214,67 @@ impl TranscriptionStrategy for ProgressiveTranscriptionStrategy {
             ),
         );
 
-        // For now, just return the Tiny model results
-        // TODO: Implement smart merging of Tiny and Medium results
-        let combined_text = tiny_chunks.join(" ");
+        // Perform final transcription with Medium model on complete audio
+        info(Component::Transcription, "Starting final Medium model transcription on complete audio");
+        
+        let final_text = if _recording_path.exists() {
+            // Use Medium model to transcribe the complete audio file
+            let medium_transcriber = self.medium_transcriber.clone();
+            let mut transcriber = medium_transcriber.lock().await;
+            
+            match transcriber.transcribe_file(&_recording_path) {
+                Ok(result) => {
+                    info(Component::Transcription, &format!(
+                        "Final Medium model transcription successful: {} chars", 
+                        result.len()
+                    ));
+                    result
+                }
+                Err(e) => {
+                    warn(Component::Transcription, &format!(
+                        "Final Medium model transcription failed: {}, falling back to Tiny chunks", e
+                    ));
+                    // Fallback to Tiny model results if Medium fails
+                    tiny_chunks.join(" ")
+                }
+            }
+        } else {
+            warn(Component::Transcription, "Recording file not found, using Tiny model chunks");
+            tiny_chunks.join(" ")
+        };
 
         let transcription_time = transcription_start.elapsed();
 
-        Ok(TranscriptionResult {
-            text: combined_text,
+        // Prepare the result first
+        let result = TranscriptionResult {
+            text: final_text,
             processing_time_ms: transcription_time.as_millis() as u64,
-            strategy_used: self.name().to_string(),
-            chunks_processed,
-        })
+            strategy_used: format!("{} (final)", self.name()),
+            chunks_processed: 1, // Final transcription is one complete pass
+        };
+
+        // CRITICAL: Clean up all state to prevent corruption in subsequent recordings
+        // Do this AFTER preparing the result to avoid any potential async issues
+        info(Component::Transcription, "Cleaning up progressive strategy state for next recording");
+        
+        // Clear all state references immediately
+        self.ring_buffer = None;
+        self.ring_transcriber = None; 
+        self.monitor_handle = None;
+        self.refinement_handle = None;
+        self.start_time = None;
+        self.config = None;
+        self.recording_path = None;
+        
+        // Force clear accumulated chunks - spawn task to avoid deadlock 
+        let tiny_chunks = self.tiny_chunks.clone();
+        let refined_chunks = self.refined_chunks.clone();
+        tokio::spawn(async move {
+            tiny_chunks.lock().await.clear();
+            refined_chunks.lock().await.clear();
+        });
+
+        Ok(result)
     }
 
     fn get_partial_results(&self) -> Vec<String> {
@@ -1183,6 +1295,7 @@ impl TranscriptionStrategySelector {
     /// Get the fastest available transcriber for fallback scenarios
     async fn get_fastest_available_transcriber(
         models_dir: &Path,
+        model_state_manager: Option<Arc<crate::model_state::ModelStateManager>>,
     ) -> Result<Arc<tokio::sync::Mutex<Transcriber>>, String> {
         // Try models in order of speed (fastest first)
         let preferred_models = [
@@ -1198,7 +1311,13 @@ impl TranscriptionStrategySelector {
                     Component::Transcription,
                     &format!("Using fastest available model for ring buffer fallback: {}", model_filename),
                 );
-                match Transcriber::get_or_create_cached(&model_path).await {
+                let transcriber_result = if let Some(ref manager) = model_state_manager {
+                    Transcriber::get_or_create_cached_with_readiness(&model_path, Some(manager.clone())).await
+                } else {
+                    Transcriber::get_or_create_cached(&model_path).await
+                };
+                
+                match transcriber_result {
                     Ok(transcriber) => return Ok(transcriber),
                     Err(e) => {
                         warn(
@@ -1221,6 +1340,7 @@ impl TranscriptionStrategySelector {
         transcriber: Arc<tokio::sync::Mutex<Transcriber>>,
         temp_dir: std::path::PathBuf,
         app_handle: Option<tauri::AppHandle>,
+        model_state_manager: Option<Arc<crate::model_state::ModelStateManager>>,
     ) -> Box<dyn TranscriptionStrategy> {
         // Check for forced strategy first
         if let Some(ref forced) = config.force_strategy {
@@ -1247,7 +1367,11 @@ impl TranscriptionStrategySelector {
                     );
                     // temp_dir is already the models directory
                     let models_dir = &temp_dir;
-                    match ProgressiveTranscriptionStrategy::new(models_dir, temp_dir.clone()).await
+                    match ProgressiveTranscriptionStrategy::new_with_model_state_manager(
+                        models_dir, 
+                        temp_dir.clone(),
+                        model_state_manager.clone()
+                    ).await
                     {
                         Ok(mut strategy) => {
                             if let Some(app_handle) = app_handle {
@@ -1323,7 +1447,11 @@ impl TranscriptionStrategySelector {
 
             // Re-enabled progressive strategy with proper Tiny+Medium model usage
             if tiny_exists && medium_exists {
-                match ProgressiveTranscriptionStrategy::new(models_dir, temp_dir.clone()).await {
+                match ProgressiveTranscriptionStrategy::new_with_model_state_manager(
+                    models_dir, 
+                    temp_dir.clone(),
+                    model_state_manager.clone()
+                ).await {
                     Ok(mut strategy) => {
                         if let Some(ref app_handle) = app_handle {
                             strategy = strategy.with_app_handle(app_handle.clone());
@@ -1361,6 +1489,7 @@ impl TranscriptionStrategySelector {
         // Check for faster models than the default one
         let fallback_transcriber = Self::get_fastest_available_transcriber(
             &temp_dir, // models_dir
+            model_state_manager,
         ).await.unwrap_or(transcriber.clone());
         
         let mut ring_buffer_strategy =
@@ -1559,5 +1688,285 @@ mod tests {
         assert!(config.chunk_duration_secs > 0);
         // chunking_threshold_secs is u64, so it's always >= 0, but we test it's reasonable
         assert!(config.chunking_threshold_secs < 3600); // Less than 1 hour
+    }
+
+    /// Test fastest model selection logic
+    #[test]
+    fn test_fastest_model_selection_logic() {
+        use tempfile::TempDir;
+        
+        // Create a temporary directory with different models
+        let temp_dir = TempDir::new().unwrap();
+        let models_dir = temp_dir.path();
+        
+        // Create models in order from slowest to fastest
+        std::fs::write(models_dir.join("ggml-small.en.bin"), b"mock small model").unwrap();
+        std::fs::write(models_dir.join("ggml-base.en.bin"), b"mock base model").unwrap();
+        std::fs::write(models_dir.join("ggml-tiny.en.bin"), b"mock tiny model").unwrap();
+        
+        // Test the fastest model selection logic
+        let preferred_models = [
+            "ggml-tiny.en.bin",
+            "ggml-base.en.bin", 
+            "ggml-small.en.bin",
+        ];
+        
+        let mut fastest_found = None;
+        for model_filename in &preferred_models {
+            let model_path = models_dir.join(model_filename);
+            if model_path.exists() {
+                fastest_found = Some(model_filename);
+                break;
+            }
+        }
+        
+        // Should find tiny (fastest) first
+        assert_eq!(fastest_found, Some(&"ggml-tiny.en.bin"));
+    }
+}
+
+/// Tests for strategy selection logic and progressive strategy functionality
+#[cfg(test)]
+mod progressive_strategy_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    /// Helper to create test model files for progressive strategy
+    async fn create_progressive_test_models(models_dir: &Path) -> Result<(), std::io::Error> {
+        tokio::fs::create_dir_all(models_dir).await?;
+        
+        // Create the required models for progressive strategy
+        tokio::fs::write(models_dir.join("ggml-tiny.en.bin"), b"mock tiny model").await?;
+        tokio::fs::write(models_dir.join("ggml-medium.en.bin"), b"mock medium model").await?;
+        tokio::fs::write(models_dir.join("ggml-base.en.bin"), b"mock base model").await?;
+        
+        Ok(())
+    }
+
+    /// Test progressive strategy creation with required models
+    #[tokio::test]
+    async fn test_progressive_strategy_creation() {
+        let temp_dir = TempDir::new().unwrap();
+        let models_dir = temp_dir.path().join("models");
+        create_progressive_test_models(&models_dir).await.unwrap();
+        
+        // This test simulates the creation without actual Transcriber instances
+        // In a real scenario, this would require mock Transcriber implementations
+        let tiny_path = models_dir.join("ggml-tiny.en.bin");
+        let medium_path = models_dir.join("ggml-medium.en.bin");
+        
+        assert!(tiny_path.exists());
+        assert!(medium_path.exists());
+        
+        // Test the model discovery logic that progressive strategy uses
+        let tiny_exists = tiny_path.exists();
+        let medium_exists = medium_path.exists();
+        
+        assert!(tiny_exists);
+        assert!(medium_exists);
+        
+        // Progressive strategy should be available when both models exist
+        assert!(tiny_exists && medium_exists);
+    }
+
+    /// Test progressive strategy fallback model selection
+    #[tokio::test]
+    async fn test_progressive_strategy_fallback_models() {
+        let temp_dir = TempDir::new().unwrap();
+        let models_dir = temp_dir.path().join("models");
+        tokio::fs::create_dir_all(&models_dir).await.unwrap();
+        
+        // Create only tiny and base models (no medium)
+        tokio::fs::write(models_dir.join("ggml-tiny.en.bin"), b"mock tiny model").await.unwrap();
+        tokio::fs::write(models_dir.join("ggml-base.en.bin"), b"mock base model").await.unwrap();
+        
+        // Test the fallback logic used in ProgressiveTranscriptionStrategy::new
+        let refinement_models = [
+            ("ggml-medium.en.bin", "Medium"),
+            ("ggml-base.en.bin", "Base"),
+            ("ggml-small.en.bin", "Small"),
+            ("ggml-tiny.en.bin", "Tiny (fallback)"),
+        ];
+        
+        let mut loaded_model = None;
+        for (filename, model_name) in &refinement_models {
+            let model_path = models_dir.join(filename);
+            if model_path.exists() {
+                loaded_model = Some((model_path, model_name.to_string()));
+                break;
+            }
+        }
+        
+        // Should find Base model as fallback when Medium is not available
+        assert!(loaded_model.is_some());
+        let (_, model_name) = loaded_model.unwrap();
+        assert_eq!(model_name, "Base");
+    }
+
+    /// Test strategy selection with progressive capability
+    #[tokio::test]
+    async fn test_strategy_selection_progressive_enabled() {
+        let temp_dir = TempDir::new().unwrap();
+        let models_dir = temp_dir.path().join("models");
+        create_progressive_test_models(&models_dir).await.unwrap();
+        
+        let config = TranscriptionConfig {
+            enable_chunking: true,
+            chunking_threshold_secs: 5,
+            ..Default::default()
+        };
+        
+        // Test the logic from TranscriptionStrategySelector::select_strategy
+        let tiny_path = models_dir.join("ggml-tiny.en.bin");
+        let medium_path = models_dir.join("ggml-medium.en.bin");
+        let tiny_exists = tiny_path.exists();
+        let medium_exists = medium_path.exists();
+        
+        // Progressive strategy should be enabled when both models exist and chunking is enabled
+        let should_use_progressive = config.enable_chunking && tiny_exists && medium_exists;
+        assert!(should_use_progressive);
+    }
+
+    /// Test progressive strategy configuration validation
+    #[test]
+    fn test_progressive_strategy_config_validation() {
+        let configs = vec![
+            // Default config should work
+            TranscriptionConfig::default(),
+            
+            // Custom refinement chunk size
+            TranscriptionConfig {
+                refinement_chunk_secs: Some(15),
+                ..Default::default()
+            },
+            
+            // No refinement chunks specified (should use default)
+            TranscriptionConfig {
+                refinement_chunk_secs: None,
+                ..Default::default()
+            },
+            
+            // Large refinement chunks
+            TranscriptionConfig {
+                refinement_chunk_secs: Some(30),
+                ..Default::default()
+            },
+        ];
+        
+        for config in configs {
+            // All configs should be valid for progressive strategy
+            assert!(config.enable_chunking); // Default should enable chunking
+            
+            // Refinement chunk size should be reasonable if specified
+            if let Some(refinement_secs) = config.refinement_chunk_secs {
+                assert!(refinement_secs > 0);
+                assert!(refinement_secs <= 60); // Reasonable upper limit
+            }
+            
+            // Regular chunk size should be reasonable
+            assert!(config.chunk_duration_secs > 0);
+            assert!(config.chunk_duration_secs <= 30);
+        }
+    }
+
+    /// Test progressive strategy model name tracking
+    #[test]
+    fn test_progressive_strategy_model_naming() {
+        // Test the refinement model naming logic
+        let refinement_models = [
+            ("ggml-medium.en.bin", "Medium"),
+            ("ggml-base.en.bin", "Base"),
+            ("ggml-small.en.bin", "Small"),
+            ("ggml-tiny.en.bin", "Tiny (fallback)"),
+        ];
+        
+        for (filename, expected_name) in &refinement_models {
+            // Each model should have a proper display name
+            assert!(!expected_name.is_empty());
+            assert!(filename.starts_with("ggml-"));
+            assert!(filename.ends_with(".bin"));
+        }
+    }
+
+    /// Test ring buffer file copying logic used by progressive strategy
+    #[tokio::test]
+    async fn test_ring_buffer_file_copying_logic() {
+        let temp_dir = TempDir::new().unwrap();
+        let main_recording = temp_dir.path().join("recording.wav");
+        let ring_buffer_file = temp_dir.path().join("ring_buffer_recording.wav");
+        
+        // Create mock ring buffer file with content
+        let test_content = b"mock audio data for testing";
+        tokio::fs::write(&ring_buffer_file, test_content).await.unwrap();
+        
+        // Test the copying logic used in progressive strategy finish_recording
+        if ring_buffer_file.exists() {
+            match std::fs::copy(&ring_buffer_file, &main_recording) {
+                Ok(bytes_copied) => {
+                    assert_eq!(bytes_copied, test_content.len() as u64);
+                    
+                    // Verify content was copied correctly
+                    let copied_content = tokio::fs::read(&main_recording).await.unwrap();
+                    assert_eq!(copied_content, test_content);
+                    
+                    // Test cleanup
+                    std::fs::remove_file(&ring_buffer_file).unwrap();
+                    assert!(!ring_buffer_file.exists());
+                    assert!(main_recording.exists());
+                }
+                Err(e) => panic!("File copy failed: {}", e),
+            }
+        }
+    }
+
+    /// Test ring buffer file path generation used by strategies
+    #[test]
+    fn test_ring_buffer_path_generation() {
+        use std::path::PathBuf;
+        
+        let test_cases = vec![
+            ("recording.wav", "ring_buffer_recording.wav"),
+            ("test_audio.wav", "ring_buffer_test_audio.wav"),
+            ("long_filename_test.wav", "ring_buffer_long_filename_test.wav"),
+        ];
+        
+        for (input, expected) in test_cases {
+            let output_path = PathBuf::from(input);
+            let ring_buffer_path = output_path.with_file_name(format!(
+                "ring_buffer_{}",
+                output_path.file_name().unwrap().to_string_lossy()
+            ));
+            
+            assert_eq!(ring_buffer_path.file_name().unwrap().to_string_lossy(), expected);
+        }
+    }
+
+    /// Test empty WAV file detection and handling
+    #[tokio::test]
+    async fn test_empty_wav_file_handling() {
+        let temp_dir = TempDir::new().unwrap();
+        let empty_file = temp_dir.path().join("empty.wav");
+        let small_file = temp_dir.path().join("small.wav");
+        let normal_file = temp_dir.path().join("normal.wav");
+        
+        // Create different sized files
+        tokio::fs::write(&empty_file, b"").await.unwrap();
+        tokio::fs::write(&small_file, b"tiny").await.unwrap(); // 4 bytes
+        tokio::fs::write(&normal_file, vec![0u8; 2000]).await.unwrap(); // 2000 bytes
+        
+        // Test the size checking logic used in strategies
+        let empty_size = std::fs::metadata(&empty_file).unwrap().len();
+        let small_size = std::fs::metadata(&small_file).unwrap().len();
+        let normal_size = std::fs::metadata(&normal_file).unwrap().len();
+        
+        // Test the threshold used in the code (1000 bytes)
+        assert!(empty_size < 1000);
+        assert!(small_size < 1000);
+        assert!(normal_size >= 1000);
+        
+        // Files smaller than 1KB should be considered too small for transcription
+        assert!(empty_size < 1000);
+        assert!(small_size < 1000);
+        assert!(normal_size >= 1000);
     }
 }

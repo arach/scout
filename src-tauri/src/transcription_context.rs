@@ -1,5 +1,5 @@
 use crate::db::Database;
-use crate::logger::{debug, info, warn, Component};
+use crate::logger::{debug, error, info, warn, Component};
 use crate::model_state::ModelStateManager;
 use crate::performance_logger::PerformanceLogger;
 use crate::transcription::{
@@ -20,6 +20,7 @@ pub struct TranscriptionContext {
     recording_start_time: Option<std::time::Instant>,
     model_name: String,
     app_handle: Option<tauri::AppHandle>,
+    model_state_manager: Option<Arc<ModelStateManager>>,
 }
 
 impl TranscriptionContext {
@@ -37,6 +38,7 @@ impl TranscriptionContext {
             recording_start_time: None,
             model_name: "unknown".to_string(),
             app_handle: None,
+            model_state_manager: None,
         }
     }
 
@@ -78,7 +80,7 @@ impl TranscriptionContext {
 
             let transcriber = match Transcriber::get_or_create_cached_with_readiness(
                 &model_path,
-                model_state_manager,
+                model_state_manager.clone(),
             )
             .await
             {
@@ -103,6 +105,7 @@ impl TranscriptionContext {
                 recording_start_time: None,
                 model_name,
                 app_handle: None,
+                model_state_manager,
             })
         } else {
             let model_name = model_path
@@ -118,26 +121,48 @@ impl TranscriptionContext {
                 ),
             );
 
-            // Warn if using a slow model
+            // Warn if using a slow model - CRITICAL for user experience
             if settings.models.active_model_id.contains("medium")
                 || settings.models.active_model_id.contains("large")
             {
-                warn(
+                error(
                     Component::Transcription,
                     &format!(
-                        "⚠️ Using {} model for real-time transcription. This may cause delays.",
+                        "🚨 CRITICAL: {} model is TOO SLOW for real-time use!",
                         settings.models.active_model_id
                     ),
                 );
+                error(
+                    Component::Transcription,
+                    "Expected: <2s delay | Actual: 2+ MINUTE delay for 10s audio",
+                );
                 warn(
                     Component::Transcription,
-                    "Consider using 'tiny' or 'base' models for better real-time performance.",
+                    "STRONGLY RECOMMENDED: Switch to 'tiny.en' or 'base.en' model immediately",
                 );
+                
+                // Log expected performance
+                if settings.models.active_model_id.contains("large-v3-turbo") {
+                    error(
+                        Component::Transcription,
+                        "large-v3-turbo: 15-20x SLOWER than real-time (2+ min for 10s audio)",
+                    );
+                } else if settings.models.active_model_id.contains("large") {
+                    error(
+                        Component::Transcription,
+                        "large models: 2-3x slower than real-time (20-30s for 10s audio)",
+                    );
+                } else if settings.models.active_model_id.contains("medium") {
+                    warn(
+                        Component::Transcription,
+                        "medium models: ~1x real-time (10s for 10s audio) - borderline slow",
+                    );
+                }
             }
 
             let transcriber = match Transcriber::get_or_create_cached_with_readiness(
                 &model_path,
-                model_state_manager,
+                model_state_manager.clone(),
             )
             .await
             {
@@ -162,6 +187,7 @@ impl TranscriptionContext {
                 recording_start_time: None,
                 model_name,
                 app_handle: None,
+                model_state_manager,
             })
         }
     }
@@ -218,6 +244,7 @@ impl TranscriptionContext {
                 recording_start_time: None,
                 model_name,
                 app_handle: None,
+                model_state_manager: None,
             })
         } else {
             let model_name = model_path
@@ -265,6 +292,7 @@ impl TranscriptionContext {
                 recording_start_time: None,
                 model_name,
                 app_handle: None,
+                model_state_manager: None,
             })
         }
     }
@@ -290,6 +318,7 @@ impl TranscriptionContext {
             self.transcriber.clone(),
             self.temp_dir.clone(),
             self.app_handle.clone(),
+            self.model_state_manager.clone(),
         )
         .await;
 
@@ -426,7 +455,9 @@ impl TranscriptionContext {
         let mut config = TranscriptionConfig::default();
         config.force_strategy = force_strategy.map(|s| s.to_string());
 
-        Self::new(transcriber, temp_dir, Some(config))
+        let mut ctx = Self::new(transcriber, temp_dir, Some(config));
+        ctx.model_state_manager = None;
+        ctx
     }
 
     /// Find the best available model file in the models directory

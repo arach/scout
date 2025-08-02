@@ -25,7 +25,7 @@ mod llm;
 mod whisper_logger;
 mod whisper_log_interceptor;
 mod performance_tracker;
-mod model_state;
+pub mod model_state;
 mod webhooks;
 #[cfg(target_os = "macos")]
 mod macos;
@@ -57,6 +57,9 @@ use std::sync::OnceLock;
 /// Global storage for the current device sample rate
 static DEVICE_SAMPLE_RATE: OnceLock<Arc<Mutex<Option<u32>>>> = OnceLock::new();
 
+/// Global storage for the current device channel count
+static DEVICE_CHANNELS: OnceLock<Arc<Mutex<Option<u16>>>> = OnceLock::new();
+
 /// Get the current device sample rate from the global cache
 /// This is used by transcription strategies to avoid hardcoding 48kHz
 pub fn get_current_device_sample_rate() -> Option<u32> {
@@ -77,6 +80,29 @@ pub fn update_device_sample_rate(sample_rate: u32) {
     if let Ok(mut rate) = rate_storage.try_lock() {
         *rate = Some(sample_rate);
         info(Component::Recording, &format!("Updated global device sample rate to: {} Hz", sample_rate));
+    }
+}
+
+/// Get the current device channel count from the global cache
+/// This is used by transcription strategies to avoid hardcoding channel count
+pub fn get_current_device_channels() -> Option<u16> {
+    let channels_storage = DEVICE_CHANNELS.get_or_init(|| Arc::new(Mutex::new(None)));
+    
+    // Use try_lock to avoid blocking if the mutex is held
+    if let Ok(channels) = channels_storage.try_lock() {
+        *channels
+    } else {
+        None
+    }
+}
+
+/// Update the cached device channel count (called from the audio recorder)
+pub fn update_device_channels(channels: u16) {
+    let channels_storage = DEVICE_CHANNELS.get_or_init(|| Arc::new(Mutex::new(None)));
+    
+    if let Ok(mut ch) = channels_storage.try_lock() {
+        *ch = Some(channels);
+        info(Component::Recording, &format!("Updated global device channels to: {}", channels));
     }
 }
 
@@ -601,13 +627,11 @@ async fn save_transcript(
     // Emit transcript-created event
     let _ = app.emit("transcript-created", &transcript);
     
-    // Trigger webhook deliveries
-    if let Err(e) = crate::webhooks::events::on_transcription_complete(
+    // Trigger webhook deliveries in background (non-blocking)
+    crate::webhooks::events::trigger_webhook_delivery_async(
         state.database.clone(),
-        &transcript,
-    ).await {
-        error(crate::logger::Component::Processing, &format!("Webhook delivery trigger failed: {}", e));
-    }
+        transcript.clone(),
+    );
     
     Ok(transcript.id)
 }
@@ -2187,6 +2211,18 @@ pub fn run() {
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir().expect("Failed to get app data dir");
             
+            // Create app data directory with secure permissions (700 - owner only)
+            if !app_data_dir.exists() {
+                std::fs::create_dir_all(&app_data_dir).expect("Failed to create app data directory");
+                #[cfg(target_os = "macos")]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let permissions = std::fs::Permissions::from_mode(0o700);
+                    std::fs::set_permissions(&app_data_dir, permissions)
+                        .expect("Failed to set secure permissions on app data directory");
+                }
+            }
+            
             // Initialize file-based logging
             if let Err(e) = logger::init_logger(&app_data_dir) {
                 eprintln!("Failed to initialize file logger: {}", e);
@@ -2194,8 +2230,15 @@ pub fn run() {
                 info(Component::UI, &format!("Scout application starting - logs available at: {:?}", logger::get_log_file_path()));
             }
             
+            // Create subdirectories with secure permissions
             let recordings_dir = app_data_dir.join("recordings");
             std::fs::create_dir_all(&recordings_dir).expect("Failed to create recordings directory");
+            #[cfg(target_os = "macos")]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let permissions = std::fs::Permissions::from_mode(0o700);
+                let _ = std::fs::set_permissions(&recordings_dir, permissions);
+            }
 
             let db_path = app_data_dir.join("scout.db");
             let database = tauri::async_runtime::block_on(async {
@@ -2205,9 +2248,15 @@ pub fn run() {
             let mut recorder = AudioRecorder::new();
             recorder.init();
             
-            // Models directory in app data
+            // Models directory in app data with secure permissions
             let models_dir = app_data_dir.join("models");
             std::fs::create_dir_all(&models_dir).expect("Failed to create models directory");
+            #[cfg(target_os = "macos")]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let permissions = std::fs::Permissions::from_mode(0o700);
+                let _ = std::fs::set_permissions(&models_dir, permissions);
+            }
             
             // Verify the directory was created
             if models_dir.exists() && models_dir.is_dir() {

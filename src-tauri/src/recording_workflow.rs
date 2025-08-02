@@ -258,27 +258,12 @@ impl RecordingWorkflow {
                                     // Create callback for AudioRecorder
                                     let sample_callback =
                                         std::sync::Arc::new(move |samples: &[f32]| {
-                                            // Convert stereo to mono if needed
-                                            let mono_samples = if audio_channels == 2 {
-                                                // Convert stereo to mono by averaging left and right channels
-                                                let mut mono =
-                                                    Vec::with_capacity(samples.len() / 2);
-                                                for i in (0..samples.len()).step_by(2) {
-                                                    if i + 1 < samples.len() {
-                                                        // Average left and right channels
-                                                        mono.push(
-                                                            (samples[i] + samples[i + 1]) / 2.0,
-                                                        );
-                                                    }
-                                                }
-                                                mono
-                                            } else {
-                                                // Already mono, just copy
-                                                samples.to_vec()
-                                            };
+                                            // Pass samples in their native format (preserve stereo for WAV)
+                                            // Note: Transcription will handle mono conversion internally if needed
+                                            let native_samples = samples.to_vec();
 
                                             // Send samples to transcription context asynchronously
-                                            if let Err(_) = sample_tx.send(mono_samples) {
+                                            if let Err(_) = sample_tx.send(native_samples) {
                                                 // Channel closed, probably shutting down
                                             }
                                         });
@@ -706,10 +691,16 @@ impl RecordingWorkflow {
                                             // Get audio metadata if available
                                             let audio_metadata_json =
                                                 if let Some(ref device_info) = device_info_result {
-                                                    device_info
-                                                        .metadata
-                                                        .as_ref()
-                                                        .and_then(|m| m.to_json().ok())
+                                                    // When using ring buffer strategy, audio is converted to mono
+                                                    if let Some(metadata) = device_info.metadata.clone() {
+                                                        // Use actual device metadata (no longer forcing mono)
+                                                        info(Component::Recording, 
+                                                            &format!("Using device audio metadata: {} Hz, {} channels", 
+                                                                metadata.format.sample_rate, metadata.format.channels));
+                                                        metadata.to_json().ok()
+                                                    } else {
+                                                        None
+                                                    }
                                                 } else {
                                                     None
                                                 };
@@ -855,13 +846,11 @@ impl RecordingWorkflow {
                                                         info(Component::UI, "transcript-created event emitted successfully");
                                                     }
 
-                                                    // Trigger webhook deliveries
-                                                    if let Err(e) = crate::webhooks::events::on_transcription_complete(
+                                                    // Trigger webhook deliveries in background (non-blocking)
+                                                    crate::webhooks::events::trigger_webhook_delivery_async(
                                                         database_clone.clone(),
-                                                        &transcript,
-                                                    ).await {
-                                                        error(Component::Processing, &format!("Webhook delivery trigger failed: {}", e));
-                                                    }
+                                                        transcript.clone(),
+                                                    );
 
                                                     // Note: Native overlay is updated via progress tracker listener
 

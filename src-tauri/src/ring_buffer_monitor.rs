@@ -29,7 +29,7 @@ impl RingBufferMonitor {
             initial_transcriber: None,
             last_chunk_time: Duration::ZERO,
             chunk_duration: Duration::from_secs(5), // 5-second chunks for better coverage
-            threshold_duration: Duration::from_secs(5), // Start chunking after 5 seconds
+            threshold_duration: Duration::from_secs(3), // Start chunking after 3 seconds for better short recording support
             recording_start_time: Instant::now(),
             completed_chunks: Vec::new(),
             next_chunk_id: 0,

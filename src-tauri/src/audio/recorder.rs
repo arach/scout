@@ -596,59 +596,27 @@ impl AudioRecorderWorker {
             );
         }
 
-        // For speech recording, we want to optimize for file size
-        // 16kHz mono is perfect for speech and Whisper works great with it
-        let optimal_sample_rate = cpal::SampleRate(16000);
-        let optimal_channels = 1; // Mono is all we need for speech
+        // CRITICAL FIX: Always use device's native configuration
+        // Forcing 16kHz was causing sample rate mismatches and garbled audio
+        // Whisper conversion will handle resampling properly during transcription
+        info(
+            Component::Recording,
+            &format!(
+                "Using device native format: {} Hz, {} channels",
+                actual_sample_rate.0,
+                device_channels
+            ),
+        );
+        info(
+            Component::Recording,
+            "Audio will be converted to 16kHz mono during transcription, not recording",
+        );
 
-        // Check if device supports our optimal configuration
-        let mut use_optimal_config = false;
-        if let Ok(supported_configs) = device.supported_input_configs() {
-            for config in supported_configs {
-                // Check if device supports 16kHz AND mono
-                if config.min_sample_rate() <= optimal_sample_rate
-                    && config.max_sample_rate() >= optimal_sample_rate
-                    && config.channels() == optimal_channels
-                {
-                    use_optimal_config = true;
-                    info(
-                        Component::Recording,
-                        "Device supports 16kHz mono - using optimal speech recording settings",
-                    );
-                    break;
-                }
-            }
-        }
-
-        // Use optimal config if supported, otherwise fall back to device default
-        let recording_sample_rate = if use_optimal_config {
-            optimal_sample_rate
-        } else {
-            warn(
-                Component::Recording,
-                &format!(
-                    "Device doesn't support 16kHz, using {} Hz",
-                    actual_sample_rate.0
-                ),
-            );
-            actual_sample_rate
-        };
-
-        // Build config based on whether we can use optimal settings
-        let mut config = if use_optimal_config {
-            // Device supports our optimal settings
-            cpal::StreamConfig {
-                channels: optimal_channels, // Record mono
-                sample_rate: recording_sample_rate,
-                buffer_size: cpal::BufferSize::Default,
-            }
-        } else {
-            // Use device's native config
-            cpal::StreamConfig {
-                channels: device_channels, // Use device's native channels
-                sample_rate: default_config.sample_rate(),
-                buffer_size: cpal::BufferSize::Default,
-            }
+        // Always use device's native config to avoid sample rate mismatches
+        let mut config = cpal::StreamConfig {
+            channels: device_channels, // Use device's native channels
+            sample_rate: default_config.sample_rate(), // Use device's native sample rate
+            buffer_size: cpal::BufferSize::Default,
         };
 
         // Try progressive buffer sizes for lower latency
@@ -678,7 +646,7 @@ impl AudioRecorderWorker {
 
         // Store sample rate, channels, and format for later use
         self.sample_rate = config.sample_rate.0;
-        self.channels = config.channels; // Store the actual recording channels (1 for mono, or device channels)
+        self.channels = config.channels; // Always matches device channels now
         self.sample_format = Some(default_config.sample_format());
 
         // Log what we're actually using
@@ -779,8 +747,9 @@ impl AudioRecorderWorker {
             "WAV file will preserve this exact format for archival quality",
         );
 
-        // Update global device sample rate cache for transcription strategies
+        // Update global device sample rate and channels cache for transcription strategies
         crate::update_device_sample_rate(config.sample_rate.0);
+        crate::update_device_channels(config.channels);
 
         // Store device info with metadata
         let device_info = DeviceInfo {
@@ -955,9 +924,11 @@ impl AudioRecorderWorker {
         let mut _silence_padding_applied = false;
         let _silence_padding_ms;
 
-        if duration_seconds < 1.0 && self.writer.lock().unwrap().is_some() {
-            // Calculate how many silence samples we need to reach 1.1 seconds (with a small buffer)
-            let target_samples = (samples_per_second * 1.1) as u64; // 1.1 seconds worth of samples (all channels)
+        // Only pad very short recordings (less than 0.3 seconds) to avoid Whisper issues
+        // Whisper performs poorly on extremely short audio, but 0.3-1.0 second clips are fine
+        if duration_seconds < 0.3 && self.writer.lock().unwrap().is_some() {
+            // Calculate how many silence samples we need to reach 0.5 seconds minimum
+            let target_samples = (samples_per_second * 0.5) as u64; // 0.5 seconds minimum for Whisper
             let silence_samples_needed = target_samples.saturating_sub(total_samples);
 
             if silence_samples_needed > 0 {
