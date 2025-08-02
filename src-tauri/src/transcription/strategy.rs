@@ -243,9 +243,16 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
                 output_path
             ),
         );
+        // Try to identify which model is being used for better logging
+        let model_info = {
+            let transcriber = self.transcriber.lock().await;
+            // Note: We can't easily get the model path from the transcriber, 
+            // but we can log that ring buffer is active
+            "ring buffer strategy"
+        };
         info(
             Component::RingBuffer,
-            "Initializing ring buffer components for real-time processing",
+            &format!("Initializing ring buffer components for real-time processing with {}", model_info),
         );
 
         // Get actual device sample rate from app state
@@ -274,7 +281,7 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
             sample_format: hound::SampleFormat::Float,
         };
 
-        // Create a separate file for ring buffer to avoid overwriting the main recording
+        // Create a separate file for ring buffer to avoid file access conflicts
         let ring_buffer_path = output_path.with_file_name(format!(
             "ring_buffer_{}",
             output_path.file_name().unwrap().to_string_lossy()
@@ -388,13 +395,62 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
             );
         }
 
-        // Finalize the main recording file
-        if let Some(ref ring_buffer) = self.ring_buffer {
-            debug(Component::RingBuffer, "Finalizing main recording file");
+        // Finalize the ring buffer file first
+        let ring_buffer_file_path = if let Some(ref ring_buffer) = self.ring_buffer {
+            debug(Component::RingBuffer, "Finalizing ring buffer recording file");
             if let Err(e) = ring_buffer.finalize_recording() {
                 warn(
                     Component::RingBuffer,
-                    &format!("Error finalizing recording: {}", e),
+                    &format!("Error finalizing ring buffer recording: {}", e),
+                );
+            }
+            
+            // Get the ring buffer file path for copying to main file
+            Some(recording_path.with_file_name(format!(
+                "ring_buffer_{}",
+                recording_path.file_name().unwrap().to_string_lossy()
+            )))
+        } else {
+            None
+        };
+
+        // Copy ring buffer file to main recording file to ensure main file has audio data
+        if let Some(ref ring_buffer_path) = ring_buffer_file_path {
+            if ring_buffer_path.exists() {
+                info(
+                    Component::RingBuffer,
+                    &format!("Copying ring buffer audio to main recording file: {:?} -> {:?}", 
+                             ring_buffer_path, recording_path),
+                );
+                
+                match std::fs::copy(ring_buffer_path, &recording_path) {
+                    Ok(bytes_copied) => {
+                        info(
+                            Component::RingBuffer,
+                            &format!("Successfully copied {} bytes of audio to main recording file", bytes_copied),
+                        );
+                        
+                        // Clean up the ring buffer file
+                        if let Err(e) = std::fs::remove_file(ring_buffer_path) {
+                            warn(
+                                Component::RingBuffer,
+                                &format!("Failed to clean up ring buffer file: {}", e),
+                            );
+                        } else {
+                            debug(Component::RingBuffer, "Cleaned up ring buffer temporary file");
+                        }
+                    }
+                    Err(e) => {
+                        warn(
+                            Component::RingBuffer,
+                            &format!("Failed to copy ring buffer to main file: {}", e),
+                        );
+                    }
+                }
+            } else {
+                warn(
+                    Component::RingBuffer,
+                    &format!("Ring buffer file does not exist: {:?}", ring_buffer_path),
                 );
             }
         }
@@ -546,6 +602,8 @@ pub struct ProgressiveTranscriptionStrategy {
     tiny_chunks: Arc<tokio::sync::Mutex<Vec<(std::ops::Range<usize>, String)>>>,
     /// Stores the refined Medium model transcriptions
     refined_chunks: Arc<tokio::sync::Mutex<Vec<(std::ops::Range<usize>, String)>>>,
+    /// Name of the refinement model being used
+    refinement_model_name: String,
 }
 
 impl ProgressiveTranscriptionStrategy {
@@ -567,21 +625,49 @@ impl ProgressiveTranscriptionStrategy {
         let tiny_transcriber = Transcriber::get_or_create_cached(&tiny_path).await?;
         info(Component::Transcription, "Tiny model loaded successfully");
 
-        // Load Medium model for refinement
-        let medium_path = models_dir.join("ggml-medium.en.bin");
-        info(
-            Component::Transcription,
-            &format!("Loading Medium model from: {:?}", medium_path),
-        );
-        if !medium_path.exists() {
-            return Err(format!("Medium model not found at: {:?}", medium_path));
-        }
-        let medium_transcriber = Transcriber::get_or_create_cached(&medium_path).await?;
-        info(Component::Transcription, "Medium model loaded successfully");
+        // Try to load Medium model for refinement, fallback to better models if not available
+        let refinement_transcriber = {
+            let refinement_models = [
+                ("ggml-medium.en.bin", "Medium"),
+                ("ggml-base.en.bin", "Base"),
+                ("ggml-small.en.bin", "Small"),
+                ("ggml-tiny.en.bin", "Tiny (fallback)"),
+            ];
+            
+            let mut loaded_model = None;
+            for (filename, model_name) in &refinement_models {
+                let model_path = models_dir.join(filename);
+                if model_path.exists() {
+                    info(
+                        Component::Transcription,
+                        &format!("Attempting to load {} model for refinement from: {:?}", model_name, model_path),
+                    );
+                    match Transcriber::get_or_create_cached(&model_path).await {
+                        Ok(transcriber) => {
+                            info(
+                                Component::Transcription,
+                                &format!("{} model loaded successfully for refinement", model_name),
+                            );
+                            loaded_model = Some((transcriber, model_name.to_string()));
+                            break;
+                        }
+                        Err(e) => {
+                            warn(
+                                Component::Transcription,
+                                &format!("Failed to load {} model: {}, trying next", model_name, e),
+                            );
+                        }
+                    }
+                }
+            }
+            
+            loaded_model.ok_or_else(|| "No refinement model available".to_string())?
+        };
 
+        let (medium_transcriber, refinement_model_name) = refinement_transcriber;
         info(
             Component::Transcription,
-            "Progressive transcription strategy initialized with Tiny + Medium models",
+            &format!("Progressive transcription strategy initialized: Tiny (real-time) + {} (refinement)", refinement_model_name),
         );
 
         Ok(Self {
@@ -598,6 +684,7 @@ impl ProgressiveTranscriptionStrategy {
             app_handle: None,
             tiny_chunks: Arc::new(tokio::sync::Mutex::new(Vec::new())),
             refined_chunks: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            refinement_model_name,
         })
     }
 
@@ -617,18 +704,19 @@ impl ProgressiveTranscriptionStrategy {
         let refined_chunks = self.refined_chunks.clone();
         let app_handle = self.app_handle.clone();
 
-        // Get chunk size from config or use 15 seconds as default
+        // Get chunk size from config or use 10 seconds as default for refinement
+        // Smaller chunks reduce hallucination risk with Tiny model
         let chunk_seconds = self
             .config
             .as_ref()
             .and_then(|c| c.refinement_chunk_secs)
-            .unwrap_or(15);
+            .unwrap_or(10);
 
         let handle = tokio::spawn(async move {
             info(
                 Component::Transcription,
                 &format!(
-                    "Starting background refinement task ({}-second chunks with Medium model)",
+                    "Starting background refinement task ({}-second chunks with refinement model)",
                     chunk_seconds
                 ),
             );
@@ -872,7 +960,7 @@ impl TranscriptionStrategy for ProgressiveTranscriptionStrategy {
             sample_format: hound::SampleFormat::Float,
         };
 
-        // Create a separate file for ring buffer to avoid overwriting the main recording
+        // Create a separate file for ring buffer to avoid file access conflicts
         let ring_buffer_path = output_path.with_file_name(format!(
             "ring_buffer_{}",
             output_path.file_name().unwrap().to_string_lossy()
@@ -882,12 +970,11 @@ impl TranscriptionStrategy for ProgressiveTranscriptionStrategy {
             &ring_buffer_path,
         )?);
 
-        // TEMPORARY: Use Medium model for real-time chunks due to Tiny model hallucinations
-        // TODO: Fix Tiny model hallucinations with longer chunks or better parameters
+        // Use Tiny model for real-time chunks (5-second intervals)
         let ring_transcriber =
             crate::transcription::ring_buffer_transcriber::RingBufferTranscriber::new(
                 ring_buffer.clone(),
-                self.medium_transcriber.clone(), // Use Medium model temporarily
+                self.tiny_transcriber.clone(), // Use Tiny model for fast real-time feedback
                 self.temp_dir.clone(),
             );
 
@@ -905,7 +992,14 @@ impl TranscriptionStrategy for ProgressiveTranscriptionStrategy {
         self.ring_transcriber = None; // Monitor owns the transcriber
         self.monitor_handle = Some((monitor_handle, stop_sender));
 
-        info(Component::Transcription, "Progressive transcription initialized - Tiny model for real-time, Medium model refining in background");
+        info(
+            Component::Transcription,
+            &format!(
+                "Progressive transcription active: Tiny model (5s real-time chunks) + {} model ({}s background refinement)",
+                self.refinement_model_name,
+                config.refinement_chunk_secs.unwrap_or(10)
+            )
+        );
         Ok(())
     }
 
@@ -976,13 +1070,62 @@ impl TranscriptionStrategy for ProgressiveTranscriptionStrategy {
             }
         }
 
-        // Finalize the main recording file
-        if let Some(ref ring_buffer) = self.ring_buffer {
-            debug(Component::Transcription, "Finalizing main recording file");
+        // Finalize the ring buffer file first
+        let ring_buffer_file_path = if let Some(ref ring_buffer) = self.ring_buffer {
+            debug(Component::Transcription, "Finalizing ring buffer recording file");
             if let Err(e) = ring_buffer.finalize_recording() {
                 warn(
                     Component::Transcription,
-                    &format!("Error finalizing recording: {}", e),
+                    &format!("Error finalizing ring buffer recording: {}", e),
+                );
+            }
+            
+            // Get the ring buffer file path for copying to main file
+            Some(_recording_path.with_file_name(format!(
+                "ring_buffer_{}",
+                _recording_path.file_name().unwrap().to_string_lossy()
+            )))
+        } else {
+            None
+        };
+
+        // Copy ring buffer file to main recording file to ensure main file has audio data
+        if let Some(ref ring_buffer_path) = ring_buffer_file_path {
+            if ring_buffer_path.exists() {
+                info(
+                    Component::Transcription,
+                    &format!("Copying ring buffer audio to main recording file: {:?} -> {:?}", 
+                             ring_buffer_path, _recording_path),
+                );
+                
+                match std::fs::copy(ring_buffer_path, &_recording_path) {
+                    Ok(bytes_copied) => {
+                        info(
+                            Component::Transcription,
+                            &format!("Successfully copied {} bytes of audio to main recording file", bytes_copied),
+                        );
+                        
+                        // Clean up the ring buffer file
+                        if let Err(e) = std::fs::remove_file(ring_buffer_path) {
+                            warn(
+                                Component::Transcription,
+                                &format!("Failed to clean up ring buffer file: {}", e),
+                            );
+                        } else {
+                            debug(Component::Transcription, "Cleaned up ring buffer temporary file");
+                        }
+                    }
+                    Err(e) => {
+                        warn(
+                            Component::Transcription,
+                            &format!("Failed to copy ring buffer to main file: {}", e),
+                        );
+                    }
+                }
+            } else {
+                warn(
+                    Component::Transcription,
+                    &format!("Ring buffer file does not exist: {:?}", ring_buffer_path),
                 );
             }
         }
@@ -1037,6 +1180,40 @@ impl TranscriptionStrategy for ProgressiveTranscriptionStrategy {
 pub struct TranscriptionStrategySelector;
 
 impl TranscriptionStrategySelector {
+    /// Get the fastest available transcriber for fallback scenarios
+    async fn get_fastest_available_transcriber(
+        models_dir: &Path,
+    ) -> Result<Arc<tokio::sync::Mutex<Transcriber>>, String> {
+        // Try models in order of speed (fastest first)
+        let preferred_models = [
+            "ggml-tiny.en.bin",
+            "ggml-base.en.bin", 
+            "ggml-small.en.bin",
+        ];
+        
+        for model_filename in &preferred_models {
+            let model_path = models_dir.join(model_filename);
+            if model_path.exists() {
+                info(
+                    Component::Transcription,
+                    &format!("Using fastest available model for ring buffer fallback: {}", model_filename),
+                );
+                match Transcriber::get_or_create_cached(&model_path).await {
+                    Ok(transcriber) => return Ok(transcriber),
+                    Err(e) => {
+                        warn(
+                            Component::Transcription,
+                            &format!("Failed to load {}: {}, trying next model", model_filename, e),
+                        );
+                        continue;
+                    }
+                }
+            }
+        }
+        
+        Err("No fast models available for ring buffer fallback".to_string())
+    }
+
     /// Select the best strategy based on recording characteristics and config
     pub async fn select_strategy(
         duration_estimate: Option<std::time::Duration>,
@@ -1144,9 +1321,8 @@ impl TranscriptionStrategySelector {
                 &format!("Medium model exists: {}", medium_exists),
             );
 
-            // TEMPORARY: Skip progressive strategy due to Tiny model hallucinations
-            // Just use ring buffer with Medium model for now
-            if false && tiny_exists && medium_exists {
+            // Re-enabled progressive strategy with proper Tiny+Medium model usage
+            if tiny_exists && medium_exists {
                 match ProgressiveTranscriptionStrategy::new(models_dir, temp_dir.clone()).await {
                     Ok(mut strategy) => {
                         if let Some(ref app_handle) = app_handle {
@@ -1154,7 +1330,7 @@ impl TranscriptionStrategySelector {
                         }
                         info(
                             Component::Transcription,
-                            "Auto-selected progressive strategy (Tiny + Medium)",
+                            &format!("Auto-selected progressive strategy: Tiny (real-time) + {} (refinement)", strategy.refinement_model_name),
                         );
                         return Box::new(strategy);
                     }
@@ -1171,7 +1347,7 @@ impl TranscriptionStrategySelector {
             } else {
                 info(
                     Component::Transcription,
-                    "Skipping progressive strategy, using ring buffer with Medium model",
+                    "Progressive strategy unavailable - missing models. Using ring buffer fallback with fastest available model",
                 );
             }
         } else {
@@ -1181,9 +1357,14 @@ impl TranscriptionStrategySelector {
             );
         }
 
-        // Fall back to ring buffer strategy
+        // Fall back to ring buffer strategy with fastest available model
+        // Check for faster models than the default one
+        let fallback_transcriber = Self::get_fastest_available_transcriber(
+            &temp_dir, // models_dir
+        ).await.unwrap_or(transcriber.clone());
+        
         let mut ring_buffer_strategy =
-            RingBufferTranscriptionStrategy::new(transcriber.clone(), temp_dir.clone());
+            RingBufferTranscriptionStrategy::new(fallback_transcriber, temp_dir.clone());
         if let Some(ref app_handle) = app_handle {
             ring_buffer_strategy = ring_buffer_strategy.with_app_handle(app_handle.clone());
         }
@@ -1198,7 +1379,7 @@ impl TranscriptionStrategySelector {
         if can_handle_ring {
             info(
                 Component::Transcription,
-                "Auto-selected ring buffer strategy",
+                "Auto-selected ring buffer strategy with fastest available model",
             );
             Box::new(ring_buffer_strategy)
         } else {
