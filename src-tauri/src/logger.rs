@@ -25,6 +25,7 @@ pub enum Component {
     FFI,
     UI,
     Models,
+    Webhooks,
 }
 
 impl Component {
@@ -38,6 +39,7 @@ impl Component {
             Component::FFI => "FFI ", // Extra space for alignment
             Component::UI => "UI  ",  // Extra spaces for alignment
             Component::Models => "MODL",
+            Component::Webhooks => "WHOK",
         }
     }
 }

@@ -1,0 +1,387 @@
+/* Webhook Logs Styles */
+
+.webhook-logs {
+  width: 100%;
+}
+
+/* Header */
+.webhook-logs-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  gap: 16px;
+}
+
+.webhook-logs-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.webhook-logs-title h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.webhook-logs-count {
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-weight: 500;
+}
+
+.webhook-logs-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Error State */
+.webhook-logs-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
+  border-radius: 6px;
+  color: var(--error-text);
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+
+.error-dismiss {
+  background: none;
+  border: none;
+  color: var(--error-text);
+  cursor: pointer;
+  padding: 0;
+  margin-left: auto;
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0.7;
+  transition: opacity 0.2s ease;
+}
+
+.error-dismiss:hover {
+  opacity: 1;
+}
+
+/* Loading State */
+.webhook-logs-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 48px 24px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  justify-content: center;
+}
+
+/* Empty State */
+.webhook-logs-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 48px 24px;
+  text-align: center;
+  border: 2px dashed var(--border-primary);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.webhook-logs-empty svg {
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+}
+
+.webhook-logs-empty h4 {
+  margin: 0 0 8px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.webhook-logs-empty p {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-secondary);
+  max-width: 400px;
+  line-height: 1.4;
+}
+
+/* Filters */
+.webhook-log-filters {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.webhook-log-filters-content {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.webhook-log-filters-field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.webhook-log-filters-field select,
+.webhook-log-filters-field input {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 14px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  color: var(--text-primary);
+}
+
+.webhook-log-filters-field select:focus,
+.webhook-log-filters-field input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px var(--accent-bg);
+}
+
+.webhook-log-filters-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-primary);
+}
+
+/* Log List */
+.webhook-logs-list {
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-primary);
+}
+
+/* Log Item */
+.webhook-log-item {
+  border-bottom: 1px solid var(--border-primary);
+}
+
+.webhook-log-item:last-child {
+  border-bottom: none;
+}
+
+.webhook-log-item--failure {
+  border-left: 3px solid var(--error-color);
+}
+
+.webhook-log-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.webhook-log-item-header:hover {
+  background: var(--bg-hover);
+}
+
+.webhook-log-item-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.webhook-log-item-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.status-icon {
+  flex-shrink: 0;
+}
+
+.status-icon--success {
+  color: var(--success-color);
+}
+
+.status-icon--failure {
+  color: var(--error-color);
+}
+
+.webhook-log-item-url {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.webhook-log-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  flex-wrap: wrap;
+}
+
+.webhook-log-item-time {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.webhook-log-item-response-time {
+  font-weight: 500;
+}
+
+.webhook-log-item-status-code {
+  background: var(--bg-secondary);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-weight: 500;
+}
+
+.webhook-log-item-retry {
+  background: var(--warning-bg);
+  color: var(--warning-text);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-weight: 500;
+}
+
+.webhook-log-item-chevron {
+  color: var(--text-secondary);
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.webhook-log-item-chevron.expanded {
+  transform: rotate(180deg);
+}
+
+/* Log Item Details */
+.webhook-log-item-details {
+  padding: 16px;
+  padding-top: 0;
+  border-top: 1px solid var(--border-primary);
+  background: var(--bg-secondary);
+}
+
+.webhook-log-item-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 8px 0;
+  font-size: 13px;
+  gap: 16px;
+}
+
+.webhook-log-item-detail-row:first-child {
+  padding-top: 0;
+}
+
+.webhook-log-item-detail-row:last-child {
+  padding-bottom: 0;
+}
+
+.webhook-log-item-detail-row strong {
+  color: var(--text-secondary);
+  font-weight: 500;
+  min-width: 100px;
+  text-align: left;
+}
+
+.webhook-log-item-detail-row span {
+  color: var(--text-primary);
+  text-align: right;
+  word-break: break-all;
+}
+
+.webhook-log-item-error {
+  color: var(--error-color) !important;
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  background: var(--error-bg);
+  padding: 8px;
+  border-radius: 4px;
+  border: 1px solid var(--error-border);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.webhook-log-item-id {
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+  font-size: 11px;
+  color: var(--text-secondary) !important;
+}
+
+/* Pagination */
+.webhook-logs-pagination {
+  display: flex;
+  justify-content: center;
+  padding: 24px;
+  border-top: 1px solid var(--border-primary);
+  background: var(--bg-secondary);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .webhook-logs-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .webhook-logs-title {
+    justify-content: center;
+  }
+  
+  .webhook-logs-actions {
+    justify-content: center;
+  }
+  
+  .webhook-log-filters-content {
+    grid-template-columns: 1fr;
+  }
+  
+  .webhook-log-item-meta {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+  
+  .webhook-log-item-detail-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+  
+  .webhook-log-item-detail-row strong {
+    min-width: auto;
+  }
+  
+  .webhook-log-item-detail-row span {
+    text-align: left;
+  }
+}

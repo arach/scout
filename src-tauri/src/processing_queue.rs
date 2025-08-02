@@ -417,6 +417,14 @@ impl ProcessingQueue {
                                                             &saved_transcript,
                                                         );
                                                     }
+
+                                                    // Trigger webhook deliveries
+                                                    if let Err(e) = crate::webhooks::events::on_transcription_complete(
+                                                        database.clone(),
+                                                        &saved_transcript,
+                                                    ).await {
+                                                        error(Component::Processing, &format!("Webhook delivery trigger failed: {}", e));
+                                                    }
                                                 }
                                                 Err(e) => {
                                                     error(Component::Processing, &format!("Failed to save transcript to database: {}", e));
