@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{migrate::MigrateDatabase, Pool, Row, Sqlite, SqlitePool};
 use std::path::Path;
 
-#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Transcript {
     pub id: i64,
     pub text: String,
@@ -442,6 +442,47 @@ impl Database {
         .execute(&pool)
         .await
         .map_err(|e| format!("Failed to create performance_timeline_events table: {}", e))?;
+
+        // Create webhook tables
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS webhooks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                url TEXT NOT NULL,
+                description TEXT,
+                enabled BOOLEAN NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                last_triggered_at TEXT,
+                headers TEXT -- JSON string for custom headers
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_webhooks_enabled ON webhooks(enabled);
+            CREATE INDEX IF NOT EXISTS idx_webhooks_url ON webhooks(url);
+
+            CREATE TABLE IF NOT EXISTS webhook_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                webhook_id INTEGER NOT NULL,
+                timestamp TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                status TEXT NOT NULL CHECK (status IN ('success', 'failure')),
+                status_code INTEGER,
+                response_time_ms INTEGER,
+                error_message TEXT,
+                attempt_number INTEGER NOT NULL DEFAULT 1,
+                payload_size INTEGER,
+                request_headers TEXT, -- JSON
+                response_headers TEXT, -- JSON
+                FOREIGN KEY (webhook_id) REFERENCES webhooks(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_webhook_logs_webhook_id ON webhook_logs(webhook_id);
+            CREATE INDEX IF NOT EXISTS idx_webhook_logs_timestamp ON webhook_logs(timestamp);
+            CREATE INDEX IF NOT EXISTS idx_webhook_logs_status ON webhook_logs(status);
+            "#
+        )
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("Failed to create webhook tables: {}", e))?;
 
         Ok(Self { pool })
     }

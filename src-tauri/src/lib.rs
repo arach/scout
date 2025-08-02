@@ -26,6 +26,7 @@ mod whisper_logger;
 mod whisper_log_interceptor;
 mod performance_tracker;
 mod model_state;
+mod webhooks;
 #[cfg(target_os = "macos")]
 mod macos;
 
@@ -599,6 +600,14 @@ async fn save_transcript(
     
     // Emit transcript-created event
     let _ = app.emit("transcript-created", &transcript);
+    
+    // Trigger webhook deliveries
+    if let Err(e) = crate::webhooks::events::on_transcription_complete(
+        state.database.clone(),
+        &transcript,
+    ).await {
+        error(crate::logger::Component::Processing, &format!("Webhook delivery trigger failed: {}", e));
+    }
     
     Ok(transcript.id)
 }
@@ -2725,6 +2734,14 @@ pub fn run() {
             delete_dictionary_entry,
             get_dictionary_matches_for_transcript,
             test_dictionary_replacement,
+            // Webhook commands
+            webhooks::get_webhooks,
+            webhooks::create_webhook,
+            webhooks::update_webhook,
+            webhooks::delete_webhook,
+            webhooks::test_webhook,
+            webhooks::get_webhook_logs,
+            webhooks::cleanup_webhook_logs,
             get_recording_stats,
             generate_sample_data
         ])

@@ -1,10 +1,11 @@
 import { memo, useState, useRef, useEffect, lazy, Suspense } from 'react';
-import { Sparkles, FolderOpen, Brain, Mic, Monitor, Palette } from 'lucide-react';
+import { Sparkles, FolderOpen, Brain, Mic, Monitor, Palette, Globe } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useSettings } from '../contexts/SettingsContext';
 import { RecordingAudioSettings } from './settings/RecordingAudioSettings';
 import { DisplayInterfaceSettings } from './settings/DisplayInterfaceSettings';
 import { ThemesSettings } from './settings/ThemesSettings';
+import { WebhookSettings } from './settings/WebhookSettings';
 import './settings/CollapsibleSection.css';
 import './SettingsView-spacing.css';
 import './settings/SoundSettings.css';
@@ -19,13 +20,26 @@ export const SettingsView = memo(function SettingsView() {
   const [isRecordingAudioExpanded, setIsRecordingAudioExpanded] = useState(true);
   const [isDisplayInterfaceExpanded, setIsDisplayInterfaceExpanded] = useState(true);
   const [isThemesExpanded, setIsThemesExpanded] = useState(true);
+  const [isWebhooksExpanded, setIsWebhooksExpanded] = useState(false);
   const [isModelManagerExpanded, setIsModelManagerExpanded] = useState(false);
   const [isLLMSettingsExpanded, setIsLLMSettingsExpanded] = useState(false);
   const recordingAudioRef = useRef<HTMLDivElement>(null);
   const displayInterfaceRef = useRef<HTMLDivElement>(null);
   const themesRef = useRef<HTMLDivElement>(null);
+  const webhooksRef = useRef<HTMLDivElement>(null);
   const modelSectionRef = useRef<HTMLDivElement>(null);
   const llmSectionRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (isWebhooksExpanded && webhooksRef.current) {
+      setTimeout(() => {
+        webhooksRef.current?.scrollIntoView({ 
+          behavior: 'smooth', 
+          block: 'nearest'
+        });
+      }, 100);
+    }
+  }, [isWebhooksExpanded]);
 
   useEffect(() => {
     if (isModelManagerExpanded && modelSectionRef.current) {
@@ -141,6 +155,34 @@ export const SettingsView = memo(function SettingsView() {
             {isThemesExpanded && (
               <div className="collapsible-content">
                 <ThemesSettings />
+              </div>
+            )}
+        </div>
+
+        {/* Webhooks - Collapsible */}
+        <div className="collapsible-section" ref={webhooksRef}>
+            <div className="collapsible-header-wrapper">
+              <div 
+                className="collapsible-header"
+                onClick={() => setIsWebhooksExpanded(!isWebhooksExpanded)}
+              >
+                <div>
+                  <h3>
+                    <span className={`collapse-arrow ${isWebhooksExpanded ? 'expanded' : ''}`}>
+                      ▶
+                    </span>
+                    Webhooks
+                    <Globe size={16} className="sparkle-icon" />
+                  </h3>
+                  <p className="collapsible-subtitle">
+                    Send transcriptions to external endpoints automatically
+                  </p>
+                </div>
+              </div>
+            </div>
+            {isWebhooksExpanded && (
+              <div className="collapsible-content">
+                <WebhookSettings />
               </div>
             )}
         </div>

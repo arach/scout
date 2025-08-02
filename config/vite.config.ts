@@ -8,6 +8,7 @@ const host = process.env.TAURI_DEV_HOST;
 
 // https://vitejs.dev/config/
 export default defineConfig(async () => {
+  // @ts-expect-error process is a nodejs global
   const isAnalyzing = process.env.ANALYZE === 'true';
   
   return {
@@ -67,7 +68,7 @@ export default defineConfig(async () => {
     chunkSizeWarningLimit: 1000,
     rollupOptions: {
       input: {
-        main: resolve(__dirname, "index.html"),
+        main: resolve(__dirname, "../index.html"),
       },
       output: {
         // Manual chunk splitting for better caching

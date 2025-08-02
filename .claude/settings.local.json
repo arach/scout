@@ -2,9 +2,17 @@
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
     "allow": [
-      "Bash(progressive-transcription-implementation.md development/ )",
-      "Bash(progressive-transcription-testing.md development/)",
-      "Bash(git mv:*)"
+      "Bash(create-dmg:*)",
+      "Bash(--volname \"Scout\" )",
+      "Bash(--window-pos 200 120 )",
+      "Bash(--window-size 600 400 )",
+      "Bash(--icon-size 100 )",
+      "Bash(--icon \"Scout.app\" 150 185 )",
+      "Bash(--hide-extension \"Scout.app\" )",
+      "Bash(--app-drop-link 450 185 )",
+      "Bash(--no-internet-enable )",
+      "Bash(\"Scout_0.4.0_Installer.dmg\" )",
+      "Bash(\"Scout.app\")"
     ],
     "deny": []
   },

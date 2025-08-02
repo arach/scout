@@ -855,6 +855,14 @@ impl RecordingWorkflow {
                                                         info(Component::UI, "transcript-created event emitted successfully");
                                                     }
 
+                                                    // Trigger webhook deliveries
+                                                    if let Err(e) = crate::webhooks::events::on_transcription_complete(
+                                                        database_clone.clone(),
+                                                        &transcript,
+                                                    ).await {
+                                                        error(Component::Processing, &format!("Webhook delivery trigger failed: {}", e));
+                                                    }
+
                                                     // Note: Native overlay is updated via progress tracker listener
 
                                                     // Give the event system time to process

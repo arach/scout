@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { Transcript } from './transcript';
 import { DictionaryEntry, DictionaryEntryInput, DictionaryEntryUpdate, DictionaryMatch, DictionaryTestResult } from './dictionary';
+import { Webhook, CreateWebhookDto, UpdateWebhookDto, WebhookTestResult, WebhookLogFilters, PaginatedWebhookLogs } from './webhook';
 
 // Permission types
 export type PermissionStatus = 'granted' | 'denied' | 'undetermined';
@@ -276,6 +277,20 @@ export const tauriApi = {
     invokeTyped<DictionaryTestResult>('test_dictionary_replacement', { text }),
   getDictionaryMatchesForTranscript: (args: { transcriptId: number }) => 
     invokeTyped<DictionaryMatch[]>('get_dictionary_matches_for_transcript', args),
+
+  // Webhook commands
+  getWebhooks: () => 
+    invokeTyped<Webhook[]>('get_webhooks'),
+  createWebhook: (args: { webhook: CreateWebhookDto }) => 
+    invokeTyped<Webhook>('create_webhook', args),
+  updateWebhook: (args: { id: string; webhook: UpdateWebhookDto }) => 
+    invokeTyped<Webhook>('update_webhook', args),
+  deleteWebhook: (args: { id: string }) => 
+    invokeTyped<void>('delete_webhook', args),
+  testWebhook: (args: { id: string }) => 
+    invokeTyped<WebhookTestResult>('test_webhook', args),
+  getWebhookLogs: (args: { filters?: WebhookLogFilters }) => 
+    invokeTyped<PaginatedWebhookLogs>('get_webhook_logs', args),
 };
 
 /**
