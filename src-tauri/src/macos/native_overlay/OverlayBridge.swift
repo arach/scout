@@ -28,6 +28,13 @@ public func nativeOverlaySetRecordingState(_ recording: Bool) {
     }
 }
 
+@_cdecl("native_overlay_set_stopping_state")
+public func nativeOverlaySetStoppingState() {
+    DispatchQueue.main.async {
+        NativeOverlayManager.shared.setStoppingState()
+    }
+}
+
 @_cdecl("native_overlay_set_processing_state")
 public func nativeOverlaySetProcessingState(_ processing: Bool) {
     DispatchQueue.main.async {

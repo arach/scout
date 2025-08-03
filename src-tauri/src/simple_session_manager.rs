@@ -3,6 +3,7 @@ use crate::audio::recorder::AudioRecorder;
 use crate::transcription::simple_transcriber::{SimpleTranscriptionService, TranscriptionRequest, TranscriptionResponse};
 use crate::logger::{debug, error, info, warn, Component};
 use crate::sound::SoundPlayer;
+use crate::db::Database;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -33,6 +34,8 @@ pub struct SimpleSessionManager {
     recordings_dir: PathBuf,
     /// Tauri app handle for event emission
     app_handle: AppHandle,
+    /// Database connection for saving transcripts
+    database: Arc<Database>,
 }
 
 #[derive(Debug, Clone)]
@@ -82,6 +85,7 @@ impl SimpleSessionManager {
         model_state_manager: Arc<crate::model_state::ModelStateManager>,
         settings_manager: Arc<Mutex<crate::settings::SettingsManager>>,
         app_handle: AppHandle,
+        database: Arc<Database>,
     ) -> Result<Self, String> {
         info(
             Component::Recording,
@@ -154,6 +158,7 @@ impl SimpleSessionManager {
             current_session: Arc::new(Mutex::new(None)),
             recordings_dir,
             app_handle,
+            database,
         })
     }
 
@@ -312,6 +317,11 @@ impl SimpleSessionManager {
             &format!("🛑 Stopping recording session: {}", session.id),
         );
 
+        // Emit immediate stopping state for user feedback
+        let _ = self.app_handle.emit("recording-state-changed", json!({
+            "state": "stopping"
+        }));
+
         // Play stop sound
         SoundPlayer::play_stop();
 
@@ -431,12 +441,69 @@ impl SimpleSessionManager {
                 // Play success sound
                 SoundPlayer::play_success();
 
-                // Emit processing complete event
-                let _ = self.app_handle.emit("processing-complete", json!({
-                    "transcript": &transcription.text,
-                    "session_id": &session_id,
-                    "duration_ms": total_duration.as_millis() as u64
-                }));
+                // Get file size for database storage
+                let file_size = std::fs::metadata(&recording_info.path)
+                    .map(|m| m.len() as i64)
+                    .ok();
+
+                // Build metadata with model info and performance metrics
+                let metadata_json = serde_json::json!({
+                    "filename": recording_info.path.file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("unknown.wav"),
+                    "model_used": transcription.model_name,
+                    "processing_type": "simplified_session",
+                    "device_name": session_device_name,
+                    "sample_rate": recording_info.sample_rate,
+                    "channels": recording_info.channels,
+                    "real_time_factor": transcription.real_time_factor,
+                    "processing_time_ms": transcription.processing_time_ms,
+                    "audio_duration_seconds": transcription.audio_duration_seconds,
+                });
+
+                // Save transcript to database
+                match self.database.save_transcript(
+                    &transcription.text,
+                    total_duration.as_millis() as i32,
+                    Some(&metadata_json.to_string()),
+                    Some(recording_info.path.to_str().unwrap_or("")),
+                    file_size,
+                ).await {
+                    Ok(saved_transcript) => {
+                        info(
+                            Component::Transcription,
+                            &format!("✅ Transcript saved to database with id={}", saved_transcript.id),
+                        );
+
+                        // Emit transcript-created event with full database object
+                        let _ = self.app_handle.emit("transcript-created", &saved_transcript);
+
+                        // Trigger webhook deliveries in background (fire-and-forget)
+                        crate::webhooks::events::trigger_webhook_delivery_async(
+                            self.database.clone(),
+                            saved_transcript.clone(),
+                        );
+
+                        // TODO: Future LLM post-processing integration
+                        // This is where we'll add LLM processing once implemented:
+                        // - Execute LLM prompts against the transcript
+                        // - Save LLM outputs to database
+                        // - Emit events for UI updates
+                    }
+                    Err(e) => {
+                        error(
+                            Component::Transcription,
+                            &format!("Failed to save transcript to database: {}", e),
+                        );
+                        
+                        // Even if database save fails, emit the old event for backward compatibility
+                        let _ = self.app_handle.emit("processing-complete", json!({
+                            "transcript": &transcription.text,
+                            "session_id": &session_id,
+                            "duration_ms": total_duration.as_millis() as u64
+                        }));
+                    }
+                }
 
                 // Clear the session after successful completion
                 {
@@ -588,6 +655,12 @@ impl SimpleSessionManager {
     pub async fn get_performance_stats(&self) -> crate::transcription::simple_transcriber::PerformanceStats {
         let transcription_service = self.transcription_service.lock().await;
         transcription_service.get_performance_stats()
+    }
+
+    /// Get current audio level from the main recorder for overlay waveform
+    pub async fn get_current_audio_level(&self) -> f32 {
+        let recorder = self.main_recorder.lock().await;
+        recorder.get_current_audio_level()
     }
 }
 

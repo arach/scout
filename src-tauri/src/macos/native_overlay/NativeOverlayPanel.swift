@@ -913,6 +913,7 @@ class OverlayContentView: NSView {
         case idle
         case hovered
         case recording
+        case stopping
         case processing
         case complete
     }
@@ -1180,6 +1181,16 @@ class OverlayContentView: NSView {
                 
                 statusLabel.isHidden = true
                 
+            case .stopping:
+                // Stopping state - show similar UI to recording but with disabled interactions
+                classicWaveformView.isHidden = true
+                classicWaveformView.stopAnimating()
+                enhancedWaveformView.isHidden = true
+                enhancedWaveformView.stopAnimating()
+                particleWaveformView.isHidden = true
+                particleWaveformView.stopAnimating()
+                processingDotsView.isHidden = true
+                
             case .processing:
                 // Processing is handled in the minimized state
                 // This case shouldn't happen but handle it gracefully
@@ -1277,7 +1288,8 @@ class OverlayContentView: NSView {
         // Update UI based on state
         recordButton.isHidden = !(isExpanded && (state == .idle || state == .hovered))
         cancelButton.isHidden = !(isExpanded && state == .recording)
-        stopButton.isHidden = !(isExpanded && state == .recording)
+        stopButton.isHidden = !(isExpanded && (state == .recording || state == .stopping))
+        stopButton.isEnabled = (state == .recording)  // Disable during stopping
         activityIndicator.isHidden = true  // Always hidden now
         // Processing dots are handled in layout based on isExpanded
         statusLabel.isHidden = true  // Never show status label anymore
@@ -1300,6 +1312,15 @@ class OverlayContentView: NSView {
             statusLabel.textColor = NSColor.systemRed
             activityIndicator.stopAnimation(nil)
             // Animation is started in the layout method when views are shown
+            processingDotsView.stopAnimating()
+            
+        case .stopping:
+            statusLabel.stringValue = "Stopping..."
+            statusLabel.textColor = NSColor.systemOrange
+            activityIndicator.stopAnimation(nil)
+            classicWaveformView.stopAnimating()
+            enhancedWaveformView.stopAnimating()
+            particleWaveformView.stopAnimating()
             processingDotsView.stopAnimating()
             
         case .processing:

@@ -304,6 +304,12 @@ export function useRecording(options: UseRecordingOptions = {}) {
             recordingContext.setRecording(true);
             setRecordingStartTime(null);
           }
+        } else if (state === "stopping") {
+          // Backend says we're stopping (immediate feedback)
+          loggers.recording.debug('Recording stopping - user feedback');
+          recordingContext.setStopping(true);
+          // Keep recording state active but show stopping feedback
+          // Don't change isRecording yet - wait for "stopped" event
         } else if (state === "stopped" || state === "idle") {
           // Backend says we've stopped or are idle
           if (isRecordingRef.current || isRecording) {
@@ -311,6 +317,7 @@ export function useRecording(options: UseRecordingOptions = {}) {
             setIsRecording(false);
             isRecordingRef.current = false;
             recordingContext.setRecording(false);
+            recordingContext.setStopping(false); // Clear stopping state
             setRecordingStartTime(null);
           }
         } else if (state === "processing") {

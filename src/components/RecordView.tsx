@@ -19,6 +19,7 @@ interface UploadProgress {
 interface RecordViewProps {
     isRecording: boolean;
     isProcessing: boolean;
+    isStopping: boolean;
     recordingStartTime: number | null;
     hotkey: string;
     pushToTalkHotkey: string;
@@ -63,6 +64,7 @@ function formatKey(key: string): string {
 export const RecordView = memo(function RecordView({
     isRecording,
     isProcessing,
+    isStopping,
     recordingStartTime,
     hotkey,
     pushToTalkHotkey,
@@ -104,7 +106,39 @@ export const RecordView = memo(function RecordView({
                 
                 {/* Main Recording Zone */}
                 <div className="recording-zone">
-                    {isRecording ? (
+                    {isStopping ? (
+                        /* Stopping State - Show immediate feedback */
+                        <div className="recording-idle">
+                            <div className="button-container record-button-container stopping">
+                                <div className="audio-visualizer-ring stopping-ring" />
+                                
+                                <button
+                                    className="circular-record-button stopping-button"
+                                    disabled={true}
+                                    title="Stopping..."
+                                >
+                                    <div className="stop-icon-large">
+                                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+                                            <rect x="6" y="6" width="12" height="12" fill="currentColor" rx="2"/>
+                                        </svg>
+                                    </div>
+                                </button>
+                            </div>
+                            
+                            <div className="record-hint">
+                                <div className="status-indicator">
+                                    <span className="status-dot stopping"></span>
+                                    <span className="status-text">Stopping...</span>
+                                </div>
+                                <div className="recording-timer">
+                                    <RecordingTimer 
+                                        startTime={recordingStartTime} 
+                                        formatTimer={formatRecordingTimer || formatDuration} 
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                    ) : isRecording ? (
                         /* Recording State - Keep same layout but change button to stop */
                         <div className="recording-idle">
                             <div className="button-container record-button-container recording">

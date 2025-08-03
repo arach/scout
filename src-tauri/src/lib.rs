@@ -152,7 +152,60 @@ async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle, devi
         info(Component::Recording, "Using simplified recording workflow");
         let manager = simple_manager.lock().await;
         // SimpleSessionManager handles sound playback and event emission
-        return manager.start_recording(device_name).await;
+        let result = manager.start_recording(device_name).await;
+        
+        // Also update native overlay for simplified workflow
+        #[cfg(target_os = "macos")]
+        if result.is_ok() {
+            let overlay = state.native_panel_overlay.lock().await;
+            overlay.show();
+            overlay.set_recording_state(true);
+            drop(overlay);
+            
+            // Start audio level monitoring for native overlay AFTER recording has started
+            let overlay_clone = state.native_panel_overlay.clone();
+            let simple_manager_clone = simple_manager.clone();
+            
+            tauri::async_runtime::spawn(async move {
+                // Wait for recording to stabilize
+                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                
+                let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(200));
+                let mut consecutive_not_recording = 0;
+                
+                loop {
+                    interval.tick().await;
+                    
+                    // Check if still recording via simple session manager
+                    let is_recording = {
+                        let manager = simple_manager_clone.lock().await;
+                        manager.is_recording().await
+                    };
+                    
+                    // Get audio level from the main recorder in simple session manager
+                    let level = {
+                        let manager = simple_manager_clone.lock().await;
+                        manager.get_current_audio_level().await
+                    };
+                    
+                    // Only exit if we've seen multiple "not recording" states
+                    if !is_recording {
+                        consecutive_not_recording += 1;
+                        if consecutive_not_recording > 5 {
+                            break;
+                        }
+                    } else {
+                        consecutive_not_recording = 0;
+                    }
+                    
+                    let overlay = overlay_clone.lock().await;
+                    overlay.set_volume_level(level);
+                    drop(overlay);
+                }
+            });
+        }
+        
+        return result;
     }
     
     // Double-check with the audio recorder
@@ -1976,6 +2029,157 @@ async fn generate_sample_data(state: State<'_, AppState>) -> Result<String, Stri
     Ok(format!("Generated {} sample transcripts over 180 days", generated_count))
 }
 
+#[derive(serde::Serialize)]
+struct ModelAccelerationStatus {
+    id: String,
+    name: String,
+    size_mb: u32,
+    downloaded: bool,
+    coreml_available: bool,
+    coreml_downloaded: bool,
+    acceleration_type: String,
+    acceleration_status: String,
+    file_path: Option<String>,
+    coreml_path: Option<String>,
+    performance_estimate: String,
+}
+
+#[derive(serde::Serialize)]
+struct ModelWarmupStatus {
+    id: String,
+    name: String,
+    is_active: bool,
+    is_ready: bool,
+    is_warming: bool,
+    status_text: String,
+    last_warmed: Option<String>,
+}
+
+#[tauri::command]
+async fn get_model_warmup_status(
+    state: State<'_, AppState>,
+) -> Result<Vec<ModelWarmupStatus>, String> {
+    let settings_guard = state.settings.lock().await;
+    let models_dir = &state.models_dir;
+    let active_model_id = &settings_guard.get().models.active_model_id;
+    
+    let models = crate::models::WhisperModel::all(models_dir, settings_guard.get());
+    let mut warmup_statuses = Vec::new();
+    
+    // Check if model state manager exists
+    if let Some(model_state_manager) = &state.model_state_manager {
+        for model in models {
+            // Skip models that aren't downloaded or don't have CoreML
+            if !model.downloaded || model.coreml_url.is_none() {
+                continue;
+            }
+            
+            let model_state = model_state_manager.get_state(&model.id).await;
+            let is_active = model.id == *active_model_id;
+            
+            let (is_ready, is_warming, status_text, last_warmed) = if let Some(state) = model_state {
+                match state.coreml_state {
+                    crate::model_state::CoreMLState::Ready => {
+                        (true, false, "✅ Ready".to_string(), state.last_warmed)
+                    },
+                    crate::model_state::CoreMLState::Warming => {
+                        (false, true, "🔄 Warming up...".to_string(), None)
+                    },
+                    crate::model_state::CoreMLState::Downloaded => {
+                        (false, false, "⏳ Not warmed up".to_string(), None)
+                    },
+                    crate::model_state::CoreMLState::Failed(err) => {
+                        (false, false, format!("❌ Failed: {}", err), None)
+                    },
+                    crate::model_state::CoreMLState::NotDownloaded => {
+                        continue; // Skip if CoreML not downloaded
+                    }
+                }
+            } else {
+                (false, false, "⏳ Not warmed up".to_string(), None)
+            };
+            
+            warmup_statuses.push(ModelWarmupStatus {
+                id: model.id,
+                name: model.name,
+                is_active,
+                is_ready,
+                is_warming,
+                status_text,
+                last_warmed,
+            });
+        }
+    }
+    
+    Ok(warmup_statuses)
+}
+
+#[tauri::command]
+async fn get_model_acceleration_status(
+    state: State<'_, AppState>,
+) -> Result<Vec<ModelAccelerationStatus>, String> {
+    let settings_guard = state.settings.lock().await;
+    let models_dir = &state.models_dir;
+    
+    let models = crate::models::WhisperModel::all(models_dir, settings_guard.get());
+    
+    let mut acceleration_statuses = Vec::new();
+    
+    for model in models {
+        // Check if model file exists
+        let model_path = models_dir.join(&model.filename);
+        let model_exists = model_path.exists();
+        
+        // Check if CoreML file exists
+        let coreml_path = if let Some(coreml_filename) = &model.coreml_filename {
+            let path = models_dir.join(coreml_filename);
+            if path.exists() { Some(path.to_string_lossy().to_string()) } else { None }
+        } else {
+            None
+        };
+        
+        // Determine acceleration type and status
+        let (acceleration_type, acceleration_status) = if model.coreml_url.is_some() {
+            if coreml_path.is_some() {
+                ("CoreML (Apple Silicon)", "✅ ACCELERATED - Using Apple Neural Engine")
+            } else if model_exists {
+                ("CPU Only", "⚠️ NO ACCELERATION - CoreML model not downloaded")
+            } else {
+                ("Not Available", "❌ MODEL NOT DOWNLOADED")
+            }
+        } else {
+            if model_exists {
+                ("CPU Only", "⚠️ NO ACCELERATION - CoreML not available for this model")
+            } else {
+                ("Not Available", "❌ MODEL NOT DOWNLOADED")
+            }
+        };
+        
+        // Performance estimate based on acceleration
+        let performance_estimate = match acceleration_type {
+            "CoreML (Apple Silicon)" => "🚀 2-5x faster than CPU",
+            "CPU Only" => "🐌 CPU-bound performance",
+            _ => "❌ Cannot run",
+        };
+        
+        acceleration_statuses.push(ModelAccelerationStatus {
+            id: model.id,
+            name: model.name,
+            size_mb: model.size_mb,
+            downloaded: model_exists,
+            coreml_available: model.coreml_url.is_some(),
+            coreml_downloaded: coreml_path.is_some(),
+            acceleration_type: acceleration_type.to_string(),
+            acceleration_status: acceleration_status.to_string(),
+            file_path: if model_exists { Some(model_path.to_string_lossy().to_string()) } else { None },
+            coreml_path,
+            performance_estimate: performance_estimate.to_string(),
+        });
+    }
+    
+    Ok(acceleration_statuses)
+}
+
 #[tauri::command]
 async fn get_recording_stats(state: State<'_, AppState>) -> Result<RecordingStats, String> {
     use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, TimeZone, Timelike, Weekday, Duration};
@@ -2418,6 +2622,7 @@ pub fn run() {
                         model_state_manager.clone(),
                         settings_arc.clone(),
                         app.handle().clone(),
+                        database_arc.clone(),
                     )) {
                         Ok(manager) => Some(Arc::new(Mutex::new(manager))),
                         Err(e) => {
@@ -2504,8 +2709,8 @@ pub fn run() {
                                     overlay.set_recording_state(true);
                                 }
                                 recording_progress::RecordingProgress::Stopping { .. } => {
-                                    debug(Component::Overlay, "Progress tracker → Stopping: keeping native overlay in recording state");
-                                    // Keep showing recording state during stopping
+                                    debug(Component::Overlay, "Progress tracker → Stopping: setting native overlay to stopping state");
+                                    overlay.set_stopping_state();
                                 }
                             }
                             drop(overlay);
@@ -2806,6 +3011,8 @@ pub fn run() {
             open_system_preferences_audio,
             mark_onboarding_complete,
             get_processing_status,
+            get_model_acceleration_status,
+            get_model_warmup_status,
             set_sound_enabled,
             is_sound_enabled,
             get_available_sounds,

@@ -113,7 +113,7 @@ class OverlayViewController: NSViewController {
     }
     
     private func handleStopRecording() {
-        currentState = .processing
+        currentState = .stopping
         updateState()
         onStopRecording?()
     }
@@ -133,15 +133,19 @@ class OverlayViewController: NSViewController {
             panel?.expand()
             
             // Don't steal focus - the main window should remain active
-        } else {
-            // When recording stops, transition to processing with smaller size
-            currentState = .processing
-            isExpanded = false
-            panel?.showProcessing()
+            updateState()
         }
-        updateState()
+        // Note: When recording stops, state transitions are now handled by the progress tracker
+        // which calls setStoppingState() -> setProcessingState() -> setIdleState() in sequence
     }
     
+    func setStoppingState() {
+        currentState = .stopping
+        // Keep expanded during stopping for user feedback
+        isExpanded = true
+        updateState()
+    }
+
     func setProcessingState(_ processing: Bool) {
         if processing {
             currentState = .processing
@@ -201,6 +205,8 @@ class OverlayViewController: NSViewController {
             return "idle"
         case .recording:
             return "recording"
+        case .stopping:
+            return "stopping"
         case .processing:
             return "processing"
         case .hovered:
@@ -286,6 +292,10 @@ class OverlayViewController: NSViewController {
     
     @objc func setRecordingState(_ recording: Bool) {
         controller?.setRecordingState(recording)
+    }
+    
+    @objc func setStoppingState() {
+        controller?.setStoppingState()
     }
     
     @objc func setProcessingState(_ processing: Bool) {

@@ -7,6 +7,7 @@ import '../test/mocks';
 // Mock props for RecordView
 const createMockProps = (overrides = {}) => ({
   isRecording: false,
+  isStopping: false,
   isProcessing: false,
   recordingStartTime: null,
   hotkey: 'CmdOrCtrl+Shift+R',

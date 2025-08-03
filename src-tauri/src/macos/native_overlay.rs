@@ -8,6 +8,7 @@ extern "C" {
     fn native_overlay_show();
     fn native_overlay_hide();
     fn native_overlay_set_recording_state(recording: bool);
+    fn native_overlay_set_stopping_state();
     fn native_overlay_set_processing_state(processing: bool);
     fn native_overlay_set_idle_state();
     fn native_overlay_set_start_recording_callback(callback: extern "C" fn());
@@ -98,6 +99,13 @@ impl NativeOverlay {
         #[cfg(target_os = "macos")]
         unsafe {
             native_overlay_set_recording_state(recording);
+        }
+    }
+
+    pub fn set_stopping_state(&self) {
+        #[cfg(target_os = "macos")]
+        unsafe {
+            native_overlay_set_stopping_state();
         }
     }
 
@@ -202,6 +210,7 @@ impl NativeOverlay {
     pub fn show(&self) {}
     pub fn hide(&self) {}
     pub fn set_recording_state(&self, _recording: bool) {}
+    pub fn set_stopping_state(&self) {}
     pub fn set_processing_state(&self, _processing: bool) {}
     pub fn set_idle_state(&self) {}
     pub fn set_on_start_recording<F>(&self, _callback: F)

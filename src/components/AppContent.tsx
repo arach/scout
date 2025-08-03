@@ -23,6 +23,7 @@ import { TranscriptionOverlay } from './TranscriptionOverlay';
 import { useAudioContext } from '../contexts/AudioContext';
 import { useTranscriptContext } from '../contexts/TranscriptContext';
 import { useUIContext } from '../contexts/UIContext';
+import { useRecordingContext } from '../contexts/RecordingContext';
 
 /**
  * Main application content component (extracted from App.tsx)
@@ -126,6 +127,9 @@ export function AppContent() {
     loggers.recording.debug('Processing started, setting isProcessing=true');
     setIsProcessing(true);
   }, [setIsProcessing]);
+
+  // Recording context to get stopping state
+  const recordingContext = useRecordingContext();
 
   // Recording hook
   const { 
@@ -454,6 +458,7 @@ export function AppContent() {
             <RecordView
               isRecording={isRecording}
               isProcessing={isProcessing}
+              isStopping={recordingContext.state.isStopping}
               recordingStartTime={recordingStartTime}
               hotkey={hotkey}
               pushToTalkHotkey={pushToTalkHotkey}

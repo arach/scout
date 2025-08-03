@@ -5,6 +5,7 @@ import { loggers } from '../utils/logger';
 interface RecordingState {
   isRecording: boolean;
   isStarting: boolean;
+  isStopping: boolean;
   lastStartTime: number;
 }
 
@@ -12,6 +13,7 @@ interface RecordingState {
 type RecordingAction =
   | { type: 'SET_STARTING'; payload: boolean }
   | { type: 'SET_RECORDING'; payload: boolean }
+  | { type: 'SET_STOPPING'; payload: boolean }
   | { type: 'RESET' };
 
 // Recording context interface
@@ -20,6 +22,7 @@ interface RecordingContextValue {
   canStartRecording: () => boolean;
   setStarting: (value: boolean) => void;
   setRecording: (value: boolean) => void;
+  setStopping: (value: boolean) => void;
   reset: () => void;
 }
 
@@ -27,6 +30,7 @@ interface RecordingContextValue {
 const initialState: RecordingState = {
   isRecording: false,
   isStarting: false,
+  isStopping: false,
   lastStartTime: 0,
 };
 
@@ -43,6 +47,11 @@ function recordingReducer(state: RecordingState, action: RecordingAction): Recor
       return {
         ...state,
         isRecording: action.payload,
+      };
+    case 'SET_STOPPING':
+      return {
+        ...state,
+        isStopping: action.payload,
       };
     case 'RESET':
       return initialState;
@@ -86,6 +95,10 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
     dispatch({ type: 'SET_RECORDING', payload: value });
   }, []);
 
+  const setStopping = useCallback((value: boolean) => {
+    dispatch({ type: 'SET_STOPPING', payload: value });
+  }, []);
+
   const reset = useCallback(() => {
     dispatch({ type: 'RESET' });
   }, []);
@@ -95,6 +108,7 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
     canStartRecording,
     setStarting,
     setRecording,
+    setStopping,
     reset,
   };
 

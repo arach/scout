@@ -11,6 +11,7 @@ interface ViewRouterProps {
   currentView: ViewType;
   // RecordView props
   isRecording: boolean;
+  isStopping: boolean;
   isProcessing: boolean;
   recordingStartTime: number | null;
   hotkey: string;
@@ -45,6 +46,7 @@ export const ViewRouter = memo<ViewRouterProps>(({
   currentView,
   // RecordView props
   isRecording,
+  isStopping,
   isProcessing,
   recordingStartTime,
   hotkey,
@@ -80,6 +82,7 @@ export const ViewRouter = memo<ViewRouterProps>(({
         <AudioErrorBoundary>
           <RecordView
             isRecording={isRecording}
+            isStopping={isStopping}
             isProcessing={isProcessing}
             recordingStartTime={recordingStartTime}
             hotkey={hotkey}
