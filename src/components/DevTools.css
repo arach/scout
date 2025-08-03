@@ -438,3 +438,194 @@
 .dev-tools-content::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.3);
 }
+
+/* Model Acceleration Status Styles */
+.model-acceleration-status {
+  margin-top: 8px;
+}
+
+.model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.model-status-card {
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 8px;
+  font-size: 11px;
+}
+
+.model-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  border-bottom: 1px solid #333;
+  padding-bottom: 4px;
+}
+
+.model-name {
+  font-weight: bold;
+  color: #fff;
+  font-size: 12px;
+}
+
+.model-size {
+  color: #888;
+  font-size: 10px;
+}
+
+.model-status-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 3px;
+}
+
+.acceleration-type {
+  color: #00d4ff;
+  font-weight: bold;
+  font-size: 10px;
+}
+
+.acceleration-status {
+  color: #fff;
+  font-size: 10px;
+  max-width: 60%;
+  text-align: right;
+}
+
+.performance-estimate {
+  color: #ffeb3b;
+  font-size: 10px;
+  font-weight: bold;
+}
+
+.status-badge.success {
+  color: #4caf50;
+}
+
+.status-badge.warning {
+  color: #ff9800;
+}
+
+.status-badge.error {
+  color: #f44336;
+}
+
+.model-file-path {
+  margin-top: 6px;
+  padding-top: 4px;
+  border-top: 1px solid #333;
+}
+
+.file-path-label {
+  color: #888;
+  font-size: 9px;
+  display: block;
+  margin-bottom: 2px;
+}
+
+.file-path {
+  color: #00ff00;
+  font-size: 9px;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  background: #0a0a0a;
+  padding: 2px 4px;
+  border-radius: 2px;
+  word-break: break-all;
+  display: block;
+}
+
+.no-models {
+  text-align: center;
+  color: #888;
+  font-style: italic;
+  padding: 20px;
+}
+
+/* Model Warmup Status Styles */
+.model-warmup-status {
+  margin-top: 8px;
+}
+
+.model-warmup-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.model-warmup-card {
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 8px;
+  font-size: 11px;
+  transition: all 0.2s ease;
+}
+
+.model-warmup-card.active {
+  border-color: #00d4ff;
+  background: #001a22;
+}
+
+.model-warmup-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.model-warmup-header .model-name {
+  font-weight: bold;
+  color: #fff;
+  font-size: 12px;
+}
+
+.active-badge {
+  background: #00d4ff;
+  color: #000;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-size: 9px;
+  font-weight: bold;
+  text-transform: uppercase;
+}
+
+.model-warmup-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.warmup-status-text {
+  color: #fff;
+  font-size: 11px;
+  flex: 1;
+}
+
+.warmup-spinner {
+  animation: spin 1s linear infinite;
+  font-size: 12px;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.last-warmed {
+  color: #888;
+  font-size: 9px;
+  margin-top: 4px;
+  border-top: 1px solid #333;
+  padding-top: 4px;
+}

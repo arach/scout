@@ -2066,49 +2066,48 @@ async fn get_model_warmup_status(
     let models = crate::models::WhisperModel::all(models_dir, settings_guard.get());
     let mut warmup_statuses = Vec::new();
     
-    // Check if model state manager exists
-    if let Some(model_state_manager) = &state.model_state_manager {
-        for model in models {
-            // Skip models that aren't downloaded or don't have CoreML
-            if !model.downloaded || model.coreml_url.is_none() {
-                continue;
-            }
-            
-            let model_state = model_state_manager.get_state(&model.id).await;
-            let is_active = model.id == *active_model_id;
-            
-            let (is_ready, is_warming, status_text, last_warmed) = if let Some(state) = model_state {
-                match state.coreml_state {
-                    crate::model_state::CoreMLState::Ready => {
-                        (true, false, "✅ Ready".to_string(), state.last_warmed)
-                    },
-                    crate::model_state::CoreMLState::Warming => {
-                        (false, true, "🔄 Warming up...".to_string(), None)
-                    },
-                    crate::model_state::CoreMLState::Downloaded => {
-                        (false, false, "⏳ Not warmed up".to_string(), None)
-                    },
-                    crate::model_state::CoreMLState::Failed(err) => {
-                        (false, false, format!("❌ Failed: {}", err), None)
-                    },
-                    crate::model_state::CoreMLState::NotDownloaded => {
-                        continue; // Skip if CoreML not downloaded
-                    }
-                }
-            } else {
-                (false, false, "⏳ Not warmed up".to_string(), None)
-            };
-            
-            warmup_statuses.push(ModelWarmupStatus {
-                id: model.id,
-                name: model.name,
-                is_active,
-                is_ready,
-                is_warming,
-                status_text,
-                last_warmed,
-            });
+    let model_state_manager = &state.model_state_manager;
+    
+    for model in models {
+        // Skip models that aren't downloaded or don't have CoreML
+        if !model.downloaded || model.coreml_url.is_none() {
+            continue;
         }
+        
+        let model_state = model_state_manager.get_state(&model.id).await;
+        let is_active = model.id == *active_model_id;
+        
+        let (is_ready, is_warming, status_text, last_warmed) = if let Some(state) = model_state {
+            match state.coreml_state {
+                crate::model_state::CoreMLState::Ready => {
+                    (true, false, "✅ Ready".to_string(), state.last_warmed)
+                },
+                crate::model_state::CoreMLState::Warming => {
+                    (false, true, "🔄 Warming up...".to_string(), None)
+                },
+                crate::model_state::CoreMLState::Downloaded => {
+                    (false, false, "⏳ Not warmed up".to_string(), None)
+                },
+                crate::model_state::CoreMLState::Failed(err) => {
+                    (false, false, format!("❌ Failed: {}", err), None)
+                },
+                crate::model_state::CoreMLState::NotDownloaded => {
+                    continue; // Skip if CoreML not downloaded
+                }
+            }
+        } else {
+            (false, false, "⏳ Not warmed up".to_string(), None)
+        };
+        
+        warmup_statuses.push(ModelWarmupStatus {
+            id: model.id,
+            name: model.name,
+            is_active,
+            is_ready,
+            is_warming,
+            status_text,
+            last_warmed,
+        });
     }
     
     Ok(warmup_statuses)

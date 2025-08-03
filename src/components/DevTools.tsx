@@ -5,6 +5,30 @@ import { Transcript } from '../types/transcript';
 import { useAudioLevel } from '../contexts/AudioContext';
 import './DevTools.css';
 
+interface ModelAccelerationStatus {
+  id: string;
+  name: string;
+  size_mb: number;
+  downloaded: boolean;
+  coreml_available: boolean;
+  coreml_downloaded: boolean;
+  acceleration_type: string;
+  acceleration_status: string;
+  file_path?: string;
+  coreml_path?: string;
+  performance_estimate: string;
+}
+
+interface ModelWarmupStatus {
+  id: string;
+  name: string;
+  is_active: boolean;
+  is_ready: boolean;
+  is_warming: boolean;
+  status_text: string;
+  last_warmed?: string;
+}
+
 type View = 'record' | 'transcripts' | 'settings' | 'stats' | 'dictionary';
 
 interface DevToolsProps {
@@ -51,6 +75,10 @@ export function DevTools(props: DevToolsProps) {
   const [isAnimating, setIsAnimating] = useState(false);
   const [showTeleprompter, setShowTeleprompter] = useState(false);
   const [waveformStyle, setWaveformStyle] = useState<'classic' | 'enhanced' | 'particles'>('enhanced');
+  const [modelAcceleration, setModelAcceleration] = useState<ModelAccelerationStatus[]>([]);
+  const [showModelAcceleration, setShowModelAcceleration] = useState(false);
+  const [modelWarmup, setModelWarmup] = useState<ModelWarmupStatus[]>([]);
+  const [showModelWarmup, setShowModelWarmup] = useState(false);
 
   // Only show in development
   const isDev = import.meta.env.DEV;
@@ -89,6 +117,40 @@ export function DevTools(props: DevToolsProps) {
     setShowTeleprompter(enabled);
     console.log(`[DevTools] Teleprompter overlay ${enabled ? 'shown' : 'hidden'}`);
   };
+
+  const loadModelAccelerationStatus = async () => {
+    try {
+      const status = await invoke<ModelAccelerationStatus[]>('get_model_acceleration_status');
+      setModelAcceleration(status);
+      console.log('[DevTools] Model acceleration status loaded:', status);
+    } catch (error) {
+      console.error('[DevTools] Failed to load model acceleration status:', error);
+    }
+  };
+
+  const loadModelWarmupStatus = async () => {
+    try {
+      const status = await invoke<ModelWarmupStatus[]>('get_model_warmup_status');
+      setModelWarmup(status);
+      console.log('[DevTools] Model warmup status loaded:', status);
+    } catch (error) {
+      console.error('[DevTools] Failed to load model warmup status:', error);
+    }
+  };
+
+  // Load model acceleration status when showing the feature
+  useEffect(() => {
+    if (showModelAcceleration && currentView === 'settings') {
+      loadModelAccelerationStatus();
+    }
+  }, [showModelAcceleration, currentView]);
+
+  // Load model warmup status when showing the feature in recording view
+  useEffect(() => {
+    if (showModelWarmup && currentView === 'record') {
+      loadModelWarmupStatus();
+    }
+  }, [showModelWarmup, currentView]);
 
   // Console logging effect - context aware
   useEffect(() => {
@@ -202,6 +264,61 @@ export function DevTools(props: DevToolsProps) {
                     </select>
                   </div>
                 </div>
+                
+                <div className="dev-tool-section">
+                  <h4>Model Readiness</h4>
+                  <div className="dev-tool-item">
+                    <label className="dev-tool-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={showModelWarmup}
+                        onChange={(e) => setShowModelWarmup(e.target.checked)}
+                      />
+                      <span className="checkbox-label">Show CoreML Warmup Status</span>
+                    </label>
+                  </div>
+                  
+                  {showModelWarmup && (
+                    <div className="model-warmup-status">
+                      <div className="dev-tool-item">
+                        <button 
+                          className="dev-tool-button"
+                          onClick={loadModelWarmupStatus}
+                        >
+                          🔄 Refresh Status
+                        </button>
+                      </div>
+                      
+                      <div className="model-warmup-list">
+                        {modelWarmup.map((model) => (
+                          <div key={model.id} className={`model-warmup-card ${model.is_active ? 'active' : ''}`}>
+                            <div className="model-warmup-header">
+                              <span className="model-name">{model.name}</span>
+                              {model.is_active && <span className="active-badge">ACTIVE</span>}
+                            </div>
+                            
+                            <div className="model-warmup-row">
+                              <span className="warmup-status-text">{model.status_text}</span>
+                              {model.is_warming && <div className="warmup-spinner">🔄</div>}
+                            </div>
+                            
+                            {model.last_warmed && (
+                              <div className="last-warmed">
+                                Last warmed: {new Date(model.last_warmed).toLocaleTimeString()}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                        
+                        {modelWarmup.length === 0 && (
+                          <div className="no-models">
+                            <p>Click "Refresh Status" to load model information</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </>
             )}
 
@@ -219,16 +336,100 @@ export function DevTools(props: DevToolsProps) {
             )}
 
             {currentView === 'settings' && (
-              <div className="dev-tool-item primary">
-                <label className="dev-tool-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={showConsoleLog}
-                    onChange={(e) => setShowConsoleLog(e.target.checked)}
-                  />
-                  <span className="checkbox-label">Log Settings Changes</span>
-                </label>
-              </div>
+              <>
+                <div className="dev-tool-item primary">
+                  <label className="dev-tool-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={showConsoleLog}
+                      onChange={(e) => setShowConsoleLog(e.target.checked)}
+                    />
+                    <span className="checkbox-label">Log Settings Changes</span>
+                  </label>
+                </div>
+                
+                <div className="dev-tool-section">
+                  <h4>Model Acceleration Status</h4>
+                  <div className="dev-tool-item">
+                    <label className="dev-tool-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={showModelAcceleration}
+                        onChange={(e) => setShowModelAcceleration(e.target.checked)}
+                      />
+                      <span className="checkbox-label">Show Model Hardware Acceleration</span>
+                    </label>
+                  </div>
+                  
+                  {showModelAcceleration && (
+                    <div className="model-acceleration-status">
+                      <div className="dev-tool-item">
+                        <button 
+                          className="dev-tool-button"
+                          onClick={loadModelAccelerationStatus}
+                        >
+                          🔄 Refresh Status
+                        </button>
+                      </div>
+                      
+                      <div className="model-list">
+                        {modelAcceleration.map((model) => (
+                          <div key={model.id} className="model-status-card">
+                            <div className="model-header">
+                              <span className="model-name">{model.name}</span>
+                              <span className="model-size">{model.size_mb}MB</span>
+                            </div>
+                            
+                            <div className="model-status-row">
+                              <span className="status-label">Downloaded:</span>
+                              <span className={`status-badge ${model.downloaded ? 'success' : 'error'}`}>
+                                {model.downloaded ? '✅' : '❌'}
+                              </span>
+                            </div>
+                            
+                            <div className="model-status-row">
+                              <span className="status-label">Acceleration:</span>
+                              <span className="acceleration-type">{model.acceleration_type}</span>
+                            </div>
+                            
+                            <div className="model-status-row">
+                              <span className="status-label">Status:</span>
+                              <span className="acceleration-status">{model.acceleration_status}</span>
+                            </div>
+                            
+                            <div className="model-status-row">
+                              <span className="status-label">Performance:</span>
+                              <span className="performance-estimate">{model.performance_estimate}</span>
+                            </div>
+                            
+                            {model.coreml_available && (
+                              <div className="model-status-row">
+                                <span className="status-label">CoreML:</span>
+                                <span className={`status-badge ${model.coreml_downloaded ? 'success' : 'warning'}`}>
+                                  {model.coreml_downloaded ? '✅ Downloaded' : '⚠️ Available'}
+                                </span>
+                              </div>
+                            )}
+                            
+                            {model.file_path && (
+                              <div className="model-file-path">
+                                <span className="file-path-label">Path:</span>
+                                <code className="file-path">{model.file_path}</code>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                        
+                        {modelAcceleration.length === 0 && (
+                          <div className="no-models">
+                            <p>Click "Refresh Status" to load model information</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </>
             )}
 
             {/* Logging Controls */}
