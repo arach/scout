@@ -1,4 +1,4 @@
-#[cfg(disabled)] // Temporarily disabled due to refactoring - needs module visibility updates  
+#[cfg(feature = "disabled-tests")] // Temporarily disabled due to refactoring - needs module visibility updates  
 mod test_short_transcriptions {
     use scout_lib::audio::format::WhisperAudioConverter;
     use scout_lib::audio::recorder::AudioRecorder;
