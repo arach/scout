@@ -121,6 +121,18 @@ impl ModelStateManager {
         self.persist_states(&states).await;
     }
     
+    pub async fn mark_coreml_downloaded(&self, model_id: &str) {
+        let mut states = self.states.write().await;
+        
+        if let Some(state) = states.get_mut(model_id) {
+            state.coreml_state = CoreMLState::Downloaded;
+            self.persist_states(&states).await;
+            info(Component::Models, &format!("Marked CoreML as downloaded for model: {}", model_id));
+        } else {
+            warn(Component::Models, &format!("Attempted to mark CoreML downloaded for unknown model: {}", model_id));
+        }
+    }
+    
     /// Check if any model is currently warming up Core ML
     pub async fn is_any_model_warming(&self) -> bool {
         let states = self.states.read().await;

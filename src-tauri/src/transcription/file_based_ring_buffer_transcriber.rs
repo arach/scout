@@ -32,10 +32,20 @@ impl FileBasedRingBufferTranscriber {
         transcriber: Arc<Mutex<Transcriber>>,
         temp_dir: PathBuf,
     ) -> Result<Self, String> {
-        // Wait a moment for the WAV file to be created and have a valid header
-        std::thread::sleep(Duration::from_millis(100));
-        
-        let wav_reader = WavFileReader::new(&wav_file_path)?;
+        // Wait for file to exist and be readable instead of artificial delay
+        let mut attempts = 0;
+        let wav_reader = loop {
+            match WavFileReader::new(&wav_file_path) {
+                Ok(reader) => break reader,
+                Err(e) if attempts < 50 => {
+                    // File might not be ready yet, wait 1ms and retry
+                    attempts += 1;
+                    std::thread::sleep(Duration::from_millis(1));
+                    continue;
+                }
+                Err(e) => return Err(format!("Failed to open WAV file after {} attempts: {}", attempts, e)),
+            }
+        };
         
         info(
             Component::RingBuffer,

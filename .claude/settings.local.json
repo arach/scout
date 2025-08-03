@@ -12,7 +12,11 @@
       "Bash(--app-drop-link 450 185 )",
       "Bash(--no-internet-enable )",
       "Bash(\"Scout_0.4.0_Installer.dmg\" )",
-      "Bash(\"Scout.app\")"
+      "Bash(\"Scout.app\")",
+      "Bash(cargo run:*)",
+      "Bash(find:*)",
+      "Bash(sqlite3:*)",
+      "Bash(git add:*)"
     ],
     "deny": []
   },

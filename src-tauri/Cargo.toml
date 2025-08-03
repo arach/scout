@@ -31,6 +31,10 @@ path = "src/bin/test_singleton.rs"
 name = "create_benchmark_corpus"
 path = "src/bin/create_benchmark_corpus.rs"
 
+[[bin]]
+name = "streaming_performance_benchmark"
+path = "src/bin/streaming_performance_benchmark.rs"
+
 # [[bin]]
 # name = "benchmark_progressive"
 # path = "src/bin/benchmark_progressive.rs"
@@ -76,6 +80,7 @@ regex = "1.10"
 uuid = { version = "1.0", features = ["v4"] }
 url = "2.5"
 thiserror = "1.0"
+tempfile = "3.20"
 
 # LLM dependencies
 candle-core = "0.9"

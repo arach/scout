@@ -179,10 +179,10 @@ async fn test_empty_wav_file_detection() {
 /// Test configuration validation for the fixes
 #[test]
 fn test_transcription_config_validation() {
-    // Test default configuration (should enable progressive strategy)
+    // Test default configuration (chunking is currently disabled by default due to progressive strategy issues)
     let default_config = scout_lib::transcription::TranscriptionConfig::default();
-    assert!(default_config.enable_chunking);
-    assert_eq!(default_config.chunking_threshold_secs, 5);
+    assert!(!default_config.enable_chunking); // Updated: chunking disabled by default to avoid progressive corruption
+    assert_eq!(default_config.chunking_threshold_secs, 3); // Updated: lowered to handle shorter recordings better
     assert_eq!(default_config.chunk_duration_secs, 5);
     assert_eq!(default_config.refinement_chunk_secs, Some(10));
     

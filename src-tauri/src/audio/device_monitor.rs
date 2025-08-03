@@ -190,7 +190,7 @@ impl DeviceMonitor {
             let mut last_check = Instant::now();
 
             while !*should_stop.lock().unwrap() {
-                thread::sleep(Duration::from_millis(100));
+                thread::sleep(Duration::from_millis(50));
 
                 if last_check.elapsed() >= check_interval {
                     if let Err(e) = Self::check_for_device_changes(

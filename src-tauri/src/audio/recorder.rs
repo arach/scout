@@ -236,15 +236,19 @@ impl AudioRecorder {
             ),
         );
 
-        // Wait for the recording state to actually change instead of using sleep
+        // Wait for the recording state to actually change with shorter timeout
         let wait_start = std::time::Instant::now();
-        let _guard = self
+        let wait_result = self
             .recording_state_changed
             .wait_timeout(
                 self.is_recording.lock().unwrap(),
-                Duration::from_millis(100),
-            )
-            .unwrap();
+                Duration::from_millis(50),  // Reduced from 100ms for faster response
+            );
+        
+        // Handle timeout gracefully - don't panic
+        if wait_result.is_err() {
+            warn(Component::Recording, "Recording state wait timed out, but continuing");
+        }
 
         let wait_time = wait_start.elapsed();
         let total_time = start_time.elapsed();

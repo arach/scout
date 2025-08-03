@@ -479,11 +479,13 @@ impl RecordingWorkflow {
                                 &format!("Recording duration: {}ms", duration_ms),
                             );
 
-                            // Update to Idle state immediately for better UI responsiveness
+                            // Update to Stopping state first for better UI feedback
                             performance_tracker_for_iter
-                                .track_event("state_change", "Updated to Idle state")
+                                .track_event("state_change", "Updated to Stopping state")
                                 .await;
-                            progress_tracker_for_iter.update(RecordingProgress::Idle);
+                            progress_tracker_for_iter.update(RecordingProgress::Stopping { 
+                                filename: active_recording.filename.clone() 
+                            });
 
                             // Get device info before stopping recording
                             let recorder = recorder.lock().await;
@@ -540,6 +542,12 @@ impl RecordingWorkflow {
                                 }
                             }
 
+                            // Update to Idle state now that recording is fully stopped
+                            performance_tracker_for_iter
+                                .track_event("state_change", "Updated to Idle state after stop")
+                                .await;
+                            progress_tracker_for_iter.update(RecordingProgress::Idle);
+                            
                             // Send immediate response for UI responsiveness
                             performance_tracker_for_iter
                                 .track_event("response_sent", "Sent immediate response to UI")
