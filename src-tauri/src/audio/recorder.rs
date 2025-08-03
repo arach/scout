@@ -1206,25 +1206,6 @@ impl AudioRecorderWorker {
                 config,
                 move |data: &[T], _: &cpal::InputCallbackInfo| {
                     if *is_recording.lock().unwrap() {
-                        // Log first callback to verify actual data rate (per recording)
-                        let prev_count = *sample_count.lock().unwrap();
-                        if prev_count == 0 {
-                            info(
-                                Component::Recording,
-                                &format!(
-                                    "First audio callback - {} samples, {} channels",
-                                    data.len(),
-                                    channels
-                                ),
-                            );
-                            info(
-                                Component::Recording,
-                                &format!(
-                                    "Preserving native format: {} Hz, {} channel(s)",
-                                    device_sample_rate, channels
-                                ),
-                            );
-                        }
 
                         // Calculate RMS (Root Mean Square) level for volume
                         let mut sum_squares = 0.0f32;
@@ -1262,12 +1243,31 @@ impl AudioRecorderWorker {
                         *audio_level.lock().unwrap() = new_level; // Already capped by amplified_rms
 
                         if let Some(ref mut writer) = *writer.lock().unwrap() {
+                            // Log first callback to verify actual data rate (per recording)
+                            let prev_count = *sample_count.lock().unwrap();
+                            if prev_count == 0 {
+                                info(
+                                    Component::Recording,
+                                    &format!(
+                                        "First audio callback - {} samples, {} channels",
+                                        data.len(),
+                                        channels
+                                    ),
+                                );
+                                info(
+                                    Component::Recording,
+                                    &format!(
+                                        "Preserving native format: {} Hz, {} channel(s)",
+                                        device_sample_rate, channels
+                                    ),
+                                );
+                            }
+
                             // Write samples directly in their native format
                             // NO conversion, NO resampling, NO channel mixing
                             for &sample in data.iter() {
                                 writer.write_sample(sample).ok();
                             }
-                            let prev_count = *sample_count.lock().unwrap();
                             *sample_count.lock().unwrap() += data.len() as u64;
 
                             // Periodic validation logging
