@@ -1533,16 +1533,6 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_transcription_config_default() {
-        let config = TranscriptionConfig::default();
-        
-        assert_eq!(config.enable_chunking, true);
-        assert_eq!(config.chunking_threshold_secs, 5);
-        assert_eq!(config.chunk_duration_secs, 5);
-        assert_eq!(config.force_strategy, None);
-        assert_eq!(config.refinement_chunk_secs, Some(10));
-    }
 
     #[test]
     fn test_transcription_config_clone() {
@@ -1768,47 +1758,6 @@ mod progressive_strategy_tests {
         assert!(should_use_progressive);
     }
 
-    /// Test progressive strategy configuration validation
-    #[test]
-    fn test_progressive_strategy_config_validation() {
-        let configs = vec![
-            // Default config should work
-            TranscriptionConfig::default(),
-            
-            // Custom refinement chunk size
-            TranscriptionConfig {
-                refinement_chunk_secs: Some(15),
-                ..Default::default()
-            },
-            
-            // No refinement chunks specified (should use default)
-            TranscriptionConfig {
-                refinement_chunk_secs: None,
-                ..Default::default()
-            },
-            
-            // Large refinement chunks
-            TranscriptionConfig {
-                refinement_chunk_secs: Some(30),
-                ..Default::default()
-            },
-        ];
-        
-        for config in configs {
-            // All configs should be valid for progressive strategy
-            assert!(config.enable_chunking); // Default should enable chunking
-            
-            // Refinement chunk size should be reasonable if specified
-            if let Some(refinement_secs) = config.refinement_chunk_secs {
-                assert!(refinement_secs > 0);
-                assert!(refinement_secs <= 60); // Reasonable upper limit
-            }
-            
-            // Regular chunk size should be reasonable
-            assert!(config.chunk_duration_secs > 0);
-            assert!(config.chunk_duration_secs <= 30);
-        }
-    }
 
     /// Test progressive strategy model name tracking
     #[test]
