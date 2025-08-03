@@ -6,6 +6,7 @@ pub mod notifications;
 pub mod recorder;
 pub mod ring_buffer_recorder;
 pub mod validation;
+pub mod wav_file_reader;
 pub mod wav_validator;
 
 #[cfg(test)]
@@ -15,4 +16,5 @@ pub use converter::AudioConverter;
 pub use format::WhisperAudioConverter;
 pub use metadata::AudioMetadata;
 pub use recorder::AudioRecorder;
+pub use wav_file_reader::WavFileReader;
 pub use wav_validator::WavValidator;

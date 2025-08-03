@@ -230,9 +230,13 @@ impl RecordingWorkflow {
                                     .current_strategy_name()
                                     .unwrap_or_else(|| "unknown".to_string());
 
-                                let sample_rx_option = if strategy_name == "ring_buffer"
-                                    || strategy_name == "progressive"
-                                {
+                                let sample_rx_option = if strategy_name == "ring_buffer" {
+                                    info(
+                                        Component::RingBuffer,
+                                        "Detected ring_buffer strategy - using file-based approach (no sample callbacks needed)",
+                                    );
+                                    None
+                                } else if strategy_name == "progressive" {
                                     info(
                                         Component::RingBuffer,
                                         &format!(
@@ -256,7 +260,18 @@ impl RecordingWorkflow {
                                     info(Component::RingBuffer, &format!("Audio device has {} channels, ring buffer expects 1 channel", audio_channels));
 
                                     // Create callback for AudioRecorder
-                                    let sample_callback =
+                                    let sample_callback: std::sync::Arc<dyn Fn(&[f32]) + Send + Sync> = if std::env::var("USE_SIMPLE_CALLBACK_TEST").is_ok() {
+                                        // Simple callback that just counts samples - no processing
+                                        std::sync::Arc::new(move |samples: &[f32]| {
+                                            // Just log every 1000th callback to avoid spam
+                                            static CALLBACK_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                                            let count = CALLBACK_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                            if count % 1000 == 0 {
+                                                info(Component::RingBuffer, &format!("Simple callback #{}: {} samples", count, samples.len()));
+                                            }
+                                        })
+                                    } else {
+                                        // Original callback with channel forwarding
                                         std::sync::Arc::new(move |samples: &[f32]| {
                                             // Pass samples in their native format (preserve stereo for WAV)
                                             // Note: Transcription will handle mono conversion internally if needed
@@ -266,26 +281,33 @@ impl RecordingWorkflow {
                                             if let Err(_) = sample_tx.send(native_samples) {
                                                 // Channel closed, probably shutting down
                                             }
-                                        });
+                                        })
+                                    };
 
-                                    // Set the callback on the recorder
-                                    let recorder = recorder.lock().await;
-                                    if let Err(e) =
-                                        recorder.set_sample_callback(Some(sample_callback))
-                                    {
-                                        error(
-                                            Component::Recording,
-                                            &format!("Failed to set sample callback: {}", e),
-                                        );
+                                    // Check if sample callbacks should be disabled
+                                    if std::env::var("DISABLE_SAMPLE_CALLBACKS").is_ok() {
+                                        info(Component::RingBuffer, "Sample callbacks DISABLED by environment variable - skipping callback setup");
                                         None
                                     } else {
-                                        info(
-                                            Component::RingBuffer,
-                                            "AudioRecorder callback set - samples will be captured",
-                                        );
-                                        drop(recorder);
-                                        info(Component::RingBuffer, "Connected AudioRecorder to RingBuffer via sample forwarding");
-                                        Some(sample_rx)
+                                        // Set the callback on the recorder
+                                        let recorder = recorder.lock().await;
+                                        if let Err(e) =
+                                            recorder.set_sample_callback(Some(sample_callback))
+                                        {
+                                            error(
+                                                Component::Recording,
+                                                &format!("Failed to set sample callback: {}", e),
+                                            );
+                                            None
+                                        } else {
+                                            info(
+                                                Component::RingBuffer,
+                                                "AudioRecorder callback set - samples will be captured",
+                                            );
+                                            drop(recorder);
+                                            info(Component::RingBuffer, "Connected AudioRecorder to RingBuffer via sample forwarding");
+                                            Some(sample_rx)
+                                        }
                                     }
                                 } else {
                                     None
@@ -423,6 +445,8 @@ impl RecordingWorkflow {
                                     Err(e) => {
                                         // Stop recording if transcription setup failed
                                         let _ = recorder.stop_recording();
+                                        // Clear sample callback on error
+                                        let _ = recorder.set_sample_callback(None);
                                         progress_tracker_for_iter.update(RecordingProgress::Idle);
                                         let _ = response.send(Err(format!(
                                             "Failed to setup transcription: {}",
@@ -479,6 +503,17 @@ impl RecordingWorkflow {
                                 continue;
                             }
                             info(Component::Recording, "recorder.stop_recording() succeeded");
+                            
+                            // CRITICAL: Clear sample callback to prevent accumulation across recordings
+                            if let Err(e) = recorder.set_sample_callback(None) {
+                                warn(
+                                    Component::Recording,
+                                    &format!("Failed to clear sample callback: {}", e),
+                                );
+                            } else {
+                                info(Component::Recording, "Sample callback cleared successfully");
+                            }
+                            
                             drop(recorder); // Release lock
 
                             // Validate the WAV file
@@ -1019,6 +1054,17 @@ impl RecordingWorkflow {
                                 let _ = response.send(Err(e));
                                 continue;
                             }
+                            
+                            // CRITICAL: Clear sample callback to prevent accumulation across recordings
+                            if let Err(e) = recorder.set_sample_callback(None) {
+                                warn(
+                                    Component::Recording,
+                                    &format!("Failed to clear sample callback during cancel: {}", e),
+                                );
+                            } else {
+                                info(Component::Recording, "Sample callback cleared during cancel");
+                            }
+                            
                             drop(recorder); // Release lock
 
                             // Cancel transcription context if it exists

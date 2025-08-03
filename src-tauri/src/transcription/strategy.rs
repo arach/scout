@@ -32,7 +32,7 @@ pub struct TranscriptionConfig {
 impl Default for TranscriptionConfig {
     fn default() -> Self {
         Self {
-            enable_chunking: true,
+            enable_chunking: false, // TEMPORARILY DISABLED - use refactored ring buffer instead of progressive
             chunking_threshold_secs: 3, // Lower threshold to handle shorter recordings better
             chunk_duration_secs: 5,     // 5-second chunks for better coverage
             force_strategy: None,
@@ -161,13 +161,13 @@ impl TranscriptionStrategy for ClassicTranscriptionStrategy {
     }
 }
 
-/// Ring buffer transcription strategy - process chunks in real-time during recording
+/// Ring buffer transcription strategy - process chunks by reading from growing WAV file
+/// This provides clean separation between recording and transcription processing
 pub struct RingBufferTranscriptionStrategy {
     transcriber: Arc<tokio::sync::Mutex<Transcriber>>,
-    ring_buffer: Option<Arc<crate::audio::ring_buffer_recorder::RingBufferRecorder>>,
-    ring_transcriber: Option<crate::transcription::ring_buffer_transcriber::RingBufferTranscriber>,
+    file_based_transcriber: Option<crate::transcription::file_based_ring_buffer_transcriber::FileBasedRingBufferTranscriber>,
     monitor_handle: Option<(
-        tokio::task::JoinHandle<crate::ring_buffer_monitor::RingBufferMonitor>,
+        tokio::task::JoinHandle<crate::file_based_ring_buffer_monitor::FileBasedRingBufferMonitor>,
         tokio::sync::mpsc::Sender<()>,
     )>,
     temp_dir: std::path::PathBuf,
@@ -184,8 +184,7 @@ impl RingBufferTranscriptionStrategy {
     ) -> Self {
         Self {
             transcriber,
-            ring_buffer: None,
-            ring_transcriber: None,
+            file_based_transcriber: None,
             monitor_handle: None,
             temp_dir,
             start_time: None,
@@ -203,7 +202,8 @@ impl RingBufferTranscriptionStrategy {
     pub fn get_ring_buffer(
         &self,
     ) -> Option<Arc<crate::audio::ring_buffer_recorder::RingBufferRecorder>> {
-        self.ring_buffer.clone()
+        // File-based strategy doesn't use ring buffer - returns None
+        None
     }
 }
 
@@ -239,100 +239,46 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
         info(
             Component::RingBuffer,
             &format!(
-                "Ring buffer transcription strategy started for: {:?}",
+                "File-based ring buffer transcription strategy started for: {:?}",
                 output_path
             ),
         );
-        // Try to identify which model is being used for better logging
-        let model_info = {
-            let transcriber = self.transcriber.lock().await;
-            // Note: We can't easily get the model path from the transcriber, 
-            // but we can log that ring buffer is active
-            "ring buffer strategy"
-        };
-        info(
-            Component::RingBuffer,
-            &format!("Initializing ring buffer components for real-time processing with {}", model_info),
-        );
-
-        // Get actual device sample rate and channels from app state
-        // These are set by AudioRecorder when it starts recording
-        let device_sample_rate = crate::get_current_device_sample_rate().unwrap_or_else(|| {
-            warn(
-                Component::RingBuffer,
-                "Device sample rate not available yet, using 48kHz as fallback",
-            );
-            48000
-        });
-        
-        let device_channels = crate::get_current_device_channels().unwrap_or_else(|| {
-            warn(
-                Component::RingBuffer,
-                "Device channels not available yet, using 2 channels as fallback",
-            );
-            2
-        });
         
         info(
             Component::RingBuffer,
-            &format!(
-                "Ring buffer using device format: {} Hz, {} channels",
-                device_sample_rate, device_channels
-            ),
+            "Using file-based approach - recording and transcription are cleanly separated",
         );
 
-        // Initialize ring buffer recorder with 5-minute capacity
-        // Use actual device format to preserve audio fidelity
-        let spec = hound::WavSpec {
-            channels: device_channels,       // Use actual device channels (stereo/mono)
-            sample_rate: device_sample_rate, // Native device sample rate
-            bits_per_sample: 32,             // f32 samples from AudioRecorder
-            sample_format: hound::SampleFormat::Float,
-        };
-
-        // Create a separate file for ring buffer to avoid file access conflicts
-        let ring_buffer_path = output_path.with_file_name(format!(
-            "ring_buffer_{}",
-            output_path.file_name().unwrap().to_string_lossy()
-        ));
-        let ring_buffer = Arc::new(crate::audio::ring_buffer_recorder::RingBufferRecorder::new(
-            spec,
-            &ring_buffer_path,
-        )?);
-
-        // Initialize ring buffer transcriber
-        let ring_transcriber =
-            crate::transcription::ring_buffer_transcriber::RingBufferTranscriber::new(
-                ring_buffer.clone(),
+        // Create file-based transcriber that will read from the growing WAV file
+        let file_based_transcriber = 
+            crate::transcription::file_based_ring_buffer_transcriber::FileBasedRingBufferTranscriber::new(
+                output_path.to_path_buf(),
                 self.transcriber.clone(),
                 self.temp_dir.clone(),
-            );
+            )?;
 
-        // Initialize and start monitor
-        let mut monitor = crate::ring_buffer_monitor::RingBufferMonitor::new(ring_buffer.clone());
+        // Initialize and start file-based monitor
+        let mut monitor = crate::file_based_ring_buffer_monitor::FileBasedRingBufferMonitor::new(
+            output_path.to_path_buf()
+        );
         if let Some(ref app_handle) = self.app_handle {
             monitor = monitor.with_app_handle(app_handle.clone());
         }
-        let (monitor_handle, stop_sender) = monitor.start_monitoring(ring_transcriber).await;
+        let (monitor_handle, stop_sender) = monitor.start_monitoring(file_based_transcriber).await;
 
-        self.ring_buffer = Some(ring_buffer);
-        self.ring_transcriber = None; // Monitor owns the transcriber
+        self.file_based_transcriber = None; // Monitor owns the transcriber
         self.monitor_handle = Some((monitor_handle, stop_sender));
 
         info(
             Component::RingBuffer,
-            "Ring buffer components initialized - ready for 5-second interval processing",
+            "File-based ring buffer components initialized - ready for 5-second interval processing",
         );
         Ok(())
     }
 
-    async fn process_samples(&mut self, samples: &[f32]) -> Result<(), String> {
-        if let Some(ref ring_buffer) = self.ring_buffer {
-            // Feed audio samples to ring buffer for real-time processing
-            ring_buffer.add_samples(samples)?;
-        } else {
-            return Err("Ring buffer not initialized - this should not happen".to_string());
-        }
+    async fn process_samples(&mut self, _samples: &[f32]) -> Result<(), String> {
+        // File-based strategy doesn't need sample processing - it reads from the growing WAV file
+        // This eliminates the fragile callback dependency chain
         Ok(())
     }
 
@@ -346,16 +292,16 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
 
         info(
             Component::RingBuffer,
-            "Finishing ring buffer transcription with real-time chunks",
+            "Finishing file-based ring buffer transcription with real-time chunks",
         );
         let transcription_start = std::time::Instant::now();
 
-        // Stop the monitor and collect results
+        // Stop the file-based monitor and collect results
         let mut final_chunks = Vec::new();
         let mut chunks_processed = 0;
 
         if let Some((monitor_handle, stop_sender)) = self.monitor_handle.take() {
-            debug(Component::RingBuffer, "Stopping ring buffer monitor...");
+            debug(Component::RingBuffer, "Stopping file-based ring buffer monitor...");
 
             // Signal monitor to stop
             let _ = stop_sender.send(()).await;
@@ -365,7 +311,7 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
                 Ok(monitor) => {
                     info(
                         Component::RingBuffer,
-                        "Monitor stopped, collecting chunk results",
+                        "File-based monitor stopped, collecting chunk results",
                     );
 
                     // Collect all transcribed chunks
@@ -376,7 +322,7 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
                             info(
                                 Component::RingBuffer,
                                 &format!(
-                                    "Collected {} transcribed chunks from ring buffer",
+                                    "Collected {} transcribed chunks from file-based processing",
                                     chunks_processed
                                 ),
                             );
@@ -384,7 +330,7 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
                         Err(e) => {
                             warn(
                                 Component::RingBuffer,
-                                &format!("Error collecting chunk results: {}", e),
+                                &format!("Error collecting file-based chunk results: {}", e),
                             );
                             // Continue with fallback instead of failing
                         }
@@ -393,75 +339,44 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
                 Err(e) => {
                     warn(
                         Component::RingBuffer,
-                        &format!("Error stopping monitor: {}", e),
+                        &format!("Error stopping file-based monitor: {}", e),
                     );
                 }
             }
         } else {
             warn(
                 Component::RingBuffer,
-                "No monitor handle found - this should not happen",
+                "No file-based monitor handle found - this should not happen",
             );
         }
 
-        // Finalize the ring buffer file first
-        let ring_buffer_file_path = if let Some(ref ring_buffer) = self.ring_buffer {
-            debug(Component::RingBuffer, "Finalizing ring buffer recording file");
-            if let Err(e) = ring_buffer.finalize_recording() {
-                warn(
-                    Component::RingBuffer,
-                    &format!("Error finalizing ring buffer recording: {}", e),
-                );
-            }
-            
-            // Get the ring buffer file path for copying to main file
-            Some(recording_path.with_file_name(format!(
-                "ring_buffer_{}",
-                recording_path.file_name().unwrap().to_string_lossy()
-            )))
-        } else {
-            None
-        };
-
-        // Copy ring buffer file to main recording file to ensure main file has audio data
-        if let Some(ref ring_buffer_path) = ring_buffer_file_path {
-            if ring_buffer_path.exists() {
-                info(
-                    Component::RingBuffer,
-                    &format!("Copying ring buffer audio to main recording file: {:?} -> {:?}", 
-                             ring_buffer_path, recording_path),
-                );
-                
-                match std::fs::copy(ring_buffer_path, &recording_path) {
-                    Ok(bytes_copied) => {
-                        info(
-                            Component::RingBuffer,
-                            &format!("Successfully copied {} bytes of audio to main recording file", bytes_copied),
-                        );
-                        
-                        // Clean up the ring buffer file
-                        if let Err(e) = std::fs::remove_file(ring_buffer_path) {
-                            warn(
-                                Component::RingBuffer,
-                                &format!("Failed to clean up ring buffer file: {}", e),
-                            );
-                        } else {
-                            debug(Component::RingBuffer, "Cleaned up ring buffer temporary file");
-                        }
-                    }
-                    Err(e) => {
-                        warn(
-                            Component::RingBuffer,
-                            &format!("Failed to copy ring buffer to main file: {}", e),
-                        );
-                    }
+        // File-based strategy uses the main recording file directly - no copying needed
+        info(
+            Component::RingBuffer,
+            &format!("File-based strategy used main recording file directly: {:?}", recording_path),
+        );
+        
+        // Verify the main recording file exists and has content
+        if recording_path.exists() {
+            match std::fs::metadata(&recording_path) {
+                Ok(metadata) => {
+                    info(
+                        Component::RingBuffer,
+                        &format!("Main recording file size: {} bytes", metadata.len()),
+                    );
                 }
-            } else {
-                warn(
-                    Component::RingBuffer,
-                    &format!("Ring buffer file does not exist: {:?}", ring_buffer_path),
-                );
+                Err(e) => {
+                    warn(
+                        Component::RingBuffer,
+                        &format!("Could not get recording file metadata: {}", e),
+                    );
+                }
             }
+        } else {
+            warn(
+                Component::RingBuffer,
+                &format!("Main recording file does not exist: {:?}", recording_path),
+            );
         }
 
         // Calculate actual transcription time from recording start
@@ -477,7 +392,7 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
         info(
             Component::RingBuffer,
             &format!(
-                "Ring buffer processing complete - {} chunks collected",
+                "File-based ring buffer processing complete - {} chunks collected",
                 chunks_processed
             ),
         );
@@ -487,7 +402,7 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
             // If no chunks were collected from the monitor, try fallback
             debug(
                 Component::RingBuffer,
-                "No chunks collected from ring buffer - checking if fallback is needed",
+                "No chunks collected from file-based ring buffer - checking if fallback is needed",
             );
 
             // Check if the recording was too short for chunking
@@ -564,7 +479,7 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
         info(
             Component::RingBuffer,
             &format!(
-                "Ring buffer transcription completed: {} chars from {} chunks in {:.2}s",
+                "File-based ring buffer transcription completed: {} chars from {} chunks in {:.2}s",
                 combined_text.len(),
                 chunks_processed,
                 transcription_time.as_secs_f64()
@@ -581,9 +496,8 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
 
         // CRITICAL: Clean up all state to prevent corruption in subsequent recordings
         // Do this AFTER preparing the result to avoid any potential async issues
-        info(Component::RingBuffer, "Cleaning up ring buffer strategy state for next recording");
-        self.ring_buffer = None;
-        self.ring_transcriber = None;
+        info(Component::RingBuffer, "Cleaning up file-based ring buffer strategy state for next recording");
+        self.file_based_transcriber = None;
         self.monitor_handle = None;
         self.start_time = None;
         self.config = None;
@@ -593,14 +507,9 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
     }
 
     fn get_partial_results(&self) -> Vec<String> {
-        // TODO: Get partial results from ring transcriber
+        // File-based strategy processes chunks as they're available
+        // TODO: Could implement partial results by checking completed chunks
         vec![]
-    }
-
-    fn get_ring_buffer(
-        &self,
-    ) -> Option<Arc<crate::audio::ring_buffer_recorder::RingBufferRecorder>> {
-        self.ring_buffer.clone()
     }
 }
 
@@ -1342,6 +1251,29 @@ impl TranscriptionStrategySelector {
         app_handle: Option<tauri::AppHandle>,
         model_state_manager: Option<Arc<crate::model_state::ModelStateManager>>,
     ) -> Box<dyn TranscriptionStrategy> {
+        // Check for environment variable override first
+        if let Ok(env_strategy) = std::env::var("FORCE_TRANSCRIPTION_STRATEGY") {
+            match env_strategy.as_str() {
+                "classic" => {
+                    info(Component::Transcription, "🎯 STRATEGY SELECTION: Environment-forced CLASSIC strategy");
+                    info(Component::Transcription, "📝 Classic strategy: AudioRecorder → Complete WAV → Single transcription pass");
+                    return Box::new(ClassicTranscriptionStrategy::new(transcriber));
+                }
+                "ring_buffer" => {
+                    info(Component::Transcription, "🎯 STRATEGY SELECTION: Environment-forced RING BUFFER strategy (file-based, no callbacks)");
+                    info(Component::Transcription, "📝 Ring buffer strategy: AudioRecorder → WAV → File-based chunking → Progressive transcription");
+                    let mut strategy = RingBufferTranscriptionStrategy::new(transcriber, temp_dir);
+                    if let Some(app_handle) = app_handle {
+                        strategy = strategy.with_app_handle(app_handle);
+                    }
+                    return Box::new(strategy);
+                }
+                _ => {
+                    warn(Component::Transcription, &format!("Unknown environment strategy '{}', ignoring", env_strategy));
+                }
+            }
+        }
+        
         // Check for forced strategy first
         if let Some(ref forced) = config.force_strategy {
             match forced.as_str() {
@@ -1456,10 +1388,13 @@ impl TranscriptionStrategySelector {
                         if let Some(ref app_handle) = app_handle {
                             strategy = strategy.with_app_handle(app_handle.clone());
                         }
-                        info(
-                            Component::Transcription,
-                            &format!("Auto-selected progressive strategy: Tiny (real-time) + {} (refinement)", strategy.refinement_model_name),
-                        );
+                        info(Component::Transcription, "🎯 STRATEGY SELECTION: Auto-selected PROGRESSIVE strategy (callback-based - KNOWN CORRUPTION RISK)");
+                        info(Component::Transcription, &format!("📝 Progressive strategy: AudioRecorder → Sample callbacks → Ring buffer → Tiny (real-time) + {} (refinement)", strategy.refinement_model_name));
+                        info(Component::Transcription, "⚠️  WARNING: This strategy uses sample callbacks which can cause audio corruption!");
+                        info(Component::Transcription, "🤖 MODEL ALGORITHM:");
+                        info(Component::Transcription, "   • REAL-TIME: Tiny model (ggml-tiny.en.bin) - Fast, lower accuracy, immediate feedback");
+                        info(Component::Transcription, &format!("   • REFINEMENT: {} - Slower, higher accuracy, background processing", strategy.refinement_model_name));
+                        info(Component::Transcription, "   • WORKFLOW: Tiny transcribes 5s chunks immediately → Medium refines same chunks in background");
                         return Box::new(strategy);
                     }
                     Err(e) => {
@@ -1506,13 +1441,19 @@ impl TranscriptionStrategySelector {
         );
 
         if can_handle_ring {
-            info(
-                Component::Transcription,
-                "Auto-selected ring buffer strategy with fastest available model",
-            );
+            info(Component::Transcription, "🎯 STRATEGY SELECTION: Auto-selected RING BUFFER strategy (file-based, safe)");
+            info(Component::Transcription, "📝 Ring buffer strategy: AudioRecorder → WAV → File-based chunking → Progressive transcription");
+            info(Component::Transcription, "✅ This strategy uses file-based audio processing (no corruption risk)");
+            info(Component::Transcription, "🤖 MODEL ALGORITHM:");
+            info(Component::Transcription, "   • SINGLE MODEL: Uses fastest available model for file-based chunking");
+            info(Component::Transcription, "   • WORKFLOW: WAV file grows → Extract 5s chunks → Transcribe chunks → Emit results");
             Box::new(ring_buffer_strategy)
         } else {
-            info(Component::Transcription, "Auto-selected classic strategy");
+            info(Component::Transcription, "🎯 STRATEGY SELECTION: Auto-selected CLASSIC strategy (fallback)");
+            info(Component::Transcription, "📝 Classic strategy: AudioRecorder → Complete WAV → Single transcription pass");
+            info(Component::Transcription, "🤖 MODEL ALGORITHM:");
+            info(Component::Transcription, "   • SINGLE MODEL: Uses default model (base.en) for complete file transcription");
+            info(Component::Transcription, "   • WORKFLOW: Record complete → Process entire WAV file → Single result");
             Box::new(classic_strategy)
         }
     }

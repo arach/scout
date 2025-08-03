@@ -1242,9 +1242,11 @@ impl AudioRecorderWorker {
                         let new_level = current_level * 0.7 + amplified_rms * 0.3; // Smooth the level changes
                         *audio_level.lock().unwrap() = new_level; // Already capped by amplified_rms
 
+                        // Acquire sample count lock first to minimize lock contention
+                        let prev_count = *sample_count.lock().unwrap();
+                        
                         if let Some(ref mut writer) = *writer.lock().unwrap() {
                             // Log first callback to verify actual data rate (per recording)
-                            let prev_count = *sample_count.lock().unwrap();
                             if prev_count == 0 {
                                 info(
                                     Component::Recording,
@@ -1266,9 +1268,10 @@ impl AudioRecorderWorker {
                             // Write samples directly in their native format
                             // NO conversion, NO resampling, NO channel mixing
                             for &sample in data.iter() {
-                                writer.write_sample(sample).ok();
+                                if let Err(e) = writer.write_sample(sample) {
+                                    error(Component::Recording, &format!("Sample write failed: {}", e));
+                                }
                             }
-                            *sample_count.lock().unwrap() += data.len() as u64;
 
                             // Periodic validation logging
                             if prev_count == 0 {
@@ -1282,6 +1285,9 @@ impl AudioRecorderWorker {
                                 );
                             }
                         }
+                        
+                        // Update sample count after writing (separate lock to minimize contention)
+                        *sample_count.lock().unwrap() += data.len() as u64;
 
                         // Call sample callback for ring buffer processing
                         if let Some(ref callback) = *sample_callback.lock().unwrap() {

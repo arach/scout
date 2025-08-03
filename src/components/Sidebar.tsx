@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { Settings, ChevronLeft, ChevronRight } from 'lucide-react';
 import './Sidebar.css';
 
-type View = 'record' | 'transcripts' | 'settings' | 'stats' | 'dictionary';
+type View = 'record' | 'transcripts' | 'settings' | 'stats' | 'dictionary' | 'audio-testing';
 
 interface SidebarProps {
   currentView: View;
@@ -204,6 +204,19 @@ export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpande
         </svg>
         {isExpanded && <span className="sidebar-label">Dictionary</span>}
         <span className="sidebar-tooltip">Dictionary</span>
+      </button>
+      <button
+        className={`sidebar-button sidebar-button-audio-testing ${currentView === 'audio-testing' ? 'active' : ''}`}
+        onClick={() => onViewChange('audio-testing')}
+        aria-label="Audio Testing"
+      >
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+          <path d="M10 6v8M6 10h8" stroke="currentColor" strokeWidth="1.5"/>
+          <circle cx="10" cy="10" r="2" fill="currentColor"/>
+        </svg>
+        {isExpanded && <span className="sidebar-label">Audio Testing</span>}
+        <span className="sidebar-tooltip">Audio Testing</span>
       </button>
       <button
         className={`sidebar-button sidebar-button-settings ${currentView === 'settings' ? 'active' : ''}`}

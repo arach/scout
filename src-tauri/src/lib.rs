@@ -9,6 +9,7 @@ mod sound;
 mod models;
 mod settings;
 mod clipboard;
+mod file_based_ring_buffer_monitor;
 mod ring_buffer_monitor;
 mod transcription_context;
 mod performance_logger;
@@ -135,6 +136,801 @@ pub struct AppState {
     pub native_panel_overlay: Arc<Mutex<macos::NativeOverlay>>,
 }
 
+
+#[tauri::command]
+async fn test_simple_recording(state: State<'_, AppState>) -> Result<String, String> {
+    use std::path::Path;
+    use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+    use hound::WavWriter;
+    use std::sync::{Arc, Mutex};
+    use std::thread;
+    use std::time::Duration;
+    
+    info(Component::Recording, "🧪 Starting SIMPLE test recording - no buffers, no strategies, no processing");
+    
+    // Create a simple output file
+    let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+    let filename = format!("test_simple_{}.wav", timestamp);
+    let output_path = state.recordings_dir.join(&filename);
+    
+    // Get default audio device
+    let host = cpal::default_host();
+    let device = host.default_input_device()
+        .ok_or("No default input device available")?;
+    
+    let config = device.default_input_config()
+        .map_err(|e| format!("Failed to get default config: {}", e))?;
+    
+    info(Component::Recording, &format!("Test device: {:?}", device.name()));
+    info(Component::Recording, &format!("Test config: {:?}", config));
+    
+    // Create WAV writer with exact device format
+    let spec = hound::WavSpec {
+        channels: config.channels(),
+        sample_rate: config.sample_rate().0,
+        bits_per_sample: 32,
+        sample_format: hound::SampleFormat::Float,
+    };
+    
+    let writer = WavWriter::create(&output_path, spec)
+        .map_err(|e| format!("Failed to create WAV writer: {}", e))?;
+    let writer = Arc::new(Mutex::new(Some(writer)));
+    
+    // Simple recording flag
+    let is_recording = Arc::new(Mutex::new(true));
+    let writer_clone = writer.clone();
+    let is_recording_clone = is_recording.clone();
+    
+    // Build simple audio stream
+    let stream = device.build_input_stream(
+        &config.into(),
+        move |data: &[f32], _: &cpal::InputCallbackInfo| {
+            if *is_recording_clone.lock().unwrap() {
+                if let Some(ref mut w) = *writer_clone.lock().unwrap() {
+                    for &sample in data.iter() {
+                        let _ = w.write_sample(sample);
+                    }
+                }
+            }
+        },
+        move |err| {
+            error(Component::Recording, &format!("Test stream error: {}", err));
+        },
+        None,
+    ).map_err(|e| format!("Failed to build test stream: {}", e))?;
+    
+    // Start recording
+    stream.play().map_err(|e| format!("Failed to start test stream: {}", e))?;
+    info(Component::Recording, "🎤 Test recording started - speak for 3 seconds...");
+    
+    // Record for 3 seconds
+    thread::sleep(Duration::from_secs(3));
+    
+    // Stop recording
+    *is_recording.lock().unwrap() = false;
+    drop(stream);
+    
+    // Finalize file
+    if let Some(writer) = writer.lock().unwrap().take() {
+        writer.finalize().map_err(|e| format!("Failed to finalize test recording: {}", e))?;
+    }
+    
+    info(Component::Recording, &format!("🎯 Test recording complete: {}", output_path.display()));
+    
+    Ok(format!("Test recording saved to: {}", filename))
+}
+
+#[tauri::command]
+async fn test_device_config_consistency(state: State<'_, AppState>) -> Result<String, String> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    use crate::logger::{info, Component};
+
+    info(Component::Recording, "🔍 Testing device configuration consistency across multiple queries");
+
+    let host = cpal::default_host();
+    let device = host.default_input_device()
+        .ok_or("No default input device available")?;
+
+    let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
+    info(Component::Recording, &format!("Testing device: {}", device_name));
+
+    let mut results = Vec::new();
+
+    // Query device config 5 times in quick succession
+    for i in 1..=5 {
+        let config = device.default_input_config()
+            .map_err(|e| format!("Failed to get device config on attempt {}: {}", i, e))?;
+
+        let config_info = format!(
+            "Attempt {}: {} Hz, {} channels, {:?}",
+            i, 
+            config.sample_rate().0,
+            config.channels(),
+            config.sample_format()
+        );
+
+        info(Component::Recording, &config_info);
+        results.push(config_info);
+
+        // Small delay between queries
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    }
+
+    let summary = format!(
+        "Device config consistency test for {}:\n{}",
+        device_name,
+        results.join("\n")
+    );
+
+    Ok(summary)
+}
+
+#[derive(serde::Serialize)]
+struct VoiceTestResult {
+    recordings: Vec<VoiceRecording>,
+    summary: String,
+}
+
+#[derive(serde::Serialize)]  
+struct VoiceRecording {
+    index: u32,
+    filename: String,
+    filepath: String,
+    description: String,
+}
+
+#[tauri::command]
+async fn serve_audio_file(file_path: String) -> Result<Vec<u8>, String> {
+    use std::fs;
+    fs::read(&file_path).map_err(|e| format!("Failed to read audio file: {}", e))
+}
+
+#[tauri::command]
+async fn start_recording_no_transcription(state: State<'_, AppState>) -> Result<String, String> {
+    use crate::logger::{info, Component};
+    
+    info(Component::Recording, "🎙️  Starting recording WITHOUT transcription components");
+    
+    // Check if already recording
+    if state.progress_tracker.is_busy() {
+        return Err("Recording already in progress".to_string());
+    }
+    
+    let recorder = state.recorder.lock().await;
+    if recorder.is_recording() {
+        drop(recorder);
+        return Err("Audio recorder is already active".to_string());
+    }
+    drop(recorder);
+    
+    // Generate filename
+    let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S_%3f").to_string();
+    let filename = format!("recording_no_transcription_{}.wav", timestamp);
+    
+    // Get recordings directory from settings - use hardcoded default for now
+    let recordings_dir = std::path::PathBuf::from("/Users/arach/Library/Application Support/com.jdi.scout/recordings");
+    
+    let path = recordings_dir.join(&filename);
+    
+    info(Component::Recording, &format!("Recording to: {:?}", path));
+    
+    // Start PURE audio recording - no transcription, no sample callbacks, no processing
+    let recorder = state.recorder.lock().await;
+    match recorder.start_recording(&path, None) {
+        Ok(_) => {
+            drop(recorder);
+            info(Component::Recording, "Pure audio recording started successfully");
+            Ok(filename)
+        }
+        Err(e) => {
+            drop(recorder);
+            Err(format!("Failed to start pure recording: {}", e))
+        }
+    }
+}
+
+#[tauri::command]
+async fn start_recording_simple_callback_test(state: State<'_, AppState>) -> Result<String, String> {
+    use crate::logger::{info, Component};
+    
+    info(Component::Recording, "🎙️ Starting recording with SIMPLE callback test (no channel forwarding)");
+    
+    // Check if already recording
+    if state.progress_tracker.is_busy() {
+        return Err("Recording already in progress".to_string());
+    }
+    
+    // Set environment variable to use simple callback instead of channel forwarding
+    std::env::set_var("USE_SIMPLE_CALLBACK_TEST", "true");
+    
+    let filename = state.recording_workflow.start_recording(None).await?;
+    
+    // Remove the environment variable override
+    std::env::remove_var("USE_SIMPLE_CALLBACK_TEST");
+    
+    Ok(filename)
+}
+
+#[tauri::command]
+async fn start_recording_ring_buffer_no_callbacks(state: State<'_, AppState>) -> Result<String, String> {
+    use crate::logger::{info, Component};
+    
+    info(Component::Recording, "🎙️ Starting recording with RING BUFFER but NO sample callbacks");
+    
+    // Check if already recording
+    if state.progress_tracker.is_busy() {
+        return Err("Recording already in progress".to_string());
+    }
+    
+    // Set environment variable to force ring buffer but disable callbacks
+    std::env::set_var("FORCE_TRANSCRIPTION_STRATEGY", "ring_buffer");
+    std::env::set_var("DISABLE_SAMPLE_CALLBACKS", "true");
+    
+    let filename = state.recording_workflow.start_recording(None).await?;
+    
+    // Remove the environment variable overrides
+    std::env::remove_var("FORCE_TRANSCRIPTION_STRATEGY");
+    std::env::remove_var("DISABLE_SAMPLE_CALLBACKS");
+    
+    Ok(filename)
+}
+
+#[tauri::command]
+async fn start_recording_classic_strategy(state: State<'_, AppState>) -> Result<String, String> {
+    use crate::logger::{info, Component};
+    
+    info(Component::Recording, "🎙️ Starting recording with CLASSIC strategy (no ring buffer, no progressive chunking)");
+    
+    // Check if already recording
+    if state.progress_tracker.is_busy() {
+        return Err("Recording already in progress".to_string());
+    }
+    
+    // Set environment variable to force classic strategy
+    std::env::set_var("FORCE_TRANSCRIPTION_STRATEGY", "classic");
+    
+    let filename = state.recording_workflow.start_recording(None).await?;
+    
+    // Remove the environment variable override
+    std::env::remove_var("FORCE_TRANSCRIPTION_STRATEGY");
+    
+    Ok(filename)
+}
+
+#[tauri::command]
+async fn stop_recording_no_transcription(state: State<'_, AppState>) -> Result<String, String> {
+    use crate::logger::{info, Component};
+    
+    info(Component::Recording, "🛑 Stopping pure recording");
+    
+    let recorder = state.recorder.lock().await;
+    match recorder.stop_recording() {
+        Ok(_) => {
+            drop(recorder);
+            info(Component::Recording, "Pure recording stopped successfully");
+            Ok("Recording stopped".to_string())
+        }
+        Err(e) => {
+            drop(recorder);
+            Err(format!("Failed to stop pure recording: {}", e))
+        }
+    }
+}
+
+#[tauri::command]
+async fn analyze_audio_corruption(file_path: String) -> Result<serde_json::Value, String> {
+    use hound::WavReader;
+    use crate::logger::{info, Component};
+    use std::collections::HashMap;
+    
+    info(Component::Recording, &format!("🔍 Analyzing audio corruption in: {}", file_path));
+    
+    let mut reader = WavReader::open(&file_path)
+        .map_err(|e| format!("Failed to open WAV file: {}", e))?;
+    
+    let spec = reader.spec();
+    info(Component::Recording, &format!("WAV spec: {:?}", spec));
+    
+    // Read all samples as f32 for analysis
+    let samples: Result<Vec<f32>, _> = reader.samples().collect();
+    let samples = samples.map_err(|e| format!("Failed to read samples: {}", e))?;
+    
+    if samples.is_empty() {
+        return Err("No audio samples found".to_string());
+    }
+    
+    info(Component::Recording, &format!("Analyzing {} samples", samples.len()));
+    
+    // Calculate basic audio metrics
+    let sample_count = samples.len();
+    let duration_seconds = sample_count as f32 / (spec.sample_rate as f32 * spec.channels as u16 as f32);
+    
+    // Analyze signal characteristics
+    let mut min_sample = f32::INFINITY;
+    let mut max_sample = f32::NEG_INFINITY;
+    let mut sum_squared = 0.0f64;
+    let mut zero_crossings = 0;
+    let mut clipped_samples = 0;
+    let mut silence_samples = 0;
+    
+    // Frequency analysis - detect unusual patterns
+    let mut amplitude_histogram = HashMap::new();
+    let mut consecutive_identical = 0;
+    let mut max_consecutive_identical = 0;
+    let mut last_sample = None;
+    
+    for &sample in &samples {
+        // Basic statistics
+        min_sample = min_sample.min(sample);
+        max_sample = max_sample.max(sample);
+        sum_squared += (sample as f64).powi(2);
+        
+        // Clipping detection
+        if sample.abs() >= 0.99 {
+            clipped_samples += 1;
+        }
+        
+        // Silence detection
+        if sample.abs() < 0.001 {
+            silence_samples += 1;
+        }
+        
+        // Amplitude distribution (binned)
+        let bin = ((sample + 1.0) * 50.0) as i32; // 100 bins from -1 to 1
+        *amplitude_histogram.entry(bin).or_insert(0) += 1;
+        
+        // Consecutive identical samples (indicates corruption)
+        if let Some(last) = last_sample {
+            let last_f32: f32 = last;
+            if (sample - last_f32).abs() < 0.00001 { // Essentially identical
+                consecutive_identical += 1;
+                max_consecutive_identical = max_consecutive_identical.max(consecutive_identical);
+            } else {
+                consecutive_identical = 0;
+            }
+        }
+        last_sample = Some(sample as f32);
+    }
+    
+    // Zero crossing analysis (for distortion detection)
+    for i in 1..samples.len() {
+        if (samples[i-1] >= 0.0) != (samples[i] >= 0.0) {
+            zero_crossings += 1;
+        }
+    }
+    
+    let rms = (sum_squared / sample_count as f64).sqrt() as f32;
+    let dynamic_range = max_sample - min_sample;
+    let silence_ratio = silence_samples as f32 / sample_count as f32;
+    let clipping_ratio = clipped_samples as f32 / sample_count as f32;
+    let zero_crossing_rate = zero_crossings as f32 / duration_seconds;
+    
+    // Detect corruption patterns
+    let mut corruption_indicators = Vec::new();
+    
+    if max_consecutive_identical > 1000 {
+        corruption_indicators.push(format!("High consecutive identical samples: {}", max_consecutive_identical));
+    }
+    
+    if clipping_ratio > 0.01 {
+        corruption_indicators.push(format!("High clipping ratio: {:.2}%", clipping_ratio * 100.0));
+    }
+    
+    if rms < 0.001 {
+        corruption_indicators.push("Extremely low RMS - possible silence".to_string());
+    } else if rms > 0.5 {
+        corruption_indicators.push(format!("Very high RMS: {:.3}", rms));
+    }
+    
+    if zero_crossing_rate > 8000.0 {
+        corruption_indicators.push(format!("Abnormally high zero crossing rate: {:.0} Hz", zero_crossing_rate));
+    } else if zero_crossing_rate < 50.0 && silence_ratio < 0.8 {
+        corruption_indicators.push(format!("Abnormally low zero crossing rate: {:.0} Hz", zero_crossing_rate));
+    }
+    
+    // Check for sample rate issues by analyzing frequency content
+    let expected_nyquist = spec.sample_rate as f32 / 2.0;
+    let actual_content_estimate = zero_crossing_rate * 2.0; // Rough estimate
+    
+    if actual_content_estimate > expected_nyquist * 1.2 {
+        corruption_indicators.push("Possible aliasing - content above Nyquist frequency".to_string());
+    }
+    
+    // Detect noise patterns
+    let mut noise_indicators = Vec::new();
+    
+    // High frequency noise detection (rapid amplitude changes)
+    let mut rapid_changes = 0;
+    for i in 1..samples.len().min(10000) { // Check first 10k samples
+        if (samples[i] - samples[i-1]).abs() > 0.1 {
+            rapid_changes += 1;
+        }
+    }
+    let rapid_change_ratio = rapid_changes as f32 / 10000.0_f32.min(samples.len() as f32);
+    
+    if rapid_change_ratio > 0.3 {
+        noise_indicators.push(format!("High rapid amplitude changes: {:.1}%", rapid_change_ratio * 100.0));
+    }
+    
+    // Build comprehensive analysis result
+    let analysis = serde_json::json!({
+        "file_path": file_path,
+        "basic_info": {
+            "sample_rate": spec.sample_rate,
+            "channels": spec.channels,
+            "bits_per_sample": spec.bits_per_sample,
+            "sample_format": format!("{:?}", spec.sample_format),
+            "duration_seconds": duration_seconds,
+            "sample_count": sample_count
+        },
+        "signal_analysis": {
+            "rms": rms,
+            "min_sample": min_sample,
+            "max_sample": max_sample,
+            "dynamic_range": dynamic_range,
+            "zero_crossing_rate": zero_crossing_rate,
+            "silence_ratio": silence_ratio,
+            "clipping_ratio": clipping_ratio,
+            "max_consecutive_identical": max_consecutive_identical
+        },
+        "corruption_indicators": corruption_indicators,
+        "noise_indicators": noise_indicators,
+        "health_score": {
+            "overall": if corruption_indicators.is_empty() && noise_indicators.is_empty() { "HEALTHY" } else { "CORRUPTED" },
+            "corruption_count": corruption_indicators.len(),
+            "noise_count": noise_indicators.len()
+        }
+    });
+    
+    info(Component::Recording, &format!("Analysis complete. Health: {}", 
+        if corruption_indicators.is_empty() && noise_indicators.is_empty() { "HEALTHY" } else { "CORRUPTED" }));
+    
+    Ok(analysis)
+}
+
+#[tauri::command]
+async fn test_voice_with_sample_rate_mismatch(state: State<'_, AppState>) -> Result<VoiceTestResult, String> {
+    use crate::logger::{info, Component};
+
+    info(Component::Recording, "🎤 Testing VOICE recording with artificial sample rate mismatch");
+
+    let mut recordings = Vec::new();
+
+    for i in 1..=3 {
+        info(Component::Recording, &format!("=== Voice Recording {} with Artificial Mismatch ===", i));
+        
+        // Create output path
+        let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S_%3f");
+        let filename = format!("test_voice_mismatch_{}_{}.wav", i, timestamp);
+        let output_path = state.recordings_dir.join(&filename);
+
+        // Use Scout's ACTUAL recording system
+        let recorder = state.recorder.lock().await;
+        
+        info(Component::Recording, &format!("🎤 Voice Recording {} - speak for 3 seconds...", i));
+        
+        // Start recording using Scout's exact same system
+        recorder
+            .start_recording(&output_path, None)
+            .map_err(|e| format!("Failed to start voice recording {}: {}", i, e))?;
+
+        drop(recorder); // Release the lock during recording
+
+        // Record for 3 seconds
+        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+
+        // Stop recording using Scout's exact same system
+        let recorder = state.recorder.lock().await;
+        recorder
+            .stop_recording()
+            .map_err(|e| format!("Failed to stop voice recording {}: {}", i, e))?;
+        
+        drop(recorder);
+
+        // NOW - artificially corrupt the WAV file to simulate the mismatch
+        match i {
+            1 => {
+                // Recording 1: Leave perfect (no corruption)
+                info(Component::Recording, "Recording 1: Leaving perfect (no sample rate corruption)");
+            }
+            2 => {
+                // Recording 2: Artificially corrupt to simulate 44.1kHz data in 48kHz header
+                info(Component::Recording, "Recording 2: Artificially corrupting to simulate sample rate mismatch (44.1kHz data)");
+                corrupt_wav_sample_rate(&output_path, 0.92)?; // 44.1/48 = 0.9175
+            }
+            3 => {
+                // Recording 3: Artificially corrupt to simulate 40kHz data in 48kHz header  
+                info(Component::Recording, "Recording 3: Artificially corrupting to simulate worse sample rate mismatch (40kHz data)");
+                corrupt_wav_sample_rate(&output_path, 0.83)?; // 40/48 = 0.833
+            }
+            _ => {}
+        }
+
+        let description = match i {
+            1 => "Perfect".to_string(),
+            2 => "~8% slower (simulating 44.1kHz data in 48kHz header)".to_string(), 
+            3 => "~17% slower (simulating 40kHz data in 48kHz header)".to_string(),
+            _ => "Unknown".to_string(),
+        };
+
+        let recording = VoiceRecording {
+            index: i,
+            filename: filename.clone(),
+            filepath: output_path.to_string_lossy().to_string(),
+            description,
+        };
+        
+        info(Component::Recording, &format!("Voice Recording {}: {} - {}", i, filename, recording.description));
+        recordings.push(recording);
+
+        // Small delay between recordings
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    }
+
+    let summary = "Voice recordings with artificial sample rate mismatch complete. Compare your voice in all 3 recordings:".to_string();
+    
+    Ok(VoiceTestResult {
+        recordings,
+        summary,
+    })
+}
+
+// Helper function to artificially corrupt WAV file sample rate
+fn corrupt_wav_sample_rate(wav_path: &std::path::Path, speed_factor: f32) -> Result<(), String> {
+    use crate::logger::{info, Component};
+    use std::fs::File;
+    use std::io::{Read, Write};
+    
+    info(Component::Recording, &format!("Corrupting WAV file: {:?} with speed factor: {}", wav_path, speed_factor));
+    
+    // Read the entire file
+    let mut file = File::open(wav_path)
+        .map_err(|e| format!("Failed to open WAV file: {}", e))?;
+    
+    let mut data = Vec::new();
+    file.read_to_end(&mut data)
+        .map_err(|e| format!("Failed to read WAV file: {}", e))?;
+    
+    if data.len() < 44 {
+        return Err("WAV file too small (less than 44 bytes)".to_string());
+    }
+    
+    // Check if it's a valid WAV file
+    if &data[0..4] != b"RIFF" || &data[8..12] != b"WAVE" {
+        return Err("Not a valid WAV file".to_string());
+    }
+    
+    // Find the fmt chunk and extract current sample rate
+    let mut pos = 12;
+    let mut sample_rate_pos = None;
+    
+    while pos + 8 <= data.len() {
+        let chunk_id = &data[pos..pos+4];
+        let chunk_size = u32::from_le_bytes([data[pos+4], data[pos+5], data[pos+6], data[pos+7]]);
+        
+        if chunk_id == b"fmt " {
+            if pos + 8 + 4 <= data.len() {
+                sample_rate_pos = Some(pos + 8 + 4); // Skip chunk header + format code
+                break;
+            }
+        }
+        
+        pos += 8 + chunk_size as usize;
+        if chunk_size % 2 == 1 {
+            pos += 1; // Pad to even boundary
+        }
+    }
+    
+    let sample_rate_pos = sample_rate_pos.ok_or("Could not find fmt chunk in WAV file")?;
+    
+    if sample_rate_pos + 4 > data.len() {
+        return Err("WAV file fmt chunk is corrupted".to_string());
+    }
+    
+    // Read current sample rate
+    let current_sample_rate = u32::from_le_bytes([
+        data[sample_rate_pos], data[sample_rate_pos+1], 
+        data[sample_rate_pos+2], data[sample_rate_pos+3]
+    ]);
+    
+    info(Component::Recording, &format!("Current sample rate: {} Hz", current_sample_rate));
+    
+    // Calculate new sample rate
+    let new_sample_rate = (current_sample_rate as f32 * speed_factor) as u32;
+    info(Component::Recording, &format!("New sample rate: {} Hz (should make audio play {}x speed)", new_sample_rate, speed_factor));
+    
+    // Update sample rate in the WAV header
+    let new_rate_bytes = new_sample_rate.to_le_bytes();
+    data[sample_rate_pos] = new_rate_bytes[0];
+    data[sample_rate_pos+1] = new_rate_bytes[1];
+    data[sample_rate_pos+2] = new_rate_bytes[2];
+    data[sample_rate_pos+3] = new_rate_bytes[3];
+    
+    // Also update byte rate (sample_rate * channels * bits_per_sample / 8)
+    // Byte rate is typically at sample_rate_pos + 4
+    if sample_rate_pos + 8 <= data.len() {
+        let current_byte_rate = u32::from_le_bytes([
+            data[sample_rate_pos+4], data[sample_rate_pos+5], 
+            data[sample_rate_pos+6], data[sample_rate_pos+7]
+        ]);
+        let new_byte_rate = (current_byte_rate as f32 * speed_factor) as u32;
+        let new_byte_rate_bytes = new_byte_rate.to_le_bytes();
+        data[sample_rate_pos+4] = new_byte_rate_bytes[0];
+        data[sample_rate_pos+5] = new_byte_rate_bytes[1];
+        data[sample_rate_pos+6] = new_byte_rate_bytes[2];
+        data[sample_rate_pos+7] = new_byte_rate_bytes[3];
+        
+        info(Component::Recording, &format!("Updated byte rate from {} to {}", current_byte_rate, new_byte_rate));
+    }
+    
+    // Write the modified data back to the file
+    let mut output_file = File::create(wav_path)
+        .map_err(|e| format!("Failed to create output file: {}", e))?;
+    
+    output_file.write_all(&data)
+        .map_err(|e| format!("Failed to write modified WAV data: {}", e))?;
+    
+    info(Component::Recording, "Successfully modified WAV header with new sample rate");
+    
+    Ok(())
+}
+
+#[tauri::command]
+async fn test_sample_rate_mismatch_reproduction(state: State<'_, AppState>) -> Result<String, String> {
+    use crate::logger::{info, Component};
+    use hound::WavWriter;
+
+    info(Component::Recording, "🧪 Testing ARTIFICIAL sample rate mismatch to reproduce degradation issue");
+
+    let mut results = Vec::new();
+
+    for i in 1..=3 {
+        info(Component::Recording, &format!("=== Creating Artificial Recording {} ===", i));
+        
+        // Create output path
+        let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S_%3f");
+        let filename = format!("test_artificial_{}_{}.wav", i, timestamp);
+        let output_path = state.recordings_dir.join(&filename);
+
+        // Artificially create the mismatch:
+        // Recording 1: Perfect (48kHz header, 48kHz data)
+        // Recording 2: Mismatch (48kHz header, ~44.1kHz data) 
+        // Recording 3: Worse mismatch (48kHz header, ~40kHz data)
+        
+        let header_sample_rate = 48000u32;
+        let actual_data_rate = match i {
+            1 => 48000u32,     // Perfect
+            2 => 44100u32,     // ~8% slower (should sound slower/lower pitch)
+            3 => 40000u32,     // ~17% slower (should sound much slower/lower pitch)  
+            _ => 48000u32,
+        };
+
+        info(Component::Recording, &format!("Recording {}: Header claims {}Hz, generating data at {}Hz", 
+            i, header_sample_rate, actual_data_rate));
+
+        // Create WAV with header claiming 48kHz
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: header_sample_rate, // Header claims 48kHz
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Float,
+        };
+
+        let mut writer = WavWriter::create(&output_path, spec)
+            .map_err(|e| format!("Failed to create artificial WAV {}: {}", i, e))?;
+
+        // Generate 3 seconds of test audio (sine wave)
+        let duration_samples = actual_data_rate * 3; // 3 seconds at ACTUAL rate
+        let frequency = 440.0; // A4 note
+        
+        for sample_idx in 0..duration_samples {
+            let t = sample_idx as f32 / actual_data_rate as f32;
+            let sample = (t * frequency * 2.0 * std::f32::consts::PI).sin() * 0.3;
+            writer.write_sample(sample)
+                .map_err(|e| format!("Failed to write sample in recording {}: {}", i, e))?;
+        }
+
+        writer.finalize()
+            .map_err(|e| format!("Failed to finalize artificial recording {}: {}", i, e))?;
+
+        let result = format!("Artificial Recording {}: {} (Header: {}Hz, Data: {}Hz)", 
+            i, filename, header_sample_rate, actual_data_rate);
+        info(Component::Recording, &result);
+        results.push(result);
+    }
+
+    let summary = format!("Artificial sample rate mismatch test complete:\n{}\n\nIf our theory is correct:\n- Recording 1 should sound normal\n- Recording 2 should sound slower/lower pitch\n- Recording 3 should sound much slower/lower pitch", 
+        results.join("\n"));
+    Ok(summary)
+}
+
+#[tauri::command]
+async fn test_multiple_scout_recordings(state: State<'_, AppState>) -> Result<String, String> {
+    use crate::logger::{info, Component};
+
+    info(Component::Recording, "🧪 Testing MULTIPLE Scout pipeline recordings to reproduce progressive degradation");
+
+    let mut results = Vec::new();
+
+    for i in 1..=3 {
+        info(Component::Recording, &format!("=== Starting Scout Pipeline Recording {} ===", i));
+        
+        // Create output path
+        let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S_%3f");
+        let filename = format!("test_scout_multi_{}_{}.wav", i, timestamp);
+        let output_path = state.recordings_dir.join(&filename);
+
+        // Use Scout's ACTUAL recording system
+        let recorder = state.recorder.lock().await;
+        
+        info(Component::Recording, &format!("🎤 Recording {} started - speak for 3 seconds...", i));
+        
+        // Start recording using Scout's exact same system
+        recorder
+            .start_recording(&output_path, None)
+            .map_err(|e| format!("Failed to start Scout recording {}: {}", i, e))?;
+
+        drop(recorder); // Release the lock during recording
+
+        // Record for 3 seconds
+        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+
+        // Stop recording using Scout's exact same system
+        let recorder = state.recorder.lock().await;
+        recorder
+            .stop_recording()
+            .map_err(|e| format!("Failed to stop Scout recording {}: {}", i, e))?;
+        
+        drop(recorder);
+
+        let result = format!("Recording {}: {}", i, filename);
+        info(Component::Recording, &format!("🎯 {}", result));
+        results.push(result);
+
+        // Small delay between recordings
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    }
+
+    let summary = format!("Multiple Scout pipeline recordings complete:\n{}", results.join("\n"));
+    Ok(summary)
+}
+
+#[tauri::command]
+async fn test_scout_pipeline_recording(state: State<'_, AppState>) -> Result<String, String> {
+    info(Component::Recording, "🧪 Starting Scout pipeline test recording - using SAME system as main recordings");
+    
+    // Create output path
+    let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+    let filename = format!("test_scout_pipeline_{}.wav", timestamp);
+    let output_path = state.recordings_dir.join(&filename);
+    
+    // Use Scout's ACTUAL recording system
+    let recorder = state.recorder.lock().await;
+    
+    info(Component::Recording, "🎤 Test recording started using Scout's AudioRecorder - speak for 3 seconds...");
+    
+    // Start recording using Scout's exact same system
+    recorder
+        .start_recording(&output_path, None)
+        .map_err(|e| format!("Failed to start Scout recording: {}", e))?;
+
+    drop(recorder); // Release the lock during recording
+
+    // Record for 3 seconds (same as simple test)
+    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+
+    // Stop recording using Scout's exact same system
+    let recorder = state.recorder.lock().await;
+    recorder
+        .stop_recording()
+        .map_err(|e| format!("Failed to stop Scout recording: {}", e))?;
+    
+    drop(recorder);
+
+    info(Component::Recording, &format!("🎯 Scout pipeline test recording complete: {}", output_path.display()));
+
+    Ok(format!("Scout pipeline test recording saved to: {}", filename))
+}
 
 #[tauri::command]
 async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle, device_name: Option<String>) -> Result<String, String> {
@@ -2692,6 +3488,19 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            serve_audio_file,
+            analyze_audio_corruption,
+            start_recording_no_transcription,
+            stop_recording_no_transcription,
+            start_recording_classic_strategy,
+            start_recording_ring_buffer_no_callbacks,
+            start_recording_simple_callback_test,
+            test_simple_recording,
+            test_device_config_consistency,
+            test_voice_with_sample_rate_mismatch,
+            test_sample_rate_mismatch_reproduction,
+            test_multiple_scout_recordings,
+            test_scout_pipeline_recording,
             start_recording,
             stop_recording,
             cancel_recording,

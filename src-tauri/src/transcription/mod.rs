@@ -7,6 +7,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
+pub mod file_based_ring_buffer_transcriber;
 pub mod ring_buffer_transcriber;
 pub mod strategy;
 
