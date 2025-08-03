@@ -1,4 +1,4 @@
-use super::device_monitor::{CapabilityCheckResult, DeviceCapabilityChecker};
+use super::device_monitor::{CapabilityCheckResult, DeviceCapabilityChecker, DeviceMonitor};
 use super::format::NativeAudioFormat;
 use super::metadata::AudioMetadata;
 use super::notifications::notify_airpods_detected;
@@ -96,6 +96,9 @@ impl AudioRecorder {
     }
 
     pub fn init(&mut self) {
+        // Eagerly probe device capabilities to ensure we have device info available
+        self.probe_and_cache_device_info();
+        
         let (tx, rx) = mpsc::channel();
         self.control_tx = Some(tx);
         let is_recording = self.is_recording.clone();
@@ -300,6 +303,76 @@ impl AudioRecorder {
             .send(RecorderCommand::StopAudioLevelMonitoring)
             .map_err(|e| format!("Failed to send stop audio level monitoring command: {}", e))
     }
+
+    /// Proactively probe and cache device information during initialization
+    /// This prevents the "No device info available" warnings during recording
+    fn probe_and_cache_device_info(&self) {
+        info(Component::Recording, "🔍 Probing device capabilities during initialization...");
+        
+        // First try to get default device capabilities directly
+        if let Some(capabilities) = DeviceMonitor::probe_default_device_capabilities() {
+            if let Some(default_config) = &capabilities.default_config {
+                let device_info = DeviceInfo {
+                    name: "Default Device".to_string(),
+                    sample_rate: default_config.sample_rate,
+                    channels: default_config.channels,
+                    metadata: None, // We'll populate this when we start recording
+                };
+                
+                if let Ok(mut guard) = self.current_device_info.lock() {
+                    *guard = Some(device_info.clone());
+                    info(
+                        Component::Recording,
+                        &format!(
+                            "✅ Cached default device info: {}Hz, {} channels", 
+                            device_info.sample_rate, 
+                            device_info.channels
+                        )
+                    );
+                } else {
+                    warn(Component::Recording, "Failed to cache device info: lock error");
+                }
+            } else {
+                warn(Component::Recording, "⚠️ Default device has no default config");
+            }
+        } else {
+            warn(Component::Recording, "⚠️ Failed to probe default device capabilities");
+            
+            // Fallback: try to get any available device info
+            match DeviceMonitor::probe_device_capabilities() {
+                Ok(devices) => {
+                    if let Some((name, capabilities)) = devices.iter().next() {
+                        if let Some(default_config) = &capabilities.default_config {
+                            let device_info = DeviceInfo {
+                                name: name.clone(),
+                                sample_rate: default_config.sample_rate,
+                                channels: default_config.channels,
+                                metadata: None,
+                            };
+                            
+                            if let Ok(mut guard) = self.current_device_info.lock() {
+                                *guard = Some(device_info.clone());
+                                info(
+                                    Component::Recording,
+                                    &format!(
+                                        "✅ Cached fallback device info ({}): {}Hz, {} channels", 
+                                        device_info.name,
+                                        device_info.sample_rate, 
+                                        device_info.channels
+                                    )
+                                );
+                            }
+                        }
+                    } else {
+                        warn(Component::Recording, "⚠️ No input devices found during probing");
+                    }
+                }
+                Err(e) => {
+                    error(Component::Recording, &format!("❌ Failed to probe device capabilities: {}", e));
+                }
+            }
+        }
+    }
 }
 
 struct AudioRecorderWorker {
@@ -371,6 +444,9 @@ impl AudioRecorderWorker {
                 drop(stream);
             }
         }
+
+        // Pre-recording validation: ensure we have cached device info
+        self.validate_device_info_available()?;
 
         let host = cpal::default_host();
 
@@ -1350,5 +1426,61 @@ impl AudioRecorderWorker {
                 None,
             )
             .map_err(|e| format!("Failed to build monitoring stream: {}", e))
+    }
+
+    /// Validate that device info is available before starting recording
+    /// This prevents the "No device info available" warnings
+    fn validate_device_info_available(&self) -> Result<(), String> {
+        match self.current_device_info.lock() {
+            Ok(guard) => {
+                if let Some(ref device_info) = *guard {
+                    info(
+                        Component::Recording,
+                        &format!(
+                            "✅ Device info validation passed: {} ({}Hz, {} channels)",
+                            device_info.name,
+                            device_info.sample_rate,
+                            device_info.channels
+                        )
+                    );
+                    Ok(())
+                } else {
+                    // Device info not available - try to probe it now as a last resort
+                    warn(Component::Recording, "⚠️ Device info not cached - attempting immediate probe");
+                    
+                    drop(guard); // Release the lock before calling probe methods
+                    
+                    if let Some(capabilities) = DeviceMonitor::probe_default_device_capabilities() {
+                        if let Some(default_config) = &capabilities.default_config {
+                            let device_info = DeviceInfo {
+                                name: "Default Device (emergency probe)".to_string(),
+                                sample_rate: default_config.sample_rate,
+                                channels: default_config.channels,
+                                metadata: None,
+                            };
+                            
+                            // Try to cache it for next time
+                            if let Ok(mut guard) = self.current_device_info.lock() {
+                                *guard = Some(device_info.clone());
+                                info(
+                                    Component::Recording,
+                                    &format!(
+                                        "🔧 Emergency device probe successful: {}Hz, {} channels",
+                                        device_info.sample_rate,
+                                        device_info.channels
+                                    )
+                                );
+                                return Ok(());
+                            }
+                        }
+                    }
+                    
+                    Err("No device info available and emergency probe failed. Cannot start recording without device information.".to_string())
+                }
+            }
+            Err(_) => {
+                Err("Failed to acquire device info lock for validation".to_string())
+            }
+        }
     }
 }
