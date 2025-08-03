@@ -1,13 +1,19 @@
-/// Demonstration of the minimal CPAL recorder
+/// Demonstration of the minimal CPAL recorder - DISABLED due to refactoring
+/// This example needs to be updated after audio module restructuring
 /// Run with: cargo run --example minimal_recorder_demo
 
+// Temporarily disabled due to module reorganization
+#[cfg(disabled)]
 use scout::audio::minimal_recorder::{MinimalAudioRecorder, RecordingInfo};
 use std::path::Path;
 use std::time::Duration;
 
 fn main() {
-    println!("🎙️ Minimal CPAL Recorder Demo");
-    println!("==============================");
+    println!("🎙️ Minimal CPAL Recorder Demo - DISABLED");
+    println!("==========================================");
+    println!("This example is temporarily disabled due to module refactoring.");
+    println!("It needs to be updated to work with the new audio architecture.");
+    return;
     
     // List available devices
     println!("\n📋 Available input devices:");

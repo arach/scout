@@ -15,6 +15,9 @@ pub use strategy::{
     TranscriptionConfig, TranscriptionResult, TranscriptionStrategy, TranscriptionStrategySelector,
 };
 
+// Export Transcriber for tests and other internal use (defined below in this module)
+// Note: The struct is defined in this file, so we don't need to re-export it
+
 // Global cache for transcriber instances to avoid CoreML reinitialization
 // Changed from single instance to HashMap to support multiple models
 static TRANSCRIBER_CACHE: Lazy<
