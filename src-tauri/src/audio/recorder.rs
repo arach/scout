@@ -1206,9 +1206,9 @@ impl AudioRecorderWorker {
                 config,
                 move |data: &[T], _: &cpal::InputCallbackInfo| {
                     if *is_recording.lock().unwrap() {
-                        // Log first callback to verify actual data rate
-                        static FIRST_CALLBACK: std::sync::Once = std::sync::Once::new();
-                        FIRST_CALLBACK.call_once(|| {
+                        // Log first callback to verify actual data rate (per recording)
+                        let prev_count = *sample_count.lock().unwrap();
+                        if prev_count == 0 {
                             info(
                                 Component::Recording,
                                 &format!(
@@ -1224,7 +1224,7 @@ impl AudioRecorderWorker {
                                     device_sample_rate, channels
                                 ),
                             );
-                        });
+                        }
 
                         // Calculate RMS (Root Mean Square) level for volume
                         let mut sum_squares = 0.0f32;
