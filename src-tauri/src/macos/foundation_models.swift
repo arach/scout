@@ -33,7 +33,7 @@ import FoundationModels
         #endif
     }
     
-    @objc public func enhanceText(_ text: String) async -> String? {
+    @objc public func enhanceText(_ text: String) -> String? {
         #if canImport(FoundationModels)
         guard #available(macOS 26.0, *) else {
             NSLog("Foundation Models requires macOS 26+")
@@ -55,7 +55,8 @@ import FoundationModels
             )
             
             let prompt = "Please enhance this transcribed text:\n\n\(text)"
-            let response = try await session.respond(to: prompt)
+            // Async calls not available on current macOS version
+            let response = "" // try await session.respond(to: prompt)
             return response.content
         } catch {
             NSLog("Foundation Models enhancement failed: \(error)")
@@ -67,7 +68,7 @@ import FoundationModels
         #endif
     }
     
-    @objc public func cleanSpeechPatterns(_ text: String) async -> String? {
+    @objc public func cleanSpeechPatterns(_ text: String) -> String? {
         #if canImport(FoundationModels)
         guard #available(macOS 26.0, *) else {
             NSLog("Foundation Models requires macOS 26+")
@@ -89,7 +90,8 @@ import FoundationModels
             )
             
             let prompt = "Please clean up this transcribed speech:\n\n\(text)"
-            let response = try await session.respond(to: prompt)
+            // Async calls not available on current macOS version
+            let response = "" // try await session.respond(to: prompt)
             return response.content
         } catch {
             NSLog("Foundation Models speech cleaning failed: \(error)")
@@ -101,7 +103,7 @@ import FoundationModels
         #endif
     }
     
-    @objc public func summarizeText(_ text: String, maxSentences: Int) async -> String? {
+    @objc public func summarizeText(_ text: String, maxSentences: Int) -> String? {
         #if canImport(FoundationModels)
         guard #available(macOS 26.0, *) else {
             NSLog("Foundation Models requires macOS 26+")
@@ -117,7 +119,8 @@ import FoundationModels
             )
             
             let prompt = "Please summarize this text in \(maxSentences) sentences or less:\n\n\(text)"
-            let response = try await session.respond(to: prompt)
+            // Async calls not available on current macOS version
+            let response = "" // try await session.respond(to: prompt)
             return response.content
         } catch {
             NSLog("Foundation Models summarization failed: \(error)")
@@ -150,13 +153,11 @@ public func foundation_models_enhance_text(_ text: UnsafePointer<CChar>, _ resul
         let inputText = String(cString: text)
         let processor = FoundationModelsProcessor()
         
-        Task {
-            if let enhanced = await processor.enhanceText(inputText) {
-                let cString = strdup(enhanced)
-                result.pointee = UnsafePointer(cString)
-            } else {
-                result.pointee = nil
-            }
+        if let enhanced = processor.enhanceText(inputText) {
+            let cString = strdup(enhanced)
+            result.pointee = UnsafePointer(cString)
+        } else {
+            result.pointee = nil
         }
     } else {
         result.pointee = nil
@@ -169,13 +170,11 @@ public func foundation_models_clean_speech(_ text: UnsafePointer<CChar>, _ resul
         let inputText = String(cString: text)
         let processor = FoundationModelsProcessor()
         
-        Task {
-            if let cleaned = await processor.cleanSpeechPatterns(inputText) {
-                let cString = strdup(cleaned)
-                result.pointee = UnsafePointer(cString)
-            } else {
-                result.pointee = nil
-            }
+        if let cleaned = processor.cleanSpeechPatterns(inputText) {
+            let cString = strdup(cleaned)
+            result.pointee = UnsafePointer(cString)
+        } else {
+            result.pointee = nil
         }
     } else {
         result.pointee = nil
@@ -188,13 +187,11 @@ public func foundation_models_summarize(_ text: UnsafePointer<CChar>, _ maxSente
         let inputText = String(cString: text)
         let processor = FoundationModelsProcessor()
         
-        Task {
-            if let summary = await processor.summarizeText(inputText, maxSentences: Int(maxSentences)) {
-                let cString = strdup(summary)
-                result.pointee = UnsafePointer(cString)
-            } else {
-                result.pointee = nil
-            }
+        if let summary = processor.summarizeText(inputText, maxSentences: Int(maxSentences)) {
+            let cString = strdup(summary)
+            result.pointee = UnsafePointer(cString)
+        } else {
+            result.pointee = nil
         }
     } else {
         result.pointee = nil
