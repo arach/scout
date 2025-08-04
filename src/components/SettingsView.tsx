@@ -5,7 +5,7 @@ import { useSettings } from '../contexts/SettingsContext';
 import { RecordingAudioSettings } from './settings/RecordingAudioSettings';
 import { DisplayInterfaceSettings } from './settings/DisplayInterfaceSettings';
 import { ThemesSettings } from './settings/ThemesSettings';
-import { WebhookSettings } from './settings/WebhookSettings';
+import { WebhookSettingsToggle } from './settings/WebhookSettingsToggle';
 import './settings/CollapsibleSection.css';
 import './SettingsView-spacing.css';
 import './settings/SoundSettings.css';
@@ -184,7 +184,7 @@ export const SettingsView = memo(function SettingsView() {
             </div>
             {isWebhooksExpanded && (
               <div className="collapsible-content">
-                <WebhookSettings />
+                <WebhookSettingsToggle />
               </div>
             )}
         </div>
@@ -255,7 +255,7 @@ export const SettingsView = memo(function SettingsView() {
                     <FoundationModelsSettings 
                       onSettingsChange={() => {
                         // Refresh settings if needed
-                        actions.refreshSettings?.();
+                        // actions.refreshSettings?.();
                       }}
                     />
                   </Suspense>

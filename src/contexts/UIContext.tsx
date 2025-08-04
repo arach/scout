@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
 
-type View = 'record' | 'transcripts' | 'settings' | 'stats' | 'dictionary';
+type View = 'record' | 'transcripts' | 'settings' | 'stats' | 'dictionary' | 'webhooks' | 'audio-testing';
 
 interface DeleteConfirmation {
   show: boolean;
@@ -55,7 +55,7 @@ export function UIProvider({ children }: UIProviderProps) {
   // Load saved view from localStorage or default to 'record'
   const [currentView, setCurrentView] = useState<View>(() => {
     const savedView = localStorage.getItem('scout-current-view');
-    return (savedView && ['record', 'transcripts', 'settings', 'stats', 'dictionary'].includes(savedView)) 
+    return (savedView && ['record', 'transcripts', 'settings', 'stats', 'dictionary', 'webhooks', 'audio-testing'].includes(savedView)) 
       ? savedView as View 
       : 'record';
   });
