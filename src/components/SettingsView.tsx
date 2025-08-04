@@ -14,6 +14,7 @@ import '../styles/grid-system.css';
 // Lazy load heavy components
 const ModelManager = lazy(() => import('./ModelManager').then(module => ({ default: module.ModelManager })));
 const LLMSettings = lazy(() => import('./LLMSettings').then(module => ({ default: module.LLMSettings })));
+const FoundationModelsSettings = lazy(() => import('./settings/FoundationModelsSettings').then(module => ({ default: module.FoundationModelsSettings })));
 
 export const SettingsView = memo(function SettingsView() {
   const { state, actions } = useSettings();
@@ -249,12 +250,25 @@ export const SettingsView = memo(function SettingsView() {
             </div>
             {isLLMSettingsExpanded && (
               <div className="collapsible-content">
-                <Suspense fallback={<div>Loading LLM settings...</div>}>
-                  <LLMSettings 
-                    settings={state.llm}
-                    onUpdateSettings={actions.updateLLMSettings}
-                  />
-                </Suspense>
+                <div className="space-y-6">
+                  <Suspense fallback={<div>Loading Foundation Models settings...</div>}>
+                    <FoundationModelsSettings 
+                      onSettingsChange={() => {
+                        // Refresh settings if needed
+                        actions.refreshSettings?.();
+                      }}
+                    />
+                  </Suspense>
+                  
+                  <div className="border-t pt-6">
+                    <Suspense fallback={<div>Loading LLM settings...</div>}>
+                      <LLMSettings 
+                        settings={state.llm}
+                        onUpdateSettings={actions.updateLLMSettings}
+                      />
+                    </Suspense>
+                  </div>
+                </div>
               </div>
             )}
         </div>

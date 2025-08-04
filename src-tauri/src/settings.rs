@@ -57,6 +57,11 @@ pub struct UISettings {
     pub profanity_filter_enabled: bool,
     pub profanity_filter_aggressive: bool,
     pub foundation_models_enabled: Option<bool>,
+    pub foundation_models_mode: Option<String>,
+    pub foundation_models_temperature: Option<f64>,
+    pub foundation_models_aggressiveness: Option<String>,
+    pub foundation_models_auto_processing: Option<String>,
+    pub foundation_models_min_words: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -130,6 +135,11 @@ impl Default for UISettings {
             profanity_filter_enabled: true,
             profanity_filter_aggressive: false,
             foundation_models_enabled: Some(false), // Disabled by default
+            foundation_models_mode: Some("enhance".to_string()),
+            foundation_models_temperature: Some(0.1),
+            foundation_models_aggressiveness: Some("moderate".to_string()),
+            foundation_models_auto_processing: Some("always".to_string()),
+            foundation_models_min_words: Some(10),
         }
     }
 }
