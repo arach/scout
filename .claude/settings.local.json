@@ -24,7 +24,9 @@
       "Bash(tree:*)",
       "Bash(cargo check:*)",
       "Bash(rm:*)",
-      "Bash(cargo fix:*)"
+      "Bash(cargo fix:*)",
+      "Bash(git push:*)",
+      "Bash(git checkout:*)"
     ],
     "deny": []
   },

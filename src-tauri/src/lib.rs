@@ -29,6 +29,7 @@ mod whisper_log_interceptor;
 mod performance_tracker;
 pub mod model_state;
 mod webhooks;
+mod foundation_models;
 #[cfg(target_os = "macos")]
 mod macos;
 
@@ -3592,7 +3593,14 @@ pub fn run() {
             webhooks::get_webhook_logs,
             webhooks::cleanup_webhook_logs,
             get_recording_stats,
-            generate_sample_data
+            generate_sample_data,
+            // Foundation Models commands
+            foundation_models::enhance_transcript,
+            foundation_models::summarize_transcript,
+            foundation_models::clean_speech_patterns,
+            foundation_models::extract_structured_data,
+            foundation_models::format_transcript,
+            foundation_models::check_foundation_models_availability
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

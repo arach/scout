@@ -196,6 +196,95 @@ fn main() {
         // Link the app context library
         println!("cargo:rustc-link-lib=static=app_context");
 
+        // Compile Foundation Models
+        println!("cargo:rerun-if-changed=src/macos/foundation_models.swift");
+        println!("cargo:rerun-if-changed=src/macos/foundation_models_bridge.m");
+
+        let foundation_models_swift_obj = out_dir.join("foundation_models.o");
+        let foundation_models_bridge_obj = out_dir.join("foundation_models_bridge.o");
+        let foundation_models_lib = out_dir.join("libfoundation_models.a");
+
+        // Compile Swift Foundation Models
+        let output = std::process::Command::new("swiftc")
+            .args([
+                "-c",
+                "-emit-objc-header",
+                "-emit-objc-header-path",
+                out_dir.join("foundation_models-Swift.h").to_str().unwrap(),
+                "-module-name",
+                "foundation_models",
+                "-o",
+                foundation_models_swift_obj.to_str().unwrap(),
+                "src/macos/foundation_models.swift",
+            ])
+            .output()
+            .expect("Failed to execute Swift compiler for Foundation Models");
+
+        if !output.status.success() {
+            println!("cargo:warning=Foundation Models Swift compilation failed");
+            println!(
+                "cargo:warning=stdout: {}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+            println!(
+                "cargo:warning=stderr: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            // Don't panic - Foundation Models is optional
+            println!("cargo:warning=Foundation Models will not be available");
+        } else {
+            // Compile Objective-C bridge for Foundation Models
+            let output = std::process::Command::new("clang")
+                .args([
+                    "-c",
+                    "-fobjc-arc",
+                    "-I",
+                    out_dir.to_str().unwrap(),
+                    "-o",
+                    foundation_models_bridge_obj.to_str().unwrap(),
+                    "src/macos/foundation_models_bridge.m",
+                ])
+                .output()
+                .expect("Failed to compile Foundation Models bridge");
+
+            if !output.status.success() {
+                println!("cargo:warning=Foundation Models bridge compilation failed");
+                println!(
+                    "cargo:warning=stdout: {}",
+                    String::from_utf8_lossy(&output.stdout)
+                );
+                println!(
+                    "cargo:warning=stderr: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                println!("cargo:warning=Foundation Models will not be available");
+            } else {
+                // Create static library for Foundation Models
+                let _ = std::fs::remove_file(&foundation_models_lib);
+                let ar_output = std::process::Command::new("ar")
+                    .args([
+                        "rcs",
+                        foundation_models_lib.to_str().unwrap(),
+                        foundation_models_swift_obj.to_str().unwrap(),
+                        foundation_models_bridge_obj.to_str().unwrap(),
+                    ])
+                    .output()
+                    .expect("Failed to create Foundation Models static library");
+
+                if !ar_output.status.success() {
+                    println!("cargo:warning=Failed to create Foundation Models static library");
+                    println!(
+                        "cargo:warning=stderr: {}",
+                        String::from_utf8_lossy(&ar_output.stderr)
+                    );
+                    println!("cargo:warning=Foundation Models will not be available");
+                } else {
+                    // Link the Foundation Models library
+                    println!("cargo:rustc-link-lib=static=foundation_models");
+                }
+            }
+        }
+
         // Compile Native NSPanel overlay
         println!("cargo:rerun-if-changed=src/macos/native_overlay/Logger.swift");
         println!("cargo:rerun-if-changed=src/macos/native_overlay/NativeOverlayPanel.swift");
@@ -261,7 +350,8 @@ fn main() {
                         || path.file_name()?.to_str()?.contains("Overlay")
                         || path.file_name()?.to_str()?.contains("Logger"))
                 {
-                    println!("cargo:warning=Found object file: {}", path.display());
+                    // Found object file: {}
+                    // println!("cargo:warning=Found object file: {}", path.display());
                     Some(path)
                 } else {
                     None
