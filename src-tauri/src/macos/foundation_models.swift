@@ -1,13 +1,13 @@
 import Foundation
 
-// Foundation Models requires macOS 15.1+ and may not be available in all regions
+// Foundation Models requires macOS 26+ and may not be available in all regions
 // Check availability at runtime and provide graceful fallback
 
 #if canImport(FoundationModels)
 import FoundationModels
 #endif
 
-@available(macOS 15.1, *)
+@available(macOS 26.0, *)
 @objc public class FoundationModelsProcessor: NSObject {
     
     @objc public override init() {
@@ -16,7 +16,7 @@ import FoundationModels
     
     @objc public static func isAvailable() -> Bool {
         #if canImport(FoundationModels)
-        guard #available(macOS 15.1, *) else { return false }
+        guard #available(macOS 26.0, *) else { return false }
         
         // Check if Foundation Models is available and system language is supported
         do {
@@ -35,8 +35,8 @@ import FoundationModels
     
     @objc public func enhanceText(_ text: String) async -> String? {
         #if canImport(FoundationModels)
-        guard #available(macOS 15.1, *) else {
-            NSLog("Foundation Models requires macOS 15.1+")
+        guard #available(macOS 26.0, *) else {
+            NSLog("Foundation Models requires macOS 26+")
             return nil
         }
         
@@ -69,8 +69,8 @@ import FoundationModels
     
     @objc public func cleanSpeechPatterns(_ text: String) async -> String? {
         #if canImport(FoundationModels)
-        guard #available(macOS 15.1, *) else {
-            NSLog("Foundation Models requires macOS 15.1+")
+        guard #available(macOS 26.0, *) else {
+            NSLog("Foundation Models requires macOS 26+")
             return nil
         }
         
@@ -103,8 +103,8 @@ import FoundationModels
     
     @objc public func summarizeText(_ text: String, maxSentences: Int) async -> String? {
         #if canImport(FoundationModels)
-        guard #available(macOS 15.1, *) else {
-            NSLog("Foundation Models requires macOS 15.1+")
+        guard #available(macOS 26.0, *) else {
+            NSLog("Foundation Models requires macOS 26+")
             return nil
         }
         
@@ -137,7 +137,7 @@ import FoundationModels
 // Simple C-style wrapper functions for easier Rust integration
 @_cdecl("foundation_models_is_available")
 public func foundation_models_is_available() -> Bool {
-    if #available(macOS 15.1, *) {
+    if #available(macOS 26.0, *) {
         return FoundationModelsProcessor.isAvailable()
     } else {
         return false
@@ -146,7 +146,7 @@ public func foundation_models_is_available() -> Bool {
 
 @_cdecl("foundation_models_enhance_text")
 public func foundation_models_enhance_text(_ text: UnsafePointer<CChar>, _ result: UnsafeMutablePointer<UnsafePointer<CChar>?>) {
-    if #available(macOS 15.1, *) {
+    if #available(macOS 26.0, *) {
         let inputText = String(cString: text)
         let processor = FoundationModelsProcessor()
         
@@ -165,7 +165,7 @@ public func foundation_models_enhance_text(_ text: UnsafePointer<CChar>, _ resul
 
 @_cdecl("foundation_models_clean_speech")
 public func foundation_models_clean_speech(_ text: UnsafePointer<CChar>, _ result: UnsafeMutablePointer<UnsafePointer<CChar>?>) {
-    if #available(macOS 15.1, *) {
+    if #available(macOS 26.0, *) {
         let inputText = String(cString: text)
         let processor = FoundationModelsProcessor()
         
@@ -184,7 +184,7 @@ public func foundation_models_clean_speech(_ text: UnsafePointer<CChar>, _ resul
 
 @_cdecl("foundation_models_summarize")
 public func foundation_models_summarize(_ text: UnsafePointer<CChar>, _ maxSentences: Int32, _ result: UnsafeMutablePointer<UnsafePointer<CChar>?>) {
-    if #available(macOS 15.1, *) {
+    if #available(macOS 26.0, *) {
         let inputText = String(cString: text)
         let processor = FoundationModelsProcessor()
         

@@ -281,7 +281,6 @@ fn main() {
                 } else {
                     // Link the Foundation Models library
                     println!("cargo:rustc-link-lib=static=foundation_models");
-                    println!("cargo:warning=Foundation Models successfully compiled and linked");
                 }
             }
         }
@@ -351,7 +350,8 @@ fn main() {
                         || path.file_name()?.to_str()?.contains("Overlay")
                         || path.file_name()?.to_str()?.contains("Logger"))
                 {
-                    println!("cargo:warning=Found object file: {}", path.display());
+                    // Found object file: {}
+                    // println!("cargo:warning=Found object file: {}", path.display());
                     Some(path)
                 } else {
                     None
