@@ -8,7 +8,7 @@
   background: var(--bg-primary);
   border: 1px solid var(--border-primary);
   border-radius: 8px;
-  overflow: hidden;
+  overflow: visible; /* Allow dropdowns to extend outside */
   margin-bottom: 16px; /* Increased for better separation */
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
   transition: box-shadow 0.2s ease;
@@ -29,6 +29,15 @@
   padding: 16px 16px; /* Adjusted to match grid padding */
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-primary);
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+}
+
+/* When collapsed, round the bottom corners too */
+.collapsible-section:not(:has(.collapsible-content)) .collapsible-header-wrapper {
+  border-bottom: none;
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
 }
 
 .collapsible-header {
@@ -130,6 +139,9 @@
   background: var(--bg-primary);
   animation: slideDown 0.2s ease-out;
   border-top: 1px solid var(--border-primary);
+  overflow: visible; /* Allow dropdowns to extend outside */
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
 }
 
 @keyframes slideDown {

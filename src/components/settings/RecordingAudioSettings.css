@@ -2,6 +2,16 @@
    =================================
 */
 
+/* Main container - ensure dropdowns can extend outside */
+.recording-audio-settings {
+  overflow: visible;
+}
+
+/* Setting item container */
+.setting-item {
+  overflow: visible; /* Ensure dropdowns can extend outside */
+}
+
 /* Two-column grid for shortcuts */
 .shortcuts-grid {
   display: grid;
@@ -38,6 +48,41 @@
   align-items: flex-end;
   gap: 16px;
   width: 100%;
+  overflow: visible; /* Ensure dropdowns can extend outside */
+}
+
+/* Sound flow container */
+.sound-flow-container {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex: 1;
+  overflow: visible; /* Ensure dropdowns can extend outside */
+}
+
+/* Sound flow item */
+.sound-flow-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow: visible; /* Ensure dropdowns can extend outside */
+}
+
+/* Sound flow label */
+.sound-flow-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Sound flow arrow */
+.sound-flow-arrow {
+  color: var(--text-secondary);
+  font-size: 16px;
+  padding: 0 4px;
+  margin-bottom: 16px; /* Align with dropdown height */
 }
 
 /* Preview button - ensure it looks like a button */
