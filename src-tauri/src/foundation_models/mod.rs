@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 use tauri::command;
-use crate::logger::{debug, error, info, warn, Component};
+use crate::logger::{info, warn, Component};
 #[cfg(target_os = "macos")]
 use crate::macos::FoundationModels;
 
@@ -78,7 +78,7 @@ pub struct FoundationModelsProcessor {
 
 impl FoundationModelsProcessor {
     pub fn new(config: FoundationModelsConfig) -> Result<Self, String> {
-        info(Component::Enhancement, "Foundation Models processor initialized");
+        info(Component::Processing, "Foundation Models processor initialized");
         Ok(Self { config })
     }
 
@@ -127,14 +127,14 @@ impl FoundationModelsProcessor {
             
             match result {
                 Ok(enhanced_text) => {
-                    info(Component::Enhancement, &format!(
+                    info(Component::Processing, &format!(
                         "Foundation Models processing completed in {}ms", 
                         processing_time.as_millis()
                     ));
                     Ok(enhanced_text)
                 }
                 Err(e) => {
-                    warn(Component::Enhancement, &format!("Foundation Models processing failed: {}", e));
+                    warn(Component::Processing, &format!("Foundation Models processing failed: {}", e));
                     Err(e)
                 }
             }
@@ -149,7 +149,7 @@ impl FoundationModelsProcessor {
     /// Update configuration
     pub fn update_config(&mut self, config: FoundationModelsConfig) {
         self.config = config;
-        info(Component::Enhancement, "Foundation Models configuration updated");
+        info(Component::Processing, "Foundation Models configuration updated");
     }
 }
 

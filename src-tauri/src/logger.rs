@@ -27,6 +27,7 @@ pub enum Component {
     Models,
     Webhooks,
     WavReader,
+    Enhancement,
 }
 
 impl Component {
@@ -42,6 +43,7 @@ impl Component {
             Component::Models => "MODL",
             Component::Webhooks => "WHOK",
             Component::WavReader => "WAVR",
+            Component::Enhancement => "ENHN",
         }
     }
 }

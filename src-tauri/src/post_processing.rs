@@ -350,27 +350,29 @@ impl PostProcessingHooks {
 
     /// Execute Foundation Models enhancement on the transcript
     async fn execute_foundation_models_enhancement(&self, transcript: &str) -> String {
-        let settings_guard = self.settings.lock().await;
-        let ui_settings = &settings_guard.get().ui;
-        
-        let foundation_models_enabled = ui_settings.foundation_models_enabled.unwrap_or(false);
-        let processing_mode = ui_settings.foundation_models_mode.as_deref().unwrap_or("enhance");
-        let auto_processing = ui_settings.foundation_models_auto_processing.as_deref().unwrap_or("always");
-        let min_words = ui_settings.foundation_models_min_words.unwrap_or(10);
-        let temperature = ui_settings.foundation_models_temperature.unwrap_or(0.1);
-        
-        drop(settings_guard);
+        let (foundation_models_enabled, processing_mode, auto_processing, min_words, temperature) = {
+            let settings_guard = self.settings.lock().await;
+            let ui_settings = &settings_guard.get().ui;
+            
+            (
+                ui_settings.foundation_models_enabled.unwrap_or(false),
+                ui_settings.foundation_models_mode.as_deref().unwrap_or("enhance").to_string(),
+                ui_settings.foundation_models_auto_processing.as_deref().unwrap_or("always").to_string(),
+                ui_settings.foundation_models_min_words.unwrap_or(10),
+                ui_settings.foundation_models_temperature.unwrap_or(0.1),
+            )
+        };
         
         if !foundation_models_enabled {
-            debug(Component::Processing, "🍎 Foundation Models enhancement is disabled");
+            info(Component::Processing, "🍎 Foundation Models enhancement is disabled");
             return transcript.to_string();
         }
 
         // Check auto-processing rules
         let word_count = transcript.split_whitespace().count();
-        match auto_processing {
+        match auto_processing.as_str() {
             "manual" => {
-                debug(Component::Processing, "🍎 Foundation Models set to manual mode - skipping auto-processing");
+                info(Component::Processing, "🍎 Foundation Models set to manual mode - skipping auto-processing");
                 return transcript.to_string();
             }
             "long_only" if word_count < min_words as usize => {
@@ -384,7 +386,7 @@ impl PostProcessingHooks {
         }
 
         if transcript.trim().is_empty() {
-            debug(Component::Processing, "🍎 Skipping Foundation Models enhancement - empty transcript");
+            info(Component::Processing, "🍎 Skipping Foundation Models enhancement - empty transcript");
             return transcript.to_string();
         }
 
@@ -395,7 +397,7 @@ impl PostProcessingHooks {
         
         // Create Foundation Models processor with user settings
         let config = FoundationModelsConfig {
-            enable_enhancement: processing_mode == "enhance",
+            enable_enhancement: processing_mode.as_str() == "enhance",
             enable_summarization: false,
             enable_structured_output: false,
             temperature,
@@ -411,7 +413,7 @@ impl PostProcessingHooks {
                 }
 
                 // Choose operation based on processing mode
-                let operation = match processing_mode {
+                let operation = match processing_mode.as_str() {
                     "clean" => ProcessingOperation::CleanSpeech,
                     "minimal" => ProcessingOperation::Enhance, // Could add a specific minimal mode later
                     _ => ProcessingOperation::Enhance,
