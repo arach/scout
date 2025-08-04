@@ -1,4 +1,4 @@
-export type ViewType = 'record' | 'transcripts' | 'settings' | 'stats' | 'dictionary';
+export type ViewType = 'record' | 'transcripts' | 'settings' | 'stats' | 'dictionary' | 'webhooks' | 'audio-testing';
 
 export interface DeleteConfirmation {
   show: boolean;

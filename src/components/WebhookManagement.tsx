@@ -5,13 +5,12 @@ import { WebhookLogsModal } from './WebhookLogsModal';
 import { Webhook, CreateWebhookDto, UpdateWebhookDto } from '../types/webhook';
 import { webhookApi, validateWebhookForm, getWebhookStatusInfo, formatWebhookUrl } from '../lib/webhooks';
 import { loggers } from '../utils/logger';
+import '../styles/grid-system.css';
 import './WebhookManagement.css';
 
-interface WebhookManagementProps {
-  className?: string;
-}
+interface WebhookManagementProps {}
 
-export const WebhookManagement: React.FC<WebhookManagementProps> = ({ className = '' }) => {
+export const WebhookManagement: React.FC<WebhookManagementProps> = () => {
   const [webhooks, setWebhooks] = useState<Webhook[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -108,13 +107,8 @@ export const WebhookManagement: React.FC<WebhookManagementProps> = ({ className 
 
   if (loading) {
     return (
-      <div className={`min-h-screen bg-gray-50 dark:bg-gray-900 ${className}`}>
-        <div className="max-w-6xl mx-auto px-6 py-8">
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
-              Webhook Management
-            </h1>
-          </div>
+      <div className="grid-container">
+        <div className="grid-content">
           <div className="webhook-loading">
             <Clock size={16} />
             Loading webhooks...
@@ -125,17 +119,8 @@ export const WebhookManagement: React.FC<WebhookManagementProps> = ({ className 
   }
 
   return (
-    <div className={`min-h-screen bg-gray-50 dark:bg-gray-900 ${className}`}>
-      <div className="max-w-6xl mx-auto px-6 py-8">
-        {/* Page Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
-            Webhook Management
-          </h1>
-          <p className="text-gray-600 dark:text-gray-400">
-            Configure webhooks to automatically send transcription data to external services and APIs
-          </p>
-        </div>
+    <div className="grid-container">
+      <div className="grid-content">
 
         {error && (
           <div className="webhook-error mb-6">
