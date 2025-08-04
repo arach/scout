@@ -1,4 +1,5 @@
 mod audio;
+pub mod strategies;
 pub mod db;
 pub mod transcription;
 mod recording_progress;
