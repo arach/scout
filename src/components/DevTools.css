@@ -63,26 +63,17 @@
   }
 }
 
-@keyframes devtools-wobble {
+@keyframes devtools-rotate {
   0% {
-    transform: scale(1) rotate(0deg);
-  }
-  30% {
-    transform: scale(1.1) rotate(-8deg);
-  }
-  60% {
-    transform: scale(1.08) rotate(6deg);
-  }
-  80% {
-    transform: scale(1.05) rotate(-3deg);
+    transform: rotate(0deg);
   }
   100% {
-    transform: scale(1) rotate(0deg);
+    transform: rotate(720deg);
   }
 }
 
 .dev-tools-button:hover:not(.active):not(.expanding):not(.collapsing) {
-  animation: devtools-wobble 0.28s cubic-bezier(0.68, -0.55, 0.27, 1.55);
+  animation: devtools-rotate 0.35s ease-out;
 }
 
 /* Dev Tools Panel */

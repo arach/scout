@@ -153,89 +153,94 @@ export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpande
         )}
       </button>
       
-      <button
-        className={`sidebar-button sidebar-button-record ${currentView === 'record' ? 'active' : ''}`}
-        onClick={() => onViewChange('record')}
-        aria-label="Record"
-      >
-        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.5"/>
-          <circle cx="10" cy="10" r="3" fill="currentColor"/>
-        </svg>
-        {isExpanded && <span className="sidebar-label">Record</span>}
-        <span className="sidebar-tooltip">Record</span>
-      </button>
-      <button
-        className={`sidebar-button sidebar-button-transcripts ${currentView === 'transcripts' ? 'active' : ''}`}
-        onClick={() => onViewChange('transcripts')}
-        aria-label="Transcripts"
-      >
-        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect x="4" y="3" width="12" height="14" rx="1" stroke="currentColor" strokeWidth="1.5"/>
-          <line x1="7" y1="7" x2="13" y2="7" stroke="currentColor" strokeWidth="1.5"/>
-          <line x1="7" y1="10" x2="13" y2="10" stroke="currentColor" strokeWidth="1.5"/>
-          <line x1="7" y1="13" x2="10" y2="13" stroke="currentColor" strokeWidth="1.5"/>
-        </svg>
-        {isExpanded && <span className="sidebar-label">Transcripts</span>}
-        <span className="sidebar-tooltip">Transcripts</span>
-      </button>
-      <button
-        className={`sidebar-button sidebar-button-stats ${currentView === 'stats' ? 'active' : ''}`}
-        onClick={() => onViewChange('stats')}
-        aria-label="Stats"
-      >
-        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect x="3" y="12" width="3" height="5" rx="0.5" fill="currentColor"/>
-          <rect x="8.5" y="8" width="3" height="9" rx="0.5" fill="currentColor"/>
-          <rect x="14" y="5" width="3" height="12" rx="0.5" fill="currentColor"/>
-        </svg>
-        {isExpanded && <span className="sidebar-label">Stats</span>}
-        <span className="sidebar-tooltip">Stats</span>
-      </button>
-      <button
-        className={`sidebar-button sidebar-button-dictionary ${currentView === 'dictionary' ? 'active' : ''}`}
-        onClick={() => onViewChange('dictionary')}
-        aria-label="Dictionary"
-      >
-        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M4 3C3.44772 3 3 3.44772 3 4V16C3 16.5523 3.44772 17 4 17H15C15.2652 17 15.5196 16.8946 15.7071 16.7071C15.8946 16.5196 16 16.2652 16 16V6L16 4C16 3.44772 15.5523 3 15 3H4Z" stroke="currentColor" strokeWidth="1.5"/>
-          <path d="M16 6C16 6 15 5 13 5H7" stroke="currentColor" strokeWidth="1.5"/>
-          <path d="M6 8H11M6 11H10M6 14H9" stroke="currentColor" strokeWidth="1.5"/>
-        </svg>
-        {isExpanded && <span className="sidebar-label">Dictionary</span>}
-        <span className="sidebar-tooltip">Dictionary</span>
-      </button>
-      <button
-        className={`sidebar-button sidebar-button-webhooks ${currentView === 'webhooks' ? 'active' : ''}`}
-        onClick={() => onViewChange('webhooks')}
-        aria-label="Webhooks"
-      >
-        <Webhook size={20} />
-        {isExpanded && <span className="sidebar-label">Webhooks</span>}
-        <span className="sidebar-tooltip">Webhooks</span>
-      </button>
-      <button
-        className={`sidebar-button sidebar-button-audio-testing ${currentView === 'audio-testing' ? 'active' : ''}`}
-        onClick={() => onViewChange('audio-testing')}
-        aria-label="Audio Testing"
-      >
-        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="1.5" fill="none"/>
-          <path d="M10 6v8M6 10h8" stroke="currentColor" strokeWidth="1.5"/>
-          <circle cx="10" cy="10" r="2" fill="currentColor"/>
-        </svg>
-        {isExpanded && <span className="sidebar-label">Audio Testing</span>}
-        <span className="sidebar-tooltip">Audio Testing</span>
-      </button>
-      <button
-        className={`sidebar-button sidebar-button-settings ${currentView === 'settings' ? 'active' : ''}`}
-        onClick={() => onViewChange('settings')}
-        aria-label="Settings"
-      >
-        <Settings size={20} />
-        {isExpanded && <span className="sidebar-label">Settings</span>}
-        <span className="sidebar-tooltip">Settings</span>
-      </button>
+      <div className="sidebar-main-buttons">
+        <button
+          className={`sidebar-button sidebar-button-record ${currentView === 'record' ? 'active' : ''}`}
+          onClick={() => onViewChange('record')}
+          aria-label="Record"
+        >
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.5"/>
+            <circle cx="10" cy="10" r="3" fill="currentColor"/>
+          </svg>
+          {isExpanded && <span className="sidebar-label">Record</span>}
+          <span className="sidebar-tooltip">Record</span>
+        </button>
+        <button
+          className={`sidebar-button sidebar-button-transcripts ${currentView === 'transcripts' ? 'active' : ''}`}
+          onClick={() => onViewChange('transcripts')}
+          aria-label="Transcripts"
+        >
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="4" y="3" width="12" height="14" rx="1" stroke="currentColor" strokeWidth="1.5"/>
+            <line x1="7" y1="7" x2="13" y2="7" stroke="currentColor" strokeWidth="1.5"/>
+            <line x1="7" y1="10" x2="13" y2="10" stroke="currentColor" strokeWidth="1.5"/>
+            <line x1="7" y1="13" x2="10" y2="13" stroke="currentColor" strokeWidth="1.5"/>
+          </svg>
+          {isExpanded && <span className="sidebar-label">Transcripts</span>}
+          <span className="sidebar-tooltip">Transcripts</span>
+        </button>
+        <button
+          className={`sidebar-button sidebar-button-stats ${currentView === 'stats' ? 'active' : ''}`}
+          onClick={() => onViewChange('stats')}
+          aria-label="Stats"
+        >
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="3" y="12" width="3" height="5" rx="0.5" fill="currentColor"/>
+            <rect x="8.5" y="8" width="3" height="9" rx="0.5" fill="currentColor"/>
+            <rect x="14" y="5" width="3" height="12" rx="0.5" fill="currentColor"/>
+          </svg>
+          {isExpanded && <span className="sidebar-label">Stats</span>}
+          <span className="sidebar-tooltip">Stats</span>
+        </button>
+        <button
+          className={`sidebar-button sidebar-button-dictionary ${currentView === 'dictionary' ? 'active' : ''}`}
+          onClick={() => onViewChange('dictionary')}
+          aria-label="Dictionary"
+        >
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M4 3C3.44772 3 3 3.44772 3 4V16C3 16.5523 3.44772 17 4 17H15C15.2652 17 15.5196 16.8946 15.7071 16.7071C15.8946 16.5196 16 16.2652 16 16V6L16 4C16 3.44772 15.5523 3 15 3H4Z" stroke="currentColor" strokeWidth="1.5"/>
+            <path d="M16 6C16 6 15 5 13 5H7" stroke="currentColor" strokeWidth="1.5"/>
+            <path d="M6 8H11M6 11H10M6 14H9" stroke="currentColor" strokeWidth="1.5"/>
+          </svg>
+          {isExpanded && <span className="sidebar-label">Dictionary</span>}
+          <span className="sidebar-tooltip">Dictionary</span>
+        </button>
+        <button
+          className={`sidebar-button sidebar-button-webhooks ${currentView === 'webhooks' ? 'active' : ''}`}
+          onClick={() => onViewChange('webhooks')}
+          aria-label="Webhooks"
+        >
+          <Webhook size={20} />
+          {isExpanded && <span className="sidebar-label">Webhooks</span>}
+          <span className="sidebar-tooltip">Webhooks</span>
+        </button>
+        <button
+          className={`sidebar-button sidebar-button-audio-testing ${currentView === 'audio-testing' ? 'active' : ''}`}
+          onClick={() => onViewChange('audio-testing')}
+          aria-label="Audio Testing"
+        >
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+            <path d="M10 6v8M6 10h8" stroke="currentColor" strokeWidth="1.5"/>
+            <circle cx="10" cy="10" r="2" fill="currentColor"/>
+          </svg>
+          {isExpanded && <span className="sidebar-label">Audio Testing</span>}
+          <span className="sidebar-tooltip">Audio Testing</span>
+        </button>
+      </div>
+      
+      <div className="sidebar-bottom-buttons">
+        <button
+          className={`sidebar-button sidebar-button-settings ${currentView === 'settings' ? 'active' : ''}`}
+          onClick={() => onViewChange('settings')}
+          aria-label="Settings"
+        >
+          <Settings size={20} />
+          {isExpanded && <span className="sidebar-label">Settings</span>}
+          <span className="sidebar-tooltip">Settings</span>
+        </button>
+      </div>
       
       {isExpanded && (
         <div 

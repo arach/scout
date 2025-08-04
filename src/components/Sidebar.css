@@ -15,6 +15,20 @@
   transition: width 0.4s cubic-bezier(0.23, 1, 0.32, 1) !important;
 }
 
+/* Main buttons container - takes up available space */
+.sidebar-main-buttons {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+/* Bottom buttons container - pinned to bottom */
+.sidebar-bottom-buttons {
+  display: flex;
+  flex-direction: column;
+  margin-top: auto;
+}
+
 .sidebar.collapsed {
   width: 52px;
   max-width: 52px;
@@ -392,6 +406,20 @@
 
 .sidebar-button-webhooks:active svg {
   animation: webhookHook 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Audio Testing button - 360 degree rotation */
+@keyframes rotate360 {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.sidebar-button-audio-testing:hover svg {
+  animation: rotate360 0.5s ease-in-out;
+}
+
+.sidebar-button-audio-testing:active svg {
+  animation: rotate360 0.5s ease-in-out;
 }
 
 /* Dark mode adjustments */
