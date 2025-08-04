@@ -8,6 +8,7 @@ use crate::logger::{info, error, debug, Component};
 use crate::llm::{CandleEngine, LLMEngine, GenerationOptions, ModelManager, PromptManager};
 use crate::llm::pipeline::LLMPipeline;
 use crate::dictionary_processor::DictionaryProcessor;
+use crate::foundation_models::{FoundationModelsProcessor, FoundationModelsConfig, ProcessingOperation};
 use std::path::PathBuf;
 
 /// Post-processing hooks that run after successful transcription
@@ -59,8 +60,11 @@ impl PostProcessingHooks {
             }
         };
         
-        // Execute profanity filtering on dictionary-processed transcript
-        let (filtered_transcript, analysis_logs) = self.execute_profanity_filter(&dict_processed_transcript, recording_duration_ms).await;
+        // Execute Foundation Models enhancement on dictionary-processed transcript
+        let enhanced_transcript = self.execute_foundation_models_enhancement(&dict_processed_transcript).await;
+        
+        // Execute profanity filtering on enhanced transcript
+        let (filtered_transcript, analysis_logs) = self.execute_profanity_filter(&enhanced_transcript, recording_duration_ms).await;
         
         // Execute auto-copy/paste hooks with filtered transcript
         self.execute_clipboard_hooks(&filtered_transcript).await;
@@ -340,6 +344,75 @@ impl PostProcessingHooks {
                 }
             } else {
                 Err(format!("Model {} not found", model_id))
+            }
+        }
+    }
+
+    /// Execute Foundation Models enhancement on the transcript
+    async fn execute_foundation_models_enhancement(&self, transcript: &str) -> String {
+        let settings_guard = self.settings.lock().await;
+        let foundation_models_enabled = settings_guard.get()
+            .ui
+            .foundation_models_enabled
+            .unwrap_or(false);
+        drop(settings_guard);
+        
+        if !foundation_models_enabled {
+            debug(Component::Processing, "🍎 Foundation Models enhancement is disabled");
+            return transcript.to_string();
+        }
+
+        if transcript.trim().is_empty() {
+            debug(Component::Processing, "🍎 Skipping Foundation Models enhancement - empty transcript");
+            return transcript.to_string();
+        }
+
+        info(Component::Processing, "🍎 Foundation Models enhancement enabled - improving transcript quality");
+        
+        // Create Foundation Models processor
+        let config = FoundationModelsConfig {
+            enable_enhancement: true,
+            enable_summarization: false,
+            enable_structured_output: false,
+            temperature: 0.1, // Low temperature for consistent enhancement
+            max_length: 2000,
+        };
+
+        match FoundationModelsProcessor::new(config) {
+            Ok(processor) => {
+                // Check if Foundation Models is available
+                if !processor.is_available().await {
+                    info(Component::Processing, "🍎 Foundation Models not available - skipping enhancement");
+                    return transcript.to_string();
+                }
+
+                // Enhance the transcript
+                match processor.process_text(transcript, ProcessingOperation::Enhance).await {
+                    Ok(enhanced_text) => {
+                        if enhanced_text != transcript {
+                            info(Component::Processing, &format!(
+                                "✅ Foundation Models enhancement successful: {} → {} chars", 
+                                transcript.len(), enhanced_text.len()
+                            ));
+                            enhanced_text
+                        } else {
+                            info(Component::Processing, "🍎 Foundation Models returned unchanged text");
+                            transcript.to_string()
+                        }
+                    }
+                    Err(e) => {
+                        error(Component::Processing, &format!(
+                            "❌ Foundation Models enhancement failed: {}", e
+                        ));
+                        transcript.to_string()
+                    }
+                }
+            }
+            Err(e) => {
+                error(Component::Processing, &format!(
+                    "❌ Failed to create Foundation Models processor: {}", e
+                ));
+                transcript.to_string()
             }
         }
     }

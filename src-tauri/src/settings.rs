@@ -56,6 +56,7 @@ pub struct UISettings {
     pub auto_paste: bool,
     pub profanity_filter_enabled: bool,
     pub profanity_filter_aggressive: bool,
+    pub foundation_models_enabled: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,6 +129,7 @@ impl Default for UISettings {
             auto_paste: false,
             profanity_filter_enabled: true,
             profanity_filter_aggressive: false,
+            foundation_models_enabled: Some(false), // Disabled by default
         }
     }
 }

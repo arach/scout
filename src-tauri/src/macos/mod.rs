@@ -6,6 +6,9 @@ pub use native_overlay::NativeOverlay;
 mod app_context;
 pub use app_context::{get_active_app_context, AppContext};
 
+mod foundation_models_ffi;
+pub use foundation_models_ffi::*;
+
 #[cfg(target_os = "macos")]
 use std::ffi::c_void;
 
