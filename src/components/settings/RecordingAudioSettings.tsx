@@ -25,6 +25,7 @@ export const RecordingAudioSettings = memo(function RecordingAudioSettings() {
       .catch(console.error);
   }, []);
 
+
   const previewSoundFlow = async () => {
     if (isPreviewingSound) return;
     
@@ -250,6 +251,7 @@ export const RecordingAudioSettings = memo(function RecordingAudioSettings() {
           </div>
         </div>
       )}
+
     </div>
   );
 });

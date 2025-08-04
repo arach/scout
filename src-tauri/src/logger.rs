@@ -26,6 +26,7 @@ pub enum Component {
     UI,
     Models,
     Webhooks,
+    WavReader,
 }
 
 impl Component {
@@ -40,6 +41,7 @@ impl Component {
             Component::UI => "UI  ",  // Extra spaces for alignment
             Component::Models => "MODL",
             Component::Webhooks => "WHOK",
+            Component::WavReader => "WAVR",
         }
     }
 }

@@ -132,9 +132,6 @@ impl KeyboardMonitor {
         match thread::Builder::new()
             .name("keyboard-monitor".to_string())
             .spawn(move || {
-                // Small delay to let the app fully initialize
-                thread::sleep(std::time::Duration::from_millis(1000));
-
                 info(Component::UI, "Keyboard monitor thread started");
 
                 // Catch any panics to prevent app crash

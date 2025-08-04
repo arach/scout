@@ -1,4 +1,4 @@
-use super::device_monitor::{CapabilityCheckResult, DeviceCapabilityChecker};
+use super::device_monitor::{CapabilityCheckResult, DeviceCapabilityChecker, DeviceMonitor};
 use super::format::NativeAudioFormat;
 use super::metadata::AudioMetadata;
 use super::notifications::notify_airpods_detected;
@@ -96,6 +96,9 @@ impl AudioRecorder {
     }
 
     pub fn init(&mut self) {
+        // Eagerly probe device capabilities to ensure we have device info available
+        self.probe_and_cache_device_info();
+        
         let (tx, rx) = mpsc::channel();
         self.control_tx = Some(tx);
         let is_recording = self.is_recording.clone();
@@ -233,15 +236,19 @@ impl AudioRecorder {
             ),
         );
 
-        // Wait for the recording state to actually change instead of using sleep
+        // Wait for the recording state to actually change with shorter timeout
         let wait_start = std::time::Instant::now();
-        let _guard = self
+        let wait_result = self
             .recording_state_changed
             .wait_timeout(
                 self.is_recording.lock().unwrap(),
-                Duration::from_millis(100),
-            )
-            .unwrap();
+                Duration::from_millis(50),  // Reduced from 100ms for faster response
+            );
+        
+        // Handle timeout gracefully - don't panic
+        if wait_result.is_err() {
+            warn(Component::Recording, "Recording state wait timed out, but continuing");
+        }
 
         let wait_time = wait_start.elapsed();
         let total_time = start_time.elapsed();
@@ -299,6 +306,76 @@ impl AudioRecorder {
             .unwrap()
             .send(RecorderCommand::StopAudioLevelMonitoring)
             .map_err(|e| format!("Failed to send stop audio level monitoring command: {}", e))
+    }
+
+    /// Proactively probe and cache device information during initialization
+    /// This prevents the "No device info available" warnings during recording
+    fn probe_and_cache_device_info(&self) {
+        info(Component::Recording, "🔍 Probing device capabilities during initialization...");
+        
+        // First try to get default device capabilities directly
+        if let Some(capabilities) = DeviceMonitor::probe_default_device_capabilities() {
+            if let Some(default_config) = &capabilities.default_config {
+                let device_info = DeviceInfo {
+                    name: "Default Device".to_string(),
+                    sample_rate: default_config.sample_rate,
+                    channels: default_config.channels,
+                    metadata: None, // We'll populate this when we start recording
+                };
+                
+                if let Ok(mut guard) = self.current_device_info.lock() {
+                    *guard = Some(device_info.clone());
+                    info(
+                        Component::Recording,
+                        &format!(
+                            "✅ Cached default device info: {}Hz, {} channels", 
+                            device_info.sample_rate, 
+                            device_info.channels
+                        )
+                    );
+                } else {
+                    warn(Component::Recording, "Failed to cache device info: lock error");
+                }
+            } else {
+                warn(Component::Recording, "⚠️ Default device has no default config");
+            }
+        } else {
+            warn(Component::Recording, "⚠️ Failed to probe default device capabilities");
+            
+            // Fallback: try to get any available device info
+            match DeviceMonitor::probe_device_capabilities() {
+                Ok(devices) => {
+                    if let Some((name, capabilities)) = devices.iter().next() {
+                        if let Some(default_config) = &capabilities.default_config {
+                            let device_info = DeviceInfo {
+                                name: name.clone(),
+                                sample_rate: default_config.sample_rate,
+                                channels: default_config.channels,
+                                metadata: None,
+                            };
+                            
+                            if let Ok(mut guard) = self.current_device_info.lock() {
+                                *guard = Some(device_info.clone());
+                                info(
+                                    Component::Recording,
+                                    &format!(
+                                        "✅ Cached fallback device info ({}): {}Hz, {} channels", 
+                                        device_info.name,
+                                        device_info.sample_rate, 
+                                        device_info.channels
+                                    )
+                                );
+                            }
+                        }
+                    } else {
+                        warn(Component::Recording, "⚠️ No input devices found during probing");
+                    }
+                }
+                Err(e) => {
+                    error(Component::Recording, &format!("❌ Failed to probe device capabilities: {}", e));
+                }
+            }
+        }
     }
 }
 
@@ -371,6 +448,9 @@ impl AudioRecorderWorker {
                 drop(stream);
             }
         }
+
+        // Pre-recording validation: ensure we have cached device info
+        self.validate_device_info_available()?;
 
         let host = cpal::default_host();
 
@@ -596,59 +676,27 @@ impl AudioRecorderWorker {
             );
         }
 
-        // For speech recording, we want to optimize for file size
-        // 16kHz mono is perfect for speech and Whisper works great with it
-        let optimal_sample_rate = cpal::SampleRate(16000);
-        let optimal_channels = 1; // Mono is all we need for speech
+        // CRITICAL FIX: Always use device's native configuration
+        // Forcing 16kHz was causing sample rate mismatches and garbled audio
+        // Whisper conversion will handle resampling properly during transcription
+        info(
+            Component::Recording,
+            &format!(
+                "Using device native format: {} Hz, {} channels",
+                actual_sample_rate.0,
+                device_channels
+            ),
+        );
+        info(
+            Component::Recording,
+            "Audio will be converted to 16kHz mono during transcription, not recording",
+        );
 
-        // Check if device supports our optimal configuration
-        let mut use_optimal_config = false;
-        if let Ok(supported_configs) = device.supported_input_configs() {
-            for config in supported_configs {
-                // Check if device supports 16kHz AND mono
-                if config.min_sample_rate() <= optimal_sample_rate
-                    && config.max_sample_rate() >= optimal_sample_rate
-                    && config.channels() == optimal_channels
-                {
-                    use_optimal_config = true;
-                    info(
-                        Component::Recording,
-                        "Device supports 16kHz mono - using optimal speech recording settings",
-                    );
-                    break;
-                }
-            }
-        }
-
-        // Use optimal config if supported, otherwise fall back to device default
-        let recording_sample_rate = if use_optimal_config {
-            optimal_sample_rate
-        } else {
-            warn(
-                Component::Recording,
-                &format!(
-                    "Device doesn't support 16kHz, using {} Hz",
-                    actual_sample_rate.0
-                ),
-            );
-            actual_sample_rate
-        };
-
-        // Build config based on whether we can use optimal settings
-        let mut config = if use_optimal_config {
-            // Device supports our optimal settings
-            cpal::StreamConfig {
-                channels: optimal_channels, // Record mono
-                sample_rate: recording_sample_rate,
-                buffer_size: cpal::BufferSize::Default,
-            }
-        } else {
-            // Use device's native config
-            cpal::StreamConfig {
-                channels: device_channels, // Use device's native channels
-                sample_rate: default_config.sample_rate(),
-                buffer_size: cpal::BufferSize::Default,
-            }
+        // Always use device's native config to avoid sample rate mismatches
+        let mut config = cpal::StreamConfig {
+            channels: device_channels, // Use device's native channels
+            sample_rate: default_config.sample_rate(), // Use device's native sample rate
+            buffer_size: cpal::BufferSize::Default,
         };
 
         // Try progressive buffer sizes for lower latency
@@ -678,7 +726,7 @@ impl AudioRecorderWorker {
 
         // Store sample rate, channels, and format for later use
         self.sample_rate = config.sample_rate.0;
-        self.channels = config.channels; // Store the actual recording channels (1 for mono, or device channels)
+        self.channels = config.channels; // Always matches device channels now
         self.sample_format = Some(default_config.sample_format());
 
         // Log what we're actually using
@@ -779,8 +827,9 @@ impl AudioRecorderWorker {
             "WAV file will preserve this exact format for archival quality",
         );
 
-        // Update global device sample rate cache for transcription strategies
+        // Update global device sample rate and channels cache for transcription strategies
         crate::update_device_sample_rate(config.sample_rate.0);
+        crate::update_device_channels(config.channels);
 
         // Store device info with metadata
         let device_info = DeviceInfo {
@@ -955,9 +1004,11 @@ impl AudioRecorderWorker {
         let mut _silence_padding_applied = false;
         let _silence_padding_ms;
 
-        if duration_seconds < 1.0 && self.writer.lock().unwrap().is_some() {
-            // Calculate how many silence samples we need to reach 1.1 seconds (with a small buffer)
-            let target_samples = (samples_per_second * 1.1) as u64; // 1.1 seconds worth of samples (all channels)
+        // Only pad very short recordings (less than 0.3 seconds) to avoid Whisper issues
+        // Whisper performs poorly on extremely short audio, but 0.3-1.0 second clips are fine
+        if duration_seconds < 0.3 && self.writer.lock().unwrap().is_some() {
+            // Calculate how many silence samples we need to reach 0.5 seconds minimum
+            let target_samples = (samples_per_second * 0.5) as u64; // 0.5 seconds minimum for Whisper
             let silence_samples_needed = target_samples.saturating_sub(total_samples);
 
             if silence_samples_needed > 0 {
@@ -1159,25 +1210,6 @@ impl AudioRecorderWorker {
                 config,
                 move |data: &[T], _: &cpal::InputCallbackInfo| {
                     if *is_recording.lock().unwrap() {
-                        // Log first callback to verify actual data rate
-                        static FIRST_CALLBACK: std::sync::Once = std::sync::Once::new();
-                        FIRST_CALLBACK.call_once(|| {
-                            info(
-                                Component::Recording,
-                                &format!(
-                                    "First audio callback - {} samples, {} channels",
-                                    data.len(),
-                                    channels
-                                ),
-                            );
-                            info(
-                                Component::Recording,
-                                &format!(
-                                    "Preserving native format: {} Hz, {} channel(s)",
-                                    device_sample_rate, channels
-                                ),
-                            );
-                        });
 
                         // Calculate RMS (Root Mean Square) level for volume
                         let mut sum_squares = 0.0f32;
@@ -1214,14 +1246,36 @@ impl AudioRecorderWorker {
                         let new_level = current_level * 0.7 + amplified_rms * 0.3; // Smooth the level changes
                         *audio_level.lock().unwrap() = new_level; // Already capped by amplified_rms
 
+                        // Acquire sample count lock first to minimize lock contention
+                        let prev_count = *sample_count.lock().unwrap();
+                        
                         if let Some(ref mut writer) = *writer.lock().unwrap() {
+                            // Log first callback to verify actual data rate (per recording)
+                            if prev_count == 0 {
+                                info(
+                                    Component::Recording,
+                                    &format!(
+                                        "First audio callback - {} samples, {} channels",
+                                        data.len(),
+                                        channels
+                                    ),
+                                );
+                                info(
+                                    Component::Recording,
+                                    &format!(
+                                        "Preserving native format: {} Hz, {} channel(s)",
+                                        device_sample_rate, channels
+                                    ),
+                                );
+                            }
+
                             // Write samples directly in their native format
                             // NO conversion, NO resampling, NO channel mixing
                             for &sample in data.iter() {
-                                writer.write_sample(sample).ok();
+                                if let Err(e) = writer.write_sample(sample) {
+                                    error(Component::Recording, &format!("Sample write failed: {}", e));
+                                }
                             }
-                            let prev_count = *sample_count.lock().unwrap();
-                            *sample_count.lock().unwrap() += data.len() as u64;
 
                             // Periodic validation logging
                             if prev_count == 0 {
@@ -1235,6 +1289,9 @@ impl AudioRecorderWorker {
                                 );
                             }
                         }
+                        
+                        // Update sample count after writing (separate lock to minimize contention)
+                        *sample_count.lock().unwrap() += data.len() as u64;
 
                         // Call sample callback for ring buffer processing
                         if let Some(ref callback) = *sample_callback.lock().unwrap() {
@@ -1379,5 +1436,61 @@ impl AudioRecorderWorker {
                 None,
             )
             .map_err(|e| format!("Failed to build monitoring stream: {}", e))
+    }
+
+    /// Validate that device info is available before starting recording
+    /// This prevents the "No device info available" warnings
+    fn validate_device_info_available(&self) -> Result<(), String> {
+        match self.current_device_info.lock() {
+            Ok(guard) => {
+                if let Some(ref device_info) = *guard {
+                    info(
+                        Component::Recording,
+                        &format!(
+                            "✅ Device info validation passed: {} ({}Hz, {} channels)",
+                            device_info.name,
+                            device_info.sample_rate,
+                            device_info.channels
+                        )
+                    );
+                    Ok(())
+                } else {
+                    // Device info not available - try to probe it now as a last resort
+                    warn(Component::Recording, "⚠️ Device info not cached - attempting immediate probe");
+                    
+                    drop(guard); // Release the lock before calling probe methods
+                    
+                    if let Some(capabilities) = DeviceMonitor::probe_default_device_capabilities() {
+                        if let Some(default_config) = &capabilities.default_config {
+                            let device_info = DeviceInfo {
+                                name: "Default Device (emergency probe)".to_string(),
+                                sample_rate: default_config.sample_rate,
+                                channels: default_config.channels,
+                                metadata: None,
+                            };
+                            
+                            // Try to cache it for next time
+                            if let Ok(mut guard) = self.current_device_info.lock() {
+                                *guard = Some(device_info.clone());
+                                info(
+                                    Component::Recording,
+                                    &format!(
+                                        "🔧 Emergency device probe successful: {}Hz, {} channels",
+                                        device_info.sample_rate,
+                                        device_info.channels
+                                    )
+                                );
+                                return Ok(());
+                            }
+                        }
+                    }
+                    
+                    Err("No device info available and emergency probe failed. Cannot start recording without device information.".to_string())
+                }
+            }
+            Err(_) => {
+                Err("Failed to acquire device info lock for validation".to_string())
+            }
+        }
     }
 }

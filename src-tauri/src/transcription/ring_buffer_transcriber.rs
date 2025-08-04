@@ -248,8 +248,12 @@ impl RingBufferTranscriber {
             return Ok(String::new());
         }
 
-        // Save chunk to temporary file
-        let chunk_filename = format!("ring_chunk_{}.wav", chunk_id);
+        // Save chunk to temporary file with unique name to prevent collisions
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let chunk_filename = format!("ring_chunk_{}_{}.wav", chunk_id, timestamp);
         let chunk_path = self.temp_dir.join(&chunk_filename);
 
         self.ring_buffer
@@ -268,12 +272,14 @@ impl RingBufferTranscriber {
             &format!("Chunk {} completed: \"{}\"", chunk_id, text),
         );
 
-        // Clean up temporary file
-        if let Err(e) = std::fs::remove_file(&chunk_path) {
-            warn(
-                Component::RingBuffer,
-                &format!("Failed to clean up chunk file: {}", e),
-            );
+        // Clean up temporary file - ensure it exists before attempting removal
+        if chunk_path.exists() {
+            if let Err(e) = std::fs::remove_file(&chunk_path) {
+                warn(
+                    Component::RingBuffer,
+                    &format!("Failed to clean up chunk file {}: {}", chunk_path.display(), e),
+                );
+            }
         }
 
         Ok(text)
@@ -298,8 +304,12 @@ impl RingBufferTranscriber {
             });
         }
 
-        // Save chunk to temporary file
-        let chunk_filename = format!("ring_chunk_{}.wav", request.chunk_id);
+        // Save chunk to temporary file with unique name to prevent collisions
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let chunk_filename = format!("ring_chunk_{}_{}.wav", request.chunk_id, timestamp);
         let chunk_path = temp_dir.join(&chunk_filename);
 
         ring_buffer.save_chunk_to_file(&chunk_data, &chunk_path)?;
@@ -312,12 +322,14 @@ impl RingBufferTranscriber {
                 .map_err(|e| format!("Transcription failed: {}", e))?
         };
 
-        // Clean up temporary file
-        if let Err(e) = std::fs::remove_file(&chunk_path) {
-            warn(
-                Component::RingBuffer,
-                &format!("Failed to clean up chunk file: {}", e),
-            );
+        // Clean up temporary file - ensure it exists before attempting removal
+        if chunk_path.exists() {
+            if let Err(e) = std::fs::remove_file(&chunk_path) {
+                warn(
+                    Component::RingBuffer,
+                    &format!("Failed to clean up chunk file {}: {}", chunk_path.display(), e),
+                );
+            }
         }
 
         Ok(ChunkResult {

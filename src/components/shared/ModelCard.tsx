@@ -45,6 +45,7 @@ export function ModelCard<T extends BaseModel>({
   isDownloading,
   downloadProgress,
   onDownload,
+  onSelect,
   renderSpecs,
   isDownloadingCoreML
 }: ModelCardProps<T>) {
@@ -110,10 +111,26 @@ export function ModelCard<T extends BaseModel>({
       {/* Action section - only show when there are actions */}
       {(model.downloaded || isDownloading) && (
         <div className="model-actions">
+          {model.downloaded && !model.active && !isDownloading && (
+            <button 
+              className="model-btn model-btn-primary"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelect(model.id);
+              }}
+            >
+              <CheckCircle size={14} />
+              <span>Use Model</span>
+            </button>
+          )}
+          
           {model.downloaded && !model.coreml_downloaded && model.coreml_url && !isDownloading && (
           <button 
             className="model-btn model-btn-secondary"
-            onClick={() => onDownload(model)}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDownload(model);
+            }}
           >
             <Zap size={14} />
             <span>Apply Acceleration</span>

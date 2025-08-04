@@ -10,6 +10,7 @@ import { TranscriptsView } from "./TranscriptsView";
 import { SettingsView } from "./SettingsView";
 import { StatsView } from "./StatsView";
 import Dictionary from "./Dictionary";
+import { AudioTestingView } from "./AudioTestingView";
 import { AudioErrorBoundary, TranscriptionErrorBoundary, SettingsErrorBoundary } from './ErrorBoundary';
 import { useRecording } from '../hooks/useRecording';
 import { useSettings } from '../hooks/useSettings';
@@ -496,6 +497,9 @@ export function AppContent() {
         )}
         {currentView === 'dictionary' && (
           <Dictionary />
+        )}
+        {currentView === 'audio-testing' && (
+          <AudioTestingView />
         )}
 
         {/* File drop overlay */}

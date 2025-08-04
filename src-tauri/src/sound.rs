@@ -348,7 +348,7 @@ impl SoundPlayer {
     }
 
     pub async fn preview_sound_flow() {
-        use tokio::time::{sleep, Duration};
+        
 
         if !Self::is_enabled() {
             return;
@@ -357,14 +357,8 @@ impl SoundPlayer {
         // Play start sound
         Self::play_start();
 
-        // Wait 1 second
-        sleep(Duration::from_millis(1000)).await;
-
-        // Play stop sound
+        // Play stop sound immediately - no artificial delay needed
         Self::play_stop();
-
-        // Wait 0.5 seconds
-        sleep(Duration::from_millis(500)).await;
 
         // Play success sound
         Self::play_success();

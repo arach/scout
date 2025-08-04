@@ -4,6 +4,79 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+use std::sync::OnceLock;
+
+// Global device capability cache to prevent repeated probing
+static DEVICE_CACHE: OnceLock<Mutex<DeviceCapabilityCache>> = OnceLock::new();
+
+#[derive(Debug, Clone)]
+struct CachedDeviceInfo {
+    capabilities: DeviceCapabilities,
+    last_updated: Instant,
+}
+
+struct DeviceCapabilityCache {
+    devices: HashMap<String, CachedDeviceInfo>,
+    default_device: Option<(String, CachedDeviceInfo)>,
+    cache_duration: Duration,
+}
+
+impl DeviceCapabilityCache {
+    fn new() -> Self {
+        Self {
+            devices: HashMap::new(),
+            default_device: None,
+            cache_duration: Duration::from_secs(30), // Cache for 30 seconds
+        }
+    }
+
+    fn get_cached_device(&self, device_name: &str) -> Option<DeviceCapabilities> {
+        if let Some(cached) = self.devices.get(device_name) {
+            if cached.last_updated.elapsed() < self.cache_duration {
+                return Some(cached.capabilities.clone());
+            }
+        }
+        None
+    }
+
+    fn get_cached_default_device(&self) -> Option<DeviceCapabilities> {
+        if let Some((_, cached)) = &self.default_device {
+            if cached.last_updated.elapsed() < self.cache_duration {
+                return Some(cached.capabilities.clone());
+            }
+        }
+        None
+    }
+
+    fn cache_device(&mut self, device_name: String, capabilities: DeviceCapabilities) {
+        let cached_info = CachedDeviceInfo {
+            capabilities,
+            last_updated: Instant::now(),
+        };
+        self.devices.insert(device_name, cached_info);
+    }
+
+    fn cache_default_device(&mut self, device_name: String, capabilities: DeviceCapabilities) {
+        let cached_info = CachedDeviceInfo {
+            capabilities,
+            last_updated: Instant::now(),
+        };
+        self.default_device = Some((device_name.clone(), cached_info.clone()));
+        // Also cache it in the regular devices map
+        self.devices.insert(device_name, cached_info);
+    }
+
+    fn clear_expired(&mut self) {
+        let now = Instant::now();
+        self.devices.retain(|_, cached| now.duration_since(cached.last_updated) < self.cache_duration);
+        
+        if let Some((_, cached)) = &self.default_device {
+            if now.duration_since(cached.last_updated) >= self.cache_duration {
+                self.default_device = None;
+            }
+        }
+    }
+}
 
 /// Device change event types
 #[derive(Debug, Clone)]
@@ -117,7 +190,7 @@ impl DeviceMonitor {
             let mut last_check = Instant::now();
 
             while !*should_stop.lock().unwrap() {
-                thread::sleep(Duration::from_millis(100));
+                thread::sleep(Duration::from_millis(50));
 
                 if last_check.elapsed() >= check_interval {
                     if let Err(e) = Self::check_for_device_changes(
@@ -385,6 +458,109 @@ impl DeviceMonitor {
     /// Get current default device
     pub fn get_current_default(&self) -> Option<String> {
         self.current_default.lock().unwrap().clone()
+    }
+
+    /// Get capabilities for a specific device by name
+    pub fn get_device_capabilities_by_name(&self, device_name: &str) -> Option<DeviceCapabilities> {
+        self.current_devices.lock().unwrap().get(device_name).cloned()
+    }
+
+    /// Get capabilities for the default input device
+    pub fn get_default_device_capabilities(&self) -> Option<DeviceCapabilities> {
+        let default_name = self.get_current_default()?;
+        self.get_device_capabilities_by_name(&default_name)
+    }
+
+    /// Immediately probe and return device capabilities without starting monitoring (with caching)
+    /// This is useful for eager device detection during initialization
+    pub fn probe_device_capabilities() -> Result<HashMap<String, DeviceCapabilities>, String> {
+        // Initialize cache if needed
+        let cache = DEVICE_CACHE.get_or_init(|| Mutex::new(DeviceCapabilityCache::new()));
+        
+        let host = cpal::default_host();
+        let input_devices = host
+            .input_devices()
+            .map_err(|e| format!("Failed to enumerate devices: {}", e))?;
+
+        let mut devices_map = HashMap::new();
+        let mut cache_hits = 0;
+        let mut cache_misses = 0;
+        
+        for device in input_devices {
+            let name = device.name().unwrap_or_else(|_| "Unknown".to_string());
+            
+            // Try cache first
+            let capabilities = if let Ok(mut cache_guard) = cache.lock() {
+                cache_guard.clear_expired();
+                if let Some(cached_capabilities) = cache_guard.get_cached_device(&name) {
+                    cache_hits += 1;
+                    Some(cached_capabilities)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            let capabilities = if let Some(caps) = capabilities {
+                caps
+            } else {
+                // Cache miss - probe the device
+                if let Ok(caps) = Self::get_device_capabilities(&device) {
+                    cache_misses += 1;
+                    
+                    // Cache the result
+                    if let Ok(mut cache_guard) = cache.lock() {
+                        cache_guard.cache_device(name.clone(), caps.clone());
+                    }
+                    caps
+                } else {
+                    continue; // Skip devices that can't be probed
+                }
+            };
+            
+            devices_map.insert(name, capabilities);
+        }
+        
+        if cache_hits > 0 || cache_misses > 0 {
+            info(
+                Component::Recording,
+                &format!("📦 Device capability cache stats: {} hits, {} misses", cache_hits, cache_misses)
+            );
+        }
+
+        Ok(devices_map)
+    }
+
+    /// Immediately probe the default device and return its capabilities (with caching)
+    pub fn probe_default_device_capabilities() -> Option<DeviceCapabilities> {
+        // Initialize cache if needed
+        let cache = DEVICE_CACHE.get_or_init(|| Mutex::new(DeviceCapabilityCache::new()));
+        
+        // Try to get from cache first
+        if let Ok(mut cache_guard) = cache.lock() {
+            cache_guard.clear_expired(); // Clean up expired entries
+            if let Some(cached_capabilities) = cache_guard.get_cached_default_device() {
+                info(Component::Recording, "📦 Using cached default device capabilities");
+                return Some(cached_capabilities);
+            }
+        }
+        
+        // Cache miss - probe the device
+        let host = cpal::default_host();
+        if let Some(default_device) = host.default_input_device() {
+            let device_name = default_device.name().unwrap_or_else(|_| "Default Device".to_string());
+            
+            if let Ok(capabilities) = Self::get_device_capabilities(&default_device) {
+                // Cache the result
+                if let Ok(mut cache_guard) = cache.lock() {
+                    cache_guard.cache_default_device(device_name, capabilities.clone());
+                    info(Component::Recording, "💾 Cached default device capabilities for future use");
+                }
+                return Some(capabilities);
+            }
+        }
+        None
     }
 
     /// Force a device check (useful for manual refresh)

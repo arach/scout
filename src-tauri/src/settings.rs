@@ -148,7 +148,7 @@ impl Default for LLMSettings {
         Self {
             enabled: false,
             model_id: "tinyllama-1.1b".to_string(),
-            temperature: 0.7,
+            temperature: 0.2,
             max_tokens: 500,
             auto_download_model: true,
             enabled_prompts: vec![

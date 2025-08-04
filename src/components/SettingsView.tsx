@@ -159,6 +159,7 @@ export const SettingsView = memo(function SettingsView() {
             )}
         </div>
 
+
         {/* Webhooks - Collapsible */}
         <div className="collapsible-section" ref={webhooksRef}>
             <div className="collapsible-header-wrapper">

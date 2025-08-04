@@ -51,7 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Connect to source database (real app data)
     let source_db_path =
-        PathBuf::from("/Users/arach/Library/Application Support/com.scout.app/scout.db");
+        PathBuf::from("/Users/arach/Library/Application Support/com.jdi.scout/scout.db");
     println!(
         "📊 Connecting to source database: {}",
         source_db_path.display()

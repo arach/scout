@@ -192,8 +192,19 @@ impl WhisperAudioConverter {
         if whisper_samples.is_empty() {
             return Err("No samples after conversion".to_string());
         }
-
+        
+        // Check for extremely short audio that might cause issues
         let duration_ms = (whisper_samples.len() as f32 / 16.0) as u32; // 16 samples per ms at 16kHz
+        if duration_ms < 100 {
+            warn(
+                Component::Transcription,
+                &format!(
+                    "Extremely short audio after conversion: {}ms ({} samples). May cause transcription issues.",
+                    duration_ms, whisper_samples.len()
+                ),
+            );
+        }
+
         let elapsed = start_time.elapsed();
 
         info(
