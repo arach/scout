@@ -5,7 +5,7 @@ import { Transcript } from '../types/transcript';
 import { useAudioLevel } from '../contexts/AudioContext';
 import './DevTools.css';
 
-type View = 'record' | 'transcripts' | 'settings' | 'stats' | 'dictionary';
+type View = 'record' | 'transcripts' | 'settings' | 'stats' | 'dictionary' | 'webhooks' | 'audio-testing';
 
 interface DevToolsProps {
   currentView: View;

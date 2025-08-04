@@ -32,7 +32,9 @@ export const AppHeader = memo<AppHeaderProps>(({
     transcripts: 'Transcripts',
     settings: 'Settings',
     stats: 'Stats',
-    dictionary: 'Dictionary'
+    dictionary: 'Dictionary',
+    webhooks: 'Webhooks',
+    'audio-testing': 'Audio Testing'
   };
 
   return (

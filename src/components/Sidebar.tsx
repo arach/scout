@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Settings, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Settings, ChevronLeft, ChevronRight, Webhook } from 'lucide-react';
 import './Sidebar.css';
 
-type View = 'record' | 'transcripts' | 'settings' | 'stats' | 'dictionary' | 'audio-testing';
+type View = 'record' | 'transcripts' | 'settings' | 'stats' | 'dictionary' | 'webhooks' | 'audio-testing';
 
 interface SidebarProps {
   currentView: View;
@@ -204,6 +204,15 @@ export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpande
         </svg>
         {isExpanded && <span className="sidebar-label">Dictionary</span>}
         <span className="sidebar-tooltip">Dictionary</span>
+      </button>
+      <button
+        className={`sidebar-button sidebar-button-webhooks ${currentView === 'webhooks' ? 'active' : ''}`}
+        onClick={() => onViewChange('webhooks')}
+        aria-label="Webhooks"
+      >
+        <Webhook size={20} />
+        {isExpanded && <span className="sidebar-label">Webhooks</span>}
+        <span className="sidebar-tooltip">Webhooks</span>
       </button>
       <button
         className={`sidebar-button sidebar-button-audio-testing ${currentView === 'audio-testing' ? 'active' : ''}`}

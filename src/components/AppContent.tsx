@@ -11,6 +11,7 @@ import { SettingsView } from "./SettingsView";
 import { StatsView } from "./StatsView";
 import Dictionary from "./Dictionary";
 import { AudioTestingView } from "./AudioTestingView";
+import { WebhookManagement } from "./WebhookManagement";
 import { AudioErrorBoundary, TranscriptionErrorBoundary, SettingsErrorBoundary } from './ErrorBoundary';
 import { useRecording } from '../hooks/useRecording';
 import { useSettings } from '../hooks/useSettings';
@@ -497,6 +498,9 @@ export function AppContent() {
         )}
         {currentView === 'dictionary' && (
           <Dictionary />
+        )}
+        {currentView === 'webhooks' && (
+          <WebhookManagement />
         )}
         {currentView === 'audio-testing' && (
           <AudioTestingView />

@@ -377,6 +377,23 @@
   animation: spinQuick 0.3s ease-out;
 }
 
+/* Webhook button hook animation */
+@keyframes webhookHook {
+  0% { transform: rotate(0deg) scale(1); }
+  25% { transform: rotate(-12deg) scale(1.1); }
+  50% { transform: rotate(8deg) scale(1.2); }
+  75% { transform: rotate(-4deg) scale(1.05); }
+  100% { transform: rotate(0deg) scale(1); }
+}
+
+.sidebar-button-webhooks:hover svg {
+  animation: webhookHook 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar-button-webhooks:active svg {
+  animation: webhookHook 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
 /* Dark mode adjustments */
 @media (prefers-color-scheme: dark) {
   .sidebar-button.active::after {
