@@ -1,7 +1,7 @@
 use crate::audio::WavFileReader;
-use crate::logger::{debug, error, info, warn, Component};
+use crate::logger::{debug, info, warn, Component};
 use crate::transcription::Transcriber;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;

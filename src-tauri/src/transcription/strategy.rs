@@ -1130,7 +1130,7 @@ impl TranscriptionStrategy for ProgressiveTranscriptionStrategy {
         let final_text = if _recording_path.exists() {
             // Use Medium model to transcribe the complete audio file
             let medium_transcriber = self.medium_transcriber.clone();
-            let mut transcriber = medium_transcriber.lock().await;
+            let transcriber = medium_transcriber.lock().await;
             
             match transcriber.transcribe_file(&_recording_path) {
                 Ok(result) => {

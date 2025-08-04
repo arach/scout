@@ -16,7 +16,15 @@
       "Bash(cargo run:*)",
       "Bash(find:*)",
       "Bash(sqlite3:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(mkdir:*)",
+      "Bash(ls:*)",
+      "Bash(cp:*)",
+      "Bash(tree:*)",
+      "Bash(cargo check:*)",
+      "Bash(rm:*)",
+      "Bash(cargo fix:*)"
     ],
     "deny": []
   },

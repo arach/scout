@@ -11,11 +11,11 @@
 /// - Circular buffer architecture for continuous recording
 /// - Hardware-level format negotiation with fallback strategies
 
-use crate::logger::{debug, error, info, warn, Component};
+use crate::logger::{error, info, warn, Component};
 use std::sync::{Arc, Mutex, Condvar};
 use std::sync::mpsc;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Callback for receiving 16kHz mono f32 samples in real-time
 pub type StreamingSampleCallback = Arc<dyn Fn(&[f32]) + Send + Sync>;

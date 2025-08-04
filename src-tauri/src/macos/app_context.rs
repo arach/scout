@@ -1,4 +1,3 @@
-use crate::logger::Component;
 use serde::{Deserialize, Serialize};
 use std::ffi::{c_char, CStr};
 

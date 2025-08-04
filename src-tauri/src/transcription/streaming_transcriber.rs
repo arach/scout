@@ -13,14 +13,13 @@
 /// - Real-time callback system for results
 
 use crate::audio::streaming_recorder_16khz::StreamingSampleCallback;
-use crate::logger::{debug, error, info, warn, Component};
+use crate::logger::{debug, error, info, Component};
 use crate::transcription::Transcriber;
 use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc;
 
 /// Configuration for streaming transcription
 #[derive(Debug, Clone)]
@@ -396,7 +395,7 @@ impl StreamingTranscriber {
         cursor.set_position(0);
 
         // Create temporary file for whisper-rs (unfortunately required by current API)
-        use std::io::Write;
+        
         let mut temp_file = tempfile::NamedTempFile::new()
             .map_err(|e| format!("Failed to create temp file: {}", e))?;
 
@@ -437,7 +436,7 @@ impl StreamingTranscriptionPipeline {
         let mut recorder = crate::audio::streaming_recorder_16khz::StreamingAudioRecorder16kHz::new(recorder_config);
         recorder.init()?;
 
-        let mut transcriber = StreamingTranscriber::new(model_path, transcriber_config).await?;
+        let transcriber = StreamingTranscriber::new(model_path, transcriber_config).await?;
 
         Ok(Self {
             recorder,

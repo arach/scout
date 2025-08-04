@@ -1,4 +1,4 @@
-use crate::logger::{debug, error, info, warn, Component};
+use crate::logger::{debug, info, warn, Component};
 use hound::{WavReader, WavSpec};
 use std::fs::File;
 use std::io::BufReader;

@@ -140,7 +140,7 @@ pub struct AppState {
 
 #[tauri::command]
 async fn test_simple_recording(state: State<'_, AppState>) -> Result<String, String> {
-    use std::path::Path;
+    
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
     use hound::WavWriter;
     use std::sync::{Arc, Mutex};
@@ -1585,7 +1585,7 @@ async fn download_model(
     model_name: String,
     model_url: String,
 ) -> Result<(), String> {
-    use tauri::Emitter;
+    
     
     let models_dir = app.path().app_data_dir()
         .map_err(|e| format!("Failed to get app data dir: {}", e))?
@@ -1625,7 +1625,7 @@ async fn download_coreml_model(
     model_name: &str,
     models_dir: &std::path::Path,
 ) -> Result<(), String> {
-    use tauri::Emitter;
+    
     
     // Construct Core ML URL based on model name
     let coreml_url = format!(
@@ -2627,8 +2627,8 @@ struct RecordingStats {
 
 #[tauri::command]
 async fn generate_sample_data(state: State<'_, AppState>) -> Result<String, String> {
-    use chrono::{DateTime, Datelike, Local, Duration, Timelike, Weekday};
-    use std::collections::HashMap;
+    use chrono::{Datelike, Local, Duration, Timelike, Weekday};
+    
     
     eprintln!("Generating sample transcript data...");
     
@@ -2793,7 +2793,7 @@ async fn get_recording_stats(state: State<'_, AppState>) -> Result<RecordingStat
         }
         
         // Convert to sorted vectors
-        let mut weekly_distribution: Vec<(String, i32)> = vec![
+        let weekly_distribution: Vec<(String, i32)> = vec![
             ("Mon".to_string(), *weekly_dist.get("Mon").unwrap_or(&0)),
             ("Tue".to_string(), *weekly_dist.get("Tue").unwrap_or(&0)),
             ("Wed".to_string(), *weekly_dist.get("Wed").unwrap_or(&0)),
