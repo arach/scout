@@ -391,7 +391,7 @@
     display: flex;
     flex-direction: column;
     margin: 0 var(--grid-padding-horizontal);
-    background: #f3f4f6;
+    background: var(--bg-secondary);
     border: 1px solid var(--border-primary);
     border-radius: 12px;
     overflow: hidden;
@@ -414,7 +414,7 @@
     height: 100%;
     position: relative;
     scrollbar-width: thin;
-    scrollbar-color: var(--border-primary, #d1d5db) var(--bg-secondary, #f3f4f6);
+    scrollbar-color: var(--border-primary) var(--bg-tertiary);
 }
 
 /* Scrollbar styling for non-virtualized list */
@@ -423,16 +423,16 @@
 }
 
 .transcript-list-scrollable::-webkit-scrollbar-track {
-    background: var(--bg-secondary, #f3f4f6);
+    background: var(--bg-tertiary);
 }
 
 .transcript-list-scrollable::-webkit-scrollbar-thumb {
-    background: var(--border-primary, #d1d5db);
+    background: var(--border-primary);
     border-radius: 4px;
 }
 
 .transcript-list-scrollable::-webkit-scrollbar-thumb:hover {
-    background: var(--border-secondary, #9ca3af);
+    background: var(--border-hover);
 }
 
 @media (max-width: 768px) {
@@ -444,7 +444,7 @@
 /* Virtualized list styles */
 .transcript-list-virtual {
     scrollbar-width: thin;
-    scrollbar-color: var(--border-primary, #d1d5db) var(--bg-secondary, #f3f4f6);
+    scrollbar-color: var(--border-primary) var(--bg-tertiary);
     /* Ensure the virtual list uses full width and height */
     width: 100% !important;
     height: 100% !important;
@@ -487,16 +487,16 @@
 }
 
 .transcript-list-virtual::-webkit-scrollbar-track {
-    background: var(--bg-secondary, #f3f4f6);
+    background: var(--bg-tertiary);
 }
 
 .transcript-list-virtual::-webkit-scrollbar-thumb {
-    background: var(--border-primary, #d1d5db);
+    background: var(--border-primary);
     border-radius: 4px;
 }
 
 .transcript-list-virtual::-webkit-scrollbar-thumb:hover {
-    background: var(--border-secondary, #9ca3af);
+    background: var(--border-hover);
 }
 
 /* Date grouping styles - removed duplicate */

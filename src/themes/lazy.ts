@@ -5,8 +5,6 @@ export const themeLoaders: Record<ThemeVariant, () => Promise<Theme>> = {
   'vscode-light': () => import('./base/vscode').then(m => m.vscodeLight),
   'vscode-dark': () => import('./base/vscode').then(m => m.vscodeDark),
   'minimal-overlay': () => import('./base/minimal').then(m => m.minimalOverlay),
-  'winamp-classic': () => import('./base/winamp').then(m => m.winampClassic),
-  'winamp-modern': () => import('./base/winamp').then(m => m.winampModern),
   'terminal-chic': () => import('./base/terminal').then(m => m.terminalChic),
   'terminal-chic-light': () => import('./base/terminal').then(m => m.terminalChicLight),
   'system': async () => {

@@ -1,4 +1,4 @@
-import React, { memo, useState } from 'react';
+import { memo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import './AudioTestingView.css';
 
@@ -10,7 +10,7 @@ export const AudioTestingView = memo(function AudioTestingView() {
   const [isTestingArtificial, setIsTestingArtificial] = useState(false);
   const [voiceTestResults, setVoiceTestResults] = useState<any>(null);
   const [audioBlobUrls, setAudioBlobUrls] = useState<{[key: string]: string}>({});
-  const [corruptionAnalysis, setCorruptionAnalysis] = useState<any>(null);
+  const [_corruptionAnalysis, _setCorruptionAnalysis] = useState<any>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isPureRecording, setIsPureRecording] = useState(false);
   const [isClassicRecording, setIsClassicRecording] = useState(false);
@@ -106,7 +106,8 @@ export const AudioTestingView = memo(function AudioTestingView() {
     }
   };
 
-  const analyzeCorruptedRecordings = async () => {
+  // @ts-ignore - Unused function kept for future use
+  const _analyzeCorruptedRecordings = async () => {
     if (isAnalyzing) return;
     
     try {
@@ -127,13 +128,13 @@ export const AudioTestingView = memo(function AudioTestingView() {
           console.error(`Failed to analyze ${filePath}:`, error);
           analyses.push({ 
             file_path: filePath, 
-            error: error.toString(),
+            error: String(error),
             health_score: { overall: 'ERROR' }
           });
         }
       }
       
-      setCorruptionAnalysis(analyses);
+      _setCorruptionAnalysis(analyses);
     } catch (error) {
       console.error('Corruption analysis failed:', error);
       alert(`Corruption analysis failed: ${error}`);

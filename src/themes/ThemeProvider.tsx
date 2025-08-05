@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { ThemeContextType, Theme } from './types';
 import { ThemeVariant, THEME_VARIANTS } from './config';
 import { getTheme, getThemeAsync, applyTheme, themes, preloadTheme } from './index';
@@ -18,6 +18,7 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
     return getTheme(themeId as ThemeVariant);
   });
   const [isLoadingTheme, setIsLoadingTheme] = useState(false);
+  const appliedThemeId = useRef<string | null>(null);
   
   // Load theme asynchronously when settings change
   useEffect(() => {
@@ -45,9 +46,12 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
       });
   }, [settings.selectedTheme, settings.theme]);
   
-  // Apply theme when it changes
+  // Apply theme when it changes (with optimization to avoid redundant applications)
   useEffect(() => {
-    applyTheme(currentTheme);
+    if (appliedThemeId.current !== currentTheme.id) {
+      applyTheme(currentTheme);
+      appliedThemeId.current = currentTheme.id;
+    }
   }, [currentTheme]);
   
   // Listen for system theme changes if using system theme

@@ -83,7 +83,7 @@ export function AudioProvider({ children }: AudioProviderProps) {
   );
 }
 
-export function useAudioContext(): Omit<AudioContextValue, 'audioLevelStore'> {
+export const useAudioContext = (): Omit<AudioContextValue, 'audioLevelStore'> => {
   const context = useContext(AudioContext);
   if (context === undefined) {
     throw new Error('useAudioContext must be used within an AudioProvider');
@@ -91,7 +91,7 @@ export function useAudioContext(): Omit<AudioContextValue, 'audioLevelStore'> {
   // Return everything except audioLevelStore to maintain backward compatibility
   const { audioLevelStore, ...contextWithoutStore } = context;
   return contextWithoutStore;
-}
+};
 
 // New hook for components that need audio level
 export function useAudioLevel(): number {

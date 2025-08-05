@@ -33,6 +33,7 @@ interface RecordViewProps {
     formatDuration: (ms: number) => string;
     formatRecordingTimer?: (ms: number) => string;
     showDeleteConfirmation: (id: number, text: string) => void;
+    navigateToTranscript: (transcriptId: number) => void;
 }
 
 // Helper function to format keyboard keys
@@ -77,6 +78,7 @@ export const RecordView = memo(function RecordView({
     formatDuration,
     formatRecordingTimer,
     showDeleteConfirmation,
+    navigateToTranscript,
 }: RecordViewProps) {
     // Get audio level from the subscription hook
     const audioLevel = useAudioLevel();
@@ -303,6 +305,7 @@ export const RecordView = memo(function RecordView({
                     formatDuration={formatDuration}
                     showDeleteConfirmation={showDeleteConfirmation}
                     onImportAudio={handleFileUpload}
+                    navigateToTranscript={navigateToTranscript}
                 />
             </div>
             

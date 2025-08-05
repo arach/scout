@@ -103,12 +103,12 @@ export function TranscriptProvider({ children }: TranscriptProviderProps) {
   );
 }
 
-export function useTranscriptContext(): TranscriptContextValue {
+export const useTranscriptContext = (): TranscriptContextValue => {
   const context = useContext(TranscriptContext);
   if (context === undefined) {
     throw new Error('useTranscriptContext must be used within a TranscriptProvider');
   }
   return context;
-}
+};
 
 export type { Transcript };

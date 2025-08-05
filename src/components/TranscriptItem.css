@@ -1,7 +1,7 @@
 /* Transcript Item Styles */
 .transcript-item {
     position: relative;
-    background: rgba(255, 255, 255, 0.5); /* Light background for better visibility */
+    background: var(--bg-primary); /* Use theme background */
     border: none;
     border-bottom: 1px solid var(--border-primary);
     padding: 12px 16px; /* Increased vertical padding */
@@ -39,18 +39,18 @@
 }
 
 .transcript-item:hover {
-    background: rgba(var(--accent-rgb), 0.03); /* Subtle accent tint on hover */
+    background: var(--bg-hover); /* Use theme hover background */
     border-bottom-color: var(--border-primary);
 }
 
 .transcript-item.selected {
-    background: rgba(var(--accent-rgb), 0.08);
-    border-bottom-color: rgba(var(--accent-rgb), 0.2);
+    background: var(--bg-active); /* Use theme active background */
+    border-bottom-color: var(--border-hover);
 }
 
 .transcript-item.active {
-    background: rgba(var(--accent-rgb), 0.12);
-    border-bottom-color: rgba(var(--accent-rgb), 0.3);
+    background: var(--bg-active); /* Use theme active background */
+    border-bottom-color: var(--border-hover);
 }
 
 /* Compact variant for recent transcripts */

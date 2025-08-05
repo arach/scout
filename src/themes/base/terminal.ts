@@ -4,13 +4,13 @@ export const terminalChic: Theme = {
   id: 'terminal-chic',
   name: 'Terminal Chic',
   colors: {
-    // Simplified dark color scheme
-    bgPrimary: '#1a1a1a',           // Very dark background
-    bgSecondary: '#1a1a1a',         // Same dark for consistency
-    bgTertiary: '#1a1a1a',          // No color variations - pure black theme
-    bgHover: '#2a2a2a',             // Subtle hover state
-    bgActive: '#333333',            // Slightly brighter active state
-    bgDanger: '#3a1a1a',            // Subtle red tint for danger
+    // Refined dark terminal color scheme
+    bgPrimary: '#1a1a1a',           // Deep black background
+    bgSecondary: '#1f1f1f',         // Slightly different for hierarchy
+    bgTertiary: '#242424',          // Subtle variation for depth
+    bgHover: '#2a2a2a',             // Clear hover feedback
+    bgActive: '#333333',            // Distinct active state
+    bgDanger: '#2d1b1b',            // Subtle red tint for danger
     bgOverlay: 'rgba(26, 26, 26, 0.98)',
     
     // All text in light colors - no green
@@ -75,7 +75,6 @@ export const terminalChicLight: Theme = {
     bgHover: '#eeeeee',             // Subtle hover
     bgActive: '#e8e8e8',            // Active state
     bgDanger: '#fef5f5',            // Light red tint
-    bgOverlay: 'rgba(255, 255, 255, 0.95)',
     
     // Dark text on light for high contrast
     textPrimary: '#1a1a1a',         // Dark primary text
@@ -95,26 +94,27 @@ export const terminalChicLight: Theme = {
     borderHover: '#b0b0b0',         // Darker on hover
     
     shadowColor: 'rgba(0, 0, 0, 0.1)',
+    bgOverlay: 'rgba(250, 250, 250, 0.95)',
     overlayBackdrop: 'rgba(255, 255, 255, 0.9)',
   },
   typography: {
     fontFamily: '"SF Mono", "JetBrains Mono", "Fira Code", Monaco, Consolas, "Courier New", monospace',
     fontFamilyMono: '"SF Mono", "JetBrains Mono", "Fira Code", Monaco, Consolas, "Courier New", monospace',
     fontSize: {
-      small: '9px',     // More compact terminal text
-      base: '11px',     // Smaller standard terminal size
-      large: '12px',    // Smaller headers
-      xlarge: '14px',   // Smaller titles
+      small: '10px',    // Slightly larger than 9px but still compact
+      base: '12px',     // Modest increase from 11px
+      large: '13px',    // Small step up from 12px
+      xlarge: '15px',   // Reasonable increase from 14px
     },
     fontWeight: {
-      normal: 300,
-      medium: 400,
-      bold: 500,
+      normal: 350,      // Slightly heavier than 300 but still light
+      medium: 450,      // Between 400 and 500
+      bold: 550,        // Heavier than 500 but not too bold
     },
     lineHeight: {
-      tight: '1.0',
-      normal: '1.2',
-      relaxed: '1.4',
+      tight: '1.1',     // Slight improvement from 1.0
+      normal: '1.3',    // Better than 1.2 but still compact
+      relaxed: '1.5',   // Improved from 1.4 but not excessive
     },
   },
   layout: {

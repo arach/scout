@@ -2,8 +2,6 @@ export type ThemeVariant =
   | 'vscode-light' 
   | 'vscode-dark' 
   | 'minimal-overlay' 
-  | 'winamp-classic' 
-  | 'winamp-modern' 
   | 'terminal-chic' 
   | 'terminal-chic-light'
   | 'system';
@@ -12,8 +10,6 @@ export const THEME_VARIANTS: ThemeVariant[] = [
   'vscode-light',
   'vscode-dark', 
   'minimal-overlay',
-  'winamp-classic',
-  'winamp-modern',
   'terminal-chic',
   'terminal-chic-light',
   'system'
@@ -26,7 +22,7 @@ export interface ThemeMetadata {
   id: ThemeVariant;
   name: string;
   description: string;
-  category: 'editor' | 'overlay' | 'retro' | 'terminal';
+  category: 'editor' | 'overlay' | 'terminal';
 }
 
 export const THEME_METADATA: Record<ThemeVariant, ThemeMetadata> = {
@@ -47,18 +43,6 @@ export const THEME_METADATA: Record<ThemeVariant, ThemeMetadata> = {
     name: 'Minimal Overlay',
     description: 'Clean, minimal overlay design',
     category: 'overlay'
-  },
-  'winamp-classic': {
-    id: 'winamp-classic',
-    name: 'Winamp Classic',
-    description: 'Nostalgic Winamp-inspired design',
-    category: 'retro'
-  },
-  'winamp-modern': {
-    id: 'winamp-modern',
-    name: 'Winamp Modern',
-    description: 'Modern take on Winamp aesthetics',
-    category: 'retro'
   },
   'terminal-chic': {
     id: 'terminal-chic',

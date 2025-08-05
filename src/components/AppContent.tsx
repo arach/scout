@@ -52,11 +52,14 @@ export function AppContent() {
     showFirstRun, 
     deleteConfirmation, 
     uploadProgress,
+    selectedTranscriptId,
     setCurrentView, 
     setShowTranscriptionOverlay, 
     setShowFirstRun, 
     setDeleteConfirmation, 
-    setUploadProgress 
+    setUploadProgress,
+    setSelectedTranscriptId,
+    navigateToTranscript
   } = useUIContext();
 
   // Local refs
@@ -464,6 +467,7 @@ export function AppContent() {
               formatDuration={formatDuration}
               formatRecordingTimer={formatRecordingTimer}
               showDeleteConfirmation={showDeleteConfirmation}
+              navigateToTranscript={navigateToTranscript}
             />
           </AudioErrorBoundary>
         )}
@@ -485,6 +489,8 @@ export function AppContent() {
               showDeleteConfirmation={showDeleteConfirmation}
               formatDuration={formatDuration}
               formatFileSize={formatFileSize}
+              selectedTranscriptId={selectedTranscriptId}
+              setSelectedTranscriptId={setSelectedTranscriptId}
             />
           </TranscriptionErrorBoundary>
         )}

@@ -16,8 +16,6 @@ export const themeMetadata: Record<ThemeVariant, { name: string; category: strin
   'vscode-light': { name: 'VS Code Light', category: 'Classic' },
   'vscode-dark': { name: 'VS Code Dark', category: 'Classic' },
   'minimal-overlay': { name: 'Minimal Overlay', category: 'Modern' },
-  'winamp-classic': { name: 'Winamp Classic', category: 'Retro' },
-  'winamp-modern': { name: 'Winamp Modern', category: 'Retro' },
   'terminal-chic': { name: 'Terminal Chic', category: 'Terminal' },
   'terminal-chic-light': { name: 'Terminal Chic Light', category: 'Terminal' },
   'system': { name: 'System', category: 'Auto' },
@@ -28,8 +26,6 @@ export const themes: Record<ThemeVariant, Theme> = {
   'vscode-light': vscodeLight,
   'vscode-dark': vscodeDark,
   'minimal-overlay': {} as Theme, // Will be loaded on demand
-  'winamp-classic': {} as Theme,
-  'winamp-modern': {} as Theme,
   'terminal-chic': {} as Theme,
   'terminal-chic-light': {} as Theme,
   'system': vscodeDark,
@@ -100,22 +96,25 @@ export const themeToCSSVariables = (theme: Theme): Record<string, string> => {
   return vars;
 };
 
-// Apply theme to document
+// Apply theme to document with optimized DOM updates
 export const applyTheme = (theme: Theme): void => {
   const cssVars = themeToCSSVariables(theme);
   const root = document.documentElement;
   
-  // Apply CSS variables
-  Object.entries(cssVars).forEach(([key, value]) => {
-    root.style.setProperty(key, value);
+  // Batch DOM updates to prevent multiple layout recalculations
+  requestAnimationFrame(() => {
+    // Apply CSS variables in a single batch
+    Object.entries(cssVars).forEach(([key, value]) => {
+      root.style.setProperty(key, value);
+    });
+    
+    // Set theme attribute for CSS selectors
+    root.setAttribute('data-theme', theme.id);
+    
+    // Set animation class
+    root.classList.remove('animations-smooth', 'animations-retro', 'animations-minimal', 'animations-none');
+    root.classList.add(`animations-${theme.layout.animations || 'smooth'}`);
   });
-  
-  // Set theme attribute for CSS selectors
-  root.setAttribute('data-theme', theme.id);
-  
-  // Set animation class
-  root.classList.remove('animations-smooth', 'animations-retro', 'animations-minimal', 'animations-none');
-  root.classList.add(`animations-${theme.layout.animations || 'smooth'}`);
 };
 
 // Get all available themes for UI

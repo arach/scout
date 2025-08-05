@@ -26,7 +26,11 @@
       "Bash(rm:*)",
       "Bash(cargo fix:*)",
       "Bash(git push:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(pnpm typecheck:*)",
+      "Bash(pnpm tsc:*)",
+      "Bash(pnpm build:*)",
+      "Bash(pnpm tauri:*)"
     ],
     "deny": []
   },

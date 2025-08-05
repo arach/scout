@@ -80,7 +80,7 @@
   object-position: center top; /* Anchor to top */
   opacity: 1;
   transform: translateY(-280px); /* Move wave image up 100px */
-  z-index: 0;
+  z-index: 2; /* Above the gradient overlay */
 }
 
 /* Add the gradient overlay like the original */

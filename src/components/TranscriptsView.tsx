@@ -24,6 +24,8 @@ interface TranscriptsViewProps {
     showDeleteConfirmation: (id: number, text: string) => void;
     formatDuration: (ms: number) => string;
     formatFileSize?: (bytes: number) => string;
+    selectedTranscriptId?: number | null;
+    setSelectedTranscriptId?: (id: number | null) => void;
 }
 
 const ITEMS_PER_PAGE = 50;
@@ -45,6 +47,8 @@ export const TranscriptsView = memo(function TranscriptsView({
     showDeleteConfirmation,
     formatDuration,
     formatFileSize,
+    selectedTranscriptId,
+    setSelectedTranscriptId,
 }: TranscriptsViewProps) {
     const [panelState, setPanelState] = useState<{
         transcript: Transcript | null;
@@ -90,6 +94,29 @@ export const TranscriptsView = memo(function TranscriptsView({
         // Reset displayed items when transcripts change
         setDisplayedItems(ITEMS_PER_PAGE);
     }, [transcripts]);
+
+    // Auto-open transcript detail panel when selectedTranscriptId is provided
+    useEffect(() => {
+        if (selectedTranscriptId && setSelectedTranscriptId) {
+            const transcript = transcripts.find(t => t.id === selectedTranscriptId);
+            if (transcript) {
+                // Find the group this transcript belongs to and expand it
+                const groups = groupTranscriptsByDate(transcripts);
+                for (const group of groups) {
+                    if (group.transcripts.some(t => t.id === selectedTranscriptId)) {
+                        setExpandedGroups(prev => new Set([...prev, group.title]));
+                        break;
+                    }
+                }
+                
+                // Open the detail panel
+                openDetailPanel(transcript);
+                
+                // Clear the selected transcript ID
+                setSelectedTranscriptId(null);
+            }
+        }
+    }, [selectedTranscriptId, transcripts, setSelectedTranscriptId, openDetailPanel]);
     
     // Handle click outside for menus
     useEffect(() => {

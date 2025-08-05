@@ -1,10 +1,12 @@
-import { memo } from 'react';
+import { memo, lazy, Suspense } from 'react';
 import { AudioErrorBoundary, TranscriptionErrorBoundary, SettingsErrorBoundary } from '../ErrorBoundary';
 import { RecordView } from '../RecordView';
-import { TranscriptsView } from '../TranscriptsView';
-import { SettingsView } from '../SettingsView';
-import { StatsView } from '../StatsView';
-import Dictionary from '../Dictionary';
+
+// Lazy load heavy components that aren't needed immediately
+const TranscriptsView = lazy(() => import('../TranscriptsView').then(m => ({ default: m.TranscriptsView })));
+const SettingsView = lazy(() => import('../SettingsView').then(m => ({ default: m.SettingsView })));
+const StatsView = lazy(() => import('../StatsView').then(m => ({ default: m.StatsView })));
+const Dictionary = lazy(() => import('../Dictionary'));
 import type { ViewType } from './types';
 
 interface ViewRouterProps {
@@ -101,35 +103,47 @@ export const ViewRouter = memo<ViewRouterProps>(({
     case 'transcripts':
       return (
         <TranscriptionErrorBoundary>
-          <TranscriptsView
-            transcripts={transcripts}
-            selectedTranscripts={selectedTranscripts}
-            searchQuery={searchQuery}
-            hotkey={hotkey}
-            setSearchQuery={setSearchQuery}
-            searchTranscripts={searchTranscripts}
-            toggleTranscriptSelection={toggleTranscriptSelection}
-            toggleTranscriptGroupSelection={toggleTranscriptGroupSelection}
-            selectAllTranscripts={selectAllTranscripts}
-            showBulkDeleteConfirmation={showBulkDeleteConfirmation}
-            exportTranscripts={exportTranscripts}
-            copyTranscript={copyTranscript}
-            showDeleteConfirmation={showDeleteConfirmation}
-            formatDuration={formatDuration}
-            formatFileSize={formatFileSize}
-          />
+          <Suspense fallback={<div style={{ padding: '20px', textAlign: 'center' }}>Loading transcripts...</div>}>
+            <TranscriptsView
+              transcripts={transcripts}
+              selectedTranscripts={selectedTranscripts}
+              searchQuery={searchQuery}
+              hotkey={hotkey}
+              setSearchQuery={setSearchQuery}
+              searchTranscripts={searchTranscripts}
+              toggleTranscriptSelection={toggleTranscriptSelection}
+              toggleTranscriptGroupSelection={toggleTranscriptGroupSelection}
+              selectAllTranscripts={selectAllTranscripts}
+              showBulkDeleteConfirmation={showBulkDeleteConfirmation}
+              exportTranscripts={exportTranscripts}
+              copyTranscript={copyTranscript}
+              showDeleteConfirmation={showDeleteConfirmation}
+              formatDuration={formatDuration}
+              formatFileSize={formatFileSize}
+            />
+          </Suspense>
         </TranscriptionErrorBoundary>
       );
     case 'settings':
       return (
         <SettingsErrorBoundary>
-          <SettingsView />
+          <Suspense fallback={<div style={{ padding: '20px', textAlign: 'center' }}>Loading settings...</div>}>
+            <SettingsView />
+          </Suspense>
         </SettingsErrorBoundary>
       );
     case 'stats':
-      return <StatsView />;
+      return (
+        <Suspense fallback={<div style={{ padding: '20px', textAlign: 'center' }}>Loading stats...</div>}>
+          <StatsView />
+        </Suspense>
+      );
     case 'dictionary':
-      return <Dictionary />;
+      return (
+        <Suspense fallback={<div style={{ padding: '20px', textAlign: 'center' }}>Loading dictionary...</div>}>
+          <Dictionary />
+        </Suspense>
+      );
     default:
       return null;
   }

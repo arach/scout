@@ -106,10 +106,10 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
 }
 
 // Hook to use recording context
-export function useRecordingContext(): RecordingContextValue {
+export const useRecordingContext = (): RecordingContextValue => {
   const context = useContext(RecordingContext);
   if (context === undefined) {
     throw new Error('useRecordingContext must be used within a RecordingProvider');
   }
   return context;
-}
+};

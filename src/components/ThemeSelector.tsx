@@ -72,25 +72,6 @@ const ThemeIcon: React.FC<{ themeId: ThemeVariant }> = ({ themeId }) => {
           <rect x="9" y="3" width="5" height="3" fill="currentColor" opacity="0.8"/>
         </svg>
       );
-    case 'winamp-classic':
-      return (
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect x="2" y="3" width="12" height="10" fill="#232323" stroke="#00ff00" strokeWidth="1"/>
-          <rect x="3" y="5" width="10" height="2" fill="#00ff00"/>
-          <rect x="3" y="8" width="6" height="1" fill="#00ff00" opacity="0.6"/>
-          <rect x="3" y="10" width="8" height="1" fill="#00ff00" opacity="0.4"/>
-        </svg>
-      );
-    case 'winamp-modern':
-      return (
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect x="2" y="3" width="12" height="10" rx="2" fill="#0c0e14" stroke="#ff6600" strokeWidth="1"/>
-          <path d="M4 7 L6 5 L8 8 L10 6 L12 7" stroke="#00ff88" strokeWidth="1.5" fill="none"/>
-          <circle cx="5" cy="10" r="1" fill="#ff6600"/>
-          <circle cx="8" cy="10" r="1" fill="#00ff88"/>
-          <circle cx="11" cy="10" r="1" fill="#ff6600"/>
-        </svg>
-      );
     case 'terminal-chic':
       return (
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">

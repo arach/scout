@@ -7,9 +7,10 @@ interface SessionTranscriptsProps {
     formatDuration: (ms: number) => string;
     showDeleteConfirmation: (id: number, text: string) => void;
     onImportAudio?: () => void;
+    navigateToTranscript: (transcriptId: number) => void;
 }
 
-export function SessionTranscripts({ transcripts, formatDuration, showDeleteConfirmation, onImportAudio }: SessionTranscriptsProps) {
+export function SessionTranscripts({ transcripts, formatDuration, showDeleteConfirmation, onImportAudio, navigateToTranscript }: SessionTranscriptsProps) {
     if (transcripts.length === 0) {
         return (
             <div className="session-transcripts">
@@ -62,6 +63,7 @@ export function SessionTranscripts({ transcripts, formatDuration, showDeleteConf
                         transcript={transcript}
                         formatDuration={formatDuration}
                         onDelete={showDeleteConfirmation}
+                        onClick={() => navigateToTranscript(transcript.id)}
                         variant="compact"
                     />
                 ))}

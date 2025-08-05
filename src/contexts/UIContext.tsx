@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 
 type View = 'record' | 'transcripts' | 'settings' | 'stats' | 'dictionary' | 'webhooks' | 'audio-testing';
 
@@ -27,6 +27,7 @@ interface UIContextState {
   deleteConfirmation: DeleteConfirmation;
   hotkeyUpdateStatus: 'idle' | 'success' | 'error';
   uploadProgress: UploadProgress;
+  selectedTranscriptId: number | null;
 }
 
 interface UIContextActions {
@@ -41,6 +42,8 @@ interface UIContextActions {
   setUploadProgress: (progress: UploadProgress | ((prev: UploadProgress) => UploadProgress)) => void;
   showDeleteDialog: (transcriptId: number, transcriptText: string, isBulk?: boolean) => void;
   hideDeleteDialog: () => void;
+  setSelectedTranscriptId: (id: number | null) => void;
+  navigateToTranscript: (transcriptId: number) => void;
 }
 
 interface UIContextValue extends UIContextState, UIContextActions {}
@@ -52,13 +55,8 @@ interface UIProviderProps {
 }
 
 export function UIProvider({ children }: UIProviderProps) {
-  // Load saved view from localStorage or default to 'record'
-  const [currentView, setCurrentView] = useState<View>(() => {
-    const savedView = localStorage.getItem('scout-current-view');
-    return (savedView && ['record', 'transcripts', 'settings', 'stats', 'dictionary', 'webhooks', 'audio-testing'].includes(savedView)) 
-      ? savedView as View 
-      : 'record';
-  });
+  // Initialize with default view first, then load from localStorage asynchronously
+  const [currentView, setCurrentView] = useState<View>('record');
   const [showTranscriptionOverlay, setShowTranscriptionOverlay] = useState(false);
   const [showFirstRun, setShowFirstRun] = useState(false);
   const [isCapturingHotkey, setIsCapturingHotkey] = useState(false);
@@ -72,6 +70,28 @@ export function UIProvider({ children }: UIProviderProps) {
   });
   const [hotkeyUpdateStatus, setHotkeyUpdateStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [uploadProgress, setUploadProgress] = useState<UploadProgress>({ status: 'idle' });
+  const [selectedTranscriptId, setSelectedTranscriptId] = useState<number | null>(null);
+
+  // Load saved view from localStorage asynchronously after initial render
+  useEffect(() => {
+    // Use requestIdleCallback if available, otherwise setTimeout
+    const loadSavedView = () => {
+      try {
+        const savedView = localStorage.getItem('scout-current-view');
+        if (savedView && ['record', 'transcripts', 'settings', 'stats', 'dictionary', 'webhooks', 'audio-testing'].includes(savedView)) {
+          setCurrentView(savedView as View);
+        }
+      } catch (error) {
+        console.warn('Failed to load saved view from localStorage:', error);
+      }
+    };
+
+    if ('requestIdleCallback' in window) {
+      requestIdleCallback(loadSavedView);
+    } else {
+      setTimeout(loadSavedView, 0);
+    }
+  }, []);
 
   const handleSetCurrentView = useCallback((view: View) => {
     setCurrentView(view);
@@ -132,6 +152,16 @@ export function UIProvider({ children }: UIProviderProps) {
     });
   }, []);
 
+  const handleSetSelectedTranscriptId = useCallback((id: number | null) => {
+    setSelectedTranscriptId(id);
+  }, []);
+
+  const navigateToTranscript = useCallback((transcriptId: number) => {
+    setSelectedTranscriptId(transcriptId);
+    setCurrentView('transcripts');
+    localStorage.setItem('scout-current-view', 'transcripts');
+  }, []);
+
   const value: UIContextValue = {
     // State
     currentView,
@@ -143,6 +173,7 @@ export function UIProvider({ children }: UIProviderProps) {
     deleteConfirmation,
     hotkeyUpdateStatus,
     uploadProgress,
+    selectedTranscriptId,
     // Actions
     setCurrentView: handleSetCurrentView,
     setShowTranscriptionOverlay: handleSetShowTranscriptionOverlay,
@@ -155,6 +186,8 @@ export function UIProvider({ children }: UIProviderProps) {
     setUploadProgress: handleSetUploadProgress,
     showDeleteDialog,
     hideDeleteDialog,
+    setSelectedTranscriptId: handleSetSelectedTranscriptId,
+    navigateToTranscript,
   };
 
   return (
@@ -164,12 +197,16 @@ export function UIProvider({ children }: UIProviderProps) {
   );
 }
 
-export function useUIContext(): UIContextValue {
+// Add display name for better debugging
+UIProvider.displayName = 'UIProvider';
+
+// Export the hook with a stable function reference for Fast Refresh
+export const useUIContext = (): UIContextValue => {
   const context = useContext(UIContext);
   if (context === undefined) {
     throw new Error('useUIContext must be used within a UIProvider');
   }
   return context;
-}
+};
 
 export type { View, DeleteConfirmation, UploadProgress };

@@ -11,10 +11,10 @@ export const vscodeLight: Theme = {
     bgActive: '#dcdcdc',
     bgDanger: '#fee',
     
-    textPrimary: '#333333',
-    textSecondary: '#666666',
-    textTertiary: '#999999',
-    textPlaceholder: '#999999',
+    textPrimary: '#1f2937',     // Darker for better contrast
+    textSecondary: '#4b5563',   // Improved contrast ratio
+    textTertiary: '#6b7280',    // Better accessibility
+    textPlaceholder: '#9ca3af', // Lighter placeholder
     textDanger: '#d32f2f',
     textSuccess: '#388e3c',
     
@@ -26,6 +26,8 @@ export const vscodeLight: Theme = {
     borderHover: '#cccccc',
     
     shadowColor: 'rgba(0, 0, 0, 0.1)',
+    bgOverlay: 'rgba(255, 255, 255, 0.95)',
+    overlayBackdrop: 'rgba(0, 0, 0, 0.1)',
   },
   typography: {
     fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
@@ -51,6 +53,8 @@ export const vscodeLight: Theme = {
     borderRadius: '6px',
     transition: 'all 0.2s ease',
     animations: 'smooth',
+    overlayPosition: 'center',
+    overlayOpacity: 0.95,
   },
 };
 
@@ -58,9 +62,9 @@ export const vscodeDark: Theme = {
   id: 'vscode-dark',
   name: 'VS Code Dark',
   colors: {
-    bgPrimary: '#1e1e1e',         // VS Code's actual dark background
-    bgSecondary: '#252526',       // VS Code's sidebar background
-    bgTertiary: '#2d2d30',        // VS Code's editor group background
+    bgPrimary: '#2a2a2a',         // Slightly lighter than VS Code's dark background
+    bgSecondary: '#2f2f30',       // Slightly lighter than VS Code's sidebar background
+    bgTertiary: '#353538',        // Slightly lighter than VS Code's editor group background
     bgHover: '#3e3e42',           // VS Code's hover state
     bgActive: '#37373d',          // VS Code's active state
     bgDanger: '#3a1d1d',
@@ -80,6 +84,8 @@ export const vscodeDark: Theme = {
     borderHover: '#5a5a5a',       // VS Code's hover border
     
     shadowColor: 'rgba(0, 0, 0, 0.3)',
+    bgOverlay: 'rgba(42, 42, 42, 0.95)',
+    overlayBackdrop: 'rgba(0, 0, 0, 0.5)',
   },
   typography: {
     fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
@@ -105,5 +111,7 @@ export const vscodeDark: Theme = {
     borderRadius: '6px',
     transition: 'all 0.2s ease',
     animations: 'smooth',
+    overlayPosition: 'center',
+    overlayOpacity: 0.95,
   },
 };

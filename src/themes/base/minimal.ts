@@ -4,13 +4,13 @@ export const minimalOverlay: Theme = {
   id: 'minimal-overlay',
   name: 'Minimal Overlay',
   colors: {
-    bgPrimary: 'rgba(0, 0, 0, 0.85)',
-    bgSecondary: 'rgba(0, 0, 0, 0.9)',
-    bgTertiary: 'rgba(0, 0, 0, 0.95)',
-    bgHover: 'rgba(255, 255, 255, 0.1)',
-    bgActive: 'rgba(255, 255, 255, 0.15)',
-    bgDanger: 'rgba(255, 0, 0, 0.2)',
-    bgOverlay: 'rgba(0, 0, 0, 0.8)',
+    bgPrimary: 'rgba(0, 0, 0, 0.9)',   // More opaque for better readability
+    bgSecondary: 'rgba(0, 0, 0, 0.95)', // Slightly more opaque
+    bgTertiary: 'rgba(0, 0, 0, 0.98)',  // Nearly opaque for important content
+    bgHover: 'rgba(255, 255, 255, 0.12)', // Slightly more visible hover
+    bgActive: 'rgba(255, 255, 255, 0.18)', // More noticeable active state
+    bgDanger: 'rgba(255, 0, 0, 0.25)',  // More visible danger state
+    bgOverlay: 'rgba(0, 0, 0, 0.85)',   // Better backdrop
     
     textPrimary: 'rgba(255, 255, 255, 0.9)',
     textSecondary: 'rgba(255, 255, 255, 0.7)',
