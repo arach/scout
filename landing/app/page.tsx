@@ -241,36 +241,43 @@ export default function Home() {
               icon="🔒"
               title="100% Private"
               description="Everything runs locally on your device. Your voice never leaves your Mac."
+              href="/docs#security"
             />
             <FeatureCard
               icon="⚡"
               title="Lightning Fast"
               description="Sub-300ms latency with optimized processing. Real-time transcription that keeps up."
+              href="/docs#performance"
             />
             <FeatureCard
               icon="🎯"
               title="Power User Ready"
               description="Global shortcuts, file upload, export options. Built for professionals."
+              href="/docs#configuration"
             />
             <FeatureCard
               icon="🎙️"
               title="Push-to-Talk"
               description="Simple global hotkey (Cmd+Shift+Space) for instant recording anywhere."
+              href="/docs#quick-start"
             />
             <FeatureCard
               icon="🧠"
               title="Whisper AI"
               description="Powered by OpenAI's Whisper models. Choose from tiny to large-v3."
+              href="/docs#custom-models"
             />
             <FeatureCard
               icon="📖"
               title="Custom Dictionary"
               description="Auto-correct technical terms, acronyms, and names with smart replacements."
+              href="/docs#api-overview"
             />
             <FeatureCard
               icon="📂"
               title="Transcript Database"
               description="All transcriptions saved locally with search, export, and management."
+              href="/docs#methods"
             />
           </div>
         </div>
@@ -433,12 +440,31 @@ export default function Home() {
   )
 }
 
-function FeatureCard({ icon, title, description }: { icon: string; title: string; description: string }) {
-  return (
-    <div className="bg-white dark:bg-gray-900 p-6 rounded-xl border border-gray-200 dark:border-gray-800 hover:border-gray-400 dark:hover:border-gray-600 transition-all hover:shadow-md">
+function FeatureCard({ icon, title, description, href }: { icon: string; title: string; description: string; href?: string }) {
+  const cardContent = (
+    <>
       <div className="text-3xl mb-4">{icon}</div>
       <h3 className="font-semibold text-lg mb-2 text-gray-900 dark:text-white">{title}</h3>
       <p className="text-gray-600 dark:text-gray-400 leading-relaxed">{description}</p>
+    </>
+  )
+
+  if (href) {
+    return (
+      <Link href={href} className="block group">
+        <div className="bg-white dark:bg-gray-900 p-6 rounded-xl border border-gray-200 dark:border-gray-800 hover:border-blue-400 dark:hover:border-blue-500 transition-all hover:shadow-lg cursor-pointer group-hover:scale-105 transform">
+          {cardContent}
+          <div className="mt-4 flex items-center text-blue-600 dark:text-blue-400 text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity">
+            Learn more →
+          </div>
+        </div>
+      </Link>
+    )
+  }
+
+  return (
+    <div className="bg-white dark:bg-gray-900 p-6 rounded-xl border border-gray-200 dark:border-gray-800 hover:border-gray-400 dark:hover:border-gray-600 transition-all hover:shadow-md">
+      {cardContent}
     </div>
   )
 }

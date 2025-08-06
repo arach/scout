@@ -217,6 +217,400 @@ function GeneratedDocSection({ docId }: { docId: string }) {
 }
 
 // Placeholder sections (will be replaced with generated docs where available)
+function QuickStartSection() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-4xl font-bold mb-4">Quick Start</h1>
+        <p className="text-xl text-gray-600 dark:text-gray-400 mb-8">
+          Get up and running with Scout's push-to-talk recording
+        </p>
+      </div>
+
+      <div className="bg-blue-50 dark:bg-blue-950/20 rounded-lg p-6">
+        <div className="flex items-start gap-4">
+          <Mic className="w-6 h-6 text-blue-500 flex-shrink-0 mt-1" />
+          <div>
+            <h3 className="font-semibold mb-2">Push-to-Talk Recording</h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+              Scout uses a simple global hotkey system for instant voice recording from anywhere on your Mac.
+            </p>
+            <div className="bg-white dark:bg-gray-800 rounded-lg p-4 font-mono text-sm">
+              <div className="mb-2"><strong>Default Hotkey:</strong> ⌘⇧Space (Cmd+Shift+Space)</div>
+              <div className="text-gray-500 dark:text-gray-400">Press and hold to record, release to stop</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <section>
+        <h2 className="text-2xl font-semibold mb-4">Basic Usage</h2>
+        <div className="space-y-4">
+          <div className="border border-gray-200 dark:border-gray-800 rounded-lg p-4">
+            <h3 className="font-medium mb-2">1. Launch Scout</h3>
+            <p className="text-gray-600 dark:text-gray-400">Open Scout from your Applications folder or use Spotlight search.</p>
+          </div>
+          <div className="border border-gray-200 dark:border-gray-800 rounded-lg p-4">
+            <h3 className="font-medium mb-2">2. Grant Permissions</h3>
+            <p className="text-gray-600 dark:text-gray-400">Allow microphone access when prompted for voice recording functionality.</p>
+          </div>
+          <div className="border border-gray-200 dark:border-gray-800 rounded-lg p-4">
+            <h3 className="font-medium mb-2">3. Start Recording</h3>
+            <p className="text-gray-600 dark:text-gray-400">Press ⌘⇧Space anywhere on your Mac to start recording. Release to stop and see your transcription.</p>
+          </div>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function SecuritySection() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-4xl font-bold mb-4">Security & Privacy</h1>
+        <p className="text-xl text-gray-600 dark:text-gray-400 mb-8">
+          Scout is designed with privacy-first principles
+        </p>
+      </div>
+
+      <div className="bg-green-50 dark:bg-green-950/20 rounded-lg p-6">
+        <div className="flex items-start gap-4">
+          <Shield className="w-6 h-6 text-green-500 flex-shrink-0 mt-1" />
+          <div>
+            <h3 className="font-semibold mb-2">100% Local Processing</h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              All voice processing happens entirely on your device. Your audio never leaves your Mac, ensuring complete privacy and security.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <section>
+        <h2 className="text-2xl font-semibold mb-4">Privacy Features</h2>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Card className="border-gray-200 dark:border-gray-800">
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Database className="w-5 h-5" />
+                Local Storage
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                All transcripts are stored locally in an encrypted SQLite database on your device.
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-gray-200 dark:border-gray-800">
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Cpu className="w-5 h-5" />
+                Offline Processing
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Whisper AI models run entirely offline with no internet connection required for transcription.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function PerformanceSection() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-4xl font-bold mb-4">Performance Optimization</h1>
+        <p className="text-xl text-gray-600 dark:text-gray-400 mb-8">
+          Scout delivers sub-300ms latency for real-time transcription
+        </p>
+      </div>
+
+      <div className="bg-yellow-50 dark:bg-yellow-950/20 rounded-lg p-6">
+        <div className="flex items-start gap-4">
+          <Zap className="w-6 h-6 text-yellow-500 flex-shrink-0 mt-1" />
+          <div>
+            <h3 className="font-semibold mb-2">Optimized Processing Pipeline</h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Scout uses advanced audio processing techniques and model optimization to achieve lightning-fast transcription speeds.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <section>
+        <h2 className="text-2xl font-semibold mb-4">Performance Metrics</h2>
+        <div className="grid gap-4 md:grid-cols-3">
+          <Card className="border-gray-200 dark:border-gray-800">
+            <CardHeader>
+              <CardTitle className="text-lg">Latency</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-green-600 dark:text-green-400 mb-1">&lt;300ms</div>
+              <p className="text-sm text-gray-600 dark:text-gray-400">Average transcription time</p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-gray-200 dark:border-gray-800">
+            <CardHeader>
+              <CardTitle className="text-lg">Memory</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-blue-600 dark:text-blue-400 mb-1">&lt;215MB</div>
+              <p className="text-sm text-gray-600 dark:text-gray-400">Runtime memory usage</p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-gray-200 dark:border-gray-800">
+            <CardHeader>
+              <CardTitle className="text-lg">Accuracy</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-purple-600 dark:text-purple-400 mb-1">95%+</div>
+              <p className="text-sm text-gray-600 dark:text-gray-400">Word accuracy rate</p>
+            </CardContent>
+          </Card>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function ConfigurationSection() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-4xl font-bold mb-4">Configuration</h1>
+        <p className="text-xl text-gray-600 dark:text-gray-400 mb-8">
+          Customize Scout for power users with advanced settings
+        </p>
+      </div>
+
+      <div className="bg-purple-50 dark:bg-purple-950/20 rounded-lg p-6">
+        <div className="flex items-start gap-4">
+          <Settings className="w-6 h-6 text-purple-500 flex-shrink-0 mt-1" />
+          <div>
+            <h3 className="font-semibold mb-2">Power User Features</h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Scout includes advanced configuration options for professionals who need precise control over their transcription workflow.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <section>
+        <h2 className="text-2xl font-semibold mb-4">Available Settings</h2>
+        <div className="space-y-4">
+          <div className="border border-gray-200 dark:border-gray-800 rounded-lg p-4">
+            <h3 className="font-medium mb-2 flex items-center gap-2">
+              <Command className="w-4 h-4" />
+              Global Shortcuts
+            </h3>
+            <p className="text-gray-600 dark:text-gray-400 mb-2">Customize hotkeys for recording, quick access, and window management.</p>
+            <div className="text-sm font-mono bg-gray-100 dark:bg-gray-800 p-2 rounded">
+              Default: ⌘⇧Space (Cmd+Shift+Space)
+            </div>
+          </div>
+
+          <div className="border border-gray-200 dark:border-gray-800 rounded-lg p-4">
+            <h3 className="font-medium mb-2 flex items-center gap-2">
+              <Terminal className="w-4 h-4" />
+              Export Options
+            </h3>
+            <p className="text-gray-600 dark:text-gray-400">Multiple export formats for integration with your existing workflow.</p>
+            <ul className="text-sm text-gray-600 dark:text-gray-400 mt-2 list-disc list-inside">
+              <li>Plain text (.txt)</li>
+              <li>Markdown (.md)</li>
+              <li>JSON with metadata</li>
+              <li>Auto-copy to clipboard</li>
+            </ul>
+          </div>
+
+          <div className="border border-gray-200 dark:border-gray-800 rounded-lg p-4">
+            <h3 className="font-medium mb-2 flex items-center gap-2">
+              <Layers className="w-4 h-4" />
+              File Upload
+            </h3>
+            <p className="text-gray-600 dark:text-gray-400">Process existing audio files through Scout's transcription engine.</p>
+          </div>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function CustomModelsSection() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-4xl font-bold mb-4">Custom Models</h1>
+        <p className="text-xl text-gray-600 dark:text-gray-400 mb-8">
+          Choose from OpenAI's Whisper models for optimal performance
+        </p>
+      </div>
+
+      <section>
+        <h2 className="text-2xl font-semibold mb-4">Available Models</h2>
+        <div className="grid gap-4">
+          <Card className="border-gray-200 dark:border-gray-800">
+            <CardHeader>
+              <CardTitle className="text-lg">Whisper Tiny</CardTitle>
+              <Badge variant="secondary">39 MB</Badge>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                Fastest processing with basic accuracy. Ideal for quick notes and simple dictation.
+              </p>
+              <div className="text-sm font-mono bg-gray-100 dark:bg-gray-800 p-2 rounded">
+                Languages: English-only
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-gray-200 dark:border-gray-800">
+            <CardHeader>
+              <CardTitle className="text-lg">Whisper Base</CardTitle>
+              <Badge variant="secondary">142 MB</Badge>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                Balanced performance and accuracy. Good for general use cases.
+              </p>
+              <div className="text-sm font-mono bg-gray-100 dark:bg-gray-800 p-2 rounded">
+                Languages: Multilingual (99 languages)
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-gray-200 dark:border-gray-800">
+            <CardHeader>
+              <CardTitle className="text-lg">Whisper Large-v3</CardTitle>
+              <Badge variant="secondary">1550 MB</Badge>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                Highest accuracy with slower processing. Perfect for critical transcription work.
+              </p>
+              <div className="text-sm font-mono bg-gray-100 dark:bg-gray-800 p-2 rounded">
+                Languages: Multilingual (99 languages)
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function ApiOverviewSection() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-4xl font-bold mb-4">API Overview</h1>
+        <p className="text-xl text-gray-600 dark:text-gray-400 mb-8">
+          Custom dictionary and transcript management APIs
+        </p>
+      </div>
+
+      <section>
+        <h2 className="text-2xl font-semibold mb-4">Dictionary Management</h2>
+        <p className="text-gray-600 dark:text-gray-400 mb-4">
+          Scout's custom dictionary system allows you to define replacements for technical terms, acronyms, and proper nouns.
+        </p>
+        
+        <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-6">
+          <h3 className="font-medium mb-4">Dictionary Entry Types</h3>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+              <h4 className="font-medium mb-2">Exact Match</h4>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">Replace exact word matches</p>
+              <div className="text-sm font-mono bg-gray-100 dark:bg-gray-800 p-2 rounded">
+                "api" → "API"
+              </div>
+            </div>
+            <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+              <h4 className="font-medium mb-2">Phrase Match</h4>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">Replace multi-word phrases</p>
+              <div className="text-sm font-mono bg-gray-100 dark:bg-gray-800 p-2 rounded">
+                "machine learning" → "ML"
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function MethodsSection() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-4xl font-bold mb-4">Methods</h1>
+        <p className="text-xl text-gray-600 dark:text-gray-400 mb-8">
+          Transcript database operations and management
+        </p>
+      </div>
+
+      <section>
+        <h2 className="text-2xl font-semibold mb-4">Database Operations</h2>
+        <div className="space-y-4">
+          <Card className="border-gray-200 dark:border-gray-800">
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Database className="w-5 h-5" />
+                Local SQLite Storage
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                All transcripts are stored locally in an encrypted SQLite database with full-text search capabilities.
+              </p>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-sm">
+                  <CheckCircle className="w-4 h-4 text-green-500" />
+                  <span>Full-text search across all transcripts</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm">
+                  <CheckCircle className="w-4 h-4 text-green-500" />
+                  <span>Metadata tracking (timestamps, duration, model used)</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm">
+                  <CheckCircle className="w-4 h-4 text-green-500" />
+                  <span>Export to multiple formats</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-gray-200 dark:border-gray-800">
+            <CardHeader>
+              <CardTitle className="text-lg">Search & Management</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                Advanced search and management features for your transcript database.
+              </p>
+              <ul className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
+                <li>• Search by content, date, or duration</li>
+                <li>• Bulk operations (delete, export multiple transcripts)</li>
+                <li>• Tag and categorize transcripts</li>
+                <li>• Usage analytics and insights</li>
+              </ul>
+            </CardContent>
+          </Card>
+        </div>
+      </section>
+    </div>
+  )
+}
+
 function InstallationSection() {
   return (
     <div className="space-y-6">
@@ -320,11 +714,34 @@ function InstallationSection() {
 const sectionComponents: Record<string, React.ComponentType> = {
   overview: OverviewSection,
   installation: InstallationSection,
-  // Add more placeholder sections as needed
+  'quick-start': QuickStartSection,
+  security: SecuritySection,
+  performance: PerformanceSection,
+  configuration: ConfigurationSection,
+  'custom-models': CustomModelsSection,
+  'api-overview': ApiOverviewSection,
+  methods: MethodsSection,
 };
 
 export default function DocsPageContent() {
   const [selectedSection, setSelectedSection] = useState("overview")
+
+  // Handle hash-based navigation for direct links from landing page
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.slice(1) // Remove the '#'
+      if (hash) {
+        setSelectedSection(hash)
+      }
+    }
+
+    // Set initial section based on hash
+    handleHashChange()
+    
+    // Listen for hash changes
+    window.addEventListener('hashchange', handleHashChange)
+    return () => window.removeEventListener('hashchange', handleHashChange)
+  }, [])
 
   // Check if this is a generated doc
   const isGeneratedDoc = Object.values(generatedDocs).some((doc: any) => doc.id === selectedSection);
@@ -356,7 +773,10 @@ export default function DocsPageContent() {
                     {section.items.map((item: any) => (
                       <li key={item.id}>
                         <button
-                          onClick={() => setSelectedSection(item.id)}
+                          onClick={() => {
+                            setSelectedSection(item.id)
+                            window.location.hash = item.id
+                          }}
                           className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
                             selectedSection === item.id
                               ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 font-medium'

@@ -30,7 +30,8 @@
       "Bash(pnpm typecheck:*)",
       "Bash(pnpm tsc:*)",
       "Bash(pnpm build:*)",
-      "Bash(pnpm tauri:*)"
+      "Bash(pnpm tauri:*)",
+      "Bash(pnpm dev:*)"
     ],
     "deny": []
   },
