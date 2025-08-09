@@ -1,4 +1,4 @@
-use tauri::State;
+use tauri::{Emitter, Manager, State};
 
 use crate::db;
 use crate::llm;

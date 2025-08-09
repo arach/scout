@@ -1,4 +1,4 @@
-use tauri::State;
+use tauri::{Emitter, Manager, State};
 
 use crate::services::downloads::download_file_with_progress;
 use crate::AppState;

@@ -145,15 +145,11 @@ pub async fn get_recording_stats(state: State<'_, AppState>) -> Result<Recording
     Ok(RecordingStats { total_recordings, total_duration, total_words, current_streak, longest_streak, average_daily, most_active_day, most_active_hour, daily_activity, weekly_distribution, hourly_distribution })
 }
 
-use tauri::State;
-use crate::AppState;
-use crate::db::PerformanceMetrics;
-
 #[tauri::command]
 pub async fn get_performance_metrics(
     state: State<'_, AppState>,
     transcript_id: Option<i64>,
-) -> Result<PerformanceMetrics, String> {
+) -> Result<db::PerformanceMetrics, String> {
     // Get metrics from database
     if let Some(id) = transcript_id {
         match state.database.get_performance_metrics_for_transcript(id).await {
@@ -163,7 +159,7 @@ pub async fn get_performance_metrics(
         }
     } else {
         // Return empty metrics if no transcript specified
-        Ok(PerformanceMetrics {
+        Ok(db::PerformanceMetrics {
             id: 0,
             transcript_id: None,
             recording_duration_ms: 0,
@@ -186,7 +182,7 @@ pub async fn get_performance_metrics(
 pub async fn get_performance_metrics_for_transcript(
     state: State<'_, AppState>,
     transcript_id: i64,
-) -> Result<PerformanceMetrics, String> {
+) -> Result<db::PerformanceMetrics, String> {
     match state.database.get_performance_metrics_for_transcript(transcript_id).await {
         Ok(Some(metrics)) => Ok(metrics),
         Ok(None) => Err(format!("No metrics found for transcript {}", transcript_id)),
@@ -197,7 +193,7 @@ pub async fn get_performance_metrics_for_transcript(
 #[tauri::command]
 pub async fn get_performance_timeline(
     state: State<'_, AppState>,
-) -> Result<Option<crate::performance_tracker::PerformanceTimeline>, String> {
+) -> Result<Option<performance_tracker::PerformanceTimeline>, String> {
     Ok(state.performance_tracker.get_current_timeline().await)
 }
 

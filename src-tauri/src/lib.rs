@@ -46,6 +46,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Emitter, Manager, State, WindowEvent};
+use crate::services::download_file_with_progress;
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tauri::tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, MenuItemBuilder};
@@ -135,52 +136,13 @@ pub struct AppState {
     pub performance_tracker: Arc<PerformanceTracker>,
     pub model_state_manager: Arc<ModelStateManager>,
     #[cfg(target_os = "macos")]
-    pub native_overlay: Arc<Mutex<macos::MacOSOverlay>>,
-    #[cfg(target_os = "macos")]
     pub native_panel_overlay: Arc<Mutex<macos::NativeOverlay>>,
 }
 
 
 // Cleaned: moved command implementations to commands/* modules
 
-#[tauri::command]
-async fn download_model(
-    app: tauri::AppHandle,
-    model_name: String,
-    model_url: String,
-) -> Result<(), String> {
-    
-    
-    let models_dir = app.path().app_data_dir()
-        .map_err(|e| format!("Failed to get app data dir: {}", e))?
-        .join("models");
-    
-    // Create models directory if it doesn't exist
-    std::fs::create_dir_all(&models_dir)
-        .map_err(|e| format!("Failed to create models directory: {}", e))?;
-    
-    let model_filename = format!("ggml-{}.bin", model_name);
-    let dest_path = models_dir.join(&model_filename);
-    
-    // Check if model already exists
-    if dest_path.exists() {
-        info(Component::Transcription, &format!("Model {} already exists, skipping download", model_name));
-        return Ok(());
-    }
-    
-    // Download the GGML model
-    download_file_with_progress(&app, &model_url, &dest_path, "model").await?;
-    
-    // Get model state manager from app state
-    let state: State<AppState> = app.state();
-    
-    // Mark model as downloaded (CoreML can be downloaded separately later)
-    state.model_state_manager.mark_model_downloaded(&model_name, false).await;
-    
-    info(Component::Transcription, &format!("Model {} downloaded successfully", model_name));
-    
-    Ok(())
-}
+// Moved to commands/models.rs
 
 // moved to commands::models
 #[cfg(target_os = "macos")]
@@ -248,7 +210,9 @@ fn extract_coreml_model(zip_path: &std::path::Path, dest_path: &std::path::Path)
 
 // moved to services::downloads
 
-#[tauri::command]
+// Moved to commands/models.rs
+// check_and_download_missing_coreml_models function removed - using commands::check_and_download_missing_coreml_models
+/*
 async fn check_and_download_missing_coreml_models(
     app: tauri::AppHandle,
     state: State<'_, AppState>
@@ -285,7 +249,11 @@ async fn check_and_download_missing_coreml_models(
         Ok(Vec::new())
     }
 }
+*/
 
+// Moved to commands/models.rs  
+// download_coreml_for_model function moved
+/*
 #[tauri::command]
 async fn download_coreml_for_model(
     app: tauri::AppHandle,
@@ -308,7 +276,10 @@ async fn download_coreml_for_model(
         Err("Core ML is only supported on macOS".to_string())
     }
 }
+*/
 
+// Moved to commands/permissions.rs
+/*
 #[tauri::command]
 async fn check_microphone_permission() -> Result<String, String> {
     // For now, just check if we can access audio devices
@@ -336,18 +307,9 @@ async fn request_microphone_permission() -> Result<String, String> {
     // For now, we'll trigger a check by trying to access the device
     check_microphone_permission().await
 }
+*/
 
-#[tauri::command]
-async fn open_system_preferences_audio() -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
-            .spawn()
-            .map_err(|e| format!("Failed to open system preferences: {}", e))?;
-    }
-    Ok(())
-}
+// moved to commands::permissions
 
 // moved to commands::misc
 
@@ -366,323 +328,69 @@ fn format_duration(ms: i32) -> String {
 
 // moved to commands::misc
 
-#[tauri::command]
-async fn set_sound_enabled(enabled: bool) -> Result<(), String> {
-    sound::SoundPlayer::set_enabled(enabled);
-    Ok(())
-}
+// moved to commands::sounds
 
-#[tauri::command]
-async fn is_sound_enabled() -> Result<bool, String> {
-    Ok(sound::SoundPlayer::is_enabled())
-}
+// moved to commands::sounds
 
-#[tauri::command]
-async fn get_available_sounds() -> Result<Vec<String>, String> {
-    Ok(sound::SoundPlayer::get_available_sounds())
-}
+// moved to commands::sounds
 
-#[tauri::command]
-async fn get_sound_settings() -> Result<serde_json::Value, String> {
-    Ok(serde_json::json!({
-        "startSound": sound::SoundPlayer::get_start_sound(),
-        "stopSound": sound::SoundPlayer::get_stop_sound(),
-        "successSound": sound::SoundPlayer::get_success_sound()
-    }))
-}
+// moved to commands::sounds
 
-#[tauri::command]
-async fn set_start_sound(sound: String) -> Result<(), String> {
-    sound::SoundPlayer::set_start_sound(sound);
-    Ok(())
-}
+// moved to commands::sounds
 
-#[tauri::command]
-async fn set_stop_sound(sound: String) -> Result<(), String> {
-    sound::SoundPlayer::set_stop_sound(sound);
-    Ok(())
-}
+// moved to commands::sounds
 
-#[tauri::command]
-async fn set_success_sound(sound: String) -> Result<(), String> {
-    sound::SoundPlayer::set_success_sound(sound);
-    Ok(())
-}
+// moved to commands::sounds
 
-#[tauri::command]
-async fn preview_sound_flow() -> Result<(), String> {
-    sound::SoundPlayer::preview_sound_flow().await;
-    Ok(())
-}
+// moved to commands::sounds
 
-#[tauri::command]
-async fn update_completion_sound_threshold(state: State<'_, AppState>, threshold_ms: i32) -> Result<(), String> {
-    let mut settings = state.settings.lock().await;
-    settings.update(|s| s.ui.completion_sound_threshold_ms = threshold_ms as u64)
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
-    Ok(())
-}
+// moved to commands::sounds
 
 // moved to commands::shortcuts
 
 // moved to commands::models
 
-#[tauri::command]
-async fn get_available_models(state: State<'_, AppState>) -> Result<Vec<models::WhisperModel>, String> {
-    let settings = state.settings.lock().await;
-    Ok(models::WhisperModel::all(&state.models_dir, settings.get()))
-}
+// moved to commands::models
 
-#[tauri::command]
-async fn has_any_model(state: State<'_, AppState>) -> Result<bool, String> {
-    
-    let has_models = match std::fs::read_dir(&state.models_dir) {
-        Ok(entries) => {
-            let mut found_models = false;
-            for entry in entries.filter_map(Result::ok) {
-                let path = entry.path();
-                if path.extension()
-                    .and_then(|ext| ext.to_str())
-                    .map(|ext| ext == "bin")
-                    .unwrap_or(false) 
-                {
-                    found_models = true;
-                }
-            }
-            found_models
-        }
-        Err(e) => {
-            error(Component::Transcription, &format!("Error reading models directory: {}", e));
-            false
-        }
-    };
-    
-    Ok(has_models)
-}
+// moved to commands::models
 
-#[tauri::command]
-async fn set_active_model(state: State<'_, AppState>, model_id: String) -> Result<(), String> {
-    let mut settings = state.settings.lock().await;
-    let _previous_model = settings.get().models.active_model_id.clone();
-    settings.update(|s| s.models.active_model_id = model_id.clone())
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
-    Ok(())
-}
+// moved to commands::models
 
-#[tauri::command]
-async fn get_models_dir(state: State<'_, AppState>) -> Result<String, String> {
-    let path = state.models_dir.to_string_lossy().to_string();
-    Ok(path)
-}
+// moved to commands::models
 
-#[tauri::command]
-async fn get_model_coreml_status(state: State<'_, AppState>, model_id: String) -> Result<crate::model_state::CoreMLState, String> {
-    if let Some(model_state) = state.model_state_manager.get_state(&model_id).await {
-        Ok(model_state.coreml_state)
-    } else {
-        Ok(crate::model_state::CoreMLState::NotDownloaded)
-    }
-}
+// moved to commands::models
 
-#[tauri::command]
-async fn open_models_folder(state: State<'_, AppState>) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(&state.models_dir)
-            .spawn()
-            .map_err(|e| format!("Failed to open folder: {}", e))?;
-    }
-    
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("explorer")
-            .arg(&state.models_dir)
-            .spawn()
-            .map_err(|e| format!("Failed to open folder: {}", e))?;
-    }
-    
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(&state.models_dir)
-            .spawn()
-            .map_err(|e| format!("Failed to open folder: {}", e))?;
-    }
-    
-    Ok(())
-}
+// moved to commands::models
 
 // moved to commands::downloads
 
-#[tauri::command]
-async fn update_global_shortcut(
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
-    shortcut: String,
-) -> Result<(), String> {
-    use tauri_plugin_global_shortcut::GlobalShortcutExt;
-    
-    // Get the current shortcut and unregister it
-    let global_shortcut = app.global_shortcut();
-    let mut settings = state.settings.lock().await;
-    let current = settings.get().ui.hotkey.clone();
-    let _ = global_shortcut.unregister(current.as_str());
-    
-    // Clone app handle for the closure
-    let app_handle = app.clone();
-    
-    // Register the new shortcut
-    global_shortcut.on_shortcut(shortcut.as_str(), move |_app, _event, _shortcut| {
-        // Note: Dynamic shortcuts currently always use toggle mode
-        // TODO: Support recording mode in dynamic shortcuts
-        if let Err(e) = app_handle.emit("toggle-recording", ()) {
-            error(Component::UI, &format!("Failed to emit toggle-recording event: {}", e));
-        }
-    }).map_err(|e| format!("Failed to register shortcut '{}': {}", shortcut, e))?;
-    
-    // Update the stored shortcut
-    settings.update(|s| s.ui.hotkey = shortcut.clone())
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
-    
-    Ok(())
-}
+// moved to commands::shortcuts
 
 // moved to commands::settings
 
 // LLM Commands
 
-#[tauri::command]
-async fn get_available_llm_models(state: State<'_, AppState>) -> Result<Vec<llm::models::LLMModel>, String> {
-    let models_dir = state.models_dir.join("llm");
-    let settings = state.settings.lock().await;
-    let active_model_id = &settings.get().llm.model_id;
-    let model_manager = llm::models::ModelManager::new(models_dir);
-    Ok(model_manager.list_models(active_model_id))
-}
+// moved to commands::llm
 
-#[tauri::command]
-async fn get_llm_model_info(state: State<'_, AppState>, model_id: String) -> Result<Option<llm::models::LLMModel>, String> {
-    let models_dir = state.models_dir.join("llm");
-    let model_manager = llm::models::ModelManager::new(models_dir);
-    Ok(model_manager.list_models(&model_id).into_iter().find(|m| m.id == model_id))
-}
+// moved to commands::llm
 
-#[tauri::command]
-async fn download_llm_model(
-    state: State<'_, AppState>,
-    model_id: String,
-    app: tauri::AppHandle,
-) -> Result<(), String> {
-    let models_dir = state.models_dir.join("llm");
-    let model_manager = llm::models::ModelManager::new(models_dir);
-    
-    // Find the model
-    let models = model_manager.list_models(&model_id);
-    let model = models.into_iter()
-        .find(|m| m.id == model_id)
-        .ok_or_else(|| format!("Model {} not found", model_id))?;
-    
-    // Download the model with progress updates
-    model_manager.download_model_with_progress(&model, Some(&app)).await
-        .map_err(|e| format!("Failed to download model: {}", e))?;
-    
-    // Emit success event
-    app.emit("llm-model-downloaded", serde_json::json!({
-        "model_id": model_id
-    })).map_err(|e| format!("Failed to emit event: {}", e))?;
-    
-    Ok(())
-}
+// moved to commands::llm
 
-#[tauri::command]
-async fn set_active_llm_model(state: State<'_, AppState>, model_id: String) -> Result<(), String> {
-    let mut settings = state.settings.lock().await;
-    settings.update(|s| s.llm.model_id = model_id.clone())
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
-    Ok(())
-}
+// moved to commands::llm
 
-#[tauri::command]
-async fn get_llm_outputs_for_transcript(
-    state: State<'_, AppState>,
-    transcript_id: i64,
-) -> Result<Vec<db::LLMOutput>, String> {
-    state.database.get_llm_outputs_for_transcript(transcript_id).await
-}
+// moved to commands::llm
 
-#[tauri::command]
-async fn get_whisper_logs_for_session(
-    state: State<'_, AppState>,
-    session_id: String,
-    limit: Option<i32>,
-) -> Result<Vec<serde_json::Value>, String> {
-    state.database.get_whisper_logs_for_session(&session_id, limit).await
-}
+// moved to commands::llm
 
-#[tauri::command]
-async fn get_whisper_logs_for_transcript(
-    state: State<'_, AppState>,
-    transcript_id: i64,
-    limit: Option<i32>,
-) -> Result<Vec<serde_json::Value>, String> {
-    state.database.get_whisper_logs_for_transcript(transcript_id, limit).await
-}
+// moved to commands::llm
 
-#[tauri::command]
-async fn get_llm_prompt_templates(
-    state: State<'_, AppState>,
-) -> Result<Vec<db::LLMPromptTemplate>, String> {
-    state.database.get_llm_prompt_templates().await
-}
+// moved to commands::llm
 
-#[tauri::command]
-async fn save_llm_prompt_template(
-    state: State<'_, AppState>,
-    id: String,
-    name: String,
-    description: Option<String>,
-    template: String,
-    category: String,
-    enabled: bool,
-) -> Result<(), String> {
-    state.database.save_llm_prompt_template(
-        &id,
-        &name,
-        description.as_deref(),
-        &template,
-        &category,
-        enabled,
-    ).await
-}
+// moved to commands::llm
 
-#[tauri::command]
-async fn delete_llm_prompt_template(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<(), String> {
-    state.database.delete_llm_prompt_template(&id).await
-}
+// moved to commands::llm
 
-#[tauri::command]
-async fn update_llm_settings(
-    state: State<'_, AppState>,
-    enabled: bool,
-    model_id: String,
-    temperature: f32,
-    max_tokens: u32,
-    enabled_prompts: Vec<String>,
-) -> Result<(), String> {
-    let mut settings = state.settings.lock().await;
-    settings.update(|s| {
-        s.llm.enabled = enabled;
-        s.llm.model_id = model_id;
-        s.llm.temperature = temperature;
-        s.llm.max_tokens = max_tokens;
-        s.llm.enabled_prompts = enabled_prompts;
-    }).map_err(|e| format!("Failed to save settings: {}", e))?;
-    Ok(())
-}
+// moved to commands::llm
 
 // moved to commands::settings
 
@@ -806,11 +514,6 @@ pub fn run() {
                 .expect("Failed to initialize settings manager");
             let settings_arc = Arc::new(Mutex::new(settings_manager));
             
-            // Initialize the native overlay (disabled - using Tauri overlay window instead)
-            #[cfg(target_os = "macos")]
-            let native_overlay = Arc::new(Mutex::new(macos::MacOSOverlay::new()));
-            // Don't show the native overlay since we're using the Tauri window
-            
             let recorder_arc = Arc::new(Mutex::new(recorder));
             let database_arc = Arc::new(database);
             let progress_tracker = Arc::new(ProgressTracker::new());
@@ -905,8 +608,6 @@ pub fn run() {
                 performance_tracker,
                 model_state_manager: model_state_manager.clone(),
                 #[cfg(target_os = "macos")]
-                native_overlay: native_overlay.clone(),
-                #[cfg(target_os = "macos")]
                 native_panel_overlay: native_panel_overlay.clone(),
             };
             
@@ -923,15 +624,15 @@ pub fn run() {
                     info(Component::Recording, "Audio system warmed up");
                 }
             }
-            
-            // Start background Core ML model warming
-            {
-                let model_state_manager_clone = model_state_manager.clone();
-                let models_dir_clone = models_dir.clone();
-                tauri::async_runtime::spawn(async move {
+                
+                // Start background Core ML model warming
+                {
+                    let model_state_manager_clone = model_state_manager.clone();
+                    let models_dir_clone = models_dir.clone();
+                    tauri::async_runtime::spawn(async move {
                     // Start CoreML warming immediately - no artificial delay needed
-                    model_state::warm_coreml_models(model_state_manager_clone, models_dir_clone).await;
-                });
+                        model_state::warm_coreml_models(model_state_manager_clone, models_dir_clone).await;
+                    });
             }
             
             // Set up progress tracking listener to update native panel overlay

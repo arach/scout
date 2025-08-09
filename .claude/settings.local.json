@@ -31,7 +31,8 @@
       "Bash(pnpm tsc:*)",
       "Bash(pnpm build:*)",
       "Bash(pnpm tauri:*)",
-      "Bash(pnpm dev:*)"
+      "Bash(pnpm dev:*)",
+      "Bash(SKIP_BUILD_SCRIPT=1 cargo check)"
     ],
     "deny": []
   },

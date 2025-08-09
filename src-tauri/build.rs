@@ -12,7 +12,10 @@ fn main() {
         let combined_lib_path = out_dir.join("libmacos_overlay.a");
         let swift_header_path = out_dir.join("overlay-Swift.h");
 
-        // Compile Swift to object file
+        // Legacy overlay (overlay.swift/overlay_bridge.m) removed
+        // Generate a dummy overlay Swift object to keep the combined lib stable
+        let dummy_swift_path = out_dir.join("overlay_dummy.swift");
+        std::fs::write(&dummy_swift_path, "import Foundation\n").expect("Failed to write dummy Swift file");
         let output = std::process::Command::new("swiftc")
             .args([
                 "-c",
@@ -25,7 +28,7 @@ fn main() {
                 "src/macos/BridgingHeader.h",
                 "-o",
                 swift_obj_path.to_str().unwrap(),
-                "src/macos/overlay.swift",
+                dummy_swift_path.to_str().unwrap(),
             ])
             .output()
             .expect("Failed to execute Swift compiler");
@@ -43,44 +46,14 @@ fn main() {
             panic!("Failed to compile Swift code");
         }
 
-        // Compile Objective-C bridge
-        let output = std::process::Command::new("clang")
-            .args([
-                "-c",
-                "-fobjc-arc",
-                "-I",
-                out_dir.to_str().unwrap(),
-                "-o",
-                bridge_obj_path.to_str().unwrap(),
-                "src/macos/overlay_bridge.m",
-            ])
-            .output()
-            .expect("Failed to compile Objective-C bridge");
-
-        if !output.status.success() {
-            println!("cargo:warning=Objective-C compilation failed");
-            println!(
-                "cargo:warning=stdout: {}",
-                String::from_utf8_lossy(&output.stdout)
-            );
-            println!(
-                "cargo:warning=stderr: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            panic!("Failed to compile Objective-C code");
-        }
+        // No legacy Objective-C bridge anymore
 
         // Remove existing library if it exists
         let _ = std::fs::remove_file(&combined_lib_path);
 
-        // Create static library from both object files
+        // Create static library (includes only the dummy overlay Swift object)
         let ar_output = std::process::Command::new("ar")
-            .args([
-                "rcs",
-                combined_lib_path.to_str().unwrap(),
-                swift_obj_path.to_str().unwrap(),
-                bridge_obj_path.to_str().unwrap(),
-            ])
+            .args(["rcs", combined_lib_path.to_str().unwrap(), swift_obj_path.to_str().unwrap()])
             .output()
             .expect("Failed to create static library");
 

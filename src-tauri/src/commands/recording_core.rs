@@ -1,4 +1,4 @@
-use tauri::State;
+use tauri::{Emitter, Manager, State};
 
 use crate::recording_workflow::RecordingResult;
 use crate::{sound, AppState};

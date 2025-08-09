@@ -250,6 +250,7 @@ mod tests {
     use super::*;
     use hound::{WavWriter, WavSpec, SampleFormat};
     use tempfile::tempdir;
+    use std::path::Path;
     use std::sync::Arc;
     use tokio::sync::Mutex;
 

@@ -31,8 +31,6 @@ pub mod logs;
 pub use logs::*;
 pub mod shortcuts;
 pub use shortcuts::*;
-pub mod performance;
-pub use performance::*;
 pub mod dictionary;
 pub use dictionary::*;
 pub mod downloads;
