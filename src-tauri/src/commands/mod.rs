@@ -7,4 +7,8 @@ pub mod audio_devices;
 pub use audio_devices::*;
 pub mod transcription;
 pub use transcription::*;
+pub mod transcripts;
+pub use transcripts::*;
+pub mod performance;
+pub use performance::*;
 

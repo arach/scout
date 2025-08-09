@@ -67,14 +67,15 @@ pub async fn analyze_audio_corruption(file_path: &str) -> Result<serde_json::Val
         let bin = ((sample + 1.0) * 50.0) as i32; // 100 bins from -1 to 1
         *amplitude_histogram.entry(bin).or_insert(0) += 1;
         if let Some(last) = last_sample {
-            if (sample - last).abs() < 0.00001 {
+            let last_f32: f32 = last;
+            if (sample - last_f32).abs() < 0.00001 {
                 consecutive_identical += 1;
                 max_consecutive_identical = max_consecutive_identical.max(consecutive_identical);
             } else {
                 consecutive_identical = 0;
             }
         }
-        last_sample = Some(sample);
+        last_sample = Some(sample as f32);
     }
 
     for i in 1..samples.len() {

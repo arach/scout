@@ -153,49 +153,7 @@ async fn serve_audio_file(file_path: String) -> Result<Vec<u8>, String> {
     fs::read(&file_path).map_err(|e| format!("Failed to read audio file: {}", e))
 }
 
-#[tauri::command]
-async fn start_recording_no_transcription(state: State<'_, AppState>) -> Result<String, String> {
-    use crate::logger::{info, Component};
-    
-    info(Component::Recording, "🎙️  Starting recording WITHOUT transcription components");
-    
-    // Check if already recording
-    if state.progress_tracker.is_busy() {
-        return Err("Recording already in progress".to_string());
-    }
-    
-    let recorder = state.recorder.lock().await;
-    if recorder.is_recording() {
-        drop(recorder);
-        return Err("Audio recorder is already active".to_string());
-    }
-    drop(recorder);
-    
-    // Generate filename
-    let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S_%3f").to_string();
-    let filename = format!("recording_no_transcription_{}.wav", timestamp);
-    
-    // Get recordings directory from settings - use hardcoded default for now
-    let recordings_dir = std::path::PathBuf::from("/Users/arach/Library/Application Support/com.jdi.scout/recordings");
-    
-    let path = recordings_dir.join(&filename);
-    
-    info(Component::Recording, &format!("Recording to: {:?}", path));
-    
-    // Start PURE audio recording - no transcription, no sample callbacks, no processing
-    let recorder = state.recorder.lock().await;
-    match recorder.start_recording(&path, None) {
-        Ok(_) => {
-            drop(recorder);
-            info(Component::Recording, "Pure audio recording started successfully");
-            Ok(filename)
-        }
-        Err(e) => {
-            drop(recorder);
-            Err(format!("Failed to start pure recording: {}", e))
-        }
-    }
-}
+// start_recording_no_transcription moved to commands::recording
 
 // moved to commands::recording and services::recording / commands::diagnostics and services::diagnostics
 
@@ -425,34 +383,7 @@ async fn log_from_overlay(_message: String) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-async fn get_audio_devices() -> Result<Vec<String>, String> {
-    use cpal::traits::{DeviceTrait, HostTrait};
-    
-    let host = cpal::default_host();
-    let mut device_names = Vec::new();
-    
-    // Get input devices
-    let devices = host.input_devices()
-        .map_err(|e| format!("Failed to enumerate input devices: {}", e))?;
-    
-    for device in devices {
-        match device.name() {
-            Ok(name) => {
-                device_names.push(name);
-            },
-            Err(e) => {
-                error(Component::Recording, &format!("Failed to get device name: {}", e));
-            }
-        }
-    }
-    
-    if device_names.is_empty() {
-        device_names.push("No input devices found".to_string());
-    }
-    
-    Ok(device_names)
-}
+// Moved to commands/audio_devices.rs
 
 // moved to commands::audio_devices and services::audio_devices
 
@@ -466,123 +397,25 @@ async fn get_current_recording_file(state: State<'_, AppState>) -> Result<Option
 
 // moved to commands::transcription and services::transcription
 
-#[tauri::command]
-async fn save_transcript(
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
-    text: String,
-    duration_ms: i32,
-) -> Result<i64, String> {
-    // Get current active model for metadata
-    let settings = state.settings.lock().await;
-    let active_model = settings.get().models.active_model_id.clone();
-    drop(settings);
-    
-    let metadata = serde_json::json!({
-        "model_used": active_model,
-        "processing_type": "manual_save"
-    }).to_string();
-    
-    let transcript = state.database.save_transcript(&text, duration_ms, Some(&metadata), None, None).await?;
-    
-    // Emit transcript-created event
-    let _ = app.emit("transcript-created", &transcript);
-    
-    // Trigger webhook deliveries in background (non-blocking)
-    crate::webhooks::events::trigger_webhook_delivery_async(
-        state.database.clone(),
-        transcript.clone(),
-    );
-    
-    Ok(transcript.id)
-}
+// moved to commands::transcripts
 
-#[tauri::command]
-async fn get_recent_transcripts(
-    state: State<'_, AppState>,
-    limit: i32,
-) -> Result<Vec<db::Transcript>, String> {
-    state.database.get_recent_transcripts(limit).await
-}
+// moved to commands::transcripts
 
-#[tauri::command]
-async fn get_performance_metrics(
-    state: State<'_, AppState>,
-    limit: i32,
-) -> Result<Vec<db::PerformanceMetrics>, String> {
-    state.database.get_recent_performance_metrics(limit).await
-}
+// keep in lib.rs for now
 
-#[tauri::command]
-async fn get_performance_metrics_for_transcript(
-    state: State<'_, AppState>,
-    transcript_id: i64,
-) -> Result<Option<db::PerformanceMetrics>, String> {
-    state.database.get_performance_metrics_for_transcript(transcript_id).await
-}
+// keep in lib.rs for now
 
-#[tauri::command]
-async fn get_performance_timeline(
-    state: State<'_, AppState>,
-) -> Result<Option<performance_tracker::PerformanceTimeline>, String> {
-    Ok(state.performance_tracker.get_current_timeline().await)
-}
+// keep in lib.rs for now
 
-#[tauri::command]
-async fn get_performance_timeline_for_transcript(
-    state: State<'_, AppState>,
-    transcript_id: i64,
-) -> Result<Vec<serde_json::Value>, String> {
-    state.database.get_performance_timeline_for_transcript(transcript_id).await
-}
+// keep in lib.rs for now
 
-#[tauri::command]
-async fn get_transcript(
-    state: State<'_, AppState>,
-    transcript_id: i64,
-) -> Result<Option<db::Transcript>, String> {
-    state.database.get_transcript(transcript_id).await
-}
+// moved to commands::transcripts
 
-#[derive(serde::Serialize)]
-struct TranscriptWithAudioDetails {
-    transcript: db::Transcript,
-    audio_metadata: Option<serde_json::Value>,
-    performance_metrics: Option<db::PerformanceMetrics>,
-}
+// moved to commands::transcripts
 
-#[tauri::command]
-async fn get_transcript_with_audio_details(
-    state: State<'_, AppState>,
-    transcript_id: i64,
-) -> Result<Option<TranscriptWithAudioDetails>, String> {
-    // Get the transcript
-    let transcript = match state.database.get_transcript(transcript_id).await? {
-        Some(t) => t,
-        None => return Ok(None),
-    };
-    
-    // Parse audio metadata if available
-    let audio_metadata = transcript.audio_metadata.as_ref()
-        .and_then(|json_str| serde_json::from_str::<serde_json::Value>(json_str).ok());
-    
-    // Get performance metrics
-    let performance_metrics = state.database.get_performance_metrics_for_transcript(transcript_id).await?;
-    
-    Ok(Some(TranscriptWithAudioDetails {
-        transcript,
-        audio_metadata,
-        performance_metrics,
-    }))
-}
+// moved to commands::transcripts
 
-#[tauri::command]
-async fn search_transcripts(
-    state: State<'_, AppState>,
-    query: String,
-) -> Result<Vec<db::Transcript>, String> {
-    state.database.search_transcripts(&query).await
-}
+// moved to commands::transcripts
 
 #[tauri::command]
 async fn read_audio_file(audio_path: String) -> Result<Vec<u8>, String> {
@@ -900,78 +733,11 @@ async fn mark_onboarding_complete(_state: State<'_, AppState>) -> Result<(), Str
     Ok(())
 }
 
-#[tauri::command]
-async fn delete_transcript(
-    state: State<'_, AppState>,
-    id: i64,
-) -> Result<(), String> {
-    let result = state.database.delete_transcript(id).await;
-    result
-}
+// Moved to commands/transcripts.rs
 
-#[tauri::command]
-async fn delete_transcripts(
-    state: State<'_, AppState>,
-    ids: Vec<i64>,
-) -> Result<(), String> {
-    state.database.delete_transcripts(&ids).await
-}
+// moved to commands::transcripts
 
-#[tauri::command]
-async fn export_transcripts(
-    transcripts: Vec<db::Transcript>,
-    format: String,
-) -> Result<String, String> {
-    match format.as_str() {
-        "json" => {
-            serde_json::to_string_pretty(&transcripts)
-                .map_err(|e| format!("Failed to serialize to JSON: {}", e))
-        }
-        "markdown" => {
-            let mut output = String::from("# Scout Transcripts\n\n");
-            for transcript in transcripts {
-                output.push_str(&format!(
-                    "## {}\n\n{}\n\n*Duration: {}*\n\n---\n\n",
-                    transcript.created_at,
-                    transcript.text,
-                    format_duration(transcript.duration_ms)
-                ));
-            }
-            Ok(output)
-        }
-        "text" => {
-            let mut output = String::new();
-            for transcript in transcripts {
-                output.push_str(&format!(
-                    "[{}] ({}):\n{}\n\n",
-                    transcript.created_at,
-                    format_duration(transcript.duration_ms),
-                    transcript.text
-                ));
-            }
-            Ok(output)
-        }
-        _ => Err("Invalid export format".to_string())
-    }
-}
-
-#[tauri::command]
-async fn export_audio_file(
-    source_path: String,
-    destination_path: String,
-) -> Result<(), String> {
-    // Verify source exists
-    let source = Path::new(&source_path);
-    if !source.exists() {
-        return Err("Source audio file not found".to_string());
-    }
-    
-    // Copy the file
-    std::fs::copy(&source_path, &destination_path)
-        .map_err(|e| format!("Failed to copy audio file: {}", e))?;
-    
-    Ok(())
-}
+// moved to commands::transcripts
 
 fn format_duration(ms: i32) -> String {
     let seconds = ms / 1000;
@@ -2568,20 +2334,20 @@ pub fn run() {
             log_from_overlay,
             get_current_recording_file,
             crate::commands::transcribe_audio,
-            save_transcript,
-            get_performance_metrics,
-            get_performance_metrics_for_transcript,
-            get_performance_timeline,
-            get_performance_timeline_for_transcript,
-            get_transcript,
-            get_transcript_with_audio_details,
-            get_recent_transcripts,
-            search_transcripts,
+            crate::commands::save_transcript,
+            crate::commands::get_performance_metrics,
+            crate::commands::get_performance_metrics_for_transcript,
+            // crate::commands::get_performance_timeline,
+            // crate::commands::get_performance_timeline_for_transcript,
+            crate::commands::get_transcript,
+            crate::commands::get_transcript_with_audio_details,
+            crate::commands::get_recent_transcripts,
+            crate::commands::search_transcripts,
             read_audio_file,
-            delete_transcript,
-            delete_transcripts,
-            export_transcripts,
-            export_audio_file,
+            crate::commands::delete_transcript,
+            crate::commands::delete_transcripts,
+            crate::commands::export_transcripts,
+            crate::commands::export_audio_file,
             update_global_shortcut,
             subscribe_to_progress,
             get_overlay_position,
