@@ -454,77 +454,7 @@ async fn get_audio_devices() -> Result<Vec<String>, String> {
     Ok(device_names)
 }
 
-#[derive(serde::Serialize)]
-struct AudioDeviceInfo {
-    name: String,
-    index: usize,
-    sample_rates: Vec<u32>,
-    channels: u16,
-}
-
-#[tauri::command]
-async fn get_audio_devices_detailed() -> Result<Vec<AudioDeviceInfo>, String> {
-    use cpal::traits::{DeviceTrait, HostTrait};
-    
-    let host = cpal::default_host();
-    let mut device_infos = Vec::new();
-    
-    // Get input devices
-    let devices = host.input_devices()
-        .map_err(|e| format!("Failed to enumerate input devices: {}", e))?;
-    
-    for (index, device) in devices.enumerate() {
-        let name = device.name().unwrap_or_else(|_| format!("Unknown Device {}", index));
-        
-        // Try to get the default input config
-        let (sample_rates, channels) = match device.default_input_config() {
-            Ok(config) => {
-                // Get supported sample rates
-                let mut rates = vec![config.sample_rate().0];
-                
-                // Try common sample rates to see what's supported
-                for &rate in &[16000, 44100, 48000, 96000] {
-                    if rate != config.sample_rate().0 {
-                        rates.push(rate);
-                    }
-                }
-                
-                (rates, config.channels())
-            },
-            Err(_) => {
-                // Fallback values if we can't get config
-                (vec![48000], 2)
-            }
-        };
-        
-        device_infos.push(AudioDeviceInfo {
-            name,
-            index,
-            sample_rates,
-            channels,
-        });
-    }
-    
-    Ok(device_infos)
-}
-
-#[tauri::command]
-async fn start_audio_level_monitoring(state: State<'_, AppState>, device_name: Option<String>) -> Result<(), String> {
-    let recorder = state.recorder.lock().await;
-    recorder.start_audio_level_monitoring(device_name.as_deref())
-}
-
-#[tauri::command]
-async fn stop_audio_level_monitoring(state: State<'_, AppState>) -> Result<(), String> {
-    let recorder = state.recorder.lock().await;
-    recorder.stop_audio_level_monitoring()
-}
-
-#[tauri::command]
-async fn get_current_audio_level(state: State<'_, AppState>) -> Result<f32, String> {
-    let recorder = state.recorder.lock().await;
-    Ok(recorder.get_current_audio_level())
-}
+// moved to commands::audio_devices and services::audio_devices
 
 
 #[tauri::command]
@@ -533,150 +463,8 @@ async fn get_current_recording_file(state: State<'_, AppState>) -> Result<Option
     Ok(file.clone())
 }
 
-#[tauri::command]
-async fn transcribe_audio(
-    state: State<'_, AppState>,
-    audio_filename: String,
-) -> Result<String, String> {
-    let audio_path = state.recordings_dir.join(&audio_filename);
-    
-    // Check if audio file exists
-    if !audio_path.exists() {
-        return Err(format!("Audio file not found at path: {:?}", audio_path));
-    }
-    
-    // Check file size to ensure it's not empty
-    let metadata = std::fs::metadata(&audio_path)
-        .map_err(|e| format!("Failed to read file metadata: {}", e))?;
-    
-    if metadata.len() < 1024 {  // Less than 1KB is probably an empty or corrupted file
-        return Err(format!("Audio file appears to be empty or corrupted (size: {} bytes)", metadata.len()));
-    }
-    
-    // Get the active model path
-    let settings = state.settings.lock().await;
-    let model_path = models::WhisperModel::get_active_model_path(&state.models_dir, settings.get());
-    drop(settings); // Release the lock early
-    
-    if !model_path.exists() {
-        error(Component::Transcription, &format!("Model file does not exist at: {:?}", model_path));
-        debug(Component::Transcription, "Models directory contents:");
-        if let Ok(entries) = std::fs::read_dir(&state.models_dir) {
-            for entry in entries.filter_map(Result::ok) {
-                debug(Component::Transcription, &format!("  - {:?}", entry.path()));
-            }
-        }
-        return Err("No Whisper model found. Please download a model from Settings.".to_string());
-    } else {
-        
-        // Extract model name from path for logging
-        let _model_name = model_path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("unknown");
-    }
-    
-    // Get or create singleton transcriber for this model
-    let result = {
-        let mut current_model = state.current_model_path.lock().await;
-        let mut transcriber_opt = state.transcriber.lock().await;
-        
-        // Check if we need to create a new transcriber (model changed or first time)
-        let needs_new_transcriber = match (&*current_model, &*transcriber_opt) {
-            (Some(current_path), Some(_)) if current_path == &model_path => false,
-            _ => true
-        };
-        
-        if needs_new_transcriber {
-            info(Component::Transcription, &format!("Creating new singleton transcriber for model: {:?}", model_path));
-            match transcription::Transcriber::new(&model_path) {
-                Ok(new_transcriber) => {
-                    *transcriber_opt = Some(new_transcriber);
-                    *current_model = Some(model_path.clone());
-                }
-                Err(e) => return Err(e)
-            }
-        }
-        
-        // Use the singleton transcriber
-        let transcriber = transcriber_opt.as_ref().unwrap();
-        transcriber.transcribe(&audio_path)?
-    };
-    
-    Ok(result)
-}
 
-#[tauri::command]
-async fn transcribe_file(
-    state: State<'_, AppState>,
-    file_path: String,
-    app: tauri::AppHandle,
-) -> Result<String, String> {
-    use std::path::Path;
-    
-    let path = Path::new(&file_path);
-    
-    // Validate file exists
-    if !path.exists() {
-        return Err("File not found".to_string());
-    }
-    
-    // Check file size (limit to ~100MB for 10 minute files)
-    let metadata = std::fs::metadata(&path)
-        .map_err(|e| format!("Failed to read file metadata: {}", e))?;
-    
-    let file_size_mb = metadata.len() as f64 / (1024.0 * 1024.0);
-    if file_size_mb > 100.0 {
-        return Err(format!("File too large: {:.1}MB (max 100MB)", file_size_mb));
-    }
-    
-    // Get file extension
-    let extension = path.extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_lowercase();
-    
-    // Support common audio formats
-    let supported_formats = ["wav", "mp3", "m4a", "flac", "ogg", "webm"];
-    if !supported_formats.contains(&extension.as_str()) {
-        return Err(format!("Unsupported file format: .{}", extension));
-    }
-    
-    // Copy file to our recordings directory with timestamp
-    let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
-    let filename = format!("upload_{}_{}", timestamp, path.file_name().unwrap().to_string_lossy());
-    let dest_path = state.recordings_dir.join(&filename);
-    
-    std::fs::copy(&path, &dest_path)
-        .map_err(|e| format!("Failed to copy file: {}", e))?;
-    
-    // Estimate duration (rough estimate based on file size)
-    let estimated_duration_ms = (file_size_mb * 60000.0) as i32; // Rough: 1MB ≈ 1 minute
-    
-    // Queue for processing
-    let job = processing_queue::ProcessingJob {
-        filename: filename.clone(),
-        audio_path: dest_path,
-        duration_ms: estimated_duration_ms,
-        app_handle: Some(app.clone()),
-        queue_entry_time: tokio::time::Instant::now(),
-        user_stop_time: None, // File upload doesn't have user stop time
-        #[cfg(target_os = "macos")]
-        app_context: None, // No app context for file uploads
-        #[cfg(not(target_os = "macos"))]
-        app_context: None,
-    };
-    
-    let _ = state.processing_queue.queue_job(job).await;
-    
-    // Emit status update
-    app.emit("file-upload-complete", serde_json::json!({
-        "filename": filename,
-        "originalName": path.file_name().unwrap().to_string_lossy(),
-        "size": metadata.len(),
-    })).map_err(|e| format!("Failed to emit event: {}", e))?;
-    
-    Ok(filename)
-}
+// moved to commands::transcription and services::transcription
 
 #[tauri::command]
 async fn save_transcript(
@@ -2772,14 +2560,14 @@ pub fn run() {
             stop_recording,
             cancel_recording,
             is_recording,
-            get_audio_devices,
-            get_audio_devices_detailed,
-            start_audio_level_monitoring,
-            stop_audio_level_monitoring,
-            get_current_audio_level,
+            crate::commands::get_audio_devices,
+            crate::commands::get_audio_devices_detailed,
+            crate::commands::start_audio_level_monitoring,
+            crate::commands::stop_audio_level_monitoring,
+            crate::commands::get_current_audio_level,
             log_from_overlay,
             get_current_recording_file,
-            transcribe_audio,
+            crate::commands::transcribe_audio,
             save_transcript,
             get_performance_metrics,
             get_performance_metrics_for_transcript,
@@ -2818,7 +2606,7 @@ pub fn run() {
             preview_sound_flow,
             update_completion_sound_threshold,
             get_current_shortcut,
-            transcribe_file,
+            crate::commands::transcribe_file,
             get_available_models,
             has_any_model,
             set_active_model,
