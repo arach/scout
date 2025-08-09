@@ -22,6 +22,7 @@ const createMockProps = (overrides = {}) => ({
   formatDuration: vi.fn((ms) => `${Math.floor(ms / 1000)}s`),
   formatRecordingTimer: vi.fn((ms) => `${Math.floor(ms / 1000)}s`),
   showDeleteConfirmation: vi.fn(),
+  navigateToTranscript: vi.fn(),
   ...overrides,
 });
 

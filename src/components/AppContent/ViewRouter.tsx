@@ -28,6 +28,7 @@ interface ViewRouterProps {
   formatDuration: (ms: number) => string;
   formatRecordingTimer: (ms: number) => string;
   showDeleteConfirmation: (id: number, text: string) => void;
+  navigateToTranscript: (transcriptId: number) => void;
   // TranscriptsView props
   transcripts: any[];
   selectedTranscripts: Set<number>;
@@ -62,6 +63,7 @@ export const ViewRouter = memo<ViewRouterProps>(({
   formatDuration,
   formatRecordingTimer,
   showDeleteConfirmation,
+  navigateToTranscript,
   // TranscriptsView props
   transcripts,
   selectedTranscripts,
@@ -97,6 +99,7 @@ export const ViewRouter = memo<ViewRouterProps>(({
             formatDuration={formatDuration}
             formatRecordingTimer={formatRecordingTimer}
             showDeleteConfirmation={showDeleteConfirmation}
+            navigateToTranscript={navigateToTranscript}
           />
         </AudioErrorBoundary>
       );
