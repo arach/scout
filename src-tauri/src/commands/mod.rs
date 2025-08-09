@@ -11,4 +11,6 @@ pub mod transcripts;
 pub use transcripts::*;
 pub mod performance;
 pub use performance::*;
+pub mod overlay;
+pub use overlay::*;
 

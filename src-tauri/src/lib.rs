@@ -440,41 +440,7 @@ async fn subscribe_to_progress(state: State<'_, AppState>, app: tauri::AppHandle
     Ok(())
 }
 
-#[tauri::command]
-async fn get_overlay_position(state: State<'_, AppState>) -> Result<String, String> {
-    let settings = state.settings.lock().await;
-    Ok(settings.get().ui.overlay_position.clone())
-}
-
-#[tauri::command]
-async fn set_overlay_position(state: State<'_, AppState>, position: String) -> Result<(), String> {
-    // Update the settings
-    let mut settings = state.settings.lock().await;
-    settings.update(|s| s.ui.overlay_position = position.clone())
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
-    drop(settings);
-    
-    // Update the native overlay position immediately
-    #[cfg(target_os = "macos")]
-    {
-        let overlay = state.native_panel_overlay.lock().await;
-        overlay.set_position(&position);
-    }
-    
-    Ok(())
-}
-
-#[tauri::command]
-async fn set_overlay_treatment(state: State<'_, AppState>, treatment: String) -> Result<(), String> {
-    // Update the native overlay waveform style
-    #[cfg(target_os = "macos")]
-    {
-        let overlay = state.native_panel_overlay.lock().await;
-        overlay.set_waveform_style(&treatment);
-    }
-    
-    Ok(())
-}
+// moved to commands::overlay
 
 #[tauri::command]
 async fn download_model(
@@ -2337,8 +2303,8 @@ pub fn run() {
             crate::commands::save_transcript,
             crate::commands::get_performance_metrics,
             crate::commands::get_performance_metrics_for_transcript,
-            // crate::commands::get_performance_timeline,
-            // crate::commands::get_performance_timeline_for_transcript,
+            crate::commands::get_performance_timeline,
+            crate::commands::get_performance_timeline_for_transcript,
             crate::commands::get_transcript,
             crate::commands::get_transcript_with_audio_details,
             crate::commands::get_recent_transcripts,
@@ -2350,9 +2316,9 @@ pub fn run() {
             crate::commands::export_audio_file,
             update_global_shortcut,
             subscribe_to_progress,
-            get_overlay_position,
-            set_overlay_position,
-            set_overlay_treatment,
+            crate::commands::get_overlay_position,
+            crate::commands::set_overlay_position,
+            crate::commands::set_overlay_treatment,
             download_model,
             check_and_download_missing_coreml_models,
             download_coreml_for_model,

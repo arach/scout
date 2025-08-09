@@ -47,18 +47,17 @@ pub async fn get_performance_metrics_for_transcript(
     }
 }
 
-// Timeline methods not implemented in performance_tracker yet
-// #[tauri::command]
-// pub async fn get_performance_timeline(
-//     state: State<'_, AppState>,
-// ) -> Result<Vec<crate::performance_tracker::TimelineEntry>, String> {
-//     Ok(state.performance_tracker.get_timeline())
-// }
+#[tauri::command]
+pub async fn get_performance_timeline(
+    state: State<'_, AppState>,
+) -> Result<Option<crate::performance_tracker::PerformanceTimeline>, String> {
+    Ok(state.performance_tracker.get_current_timeline().await)
+}
 
-// #[tauri::command]
-// pub async fn get_performance_timeline_for_transcript(
-//     state: State<'_, AppState>,
-//     transcript_id: i64,
-// ) -> Result<Vec<crate::performance_tracker::TimelineEntry>, String> {
-//     state.performance_tracker.get_timeline_for_transcript(transcript_id).await
-// }
+#[tauri::command]
+pub async fn get_performance_timeline_for_transcript(
+    state: State<'_, AppState>,
+    transcript_id: i64,
+) -> Result<Vec<serde_json::Value>, String> {
+    state.database.get_performance_timeline_for_transcript(transcript_id).await
+}
