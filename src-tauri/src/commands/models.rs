@@ -147,6 +147,12 @@ pub async fn get_models_dir(state: State<'_, AppState>) -> Result<String, String
 }
 
 #[tauri::command]
+pub async fn get_current_model(state: State<'_, AppState>) -> Result<String, String> {
+    let settings = state.settings.lock().await;
+    Ok(settings.get().models.active_model_id.clone())
+}
+
+#[tauri::command]
 pub async fn get_model_coreml_status(state: State<'_, AppState>, model_id: String) -> Result<crate::model_state::CoreMLState, String> {
     if let Some(model_state) = state.model_state_manager.get_state(&model_id).await {
         Ok(model_state.coreml_state)

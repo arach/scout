@@ -141,306 +141,7 @@ pub struct AppState {
 }
 
 
-// moved to commands::audio_debug::test_simple_recording
-
-// moved to commands::audio_debug::test_device_config_consistency
-
-// moved to commands::audio_debug::{VoiceTestResult, VoiceRecording}
-
-#[tauri::command]
-async fn serve_audio_file(file_path: String) -> Result<Vec<u8>, String> {
-    use std::fs;
-    fs::read(&file_path).map_err(|e| format!("Failed to read audio file: {}", e))
-}
-
-// start_recording_no_transcription moved to commands::recording
-
-// moved to commands::recording and services::recording / commands::diagnostics and services::diagnostics
-
-// moved to commands::audio_debug::test_voice_with_sample_rate_mismatch
-
-// moved to commands::audio_debug::corrupt_wav_sample_rate
-
-// moved to commands::audio_debug::test_sample_rate_mismatch_reproduction
-
-// moved to commands::audio_debug::test_multiple_scout_recordings
-
-// moved to commands::audio_debug::test_scout_pipeline_recording
-
-#[tauri::command]
-async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle, device_name: Option<String>) -> Result<String, String> {
-    // Check if already recording
-    if state.progress_tracker.is_busy() {
-        warn(Component::Recording, "Attempted to start recording while already recording");
-        return Err("Recording already in progress".to_string());
-    }
-    
-    // Double-check with the audio recorder
-    let recorder = state.recorder.lock().await;
-    if recorder.is_recording() {
-        drop(recorder);
-        warn(Component::Recording, "Audio recorder is already recording");
-        return Err("Audio recorder is already active".to_string());
-    }
-    drop(recorder);
-    
-    // Play start sound after we've confirmed we can record
-    sound::SoundPlayer::play_start();
-    
-    
-    // Use the recording workflow to start recording
-    let filename = state.recording_workflow.start_recording(device_name).await?;
-    
-    // Progress is already updated by recording_workflow, no need to update again
-    
-    // Store the current recording filename
-    *state.current_recording_file.lock().await = Some(filename.clone());
-
-    // Update tray menu item text
-    if let Some(menu_item) = app.try_state::<MenuItem<tauri::Wry>>() {
-        let _ = menu_item.set_text("Stop Recording");
-    }
-
-    // Show native NSPanel overlay and immediately set recording state
-    #[cfg(target_os = "macos")]
-    {
-        let overlay = state.native_panel_overlay.lock().await;
-        overlay.show();
-        overlay.set_recording_state(true);
-        drop(overlay);
-        
-        // Start audio level monitoring for native overlay AFTER recording has started
-        let overlay_clone = state.native_panel_overlay.clone();
-        let recorder_clone = state.recorder.clone();
-        
-        // Start audio level monitoring task
-        
-        tauri::async_runtime::spawn(async move {
-            // Audio level monitoring task started
-            
-            // Wait for recording to stabilize
-            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-            
-            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(200)); // Reduced frequency to avoid lock contention
-            let mut tick_count = 0;
-            let mut consecutive_not_recording = 0;
-            
-            loop {
-                interval.tick().await;
-                tick_count += 1;
-                
-                let recorder = recorder_clone.lock().await;
-                let is_recording = recorder.is_recording();
-                let level = recorder.get_current_audio_level();
-                drop(recorder);
-                
-                // Only exit if we've seen multiple "not recording" states
-                if !is_recording {
-                    consecutive_not_recording += 1;
-                    if consecutive_not_recording > 5 {
-                        // Recording stopped - end monitoring
-                        break;
-                    }
-                } else {
-                    consecutive_not_recording = 0;
-                }
-                
-                // Log every 20th tick (every second) for debugging
-                if tick_count % 20 == 0 {
-                    // Periodic audio level check
-                }
-                
-                let overlay = overlay_clone.lock().await;
-                overlay.set_volume_level(level);
-                drop(overlay);
-            }
-            
-            // Audio level monitoring task ended
-        });
-    }
-
-    // Broadcast recording state change to ALL windows
-    let _ = app.emit("recording-state-changed", serde_json::json!({
-        "state": "recording",
-        "filename": &filename
-    }));
-
-    Ok(filename)
-}
-
-#[tauri::command]
-async fn cancel_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<(), String> {
-    
-    // Cancel recording without queueing for processing
-    state.recording_workflow.cancel_recording().await?;
-    
-    // Clear the current recording file
-    state.current_recording_file.lock().await.take();
-    
-    // Update tray menu item text
-    if let Some(menu_item) = app.try_state::<MenuItem<tauri::Wry>>() {
-        let _ = menu_item.set_text("Start Recording");
-    }
-    
-    // Stop recording overlay updates
-    state.is_recording_overlay_active.store(false, Ordering::Relaxed);
-    
-    // Native overlay will be updated to idle by progress tracker listener
-    
-    Ok(())
-}
-
-#[tauri::command]
-async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<RecordingResult, String> {
-    
-    // Use the recording workflow to stop recording
-    let result = state.recording_workflow.stop_recording().await?;
-    
-    // Play stop sound
-    sound::SoundPlayer::play_stop();
-    
-    // Set native overlay to processing state instead of idle
-    #[cfg(target_os = "macos")]
-    {
-        use crate::logger::{info, debug, Component};
-        
-        info(Component::Overlay, "Setting native overlay to processing state for transcription");
-        
-        let overlay = state.native_panel_overlay.lock().await;
-        overlay.set_processing_state(true);
-        debug(Component::Overlay, "Native overlay set to processing state");
-        drop(overlay);
-    }
-    
-    // Get the filename for background processing
-    let filename = state.current_recording_file.lock().await.take();
-    
-    // Spawn a background task to ensure file is ready
-    if let Some(filename) = filename {
-        let recordings_dir = state.recordings_dir.clone();
-        
-        tokio::spawn(async move {
-            // Wait for the audio file to be fully written
-            tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
-            
-            // Verify file exists and has content
-            let file_path = recordings_dir.join(&filename);
-            match tokio::fs::metadata(&file_path).await {
-                Ok(_metadata) => {
-                }
-                Err(e) => {
-                    error(Component::Recording, &format!("Failed to verify recording file: {}", e));
-                }
-            }
-        });
-    }
-    
-    // Update tray menu item text
-    if let Some(menu_item) = app.try_state::<MenuItem<tauri::Wry>>() {
-        let _ = menu_item.set_text("Start Recording");
-    }
-    
-    // Stop recording overlay updates
-    state.is_recording_overlay_active.store(false, Ordering::Relaxed);
-    
-    // Native overlay state will be managed by the progress tracker and processing status events
-    // Don't set it to processing here - let the workflow handle state transitions
-    
-    // Broadcast recording state change to ALL windows
-    let _ = app.emit("recording-state-changed", serde_json::json!({
-        "state": "stopped"
-    }));
-    
-    Ok(result)
-}
-
-#[tauri::command]
-async fn is_recording(state: State<'_, AppState>) -> Result<bool, String> {
-    // Check progress tracker state first - it's the most authoritative source
-    let progress = state.progress_tracker.current_state();
-    match progress {
-        recording_progress::RecordingProgress::Recording { .. } => Ok(true),
-        recording_progress::RecordingProgress::Stopping { .. } => Ok(true),
-        recording_progress::RecordingProgress::Idle => {
-            // Only check recorder state if progress tracker is idle
-            // This prevents race conditions where recorder state hasn't been cleared yet
-            let recorder = state.recorder.lock().await;
-            let is_recording = recorder.is_recording();
-            drop(recorder);
-            
-            // Log if there's a mismatch for debugging
-            if is_recording {
-                warn(Component::Recording, "is_recording mismatch: recorder says true but progress tracker is idle");
-            }
-            
-            Ok(is_recording)
-        }
-    }
-}
-
-#[tauri::command]
-async fn log_from_overlay(_message: String) -> Result<(), String> {
-    Ok(())
-}
-
-// Moved to commands/audio_devices.rs
-
-// moved to commands::audio_devices and services::audio_devices
-
-
-#[tauri::command]
-async fn get_current_recording_file(state: State<'_, AppState>) -> Result<Option<String>, String> {
-    let file = state.current_recording_file.lock().await;
-    Ok(file.clone())
-}
-
-
-// moved to commands::transcription and services::transcription
-
-// moved to commands::transcripts
-
-// moved to commands::transcripts
-
-// keep in lib.rs for now
-
-// keep in lib.rs for now
-
-// keep in lib.rs for now
-
-// keep in lib.rs for now
-
-// moved to commands::transcripts
-
-// moved to commands::transcripts
-
-// moved to commands::transcripts
-
-// moved to commands::transcripts
-
-#[tauri::command]
-async fn read_audio_file(audio_path: String) -> Result<Vec<u8>, String> {
-    let path = Path::new(&audio_path);
-    if path.extension().and_then(|s| s.to_str()) == Some("wav") {
-        return std::fs::read(&audio_path).map_err(|e| e.to_string());
-    }
-    AudioConverter::convert_to_wav_bytes(path)
-}
-
-#[tauri::command]
-async fn subscribe_to_progress(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<(), String> {
-    let mut receiver = state.progress_tracker.subscribe();
-    
-    tauri::async_runtime::spawn(async move {
-        while receiver.changed().await.is_ok() {
-            let progress = receiver.borrow().clone();
-            let _ = app.emit("recording-progress", &progress);
-        }
-    });
-    
-    Ok(())
-}
-
-// moved to commands::overlay
+// Cleaned: moved command implementations to commands/* modules
 
 #[tauri::command]
 async fn download_model(
@@ -648,11 +349,7 @@ async fn open_system_preferences_audio() -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-async fn mark_onboarding_complete(_state: State<'_, AppState>) -> Result<(), String> {
-    // Could store this in settings if needed
-    Ok(())
-}
+// moved to commands::misc
 
 // Moved to commands/transcripts.rs
 
@@ -667,11 +364,7 @@ fn format_duration(ms: i32) -> String {
     format!("{}:{:02}", minutes, remaining_seconds)
 }
 
-#[tauri::command]
-async fn get_processing_status() -> Result<Vec<String>, String> {
-    // This could be enhanced to return actual queue status
-    Ok(vec!["Processing queue is active".to_string()])
-}
+// moved to commands::misc
 
 #[tauri::command]
 async fn set_sound_enabled(enabled: bool) -> Result<(), String> {
@@ -730,17 +423,9 @@ async fn update_completion_sound_threshold(state: State<'_, AppState>, threshold
     Ok(())
 }
 
-#[tauri::command]
-async fn get_current_shortcut(state: State<'_, AppState>) -> Result<String, String> {
-    let settings = state.settings.lock().await;
-    Ok(settings.get().ui.hotkey.clone())
-}
+// moved to commands::shortcuts
 
-#[tauri::command]
-async fn get_current_model(state: State<'_, AppState>) -> Result<String, String> {
-    let settings = state.settings.lock().await;
-    Ok(settings.get().models.active_model_id.clone())
-}
+// moved to commands::models
 
 #[tauri::command]
 async fn get_available_models(state: State<'_, AppState>) -> Result<Vec<models::WhisperModel>, String> {
@@ -828,85 +513,7 @@ async fn open_models_folder(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-async fn download_file(
-    url: String,
-    dest_path: String,
-    app: tauri::AppHandle,
-) -> Result<(), String> {
-    use std::path::Path;
-    use tokio::fs::File;
-    use tokio::io::AsyncWriteExt;
-    use futures_util::StreamExt;
-    
-    
-    // Ensure parent directory exists
-    if let Some(parent) = Path::new(&dest_path).parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create directory: {}", e))?;
-        
-        // Verify directory was created
-        if parent.exists() && parent.is_dir() {
-        } else {
-            error(Component::Transcription, "Parent directory was not created properly!");
-        }
-    }
-    
-    // Start download
-    let client = reqwest::Client::new();
-    let response = client.get(&url)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to start download: {}", e))?;
-    
-    let total_size = response.content_length().unwrap_or(0);
-    
-    // Create the file
-    let mut file = File::create(&dest_path).await
-        .map_err(|e| format!("Failed to create file at {}: {}", dest_path, e))?;
-    
-    // Download with progress
-    let mut downloaded = 0u64;
-    let mut stream = response.bytes_stream();
-    
-    while let Some(chunk_result) = stream.next().await {
-        let chunk = chunk_result
-            .map_err(|e| format!("Download error: {}", e))?;
-        
-        file.write_all(&chunk).await
-            .map_err(|e| format!("Failed to write chunk: {}", e))?;
-        
-        downloaded += chunk.len() as u64;
-        
-        // Emit progress event
-        let progress = if total_size > 0 {
-            (downloaded as f64 / total_size as f64) * 100.0
-        } else {
-            0.0
-        };
-        
-        let _ = app.emit("download-progress", serde_json::json!({
-            "url": url,
-            "downloaded": downloaded,
-            "total": total_size,
-            "progress": progress
-        }));
-    }
-    
-    file.flush().await
-        .map_err(|e| format!("Failed to flush file: {}", e))?;
-    
-    
-    // Verify the file exists
-    if Path::new(&dest_path).exists() {
-        let _metadata = std::fs::metadata(&dest_path)
-            .map_err(|e| format!("Failed to get file metadata: {}", e))?;
-    } else {
-        error(Component::Transcription, "File does not exist after download!");
-    }
-    
-    Ok(())
-}
+// moved to commands::downloads
 
 #[tauri::command]
 async fn update_global_shortcut(
@@ -1080,602 +687,26 @@ async fn update_llm_settings(
 // moved to commands::settings
 
 
-#[tauri::command]
-async fn get_push_to_talk_shortcut(state: State<'_, AppState>) -> Result<String, String> {
-    let settings = state.settings.lock().await;
-    Ok(settings.get().ui.push_to_talk_hotkey.clone())
-}
+// moved to commands::shortcuts
 
-#[tauri::command]
-async fn update_push_to_talk_shortcut(
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
-    shortcut: String,
-) -> Result<(), String> {
-    use tauri_plugin_global_shortcut::GlobalShortcutExt;
-    
-    let global_shortcut = app.global_shortcut();
-    let mut settings = state.settings.lock().await;
-    
-    // Unregister old push-to-talk shortcut
-    let current = settings.get().ui.push_to_talk_hotkey.clone();
-    let _ = global_shortcut.unregister(current.as_str());
-    
-    // Clone app handle for the closure
-    let app_handle = app.clone();
-    
-    // Register the new push-to-talk shortcut
-    global_shortcut.on_shortcut(shortcut.as_str(), move |_app, _event, _shortcut| {
-        if let Err(e) = app_handle.emit("push-to-talk-pressed", ()) {
-            error(Component::UI, &format!("Failed to emit push-to-talk-pressed event: {}", e));
-        }
-    }).map_err(|e| format!("Failed to register push-to-talk shortcut '{}': {}", shortcut, e))?;
-    
-    // Update keyboard monitor with new push-to-talk key
-    state.keyboard_monitor.set_push_to_talk_key(&shortcut);
-    
-    // Update the stored shortcut
-    settings.update(|s| s.ui.push_to_talk_hotkey = shortcut.clone())
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
-    
-    Ok(())
-}
+// moved to commands::shortcuts
 
-#[tauri::command]
-async fn paste_text() -> Result<(), String> {
-    clipboard::simulate_paste()
-}
+// moved to commands::misc
 
-#[tauri::command]
-async fn play_success_sound() -> Result<(), String> {
-    sound::SoundPlayer::play_success();
-    Ok(())
-}
+// moved to commands::sounds
 
-#[tauri::command]
-async fn set_overlay_waveform_style(state: State<'_, AppState>, style: String) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        let overlay = state.native_panel_overlay.lock().await;
-        overlay.set_waveform_style(&style);
-    }
-    Ok(())
-}
+// moved to commands::overlay
 
-#[tauri::command]
-async fn get_log_file_path() -> Result<Option<String>, String> {
-    Ok(logger::get_log_file_path().map(|p| p.to_string_lossy().to_string()))
-}
+// moved to commands::logs
 
-#[tauri::command]
-async fn open_log_file() -> Result<(), String> {
-    use std::process::Command;
-    
-    if let Some(log_path) = logger::get_log_file_path() {
-        #[cfg(target_os = "macos")]
-        {
-            Command::new("open")
-                .arg(&log_path)
-                .spawn()
-                .map_err(|e| format!("Failed to open log file: {}", e))?;
-        }
-        
-        #[cfg(target_os = "windows")]
-        {
-            Command::new("notepad")
-                .arg(&log_path)
-                .spawn()
-                .map_err(|e| format!("Failed to open log file: {}", e))?;
-        }
-        
-        #[cfg(target_os = "linux")]
-        {
-            Command::new("xdg-open")
-                .arg(&log_path)
-                .spawn()
-                .map_err(|e| format!("Failed to open log file: {}", e))?;
-        }
-        
-        Ok(())
-    } else {
-        Err("No log file found".to_string())
-    }
-}
+// moved to commands::logs
 
-#[tauri::command]
-async fn show_log_file_in_finder() -> Result<(), String> {
-    use std::process::Command;
-    
-    if let Some(log_path) = logger::get_log_file_path() {
-        #[cfg(target_os = "macos")]
-        {
-            Command::new("open")
-                .arg("-R")  // Reveal in Finder
-                .arg(&log_path)
-                .spawn()
-                .map_err(|e| format!("Failed to reveal log file in Finder: {}", e))?;
-        }
-        
-        #[cfg(target_os = "windows")]
-        {
-            Command::new("explorer")
-                .arg("/select,")
-                .arg(&log_path)
-                .spawn()
-                .map_err(|e| format!("Failed to reveal log file in Explorer: {}", e))?;
-        }
-        
-        #[cfg(target_os = "linux")]
-        {
-            // Try to reveal in file manager, fall back to opening directory
-            if let Some(parent) = log_path.parent() {
-                Command::new("xdg-open")
-                    .arg(parent)
-                    .spawn()
-                    .map_err(|e| format!("Failed to open logs directory: {}", e))?;
-            } else {
-                return Err("Could not find logs directory".to_string());
-            }
-        }
-        
-        Ok(())
-    } else {
-        Err("No log file found".to_string())
-    }
-}
+// moved to commands::logs
 
 
-// Dictionary commands
-#[tauri::command]
-async fn get_dictionary_entries(
-    state: State<'_, AppState>,
-    enabled_only: bool,
-) -> Result<Vec<db::DictionaryEntry>, String> {
-    if enabled_only {
-        state.database.get_enabled_dictionary_entries().await
-    } else {
-        state.database.get_all_dictionary_entries().await
-    }
-}
+// moved to commands::dictionary
 
-#[tauri::command]
-async fn save_dictionary_entry(
-    state: State<'_, AppState>,
-    original_text: String,
-    replacement_text: String,
-    match_type: String,
-    is_case_sensitive: bool,
-    phonetic_pattern: Option<String>,
-    category: Option<String>,
-    description: Option<String>,
-) -> Result<i64, String> {
-    state.database.save_dictionary_entry(
-        &original_text,
-        &replacement_text,
-        &match_type,
-        is_case_sensitive,
-        phonetic_pattern.as_deref(),
-        category.as_deref(),
-        description.as_deref(),
-    ).await
-}
 
-#[tauri::command]
-async fn update_dictionary_entry(
-    state: State<'_, AppState>,
-    id: i64,
-    original_text: String,
-    replacement_text: String,
-    match_type: String,
-    is_case_sensitive: bool,
-    phonetic_pattern: Option<String>,
-    category: Option<String>,
-    description: Option<String>,
-    enabled: bool,
-) -> Result<(), String> {
-    state.database.update_dictionary_entry(
-        id,
-        &original_text,
-        &replacement_text,
-        &match_type,
-        is_case_sensitive,
-        phonetic_pattern.as_deref(),
-        category.as_deref(),
-        description.as_deref(),
-        enabled,
-    ).await
-}
-
-#[tauri::command]
-async fn delete_dictionary_entry(
-    state: State<'_, AppState>,
-    id: i64,
-) -> Result<(), String> {
-    state.database.delete_dictionary_entry(id).await
-}
-
-#[tauri::command]
-async fn get_dictionary_matches_for_transcript(
-    state: State<'_, AppState>,
-    transcript_id: i64,
-) -> Result<Vec<serde_json::Value>, String> {
-    state.database.get_dictionary_matches_for_transcript(transcript_id).await
-}
-
-#[tauri::command]
-async fn test_dictionary_replacement(
-    state: State<'_, AppState>,
-    text: String,
-) -> Result<String, String> {
-    let dictionary_processor = crate::dictionary_processor::DictionaryProcessor::new(state.database.clone());
-    let (processed_text, _matches) = dictionary_processor.process_transcript(&text, None).await?;
-    Ok(processed_text)
-}
-
-#[derive(serde::Serialize)]
-struct DayActivity {
-    date: String,
-    count: i32,
-    duration_ms: i64,
-    words: i64,
-}
-
-#[derive(serde::Serialize)]
-struct RecordingStats {
-    total_recordings: i32,
-    total_duration: i64,
-    total_words: i64,
-    current_streak: i32,
-    longest_streak: i32,
-    average_daily: f64,
-    most_active_day: String,
-    most_active_hour: i32,
-    daily_activity: Vec<DayActivity>,
-    weekly_distribution: Vec<(String, i32)>,
-    hourly_distribution: Vec<(i32, i32)>,
-}
-
-#[tauri::command]
-async fn generate_sample_data(state: State<'_, AppState>) -> Result<String, String> {
-    use chrono::{Datelike, Local, Duration, Timelike, Weekday};
-    
-    
-    eprintln!("Generating sample transcript data...");
-    
-    let now = Local::now();
-    let mut generated_count = 0;
-    
-    // Generate data for the past 180 days (6 months)
-    for days_ago in 0..180 {
-        let date = now - Duration::days(days_ago);
-        
-        // Skip some days to create realistic streaks and gaps
-        let skip_chance = match date.weekday() {
-            Weekday::Sat | Weekday::Sun => 0.7, // 70% chance to skip weekends
-            _ => 0.2, // 20% chance to skip weekdays
-        };
-        
-        // Use date as seed for consistent randomness
-        let date_seed = (date.day() * date.month() * ((days_ago + 1) as u32)) as f32;
-        if (date_seed % 100.0) / 100.0 < skip_chance {
-            continue;
-        }
-        
-        // Determine number of recordings for this day
-        let base_recordings = match date.weekday() {
-            Weekday::Mon | Weekday::Wed | Weekday::Fri => 3..=7, // Busy days
-            Weekday::Tue | Weekday::Thu => 2..=5, // Normal days
-            Weekday::Sat | Weekday::Sun => 1..=3, // Weekend
-        };
-        
-        let num_recordings = ((date_seed as usize % 5) + base_recordings.start()) 
-            .min(*base_recordings.end());
-        
-        // Generate recordings throughout the day
-        for recording_num in 0..num_recordings {
-            // Distribute recordings during work hours (9am-6pm) with some variation
-            let hour = match recording_num % 5 {
-                0 => 9 + (date_seed as u32 % 2), // Morning (9-10am)
-                1 => 11 + (date_seed as u32 % 2), // Late morning (11am-12pm)
-                2 => 14 + (date_seed as u32 % 2), // Afternoon (2-3pm)
-                3 => 16 + (date_seed as u32 % 2), // Late afternoon (4-5pm)
-                _ => 10 + (date_seed as u32 % 8), // Random throughout day
-            };
-            
-            let minute = (date_seed as u32 * ((recording_num + 1) as u32)) % 60;
-            
-            // Vary duration based on time of day
-            let duration_ms = match hour {
-                9..=11 => 60000 + ((date_seed as i32 * 1000) % 180000), // 1-4 minutes morning
-                14..=16 => 120000 + ((date_seed as i32 * 1500) % 240000), // 2-6 minutes afternoon
-                _ => 90000 + ((date_seed as i32 * 800) % 150000), // 1.5-4 minutes other times
-            };
-            
-            // Calculate approximate words (150-200 words per minute)
-            let words_per_minute = 150 + ((date_seed as i32) % 50);
-            let words = (duration_ms / 60000) * words_per_minute;
-            
-            // Create sample text
-            let text = format!(
-                "Sample recording from {} at {}:{:02}. This is recording {} of {} for the day. \
-                The recording lasted {} seconds and contains approximately {} words of transcribed content. \
-                This demonstrates typical usage patterns with varying activity levels throughout the week.",
-                date.format("%A, %B %d, %Y"),
-                hour,
-                minute,
-                recording_num + 1,
-                num_recordings,
-                duration_ms / 1000,
-                words
-            );
-            
-            // Set created_at timestamp
-            let created_at = date
-                .with_hour(hour)
-                .unwrap()
-                .with_minute(minute)
-                .unwrap()
-                .with_second(0)
-                .unwrap()
-                .format("%Y-%m-%d %H:%M:%S")
-                .to_string();
-            
-            // Save to database  
-            match state.database.save_transcript_with_timestamp(&text, duration_ms, None, None, &created_at).await {
-                Ok(_) => generated_count += 1,
-                Err(e) => eprintln!("Failed to create sample transcript: {}", e),
-            }
-        }
-    }
-    
-    Ok(format!("Generated {} sample transcripts over 180 days", generated_count))
-}
-
-#[tauri::command]
-async fn get_recording_stats(state: State<'_, AppState>) -> Result<RecordingStats, String> {
-    use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, TimeZone, Timelike, Weekday, Duration};
-    use std::collections::HashMap;
-    
-    // Log the start of the function
-    eprintln!("get_recording_stats called");
-    
-    // Get all transcripts to calculate stats
-    let all_transcripts = state.database.get_recent_transcripts(10000).await?;
-    eprintln!("Found {} transcripts", all_transcripts.len());
-    
-    if all_transcripts.is_empty() {
-        eprintln!("No transcripts found, returning demo data...");
-        
-        // Return demo data for visualization
-        let now = Local::now();
-        let mut daily_activity = Vec::new();
-        let mut weekly_dist = HashMap::new();
-        let mut hourly_dist = HashMap::new();
-        
-        // Generate activity for the past 90 days
-        for days_ago in 0..90 {
-            let date = now - Duration::days(days_ago);
-            let date_str = date.format("%Y-%m-%d").to_string();
-            
-            // Vary activity based on day of week
-            let (count, duration, words) = match date.weekday() {
-                Weekday::Sat | Weekday::Sun => {
-                    // Weekends: less activity
-                    if days_ago % 3 == 0 {
-                        (1, 60000 + (days_ago as i32 * 1000) % 120000, 200 + (days_ago as i32 * 10) % 300)
-                    } else {
-                        (0, 0, 0)
-                    }
-                }
-                _ => {
-                    // Weekdays: more activity
-                    let base_count = 2 + (days_ago % 3) as i32;
-                    let base_duration = 120000 + (days_ago as i32 * 2000) % 180000;
-                    let base_words = 400 + (days_ago as i32 * 20) % 500;
-                    (base_count, base_duration, base_words)
-                }
-            };
-            
-            if count > 0 {
-                daily_activity.push(DayActivity {
-                    date: date_str,
-                    count,
-                    duration_ms: duration as i64,
-                    words: words as i64,
-                });
-                
-                // Update weekly distribution
-                let weekday = match date.weekday() {
-                    Weekday::Mon => "Mon",
-                    Weekday::Tue => "Tue",
-                    Weekday::Wed => "Wed",
-                    Weekday::Thu => "Thu",
-                    Weekday::Fri => "Fri",
-                    Weekday::Sat => "Sat",
-                    Weekday::Sun => "Sun",
-                }.to_string();
-                *weekly_dist.entry(weekday).or_insert(0) += count;
-                
-                // Update hourly distribution (simulate activity between 9am-6pm)
-                let hour = (9 + (days_ago % 10)) as i32;
-                *hourly_dist.entry(hour).or_insert(0) += count;
-            }
-        }
-        
-        // Convert to sorted vectors
-        let weekly_distribution: Vec<(String, i32)> = vec![
-            ("Mon".to_string(), *weekly_dist.get("Mon").unwrap_or(&0)),
-            ("Tue".to_string(), *weekly_dist.get("Tue").unwrap_or(&0)),
-            ("Wed".to_string(), *weekly_dist.get("Wed").unwrap_or(&0)),
-            ("Thu".to_string(), *weekly_dist.get("Thu").unwrap_or(&0)),
-            ("Fri".to_string(), *weekly_dist.get("Fri").unwrap_or(&0)),
-            ("Sat".to_string(), *weekly_dist.get("Sat").unwrap_or(&0)),
-            ("Sun".to_string(), *weekly_dist.get("Sun").unwrap_or(&0)),
-        ];
-        
-        let mut hourly_distribution: Vec<(i32, i32)> = hourly_dist.into_iter().collect();
-        hourly_distribution.sort_by_key(|&(hour, _)| hour);
-        
-        // Calculate totals and streaks
-        let total_recordings = daily_activity.iter().map(|d| d.count).sum();
-        let total_duration = daily_activity.iter().map(|d| d.duration_ms).sum();
-        let total_words = daily_activity.iter().map(|d| d.words).sum();
-        
-        return Ok(RecordingStats {
-            total_recordings,
-            total_duration,
-            total_words,
-            current_streak: 3,
-            longest_streak: 12,
-            average_daily: total_recordings as f64 / 90.0,
-            most_active_day: "Wednesday".to_string(),
-            most_active_hour: 14,
-            daily_activity,
-            weekly_distribution,
-            hourly_distribution,
-        });
-    }
-    
-    // If we have real data, process it normally...
-    eprintln!("Processing {} real transcripts", all_transcripts.len());
-    
-    // Calculate basic stats
-    let total_recordings = all_transcripts.len() as i32;
-    let total_duration: i64 = all_transcripts.iter().map(|t| t.duration_ms as i64).sum();
-    let total_words: i64 = all_transcripts.iter()
-        .map(|t| t.text.split_whitespace().count() as i64)
-        .sum();
-    
-    // Group by date for daily activity
-    let mut daily_map: HashMap<String, (i32, i64, i64)> = HashMap::new();
-    let mut weekday_map: HashMap<Weekday, i32> = HashMap::new();
-    let mut hour_map: HashMap<i32, i32> = HashMap::new();
-    
-    for transcript in &all_transcripts {
-        // Parse created_at timestamp
-        let created_at = if let Ok(dt) = DateTime::parse_from_rfc3339(&transcript.created_at) {
-            dt.with_timezone(&Local)
-        } else if let Ok(naive_dt) = NaiveDateTime::parse_from_str(&transcript.created_at, "%Y-%m-%d %H:%M:%S") {
-            Local.from_local_datetime(&naive_dt).single()
-                .ok_or_else(|| format!("Ambiguous local time: {}", transcript.created_at))?
-        } else if let Ok(naive_dt) = transcript.created_at.parse::<chrono::NaiveDateTime>() {
-            Local.from_local_datetime(&naive_dt).single()
-                .ok_or_else(|| format!("Ambiguous local time: {}", transcript.created_at))?
-        } else {
-            return Err(format!("Failed to parse timestamp: {} (expected RFC3339 or YYYY-MM-DD HH:MM:SS format)", transcript.created_at));
-        };
-        
-        let date_str = created_at.format("%Y-%m-%d").to_string();
-        let words = transcript.text.split_whitespace().count() as i64;
-        
-        let entry = daily_map.entry(date_str).or_insert((0, 0, 0));
-        entry.0 += 1;
-        entry.1 += transcript.duration_ms as i64;
-        entry.2 += words;
-        
-        // Track weekday distribution
-        let weekday = created_at.weekday();
-        *weekday_map.entry(weekday).or_insert(0) += 1;
-        
-        // Track hourly distribution
-        let hour = created_at.hour() as i32;
-        *hour_map.entry(hour).or_insert(0) += 1;
-    }
-    
-    // Convert daily map to sorted vec
-    let mut daily_activity: Vec<DayActivity> = daily_map.into_iter()
-        .map(|(date, (count, duration, words))| DayActivity {
-            date,
-            count,
-            duration_ms: duration,
-            words,
-        })
-        .collect();
-    daily_activity.sort_by(|a, b| a.date.cmp(&b.date));
-    
-    // Calculate streaks
-    let mut current_streak = 0;
-    let mut longest_streak = 0;
-    let mut temp_streak = 0;
-    let mut last_date: Option<NaiveDate> = None;
-    
-    let today = Local::now().date_naive();
-    
-    for activity in &daily_activity {
-        let date = NaiveDate::parse_from_str(&activity.date, "%Y-%m-%d")
-            .map_err(|_| "Failed to parse date")?;
-        
-        if let Some(last) = last_date {
-            let diff = date.signed_duration_since(last).num_days();
-            if diff == 1 {
-                temp_streak += 1;
-            } else {
-                longest_streak = longest_streak.max(temp_streak);
-                temp_streak = 1;
-            }
-        } else {
-            temp_streak = 1;
-        }
-        
-        last_date = Some(date);
-        
-        // Check if current streak is still active
-        if date == today || date == today.pred_opt().unwrap_or(today) {
-            current_streak = temp_streak;
-        }
-    }
-    longest_streak = longest_streak.max(temp_streak);
-    
-    // Calculate average daily recordings
-    let days_with_recordings = daily_activity.len() as f64;
-    let average_daily = if days_with_recordings > 0.0 {
-        total_recordings as f64 / days_with_recordings
-    } else {
-        0.0
-    };
-    
-    // Find most active day of week
-    let most_active_day = weekday_map.iter()
-        .max_by_key(|(_, count)| *count)
-        .map(|(weekday, _)| format!("{:?}", weekday))
-        .unwrap_or_else(|| "Monday".to_string());
-    
-    // Find most active hour
-    let most_active_hour = hour_map.iter()
-        .max_by_key(|(_, count)| *count)
-        .map(|(hour, _)| *hour)
-        .unwrap_or(0);
-    
-    // Prepare weekly distribution
-    let weekly_distribution = vec![
-        ("Monday".to_string(), *weekday_map.get(&Weekday::Mon).unwrap_or(&0)),
-        ("Tuesday".to_string(), *weekday_map.get(&Weekday::Tue).unwrap_or(&0)),
-        ("Wednesday".to_string(), *weekday_map.get(&Weekday::Wed).unwrap_or(&0)),
-        ("Thursday".to_string(), *weekday_map.get(&Weekday::Thu).unwrap_or(&0)),
-        ("Friday".to_string(), *weekday_map.get(&Weekday::Fri).unwrap_or(&0)),
-        ("Saturday".to_string(), *weekday_map.get(&Weekday::Sat).unwrap_or(&0)),
-        ("Sunday".to_string(), *weekday_map.get(&Weekday::Sun).unwrap_or(&0)),
-    ];
-    
-    // Prepare hourly distribution
-    let hourly_distribution: Vec<(i32, i32)> = (0..24)
-        .map(|h| (h, *hour_map.get(&h).unwrap_or(&0)))
-        .collect();
-    
-    Ok(RecordingStats {
-        total_recordings,
-        total_duration,
-        total_words,
-        current_streak,
-        longest_streak,
-        average_daily,
-        most_active_day,
-        most_active_hour,
-        daily_activity,
-        weekly_distribution,
-        hourly_distribution,
-    })
-}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -2227,69 +1258,69 @@ pub fn run() {
             crate::commands::test_multiple_scout_recordings,
             crate::commands::test_scout_pipeline_recording,
             crate::commands::analyze_audio_corruption,
-            // Remaining legacy handlers (to be moved next)
-            serve_audio_file,
-            start_recording,
-            stop_recording,
-            cancel_recording,
-            is_recording,
-            log_from_overlay,
-            get_current_recording_file,
-            update_global_shortcut,
-            subscribe_to_progress,
+            crate::commands::serve_audio_file,
+            crate::commands::start_recording,
+            crate::commands::stop_recording,
+            crate::commands::cancel_recording,
+            crate::commands::is_recording,
+            crate::commands::log_from_overlay,
+            crate::commands::get_current_recording_file,
+            crate::commands::update_global_shortcut,
+            crate::commands::subscribe_to_progress,
             crate::commands::download_model,
             crate::commands::check_and_download_missing_coreml_models,
             crate::commands::download_coreml_for_model,
             crate::commands::get_model_coreml_status,
-            check_microphone_permission,
-            request_microphone_permission,
-            open_system_preferences_audio,
-            mark_onboarding_complete,
-            get_processing_status,
-            set_sound_enabled,
-            is_sound_enabled,
-            get_available_sounds,
-            get_sound_settings,
-            set_start_sound,
-            set_stop_sound,
-            set_success_sound,
-            preview_sound_flow,
-            update_completion_sound_threshold,
-            get_current_shortcut,
+            crate::commands::check_microphone_permission,
+            crate::commands::request_microphone_permission,
+            crate::commands::open_system_preferences_audio,
+            crate::commands::set_sound_enabled,
+            crate::commands::is_sound_enabled,
+            crate::commands::get_available_sounds,
+            crate::commands::get_sound_settings,
+            crate::commands::set_start_sound,
+            crate::commands::set_stop_sound,
+            crate::commands::set_success_sound,
+            crate::commands::preview_sound_flow,
+            crate::commands::update_completion_sound_threshold,
             crate::commands::get_available_models,
             crate::commands::has_any_model,
             crate::commands::set_active_model,
             crate::commands::get_models_dir,
             crate::commands::open_models_folder,
-            download_file,
             // LLM commands
-            get_available_llm_models,
-            get_llm_model_info,
-            download_llm_model,
-            set_active_llm_model,
-            get_llm_outputs_for_transcript,
-            get_whisper_logs_for_session,
-            get_whisper_logs_for_transcript,
-            get_llm_prompt_templates,
-            save_llm_prompt_template,
-            delete_llm_prompt_template,
-            update_llm_settings,
-            get_current_model,
-            get_push_to_talk_shortcut,
-            update_push_to_talk_shortcut,
-            paste_text,
-            play_success_sound,
-            set_overlay_waveform_style,
-            get_log_file_path,
-            open_log_file,
-            show_log_file_in_finder,
+            crate::commands::get_available_llm_models,
+            crate::commands::get_llm_model_info,
+            crate::commands::download_llm_model,
+            crate::commands::set_active_llm_model,
+            crate::commands::get_llm_outputs_for_transcript,
+            crate::commands::get_whisper_logs_for_session,
+            crate::commands::get_whisper_logs_for_transcript,
+            crate::commands::get_llm_prompt_templates,
+            crate::commands::save_llm_prompt_template,
+            crate::commands::delete_llm_prompt_template,
+            crate::commands::update_llm_settings,
+            crate::commands::get_push_to_talk_shortcut,
+            crate::commands::update_push_to_talk_shortcut,
+            crate::commands::get_log_file_path,
+            crate::commands::open_log_file,
+            crate::commands::show_log_file_in_finder,
+            // Misc and utility
+            crate::commands::mark_onboarding_complete,
+            crate::commands::get_processing_status,
+            crate::commands::paste_text,
+            crate::commands::play_success_sound,
+            crate::commands::set_overlay_waveform_style,
+            crate::commands::download_file,
+            crate::commands::get_current_shortcut,
+            crate::commands::get_current_model,
             // Dictionary commands
-            get_dictionary_entries,
-            save_dictionary_entry,
-            update_dictionary_entry,
-            delete_dictionary_entry,
-            get_dictionary_matches_for_transcript,
-            test_dictionary_replacement,
+            crate::commands::get_dictionary_entries,
+            crate::commands::save_dictionary_entry,
+            crate::commands::update_dictionary_entry,
+            crate::commands::delete_dictionary_entry,
+            crate::commands::get_dictionary_matches_for_transcript,
+            crate::commands::test_dictionary_replacement,
             // Webhook commands
             webhooks::get_webhooks,
             webhooks::create_webhook,
@@ -2298,8 +1329,8 @@ pub fn run() {
             webhooks::test_webhook,
             webhooks::get_webhook_logs,
             webhooks::cleanup_webhook_logs,
-            get_recording_stats,
-            generate_sample_data,
+            crate::commands::get_recording_stats,
+            crate::commands::generate_sample_data,
             // Foundation Models commands
             foundation_models::enhance_transcript,
             foundation_models::summarize_transcript,

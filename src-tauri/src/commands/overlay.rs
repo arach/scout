@@ -34,3 +34,13 @@ pub async fn set_overlay_treatment(state: State<'_, AppState>, treatment: String
     Ok(())
 }
 
+#[tauri::command]
+pub async fn set_overlay_waveform_style(state: State<'_, AppState>, style: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let overlay = state.native_panel_overlay.lock().await;
+        overlay.set_waveform_style(&style);
+    }
+    Ok(())
+}
+
