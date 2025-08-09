@@ -13,4 +13,8 @@ pub mod performance;
 pub use performance::*;
 pub mod overlay;
 pub use overlay::*;
+pub mod settings;
+pub use settings::*;
+pub mod models;
+pub use models::*;
 

@@ -10,4 +10,6 @@ pub mod transcription;
 pub use transcription::*;
 pub mod transcripts;
 pub use transcripts::*;
+pub mod downloads;
+pub use downloads::*;
 

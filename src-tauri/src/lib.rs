@@ -481,7 +481,7 @@ async fn download_model(
     Ok(())
 }
 
-// Helper function to download Core ML models
+// moved to commands::models
 #[cfg(target_os = "macos")]
 async fn download_coreml_model(
     app: &tauri::AppHandle,
@@ -522,7 +522,7 @@ async fn download_coreml_model(
     Ok(())
 }
 
-// Helper function to extract Core ML model from zip
+// moved to commands::models
 #[cfg(target_os = "macos")]
 fn extract_coreml_model(zip_path: &std::path::Path, dest_path: &std::path::Path) -> Result<(), String> {
     use std::process::Command;
@@ -545,52 +545,7 @@ fn extract_coreml_model(zip_path: &std::path::Path, dest_path: &std::path::Path)
     Ok(())
 }
 
-// Generic file download helper
-async fn download_file_with_progress(
-    app: &tauri::AppHandle,
-    url: &str,
-    dest_path: &std::path::Path,
-    file_type: &str,
-) -> Result<(), String> {
-    use tauri::Emitter;
-    use futures_util::StreamExt;
-    use std::io::Write;
-    
-    let response = reqwest::get(url).await
-        .map_err(|e| format!("Failed to download {}: {}", file_type, e))?;
-    
-    let total_size = response.content_length().unwrap_or(0);
-    let mut downloaded = 0u64;
-    
-    let mut file = std::fs::File::create(dest_path)
-        .map_err(|e| format!("Failed to create file: {}", e))?;
-    
-    let mut stream = response.bytes_stream();
-    
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| format!("Failed to read chunk: {}", e))?;
-        file.write_all(&chunk)
-            .map_err(|e| format!("Failed to write chunk: {}", e))?;
-        
-        downloaded += chunk.len() as u64;
-        let progress = if total_size > 0 {
-            (downloaded as f32 / total_size as f32 * 100.0) as u32
-        } else {
-            0
-        };
-        
-        // Emit download progress with file type and URL
-        app.emit("download-progress", serde_json::json!({
-            "url": url,
-            "progress": progress,
-            "downloaded": downloaded,
-            "total": total_size,
-            "fileType": file_type,
-        })).ok();
-    }
-    
-    Ok(())
-}
+// moved to services::downloads
 
 #[tauri::command]
 async fn check_and_download_missing_coreml_models(
@@ -986,26 +941,7 @@ async fn update_global_shortcut(
     Ok(())
 }
 
-#[tauri::command]
-async fn get_settings(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let settings = state.settings.lock().await;
-    serde_json::to_value(settings.get())
-        .map_err(|e| format!("Failed to serialize settings: {}", e))
-}
-
-#[tauri::command]
-async fn update_settings(state: State<'_, AppState>, new_settings: serde_json::Value) -> Result<(), String> {
-    let mut settings = state.settings.lock().await;
-    
-    // Parse the new settings
-    let app_settings: settings::AppSettings = serde_json::from_value(new_settings)
-        .map_err(|e| format!("Invalid settings format: {}", e))?;
-    
-    // Update the settings
-    settings.update(|s| *s = app_settings)?;
-    
-    Ok(())
-}
+// moved to commands::settings
 
 // LLM Commands
 
@@ -1141,29 +1077,7 @@ async fn update_llm_settings(
     Ok(())
 }
 
-#[tauri::command]
-async fn set_auto_copy(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
-    let mut settings = state.settings.lock().await;
-    settings.update(|s| s.ui.auto_copy = enabled)
-}
-
-#[tauri::command]
-async fn is_auto_copy_enabled(state: State<'_, AppState>) -> Result<bool, String> {
-    let settings = state.settings.lock().await;
-    Ok(settings.get().ui.auto_copy)
-}
-
-#[tauri::command]
-async fn set_auto_paste(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
-    let mut settings = state.settings.lock().await;
-    settings.update(|s| s.ui.auto_paste = enabled)
-}
-
-#[tauri::command]
-async fn is_auto_paste_enabled(state: State<'_, AppState>) -> Result<bool, String> {
-    let settings = state.settings.lock().await;
-    Ok(settings.get().ui.auto_paste)
-}
+// moved to commands::settings
 
 
 #[tauri::command]
@@ -2275,8 +2189,32 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            serve_audio_file,
-            crate::commands::analyze_audio_corruption,
+            // Moved/organized commands first (clarity on what remains below)
+            crate::commands::get_settings,
+            crate::commands::update_settings,
+            crate::commands::set_auto_copy,
+            crate::commands::is_auto_copy_enabled,
+            crate::commands::set_auto_paste,
+            crate::commands::is_auto_paste_enabled,
+            crate::commands::get_overlay_position,
+            crate::commands::set_overlay_position,
+            crate::commands::set_overlay_treatment,
+            crate::commands::get_audio_devices,
+            crate::commands::get_audio_devices_detailed,
+            crate::commands::start_audio_level_monitoring,
+            crate::commands::stop_audio_level_monitoring,
+            crate::commands::get_current_audio_level,
+            crate::commands::transcribe_audio,
+            crate::commands::transcribe_file,
+            crate::commands::save_transcript,
+            crate::commands::get_transcript,
+            crate::commands::get_transcript_with_audio_details,
+            crate::commands::get_recent_transcripts,
+            crate::commands::search_transcripts,
+            crate::commands::delete_transcript,
+            crate::commands::delete_transcripts,
+            crate::commands::export_transcripts,
+            crate::commands::export_audio_file,
             crate::commands::start_recording_no_transcription,
             crate::commands::stop_recording_no_transcription,
             crate::commands::start_recording_classic_strategy,
@@ -2288,41 +2226,21 @@ pub fn run() {
             crate::commands::test_sample_rate_mismatch_reproduction,
             crate::commands::test_multiple_scout_recordings,
             crate::commands::test_scout_pipeline_recording,
+            crate::commands::analyze_audio_corruption,
+            // Remaining legacy handlers (to be moved next)
+            serve_audio_file,
             start_recording,
             stop_recording,
             cancel_recording,
             is_recording,
-            crate::commands::get_audio_devices,
-            crate::commands::get_audio_devices_detailed,
-            crate::commands::start_audio_level_monitoring,
-            crate::commands::stop_audio_level_monitoring,
-            crate::commands::get_current_audio_level,
             log_from_overlay,
             get_current_recording_file,
-            crate::commands::transcribe_audio,
-            crate::commands::save_transcript,
-            crate::commands::get_performance_metrics,
-            crate::commands::get_performance_metrics_for_transcript,
-            crate::commands::get_performance_timeline,
-            crate::commands::get_performance_timeline_for_transcript,
-            crate::commands::get_transcript,
-            crate::commands::get_transcript_with_audio_details,
-            crate::commands::get_recent_transcripts,
-            crate::commands::search_transcripts,
-            read_audio_file,
-            crate::commands::delete_transcript,
-            crate::commands::delete_transcripts,
-            crate::commands::export_transcripts,
-            crate::commands::export_audio_file,
             update_global_shortcut,
             subscribe_to_progress,
-            crate::commands::get_overlay_position,
-            crate::commands::set_overlay_position,
-            crate::commands::set_overlay_treatment,
-            download_model,
-            check_and_download_missing_coreml_models,
-            download_coreml_for_model,
-            get_model_coreml_status,
+            crate::commands::download_model,
+            crate::commands::check_and_download_missing_coreml_models,
+            crate::commands::download_coreml_for_model,
+            crate::commands::get_model_coreml_status,
             check_microphone_permission,
             request_microphone_permission,
             open_system_preferences_audio,
@@ -2338,15 +2256,12 @@ pub fn run() {
             preview_sound_flow,
             update_completion_sound_threshold,
             get_current_shortcut,
-            crate::commands::transcribe_file,
-            get_available_models,
-            has_any_model,
-            set_active_model,
-            get_models_dir,
-            open_models_folder,
+            crate::commands::get_available_models,
+            crate::commands::has_any_model,
+            crate::commands::set_active_model,
+            crate::commands::get_models_dir,
+            crate::commands::open_models_folder,
             download_file,
-            get_settings,
-            update_settings,
             // LLM commands
             get_available_llm_models,
             get_llm_model_info,
@@ -2360,10 +2275,6 @@ pub fn run() {
             delete_llm_prompt_template,
             update_llm_settings,
             get_current_model,
-            set_auto_copy,
-            is_auto_copy_enabled,
-            set_auto_paste,
-            is_auto_paste_enabled,
             get_push_to_talk_shortcut,
             update_push_to_talk_shortcut,
             paste_text,
