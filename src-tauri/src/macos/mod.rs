@@ -8,3 +8,6 @@ pub use app_context::{get_active_app_context, AppContext};
 
 mod foundation_models_ffi;
 pub use foundation_models_ffi::*;
+
+mod keyboard_bridge;
+pub use keyboard_bridge::*;

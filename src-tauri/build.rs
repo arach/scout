@@ -258,6 +258,64 @@ fn main() {
             }
         }
 
+        // Compile Keyboard Monitor
+        println!("cargo:rerun-if-changed=src/macos/keyboard_monitor.swift");
+
+        let keyboard_monitor_swift_obj = out_dir.join("keyboard_monitor.o");
+        let keyboard_monitor_lib = out_dir.join("libkeyboard_monitor.a");
+
+        // Compile Swift Keyboard Monitor
+        let output = std::process::Command::new("swiftc")
+            .args([
+                "-c",
+                "-emit-objc-header",
+                "-emit-objc-header-path",
+                out_dir.join("keyboard_monitor-Swift.h").to_str().unwrap(),
+                "-module-name",
+                "keyboard_monitor",
+                "-o",
+                keyboard_monitor_swift_obj.to_str().unwrap(),
+                "src/macos/keyboard_monitor.swift",
+            ])
+            .output()
+            .expect("Failed to execute Swift compiler for Keyboard Monitor");
+
+        if !output.status.success() {
+            println!("cargo:warning=Keyboard Monitor Swift compilation failed");
+            println!(
+                "cargo:warning=stdout: {}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+            println!(
+                "cargo:warning=stderr: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            println!("cargo:warning=Push-to-talk key release detection will not be available");
+        } else {
+            // Create static library for Keyboard Monitor
+            let _ = std::fs::remove_file(&keyboard_monitor_lib);
+            let ar_output = std::process::Command::new("ar")
+                .args([
+                    "rcs",
+                    keyboard_monitor_lib.to_str().unwrap(),
+                    keyboard_monitor_swift_obj.to_str().unwrap(),
+                ])
+                .output()
+                .expect("Failed to create Keyboard Monitor static library");
+
+            if !ar_output.status.success() {
+                println!("cargo:warning=Failed to create Keyboard Monitor static library");
+                println!(
+                    "cargo:warning=stderr: {}",
+                    String::from_utf8_lossy(&ar_output.stderr)
+                );
+                println!("cargo:warning=Push-to-talk key release detection will not be available");
+            } else {
+                // Link the Keyboard Monitor library
+                println!("cargo:rustc-link-lib=static=keyboard_monitor");
+            }
+        }
+
         // Compile Native NSPanel overlay
         println!("cargo:rerun-if-changed=src/macos/native_overlay/Logger.swift");
         println!("cargo:rerun-if-changed=src/macos/native_overlay/NativeOverlayPanel.swift");

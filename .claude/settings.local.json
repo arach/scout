@@ -32,7 +32,10 @@
       "Bash(pnpm build:*)",
       "Bash(pnpm tauri:*)",
       "Bash(pnpm dev:*)",
-      "Bash(SKIP_BUILD_SCRIPT=1 cargo check)"
+      "Bash(SKIP_BUILD_SCRIPT=1 cargo check)",
+      "Bash(git log:*)",
+      "Bash(git ls-tree:*)",
+      "Bash(mv:*)"
     ],
     "deny": []
   },

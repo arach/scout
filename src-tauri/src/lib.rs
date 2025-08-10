@@ -590,6 +590,19 @@ pub fn run() {
             // Create keyboard monitor
             let keyboard_monitor = Arc::new(KeyboardMonitor::new(app.handle().clone()));
             
+            // Start keyboard monitoring for push-to-talk (must be started before setting the key)
+            keyboard_monitor.clone().start_monitoring();
+            
+            // Set the initial push-to-talk key from settings
+            {
+                let settings = tauri::async_runtime::block_on(settings_arc.lock());
+                let push_to_talk_key = &settings.get().ui.push_to_talk_hotkey;
+                if !push_to_talk_key.is_empty() {
+                    keyboard_monitor.set_push_to_talk_key(push_to_talk_key);
+                    info(Component::UI, &format!("Set initial push-to-talk key: {}", push_to_talk_key));
+                }
+            }
+            
             let state = AppState {
                 recorder: recorder_arc,
                 database: database_arc,
