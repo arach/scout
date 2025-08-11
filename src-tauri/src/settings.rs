@@ -221,12 +221,17 @@ impl SettingsManager {
     }
 
     pub fn save(&self) -> Result<(), String> {
+        crate::logger::info(crate::logger::Component::Settings, &format!("Saving settings to: {:?}", self.settings_path));
+        crate::logger::info(crate::logger::Component::Settings, &format!("Current auto_copy: {}, auto_paste: {}", 
+            self.settings.ui.auto_copy, self.settings.ui.auto_paste));
+        
         let json = serde_json::to_string_pretty(&self.settings)
             .map_err(|e| format!("Failed to serialize settings: {}", e))?;
 
         fs::write(&self.settings_path, json)
             .map_err(|e| format!("Failed to save settings: {}", e))?;
 
+        crate::logger::info(crate::logger::Component::Settings, "✅ Settings saved successfully");
         Ok(())
     }
 

@@ -35,31 +35,30 @@ mod foundation_models;
 #[cfg(target_os = "macos")]
 mod macos;
 
-// std
-use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
-use std::sync::OnceLock;
-
-// external
-use tauri::menu::{Menu, MenuItemBuilder, PredefinedMenuItem};
-use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{Emitter, Manager, WindowEvent};
-use tauri_plugin_global_shortcut::GlobalShortcutExt;
-use tokio::sync::Mutex;
-
-// internal (crate)
 use audio::AudioRecorder;
 use db::Database;
-use keyboard_monitor::KeyboardMonitor;
 use processing_queue::{ProcessingQueue, ProcessingStatus};
 use recording_progress::ProgressTracker;
-use recording_workflow::RecordingWorkflow;
+use recording_workflow::{RecordingWorkflow, RecordingResult};
 use settings::SettingsManager;
-use crate::logger::{debug, error, info, warn, Component};
-use crate::model_state::ModelStateManager;
-use crate::performance_tracker::PerformanceTracker;
+use keyboard_monitor::KeyboardMonitor;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::{Emitter, Manager, State, WindowEvent};
+use crate::services::download_file_with_progress;
+use tauri_plugin_global_shortcut::GlobalShortcutExt;
+use tauri::tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, MenuItemBuilder};
+use tokio::sync::Mutex;
+use chrono;
+use audio::converter::AudioConverter;
+use std::path::Path;
+use crate::logger::{info, debug, warn, error, Component};
 use crate::transcription::Transcriber;
+use crate::performance_tracker::PerformanceTracker;
+use crate::model_state::ModelStateManager;
+use std::sync::OnceLock;
 
 /// Global storage for the current device sample rate
 static DEVICE_SAMPLE_RATE: OnceLock<Arc<Mutex<Option<u32>>>> = OnceLock::new();
@@ -139,6 +138,284 @@ pub struct AppState {
     #[cfg(target_os = "macos")]
     pub native_panel_overlay: Arc<Mutex<macos::NativeOverlay>>,
 }
+
+
+// Cleaned: moved command implementations to commands/* modules
+
+// Moved to commands/models.rs
+
+// moved to commands::models
+#[cfg(target_os = "macos")]
+async fn download_coreml_model(
+    app: &tauri::AppHandle,
+    model_name: &str,
+    models_dir: &std::path::Path,
+) -> Result<(), String> {
+    
+    
+    // Construct Core ML URL based on model name
+    let coreml_url = format!(
+        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{}-encoder.mlmodelc.zip?download=true",
+        model_name
+    );
+    
+    let coreml_filename = format!("ggml-{}-encoder.mlmodelc", model_name);
+    let coreml_path = models_dir.join(&coreml_filename);
+    
+    // Check if Core ML model already exists
+    if coreml_path.exists() {
+        info(Component::Transcription, &format!("Core ML model already exists: {}", coreml_filename));
+        return Ok(());
+    }
+    
+    info(Component::Transcription, &format!("Downloading Core ML model for {}", model_name));
+    
+    // Download the zip file
+    let zip_path = models_dir.join(format!("{}.zip", coreml_filename));
+    download_file_with_progress(app, &coreml_url, &zip_path, "coreml").await?;
+    
+    // Extract the zip file
+    extract_coreml_model(&zip_path, &coreml_path)?;
+    
+    // Clean up zip file
+    let _ = std::fs::remove_file(&zip_path);
+    
+    info(Component::Transcription, &format!("Core ML model downloaded and extracted: {}", coreml_filename));
+    
+    Ok(())
+}
+
+// moved to commands::models
+#[cfg(target_os = "macos")]
+fn extract_coreml_model(zip_path: &std::path::Path, dest_path: &std::path::Path) -> Result<(), String> {
+    use std::process::Command;
+    
+    // Use system unzip command for simplicity
+    let output = Command::new("unzip")
+        .arg("-q") // Quiet mode
+        .arg("-o") // Overwrite
+        .arg(zip_path)
+        .arg("-d")
+        .arg(dest_path.parent().unwrap())
+        .output()
+        .map_err(|e| format!("Failed to run unzip: {}", e))?;
+    
+    if !output.status.success() {
+        return Err(format!("Failed to extract Core ML model: {}", 
+            String::from_utf8_lossy(&output.stderr)));
+    }
+    
+    Ok(())
+}
+
+// moved to services::downloads
+
+// Moved to commands/models.rs
+// check_and_download_missing_coreml_models function removed - using commands::check_and_download_missing_coreml_models
+/*
+async fn check_and_download_missing_coreml_models(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>
+) -> Result<Vec<String>, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let models_dir = state.models_dir.clone();
+        let settings_manager = state.settings.lock().await;
+        let settings = settings_manager.get();
+        let models = models::WhisperModel::all(&models_dir, settings);
+        drop(settings_manager);
+        
+        let mut downloaded_models = Vec::new();
+        
+        for model in models {
+            // Check if GGML model is downloaded but Core ML is not
+            if model.downloaded && !model.coreml_downloaded && model.coreml_url.is_some() {
+                info(Component::Models, &format!("Found model {} with missing Core ML, downloading...", model.id));
+                
+                // Download the Core ML model
+                if let Err(e) = download_coreml_model(&app, &model.id, &models_dir).await {
+                    error(Component::Models, &format!("Failed to download Core ML for {}: {}", model.id, e));
+                } else {
+                    downloaded_models.push(model.id.clone());
+                }
+            }
+        }
+        
+        Ok(downloaded_models)
+    }
+    
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(Vec::new())
+    }
+}
+*/
+
+// Moved to commands/models.rs  
+// download_coreml_for_model function moved
+/*
+#[tauri::command]
+async fn download_coreml_for_model(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    model_id: String
+) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let models_dir = state.models_dir.clone();
+        download_coreml_model(&app, &model_id, &models_dir).await?;
+        
+        // Update model state to reflect CoreML availability
+        state.model_state_manager.mark_coreml_downloaded(&model_id).await;
+        
+        Ok(())
+    }
+    
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("Core ML is only supported on macOS".to_string())
+    }
+}
+*/
+
+// Moved to commands/permissions.rs
+/*
+#[tauri::command]
+async fn check_microphone_permission() -> Result<String, String> {
+    // For now, just check if we can access audio devices
+    // If we can enumerate devices, we likely have permission
+    #[cfg(target_os = "macos")]
+    {
+        use cpal::traits::HostTrait;
+        
+        let host = cpal::default_host();
+        match host.default_input_device() {
+            Some(_) => Ok("granted".to_string()),
+            None => Ok("denied".to_string()),
+        }
+    }
+    
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok("granted".to_string())
+    }
+}
+
+#[tauri::command]
+async fn request_microphone_permission() -> Result<String, String> {
+    // The actual permission request happens when we try to use the microphone
+    // For now, we'll trigger a check by trying to access the device
+    check_microphone_permission().await
+}
+*/
+
+// moved to commands::permissions
+
+// moved to commands::misc
+
+// Moved to commands/transcripts.rs
+
+// moved to commands::transcripts
+
+// moved to commands::transcripts
+
+fn format_duration(ms: i32) -> String {
+    let seconds = ms / 1000;
+    let minutes = seconds / 60;
+    let remaining_seconds = seconds % 60;
+    format!("{}:{:02}", minutes, remaining_seconds)
+}
+
+// moved to commands::misc
+
+// moved to commands::sounds
+
+// moved to commands::sounds
+
+// moved to commands::sounds
+
+// moved to commands::sounds
+
+// moved to commands::sounds
+
+// moved to commands::sounds
+
+// moved to commands::sounds
+
+// moved to commands::sounds
+
+// moved to commands::sounds
+
+// moved to commands::shortcuts
+
+// moved to commands::models
+
+// moved to commands::models
+
+// moved to commands::models
+
+// moved to commands::models
+
+// moved to commands::models
+
+// moved to commands::models
+
+// moved to commands::models
+
+// moved to commands::downloads
+
+// moved to commands::shortcuts
+
+// moved to commands::settings
+
+// LLM Commands
+
+// moved to commands::llm
+
+// moved to commands::llm
+
+// moved to commands::llm
+
+// moved to commands::llm
+
+// moved to commands::llm
+
+// moved to commands::llm
+
+// moved to commands::llm
+
+// moved to commands::llm
+
+// moved to commands::llm
+
+// moved to commands::llm
+
+// moved to commands::llm
+
+// moved to commands::settings
+
+
+// moved to commands::shortcuts
+
+// moved to commands::shortcuts
+
+// moved to commands::misc
+
+// moved to commands::sounds
+
+// moved to commands::overlay
+
+// moved to commands::logs
+
+// moved to commands::logs
+
+// moved to commands::logs
+
+
+// moved to commands::dictionary
+
+
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Initialize env_logger with our custom interceptor to capture whisper logs
@@ -537,29 +814,29 @@ pub fn run() {
                     .build(app)?
             ])?;
             
-            // Load tray icon via Resource path resolver with sensible fallbacks
-            use tauri::path::BaseDirectory;
-            let tray_icon = (|| {
-                if let Ok(resolved) = app.path().resolve("icons/scout-tray-icon.png", BaseDirectory::Resource) {
-                    if let Ok(icon) = tauri::image::Image::from_path(&resolved) {
-                        info(Component::UI, &format!("Loaded tray icon from resources: {:?}", resolved));
-                        return icon;
-                    }
+            // Load tray icon - try multiple paths to find the proper Scout icon
+            let possible_paths = vec![
+                "src-tauri/icons/scout-tray-icon.png",        // Development path - Scout logo
+                "icons/scout-tray-icon.png",                  // Current directory - Scout logo
+                "../src-tauri/icons/scout-tray-icon.png",     // Relative from target directory
+                "../../src-tauri/icons/scout-tray-icon.png",  // Further relative
+                "src-tauri/icons/tray-icon.png",              // Fallback to original (Tauri logo)
+                "icons/tray-icon.png",                        // Fallback current directory
+            ];
+            
+            let mut tray_icon = None;
+            for path in possible_paths {
+                if let Ok(icon) = tauri::image::Image::from_path(path) {
+                    tray_icon = Some(icon);
+                    info(Component::UI, &format!("Successfully loaded tray icon from: {}", path));
+                    break;
                 }
-                if let Ok(resolved) = app.path().resolve("icons/tray-icon.png", BaseDirectory::Resource) {
-                    if let Ok(icon) = tauri::image::Image::from_path(&resolved) {
-                        info(Component::UI, &format!("Loaded fallback tray icon from resources: {:?}", resolved));
-                        return icon;
-                    }
-                }
-                // Dev fallback during unbundled runs
-                if let Ok(icon) = tauri::image::Image::from_path("src-tauri/icons/scout-tray-icon.png") {
-                    info(Component::UI, "Loaded tray icon from dev path: src-tauri/icons/scout-tray-icon.png");
-                    return icon;
-                }
-                warn(Component::UI, "Could not find Scout tray icon, using default window icon");
+            }
+            
+            let tray_icon = tray_icon.unwrap_or_else(|| {
+                warn(Component::UI, "Could not find Scout tray icon (scout-tray-icon.png), using default window icon");
                 app.default_window_icon().unwrap().clone()
-            })();
+            });
             
             let _ = TrayIconBuilder::new()
                 .icon(tray_icon)

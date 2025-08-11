@@ -8,7 +8,7 @@ fn main() {
 
         // Create output paths
         let swift_obj_path = out_dir.join("overlay.o");
-        let bridge_obj_path = out_dir.join("overlay_bridge.o");
+        let _bridge_obj_path = out_dir.join("overlay_bridge.o");
         let combined_lib_path = out_dir.join("libmacos_overlay.a");
         let swift_header_path = out_dir.join("overlay-Swift.h");
 
