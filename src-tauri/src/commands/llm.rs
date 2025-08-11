@@ -2,7 +2,6 @@ use tauri::{Emitter, State};
 
 use crate::db;
 use crate::llm;
-use crate::settings;
 use crate::AppState;
 
 #[tauri::command]

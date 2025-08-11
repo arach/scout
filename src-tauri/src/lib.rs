@@ -780,7 +780,4 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-#[cfg(test)]
-mod tests {
-    // ... existing code ...
-}
+// tests module removed (unused)

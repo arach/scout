@@ -1,4 +1,4 @@
-use tauri::{Emitter, Manager, State};
+use tauri::{Emitter, State};
 
 use crate::AppState;
 

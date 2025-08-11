@@ -61,7 +61,11 @@ export type SettingsAction =
   | { type: 'SET_HOTKEY_UPDATE_STATUS'; payload: 'idle' | 'success' | 'error' }
   | { type: 'TOGGLE_AUTO_COPY' }
   | { type: 'TOGGLE_AUTO_PASTE' }
+  | { type: 'SET_AUTO_COPY'; payload: boolean }
+  | { type: 'SET_AUTO_PASTE'; payload: boolean }
   | { type: 'TOGGLE_SOUND_ENABLED' }
+  | { type: 'SET_SOUND_ENABLED'; payload: boolean }
+  | { type: 'SET_PROFANITY_FILTER'; payload: boolean }
   | { type: 'UPDATE_SOUND'; payload: { type: SoundType; sound: string } }
   | { type: 'UPDATE_COMPLETION_THRESHOLD'; payload: number }
   | { type: 'UPDATE_OVERLAY_POSITION'; payload: OverlayPosition }
@@ -137,11 +141,33 @@ function settingsReducer(state: SettingsState, action: SettingsAction): Settings
         clipboard: { ...state.clipboard, autoPaste: !state.clipboard.autoPaste }
       };
     
+    case 'SET_AUTO_COPY':
+      return {
+        ...state,
+        clipboard: { ...state.clipboard, autoCopy: action.payload }
+      };
+    
+    case 'SET_AUTO_PASTE':
+      return {
+        ...state,
+        clipboard: { ...state.clipboard, autoPaste: action.payload }
+      };
+    
     case 'TOGGLE_SOUND_ENABLED':
       return {
         ...state,
         sound: { ...state.sound, soundEnabled: !state.sound.soundEnabled }
       };
+    
+    case 'SET_SOUND_ENABLED':
+      return {
+        ...state,
+        sound: { ...state.sound, soundEnabled: action.payload }
+      };
+    
+    case 'SET_PROFANITY_FILTER':
+      // We need to add profanity filter to the state first
+      return state;
     
     case 'UPDATE_SOUND':
       return {

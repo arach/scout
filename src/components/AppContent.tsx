@@ -15,6 +15,7 @@ import { WebhookManagement } from "./WebhookManagement";
 import { AudioErrorBoundary, TranscriptionErrorBoundary, SettingsErrorBoundary } from './ErrorBoundary';
 import { useRecording } from '../hooks/useRecording';
 import { useSettings } from '../hooks/useSettings';
+import { useSettingsSync } from '../hooks/useSettingsSync';
 import { useFileDrop } from '../hooks/useFileDrop';
 import { useTranscriptEvents } from '../hooks/useTranscriptEvents';
 import { useProcessingStatus } from '../hooks/useProcessingStatus';
@@ -72,6 +73,9 @@ export function AppContent() {
     soundEnabled,
     completionSoundThreshold,
   } = useSettings();
+
+  // Sync settings with backend
+  useSettingsSync();
 
   // Load transcripts functions
   const loadRecentTranscripts = useCallback(async () => {

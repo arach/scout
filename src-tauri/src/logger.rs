@@ -24,6 +24,7 @@ pub enum Component {
     Processing,
     FFI,
     UI,
+    Settings,
     Models,
     Webhooks,
     WavReader,
@@ -40,6 +41,7 @@ impl Component {
             Component::Processing => "PROC",
             Component::FFI => "FFI ", // Extra space for alignment
             Component::UI => "UI  ",  // Extra spaces for alignment
+            Component::Settings => "STNG",
             Component::Models => "MODL",
             Component::Webhooks => "WHOK",
             Component::WavReader => "WAVR",
