@@ -208,10 +208,18 @@
   }
 }
 
+/* Sound feedback header - toggle and preview button together */
+.sound-feedback-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
 /* Sound feedback toggle specific styling */
 .sound-feedback-toggle {
-  margin-bottom: 16px;
   justify-content: flex-start;
+  margin-bottom: 0;
 }
 
 /* Animation for spin */
