@@ -4,9 +4,8 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
-  // Configure for GitHub Pages
-  basePath: process.env.NODE_ENV === 'production' ? '/scout' : '',
-  assetPrefix: process.env.NODE_ENV === 'production' ? '/scout' : '',
+  // No basePath needed for custom domain deployment
+  // The site will be served from the root at scout.arach.dev
   // Handle trailing slashes consistently
   trailingSlash: true,
 }
