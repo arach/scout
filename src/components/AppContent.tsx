@@ -3,7 +3,7 @@ import { invokeTyped, tauriApi } from '../types/tauri';
 import { loggers } from '../utils/logger';
 import { safeEventListen, cleanupListeners } from "../lib/safeEventListener";
 import { open } from "@tauri-apps/plugin-dialog";
-import { OnboardingFlow } from "./OnboardingFlow";
+import { OnboardingFlow } from "./OnboardingFlowNew";
 import { Sidebar, useSidebarState } from "./Sidebar";
 import { RecordView } from "./RecordView";
 import { TranscriptsView } from "./TranscriptsView";
