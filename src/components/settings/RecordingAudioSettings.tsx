@@ -176,6 +176,7 @@ export const RecordingAudioSettings = memo(function RecordingAudioSettings() {
                 onClick={previewSoundFlow}
                 disabled={!sound.soundEnabled || isPreviewingSound}
                 className={`preview-sound-button ${isPreviewingSound ? 'playing' : ''}`}
+                style={{ marginLeft: '35px' }}
               >
                 {isPreviewingSound ? (
                   <>
