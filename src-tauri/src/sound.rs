@@ -135,6 +135,7 @@ impl SoundPlayer {
 
     pub fn play_start() {
         if !Self::is_enabled() {
+            println!("  ⚠️  Sounds are disabled, skipping start sound");
             return;
         }
 
@@ -144,10 +145,15 @@ impl SoundPlayer {
             if let Some(start_sound_mutex) = START_SOUND.get() {
                 if let Ok(sound_name) = start_sound_mutex.lock() {
                     let sound_path = Self::resolve_sound_path(&sound_name);
+                    println!("  🎵 Playing start sound: {} -> {}", sound_name, sound_path);
 
-                    let _ = std::process::Command::new("afplay")
+                    let result = std::process::Command::new("afplay")
                         .arg(&sound_path)
                         .spawn();
+                    
+                    if let Err(e) = result {
+                        println!("  ❌ Failed to play start sound: {}", e);
+                    }
                 }
             }
         }
@@ -180,6 +186,7 @@ impl SoundPlayer {
 
     pub fn play_stop() {
         if !Self::is_enabled() {
+            println!("  ⚠️  Sounds are disabled, skipping stop sound");
             return;
         }
 
@@ -188,6 +195,7 @@ impl SoundPlayer {
             Self::init_defaults();
             let sound_name = STOP_SOUND.get().unwrap().lock().unwrap();
             let sound_path = Self::resolve_sound_path(&sound_name);
+            println!("  🎵 Playing stop sound: {} -> {}", sound_name, sound_path);
 
             let _ = std::process::Command::new("afplay")
                 .arg(&sound_path)
@@ -263,6 +271,7 @@ impl SoundPlayer {
 
     pub fn play_success() {
         if !Self::is_enabled() {
+            println!("  ⚠️  Sounds are disabled, skipping success sound");
             return;
         }
 
@@ -271,6 +280,7 @@ impl SoundPlayer {
             Self::init_defaults();
             let sound_name = SUCCESS_SOUND.get().unwrap().lock().unwrap();
             let sound_path = Self::resolve_sound_path(&sound_name);
+            println!("  🎵 Playing success sound: {} -> {}", sound_name, sound_path);
 
             let _ = std::process::Command::new("afplay")
                 .arg(&sound_path)

@@ -5,11 +5,12 @@ import { useSettings } from '../contexts/SettingsContext';
 import { RecordingAudioSettings } from './settings/RecordingAudioSettings';
 import { DisplayInterfaceSettings } from './settings/DisplayInterfaceSettings';
 import { ThemesSettings } from './settings/ThemesSettings';
-import { WebhookSettingsToggle } from './settings/WebhookSettingsToggle';
+import { WebhookSettingsSimple } from './settings/WebhookSettingsSimple';
 import './settings/CollapsibleSection.css';
 import './SettingsView-spacing.css';
 import './settings/SoundSettings.css';
 import './settings/CompactSections.css';
+import './settings/WebhookSettingsSimple.css';
 import '../styles/grid-system.css';
 
 // Lazy load heavy components
@@ -270,7 +271,7 @@ export const SettingsView = memo(function SettingsView() {
             </div>
             {isWebhooksExpanded && (
               <div className="collapsible-content">
-                <WebhookSettingsToggle />
+                <WebhookSettingsSimple />
               </div>
             )}
         </div>

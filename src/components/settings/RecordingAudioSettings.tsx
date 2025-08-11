@@ -1,5 +1,6 @@
 import React, { memo } from 'react';
 import { useSettings } from '../../contexts/SettingsContext';
+import { useSettings as useSettingsHook } from '../../hooks/useSettingsContext';
 import { useHotkeyCapture } from '../../hooks/useHotkeyCapture';
 import { formatShortcutJSX } from '../../lib/formatShortcutJSX';
 import { Dropdown } from '../Dropdown';
@@ -7,7 +8,8 @@ import { invoke } from '@tauri-apps/api/core';
 import './RecordingAudioSettings.css';
 
 export const RecordingAudioSettings = memo(function RecordingAudioSettings() {
-  const { state, actions } = useSettings();
+  const { state } = useSettings();
+  const actions = useSettingsHook();
   const { shortcuts, clipboard, sound } = state;
   const {
     startCapturingHotkey,

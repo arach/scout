@@ -1,0 +1,58 @@
+/* Simple Webhook Settings Styles */
+.webhook-settings-simple {
+  width: 100%;
+}
+
+.webhook-settings-simple .setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.webhook-settings-simple label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.webhook-count {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  padding: 2px 6px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+}
+
+.webhook-settings-simple .setting-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.webhook-settings-simple .manage-button {
+  padding: 6px 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.webhook-settings-simple .manage-button:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border-color: var(--border-secondary);
+}
+
+.webhook-hint {
+  margin-top: 8px;
+  margin-left: 0;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.4;
+}
