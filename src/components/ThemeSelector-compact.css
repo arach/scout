@@ -6,22 +6,27 @@
 /* Override default grid for compact mode */
 .theme-selector-compact .theme-options {
   display: grid;
-  grid-template-columns: repeat(4, 1fr); /* 4 columns by default */
+  grid-template-columns: repeat(3, 1fr); /* 3 columns for compact containers */
   gap: 12px;
   max-width: 100%;
   margin-top: 0; /* Remove extra top margin */
 }
 
-/* 5 columns on desktop for maximum horizontal usage */
+/* When in a full-width section, use more columns */
+.collapsible-section--full .theme-selector-compact .theme-options {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+/* Desktop: more columns for full-width sections */
 @media (min-width: 900px) {
-  .theme-selector-compact .theme-options {
+  .collapsible-section--full .theme-selector-compact .theme-options {
     grid-template-columns: repeat(5, 1fr);
   }
 }
 
-/* 6 columns on very wide screens */
+/* Very wide screens: maximum columns for full-width */
 @media (min-width: 1400px) {
-  .theme-selector-compact .theme-options {
+  .collapsible-section--full .theme-selector-compact .theme-options {
     grid-template-columns: repeat(6, 1fr);
   }
 }
