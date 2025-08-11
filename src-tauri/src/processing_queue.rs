@@ -364,16 +364,29 @@ impl ProcessingQueue {
                                                         .and_then(|ext| ext.to_str())
                                                         .map(|s| s.to_string());
 
-                                                    let performance_data = crate::performance_metrics_service::PerformanceDataBuilder::new(
-                                                    job.duration_ms,
-                                                    transcription_time_ms,
-                                                    model_name.to_string(),
-                                                    "processing_queue".to_string()
-                                                )
-                                                .with_user_latency(user_perceived_latency_ms.unwrap_or(0))
-                                                .with_queue_time(queue_time_ms)
-                                                .with_audio_info(file_size, audio_format)
-                                                .build();
+                                                    let performance_data = crate::performance_metrics_service::TranscriptionPerformanceData {
+                                                        recording_duration_ms: job.duration_ms,
+                                                        transcription_time_ms,
+                                                        user_perceived_latency_ms,
+                                                        processing_queue_time_ms: Some(queue_time_ms),
+                                                        model_used: model_name.to_string(),
+                                                        transcription_strategy: "processing_queue".to_string(),
+                                                        audio_file_size_bytes: file_size,
+                                                        audio_format,
+                                                        audio_device_name: None,
+                                                        audio_sample_rate: None,
+                                                        audio_channels: None,
+                                                        audio_bit_depth: None,
+                                                        audio_buffer_size: None,
+                                                        audio_input_gain: None,
+                                                        requested_sample_rate: None,
+                                                        requested_channels: None,
+                                                        success: true,
+                                                        error_message: None,
+                                                        chunks_processed: None,
+                                                        strategy_metadata: None,
+                                                        audio_metadata: None,
+                                                    };
 
                                                     match post_processing
                                                         .save_performance_metrics(

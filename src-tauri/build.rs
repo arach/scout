@@ -8,11 +8,14 @@ fn main() {
 
         // Create output paths
         let swift_obj_path = out_dir.join("overlay.o");
-        let bridge_obj_path = out_dir.join("overlay_bridge.o");
+        let _bridge_obj_path = out_dir.join("overlay_bridge.o");
         let combined_lib_path = out_dir.join("libmacos_overlay.a");
         let swift_header_path = out_dir.join("overlay-Swift.h");
 
-        // Compile Swift to object file
+        // Legacy overlay (overlay.swift/overlay_bridge.m) removed
+        // Generate a dummy overlay Swift object to keep the combined lib stable
+        let dummy_swift_path = out_dir.join("overlay_dummy.swift");
+        std::fs::write(&dummy_swift_path, "import Foundation\n").expect("Failed to write dummy Swift file");
         let output = std::process::Command::new("swiftc")
             .args([
                 "-c",
@@ -25,7 +28,7 @@ fn main() {
                 "src/macos/BridgingHeader.h",
                 "-o",
                 swift_obj_path.to_str().unwrap(),
-                "src/macos/overlay.swift",
+                dummy_swift_path.to_str().unwrap(),
             ])
             .output()
             .expect("Failed to execute Swift compiler");
@@ -43,44 +46,14 @@ fn main() {
             panic!("Failed to compile Swift code");
         }
 
-        // Compile Objective-C bridge
-        let output = std::process::Command::new("clang")
-            .args([
-                "-c",
-                "-fobjc-arc",
-                "-I",
-                out_dir.to_str().unwrap(),
-                "-o",
-                bridge_obj_path.to_str().unwrap(),
-                "src/macos/overlay_bridge.m",
-            ])
-            .output()
-            .expect("Failed to compile Objective-C bridge");
-
-        if !output.status.success() {
-            println!("cargo:warning=Objective-C compilation failed");
-            println!(
-                "cargo:warning=stdout: {}",
-                String::from_utf8_lossy(&output.stdout)
-            );
-            println!(
-                "cargo:warning=stderr: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            panic!("Failed to compile Objective-C code");
-        }
+        // No legacy Objective-C bridge anymore
 
         // Remove existing library if it exists
         let _ = std::fs::remove_file(&combined_lib_path);
 
-        // Create static library from both object files
+        // Create static library (includes only the dummy overlay Swift object)
         let ar_output = std::process::Command::new("ar")
-            .args([
-                "rcs",
-                combined_lib_path.to_str().unwrap(),
-                swift_obj_path.to_str().unwrap(),
-                bridge_obj_path.to_str().unwrap(),
-            ])
+            .args(["rcs", combined_lib_path.to_str().unwrap(), swift_obj_path.to_str().unwrap()])
             .output()
             .expect("Failed to create static library");
 
@@ -282,6 +255,64 @@ fn main() {
                     // Link the Foundation Models library
                     println!("cargo:rustc-link-lib=static=foundation_models");
                 }
+            }
+        }
+
+        // Compile Keyboard Monitor
+        println!("cargo:rerun-if-changed=src/macos/keyboard_monitor.swift");
+
+        let keyboard_monitor_swift_obj = out_dir.join("keyboard_monitor.o");
+        let keyboard_monitor_lib = out_dir.join("libkeyboard_monitor.a");
+
+        // Compile Swift Keyboard Monitor
+        let output = std::process::Command::new("swiftc")
+            .args([
+                "-c",
+                "-emit-objc-header",
+                "-emit-objc-header-path",
+                out_dir.join("keyboard_monitor-Swift.h").to_str().unwrap(),
+                "-module-name",
+                "keyboard_monitor",
+                "-o",
+                keyboard_monitor_swift_obj.to_str().unwrap(),
+                "src/macos/keyboard_monitor.swift",
+            ])
+            .output()
+            .expect("Failed to execute Swift compiler for Keyboard Monitor");
+
+        if !output.status.success() {
+            println!("cargo:warning=Keyboard Monitor Swift compilation failed");
+            println!(
+                "cargo:warning=stdout: {}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+            println!(
+                "cargo:warning=stderr: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            println!("cargo:warning=Push-to-talk key release detection will not be available");
+        } else {
+            // Create static library for Keyboard Monitor
+            let _ = std::fs::remove_file(&keyboard_monitor_lib);
+            let ar_output = std::process::Command::new("ar")
+                .args([
+                    "rcs",
+                    keyboard_monitor_lib.to_str().unwrap(),
+                    keyboard_monitor_swift_obj.to_str().unwrap(),
+                ])
+                .output()
+                .expect("Failed to create Keyboard Monitor static library");
+
+            if !ar_output.status.success() {
+                println!("cargo:warning=Failed to create Keyboard Monitor static library");
+                println!(
+                    "cargo:warning=stderr: {}",
+                    String::from_utf8_lossy(&ar_output.stderr)
+                );
+                println!("cargo:warning=Push-to-talk key release detection will not be available");
+            } else {
+                // Link the Keyboard Monitor library
+                println!("cargo:rustc-link-lib=static=keyboard_monitor");
             }
         }
 

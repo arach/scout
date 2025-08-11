@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::Duration;
 use std::sync::Arc;
 use tauri::Emitter;
 use tokio::sync::{mpsc, oneshot};
@@ -14,6 +15,9 @@ use crate::settings::SettingsManager;
 use crate::transcription_context::TranscriptionContext;
 use crate::whisper_log_interceptor::WhisperLogInterceptor;
 use crate::whisper_logger;
+
+// Consolidated timeout for transcription completion
+const TRANSCRIPTION_TIMEOUT: Duration = Duration::from_secs(180);
 
 #[derive(Debug)]
 pub enum RecordingCommand {
@@ -260,9 +264,9 @@ impl RecordingWorkflow {
                                     info(Component::RingBuffer, &format!("Audio device has {} channels, ring buffer expects 1 channel", audio_channels));
 
                                     // Create callback for AudioRecorder
-                                    let sample_callback: std::sync::Arc<dyn Fn(&[f32]) + Send + Sync> = if std::env::var("USE_SIMPLE_CALLBACK_TEST").is_ok() {
+                                    let sample_callback: Arc<dyn Fn(&[f32]) + Send + Sync> = if std::env::var_os("USE_SIMPLE_CALLBACK_TEST").is_some() {
                                         // Simple callback that just counts samples - no processing
-                                        std::sync::Arc::new(move |samples: &[f32]| {
+                                        Arc::new(move |samples: &[f32]| {
                                             // Just log every 1000th callback to avoid spam
                                             static CALLBACK_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
                                             let count = CALLBACK_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -272,7 +276,7 @@ impl RecordingWorkflow {
                                         })
                                     } else {
                                         // Original callback with channel forwarding
-                                        std::sync::Arc::new(move |samples: &[f32]| {
+                                        Arc::new(move |samples: &[f32]| {
                                             // Pass samples in their native format (preserve stereo for WAV)
                                             // Note: Transcription will handle mono conversion internally if needed
                                             let native_samples = samples.to_vec();
@@ -285,28 +289,32 @@ impl RecordingWorkflow {
                                     };
 
                                     // Check if sample callbacks should be disabled
-                                    if std::env::var("DISABLE_SAMPLE_CALLBACKS").is_ok() {
+                                    if std::env::var_os("DISABLE_SAMPLE_CALLBACKS").is_some() {
                                         info(Component::RingBuffer, "Sample callbacks DISABLED by environment variable - skipping callback setup");
                                         None
                                     } else {
-                                        // Set the callback on the recorder
-                                        let recorder = recorder.lock().await;
-                                        if let Err(e) =
-                                            recorder.set_sample_callback(Some(sample_callback))
-                                        {
-                                            error(
-                                                Component::Recording,
-                                                &format!("Failed to set sample callback: {}", e),
-                                            );
-                                            None
-                                        } else {
-                                            info(
-                                                Component::RingBuffer,
-                                                "AudioRecorder callback set - samples will be captured",
-                                            );
-                                            drop(recorder);
-                                            info(Component::RingBuffer, "Connected AudioRecorder to RingBuffer via sample forwarding");
-                                            Some(sample_rx)
+                                        // Set the callback on the recorder within a tight scope
+                                        let set_result = {
+                                            let recorder_guard = recorder.lock().await;
+                                            recorder_guard.set_sample_callback(Some(sample_callback))
+                                        };
+
+                                        match set_result {
+                                            Err(e) => {
+                                                error(
+                                                    Component::Recording,
+                                                    &format!("Failed to set sample callback: {}", e),
+                                                );
+                                                None
+                                            }
+                                            Ok(()) => {
+                                                info(
+                                                    Component::RingBuffer,
+                                                    "AudioRecorder callback set - samples will be captured",
+                                                );
+                                                info(Component::RingBuffer, "Connected AudioRecorder to RingBuffer via sample forwarding");
+                                                Some(sample_rx)
+                                            }
                                         }
                                     }
                                 } else {
@@ -317,8 +325,12 @@ impl RecordingWorkflow {
                                 performance_tracker_for_iter
                                     .track_event("audio_start", "Starting audio recording")
                                     .await;
-                                let recorder = recorder.lock().await;
-                                match recorder.start_recording(&path, device_name.as_deref()) {
+                                // Start the recorder without holding the lock across heavy work
+                                let start_result = {
+                                    let recorder_guard = recorder.lock().await;
+                                    recorder_guard.start_recording(&path, device_name.as_deref())
+                                };
+                                match start_result {
                                     Ok(_) => {
                                         let start_time = std::time::Instant::now();
                                         let strategy_name = transcription_context
@@ -335,9 +347,7 @@ impl RecordingWorkflow {
                                         // Create sample processing task if we have ring buffer
                                         if let Some(mut sample_rx) = sample_rx_option {
                                             debug(Component::RingBuffer, "Attempting to get ring buffer reference from transcription context");
-                                            if let Some(ring_buffer) =
-                                                transcription_context.get_ring_buffer()
-                                            {
+                                            if let Some(ring_buffer) = transcription_context.get_ring_buffer() {
                                                 info(
                                                     Component::RingBuffer,
                                                     "Got ring buffer reference successfully",
@@ -444,9 +454,12 @@ impl RecordingWorkflow {
                                     }
                                     Err(e) => {
                                         // Stop recording if transcription setup failed
-                                        let _ = recorder.stop_recording();
-                                        // Clear sample callback on error
-                                        let _ = recorder.set_sample_callback(None);
+                                        {
+                                            let recorder_guard = recorder.lock().await;
+                                            let _ = recorder_guard.stop_recording();
+                                            // Clear sample callback on error
+                                            let _ = recorder_guard.set_sample_callback(None);
+                                        }
                                         progress_tracker_for_iter.update(RecordingProgress::Idle);
                                         let _ = response.send(Err(format!(
                                             "Failed to setup transcription: {}",
@@ -487,36 +500,37 @@ impl RecordingWorkflow {
                                 filename: active_recording.filename.clone() 
                             });
 
-                            // Get device info before stopping recording
-                            let recorder = recorder.lock().await;
-                            let device_info = recorder.get_current_device_info();
-                            debug(Component::Recording, "Calling recorder.stop_recording()...");
-                            performance_tracker_for_iter
-                                .track_event("audio_stop", "Stopping audio recorder")
-                                .await;
-                            if let Err(e) = recorder.stop_recording() {
-                                error(
-                                    Component::Recording,
-                                    &format!("Failed to stop recording: {}", e),
-                                );
-                                // Update to idle on error
-                                progress_tracker_for_iter.update(RecordingProgress::Idle);
-                                let _ = response.send(Err(e));
-                                continue;
-                            }
-                            info(Component::Recording, "recorder.stop_recording() succeeded");
-                            
-                            // CRITICAL: Clear sample callback to prevent accumulation across recordings
-                            if let Err(e) = recorder.set_sample_callback(None) {
-                                warn(
-                                    Component::Recording,
-                                    &format!("Failed to clear sample callback: {}", e),
-                                );
-                            } else {
-                                info(Component::Recording, "Sample callback cleared successfully");
-                            }
-                            
-                            drop(recorder); // Release lock
+                            // Get device info and stop recorder in a tight scope
+                            let device_info = {
+                                let recorder_guard = recorder.lock().await;
+                                let device_info_snapshot = recorder_guard.get_current_device_info();
+                                debug(Component::Recording, "Calling recorder.stop_recording()...");
+                                performance_tracker_for_iter
+                                    .track_event("audio_stop", "Stopping audio recorder")
+                                    .await;
+                                if let Err(e) = recorder_guard.stop_recording() {
+                                    error(
+                                        Component::Recording,
+                                        &format!("Failed to stop recording: {}", e),
+                                    );
+                                    // Update to idle on error
+                                    progress_tracker_for_iter.update(RecordingProgress::Idle);
+                                    let _ = response.send(Err(e));
+                                    continue;
+                                }
+                                info(Component::Recording, "recorder.stop_recording() succeeded");
+
+                                // Clear sample callback to prevent accumulation across recordings
+                                if let Err(e) = recorder_guard.set_sample_callback(None) {
+                                    warn(
+                                        Component::Recording,
+                                        &format!("Failed to clear sample callback: {}", e),
+                                    );
+                                } else {
+                                    info(Component::Recording, "Sample callback cleared successfully");
+                                }
+                                device_info_snapshot  // Return the device info captured before stopping
+                            };
 
                             // Validate the WAV file
                             let wav_path = recordings_dir_for_iter.join(&active_recording.filename);
@@ -625,7 +639,7 @@ impl RecordingWorkflow {
                                         .await;
                                     info(Component::Transcription, "Starting transcription (Core ML first run may take 2-3 minutes)...");
                                     let finish_timeout = tokio::time::timeout(
-                                        tokio::time::Duration::from_secs(180), // 3 minute timeout for Core ML initialization
+                                        TRANSCRIPTION_TIMEOUT,
                                         transcription_context.finish_recording(),
                                     )
                                     .await;
@@ -1056,24 +1070,24 @@ impl RecordingWorkflow {
 
                     RecordingCommand::CancelRecording { response } => {
                         if let Some(mut active_recording) = current_recording.take() {
-                            // Stop recording
-                            let recorder = recorder.lock().await;
-                            if let Err(e) = recorder.stop_recording() {
-                                let _ = response.send(Err(e));
-                                continue;
+                            // Stop recording (tight lock scope)
+                            {
+                                let recorder_guard = recorder.lock().await;
+                                if let Err(e) = recorder_guard.stop_recording() {
+                                    let _ = response.send(Err(e));
+                                    continue;
+                                }
+
+                                // Clear sample callback on cancel
+                                if let Err(e) = recorder_guard.set_sample_callback(None) {
+                                    warn(
+                                        Component::Recording,
+                                        &format!("Failed to clear sample callback during cancel: {}", e),
+                                    );
+                                } else {
+                                    info(Component::Recording, "Sample callback cleared during cancel");
+                                }
                             }
-                            
-                            // CRITICAL: Clear sample callback to prevent accumulation across recordings
-                            if let Err(e) = recorder.set_sample_callback(None) {
-                                warn(
-                                    Component::Recording,
-                                    &format!("Failed to clear sample callback during cancel: {}", e),
-                                );
-                            } else {
-                                info(Component::Recording, "Sample callback cleared during cancel");
-                            }
-                            
-                            drop(recorder); // Release lock
 
                             // Cancel transcription context if it exists
                             if let Some(_transcription_context) =

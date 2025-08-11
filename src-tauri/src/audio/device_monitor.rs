@@ -1,10 +1,13 @@
-use crate::logger::{error, info, Component};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex, OnceLock},
+    thread,
+    time::{Duration, Instant},
+};
+
 use cpal::traits::{DeviceTrait, HostTrait};
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::{Duration, Instant};
-use std::sync::OnceLock;
+
+use crate::logger::{error, info, Component};
 
 // Global device capability cache to prevent repeated probing
 static DEVICE_CACHE: OnceLock<Mutex<DeviceCapabilityCache>> = OnceLock::new();

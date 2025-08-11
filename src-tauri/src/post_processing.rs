@@ -1,15 +1,16 @@
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 use tokio::time::{sleep, Duration};
-use crate::settings::SettingsManager;
-use crate::profanity_filter::ProfanityFilter;
-use crate::performance_metrics_service::{PerformanceMetricsService, TranscriptionPerformanceData};
-use crate::db::Database;
-use crate::logger::{info, error, debug, Component};
-use crate::llm::{CandleEngine, LLMEngine, GenerationOptions, ModelManager, PromptManager};
-use crate::llm::pipeline::LLMPipeline;
-use crate::dictionary_processor::DictionaryProcessor;
-use crate::foundation_models::{FoundationModelsProcessor, FoundationModelsConfig, ProcessingOperation};
-use std::path::PathBuf;
+
+use crate::{
+    db::Database,
+    dictionary_processor::DictionaryProcessor,
+    foundation_models::{FoundationModelsConfig, FoundationModelsProcessor, ProcessingOperation},
+    llm::{pipeline::LLMPipeline, CandleEngine, GenerationOptions, LLMEngine, ModelManager, PromptManager},
+    logger::{Component, debug, error, info},
+    performance_metrics_service::{PerformanceMetricsService, TranscriptionPerformanceData},
+    profanity_filter::ProfanityFilter,
+    settings::SettingsManager,
+};
 
 /// Post-processing hooks that run after successful transcription
 pub struct PostProcessingHooks {
