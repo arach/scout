@@ -1083,11 +1083,11 @@ h1 {
 
 .setting-item label {
   display: block;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--text-primary);
-  margin-bottom: var(--form-label-margin);
-  line-height: var(--line-height-normal);
+  margin-bottom: 4px;
+  line-height: 1.3;
 }
 
 .hotkey-input-group {

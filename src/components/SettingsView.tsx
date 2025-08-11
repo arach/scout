@@ -8,7 +8,6 @@ import { ThemesSettings } from './settings/ThemesSettings';
 import { WebhookSettingsSimple } from './settings/WebhookSettingsSimple';
 import './settings/CollapsibleSection.css';
 import './SettingsView-spacing.css';
-import './settings/SoundSettings.css';
 import './settings/CompactSections.css';
 import './settings/WebhookSettingsSimple.css';
 import '../styles/grid-system.css';
