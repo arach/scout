@@ -1,23 +1,22 @@
-import { useEffect, useCallback, useRef } from 'react';
+import { useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useSettings } from '../contexts/SettingsContext';
 
 /**
- * Hook to synchronize ALL settings between frontend and backend
+ * Simplified hook to load settings from backend on mount
+ * Settings are saved directly when UI components change them
  */
 export function useSettingsSync() {
-  const { state, dispatch } = useSettings();
-  const isInitialLoad = useRef(true);
-  const previousState = useRef(state);
+  const { dispatch } = useSettings();
 
-  // Load ALL settings from backend on mount
+  // Load settings from backend once on mount
   useEffect(() => {
     const loadSettings = async () => {
       try {
         const backendSettings = await invoke<any>('get_settings');
         console.log('Loading settings from backend:', backendSettings);
         
-        // Update frontend state with ALL backend settings
+        // Update frontend state with backend settings
         if (backendSettings.ui) {
           // Clipboard settings
           if (backendSettings.ui.auto_copy !== undefined) {
@@ -64,111 +63,24 @@ export function useSettingsSync() {
           if (backendSettings.ui.theme) {
             dispatch({ type: 'UPDATE_THEME', payload: backendSettings.ui.theme });
           }
-          
-          // Profanity filter settings (backend has these but frontend doesn't use them yet)
-          // TODO: Add profanity filter support to frontend
-          // if (backendSettings.ui.profanity_filter_enabled !== undefined) {
-          //   dispatch({ type: 'SET_PROFANITY_FILTER', payload: backendSettings.ui.profanity_filter_enabled });
-          // }
-          
-          // Foundation Models settings (backend has these but frontend doesn't use them yet)
-          // TODO: Add foundation models settings to frontend state
-        }
-        
-        // Model settings (Whisper models)
-        if (backendSettings.models) {
-          // TODO: Add model settings to frontend state
-          // Currently these are managed separately through the model manager
-          console.log('Model settings from backend:', backendSettings.models);
-        }
-        
-        // Processing settings
-        if (backendSettings.processing) {
-          // TODO: Add processing settings to frontend if needed
-          console.log('Processing settings from backend:', backendSettings.processing);
-        }
-        
-        // Audio settings
-        if (backendSettings.audio) {
-          // TODO: Add audio device settings to frontend if needed
-          console.log('Audio settings from backend:', backendSettings.audio);
         }
         
         // LLM settings
         if (backendSettings.llm) {
           dispatch({ type: 'UPDATE_LLM_SETTINGS', payload: backendSettings.llm });
         }
-        
-        isInitialLoad.current = false;
       } catch (error) {
         console.error('Failed to load settings from backend:', error);
-        isInitialLoad.current = false;
       }
     };
 
     loadSettings();
   }, [dispatch]);
 
-  // Save specific settings to backend when they change
-  // We'll use individual watchers instead of watching the entire state
-  // to avoid excessive saves
-  
-  // Auto-copy changes
-  useEffect(() => {
-    if (isInitialLoad.current) return;
-    
-    const syncAutoCopy = async () => {
-      try {
-        await invoke('set_auto_copy', { enabled: state.clipboard.autoCopy });
-        console.log('Auto-copy synced:', state.clipboard.autoCopy);
-      } catch (error) {
-        console.error('Failed to sync auto-copy:', error);
-      }
-    };
-    
-    const timeoutId = setTimeout(syncAutoCopy, 300);
-    return () => clearTimeout(timeoutId);
-  }, [state.clipboard.autoCopy]);
-  
-  // Auto-paste changes
-  useEffect(() => {
-    if (isInitialLoad.current) return;
-    
-    const syncAutoPaste = async () => {
-      try {
-        await invoke('set_auto_paste', { enabled: state.clipboard.autoPaste });
-        console.log('Auto-paste synced:', state.clipboard.autoPaste);
-      } catch (error) {
-        console.error('Failed to sync auto-paste:', error);
-      }
-    };
-    
-    const timeoutId = setTimeout(syncAutoPaste, 300);
-    return () => clearTimeout(timeoutId);
-  }, [state.clipboard.autoPaste]);
-  
-  // Sound enabled changes
-  useEffect(() => {
-    if (isInitialLoad.current) return;
-    
-    const syncSoundEnabled = async () => {
-      try {
-        await invoke('set_sound_enabled', { enabled: state.sound.soundEnabled });
-        console.log('Sound enabled synced:', state.sound.soundEnabled);
-      } catch (error) {
-        console.error('Failed to sync sound enabled:', error);
-      }
-    };
-    
-    const timeoutId = setTimeout(syncSoundEnabled, 300);
-    return () => clearTimeout(timeoutId);
-  }, [state.sound.soundEnabled]);
-
-  // Individual setting sync functions (for immediate updates)
+  // Provide sync functions that components can call directly when they change settings
   const syncAutoCopy = useCallback(async (enabled: boolean) => {
     try {
       await invoke('set_auto_copy', { enabled });
-      console.log('Auto-copy synced:', enabled);
     } catch (error) {
       console.error('Failed to sync auto-copy:', error);
     }
@@ -177,7 +89,6 @@ export function useSettingsSync() {
   const syncAutoPaste = useCallback(async (enabled: boolean) => {
     try {
       await invoke('set_auto_paste', { enabled });
-      console.log('Auto-paste synced:', enabled);
     } catch (error) {
       console.error('Failed to sync auto-paste:', error);
     }
@@ -186,7 +97,6 @@ export function useSettingsSync() {
   const syncSoundEnabled = useCallback(async (enabled: boolean) => {
     try {
       await invoke('set_sound_enabled', { enabled });
-      console.log('Sound enabled synced:', enabled);
     } catch (error) {
       console.error('Failed to sync sound enabled:', error);
     }

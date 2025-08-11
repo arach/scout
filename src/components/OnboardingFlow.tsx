@@ -4,6 +4,7 @@ import { safeEventListen } from '../lib/safeEventListener';
 import { Check, X, AlertCircle, Info } from 'lucide-react';
 import soundwaveImage from '../assets/soundwave.png';
 import { Tooltip } from './Tooltip';
+import { DevTools } from './DevTools';
 import './OnboardingFlow.css';
 
 interface OnboardingFlowProps {
@@ -630,6 +631,14 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete, onSt
           className="onboarding-soundwave-image"
         />
       </div>
+
+      {/* DevTools for onboarding navigation */}
+      <DevTools 
+        currentView="record"
+        appVersion="0.4.0"
+        onboardingStep={currentStep}
+        onStepChange={setCurrentStep}
+      />
 
       {/* Content container */}
       <div className="onboarding-content-container">
