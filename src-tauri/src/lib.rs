@@ -471,34 +471,26 @@ pub fn run() {
                     .build(app)?
             ])?;
 
-            use tauri::path::BaseDirectory;
-            let tray_icon = (|| {
-                // Prefer the generic tray-icon first (correct monochrome asset for tray)
-                if let Ok(resolved) = app.path().resolve("icons/tray-icon.png", BaseDirectory::Resource) {
-                    if let Ok(icon) = tauri::image::Image::from_path(&resolved) {
-                        info(Component::UI, &format!("Loaded tray icon from resources: {:?}", resolved));
-                        return icon;
-                    }
+            let tray_icon = {
+                #[cfg(debug_assertions)]
+                {
+                    // In development, load from the icons directory
+                    let icon_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("icons/tray-icon.png");
+                    tauri::image::Image::from_path(icon_path)
+                        .unwrap_or_else(|_| app.default_window_icon().unwrap().clone())
                 }
-                // Fallback to branded scout tray icon if present
-                if let Ok(resolved) = app.path().resolve("icons/scout-tray-icon.png", BaseDirectory::Resource) {
-                    if let Ok(icon) = tauri::image::Image::from_path(&resolved) {
-                        info(Component::UI, &format!("Loaded scout tray icon from resources: {:?}", resolved));
-                        return icon;
-                    }
+                
+                #[cfg(not(debug_assertions))]
+                {
+                    // In production, load from bundled resources
+                    use tauri::path::BaseDirectory;
+                    app.path()
+                        .resolve("icons/tray-icon.png", BaseDirectory::Resource)
+                        .ok()
+                        .and_then(|path| tauri::image::Image::from_path(path).ok())
+                        .unwrap_or_else(|| app.default_window_icon().unwrap().clone())
                 }
-                // Dev-path fallbacks in repo
-                if let Ok(icon) = tauri::image::Image::from_path("src-tauri/icons/tray-icon.png") {
-                    info(Component::UI, "Loaded tray icon from dev path: src-tauri/icons/tray-icon.png");
-                    return icon;
-                }
-                if let Ok(icon) = tauri::image::Image::from_path("src-tauri/icons/scout-tray-icon.png") {
-                    info(Component::UI, "Loaded scout tray icon from dev path: src-tauri/icons/scout-tray-icon.png");
-                    return icon;
-                }
-                warn(Component::UI, "Could not find tray icon, using default window icon");
-                app.default_window_icon().unwrap().clone()
-            })();
+            };
 
             let _ = TrayIconBuilder::new()
                 .icon(tray_icon)
