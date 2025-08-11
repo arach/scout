@@ -693,6 +693,8 @@ pub fn run() {
             webhooks::cleanup_webhook_logs,
             crate::commands::get_recording_stats,
             crate::commands::generate_sample_data,
+            crate::commands::get_performance_metrics_for_transcript,
+            crate::commands::get_performance_timeline_for_transcript,
             foundation_models::enhance_transcript,
             foundation_models::summarize_transcript,
             foundation_models::clean_speech_patterns,
