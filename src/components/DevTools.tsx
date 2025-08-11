@@ -3,9 +3,11 @@ import { invoke } from '@tauri-apps/api/core';
 import { TranscriptionOverlay } from './TranscriptionOverlay';
 import { Transcript } from '../types/transcript';
 import { useAudioLevel } from '../contexts/AudioContext';
+import { useUIContext } from '../contexts/UIContext';
 import './DevTools.css';
 
 type View = 'record' | 'transcripts' | 'settings' | 'stats' | 'dictionary' | 'webhooks' | 'audio-testing';
+type OnboardingStep = 'model' | 'microphone' | 'shortcuts' | 'tour';
 
 interface DevToolsProps {
   currentView: View;
@@ -44,6 +46,9 @@ export function DevTools(props: DevToolsProps) {
 
   // Get audio level from the subscription hook
   const audioLevel = useAudioLevel();
+  
+  // Get UI context for onboarding control
+  const { showFirstRun, setShowFirstRun } = useUIContext();
 
   const [isOpen, setIsOpen] = useState(false);
   const [showMicLevel, setShowMicLevel] = useState(false);
@@ -51,6 +56,22 @@ export function DevTools(props: DevToolsProps) {
   const [isAnimating, setIsAnimating] = useState(false);
   const [showTeleprompter, setShowTeleprompter] = useState(false);
   const [waveformStyle, setWaveformStyle] = useState<'classic' | 'enhanced' | 'particles'>('enhanced');
+  const [currentOnboardingStep, setCurrentOnboardingStep] = useState<OnboardingStep>('model');
+
+  // Load onboarding step from localStorage
+  useEffect(() => {
+    try {
+      const savedState = localStorage.getItem('scout-onboarding-state');
+      if (savedState) {
+        const state = JSON.parse(savedState);
+        if (state.currentStep) {
+          setCurrentOnboardingStep(state.currentStep);
+        }
+      }
+    } catch (error) {
+      console.error('[DevTools] Failed to load onboarding state:', error);
+    }
+  }, [showFirstRun]);
 
   // Only show in development
   const isDev = import.meta.env.DEV;
@@ -88,6 +109,39 @@ export function DevTools(props: DevToolsProps) {
   const handleTeleprompterToggle = (enabled: boolean) => {
     setShowTeleprompter(enabled);
     console.log(`[DevTools] Teleprompter overlay ${enabled ? 'shown' : 'hidden'}`);
+  };
+
+  // Onboarding navigation functions
+  const handleShowOnboarding = () => {
+    // Clear any existing onboarding state
+    localStorage.removeItem('scout-onboarding-complete');
+    localStorage.removeItem('scout-onboarding-state');
+    // Show onboarding
+    setShowFirstRun(true);
+    console.log('[DevTools] Showing onboarding flow');
+  };
+
+  const handleJumpToOnboardingStep = (step: OnboardingStep) => {
+    // Set up the onboarding state for the specific step
+    const onboardingState = {
+      currentStep: step,
+      downloadStatus: step === 'model' ? 'idle' : 'complete',
+      micPermission: step === 'microphone' ? 'not-determined' : 'granted',
+      shortcutsConfigured: step === 'shortcuts' ? false : true
+    };
+    
+    localStorage.setItem('scout-onboarding-state', JSON.stringify(onboardingState));
+    localStorage.removeItem('scout-onboarding-complete');
+    
+    setCurrentOnboardingStep(step);
+    setShowFirstRun(true);
+    console.log(`[DevTools] Jumping to onboarding step: ${step}`);
+  };
+
+  const handleSkipOnboarding = () => {
+    localStorage.setItem('scout-onboarding-complete', 'true');
+    setShowFirstRun(false);
+    console.log('[DevTools] Skipping onboarding');
   };
 
   // Console logging effect - context aware
@@ -230,6 +284,65 @@ export function DevTools(props: DevToolsProps) {
                 </label>
               </div>
             )}
+
+            {/* Onboarding Controls */}
+            <div className="dev-tool-section">
+              <h4>Onboarding Navigation</h4>
+              <div className="dev-tool-item">
+                <span className="status-label">Status:</span>
+                <span className={`status-badge ${showFirstRun ? 'active' : 'inactive'}`}>
+                  {showFirstRun ? 'ACTIVE' : 'INACTIVE'}
+                </span>
+              </div>
+              <div className="dev-tool-item">
+                <button 
+                  className="dev-tool-button primary"
+                  onClick={handleShowOnboarding}
+                >
+                  Show Onboarding
+                </button>
+                <button 
+                  className="dev-tool-button"
+                  onClick={handleSkipOnboarding}
+                  disabled={!showFirstRun}
+                >
+                  Skip Onboarding
+                </button>
+              </div>
+              <div className="dev-tool-item">
+                <span className="status-label">Jump to Screen:</span>
+                <div className="onboarding-nav-buttons">
+                  <button 
+                    className={`dev-tool-button ${currentOnboardingStep === 'model' ? 'active' : ''}`}
+                    onClick={() => handleJumpToOnboardingStep('model')}
+                    title="Model Download Screen"
+                  >
+                    1
+                  </button>
+                  <button 
+                    className={`dev-tool-button ${currentOnboardingStep === 'microphone' ? 'active' : ''}`}
+                    onClick={() => handleJumpToOnboardingStep('microphone')}
+                    title="Microphone Permission Screen"
+                  >
+                    2
+                  </button>
+                  <button 
+                    className={`dev-tool-button ${currentOnboardingStep === 'shortcuts' ? 'active' : ''}`}
+                    onClick={() => handleJumpToOnboardingStep('shortcuts')}
+                    title="Shortcuts Configuration Screen"
+                  >
+                    3
+                  </button>
+                  <button 
+                    className={`dev-tool-button ${currentOnboardingStep === 'tour' ? 'active' : ''}`}
+                    onClick={() => handleJumpToOnboardingStep('tour')}
+                    title="Interactive Tour Screen"
+                  >
+                    4
+                  </button>
+                </div>
+              </div>
+            </div>
 
             {/* Logging Controls */}
             <div className="dev-tool-section">

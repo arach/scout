@@ -1,40 +1,21 @@
-// Group Tauri command implementations by responsibility
-pub mod diagnostics;
-pub use diagnostics::*;
-pub mod recording;
-pub use recording::*;
-pub mod audio_devices;
-pub use audio_devices::*;
+// Organized command modules by domain
+pub mod audio;
+pub use audio::*;
+
 pub mod transcription;
 pub use transcription::*;
-pub mod transcripts;
-pub use transcripts::*;
-pub mod performance;
-pub use performance::*;
-pub mod overlay;
-pub use overlay::*;
+
+pub mod ui;
+pub use ui::*;
+
+pub mod system;
+pub use system::*;
+
 pub mod settings;
 pub use settings::*;
-pub mod models;
-pub use models::*;
-pub mod sounds;
-pub use sounds::*;
-pub mod files;
-pub use files::*;
-pub mod permissions;
-pub use permissions::*;
-pub mod recording_core;
-pub use recording_core::*;
-pub mod llm;
-pub use llm::*;
-pub mod logs;
-pub use logs::*;
-pub mod shortcuts;
-pub use shortcuts::*;
-pub mod dictionary;
-pub use dictionary::*;
-pub mod downloads;
-pub use downloads::*;
-pub mod misc;
-pub use misc::*;
 
+pub mod ai;
+pub use ai::*;
+
+pub mod storage;
+pub use storage::*;

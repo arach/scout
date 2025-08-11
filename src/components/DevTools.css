@@ -81,8 +81,8 @@
   position: fixed;
   bottom: 12px;
   right: 12px;
-  width: 300px;
-  max-height: 400px;
+  width: 320px;
+  max-height: 500px;
   background: rgba(0, 0, 0, 0.95);
   border: 1px solid #333;
   border-radius: 8px;
@@ -225,6 +225,18 @@
   border-color: rgba(120, 120, 120, 0.3);
 }
 
+.status-badge.active {
+  background: rgba(40, 120, 40, 0.6);
+  color: #88ff88;
+  border-color: rgba(80, 160, 80, 0.5);
+}
+
+.status-badge.inactive {
+  background: rgba(80, 80, 80, 0.4);
+  color: #888;
+  border-color: rgba(120, 120, 120, 0.3);
+}
+
 .audio-level-mini {
   background: rgba(48, 48, 48, 0.6);
   color: #ccc;
@@ -305,6 +317,57 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Onboarding Navigation Buttons */
+.onboarding-nav-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.onboarding-nav-buttons .dev-tool-button {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 14px;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.onboarding-nav-buttons .dev-tool-button.active {
+  background: #4a9eff;
+  border-color: #4a9eff;
+  box-shadow: 0 0 8px rgba(74, 158, 255, 0.5);
+}
+
+.onboarding-nav-buttons .dev-tool-button:hover:not(.active) {
+  background: rgba(74, 158, 255, 0.2);
+  border-color: #4a9eff;
+}
+
+.dev-tool-button.primary {
+  background: rgba(74, 158, 255, 0.2);
+  border-color: #4a9eff;
+  color: #4a9eff;
+}
+
+.dev-tool-button.primary:hover {
+  background: rgba(74, 158, 255, 0.3);
+}
+
+.dev-tool-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.dev-tool-button:disabled:hover {
+  background: rgba(120, 120, 120, 0.1);
+  border-color: #666;
 }
 
 /* Mic Level Overlay */

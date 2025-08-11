@@ -4,6 +4,10 @@ use crate::db;
 use crate::llm;
 use crate::AppState;
 
+// ============================================================================
+// LLM Model Management Commands
+// ============================================================================
+
 #[tauri::command]
 pub async fn get_available_llm_models(state: State<'_, AppState>) -> Result<Vec<llm::models::LLMModel>, String> {
     let models_dir = state.models_dir.join("llm");
@@ -47,6 +51,10 @@ pub async fn set_active_llm_model(state: State<'_, AppState>, model_id: String) 
     Ok(())
 }
 
+// ============================================================================
+// LLM Output and Logging Commands
+// ============================================================================
+
 #[tauri::command]
 pub async fn get_llm_outputs_for_transcript(state: State<'_, AppState>, transcript_id: i64) -> Result<Vec<db::LLMOutput>, String> {
     state.database.get_llm_outputs_for_transcript(transcript_id).await
@@ -61,6 +69,10 @@ pub async fn get_whisper_logs_for_session(state: State<'_, AppState>, session_id
 pub async fn get_whisper_logs_for_transcript(state: State<'_, AppState>, transcript_id: i64, limit: Option<i32>) -> Result<Vec<serde_json::Value>, String> {
     state.database.get_whisper_logs_for_transcript(transcript_id, limit).await
 }
+
+// ============================================================================
+// LLM Prompt Template Commands
+// ============================================================================
 
 #[tauri::command]
 pub async fn get_llm_prompt_templates(state: State<'_, AppState>) -> Result<Vec<db::LLMPromptTemplate>, String> {
@@ -88,6 +100,10 @@ pub async fn delete_llm_prompt_template(state: State<'_, AppState>, id: String) 
     state.database.delete_llm_prompt_template(&id).await
 }
 
+// ============================================================================
+// LLM Settings Commands
+// ============================================================================
+
 #[tauri::command]
 pub async fn update_llm_settings(
     state: State<'_, AppState>,
@@ -109,4 +125,3 @@ pub async fn update_llm_settings(
         .map_err(|e| format!("Failed to save settings: {}", e))?;
     Ok(())
 }
-

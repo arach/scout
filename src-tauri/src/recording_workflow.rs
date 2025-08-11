@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::Duration;
 use std::sync::Arc;
 use tauri::Emitter;
 use tokio::sync::{mpsc, oneshot};
@@ -14,6 +15,9 @@ use crate::settings::SettingsManager;
 use crate::transcription_context::TranscriptionContext;
 use crate::whisper_log_interceptor::WhisperLogInterceptor;
 use crate::whisper_logger;
+
+// Consolidated timeout for transcription completion
+const TRANSCRIPTION_TIMEOUT: Duration = Duration::from_secs(180);
 
 #[derive(Debug)]
 pub enum RecordingCommand {
@@ -260,9 +264,9 @@ impl RecordingWorkflow {
                                     info(Component::RingBuffer, &format!("Audio device has {} channels, ring buffer expects 1 channel", audio_channels));
 
                                     // Create callback for AudioRecorder
-                                    let sample_callback: std::sync::Arc<dyn Fn(&[f32]) + Send + Sync> = if std::env::var("USE_SIMPLE_CALLBACK_TEST").is_ok() {
+                                    let sample_callback: Arc<dyn Fn(&[f32]) + Send + Sync> = if std::env::var_os("USE_SIMPLE_CALLBACK_TEST").is_some() {
                                         // Simple callback that just counts samples - no processing
-                                        std::sync::Arc::new(move |samples: &[f32]| {
+                                        Arc::new(move |samples: &[f32]| {
                                             // Just log every 1000th callback to avoid spam
                                             static CALLBACK_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
                                             let count = CALLBACK_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -272,7 +276,7 @@ impl RecordingWorkflow {
                                         })
                                     } else {
                                         // Original callback with channel forwarding
-                                        std::sync::Arc::new(move |samples: &[f32]| {
+                                        Arc::new(move |samples: &[f32]| {
                                             // Pass samples in their native format (preserve stereo for WAV)
                                             // Note: Transcription will handle mono conversion internally if needed
                                             let native_samples = samples.to_vec();
@@ -285,7 +289,7 @@ impl RecordingWorkflow {
                                     };
 
                                     // Check if sample callbacks should be disabled
-                                    if std::env::var("DISABLE_SAMPLE_CALLBACKS").is_ok() {
+                                    if std::env::var_os("DISABLE_SAMPLE_CALLBACKS").is_some() {
                                         info(Component::RingBuffer, "Sample callbacks DISABLED by environment variable - skipping callback setup");
                                         None
                                     } else {
@@ -625,7 +629,7 @@ impl RecordingWorkflow {
                                         .await;
                                     info(Component::Transcription, "Starting transcription (Core ML first run may take 2-3 minutes)...");
                                     let finish_timeout = tokio::time::timeout(
-                                        tokio::time::Duration::from_secs(180), // 3 minute timeout for Core ML initialization
+                                        TRANSCRIPTION_TIMEOUT,
                                         transcription_context.finish_recording(),
                                     )
                                     .await;
