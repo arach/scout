@@ -56,16 +56,40 @@ export function useSettingsSync() {
           if (backendSettings.ui.overlay_position) {
             dispatch({ type: 'UPDATE_OVERLAY_POSITION', payload: backendSettings.ui.overlay_position });
           }
+          // Note: overlay_treatment is not in backend, keeping frontend default
           
           // Theme settings
           if (backendSettings.ui.theme) {
             dispatch({ type: 'UPDATE_THEME', payload: backendSettings.ui.theme });
           }
           
-          // Profanity filter settings
-          if (backendSettings.ui.profanity_filter_enabled !== undefined) {
-            dispatch({ type: 'SET_PROFANITY_FILTER', payload: backendSettings.ui.profanity_filter_enabled });
-          }
+          // Profanity filter settings (backend has these but frontend doesn't use them yet)
+          // TODO: Add profanity filter support to frontend
+          // if (backendSettings.ui.profanity_filter_enabled !== undefined) {
+          //   dispatch({ type: 'SET_PROFANITY_FILTER', payload: backendSettings.ui.profanity_filter_enabled });
+          // }
+          
+          // Foundation Models settings (backend has these but frontend doesn't use them yet)
+          // TODO: Add foundation models settings to frontend state
+        }
+        
+        // Model settings (Whisper models)
+        if (backendSettings.models) {
+          // TODO: Add model settings to frontend state
+          // Currently these are managed separately through the model manager
+          console.log('Model settings from backend:', backendSettings.models);
+        }
+        
+        // Processing settings
+        if (backendSettings.processing) {
+          // TODO: Add processing settings to frontend if needed
+          console.log('Processing settings from backend:', backendSettings.processing);
+        }
+        
+        // Audio settings
+        if (backendSettings.audio) {
+          // TODO: Add audio device settings to frontend if needed
+          console.log('Audio settings from backend:', backendSettings.audio);
         }
         
         // LLM settings
