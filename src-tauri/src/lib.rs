@@ -64,18 +64,11 @@ use crate::{
     transcription::Transcriber,
 };
 
-/// Global storage for the current device sample rate
 static DEVICE_SAMPLE_RATE: OnceLock<Arc<Mutex<Option<u32>>>> = OnceLock::new();
-
-/// Global storage for the current device channel count
 static DEVICE_CHANNELS: OnceLock<Arc<Mutex<Option<u16>>>> = OnceLock::new();
 
-/// Get the current device sample rate from the global cache
-/// This is used by transcription strategies to avoid hardcoding 48kHz
 pub fn get_current_device_sample_rate() -> Option<u32> {
     let rate_storage = DEVICE_SAMPLE_RATE.get_or_init(|| Arc::new(Mutex::new(None)));
-    
-    // Use try_lock to avoid blocking if the mutex is held
     if let Ok(rate) = rate_storage.try_lock() {
         *rate
     } else {
@@ -83,22 +76,16 @@ pub fn get_current_device_sample_rate() -> Option<u32> {
     }
 }
 
-/// Update the cached device sample rate (called from the audio recorder)
 pub fn update_device_sample_rate(sample_rate: u32) {
     let rate_storage = DEVICE_SAMPLE_RATE.get_or_init(|| Arc::new(Mutex::new(None)));
-    
     if let Ok(mut rate) = rate_storage.try_lock() {
         *rate = Some(sample_rate);
         info(Component::Recording, &format!("Updated global device sample rate to: {} Hz", sample_rate));
     }
 }
 
-/// Get the current device channel count from the global cache
-/// This is used by transcription strategies to avoid hardcoding channel count
 pub fn get_current_device_channels() -> Option<u16> {
     let channels_storage = DEVICE_CHANNELS.get_or_init(|| Arc::new(Mutex::new(None)));
-    
-    // Use try_lock to avoid blocking if the mutex is held
     if let Ok(channels) = channels_storage.try_lock() {
         *channels
     } else {
@@ -106,17 +93,14 @@ pub fn get_current_device_channels() -> Option<u16> {
     }
 }
 
-/// Update the cached device channel count (called from the audio recorder)
 pub fn update_device_channels(channels: u16) {
     let channels_storage = DEVICE_CHANNELS.get_or_init(|| Arc::new(Mutex::new(None)));
-    
     if let Ok(mut ch) = channels_storage.try_lock() {
         *ch = Some(channels);
         info(Component::Recording, &format!("Updated global device channels to: {}", channels));
     }
 }
 
-// Overlay dimensions configuration
 const OVERLAY_EXPANDED_WIDTH: f64 = 220.0;
 const OVERLAY_EXPANDED_HEIGHT: f64 = 48.0;
 const OVERLAY_MINIMIZED_WIDTH: f64 = 48.0;
@@ -142,29 +126,24 @@ pub struct AppState {
     #[cfg(target_os = "macos")]
     pub native_panel_overlay: Arc<Mutex<macos::NativeOverlay>>,
 }
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Initialize env_logger with our custom interceptor to capture whisper logs
-    // Set RUST_LOG to capture whisper output at debug level
     std::env::set_var("RUST_LOG", "scout=info,whisper=debug,whisper_rs=debug");
-    
-    // Initialize env_logger as the base logger
+
     let env_logger = env_logger::Builder::from_default_env()
         .target(env_logger::Target::Stdout)
         .build();
-    
-    // Wrap it with our WhisperLogInterceptor
+
     let interceptor = whisper_log_interceptor::WhisperLogInterceptor::new(Box::new(env_logger));
-    
-    // Set the interceptor as the global logger
+
     log::set_boxed_logger(Box::new(interceptor))
         .expect("Failed to set logger");
     log::set_max_level(log::LevelFilter::Debug);
-    
-    // Install whisper-rs log trampoline to capture whisper.cpp logs
+
     whisper_rs::install_whisper_log_trampoline();
     info(Component::Transcription, "Installed whisper log trampoline for capturing whisper.cpp output");
-    
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -173,8 +152,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir().expect("Failed to get app data dir");
-            
-            // Create app data directory with secure permissions (700 - owner only)
+
             if !app_data_dir.exists() {
                 std::fs::create_dir_all(&app_data_dir).expect("Failed to create app data directory");
                 #[cfg(target_os = "macos")]
@@ -185,15 +163,13 @@ pub fn run() {
                         .expect("Failed to set secure permissions on app data directory");
                 }
             }
-            
-            // Initialize file-based logging
+
             if let Err(e) = logger::init_logger(&app_data_dir) {
                 eprintln!("Failed to initialize file logger: {}", e);
             } else {
                 info(Component::UI, &format!("Scout application starting - logs available at: {:?}", logger::get_log_file_path()));
             }
-            
-            // Create subdirectories with secure permissions
+
             let recordings_dir = app_data_dir.join("recordings");
             std::fs::create_dir_all(&recordings_dir).expect("Failed to create recordings directory");
             #[cfg(target_os = "macos")]
@@ -210,8 +186,7 @@ pub fn run() {
 
             let mut recorder = AudioRecorder::new();
             recorder.init();
-            
-            // Models directory in app data with secure permissions
+
             let models_dir = app_data_dir.join("models");
             std::fs::create_dir_all(&models_dir).expect("Failed to create models directory");
             #[cfg(target_os = "macos")]
@@ -220,36 +195,29 @@ pub fn run() {
                 let permissions = std::fs::Permissions::from_mode(0o700);
                 let _ = std::fs::set_permissions(&models_dir, permissions);
             }
-            
-            // Verify the directory was created
-            if models_dir.exists() && models_dir.is_dir() {
-            } else {
+
+            if !(models_dir.exists() && models_dir.is_dir()) {
                 error(Component::Transcription, "Models directory was not created properly!");
             }
-            
-            // Initialize model state manager
+
             let model_state_manager = Arc::new(ModelStateManager::new(&app_data_dir));
-            
-            // Initialize whisper logger
+
             if let Err(e) = whisper_logger::init_whisper_logger(&app_data_dir) {
                 error(Component::Transcription, &format!("Failed to initialize whisper logger: {}", e));
             }
-            
-            // Initialize settings manager
+
             let settings_manager = SettingsManager::new(&app_data_dir)
                 .expect("Failed to initialize settings manager");
             let settings_arc = Arc::new(Mutex::new(settings_manager));
-            
+
             let recorder_arc = Arc::new(Mutex::new(recorder));
             let database_arc = Arc::new(database);
             let progress_tracker = Arc::new(ProgressTracker::new());
             let progress_tracker_clone = progress_tracker.clone();
-            
-            // Create shared singleton transcriber instances
+
             let transcriber = Arc::new(Mutex::new(None::<Transcriber>));
             let current_model_path = Arc::new(Mutex::new(None::<PathBuf>));
-            
-            // Create the processing queue with shared transcriber
+
             let (processing_queue, mut processing_status_rx) = ProcessingQueue::new(
                 database_arc.clone(),
                 models_dir.clone(),
@@ -259,9 +227,9 @@ pub fn run() {
                 current_model_path.clone(),
             );
             let processing_queue_arc = Arc::new(processing_queue);
-            
+
             let performance_tracker = Arc::new(PerformanceTracker::new());
-            
+
             let recording_workflow = Arc::new(RecordingWorkflow::new(
                 recorder_arc.clone(),
                 recordings_dir.clone(),
@@ -283,40 +251,33 @@ pub fn run() {
             let native_panel_overlay = {
                 let overlay = macos::NativeOverlay::new();
                 let app_handle = app.handle().clone();
-                
-                // Set up callback for when recording starts from overlay
+
                 overlay.set_on_start_recording(move || {
                     if let Err(e) = app_handle.emit("native-overlay-start-recording", ()) {
                         error(Component::UI, &format!("Failed to emit native-overlay-start-recording event: {}", e));
                     }
                 });
-                
+
                 let app_handle = app.handle().clone();
-                // Set up callback for when recording stops from overlay
                 overlay.set_on_stop_recording(move || {
                     if let Err(e) = app_handle.emit("native-overlay-stop-recording", ()) {
                         error(Component::UI, &format!("Failed to emit native-overlay-stop-recording event: {}", e));
                     }
                 });
-                
+
                 let app_handle = app.handle().clone();
-                // Set up callback for when recording is cancelled from overlay
                 overlay.set_on_cancel_recording(move || {
                     if let Err(e) = app_handle.emit("native-overlay-cancel-recording", ()) {
                         error(Component::UI, &format!("Failed to emit native-overlay-cancel-recording event: {}", e));
                     }
                 });
-                
-                // Show the overlay at startup
+
                 overlay.show();
-                
+
                 Arc::new(Mutex::new(overlay))
             };
-            
-            // Create keyboard monitor
+
             let keyboard_monitor = Arc::new(KeyboardMonitor::new(app.handle().clone()));
-            
-            // Start keyboard monitoring for push-to-talk (must be started before setting the key)
             keyboard_monitor.clone().start_monitoring();
             
             // Set the initial push-to-talk key from settings
@@ -328,7 +289,7 @@ pub fn run() {
                     info(Component::UI, &format!("Set initial push-to-talk key: {}", push_to_talk_key));
                 }
             }
-            
+
             let state = AppState {
                 recorder: recorder_arc,
                 database: database_arc,
@@ -349,10 +310,9 @@ pub fn run() {
                 #[cfg(target_os = "macos")]
                 native_panel_overlay: native_panel_overlay.clone(),
             };
-            
+
             app.manage(state);
-            
-            // Preload sounds to avoid first-play delay
+
             sound::SoundPlayer::preload_sounds();
             
             // Warm up audio system to avoid first-record delay
@@ -363,28 +323,23 @@ pub fn run() {
                     info(Component::Recording, "Audio system warmed up");
                 }
             }
-                
-                // Start background Core ML model warming
-                {
-                    let model_state_manager_clone = model_state_manager.clone();
-                    let models_dir_clone = models_dir.clone();
-                    tauri::async_runtime::spawn(async move {
-                    // Start CoreML warming immediately - no artificial delay needed
-                        model_state::warm_coreml_models(model_state_manager_clone, models_dir_clone).await;
-                    });
+
+            {
+                let model_state_manager_clone = model_state_manager.clone();
+                let models_dir_clone = models_dir.clone();
+                tauri::async_runtime::spawn(async move {
+                    model_state::warm_coreml_models(model_state_manager_clone, models_dir_clone).await;
+                });
             }
-            
-            // Set up progress tracking listener to update native panel overlay
+
             {
                 let mut receiver = progress_tracker_clone.subscribe();
                 #[cfg(target_os = "macos")]
                 let native_panel_clone = native_panel_overlay.clone();
-                
+
                 tauri::async_runtime::spawn(async move {
                     while receiver.changed().await.is_ok() {
                         let progress = receiver.borrow().clone();
-                        
-                        // Update native panel overlay based on progress state
                         #[cfg(target_os = "macos")]
                         {
                             let overlay = native_panel_clone.lock().await;
@@ -399,7 +354,6 @@ pub fn run() {
                                 }
                                 recording_progress::RecordingProgress::Stopping { .. } => {
                                     debug(Component::Overlay, "Progress tracker → Stopping: keeping native overlay in recording state");
-                                    // Keep showing recording state during stopping
                                 }
                             }
                             drop(overlay);
@@ -407,51 +361,39 @@ pub fn run() {
                     }
                 });
             }
-            
-            // Set up processing status monitoring
+
             {
                 let app_handle = app.handle().clone();
                 #[cfg(target_os = "macos")]
                 let _native_overlay_clone = native_panel_overlay.clone();
-                
+
                 tauri::async_runtime::spawn(async move {
                     while let Some(status) = processing_status_rx.recv().await {
-                        // Emit processing status to frontend and overlay
                         let _ = app_handle.emit("processing-status", &status);
-                        
-                        
-                        // Update native overlay based on processing status
+
                         #[cfg(target_os = "macos")]
                         {
                             match &status {
                                 ProcessingStatus::Complete { .. } | ProcessingStatus::Failed { .. } => {
-                                    // Processing is done - set overlay to idle
                                     debug(Component::UI, "Processing complete/failed - setting native overlay to idle");
                                     let overlay = _native_overlay_clone.lock().await;
                                     overlay.set_idle_state();
                                     drop(overlay);
                                 }
                                 ProcessingStatus::Transcribing { .. } => {
-                                    // Transcription started - ensure overlay shows processing state
                                     debug(Component::UI, "Transcription started - setting native overlay to processing");
                                     let overlay = _native_overlay_clone.lock().await;
                                     overlay.set_processing_state(true);
                                     drop(overlay);
                                 }
-                                _ => {
-                                    // Other states don't affect overlay
-                                }
+                                _ => {}
                             }
                         }
-                        
-                        // Log the status
+
                         match &status {
-                            ProcessingStatus::Queued { position: _ } => {
-                            }
-                            ProcessingStatus::Processing { filename: _ } => {
-                            }
-                            ProcessingStatus::Converting { filename: _ } => {
-                            }
+                            ProcessingStatus::Queued { position: _ } => {}
+                            ProcessingStatus::Processing { filename: _ } => {}
+                            ProcessingStatus::Converting { filename: _ } => {}
                             ProcessingStatus::Transcribing { filename } => {
                                 info(Component::Transcription, &format!("Transcribing file: {}", filename));
                             }
@@ -465,15 +407,13 @@ pub fn run() {
                     }
                 });
             }
-            
-            // Show native overlay on startup
+
             #[cfg(target_os = "macos")]
             {
                 let overlay = tauri::async_runtime::block_on(native_panel_overlay.lock());
                 overlay.show();
             }
-            
-            // Set up both global shortcuts from settings
+
             let app_handle = app.app_handle().clone();
             let (toggle_hotkey, push_to_talk_hotkey) = {
                 let settings_lock = settings_arc.lock();
@@ -483,8 +423,7 @@ pub fn run() {
                     settings.get().ui.push_to_talk_hotkey.clone()
                 )
             };
-            
-            // Register toggle shortcut
+
             let app_handle_toggle = app_handle.clone();
             if let Err(e) = app.global_shortcut().on_shortcut(toggle_hotkey.as_str(), move |_app, _event, _shortcut| {
                 if let Err(e) = app_handle_toggle.emit("toggle-recording", ()) {
@@ -493,8 +432,7 @@ pub fn run() {
             }) {
                 error(Component::UI, &format!("Failed to register toggle shortcut '{}': {:?}", toggle_hotkey, e));
             }
-            
-            // Register push-to-talk shortcut
+
             let app_handle_ptt = app_handle.clone();
             if let Err(e) = app.global_shortcut().on_shortcut(push_to_talk_hotkey.as_str(), move |_app, _event, _shortcut| {
                 if let Err(e) = app_handle_ptt.emit("push-to-talk-pressed", ()) {
@@ -503,30 +441,23 @@ pub fn run() {
             }) {
                 error(Component::UI, &format!("Failed to register push-to-talk shortcut '{}': {:?}", push_to_talk_hotkey, e));
             }
-            
-            // Initialize keyboard monitor for push-to-talk key release detection
-            // This is optional - if it fails, push-to-talk will still work but won't auto-stop
+
             keyboard_monitor.set_push_to_talk_key(&push_to_talk_hotkey);
-            
-            // Disable keyboard monitor to prevent crashes
-            // The frontend-based solution will handle key release detection
+
             info(Component::UI, "Keyboard monitoring disabled - using frontend key detection");
             info(Component::UI, "Push-to-talk will work when Scout window has focus");
-            
-            // Only start if explicitly requested via environment variable
+
             if std::env::var("SCOUT_ENABLE_KEYBOARD_MONITOR").is_ok() {
                 info(Component::UI, "Keyboard monitoring force-enabled via SCOUT_ENABLE_KEYBOARD_MONITOR");
                 keyboard_monitor.clone().start_monitoring();
             }
-            
-            // Set up system tray
+
             let toggle_recording_item = MenuItemBuilder::with_id("toggle_recording", "Start Recording")
                 .accelerator(&toggle_hotkey)
                 .build(app)?;
-            
-            // Store reference to the menu item
+
             app.manage(toggle_recording_item.clone());
-            
+
             let tray_menu = Menu::with_items(app, &[
                 &MenuItemBuilder::with_id("show", "Show/Hide Window")
                     .accelerator("CmdOrCtrl+Shift+S")
@@ -539,31 +470,36 @@ pub fn run() {
                     .accelerator("CmdOrCtrl+Q")
                     .build(app)?
             ])?;
-            
-            // Load tray icon via Resource path resolver with sensible fallbacks
+
             use tauri::path::BaseDirectory;
             let tray_icon = (|| {
-                if let Ok(resolved) = app.path().resolve("icons/scout-tray-icon.png", BaseDirectory::Resource) {
+                // Prefer the generic tray-icon first (correct monochrome asset for tray)
+                if let Ok(resolved) = app.path().resolve("icons/tray-icon.png", BaseDirectory::Resource) {
                     if let Ok(icon) = tauri::image::Image::from_path(&resolved) {
                         info(Component::UI, &format!("Loaded tray icon from resources: {:?}", resolved));
                         return icon;
                     }
                 }
-                if let Ok(resolved) = app.path().resolve("icons/tray-icon.png", BaseDirectory::Resource) {
+                // Fallback to branded scout tray icon if present
+                if let Ok(resolved) = app.path().resolve("icons/scout-tray-icon.png", BaseDirectory::Resource) {
                     if let Ok(icon) = tauri::image::Image::from_path(&resolved) {
-                        info(Component::UI, &format!("Loaded fallback tray icon from resources: {:?}", resolved));
+                        info(Component::UI, &format!("Loaded scout tray icon from resources: {:?}", resolved));
                         return icon;
                     }
                 }
-                // Dev fallback during unbundled runs
-                if let Ok(icon) = tauri::image::Image::from_path("src-tauri/icons/scout-tray-icon.png") {
-                    info(Component::UI, "Loaded tray icon from dev path: src-tauri/icons/scout-tray-icon.png");
+                // Dev-path fallbacks in repo
+                if let Ok(icon) = tauri::image::Image::from_path("src-tauri/icons/tray-icon.png") {
+                    info(Component::UI, "Loaded tray icon from dev path: src-tauri/icons/tray-icon.png");
                     return icon;
                 }
-                warn(Component::UI, "Could not find Scout tray icon, using default window icon");
+                if let Ok(icon) = tauri::image::Image::from_path("src-tauri/icons/scout-tray-icon.png") {
+                    info(Component::UI, "Loaded scout tray icon from dev path: src-tauri/icons/scout-tray-icon.png");
+                    return icon;
+                }
+                warn(Component::UI, "Could not find tray icon, using default window icon");
                 app.default_window_icon().unwrap().clone()
             })();
-            
+
             let _ = TrayIconBuilder::new()
                 .icon(tray_icon)
                 .tooltip("Scout - Local-first dictation")
@@ -588,7 +524,7 @@ pub fn run() {
                         }
                         "show_logs" => {
                             use std::process::Command;
-                            
+
                             if let Some(log_path) = logger::get_log_file_path() {
                                 #[cfg(target_os = "macos")]
                                 {
@@ -596,14 +532,14 @@ pub fn run() {
                                         error(Component::UI, &format!("Failed to reveal log file from menu: {}", e));
                                     }
                                 }
-                                
+
                                 #[cfg(target_os = "windows")]
                                 {
                                     if let Err(e) = Command::new("explorer").arg("/select,").arg(&log_path).spawn() {
                                         error(Component::UI, &format!("Failed to reveal log file from menu: {}", e));
                                     }
                                 }
-                                
+
                                 #[cfg(target_os = "linux")]
                                 {
                                     if let Some(parent) = log_path.parent() {
@@ -642,25 +578,22 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
-            
-            // Handle window events to hide instead of close
+
             if let Some(main_window) = app.get_webview_window("main") {
                 let window_for_events = main_window.clone();
                 main_window.on_window_event(move |event| {
-                if let WindowEvent::CloseRequested { api, .. } = &event {
-                    // Hide window instead of closing
-                    api.prevent_close();
-                    let _ = window_for_events.hide();
-                }
-            });
+                    if let WindowEvent::CloseRequested { api, .. } = &event {
+                        api.prevent_close();
+                        let _ = window_for_events.hide();
+                    }
+                });
             } else {
                 warn(Component::UI, "Could not find main window for event handling");
             }
-            
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            // Moved/organized commands first (clarity on what remains below)
             crate::commands::get_settings,
             crate::commands::update_settings,
             crate::commands::set_auto_copy,
@@ -729,7 +662,6 @@ pub fn run() {
             crate::commands::set_active_model,
             crate::commands::get_models_dir,
             crate::commands::open_models_folder,
-            // LLM commands
             crate::commands::get_available_llm_models,
             crate::commands::get_llm_model_info,
             crate::commands::download_llm_model,
@@ -746,7 +678,6 @@ pub fn run() {
             crate::commands::get_log_file_path,
             crate::commands::open_log_file,
             crate::commands::show_log_file_in_finder,
-            // Misc and utility
             crate::commands::mark_onboarding_complete,
             crate::commands::get_processing_status,
             crate::commands::paste_text,
@@ -755,14 +686,12 @@ pub fn run() {
             crate::commands::download_file,
             crate::commands::get_current_shortcut,
             crate::commands::get_current_model,
-            // Dictionary commands
             crate::commands::get_dictionary_entries,
             crate::commands::save_dictionary_entry,
             crate::commands::update_dictionary_entry,
             crate::commands::delete_dictionary_entry,
             crate::commands::get_dictionary_matches_for_transcript,
             crate::commands::test_dictionary_replacement,
-            // Webhook commands
             webhooks::get_webhooks,
             webhooks::create_webhook,
             webhooks::update_webhook,
@@ -772,7 +701,6 @@ pub fn run() {
             webhooks::cleanup_webhook_logs,
             crate::commands::get_recording_stats,
             crate::commands::generate_sample_data,
-            // Foundation Models commands
             foundation_models::enhance_transcript,
             foundation_models::summarize_transcript,
             foundation_models::clean_speech_patterns,
@@ -783,5 +711,3 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
-
-// tests module removed (unused)

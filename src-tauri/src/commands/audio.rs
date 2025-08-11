@@ -334,8 +334,19 @@ pub async fn set_success_sound(state: State<'_, AppState>, sound_name: String) -
 }
 
 #[tauri::command]
-pub async fn preview_sound_flow() -> Result<(), String> {
-    sound::SoundPlayer::preview_sound_flow().await;
+pub async fn preview_sound_flow(state: State<'_, AppState>) -> Result<(), String> {
+    // Read threshold from settings to simulate the configured flow
+    let threshold_ms = {
+        let settings_guard = state.settings.lock().await;
+        settings_guard.get().ui.completion_sound_threshold_ms
+    };
+
+    // Simulate real sequence: start → slight gap → stop → threshold delay → success
+    sound::SoundPlayer::play_start();
+    tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+    sound::SoundPlayer::play_stop();
+    tokio::time::sleep(tokio::time::Duration::from_millis(threshold_ms)).await;
+    sound::SoundPlayer::play_success();
     Ok(())
 }
 

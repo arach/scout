@@ -348,19 +348,14 @@ impl SoundPlayer {
     }
 
     pub async fn preview_sound_flow() {
-        
-
+        // Deprecated: kept for compatibility. The command now implements the real sequence
         if !Self::is_enabled() {
             return;
         }
-
-        // Play start sound
         Self::play_start();
-
-        // Play stop sound immediately - no artificial delay needed
+        tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
         Self::play_stop();
-
-        // Play success sound
+        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
         Self::play_success();
     }
 
