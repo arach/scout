@@ -26,6 +26,14 @@ pub async fn set_overlay_position(state: State<'_, AppState>, position: String) 
 
 #[tauri::command]
 pub async fn set_overlay_treatment(state: State<'_, AppState>, treatment: String) -> Result<(), String> {
+    // Persist to settings
+    let mut settings = state.settings.lock().await;
+    settings
+        .update(|s| s.ui.overlay_treatment = treatment.clone())
+        .map_err(|e| format!("Failed to save overlay_treatment setting: {}", e))?;
+    drop(settings);
+    
+    // Update native overlay
     #[cfg(target_os = "macos")]
     {
         let overlay = state.native_panel_overlay.lock().await;
@@ -36,6 +44,14 @@ pub async fn set_overlay_treatment(state: State<'_, AppState>, treatment: String
 
 #[tauri::command]
 pub async fn set_overlay_waveform_style(state: State<'_, AppState>, style: String) -> Result<(), String> {
+    // Persist to settings (same as overlay_treatment)
+    let mut settings = state.settings.lock().await;
+    settings
+        .update(|s| s.ui.overlay_treatment = style.clone())
+        .map_err(|e| format!("Failed to save overlay_waveform_style setting: {}", e))?;
+    drop(settings);
+    
+    // Update native overlay
     #[cfg(target_os = "macos")]
     {
         let overlay = state.native_panel_overlay.lock().await;

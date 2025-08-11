@@ -4,8 +4,16 @@ use crate::sound;
 use crate::AppState;
 
 #[tauri::command]
-pub async fn set_sound_enabled(enabled: bool) -> Result<(), String> {
+pub async fn set_sound_enabled(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
+    // Update in-memory state
     sound::SoundPlayer::set_enabled(enabled);
+    
+    // Persist to settings
+    let mut settings = state.settings.lock().await;
+    settings
+        .update(|s| s.ui.sound_enabled = enabled)
+        .map_err(|e| format!("Failed to save sound_enabled setting: {}", e))?;
+    
     Ok(())
 }
 
@@ -29,20 +37,44 @@ pub async fn get_sound_settings() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-pub async fn set_start_sound(sound_name: String) -> Result<(), String> {
-    sound::SoundPlayer::set_start_sound(sound_name);
+pub async fn set_start_sound(state: State<'_, AppState>, sound_name: String) -> Result<(), String> {
+    // Update in-memory state
+    sound::SoundPlayer::set_start_sound(sound_name.clone());
+    
+    // Persist to settings
+    let mut settings = state.settings.lock().await;
+    settings
+        .update(|s| s.ui.start_sound = sound_name)
+        .map_err(|e| format!("Failed to save start_sound setting: {}", e))?;
+    
     Ok(())
 }
 
 #[tauri::command]
-pub async fn set_stop_sound(sound_name: String) -> Result<(), String> {
-    sound::SoundPlayer::set_stop_sound(sound_name);
+pub async fn set_stop_sound(state: State<'_, AppState>, sound_name: String) -> Result<(), String> {
+    // Update in-memory state
+    sound::SoundPlayer::set_stop_sound(sound_name.clone());
+    
+    // Persist to settings
+    let mut settings = state.settings.lock().await;
+    settings
+        .update(|s| s.ui.stop_sound = sound_name)
+        .map_err(|e| format!("Failed to save stop_sound setting: {}", e))?;
+    
     Ok(())
 }
 
 #[tauri::command]
-pub async fn set_success_sound(sound_name: String) -> Result<(), String> {
-    sound::SoundPlayer::set_success_sound(sound_name);
+pub async fn set_success_sound(state: State<'_, AppState>, sound_name: String) -> Result<(), String> {
+    // Update in-memory state
+    sound::SoundPlayer::set_success_sound(sound_name.clone());
+    
+    // Persist to settings
+    let mut settings = state.settings.lock().await;
+    settings
+        .update(|s| s.ui.success_sound = sound_name)
+        .map_err(|e| format!("Failed to save success_sound setting: {}", e))?;
+    
     Ok(())
 }
 

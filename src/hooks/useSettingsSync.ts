@@ -56,7 +56,9 @@ export function useSettingsSync() {
           if (backendSettings.ui.overlay_position) {
             dispatch({ type: 'UPDATE_OVERLAY_POSITION', payload: backendSettings.ui.overlay_position });
           }
-          // Note: overlay_treatment is not in backend, keeping frontend default
+          if (backendSettings.ui.overlay_treatment) {
+            dispatch({ type: 'UPDATE_OVERLAY_TREATMENT', payload: backendSettings.ui.overlay_treatment });
+          }
           
           // Theme settings
           if (backendSettings.ui.theme) {

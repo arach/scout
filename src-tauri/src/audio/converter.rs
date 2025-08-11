@@ -1,7 +1,9 @@
-use hound::{WavSpec, WavWriter};
 use std::fs::File;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
+
+use hound::{WavSpec, WavWriter};
+
 use symphonia::core::audio::AudioBufferRef;
 use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
 use symphonia::core::errors::Error;
