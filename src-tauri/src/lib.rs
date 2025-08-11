@@ -32,34 +32,36 @@ mod performance_tracker;
 pub mod model_state;
 mod webhooks;
 mod foundation_models;
+
 #[cfg(target_os = "macos")]
 mod macos;
 
-// std
-use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
-use std::sync::OnceLock;
+use std::{
+    path::PathBuf,
+    sync::{atomic::AtomicBool, Arc, OnceLock},
+};
 
-// external
-use tauri::menu::{Menu, MenuItemBuilder, PredefinedMenuItem};
-use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{Emitter, Manager, WindowEvent};
+use tauri::{
+    menu::{Menu, MenuItemBuilder, PredefinedMenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Emitter, Manager, WindowEvent,
+};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tokio::sync::Mutex;
 
-// internal (crate)
-use audio::AudioRecorder;
-use db::Database;
-use keyboard_monitor::KeyboardMonitor;
-use processing_queue::{ProcessingQueue, ProcessingStatus};
-use recording_progress::ProgressTracker;
-use recording_workflow::RecordingWorkflow;
-use settings::SettingsManager;
-use crate::logger::{debug, error, info, warn, Component};
-use crate::model_state::ModelStateManager;
-use crate::performance_tracker::PerformanceTracker;
-use crate::transcription::Transcriber;
+use crate::{
+    audio::AudioRecorder,
+    db::Database,
+    keyboard_monitor::KeyboardMonitor,
+    processing_queue::{ProcessingQueue, ProcessingStatus},
+    recording_progress::ProgressTracker,
+    recording_workflow::RecordingWorkflow,
+    settings::SettingsManager,
+    logger::{debug, error, info, warn, Component},
+    model_state::ModelStateManager,
+    performance_tracker::PerformanceTracker,
+    transcription::Transcriber,
+};
 
 /// Global storage for the current device sample rate
 static DEVICE_SAMPLE_RATE: OnceLock<Arc<Mutex<Option<u32>>>> = OnceLock::new();
@@ -696,6 +698,7 @@ pub fn run() {
             crate::commands::test_scout_pipeline_recording,
             crate::commands::analyze_audio_corruption,
             crate::commands::serve_audio_file,
+            crate::commands::read_audio_file,
             crate::commands::start_recording,
             crate::commands::stop_recording,
             crate::commands::cancel_recording,

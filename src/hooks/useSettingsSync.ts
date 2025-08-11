@@ -109,46 +109,60 @@ export function useSettingsSync() {
     loadSettings();
   }, [dispatch]);
 
-  // Save the entire settings object to backend when it changes
+  // Save specific settings to backend when they change
+  // We'll use individual watchers instead of watching the entire state
+  // to avoid excessive saves
+  
+  // Auto-copy changes
   useEffect(() => {
-    // Skip the initial load to avoid saving before loading
-    if (isInitialLoad.current) {
-      return;
-    }
-
-    const saveSettings = async () => {
+    if (isInitialLoad.current) return;
+    
+    const syncAutoCopy = async () => {
       try {
-        // Create backend-compatible settings object
-        const backendSettings = {
-          ui: {
-            auto_copy: state.clipboard.autoCopy,
-            auto_paste: state.clipboard.autoPaste,
-            sound_enabled: state.sound.soundEnabled,
-            start_sound: state.sound.startSound,
-            stop_sound: state.sound.stopSound,
-            success_sound: state.sound.successSound,
-            completion_sound_threshold_ms: state.sound.completionSoundThreshold,
-            hotkey: state.shortcuts.hotkey,
-            push_to_talk_hotkey: state.shortcuts.pushToTalkHotkey,
-            overlay_position: state.ui.overlayPosition,
-            overlay_treatment: state.ui.overlayTreatment,
-            theme: state.ui.theme,
-          },
-          llm: state.llm,
-        };
-
-        // Update entire settings object
-        await invoke('update_settings', { newSettings: backendSettings });
-        console.log('Settings synced to backend:', backendSettings);
+        await invoke('set_auto_copy', { enabled: state.clipboard.autoCopy });
+        console.log('Auto-copy synced:', state.clipboard.autoCopy);
       } catch (error) {
-        console.error('Failed to sync settings to backend:', error);
+        console.error('Failed to sync auto-copy:', error);
       }
     };
-
-    // Debounce saves to avoid too many calls
-    const timeoutId = setTimeout(saveSettings, 500);
+    
+    const timeoutId = setTimeout(syncAutoCopy, 300);
     return () => clearTimeout(timeoutId);
-  }, [state]);
+  }, [state.clipboard.autoCopy]);
+  
+  // Auto-paste changes
+  useEffect(() => {
+    if (isInitialLoad.current) return;
+    
+    const syncAutoPaste = async () => {
+      try {
+        await invoke('set_auto_paste', { enabled: state.clipboard.autoPaste });
+        console.log('Auto-paste synced:', state.clipboard.autoPaste);
+      } catch (error) {
+        console.error('Failed to sync auto-paste:', error);
+      }
+    };
+    
+    const timeoutId = setTimeout(syncAutoPaste, 300);
+    return () => clearTimeout(timeoutId);
+  }, [state.clipboard.autoPaste]);
+  
+  // Sound enabled changes
+  useEffect(() => {
+    if (isInitialLoad.current) return;
+    
+    const syncSoundEnabled = async () => {
+      try {
+        await invoke('set_sound_enabled', { enabled: state.sound.soundEnabled });
+        console.log('Sound enabled synced:', state.sound.soundEnabled);
+      } catch (error) {
+        console.error('Failed to sync sound enabled:', error);
+      }
+    };
+    
+    const timeoutId = setTimeout(syncSoundEnabled, 300);
+    return () => clearTimeout(timeoutId);
+  }, [state.sound.soundEnabled]);
 
   // Individual setting sync functions (for immediate updates)
   const syncAutoCopy = useCallback(async (enabled: boolean) => {
