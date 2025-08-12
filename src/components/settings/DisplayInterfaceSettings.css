@@ -12,15 +12,15 @@
   margin-top: 8px;
 }
 
-/* Position buttons - more subtle */
+/* Position buttons - darker and more visible */
 .position-button {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 6px;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(255, 255, 255, 0.6);
   cursor: pointer;
   transition: all 0.2s ease;
   padding: 0;
@@ -30,9 +30,9 @@
 }
 
 .position-button:hover {
-  border-color: rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.05);
-  color: rgba(255, 255, 255, 0.6);
+  border-color: rgba(255, 255, 255, 0.25);
+  background: rgba(0, 0, 0, 0.6);
+  color: rgba(255, 255, 255, 0.9);
 }
 
 /* Active state - blue accent */
