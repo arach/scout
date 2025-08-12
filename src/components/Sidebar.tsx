@@ -70,7 +70,7 @@ export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpande
   const [isResizing, setIsResizing] = useState(false);
   const [showWebhooks, setShowWebhooks] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
-  const MIN_WIDTH = 150;
+  const MIN_WIDTH = 68;
   const MAX_WIDTH = 400;
   
 
@@ -148,10 +148,24 @@ export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpande
     if (!isResizing) return;
     
     const newWidth = e.clientX;
-    if (newWidth >= MIN_WIDTH && newWidth <= MAX_WIDTH) {
-      setWidth(newWidth);
+    
+    // Auto-collapse if dragged below 180px
+    if (newWidth < 180) {
+      // Collapse the sidebar
+      if (isExpanded) {
+        onToggleExpanded();
+      }
+      setWidth(200); // Keep the expanded width for when we expand again
+    } else {
+      // Expand if collapsed and dragging above 180px
+      if (!isExpanded && newWidth >= 180) {
+        onToggleExpanded();
+      }
+      if (newWidth >= 180 && newWidth <= MAX_WIDTH) {
+        setWidth(newWidth);
+      }
     }
-  }, [isResizing]);
+  }, [isResizing, isExpanded, onToggleExpanded]);
 
   const handleMouseUp = useCallback(() => {
     if (isResizing) {

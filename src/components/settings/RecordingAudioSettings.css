@@ -10,12 +10,14 @@
 /* Setting item container - tighter spacing */
 .recording-audio-settings .setting-item {
   overflow: visible; /* Ensure dropdowns can extend outside */
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .recording-audio-settings .setting-item label {
-  font-size: 11px;
-  margin-bottom: 3px;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text-primary);
+  margin-bottom: 6px;
 }
 
 /* Two-column grid for shortcuts */
@@ -130,8 +132,27 @@
 .actions-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin-bottom: 14px;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+/* Toggles section - full width */
+.toggles-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+/* Toggle with action button */
+.toggle-with-action {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.toggle-with-action .toggle-wrapper {
+  flex: 0 0 auto;
 }
 
 /* Toggle switch styles */

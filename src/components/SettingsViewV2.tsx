@@ -4,7 +4,9 @@ import {
   Monitor, 
   AudioWaveform, 
   Sparkles, 
-  Globe
+  Globe,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { RecordingAudioSettings } from './settings/RecordingAudioSettings';
@@ -24,44 +26,46 @@ interface SidebarItem {
 
 const sidebarItems: SidebarItem[] = [
   { 
-    id: 'recording-audio', 
-    label: 'Recording & Audio', 
+    id: 'recording', 
+    label: 'Recording', 
     icon: Mic,
-    description: 'Configure shortcuts, sounds, and recording behavior'
+    description: 'Shortcuts and audio settings'
   },
   { 
-    id: 'display-interface', 
-    label: 'Display & Themes', 
+    id: 'display', 
+    label: 'Display', 
     icon: Monitor,
-    description: 'Visual appearance and recording feedback'
+    description: 'Themes and visual feedback'
   },
   { 
     id: 'transcription', 
-    label: 'Transcription Models', 
+    label: 'Transcription', 
     icon: AudioWaveform,
-    description: 'Download and manage AI models for transcription'
+    description: 'AI models for speech-to-text'
   },
   { 
-    id: 'post-processing', 
-    label: 'Post-processing', 
+    id: 'processing', 
+    label: 'Processing', 
     icon: Sparkles,
-    description: 'Enhance transcripts with summaries and insights'
+    description: 'Post-transcription enhancements'
   },
   { 
     id: 'webhooks', 
     label: 'Webhooks', 
     icon: Globe,
-    description: 'Send transcription results to external services'
+    description: 'External service integration'
   },
 ];
 
 export const SettingsViewV2 = memo(function SettingsViewV2() {
-  const [activeCategory, setActiveCategory] = useState('recording-audio');
+  const [activeCategory, setActiveCategory] = useState('recording');
   const [sidebarWidth, setSidebarWidth] = useState(225);
   const [isResizing, setIsResizing] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const MIN_WIDTH = 150;
   const MAX_WIDTH = 350;
+  const COLLAPSED_WIDTH = 68;
 
   // Load saved sidebar width
   useEffect(() => {
@@ -102,8 +106,16 @@ export const SettingsViewV2 = memo(function SettingsViewV2() {
     if (!isResizing) return;
     
     const newWidth = e.clientX;
-    if (newWidth >= MIN_WIDTH && newWidth <= MAX_WIDTH) {
-      setSidebarWidth(newWidth);
+    
+    // Auto-collapse if dragged below 180px
+    if (newWidth < 180) {
+      setIsCollapsed(true);
+      setSidebarWidth(225); // Keep the expanded width for when we expand again
+    } else {
+      setIsCollapsed(false);
+      if (newWidth >= MIN_WIDTH && newWidth <= MAX_WIDTH) {
+        setSidebarWidth(newWidth);
+      }
     }
   }, [isResizing]);
 
@@ -132,73 +144,26 @@ export const SettingsViewV2 = memo(function SettingsViewV2() {
 
   const renderContent = () => {
     switch (activeCategory) {
-      case 'recording-audio':
-        return (
-          <div className="settings-content">
-            <div className="settings-header-simple">
-              <h1>Recording & Audio</h1>
-              <p>Configure shortcuts, sounds, and recording behavior</p>
-            </div>
-            <div className="settings-card">
-              <div className="settings-card-content">
-                <RecordingAudioSettings />
-              </div>
-            </div>
-          </div>
-        );
+      case 'recording':
+        return <RecordingAudioSettings />;
 
-      case 'display-interface':
+      case 'display':
         return (
-          <div className="settings-content">
-            <div className="settings-header-simple">
-              <h1>Display & Themes</h1>
-              <p>Visual appearance and recording feedback</p>
-            </div>
-            <div className="settings-section">
-              <h2 className="settings-section-title">Recording Display</h2>
-              <div className="settings-card">
-                <div className="settings-card-content">
-                  <DisplayInterfaceSettings />
-                </div>
-              </div>
-            </div>
-            <div className="settings-section">
-              <h2 className="settings-section-title">Themes</h2>
-              <div className="settings-card">
-                <div className="settings-card-content">
-                  <ThemesSettings />
-                </div>
-              </div>
-            </div>
-          </div>
+          <>
+            <h2 className="settings-section-title">Overlay</h2>
+            <DisplayInterfaceSettings />
+            <h2 className="settings-section-title">Theme</h2>
+            <ThemesSettings />
+          </>
         );
 
 
       case 'transcription':
-        return (
-          <div className="settings-content">
-            <div className="settings-header-simple">
-              <h1>Transcription Models</h1>
-              <p>Download and manage AI models for transcription</p>
-            </div>
-            <div className="settings-card">
-              <div className="settings-card-content">
-                <ModelManager />
-              </div>
-            </div>
-          </div>
-        );
+        return <ModelManager />;
 
-      case 'post-processing':
+      case 'processing':
         return (
-          <div className="settings-content">
-            <div className="settings-header-simple">
-              <h1>Post-processing</h1>
-              <p>Enhance transcripts with summaries and insights</p>
-            </div>
-            <div className="settings-card">
-              <div className="settings-card-content">
-                <LLMSettings 
+          <LLMSettings 
                   settings={{
                     enabled: false,
                     model_id: '',
@@ -210,26 +175,11 @@ export const SettingsViewV2 = memo(function SettingsViewV2() {
                   onUpdateSettings={(updates) => {
                     console.log('LLM settings update:', updates);
                   }}
-                />
-              </div>
-            </div>
-          </div>
+          />
         );
 
       case 'webhooks':
-        return (
-          <div className="settings-content">
-            <div className="settings-header-simple">
-              <h1>Webhooks</h1>
-              <p>Send transcription results to external services</p>
-            </div>
-            <div className="settings-card">
-              <div className="settings-card-content">
-                <WebhookSettingsSimple />
-              </div>
-            </div>
-          </div>
-        );
+        return <WebhookSettingsSimple />;
 
       default:
         return null;
@@ -240,9 +190,17 @@ export const SettingsViewV2 = memo(function SettingsViewV2() {
     <div className="settings-v2">
       <div 
         ref={sidebarRef}
-        className={`settings-sidebar ${isResizing ? 'resizing' : ''}`}
-        style={{ width: `${sidebarWidth}px` }}
+        className={`settings-sidebar ${isResizing ? 'resizing' : ''} ${isCollapsed ? 'collapsed' : ''}`}
+        style={{ width: isCollapsed ? `${COLLAPSED_WIDTH}px` : `${sidebarWidth}px` }}
       >
+        <button
+          className="settings-sidebar-toggle"
+          onClick={() => setIsCollapsed(!isCollapsed)}
+          aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          {isCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+        </button>
+        
         <nav className="settings-sidebar-nav">
           {sidebarItems.map((item) => {
             const Icon = item.icon;
@@ -251,23 +209,28 @@ export const SettingsViewV2 = memo(function SettingsViewV2() {
                 key={item.id}
                 onClick={() => setActiveCategory(item.id)}
                 className={`settings-sidebar-item ${activeCategory === item.id ? 'active' : ''}`}
+                title={isCollapsed ? item.label : undefined}
               >
                 <Icon className="settings-sidebar-item-icon" />
-                <span className="settings-sidebar-item-label">{item.label}</span>
+                {!isCollapsed && <span className="settings-sidebar-item-label">{item.label}</span>}
               </button>
             );
           })}
         </nav>
         
-        <div 
-          className="settings-sidebar-resize-handle"
-          onMouseDown={handleMouseDown}
-        />
+        {!isCollapsed && (
+          <div 
+            className="settings-sidebar-resize-handle"
+            onMouseDown={handleMouseDown}
+          />
+        )}
       </div>
 
       <div className="settings-main">
         <div className="settings-main-container">
-          {renderContent()}
+          <div className="settings-content-wrapper" key={activeCategory}>
+            {renderContent()}
+          </div>
         </div>
       </div>
     </div>

@@ -131,6 +131,10 @@ export const RecordingAudioSettings = memo(function RecordingAudioSettings() {
           </div>
         </div>
 
+      </div>
+
+      {/* Toggle Settings - Full Width */}
+      <div className="toggles-section">
         {/* Auto-copy Toggle */}
         <Toggle
           label="Auto-copy to clipboard"
@@ -145,22 +149,20 @@ export const RecordingAudioSettings = memo(function RecordingAudioSettings() {
           onChange={actions.toggleAutoPaste}
         />
 
-        {/* Sound Enable Toggle with Preview */}
-        <div className="toggle-setting-with-action">
+        {/* Sound Enable Toggle with Preview Button */}
+        <div className="toggle-with-action">
           <Toggle
             label="Enable sound feedback"
             checked={sound.soundEnabled}
             onChange={actions.toggleSoundEnabled}
           />
-          <div style={{ display: 'flex', alignItems: 'center', marginLeft: 'auto' }}>
-            {sound.soundEnabled && (
-              <button
-                onClick={previewSoundFlow}
-                disabled={!sound.soundEnabled || isPreviewingSound}
-                className={`preview-sound-button ${isPreviewingSound ? 'playing' : ''}`}
-                style={{ marginLeft: '35px' }}
-              >
-                {isPreviewingSound ? (
+          {sound.soundEnabled && (
+            <button
+              onClick={previewSoundFlow}
+              disabled={!sound.soundEnabled || isPreviewingSound}
+              className={`preview-sound-button ${isPreviewingSound ? 'playing' : ''}`}
+            >
+              {isPreviewingSound ? (
                   <>
                     <svg
                       width="14"
@@ -197,8 +199,7 @@ export const RecordingAudioSettings = memo(function RecordingAudioSettings() {
                   </>
                 )}
               </button>
-            )}
-          </div>
+          )}
         </div>
       </div>
 
