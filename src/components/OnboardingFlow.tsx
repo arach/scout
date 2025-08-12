@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { safeEventListen } from '../lib/safeEventListener';
-import { CheckCircle, X, AlertCircle, Info, Download, Loader2 } from 'lucide-react';
+import { CheckCircle, X, AlertCircle, Info, Download, Loader2, Mic } from 'lucide-react';
 import { DevTools } from './DevTools';
+import { MicrophoneSelector } from './MicrophoneSelector';
 import './OnboardingFlow.css';
 
 interface OnboardingFlowProps {
@@ -59,7 +60,20 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete, onSt
   const [isCapturingToggle, setIsCapturingToggle] = useState(false);
   const [previousPTTShortcut, setPreviousPTTShortcut] = useState('Cmd+Shift+Space');
   const [previousToggleShortcut, setPreviousToggleShortcut] = useState('Cmd+Shift+R');
+  const [selectedMic, setSelectedMic] = useState<string>('');
+  const [isTestingMic, setIsTestingMic] = useState(false);
+  const [micTestLevel, setMicTestLevel] = useState(0);
   const activeListenerRef = useRef<(() => void) | null>(null);
+  
+  // Helper to transition between steps with sound
+  const transitionToStep = async (step: OnboardingStep) => {
+    try {
+      await invoke('play_transition_sound');
+    } catch (error) {
+      console.error('Failed to play transition sound:', error);
+    }
+    setCurrentStep(step);
+  };
   
   // Notify parent when step changes
   useEffect(() => {
@@ -164,7 +178,8 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete, onSt
       }
       
       setDownloadStatus('complete');
-      setTimeout(() => setCurrentStep('microphone'), 1000);
+      await invoke('play_success_sound');
+      setTimeout(() => transitionToStep('microphone'), 1000);
     } catch (error) {
       console.error('Failed to download model:', error);
       setDownloadError(String(error));
@@ -184,10 +199,54 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete, onSt
       const status = await invoke<PermissionStatus>('request_microphone_permission');
       setMicPermission(status);
       if (status === 'granted') {
-        setTimeout(() => setCurrentStep('shortcuts'), 1000);
+        await invoke('play_success_sound');
+        setTimeout(() => transitionToStep('shortcuts'), 1000);
       }
     } catch (error) {
       console.error('Failed to request microphone permission:', error);
+    }
+  };
+
+  // Test microphone functionality
+  const testMicrophone = async () => {
+    if (isTestingMic) {
+      // Stop testing
+      try {
+        await invoke('stop_audio_level_monitoring');
+        setIsTestingMic(false);
+        setMicTestLevel(0);
+      } catch (error) {
+        console.error('Failed to stop mic test:', error);
+      }
+    } else {
+      // Start testing
+      try {
+        await invoke('start_audio_level_monitoring', { 
+          deviceName: selectedMic || undefined 
+        });
+        setIsTestingMic(true);
+        
+        // Poll for audio levels
+        const pollInterval = setInterval(async () => {
+          try {
+            const level = await invoke<number>('get_current_audio_level');
+            setMicTestLevel(Math.min(100, level * 100));
+          } catch (error) {
+            console.error('Failed to get audio level:', error);
+          }
+        }, 50);
+        
+        // Stop after 5 seconds
+        setTimeout(async () => {
+          clearInterval(pollInterval);
+          await invoke('stop_audio_level_monitoring').catch(console.error);
+          setIsTestingMic(false);
+          setMicTestLevel(0);
+        }, 5000);
+      } catch (error) {
+        console.error('Failed to start mic test:', error);
+        setIsTestingMic(false);
+      }
     }
   };
 
@@ -366,7 +425,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete, onSt
         {downloadStatus === 'complete' && (
           <>
             <button
-              onClick={() => setCurrentStep('microphone')}
+              onClick={() => transitionToStep('microphone')}
               className="onboarding-btn onboarding-btn-primary"
             >
               Next: Set Up Microphone
@@ -419,17 +478,61 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete, onSt
         )}
 
         {micPermission === 'granted' && (
-          <div className="onboarding-permission onboarding-permission-granted">
-            <div className="onboarding-permission-content">
-              <CheckCircle style={{ color: '#4ade80' }} />
-              <div>
-                <div className="onboarding-permission-title" style={{ color: '#4ade80' }}>Permission Granted</div>
-                <div className="onboarding-permission-desc">
-                  Scout can now access your microphone for transcription
+          <>
+            <div className="onboarding-permission onboarding-permission-granted">
+              <div className="onboarding-permission-content">
+                <CheckCircle style={{ color: '#4ade80' }} />
+                <div>
+                  <div className="onboarding-permission-title" style={{ color: '#4ade80' }}>Permission Granted</div>
+                  <div className="onboarding-permission-desc">
+                    Now select your preferred microphone and test it
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+            
+            <div className="onboarding-mic-selector" style={{ marginTop: '24px' }}>
+              <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: 500 }}>
+                Select Microphone
+              </label>
+              <MicrophoneSelector
+                selectedMic={selectedMic}
+                onMicChange={setSelectedMic}
+                disabled={isTestingMic}
+              />
+              
+              <div style={{ marginTop: '16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <button
+                  onClick={testMicrophone}
+                  className={`onboarding-btn ${isTestingMic ? 'onboarding-btn-secondary' : 'onboarding-btn-primary'}`}
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                >
+                  <Mic size={18} />
+                  {isTestingMic ? 'Stop Test' : 'Test Microphone'}
+                </button>
+                
+                {isTestingMic && (
+                  <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '12px', color: '#666' }}>Level:</span>
+                    <div style={{ 
+                      flex: 1, 
+                      height: '8px', 
+                      backgroundColor: '#e5e5e5', 
+                      borderRadius: '4px',
+                      overflow: 'hidden'
+                    }}>
+                      <div style={{ 
+                        width: `${micTestLevel}%`, 
+                        height: '100%', 
+                        backgroundColor: micTestLevel > 80 ? '#ef4444' : micTestLevel > 50 ? '#fbbf24' : '#4ade80',
+                        transition: 'width 0.1s ease'
+                      }} />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
         )}
 
         {micPermission === 'denied' && (
@@ -454,7 +557,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete, onSt
           </button>
         )}
         {micPermission === 'granted' && (
-          <button onClick={() => setCurrentStep('shortcuts')} className="onboarding-btn onboarding-btn-primary">
+          <button onClick={() => transitionToStep('shortcuts')} className="onboarding-btn onboarding-btn-primary">
             Next: Configure Shortcuts
           </button>
         )}
@@ -565,13 +668,14 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete, onSt
       )}
 
       <div className="onboarding-actions onboarding-actions-row">
-        <button onClick={() => setCurrentStep('tour')} className="onboarding-btn onboarding-btn-link">
+        <button onClick={() => transitionToStep('tour')} className="onboarding-btn onboarding-btn-link">
           Skip for now
         </button>
         <button
-          onClick={() => {
+          onClick={async () => {
             setShortcutsConfigured(true);
-            setCurrentStep('tour');
+            await invoke('play_success_sound');
+            transitionToStep('tour');
           }}
           className="onboarding-btn onboarding-btn-primary"
         >

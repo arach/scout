@@ -149,9 +149,12 @@ export function useSettings() {
   }, [actions, state.sound.soundEnabled]);
 
   const updateStartSound = useCallback(async (sound: string) => {
+    console.log('Frontend: Updating start sound to:', sound);
     actions.updateStartSound(sound);
     try {
-      await invoke('set_start_sound', { sound });
+      await invoke('set_start_sound', { soundName: sound });
+      await invoke('play_save_sound');
+      console.log('Frontend: Successfully updated start sound');
     } catch (error) {
       console.error('Failed to update start sound:', error);
     }
@@ -160,7 +163,8 @@ export function useSettings() {
   const updateStopSound = useCallback(async (sound: string) => {
     actions.updateStopSound(sound);
     try {
-      await invoke('set_stop_sound', { sound });
+      await invoke('set_stop_sound', { soundName: sound });
+      await invoke('play_save_sound');
     } catch (error) {
       console.error('Failed to update stop sound:', error);
     }
@@ -169,7 +173,8 @@ export function useSettings() {
   const updateSuccessSound = useCallback(async (sound: string) => {
     actions.updateSuccessSound(sound);
     try {
-      await invoke('set_success_sound', { sound });
+      await invoke('set_success_sound', { soundName: sound });
+      await invoke('play_save_sound');
     } catch (error) {
       console.error('Failed to update success sound:', error);
     }

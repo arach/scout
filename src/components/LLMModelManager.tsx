@@ -110,6 +110,20 @@ export const LLMModelManager: React.FC = () => {
     }
   };
 
+  const cancelDownload = async (modelId: string) => {
+    try {
+      await invoke('cancel_llm_download', { modelId });
+      // Remove from downloading state
+      setDownloading(prev => {
+        const newState = { ...prev };
+        delete newState[modelId];
+        return newState;
+      });
+    } catch (error) {
+      console.error('Failed to cancel download:', error);
+    }
+  };
+
   // Commented out unused function
   // const deleteModel = async (modelId: string) => {
   //   try {
@@ -141,6 +155,7 @@ export const LLMModelManager: React.FC = () => {
               downloadProgress={progress}
               onDownload={(m) => downloadModel(m.id)}
               onSelect={selectModel}
+              onCancelDownload={cancelDownload}
               renderSpecs={renderLLMSpecs}
             />
           );

@@ -135,6 +135,7 @@ impl SoundPlayer {
 
     pub fn play_start() {
         if !Self::is_enabled() {
+            println!("  ⚠️  Sounds are disabled, skipping start sound");
             return;
         }
 
@@ -144,10 +145,15 @@ impl SoundPlayer {
             if let Some(start_sound_mutex) = START_SOUND.get() {
                 if let Ok(sound_name) = start_sound_mutex.lock() {
                     let sound_path = Self::resolve_sound_path(&sound_name);
+                    println!("  🎵 Playing start sound: {} -> {}", sound_name, sound_path);
 
-                    let _ = std::process::Command::new("afplay")
+                    let result = std::process::Command::new("afplay")
                         .arg(&sound_path)
                         .spawn();
+                    
+                    if let Err(e) = result {
+                        println!("  ❌ Failed to play start sound: {}", e);
+                    }
                 }
             }
         }
@@ -180,6 +186,7 @@ impl SoundPlayer {
 
     pub fn play_stop() {
         if !Self::is_enabled() {
+            println!("  ⚠️  Sounds are disabled, skipping stop sound");
             return;
         }
 
@@ -188,6 +195,7 @@ impl SoundPlayer {
             Self::init_defaults();
             let sound_name = STOP_SOUND.get().unwrap().lock().unwrap();
             let sound_path = Self::resolve_sound_path(&sound_name);
+            println!("  🎵 Playing stop sound: {} -> {}", sound_name, sound_path);
 
             let _ = std::process::Command::new("afplay")
                 .arg(&sound_path)
@@ -263,6 +271,7 @@ impl SoundPlayer {
 
     pub fn play_success() {
         if !Self::is_enabled() {
+            println!("  ⚠️  Sounds are disabled, skipping success sound");
             return;
         }
 
@@ -271,6 +280,7 @@ impl SoundPlayer {
             Self::init_defaults();
             let sound_name = SUCCESS_SOUND.get().unwrap().lock().unwrap();
             let sound_path = Self::resolve_sound_path(&sound_name);
+            println!("  🎵 Playing success sound: {} -> {}", sound_name, sound_path);
 
             let _ = std::process::Command::new("afplay")
                 .arg(&sound_path)
@@ -300,6 +310,108 @@ impl SoundPlayer {
                         .arg("150")
                         .spawn()
                 });
+        }
+    }
+
+    /// Play a loading/processing sound effect
+    pub fn play_loading() {
+        if !Self::is_enabled() {
+            return;
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            // Use a subtle system sound for loading
+            let _ = std::process::Command::new("afplay")
+                .arg("/System/Library/Sounds/Morse.aiff")
+                .spawn();
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            // Play a loading beep pattern
+            let _ = std::process::Command::new("powershell")
+                .arg("-Command")
+                .arg("[console]::beep(500, 100)")
+                .spawn();
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            let _ = std::process::Command::new("beep")
+                .arg("-f")
+                .arg("500")
+                .arg("-l")
+                .arg("100")
+                .spawn();
+        }
+    }
+
+    /// Play a transition/navigation sound effect
+    pub fn play_transition() {
+        if !Self::is_enabled() {
+            return;
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            // Use a quick, subtle sound for transitions
+            let _ = std::process::Command::new("afplay")
+                .arg("/System/Library/Sounds/Pop.aiff")
+                .spawn();
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            // Play a quick transition beep
+            let _ = std::process::Command::new("powershell")
+                .arg("-Command")
+                .arg("[console]::beep(800, 50)")
+                .spawn();
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            let _ = std::process::Command::new("beep")
+                .arg("-f")
+                .arg("800")
+                .arg("-l")
+                .arg("50")
+                .spawn();
+        }
+    }
+
+    /// Play a save/settings update sound effect
+    pub fn play_save() {
+        if !Self::is_enabled() {
+            return;
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            // Use a pleasant confirmation sound
+            let _ = std::process::Command::new("afplay")
+                .arg("/System/Library/Sounds/Purr.aiff")
+                .spawn();
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            // Play a save confirmation beep
+            let _ = std::process::Command::new("powershell")
+                .arg("-Command")
+                .arg("[console]::beep(1000, 100)")
+                .spawn();
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            let _ = std::process::Command::new("beep")
+                .arg("-f")
+                .arg("1000")
+                .arg("-l")
+                .arg("100")
+                .spawn();
         }
     }
 

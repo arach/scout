@@ -1,0 +1,165 @@
+/* Webhook Settings Styles */
+
+.webhook-settings-simple {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.webhook-info-section {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.webhook-info-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 12px 0;
+}
+
+.webhook-description {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0 0 16px 0;
+}
+
+.webhook-features {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.webhook-feature {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.webhook-feature svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--accent-primary);
+  opacity: 0.7;
+}
+
+.payload-structure {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  padding: 12px;
+  margin-top: 16px;
+}
+
+.payload-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 8px 0;
+}
+
+.payload-code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-primary);
+  line-height: 1.5;
+  white-space: pre;
+  overflow-x: auto;
+  margin: 0;
+}
+
+.payload-code .key {
+  color: var(--accent-primary);
+}
+
+.payload-code .type {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+.payload-code .comment {
+  color: var(--text-tertiary);
+  opacity: 0.7;
+}
+
+.webhook-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.manage-button {
+  padding: 8px 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: fit-content;
+}
+
+.manage-button:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-hover);
+}
+
+.webhook-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 8px;
+  width: fit-content;
+}
+
+.webhook-status.enabled {
+  background: rgba(16, 185, 129, 0.1);
+  color: rgb(16, 185, 129);
+}
+
+.webhook-status svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Dark mode adjustments */
+@media (prefers-color-scheme: dark) {
+  .webhook-info-section {
+    background: rgba(255, 255, 255, 0.03);
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+  
+  .payload-structure {
+    background: rgba(0, 0, 0, 0.3);
+    border-color: rgba(255, 255, 255, 0.06);
+  }
+  
+  .payload-code .key {
+    color: #60a5fa;
+  }
+  
+  .payload-code .type {
+    color: #a78bfa;
+  }
+}

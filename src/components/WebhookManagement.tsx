@@ -61,7 +61,15 @@ export const WebhookManagement: React.FC<WebhookManagementProps> = () => {
 
     try {
       await webhookApi.deleteWebhook(id);
-      setWebhooks(prev => prev.filter(w => w.id !== id));
+      setWebhooks(prev => {
+        const updated = prev.filter(w => w.id !== id);
+        // Notify sidebar to check webhook status
+        const hasEnabledWebhooks = updated.length > 0 && updated.some(w => w.enabled);
+        window.dispatchEvent(new CustomEvent('webhook-status-changed', { 
+          detail: { enabled: hasEnabledWebhooks } 
+        }));
+        return updated;
+      });
       loggers.ui.info('Webhook deleted successfully');
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to delete webhook';
@@ -95,9 +103,15 @@ export const WebhookManagement: React.FC<WebhookManagementProps> = () => {
         enabled: !webhook.enabled
       });
       
-      setWebhooks(prev => prev.map(w => 
-        w.id === webhook.id ? updatedWebhook : w
-      ));
+      setWebhooks(prev => {
+        const updatedList = prev.map(w => w.id === webhook.id ? updatedWebhook : w);
+        // Notify sidebar to check webhook status
+        const hasEnabledWebhooks = updatedList.length > 0 && updatedList.some(w => w.enabled);
+        window.dispatchEvent(new CustomEvent('webhook-status-changed', { 
+          detail: { enabled: hasEnabledWebhooks } 
+        }));
+        return updatedList;
+      });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to toggle webhook';
       setError(errorMessage);
@@ -193,12 +207,26 @@ export const WebhookManagement: React.FC<WebhookManagementProps> = () => {
             try {
               if (editingWebhook) {
                 const updated = await webhookApi.updateWebhook(editingWebhook.id, webhookData);
-                setWebhooks(prev => prev.map(w => 
-                  w.id === editingWebhook.id ? updated : w
-                ));
+                setWebhooks(prev => {
+                  const updatedList = prev.map(w => w.id === editingWebhook.id ? updated : w);
+                  // Notify sidebar to check webhook status
+                  const hasEnabledWebhooks = updatedList.length > 0 && updatedList.some(w => w.enabled);
+                  window.dispatchEvent(new CustomEvent('webhook-status-changed', { 
+                    detail: { enabled: hasEnabledWebhooks } 
+                  }));
+                  return updatedList;
+                });
               } else {
                 const newWebhook = await webhookApi.createWebhook(webhookData as CreateWebhookDto);
-                setWebhooks(prev => [...prev, newWebhook]);
+                setWebhooks(prev => {
+                  const updatedList = [...prev, newWebhook];
+                  // Notify sidebar to check webhook status
+                  const hasEnabledWebhooks = updatedList.length > 0 && updatedList.some(w => w.enabled);
+                  window.dispatchEvent(new CustomEvent('webhook-status-changed', { 
+                    detail: { enabled: hasEnabledWebhooks } 
+                  }));
+                  return updatedList;
+                });
               }
               handleCancelEdit();
             } catch (err) {

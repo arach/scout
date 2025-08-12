@@ -293,6 +293,8 @@ pub async fn get_sound_settings() -> Result<serde_json::Value, String> {
 
 #[tauri::command]
 pub async fn set_start_sound(state: State<'_, AppState>, sound_name: String) -> Result<(), String> {
+    println!("🔧 Setting start sound to: {}", sound_name);
+    
     // Update in-memory state
     sound::SoundPlayer::set_start_sound(sound_name.clone());
     
@@ -307,6 +309,8 @@ pub async fn set_start_sound(state: State<'_, AppState>, sound_name: String) -> 
 
 #[tauri::command]
 pub async fn set_stop_sound(state: State<'_, AppState>, sound_name: String) -> Result<(), String> {
+    println!("🔧 Setting stop sound to: {}", sound_name);
+    
     // Update in-memory state
     sound::SoundPlayer::set_stop_sound(sound_name.clone());
     
@@ -321,6 +325,8 @@ pub async fn set_stop_sound(state: State<'_, AppState>, sound_name: String) -> R
 
 #[tauri::command]
 pub async fn set_success_sound(state: State<'_, AppState>, sound_name: String) -> Result<(), String> {
+    println!("🔧 Setting success sound to: {}", sound_name);
+    
     // Update in-memory state
     sound::SoundPlayer::set_success_sound(sound_name.clone());
     
@@ -341,12 +347,30 @@ pub async fn preview_sound_flow(state: State<'_, AppState>) -> Result<(), String
         settings_guard.get().ui.completion_sound_threshold_ms
     };
 
+    // Log which sounds are configured
+    let start_sound = sound::SoundPlayer::get_start_sound();
+    let stop_sound = sound::SoundPlayer::get_stop_sound();
+    let success_sound = sound::SoundPlayer::get_success_sound();
+    
+    println!("🔊 Preview sound flow:");
+    println!("  Start sound: {}", start_sound);
+    println!("  Stop sound: {}", stop_sound);
+    println!("  Success sound: {}", success_sound);
+    println!("  Threshold: {}ms", threshold_ms);
+
     // Simulate real sequence: start → slight gap → stop → threshold delay → success
+    println!("  Playing start sound...");
     sound::SoundPlayer::play_start();
-    tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;  // Increased from 150ms
+    
+    println!("  Playing stop sound...");
     sound::SoundPlayer::play_stop();
-    tokio::time::sleep(tokio::time::Duration::from_millis(threshold_ms)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;  // Use 500ms instead of threshold for testing
+    
+    println!("  Playing success sound...");
     sound::SoundPlayer::play_success();
+    
+    println!("  Preview complete!");
     Ok(())
 }
 
@@ -357,10 +381,31 @@ pub async fn play_success_sound() -> Result<(), String> {
 }
 
 #[tauri::command]
+pub async fn play_loading_sound() -> Result<(), String> {
+    sound::SoundPlayer::play_loading();
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn play_transition_sound() -> Result<(), String> {
+    sound::SoundPlayer::play_transition();
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn play_save_sound() -> Result<(), String> {
+    sound::SoundPlayer::play_save();
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn update_completion_sound_threshold(state: State<'_, AppState>, threshold_ms: i32) -> Result<(), String> {
     let mut settings = state.settings.lock().await;
     settings
         .update(|s| s.ui.completion_sound_threshold_ms = threshold_ms as u64)
         .map_err(|e| format!("Failed to save settings: {}", e))?;
+    
+    // Play save sound to confirm the change
+    sound::SoundPlayer::play_save();
     Ok(())
 }

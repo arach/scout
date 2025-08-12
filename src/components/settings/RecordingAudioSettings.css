@@ -7,31 +7,39 @@
   overflow: visible;
 }
 
-/* Setting item container */
-.setting-item {
+/* Setting item container - tighter spacing */
+.recording-audio-settings .setting-item {
   overflow: visible; /* Ensure dropdowns can extend outside */
+  margin-bottom: 8px;
+}
+
+.recording-audio-settings .setting-item label {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text-primary);
+  margin-bottom: 6px;
 }
 
 /* Two-column grid for shortcuts */
 .shortcuts-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  margin-bottom: 20px;
+  gap: 12px;
+  margin-bottom: 14px;
 }
 
 /* Keyboard key display with high contrast */
 .keyboard-key {
   display: inline-block;
-  padding: 6px 16px;
+  padding: 3px 10px;
   background: #4a4a4a;
   border: 1px solid #666;
-  border-radius: 4px;
+  border-radius: 3px;
   font-family: 'SF Mono', Consolas, monospace;
-  font-size: 18px;
+  font-size: 13px;
   font-weight: 600;
   color: #ffffff;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2), inset 0 -1px 0 rgba(0, 0, 0, 0.2);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), inset 0 -1px 0 rgba(0, 0, 0, 0.2);
   text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
 }
 
@@ -46,7 +54,7 @@
 .sound-flow-wrapper {
   display: flex;
   align-items: flex-end;
-  gap: 16px;
+  gap: 12px;
   width: 100%;
   overflow: visible; /* Ensure dropdowns can extend outside */
 }
@@ -55,7 +63,7 @@
 .sound-flow-container {
   display: flex;
   align-items: flex-end;
-  gap: 8px;
+  gap: 6px;
   flex: 1;
   overflow: visible; /* Ensure dropdowns can extend outside */
 }
@@ -64,48 +72,49 @@
 .sound-flow-item {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
   overflow: visible; /* Ensure dropdowns can extend outside */
 }
 
 /* Sound flow label */
 .sound-flow-label {
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 500;
   color: var(--text-secondary);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
 }
 
 /* Sound flow arrow */
 .sound-flow-arrow {
   color: var(--text-secondary);
-  font-size: 16px;
-  padding: 0 4px;
-  margin-bottom: 16px; /* Align with dropdown height */
+  font-size: 14px;
+  padding: 0 2px;
+  margin-bottom: 14px; /* Align with dropdown height */
 }
 
 /* Preview button - ensure it looks like a button */
-.preview-sound-button {
+.recording-audio-settings .preview-sound-button {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
+  gap: 5px;
+  padding: 5px 12px;
   background: var(--bg-secondary);
   color: var(--text-primary);
-  border: 1px solid var(--border-primary);
-  border-radius: 6px;
-  font-size: 13px;
+  border: 1px solid var(--border-primary, #444) !important;
+  border-radius: 4px;
+  font-size: 12px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
   white-space: nowrap;
   flex-shrink: 0;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
-.preview-sound-button:hover:not(:disabled) {
+.recording-audio-settings .preview-sound-button:hover:not(:disabled) {
   background: var(--bg-hover);
-  border-color: var(--border-secondary);
+  border-color: var(--border-secondary, #666) !important;
 }
 
 .preview-sound-button:disabled {
@@ -123,31 +132,50 @@
 .actions-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  margin-bottom: 20px;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+/* Toggles section - full width */
+.toggles-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+/* Toggle with action button */
+.toggle-with-action {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.toggle-with-action .toggle-wrapper {
+  flex: 0 0 auto;
 }
 
 /* Toggle switch styles */
 .toggle-setting {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 0;
+  gap: 10px;
+  padding: 6px 0;
 }
 
 .toggle-setting label {
-  font-size: 14px;
+  font-size: 12px;
   color: var(--text-primary);
   white-space: nowrap;
 }
 
 .toggle-switch {
   position: relative;
-  width: 40px;
-  height: 22px;
+  width: 36px;
+  height: 20px;
   background: var(--bg-tertiary);
   border: 1px solid var(--border-primary);
-  border-radius: 11px;
+  border-radius: 10px;
   cursor: pointer;
   transition: all 0.2s ease;
   flex-shrink: 0;
@@ -167,17 +195,17 @@
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   background: white;
   border-radius: 50%;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
   transition: transform 0.2s ease;
   pointer-events: none;
 }
 
 .toggle-switch input:checked ~ .toggle-switch-slider {
-  transform: translateX(18px);
+  transform: translateX(16px);
 }
 
 /* Toggle switch checked state - use :has() for modern browsers */
@@ -208,10 +236,17 @@
   }
 }
 
+/* Sound settings row - toggle and preview */
+.sound-settings-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
 /* Sound feedback toggle specific styling */
 .sound-feedback-toggle {
-  margin-bottom: 16px;
   justify-content: flex-start;
+  margin-bottom: 0;
 }
 
 /* Animation for spin */

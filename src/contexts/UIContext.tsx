@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 
-type View = 'record' | 'transcripts' | 'settings' | 'stats' | 'dictionary' | 'webhooks' | 'audio-testing';
+type View = 'record' | 'transcripts' | 'settings' | 'settings-v2' | 'stats' | 'dictionary' | 'webhooks';
 
 interface DeleteConfirmation {
   show: boolean;
@@ -78,7 +78,7 @@ export function UIProvider({ children }: UIProviderProps) {
     const loadSavedView = () => {
       try {
         const savedView = localStorage.getItem('scout-current-view');
-        if (savedView && ['record', 'transcripts', 'settings', 'stats', 'dictionary', 'webhooks', 'audio-testing'].includes(savedView)) {
+        if (savedView && ['record', 'transcripts', 'settings', 'stats', 'dictionary', 'webhooks'].includes(savedView)) {
           setCurrentView(savedView as View);
         }
       } catch (error) {

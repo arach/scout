@@ -8,9 +8,9 @@ import { Sidebar, useSidebarState } from "./Sidebar";
 import { RecordView } from "./RecordView";
 import { TranscriptsView } from "./TranscriptsView";
 import { SettingsView } from "./SettingsView";
+import { SettingsViewV2 } from "./SettingsViewV2";
 import { StatsView } from "./StatsView";
 import Dictionary from "./Dictionary";
-import { AudioTestingView } from "./AudioTestingView";
 import { WebhookManagement } from "./WebhookManagement";
 import { AudioErrorBoundary, TranscriptionErrorBoundary, SettingsErrorBoundary } from './ErrorBoundary';
 import { useRecording } from '../hooks/useRecording';
@@ -226,6 +226,9 @@ export function AppContent() {
       });
       if (result) {
         try {
+          // Play loading sound when starting file upload
+          await invokeTyped('play_loading_sound');
+          
           setIsProcessing(true);
           const filename = result.split('/').pop() || 'audio file';
           setUploadProgress({
@@ -503,6 +506,11 @@ export function AppContent() {
             <SettingsView />
           </SettingsErrorBoundary>
         )}
+        {currentView === 'settings-v2' && (
+          <SettingsErrorBoundary>
+            <SettingsViewV2 />
+          </SettingsErrorBoundary>
+        )}
         {currentView === 'stats' && (
           <StatsView />
         )}
@@ -511,9 +519,6 @@ export function AppContent() {
         )}
         {currentView === 'webhooks' && (
           <WebhookManagement />
-        )}
-        {currentView === 'audio-testing' && (
-          <AudioTestingView />
         )}
 
         {/* File drop overlay */}

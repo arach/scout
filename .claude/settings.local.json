@@ -35,7 +35,9 @@
       "Bash(SKIP_BUILD_SCRIPT=1 cargo check)",
       "Bash(git log:*)",
       "Bash(git ls-tree:*)",
-      "Bash(mv:*)"
+      "Bash(mv:*)",
+      "Bash(grep:*)",
+      "Bash(git branch:*)"
     ],
     "deny": []
   },

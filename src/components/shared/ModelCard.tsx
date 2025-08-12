@@ -7,7 +7,9 @@ import {
   Download,
   Brain,
   FileText,
-  Zap
+  Zap,
+  ExternalLink,
+  X
 } from 'lucide-react';
 import './ModelCard.css';
 
@@ -36,6 +38,7 @@ export interface ModelCardProps<T extends BaseModel> {
   };
   onDownload: (model: T) => void;
   onSelect: (modelId: string) => void;
+  onCancelDownload?: (modelId: string) => void;
   renderSpecs?: (model: T) => React.ReactNode;
   isDownloadingCoreML?: boolean;
 }
@@ -46,6 +49,7 @@ export function ModelCard<T extends BaseModel>({
   downloadProgress,
   onDownload,
   onSelect,
+  onCancelDownload,
   renderSpecs,
   isDownloadingCoreML
 }: ModelCardProps<T>) {
@@ -64,29 +68,27 @@ export function ModelCard<T extends BaseModel>({
       onClick={isClickableForDownload ? () => onDownload(model) : undefined}
     >
       <div className="model-card-header">
-        <h3 className="model-name">
-          <span>{model.name}</span>
-          <div className="model-status-pills">
-            {model.downloaded && (
-              <span className="model-status-pill installed">
-                <CheckCircle size={10} />
-                Installed
-              </span>
-            )}
-            {model.downloaded && model.coreml_downloaded && (
-              <span className="model-status-pill accelerated">
-                <Zap size={10} />
-                CoreML Accelerated
-              </span>
-            )}
-            {isClickableForDownload && (
-              <span className="model-status-pill download-hint">
-                <Download size={10} />
-                Click to Install
-              </span>
-            )}
-          </div>
-        </h3>
+        <h3 className="model-name">{model.name}</h3>
+        <div className="model-status-pills">
+          {model.downloaded && (
+            <span className="model-status-pill installed">
+              <CheckCircle size={10} />
+              Installed
+            </span>
+          )}
+          {model.downloaded && model.coreml_downloaded && (
+            <span className="model-status-pill accelerated">
+              <Zap size={10} />
+              CoreML Accelerated
+            </span>
+          )}
+          {isClickableForDownload && (
+            <span className="model-status-pill download-hint">
+              <Download size={10} />
+              {model.size_mb >= 1000 ? `Download ${formatSize(model.size_mb)}` : 'Click to Install'}
+            </span>
+          )}
+        </div>
       </div>
       
       {/* Model description */}
@@ -105,12 +107,25 @@ export function ModelCard<T extends BaseModel>({
         {renderSpecs && renderSpecs(model)}
       </div>
       
+      {/* Hugging Face link - positioned consistently */}
+      <a 
+        href={`https://huggingface.co/ggerganov/whisper.cpp`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="model-hf-link"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <span className="model-hf-url">https://huggingface.co/ggerganov/whisper.cpp</span>
+        <ExternalLink size={12} />
+      </a>
+      
       {/* Spacer to push buttons to bottom */}
       <div className="model-spacer" />
       
-      {/* Action section - only show when there are actions */}
-      {(model.downloaded || isDownloading) && (
-        <div className="model-actions">
+      {/* Action section - always render div to maintain consistent spacing */}
+      <div className="model-actions">
+        {(model.downloaded || isDownloading) && (
+          <>
           {model.downloaded && !model.active && !isDownloading && (
             <button 
               className="model-btn model-btn-primary"
@@ -140,19 +155,34 @@ export function ModelCard<T extends BaseModel>({
       
         {isDownloading && downloadProgress && (
           <div className="model-download-progress">
-            <div className="model-progress-bar">
-              <div 
-                className="model-progress-fill"
-                style={{ width: `${downloadProgress.progress}%` }}
-              />
+            <div className="model-progress-container">
+              <div className="model-progress-bar">
+                <div 
+                  className="model-progress-fill"
+                  style={{ width: `${downloadProgress.progress}%` }}
+                />
+              </div>
+              {onCancelDownload && (
+                <button 
+                  className="model-btn-cancel"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCancelDownload(model.id);
+                  }}
+                  title="Cancel download"
+                >
+                  <X size={14} />
+                </button>
+              )}
             </div>
             <span className="model-progress-text">
               {isDownloadingCoreML ? 'Core ML: ' : ''}{formatSize(downloadProgress.downloadedMb)} / {formatSize(downloadProgress.totalMb)}
             </span>
           </div>
         )}
-        </div>
+        </>
       )}
+      </div>
     </div>
   );
 }

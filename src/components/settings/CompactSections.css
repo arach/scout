@@ -1,0 +1,73 @@
+/* Compact Settings Layout System
+   ================================
+   Provides flexible layouts for settings sections
+*/
+
+/* Container for mixed-width sections */
+.settings-layout-flex {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+/* Section size modifiers */
+.collapsible-section--compact {
+  flex: 0 1 calc(50% - 6px); /* Half width minus half gap */
+  min-width: 320px; /* Minimum width before wrapping */
+}
+
+.collapsible-section--two-thirds {
+  flex: 0 1 calc(66.666% - 8px);
+  min-width: 400px;
+}
+
+.collapsible-section--one-third {
+  flex: 0 1 calc(33.333% - 4px);
+  min-width: 280px;
+}
+
+.collapsible-section--full {
+  flex: 0 1 100%;
+}
+
+/* Auto-sizing based on content */
+.collapsible-section--auto {
+  flex: 1 1 auto;
+  min-width: 300px;
+}
+
+/* Compact content padding for smaller sections */
+.collapsible-section--compact .collapsible-content,
+.collapsible-section--one-third .collapsible-content {
+  padding: 12px;
+}
+
+/* Responsive behavior */
+@media (max-width: 768px) {
+  .collapsible-section--compact,
+  .collapsible-section--two-thirds,
+  .collapsible-section--one-third,
+  .collapsible-section--auto {
+    flex: 0 1 100%;
+    min-width: 100%;
+  }
+}
+
+/* Special case for sections that should remain inline */
+.settings-inline-group {
+  display: flex;
+  gap: 12px;
+  flex-wrap: nowrap;
+  width: 100%;
+}
+
+.settings-inline-group .collapsible-section {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+/* Adjust grid container for more compact view */
+.grid-content--settings-compact {
+  max-width: 1000px; /* Slightly wider to accommodate side-by-side sections */
+}

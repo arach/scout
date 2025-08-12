@@ -10,8 +10,8 @@
   height: 100vh; /* Full viewport height */
   z-index: 101;
   /* No shadow - unified design */
-  width: 52px;
-  max-width: 52px;
+  width: 68px;
+  max-width: 68px;
   transition: width 0.4s cubic-bezier(0.23, 1, 0.32, 1) !important;
 }
 
@@ -30,8 +30,8 @@
 }
 
 .sidebar.collapsed {
-  width: 52px;
-  max-width: 52px;
+  width: 68px;
+  max-width: 68px;
 }
 
 .sidebar.expanded {
@@ -383,11 +383,13 @@
 }
 
 /* Settings button - spin quickly */
-.sidebar-button-settings:hover svg {
+.sidebar-button-settings:hover svg,
+.sidebar-button-settings-v2:hover svg {
   animation: spinQuick 0.3s ease-out;
 }
 
-.sidebar-button-settings:active svg {
+.sidebar-button-settings:active svg,
+.sidebar-button-settings-v2:active svg {
   animation: spinQuick 0.3s ease-out;
 }
 

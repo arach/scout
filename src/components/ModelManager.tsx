@@ -161,6 +161,20 @@ export const ModelManager: React.FC = () => {
     }
   };
 
+  const cancelDownload = async (modelId: string) => {
+    try {
+      await invoke('cancel_model_download', { modelId });
+      // Remove from downloading state
+      setDownloading(prev => {
+        const newState = { ...prev };
+        delete newState[modelId];
+        return newState;
+      });
+    } catch (error) {
+      console.error('Failed to cancel download:', error);
+    }
+  };
+
   const checkForMissingCoreML = async () => {
     try {
       setCheckingCoreML(true);
@@ -205,6 +219,7 @@ export const ModelManager: React.FC = () => {
               downloadProgress={progress}
               onDownload={downloadModel}
               onSelect={setActiveModel}
+              onCancelDownload={cancelDownload}
               renderSpecs={renderWhisperSpecs}
               isDownloadingCoreML={isDownloadingCoreML}
             />

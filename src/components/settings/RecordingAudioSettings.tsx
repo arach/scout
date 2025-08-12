@@ -1,13 +1,16 @@
 import React, { memo } from 'react';
 import { useSettings } from '../../contexts/SettingsContext';
+import { useSettings as useSettingsHook } from '../../hooks/useSettingsContext';
 import { useHotkeyCapture } from '../../hooks/useHotkeyCapture';
 import { formatShortcutJSX } from '../../lib/formatShortcutJSX';
 import { Dropdown } from '../Dropdown';
+import { Toggle } from '../ui/Toggle';
 import { invoke } from '@tauri-apps/api/core';
 import './RecordingAudioSettings.css';
 
 export const RecordingAudioSettings = memo(function RecordingAudioSettings() {
-  const { state, actions } = useSettings();
+  const { state } = useSettings();
+  const actions = useSettingsHook();
   const { shortcuts, clipboard, sound } = state;
   const {
     startCapturingHotkey,
@@ -128,54 +131,82 @@ export const RecordingAudioSettings = memo(function RecordingAudioSettings() {
           </div>
         </div>
 
-        {/* Auto-copy Toggle */}
-        <div className="toggle-setting">
-          <label htmlFor="auto-copy">Auto-copy to clipboard</label>
-          <div className="toggle-switch">
-            <input
-              id="auto-copy"
-              type="checkbox"
-              checked={clipboard.autoCopy}
-              onChange={actions.toggleAutoCopy}
-            />
-            <span className="toggle-switch-slider"></span>
-          </div>
-        </div>
-        
-        {/* Auto-paste Toggle */}
-        <div className="toggle-setting">
-          <label htmlFor="auto-paste">Auto-paste after transcription</label>
-          <div className="toggle-switch">
-            <input
-              id="auto-paste"
-              type="checkbox"
-              checked={clipboard.autoPaste}
-              onChange={actions.toggleAutoPaste}
-            />
-            <span className="toggle-switch-slider"></span>
-          </div>
-        </div>
       </div>
 
-      {/* Sound Settings */}
-      <div className="toggle-setting sound-feedback-toggle">
-        <label htmlFor="sound-feedback">Enable sound feedback</label>
-        <div className="toggle-switch">
-          <input
-            id="sound-feedback"
-            type="checkbox"
+      {/* Toggle Settings - Full Width */}
+      <div className="toggles-section">
+        {/* Auto-copy Toggle */}
+        <Toggle
+          label="Auto-copy to clipboard"
+          checked={clipboard.autoCopy}
+          onChange={actions.toggleAutoCopy}
+        />
+        
+        {/* Auto-paste Toggle */}
+        <Toggle
+          label="Auto-paste after transcription"
+          checked={clipboard.autoPaste}
+          onChange={actions.toggleAutoPaste}
+        />
+
+        {/* Sound Enable Toggle with Preview Button */}
+        <div className="toggle-with-action">
+          <Toggle
+            label="Enable sound feedback"
             checked={sound.soundEnabled}
             onChange={actions.toggleSoundEnabled}
           />
-          <span className="toggle-switch-slider"></span>
+          {sound.soundEnabled && (
+            <button
+              onClick={previewSoundFlow}
+              disabled={!sound.soundEnabled || isPreviewingSound}
+              className={`preview-sound-button ${isPreviewingSound ? 'playing' : ''}`}
+            >
+              {isPreviewingSound ? (
+                  <>
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      style={{
+                        animation: 'spin 1s linear infinite'
+                      }}
+                    >
+                      <path d="M21 12a9 9 0 11-6.219-8.56" />
+                    </svg>
+                    Playing...
+                  </>
+                ) : (
+                  <>
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                    </svg>
+                    Preview
+                  </>
+                )}
+              </button>
+          )}
         </div>
       </div>
 
-      {/* Sound flow with preview button */}
+      {/* Sound flow configuration */}
       {sound.soundEnabled && (
         <div className="setting-item">
-          <div className="sound-flow-wrapper">
-            <div className="sound-flow-container">
+          <div className="sound-flow-container">
               <div className="sound-flow-item">
                 <div className="sound-flow-label">Start</div>
                 <Dropdown
@@ -205,49 +236,6 @@ export const RecordingAudioSettings = memo(function RecordingAudioSettings() {
                   style={{ width: '120px' }}
                 />
               </div>
-            </div>
-            <button
-              onClick={previewSoundFlow}
-              disabled={!sound.soundEnabled || isPreviewingSound}
-              className={`preview-sound-button ${isPreviewingSound ? 'playing' : ''}`}
-            >
-              {isPreviewingSound ? (
-                <>
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    style={{
-                      animation: 'spin 1s linear infinite'
-                    }}
-                  >
-                    <path d="M21 12a9 9 0 11-6.219-8.56" />
-                  </svg>
-                  Playing...
-                </>
-              ) : (
-                <>
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
-                  </svg>
-                  Preview
-                </>
-              )}
-            </button>
           </div>
         </div>
       )}

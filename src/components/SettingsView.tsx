@@ -5,10 +5,11 @@ import { useSettings } from '../contexts/SettingsContext';
 import { RecordingAudioSettings } from './settings/RecordingAudioSettings';
 import { DisplayInterfaceSettings } from './settings/DisplayInterfaceSettings';
 import { ThemesSettings } from './settings/ThemesSettings';
-import { WebhookSettingsToggle } from './settings/WebhookSettingsToggle';
+import { WebhookSettingsSimple } from './settings/WebhookSettingsSimple';
 import './settings/CollapsibleSection.css';
 import './SettingsView-spacing.css';
-import './settings/SoundSettings.css';
+import './settings/CompactSections.css';
+import './settings/WebhookSettingsSimple.css';
 import '../styles/grid-system.css';
 
 // Lazy load heavy components
@@ -75,9 +76,11 @@ export const SettingsView = memo(function SettingsView() {
 
   return (
     <div className="grid-container">
-      <div className="grid-content grid-content--settings">
-        {/* Recording & Audio - Collapsible */}
-        <div className="collapsible-section" ref={recordingAudioRef}>
+      <div className="grid-content grid-content--settings grid-content--settings-compact">
+        {/* Wrap sections in flexible layout */}
+        <div className="settings-layout-flex">
+          {/* Recording & Audio - Full width as it has lots of content */}
+          <div className="collapsible-section collapsible-section--full" ref={recordingAudioRef}>
             <div className="collapsible-header-wrapper">
               <div 
                 className="collapsible-header"
@@ -89,7 +92,7 @@ export const SettingsView = memo(function SettingsView() {
                       ▶
                     </span>
                     Recording & Audio
-                    <Mic size={16} className="sparkle-icon" />
+                    <Mic size={14} className="sparkle-icon" />
                   </h3>
                   <p className="collapsible-subtitle">
                     Shortcuts, sounds, and output settings
@@ -104,8 +107,8 @@ export const SettingsView = memo(function SettingsView() {
             )}
         </div>
 
-        {/* Display & Interface - Collapsible */}
-        <div className="collapsible-section" ref={displayInterfaceRef}>
+          {/* Display & Interface - Compact width */}
+          <div className="collapsible-section collapsible-section--compact" ref={displayInterfaceRef}>
             <div className="collapsible-header-wrapper">
               <div 
                 className="collapsible-header"
@@ -117,7 +120,7 @@ export const SettingsView = memo(function SettingsView() {
                       ▶
                     </span>
                     Display & Interface
-                    <Monitor size={16} className="sparkle-icon" />
+                    <Monitor size={14} className="sparkle-icon" />
                   </h3>
                   <p className="collapsible-subtitle">
                     Visual feedback shown on screen while actively recording
@@ -132,8 +135,8 @@ export const SettingsView = memo(function SettingsView() {
             )}
         </div>
 
-        {/* Themes - Collapsible */}
-        <div className="collapsible-section" ref={themesRef}>
+          {/* Themes - Compact width */}
+          <div className="collapsible-section collapsible-section--compact" ref={themesRef}>
             <div className="collapsible-header-wrapper">
               <div 
                 className="collapsible-header"
@@ -145,7 +148,7 @@ export const SettingsView = memo(function SettingsView() {
                       ▶
                     </span>
                     Themes
-                    <Palette size={16} className="sparkle-icon" />
+                    <Palette size={14} className="sparkle-icon" />
                   </h3>
                   <p className="collapsible-subtitle">
                     Choose your visual theme
@@ -160,37 +163,8 @@ export const SettingsView = memo(function SettingsView() {
             )}
         </div>
 
-
-        {/* Webhooks - Collapsible */}
-        <div className="collapsible-section" ref={webhooksRef}>
-            <div className="collapsible-header-wrapper">
-              <div 
-                className="collapsible-header"
-                onClick={() => setIsWebhooksExpanded(!isWebhooksExpanded)}
-              >
-                <div>
-                  <h3>
-                    <span className={`collapse-arrow ${isWebhooksExpanded ? 'expanded' : ''}`}>
-                      ▶
-                    </span>
-                    Webhooks
-                    <Globe size={16} className="sparkle-icon" />
-                  </h3>
-                  <p className="collapsible-subtitle">
-                    Send transcriptions to external endpoints automatically
-                  </p>
-                </div>
-              </div>
-            </div>
-            {isWebhooksExpanded && (
-              <div className="collapsible-content">
-                <WebhookSettingsToggle />
-              </div>
-            )}
-        </div>
-
-        {/* Model Manager - Full Width Collapsible */}
-        <div className="collapsible-section model-manager-full-width" ref={modelSectionRef}>
+          {/* Model Manager - Full Width */}
+          <div className="collapsible-section collapsible-section--full" ref={modelSectionRef}>
             <div className="collapsible-header-wrapper">
               <div 
                 className="collapsible-header"
@@ -202,7 +176,7 @@ export const SettingsView = memo(function SettingsView() {
                       ▶
                     </span>
                     Transcription Models
-                    <Sparkles size={16} className="sparkle-icon" />
+                    <Sparkles size={14} className="sparkle-icon" />
                   </h3>
                   <p className="collapsible-subtitle">
                     Download and manage AI models for transcription
@@ -227,8 +201,8 @@ export const SettingsView = memo(function SettingsView() {
             )}
         </div>
 
-        {/* LLM Settings - Full Width Collapsible */}
-        <div className="collapsible-section model-manager-full-width" ref={llmSectionRef}>
+          {/* LLM Settings - Full Width */}
+          <div className="collapsible-section collapsible-section--full" ref={llmSectionRef}>
             <div className="collapsible-header-wrapper">
               <div 
                 className="collapsible-header"
@@ -240,7 +214,7 @@ export const SettingsView = memo(function SettingsView() {
                       ▶
                     </span>
                     Post-processing
-                    <Brain size={16} className="sparkle-icon" />
+                    <Brain size={14} className="sparkle-icon" />
                   </h3>
                   <p className="collapsible-subtitle">
                     Enhance transcripts with summaries and insights
@@ -273,6 +247,34 @@ export const SettingsView = memo(function SettingsView() {
             )}
         </div>
 
+          {/* Webhooks - Full width */}
+          <div className="collapsible-section collapsible-section--full" ref={webhooksRef}>
+            <div className="collapsible-header-wrapper">
+              <div 
+                className="collapsible-header"
+                onClick={() => setIsWebhooksExpanded(!isWebhooksExpanded)}
+              >
+                <div>
+                  <h3>
+                    <span className={`collapse-arrow ${isWebhooksExpanded ? 'expanded' : ''}`}>
+                      ▶
+                    </span>
+                    Webhooks
+                    <Globe size={14} className="sparkle-icon" />
+                  </h3>
+                  <p className="collapsible-subtitle">
+                    Send transcriptions to external endpoints automatically
+                  </p>
+                </div>
+              </div>
+            </div>
+            {isWebhooksExpanded && (
+              <div className="collapsible-content">
+                <WebhookSettingsSimple />
+              </div>
+            )}
+        </div>
+        </div>{/* End of settings-layout-flex */}
       </div>
     </div>
   );

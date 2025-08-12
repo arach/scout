@@ -6,7 +6,7 @@ import { useAudioLevel } from '../contexts/AudioContext';
 import { useUIContext } from '../contexts/UIContext';
 import './DevTools.css';
 
-type View = 'record' | 'transcripts' | 'settings' | 'stats' | 'dictionary' | 'webhooks' | 'audio-testing';
+type View = 'record' | 'transcripts' | 'settings' | 'stats' | 'dictionary' | 'webhooks';
 type OnboardingStep = 'model' | 'microphone' | 'shortcuts' | 'tour';
 
 interface DevToolsProps {

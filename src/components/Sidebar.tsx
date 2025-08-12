@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Settings, ChevronLeft, ChevronRight, Webhook } from 'lucide-react';
+import { webhookApi } from '../lib/webhooks';
 import './Sidebar.css';
 
-type View = 'record' | 'transcripts' | 'settings' | 'stats' | 'dictionary' | 'webhooks' | 'audio-testing';
+type View = 'record' | 'transcripts' | 'settings' | 'settings-v2' | 'stats' | 'dictionary' | 'webhooks';
 
 interface SidebarProps {
   currentView: View;
@@ -56,12 +57,55 @@ export const useSidebarState = (): SidebarState => {
 };
 
 export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpanded }: SidebarProps) {
+  const handleViewChange = async (view: View) => {
+    // Play transition sound when changing views
+    try {
+      await invoke('play_transition_sound');
+    } catch (error) {
+      console.error('Failed to play transition sound:', error);
+    }
+    onViewChange(view);
+  };
   const [width, setWidth] = useState(200);
   const [isResizing, setIsResizing] = useState(false);
+  const [showWebhooks, setShowWebhooks] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
-  const MIN_WIDTH = 150;
+  const MIN_WIDTH = 68;
   const MAX_WIDTH = 400;
   
+
+  // Check webhook status
+  useEffect(() => {
+    const checkWebhookStatus = async () => {
+      try {
+        const webhooks = await webhookApi.getWebhooks();
+        const hasEnabledWebhooks = webhooks.length > 0 && webhooks.some(w => w.enabled);
+        setShowWebhooks(hasEnabledWebhooks);
+      } catch (error) {
+        console.error('Failed to check webhook status:', error);
+        setShowWebhooks(false);
+      }
+    };
+    
+    // Initial check
+    checkWebhookStatus();
+    
+    // Listen for webhook status changes
+    const handleWebhookStatusChange = (event: CustomEvent) => {
+      checkWebhookStatus();
+    };
+    
+    window.addEventListener('webhook-status-changed', handleWebhookStatusChange as EventListener);
+    
+    // Also re-check when settings view is accessed
+    if (currentView === 'settings') {
+      checkWebhookStatus();
+    }
+    
+    return () => {
+      window.removeEventListener('webhook-status-changed', handleWebhookStatusChange as EventListener);
+    };
+  }, [currentView]);
 
   // Load saved width
   useEffect(() => {
@@ -104,10 +148,24 @@ export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpande
     if (!isResizing) return;
     
     const newWidth = e.clientX;
-    if (newWidth >= MIN_WIDTH && newWidth <= MAX_WIDTH) {
-      setWidth(newWidth);
+    
+    // Auto-collapse if dragged below 180px
+    if (newWidth < 180) {
+      // Collapse the sidebar
+      if (isExpanded) {
+        onToggleExpanded();
+      }
+      setWidth(200); // Keep the expanded width for when we expand again
+    } else {
+      // Expand if collapsed and dragging above 180px
+      if (!isExpanded && newWidth >= 180) {
+        onToggleExpanded();
+      }
+      if (newWidth >= 180 && newWidth <= MAX_WIDTH) {
+        setWidth(newWidth);
+      }
     }
-  }, [isResizing]);
+  }, [isResizing, isExpanded, onToggleExpanded]);
 
   const handleMouseUp = useCallback(() => {
     if (isResizing) {
@@ -156,7 +214,7 @@ export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpande
       <div className="sidebar-main-buttons">
         <button
           className={`sidebar-button sidebar-button-record ${currentView === 'record' ? 'active' : ''}`}
-          onClick={() => onViewChange('record')}
+          onClick={() => handleViewChange('record')}
           aria-label="Record"
         >
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -168,7 +226,7 @@ export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpande
         </button>
         <button
           className={`sidebar-button sidebar-button-transcripts ${currentView === 'transcripts' ? 'active' : ''}`}
-          onClick={() => onViewChange('transcripts')}
+          onClick={() => handleViewChange('transcripts')}
           aria-label="Transcripts"
         >
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -182,7 +240,7 @@ export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpande
         </button>
         <button
           className={`sidebar-button sidebar-button-stats ${currentView === 'stats' ? 'active' : ''}`}
-          onClick={() => onViewChange('stats')}
+          onClick={() => handleViewChange('stats')}
           aria-label="Stats"
         >
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -195,7 +253,7 @@ export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpande
         </button>
         <button
           className={`sidebar-button sidebar-button-dictionary ${currentView === 'dictionary' ? 'active' : ''}`}
-          onClick={() => onViewChange('dictionary')}
+          onClick={() => handleViewChange('dictionary')}
           aria-label="Dictionary"
         >
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -206,34 +264,32 @@ export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpande
           {isExpanded && <span className="sidebar-label">Dictionary</span>}
           <span className="sidebar-tooltip">Dictionary</span>
         </button>
-        <button
-          className={`sidebar-button sidebar-button-webhooks ${currentView === 'webhooks' ? 'active' : ''}`}
-          onClick={() => onViewChange('webhooks')}
-          aria-label="Webhooks"
-        >
-          <Webhook size={20} />
-          {isExpanded && <span className="sidebar-label">Webhooks</span>}
-          <span className="sidebar-tooltip">Webhooks</span>
-        </button>
-        <button
-          className={`sidebar-button sidebar-button-audio-testing ${currentView === 'audio-testing' ? 'active' : ''}`}
-          onClick={() => onViewChange('audio-testing')}
-          aria-label="Audio Testing"
-        >
-          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="1.5" fill="none"/>
-            <path d="M10 6v8M6 10h8" stroke="currentColor" strokeWidth="1.5"/>
-            <circle cx="10" cy="10" r="2" fill="currentColor"/>
-          </svg>
-          {isExpanded && <span className="sidebar-label">Audio Testing</span>}
-          <span className="sidebar-tooltip">Audio Testing</span>
-        </button>
+        {showWebhooks && (
+          <button
+            className={`sidebar-button sidebar-button-webhooks ${currentView === 'webhooks' ? 'active' : ''}`}
+            onClick={() => handleViewChange('webhooks')}
+            aria-label="Webhooks"
+          >
+            <Webhook size={20} />
+            {isExpanded && <span className="sidebar-label">Webhooks</span>}
+            <span className="sidebar-tooltip">Webhooks</span>
+          </button>
+        )}
       </div>
       
       <div className="sidebar-bottom-buttons">
         <button
+          className={`sidebar-button sidebar-button-settings sidebar-button-settings-v2 ${currentView === 'settings-v2' ? 'active' : ''}`}
+          onClick={() => handleViewChange('settings-v2')}
+          aria-label="Settings V2"
+        >
+          <Settings size={20} />
+          {isExpanded && <span className="sidebar-label">Settings V2</span>}
+          <span className="sidebar-tooltip">Settings V2</span>
+        </button>
+        <button
           className={`sidebar-button sidebar-button-settings ${currentView === 'settings' ? 'active' : ''}`}
-          onClick={() => onViewChange('settings')}
+          onClick={() => handleViewChange('settings')}
           aria-label="Settings"
         >
           <Settings size={20} />
