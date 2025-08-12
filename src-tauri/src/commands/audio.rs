@@ -381,10 +381,31 @@ pub async fn play_success_sound() -> Result<(), String> {
 }
 
 #[tauri::command]
+pub async fn play_loading_sound() -> Result<(), String> {
+    sound::SoundPlayer::play_loading();
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn play_transition_sound() -> Result<(), String> {
+    sound::SoundPlayer::play_transition();
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn play_save_sound() -> Result<(), String> {
+    sound::SoundPlayer::play_save();
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn update_completion_sound_threshold(state: State<'_, AppState>, threshold_ms: i32) -> Result<(), String> {
     let mut settings = state.settings.lock().await;
     settings
         .update(|s| s.ui.completion_sound_threshold_ms = threshold_ms as u64)
         .map_err(|e| format!("Failed to save settings: {}", e))?;
+    
+    // Play save sound to confirm the change
+    sound::SoundPlayer::play_save();
     Ok(())
 }

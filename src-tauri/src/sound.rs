@@ -313,6 +313,108 @@ impl SoundPlayer {
         }
     }
 
+    /// Play a loading/processing sound effect
+    pub fn play_loading() {
+        if !Self::is_enabled() {
+            return;
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            // Use a subtle system sound for loading
+            let _ = std::process::Command::new("afplay")
+                .arg("/System/Library/Sounds/Morse.aiff")
+                .spawn();
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            // Play a loading beep pattern
+            let _ = std::process::Command::new("powershell")
+                .arg("-Command")
+                .arg("[console]::beep(500, 100)")
+                .spawn();
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            let _ = std::process::Command::new("beep")
+                .arg("-f")
+                .arg("500")
+                .arg("-l")
+                .arg("100")
+                .spawn();
+        }
+    }
+
+    /// Play a transition/navigation sound effect
+    pub fn play_transition() {
+        if !Self::is_enabled() {
+            return;
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            // Use a quick, subtle sound for transitions
+            let _ = std::process::Command::new("afplay")
+                .arg("/System/Library/Sounds/Pop.aiff")
+                .spawn();
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            // Play a quick transition beep
+            let _ = std::process::Command::new("powershell")
+                .arg("-Command")
+                .arg("[console]::beep(800, 50)")
+                .spawn();
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            let _ = std::process::Command::new("beep")
+                .arg("-f")
+                .arg("800")
+                .arg("-l")
+                .arg("50")
+                .spawn();
+        }
+    }
+
+    /// Play a save/settings update sound effect
+    pub fn play_save() {
+        if !Self::is_enabled() {
+            return;
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            // Use a pleasant confirmation sound
+            let _ = std::process::Command::new("afplay")
+                .arg("/System/Library/Sounds/Purr.aiff")
+                .spawn();
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            // Play a save confirmation beep
+            let _ = std::process::Command::new("powershell")
+                .arg("-Command")
+                .arg("[console]::beep(1000, 100)")
+                .spawn();
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            let _ = std::process::Command::new("beep")
+                .arg("-f")
+                .arg("1000")
+                .arg("-l")
+                .arg("100")
+                .spawn();
+        }
+    }
+
     pub fn set_enabled(enabled: bool) {
         let _ = SOUND_ENABLED.set(enabled);
     }

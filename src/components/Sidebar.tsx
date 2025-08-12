@@ -56,6 +56,15 @@ export const useSidebarState = (): SidebarState => {
 };
 
 export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpanded }: SidebarProps) {
+  const handleViewChange = async (view: View) => {
+    // Play transition sound when changing views
+    try {
+      await invoke('play_transition_sound');
+    } catch (error) {
+      console.error('Failed to play transition sound:', error);
+    }
+    onViewChange(view);
+  };
   const [width, setWidth] = useState(200);
   const [isResizing, setIsResizing] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -156,7 +165,7 @@ export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpande
       <div className="sidebar-main-buttons">
         <button
           className={`sidebar-button sidebar-button-record ${currentView === 'record' ? 'active' : ''}`}
-          onClick={() => onViewChange('record')}
+          onClick={() => handleViewChange('record')}
           aria-label="Record"
         >
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -168,7 +177,7 @@ export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpande
         </button>
         <button
           className={`sidebar-button sidebar-button-transcripts ${currentView === 'transcripts' ? 'active' : ''}`}
-          onClick={() => onViewChange('transcripts')}
+          onClick={() => handleViewChange('transcripts')}
           aria-label="Transcripts"
         >
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -182,7 +191,7 @@ export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpande
         </button>
         <button
           className={`sidebar-button sidebar-button-stats ${currentView === 'stats' ? 'active' : ''}`}
-          onClick={() => onViewChange('stats')}
+          onClick={() => handleViewChange('stats')}
           aria-label="Stats"
         >
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -195,7 +204,7 @@ export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpande
         </button>
         <button
           className={`sidebar-button sidebar-button-dictionary ${currentView === 'dictionary' ? 'active' : ''}`}
-          onClick={() => onViewChange('dictionary')}
+          onClick={() => handleViewChange('dictionary')}
           aria-label="Dictionary"
         >
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -208,7 +217,7 @@ export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpande
         </button>
         <button
           className={`sidebar-button sidebar-button-webhooks ${currentView === 'webhooks' ? 'active' : ''}`}
-          onClick={() => onViewChange('webhooks')}
+          onClick={() => handleViewChange('webhooks')}
           aria-label="Webhooks"
         >
           <Webhook size={20} />
@@ -220,7 +229,7 @@ export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpande
       <div className="sidebar-bottom-buttons">
         <button
           className={`sidebar-button sidebar-button-settings ${currentView === 'settings' ? 'active' : ''}`}
-          onClick={() => onViewChange('settings')}
+          onClick={() => handleViewChange('settings')}
           aria-label="Settings"
         >
           <Settings size={20} />

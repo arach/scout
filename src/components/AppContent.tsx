@@ -225,6 +225,9 @@ export function AppContent() {
       });
       if (result) {
         try {
+          // Play loading sound when starting file upload
+          await invoke('play_loading_sound');
+          
           setIsProcessing(true);
           const filename = result.split('/').pop() || 'audio file';
           setUploadProgress({
