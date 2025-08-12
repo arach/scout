@@ -591,6 +591,62 @@
   }
 }
 
+/* Micro-animations for sidebar items */
+@keyframes webhookHook {
+  0% { transform: rotate(0deg) scale(1); }
+  25% { transform: rotate(-12deg) scale(1.1); }
+  50% { transform: rotate(8deg) scale(1.2); }
+  75% { transform: rotate(-4deg) scale(1.05); }
+  100% { transform: rotate(0deg) scale(1); }
+}
+
+@keyframes micPulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+
+@keyframes monitorFlicker {
+  0% { opacity: 1; }
+  25% { opacity: 0.7; }
+  50% { opacity: 1; }
+  75% { opacity: 0.8; }
+  100% { opacity: 1; }
+}
+
+@keyframes waveFlow {
+  0% { transform: scaleX(1); }
+  50% { transform: scaleX(1.2); }
+  100% { transform: scaleX(1); }
+}
+
+@keyframes sparkle {
+  0% { transform: rotate(0deg) scale(1); }
+  50% { transform: rotate(180deg) scale(1.2); }
+  100% { transform: rotate(360deg) scale(1); }
+}
+
+/* Apply animations on hover */
+.settings-sidebar-item-webhooks:hover .settings-sidebar-item-icon {
+  animation: webhookHook 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.settings-sidebar-item-recording:hover .settings-sidebar-item-icon {
+  animation: micPulse 0.3s ease-out;
+}
+
+.settings-sidebar-item-display:hover .settings-sidebar-item-icon {
+  animation: monitorFlicker 0.4s ease-out;
+}
+
+.settings-sidebar-item-transcription:hover .settings-sidebar-item-icon {
+  animation: waveFlow 0.3s ease-out;
+}
+
+.settings-sidebar-item-processing:hover .settings-sidebar-item-icon {
+  animation: sparkle 0.4s ease-out;
+}
+
 /* Scrollbar Styling */
 .settings-sidebar-nav::-webkit-scrollbar,
 .settings-main::-webkit-scrollbar {

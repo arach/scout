@@ -4,7 +4,7 @@ import {
   Monitor, 
   AudioWaveform, 
   Sparkles, 
-  Globe,
+  Webhook,
   ChevronLeft,
   ChevronRight
 } from 'lucide-react';
@@ -53,7 +53,7 @@ const sidebarItems: SidebarItem[] = [
   { 
     id: 'webhooks', 
     label: 'Webhooks', 
-    icon: Globe,
+    icon: Webhook,
     description: 'External service integration'
   },
 ];
@@ -210,7 +210,7 @@ export const SettingsViewV2 = memo(function SettingsViewV2() {
               <button
                 key={item.id}
                 onClick={() => setActiveCategory(item.id)}
-                className={`settings-sidebar-item ${activeCategory === item.id ? 'active' : ''}`}
+                className={`settings-sidebar-item settings-sidebar-item-${item.id} ${activeCategory === item.id ? 'active' : ''}`}
                 title={isCollapsed ? item.label : undefined}
               >
                 <Icon className="settings-sidebar-item-icon" />

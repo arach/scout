@@ -8,7 +8,8 @@ import {
   Brain,
   FileText,
   Zap,
-  ExternalLink
+  ExternalLink,
+  X
 } from 'lucide-react';
 import './ModelCard.css';
 
@@ -37,6 +38,7 @@ export interface ModelCardProps<T extends BaseModel> {
   };
   onDownload: (model: T) => void;
   onSelect: (modelId: string) => void;
+  onCancelDownload?: (modelId: string) => void;
   renderSpecs?: (model: T) => React.ReactNode;
   isDownloadingCoreML?: boolean;
 }
@@ -47,6 +49,7 @@ export function ModelCard<T extends BaseModel>({
   downloadProgress,
   onDownload,
   onSelect,
+  onCancelDownload,
   renderSpecs,
   isDownloadingCoreML
 }: ModelCardProps<T>) {
@@ -82,7 +85,7 @@ export function ModelCard<T extends BaseModel>({
           {isClickableForDownload && (
             <span className="model-status-pill download-hint">
               <Download size={10} />
-              Click to Install
+              {model.size_mb >= 1000 ? `Download ${formatSize(model.size_mb)}` : 'Click to Install'}
             </span>
           )}
         </div>
@@ -104,10 +107,7 @@ export function ModelCard<T extends BaseModel>({
         {renderSpecs && renderSpecs(model)}
       </div>
       
-      {/* Spacer to push buttons to bottom */}
-      <div className="model-spacer" />
-      
-      {/* Hugging Face link */}
+      {/* Hugging Face link - positioned consistently */}
       <a 
         href={`https://huggingface.co/ggerganov/whisper.cpp`}
         target="_blank"
@@ -119,9 +119,13 @@ export function ModelCard<T extends BaseModel>({
         <ExternalLink size={12} />
       </a>
       
-      {/* Action section - only show when there are actions */}
-      {(model.downloaded || isDownloading) && (
-        <div className="model-actions">
+      {/* Spacer to push buttons to bottom */}
+      <div className="model-spacer" />
+      
+      {/* Action section - always render div to maintain consistent spacing */}
+      <div className="model-actions">
+        {(model.downloaded || isDownloading) && (
+          <>
           {model.downloaded && !model.active && !isDownloading && (
             <button 
               className="model-btn model-btn-primary"
@@ -151,19 +155,34 @@ export function ModelCard<T extends BaseModel>({
       
         {isDownloading && downloadProgress && (
           <div className="model-download-progress">
-            <div className="model-progress-bar">
-              <div 
-                className="model-progress-fill"
-                style={{ width: `${downloadProgress.progress}%` }}
-              />
+            <div className="model-progress-container">
+              <div className="model-progress-bar">
+                <div 
+                  className="model-progress-fill"
+                  style={{ width: `${downloadProgress.progress}%` }}
+                />
+              </div>
+              {onCancelDownload && (
+                <button 
+                  className="model-btn-cancel"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCancelDownload(model.id);
+                  }}
+                  title="Cancel download"
+                >
+                  <X size={14} />
+                </button>
+              )}
             </div>
             <span className="model-progress-text">
               {isDownloadingCoreML ? 'Core ML: ' : ''}{formatSize(downloadProgress.downloadedMb)} / {formatSize(downloadProgress.totalMb)}
             </span>
           </div>
         )}
-        </div>
+        </>
       )}
+      </div>
     </div>
   );
 }

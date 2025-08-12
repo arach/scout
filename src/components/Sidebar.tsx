@@ -279,7 +279,7 @@ export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpande
       
       <div className="sidebar-bottom-buttons">
         <button
-          className={`sidebar-button sidebar-button-settings-v2 ${currentView === 'settings-v2' ? 'active' : ''}`}
+          className={`sidebar-button sidebar-button-settings sidebar-button-settings-v2 ${currentView === 'settings-v2' ? 'active' : ''}`}
           onClick={() => handleViewChange('settings-v2')}
           aria-label="Settings V2"
         >
