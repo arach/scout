@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Settings, ChevronLeft, ChevronRight, Webhook } from 'lucide-react';
+import { webhookApi } from '../lib/webhooks';
 import './Sidebar.css';
 
 type View = 'record' | 'transcripts' | 'settings' | 'stats' | 'dictionary' | 'webhooks';
@@ -67,10 +68,44 @@ export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpande
   };
   const [width, setWidth] = useState(200);
   const [isResizing, setIsResizing] = useState(false);
+  const [showWebhooks, setShowWebhooks] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const MIN_WIDTH = 150;
   const MAX_WIDTH = 400;
   
+
+  // Check webhook status
+  useEffect(() => {
+    const checkWebhookStatus = async () => {
+      try {
+        const webhooks = await webhookApi.getWebhooks();
+        const hasEnabledWebhooks = webhooks.length > 0 && webhooks.some(w => w.enabled);
+        setShowWebhooks(hasEnabledWebhooks);
+      } catch (error) {
+        console.error('Failed to check webhook status:', error);
+        setShowWebhooks(false);
+      }
+    };
+    
+    // Initial check
+    checkWebhookStatus();
+    
+    // Listen for webhook status changes
+    const handleWebhookStatusChange = (event: CustomEvent) => {
+      checkWebhookStatus();
+    };
+    
+    window.addEventListener('webhook-status-changed', handleWebhookStatusChange as EventListener);
+    
+    // Also re-check when settings view is accessed
+    if (currentView === 'settings') {
+      checkWebhookStatus();
+    }
+    
+    return () => {
+      window.removeEventListener('webhook-status-changed', handleWebhookStatusChange as EventListener);
+    };
+  }, [currentView]);
 
   // Load saved width
   useEffect(() => {
@@ -215,15 +250,17 @@ export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpande
           {isExpanded && <span className="sidebar-label">Dictionary</span>}
           <span className="sidebar-tooltip">Dictionary</span>
         </button>
-        <button
-          className={`sidebar-button sidebar-button-webhooks ${currentView === 'webhooks' ? 'active' : ''}`}
-          onClick={() => handleViewChange('webhooks')}
-          aria-label="Webhooks"
-        >
-          <Webhook size={20} />
-          {isExpanded && <span className="sidebar-label">Webhooks</span>}
-          <span className="sidebar-tooltip">Webhooks</span>
-        </button>
+        {showWebhooks && (
+          <button
+            className={`sidebar-button sidebar-button-webhooks ${currentView === 'webhooks' ? 'active' : ''}`}
+            onClick={() => handleViewChange('webhooks')}
+            aria-label="Webhooks"
+          >
+            <Webhook size={20} />
+            {isExpanded && <span className="sidebar-label">Webhooks</span>}
+            <span className="sidebar-tooltip">Webhooks</span>
+          </button>
+        )}
       </div>
       
       <div className="sidebar-bottom-buttons">

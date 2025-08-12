@@ -33,6 +33,11 @@ export const WebhookSettingsSimple: React.FC = () => {
           )
         );
         setWebhooksEnabled(false);
+        
+        // Trigger a custom event to notify sidebar
+        window.dispatchEvent(new CustomEvent('webhook-status-changed', { 
+          detail: { enabled: false } 
+        }));
       } else {
         // If no webhooks, go to setup
         if (webhookCount === 0) {
@@ -47,6 +52,11 @@ export const WebhookSettingsSimple: React.FC = () => {
           )
         );
         setWebhooksEnabled(true);
+        
+        // Trigger a custom event to notify sidebar
+        window.dispatchEvent(new CustomEvent('webhook-status-changed', { 
+          detail: { enabled: true } 
+        }));
       }
     } catch (err) {
       console.error('Failed to toggle webhooks', err);
