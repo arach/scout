@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 
-type View = 'record' | 'transcripts' | 'settings' | 'settings-v2' | 'stats' | 'dictionary' | 'webhooks';
+type View = 'record' | 'transcripts' | 'settings' | 'stats' | 'dictionary' | 'webhooks';
 
 interface DeleteConfirmation {
   show: boolean;

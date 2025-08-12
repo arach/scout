@@ -4,7 +4,7 @@ import { Settings, ChevronLeft, ChevronRight, Webhook } from 'lucide-react';
 import { webhookApi } from '../lib/webhooks';
 import './Sidebar.css';
 
-type View = 'record' | 'transcripts' | 'settings' | 'settings-v2' | 'stats' | 'dictionary' | 'webhooks';
+type View = 'record' | 'transcripts' | 'settings' | 'stats' | 'dictionary' | 'webhooks';
 
 interface SidebarProps {
   currentView: View;
@@ -70,7 +70,6 @@ export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpande
   const [isResizing, setIsResizing] = useState(false);
   const [showWebhooks, setShowWebhooks] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
-  const MIN_WIDTH = 68;
   const MAX_WIDTH = 400;
   
 
@@ -91,7 +90,7 @@ export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpande
     checkWebhookStatus();
     
     // Listen for webhook status changes
-    const handleWebhookStatusChange = (event: CustomEvent) => {
+    const handleWebhookStatusChange = () => {
       checkWebhookStatus();
     };
     
@@ -278,15 +277,6 @@ export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpande
       </div>
       
       <div className="sidebar-bottom-buttons">
-        <button
-          className={`sidebar-button sidebar-button-settings sidebar-button-settings-v2 ${currentView === 'settings-v2' ? 'active' : ''}`}
-          onClick={() => handleViewChange('settings-v2')}
-          aria-label="Settings V2"
-        >
-          <Settings size={20} />
-          {isExpanded && <span className="sidebar-label">Settings V2</span>}
-          <span className="sidebar-tooltip">Settings V2</span>
-        </button>
         <button
           className={`sidebar-button sidebar-button-settings ${currentView === 'settings' ? 'active' : ''}`}
           onClick={() => handleViewChange('settings')}

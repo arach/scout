@@ -1,280 +1,239 @@
-import { memo, useState, useRef, useEffect, lazy, Suspense } from 'react';
-import { Sparkles, FolderOpen, Brain, Mic, Monitor, Palette, Globe } from 'lucide-react';
+import { memo, useState, useEffect, useRef, useCallback } from 'react';
+import { 
+  Mic, 
+  Monitor, 
+  AudioWaveform, 
+  Sparkles, 
+  Webhook,
+  ChevronLeft,
+  ChevronRight
+} from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
-import { useSettings } from '../contexts/SettingsContext';
 import { RecordingAudioSettings } from './settings/RecordingAudioSettings';
 import { DisplayInterfaceSettings } from './settings/DisplayInterfaceSettings';
 import { ThemesSettings } from './settings/ThemesSettings';
 import { WebhookSettingsSimple } from './settings/WebhookSettingsSimple';
-import './settings/CollapsibleSection.css';
-import './SettingsView-spacing.css';
-import './settings/CompactSections.css';
-import './settings/WebhookSettingsSimple.css';
-import '../styles/grid-system.css';
+import { ModelManager } from './ModelManager';
+import { LLMSettings } from './LLMSettings';
+import { LLMSettings as LLMSettingsType } from '../types/llm';
+import './SettingsView.css';
 
-// Lazy load heavy components
-const ModelManager = lazy(() => import('./ModelManager').then(module => ({ default: module.ModelManager })));
-const LLMSettings = lazy(() => import('./LLMSettings').then(module => ({ default: module.LLMSettings })));
-const FoundationModelsSettings = lazy(() => import('./settings/FoundationModelsSettings').then(module => ({ default: module.FoundationModelsSettings })));
+interface SidebarItem {
+  id: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  description: string;
+}
+
+const sidebarItems: SidebarItem[] = [
+  { 
+    id: 'recording', 
+    label: 'Recording', 
+    icon: Mic,
+    description: 'Shortcuts and audio settings'
+  },
+  { 
+    id: 'display', 
+    label: 'Display', 
+    icon: Monitor,
+    description: 'Themes and visual feedback'
+  },
+  { 
+    id: 'transcription', 
+    label: 'Transcription', 
+    icon: AudioWaveform,
+    description: 'AI models for speech-to-text'
+  },
+  { 
+    id: 'processing', 
+    label: 'Processing', 
+    icon: Sparkles,
+    description: 'Post-transcription enhancements'
+  },
+  { 
+    id: 'webhooks', 
+    label: 'Webhooks', 
+    icon: Webhook,
+    description: 'External service integration'
+  },
+];
 
 export const SettingsView = memo(function SettingsView() {
-  const { state, actions } = useSettings();
-  const [isRecordingAudioExpanded, setIsRecordingAudioExpanded] = useState(true);
-  const [isDisplayInterfaceExpanded, setIsDisplayInterfaceExpanded] = useState(true);
-  const [isThemesExpanded, setIsThemesExpanded] = useState(true);
-  const [isWebhooksExpanded, setIsWebhooksExpanded] = useState(false);
-  const [isModelManagerExpanded, setIsModelManagerExpanded] = useState(false);
-  const [isLLMSettingsExpanded, setIsLLMSettingsExpanded] = useState(false);
-  const recordingAudioRef = useRef<HTMLDivElement>(null);
-  const displayInterfaceRef = useRef<HTMLDivElement>(null);
-  const themesRef = useRef<HTMLDivElement>(null);
-  const webhooksRef = useRef<HTMLDivElement>(null);
-  const modelSectionRef = useRef<HTMLDivElement>(null);
-  const llmSectionRef = useRef<HTMLDivElement>(null);
+  const [activeCategory, setActiveCategory] = useState('recording');
+  const [sidebarWidth, setSidebarWidth] = useState(225);
+  const [isResizing, setIsResizing] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [llmSettings, setLlmSettings] = useState<LLMSettingsType>({
+    enabled: false,
+    model_id: '',
+    temperature: 0.7,
+    max_tokens: 2048,
+    auto_download_model: false,
+    enabled_prompts: []
+  });
+  const sidebarRef = useRef<HTMLDivElement>(null);
+  const MIN_WIDTH = 150;
+  const MAX_WIDTH = 350;
+  const COLLAPSED_WIDTH = 68;
 
+  // Load saved sidebar width
   useEffect(() => {
-    if (isWebhooksExpanded && webhooksRef.current) {
-      setTimeout(() => {
-        webhooksRef.current?.scrollIntoView({ 
-          behavior: 'smooth', 
-          block: 'nearest'
-        });
-      }, 100);
-    }
-  }, [isWebhooksExpanded]);
+    const loadSidebarWidth = async () => {
+      try {
+        const settings = await invoke<{ settings_sidebar_width?: number }>('get_settings');
+        if (settings.settings_sidebar_width) {
+          setSidebarWidth(settings.settings_sidebar_width);
+        }
+      } catch (error) {
+        console.error('Failed to load settings sidebar width:', error);
+      }
+    };
+    loadSidebarWidth();
+  }, []);
 
-  useEffect(() => {
-    if (isModelManagerExpanded && modelSectionRef.current) {
-      setTimeout(() => {
-        modelSectionRef.current?.scrollIntoView({ 
-          behavior: 'smooth', 
-          block: 'nearest'
-        });
-      }, 100);
-    }
-  }, [isModelManagerExpanded]);
-
-  useEffect(() => {
-    if (isLLMSettingsExpanded && llmSectionRef.current) {
-      setTimeout(() => {
-        llmSectionRef.current?.scrollIntoView({ 
-          behavior: 'smooth', 
-          block: 'nearest'
-        });
-      }, 100);
-    }
-  }, [isLLMSettingsExpanded]);
-
-
-  const openModelsFolder = async () => {
+  // Save width when resizing stops
+  const saveWidth = useCallback(async (newWidth: number) => {
     try {
-      await invoke('open_models_folder');
+      const settings = await invoke('get_settings') as Record<string, any>;
+      await invoke('update_settings', { 
+        newSettings: {
+          ...settings, 
+          settings_sidebar_width: newWidth 
+        }
+      });
     } catch (error) {
-      console.error('Failed to open models folder:', error);
+      console.error('Failed to save settings sidebar width:', error);
+    }
+  }, []);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+  }, []);
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (!isResizing) return;
+    
+    const newWidth = e.clientX;
+    
+    // Auto-collapse if dragged below 180px
+    if (newWidth < 180) {
+      setIsCollapsed(true);
+      setSidebarWidth(225); // Keep the expanded width for when we expand again
+    } else {
+      setIsCollapsed(false);
+      if (newWidth >= MIN_WIDTH && newWidth <= MAX_WIDTH) {
+        setSidebarWidth(newWidth);
+      }
+    }
+  }, [isResizing]);
+
+  const handleMouseUp = useCallback(() => {
+    if (isResizing) {
+      setIsResizing(false);
+      saveWidth(sidebarWidth);
+    }
+  }, [isResizing, sidebarWidth, saveWidth]);
+
+  useEffect(() => {
+    if (isResizing) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      };
+    }
+  }, [isResizing, handleMouseMove, handleMouseUp]);
+
+  const renderContent = () => {
+    switch (activeCategory) {
+      case 'recording':
+        return <RecordingAudioSettings />;
+
+      case 'display':
+        return (
+          <>
+            <h2 className="settings-section-title">Overlay</h2>
+            <DisplayInterfaceSettings />
+            <h2 className="settings-section-title">Theme</h2>
+            <ThemesSettings />
+          </>
+        );
+
+
+      case 'transcription':
+        return <ModelManager />;
+
+      case 'processing':
+        return (
+          <LLMSettings 
+                  settings={llmSettings}
+                  onUpdateSettings={(updates) => {
+                    setLlmSettings(prev => ({ ...prev, ...updates }));
+                  }}
+          />
+        );
+
+      case 'webhooks':
+        return <WebhookSettingsSimple />;
+
+      default:
+        return null;
     }
   };
 
   return (
-    <div className="grid-container">
-      <div className="grid-content grid-content--settings grid-content--settings-compact">
-        {/* Wrap sections in flexible layout */}
-        <div className="settings-layout-flex">
-          {/* Recording & Audio - Full width as it has lots of content */}
-          <div className="collapsible-section collapsible-section--full" ref={recordingAudioRef}>
-            <div className="collapsible-header-wrapper">
-              <div 
-                className="collapsible-header"
-                onClick={() => setIsRecordingAudioExpanded(!isRecordingAudioExpanded)}
+    <div className="settings-view">
+      <div 
+        ref={sidebarRef}
+        className={`settings-sidebar ${isResizing ? 'resizing' : ''} ${isCollapsed ? 'collapsed' : ''}`}
+        style={{ width: isCollapsed ? `${COLLAPSED_WIDTH}px` : `${sidebarWidth}px` }}
+      >
+        <button
+          className="settings-sidebar-toggle"
+          onClick={() => setIsCollapsed(!isCollapsed)}
+          aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          {isCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+        </button>
+        
+        <nav className="settings-sidebar-nav">
+          {sidebarItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.id}
+                onClick={() => setActiveCategory(item.id)}
+                className={`settings-sidebar-item settings-sidebar-item-${item.id} ${activeCategory === item.id ? 'active' : ''}`}
+                title={isCollapsed ? item.label : undefined}
               >
-                <div>
-                  <h3>
-                    <span className={`collapse-arrow ${isRecordingAudioExpanded ? 'expanded' : ''}`}>
-                      ▶
-                    </span>
-                    Recording & Audio
-                    <Mic size={14} className="sparkle-icon" />
-                  </h3>
-                  <p className="collapsible-subtitle">
-                    Shortcuts, sounds, and output settings
-                  </p>
-                </div>
-              </div>
-            </div>
-            {isRecordingAudioExpanded && (
-              <div className="collapsible-content">
-                <RecordingAudioSettings />
-              </div>
-            )}
-        </div>
-
-          {/* Display & Interface - Compact width */}
-          <div className="collapsible-section collapsible-section--compact" ref={displayInterfaceRef}>
-            <div className="collapsible-header-wrapper">
-              <div 
-                className="collapsible-header"
-                onClick={() => setIsDisplayInterfaceExpanded(!isDisplayInterfaceExpanded)}
-              >
-                <div>
-                  <h3>
-                    <span className={`collapse-arrow ${isDisplayInterfaceExpanded ? 'expanded' : ''}`}>
-                      ▶
-                    </span>
-                    Display & Interface
-                    <Monitor size={14} className="sparkle-icon" />
-                  </h3>
-                  <p className="collapsible-subtitle">
-                    Visual feedback shown on screen while actively recording
-                  </p>
-                </div>
-              </div>
-            </div>
-            {isDisplayInterfaceExpanded && (
-              <div className="collapsible-content">
-                <DisplayInterfaceSettings />
-              </div>
-            )}
-        </div>
-
-          {/* Themes - Compact width */}
-          <div className="collapsible-section collapsible-section--compact" ref={themesRef}>
-            <div className="collapsible-header-wrapper">
-              <div 
-                className="collapsible-header"
-                onClick={() => setIsThemesExpanded(!isThemesExpanded)}
-              >
-                <div>
-                  <h3>
-                    <span className={`collapse-arrow ${isThemesExpanded ? 'expanded' : ''}`}>
-                      ▶
-                    </span>
-                    Themes
-                    <Palette size={14} className="sparkle-icon" />
-                  </h3>
-                  <p className="collapsible-subtitle">
-                    Choose your visual theme
-                  </p>
-                </div>
-              </div>
-            </div>
-            {isThemesExpanded && (
-              <div className="collapsible-content">
-                <ThemesSettings />
-              </div>
-            )}
-        </div>
-
-          {/* Model Manager - Full Width */}
-          <div className="collapsible-section collapsible-section--full" ref={modelSectionRef}>
-            <div className="collapsible-header-wrapper">
-              <div 
-                className="collapsible-header"
-                onClick={() => setIsModelManagerExpanded(!isModelManagerExpanded)}
-              >
-                <div>
-                  <h3>
-                    <span className={`collapse-arrow ${isModelManagerExpanded ? 'expanded' : ''}`}>
-                      ▶
-                    </span>
-                    Transcription Models
-                    <Sparkles size={14} className="sparkle-icon" />
-                  </h3>
-                  <p className="collapsible-subtitle">
-                    Download and manage AI models for transcription
-                  </p>
-                </div>
-              </div>
-              <button 
-                className="open-models-folder-link"
-                onClick={openModelsFolder}
-                title="Add your own .bin model files here"
-              >
-                <FolderOpen size={12} />
-                Open Models Folder
+                <Icon className="settings-sidebar-item-icon" />
+                {!isCollapsed && <span className="settings-sidebar-item-label">{item.label}</span>}
               </button>
-            </div>
-            {isModelManagerExpanded && (
-              <div className="collapsible-content">
-                <Suspense fallback={<div>Loading model manager...</div>}>
-                  <ModelManager />
-                </Suspense>
-              </div>
-            )}
-        </div>
+            );
+          })}
+        </nav>
+        
+        {!isCollapsed && (
+          <div 
+            className="settings-sidebar-resize-handle"
+            onMouseDown={handleMouseDown}
+          />
+        )}
+      </div>
 
-          {/* LLM Settings - Full Width */}
-          <div className="collapsible-section collapsible-section--full" ref={llmSectionRef}>
-            <div className="collapsible-header-wrapper">
-              <div 
-                className="collapsible-header"
-                onClick={() => setIsLLMSettingsExpanded(!isLLMSettingsExpanded)}
-              >
-                <div>
-                  <h3>
-                    <span className={`collapse-arrow ${isLLMSettingsExpanded ? 'expanded' : ''}`}>
-                      ▶
-                    </span>
-                    Post-processing
-                    <Brain size={14} className="sparkle-icon" />
-                  </h3>
-                  <p className="collapsible-subtitle">
-                    Enhance transcripts with summaries and insights
-                  </p>
-                </div>
-              </div>
-            </div>
-            {isLLMSettingsExpanded && (
-              <div className="collapsible-content">
-                <div className="space-y-6">
-                  <Suspense fallback={<div>Loading Foundation Models settings...</div>}>
-                    <FoundationModelsSettings 
-                      onSettingsChange={() => {
-                        // Refresh settings if needed
-                        // actions.refreshSettings?.();
-                      }}
-                    />
-                  </Suspense>
-                  
-                  <div className="border-t pt-6">
-                    <Suspense fallback={<div>Loading LLM settings...</div>}>
-                      <LLMSettings 
-                        settings={state.llm}
-                        onUpdateSettings={actions.updateLLMSettings}
-                      />
-                    </Suspense>
-                  </div>
-                </div>
-              </div>
-            )}
+      <div className="settings-main">
+        <div className="settings-main-container">
+          <div className="settings-content-wrapper" key={activeCategory}>
+            {renderContent()}
+          </div>
         </div>
-
-          {/* Webhooks - Full width */}
-          <div className="collapsible-section collapsible-section--full" ref={webhooksRef}>
-            <div className="collapsible-header-wrapper">
-              <div 
-                className="collapsible-header"
-                onClick={() => setIsWebhooksExpanded(!isWebhooksExpanded)}
-              >
-                <div>
-                  <h3>
-                    <span className={`collapse-arrow ${isWebhooksExpanded ? 'expanded' : ''}`}>
-                      ▶
-                    </span>
-                    Webhooks
-                    <Globe size={14} className="sparkle-icon" />
-                  </h3>
-                  <p className="collapsible-subtitle">
-                    Send transcriptions to external endpoints automatically
-                  </p>
-                </div>
-              </div>
-            </div>
-            {isWebhooksExpanded && (
-              <div className="collapsible-content">
-                <WebhookSettingsSimple />
-              </div>
-            )}
-        </div>
-        </div>{/* End of settings-layout-flex */}
       </div>
     </div>
   );

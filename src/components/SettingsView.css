@@ -1,6 +1,6 @@
-/* SettingsViewV2.css - Side navigation settings page */
+/* SettingsView.css - Side navigation settings page */
 
-.settings-v2 {
+.settings-view {
   display: flex;
   height: 100vh;
   background: var(--bg-primary);

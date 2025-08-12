@@ -8,7 +8,6 @@ import { Sidebar, useSidebarState } from "./Sidebar";
 import { RecordView } from "./RecordView";
 import { TranscriptsView } from "./TranscriptsView";
 import { SettingsView } from "./SettingsView";
-import { SettingsViewV2 } from "./SettingsViewV2";
 import { StatsView } from "./StatsView";
 import Dictionary from "./Dictionary";
 import { WebhookManagement } from "./WebhookManagement";
@@ -504,11 +503,6 @@ export function AppContent() {
         {currentView === 'settings' && (
           <SettingsErrorBoundary>
             <SettingsView />
-          </SettingsErrorBoundary>
-        )}
-        {currentView === 'settings-v2' && (
-          <SettingsErrorBoundary>
-            <SettingsViewV2 />
           </SettingsErrorBoundary>
         )}
         {currentView === 'stats' && (

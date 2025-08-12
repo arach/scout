@@ -383,13 +383,11 @@
 }
 
 /* Settings button - spin quickly */
-.sidebar-button-settings:hover svg,
-.sidebar-button-settings-v2:hover svg {
+.sidebar-button-settings:hover svg {
   animation: spinQuick 0.3s ease-out;
 }
 
-.sidebar-button-settings:active svg,
-.sidebar-button-settings-v2:active svg {
+.sidebar-button-settings:active svg {
   animation: spinQuick 0.3s ease-out;
 }
 
