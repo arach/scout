@@ -4,7 +4,7 @@ import { RecordView } from '../RecordView';
 
 // Lazy load heavy components that aren't needed immediately
 const TranscriptsView = lazy(() => import('../TranscriptsView').then(m => ({ default: m.TranscriptsView })));
-const SettingsView = lazy(() => import('../SettingsView').then(m => ({ default: m.SettingsView })));
+const SettingsView = lazy(() => import('../SettingsViewV2').then(m => ({ default: m.SettingsViewV2 })));
 const StatsView = lazy(() => import('../StatsView').then(m => ({ default: m.StatsView })));
 const Dictionary = lazy(() => import('../Dictionary'));
 import type { ViewType } from './types';

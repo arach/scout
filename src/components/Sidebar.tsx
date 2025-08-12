@@ -4,7 +4,7 @@ import { Settings, ChevronLeft, ChevronRight, Webhook } from 'lucide-react';
 import { webhookApi } from '../lib/webhooks';
 import './Sidebar.css';
 
-type View = 'record' | 'transcripts' | 'settings' | 'stats' | 'dictionary' | 'webhooks';
+type View = 'record' | 'transcripts' | 'settings' | 'settings-v2' | 'stats' | 'dictionary' | 'webhooks';
 
 interface SidebarProps {
   currentView: View;
@@ -264,6 +264,15 @@ export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpande
       </div>
       
       <div className="sidebar-bottom-buttons">
+        <button
+          className={`sidebar-button sidebar-button-settings-v2 ${currentView === 'settings-v2' ? 'active' : ''}`}
+          onClick={() => handleViewChange('settings-v2')}
+          aria-label="Settings V2"
+        >
+          <Settings size={20} />
+          {isExpanded && <span className="sidebar-label">Settings V2</span>}
+          <span className="sidebar-tooltip">Settings V2</span>
+        </button>
         <button
           className={`sidebar-button sidebar-button-settings ${currentView === 'settings' ? 'active' : ''}`}
           onClick={() => handleViewChange('settings')}

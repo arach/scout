@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useUIContext } from '../../contexts/UIContext';
 import { webhookApi } from '../../lib/webhooks';
+import { Toggle } from '../ui/Toggle';
 
 export const WebhookSettingsSimple: React.FC = () => {
   const [webhooksEnabled, setWebhooksEnabled] = useState(false);

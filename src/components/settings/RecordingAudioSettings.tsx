@@ -4,6 +4,7 @@ import { useSettings as useSettingsHook } from '../../hooks/useSettingsContext';
 import { useHotkeyCapture } from '../../hooks/useHotkeyCapture';
 import { formatShortcutJSX } from '../../lib/formatShortcutJSX';
 import { Dropdown } from '../Dropdown';
+import { Toggle } from '../ui/Toggle';
 import { invoke } from '@tauri-apps/api/core';
 import './RecordingAudioSettings.css';
 
@@ -131,46 +132,27 @@ export const RecordingAudioSettings = memo(function RecordingAudioSettings() {
         </div>
 
         {/* Auto-copy Toggle */}
-        <div className="toggle-setting">
-          <label htmlFor="auto-copy">Auto-copy to clipboard</label>
-          <div className="toggle-switch">
-            <input
-              id="auto-copy"
-              type="checkbox"
-              checked={clipboard.autoCopy}
-              onChange={actions.toggleAutoCopy}
-            />
-            <span className="toggle-switch-slider"></span>
-          </div>
-        </div>
+        <Toggle
+          label="Auto-copy to clipboard"
+          checked={clipboard.autoCopy}
+          onChange={actions.toggleAutoCopy}
+        />
         
         {/* Auto-paste Toggle */}
-        <div className="toggle-setting">
-          <label htmlFor="auto-paste">Auto-paste after transcription</label>
-          <div className="toggle-switch">
-            <input
-              id="auto-paste"
-              type="checkbox"
-              checked={clipboard.autoPaste}
-              onChange={actions.toggleAutoPaste}
-            />
-            <span className="toggle-switch-slider"></span>
-          </div>
-        </div>
+        <Toggle
+          label="Auto-paste after transcription"
+          checked={clipboard.autoPaste}
+          onChange={actions.toggleAutoPaste}
+        />
 
         {/* Sound Enable Toggle with Preview */}
-        <div className="toggle-setting">
-          <label htmlFor="sound-feedback">Enable sound feedback</label>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div className="toggle-switch">
-              <input
-                id="sound-feedback"
-                type="checkbox"
-                checked={sound.soundEnabled}
-                onChange={actions.toggleSoundEnabled}
-              />
-              <span className="toggle-switch-slider"></span>
-            </div>
+        <div className="toggle-setting-with-action">
+          <Toggle
+            label="Enable sound feedback"
+            checked={sound.soundEnabled}
+            onChange={actions.toggleSoundEnabled}
+          />
+          <div style={{ display: 'flex', alignItems: 'center', marginLeft: 'auto' }}>
             {sound.soundEnabled && (
               <button
                 onClick={previewSoundFlow}

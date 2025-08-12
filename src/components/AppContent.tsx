@@ -8,6 +8,7 @@ import { Sidebar, useSidebarState } from "./Sidebar";
 import { RecordView } from "./RecordView";
 import { TranscriptsView } from "./TranscriptsView";
 import { SettingsView } from "./SettingsView";
+import { SettingsViewV2 } from "./SettingsViewV2";
 import { StatsView } from "./StatsView";
 import Dictionary from "./Dictionary";
 import { WebhookManagement } from "./WebhookManagement";
@@ -226,7 +227,7 @@ export function AppContent() {
       if (result) {
         try {
           // Play loading sound when starting file upload
-          await invoke('play_loading_sound');
+          await invokeTyped('play_loading_sound');
           
           setIsProcessing(true);
           const filename = result.split('/').pop() || 'audio file';
@@ -503,6 +504,11 @@ export function AppContent() {
         {currentView === 'settings' && (
           <SettingsErrorBoundary>
             <SettingsView />
+          </SettingsErrorBoundary>
+        )}
+        {currentView === 'settings-v2' && (
+          <SettingsErrorBoundary>
+            <SettingsViewV2 />
           </SettingsErrorBoundary>
         )}
         {currentView === 'stats' && (

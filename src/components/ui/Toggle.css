@@ -1,0 +1,135 @@
+/* Toggle.css - Clean toggle switch component */
+
+/* Toggle Button - Clean minimal style */
+.toggle {
+  position: relative;
+  background: rgba(71, 85, 105, 0.6);
+  border: none;
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.toggle:hover:not(.toggle-disabled) {
+  background: rgba(71, 85, 105, 0.7);
+}
+
+.toggle:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(71, 85, 105, 0.3), inset 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+/* Sizes */
+.toggle-small {
+  width: 32px;
+  height: 18px;
+}
+
+.toggle-medium {
+  width: 36px;
+  height: 20px;
+}
+
+.toggle-large {
+  width: 44px;
+  height: 24px;
+}
+
+/* Slider */
+.toggle-slider {
+  position: absolute;
+  background: white;
+  border-radius: 9999px;
+  transition: transform 0.2s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.toggle-small .toggle-slider {
+  width: 14px;
+  height: 14px;
+  left: 2px;
+  top: 2px;
+}
+
+.toggle-medium .toggle-slider {
+  width: 16px;
+  height: 16px;
+  left: 2px;
+  top: 2px;
+}
+
+.toggle-large .toggle-slider {
+  width: 20px;
+  height: 20px;
+  left: 2px;
+  top: 2px;
+}
+
+/* Checked State */
+.toggle-checked {
+  background: rgba(16, 185, 129, 0.8);
+}
+
+.toggle-checked:hover:not(.toggle-disabled) {
+  background: rgba(16, 185, 129, 0.9);
+}
+
+.toggle-checked:focus-visible {
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.3), inset 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.toggle-checked.toggle-small .toggle-slider {
+  transform: translateX(14px);
+}
+
+.toggle-checked.toggle-medium .toggle-slider {
+  transform: translateX(16px);
+}
+
+.toggle-checked.toggle-large .toggle-slider {
+  transform: translateX(20px);
+}
+
+/* Disabled State */
+.toggle-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.toggle-disabled:hover {
+  background: rgba(71, 85, 105, 0.5);
+  border-color: rgba(71, 85, 105, 0.3);
+}
+
+/* Wrapper with Label */
+.toggle-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.toggle-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.toggle-label {
+  display: block;
+  font-size: 14px;
+  color: #cbd5e1;
+  font-weight: 400;
+  margin: 0;
+}
+
+.toggle-description {
+  font-size: 12px;
+  color: #64748b;
+  margin: 4px 0 0 0;
+  font-weight: 300;
+  line-height: 1.5;
+}
