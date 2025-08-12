@@ -13,11 +13,12 @@
 }
 
 /* Position buttons - darker and more visible */
-.position-button {
+.overlay-position-grid .position-button {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.4);
+  background: rgba(0, 0, 0, 0.4) !important;
+  background-color: rgba(0, 0, 0, 0.4) !important;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 6px;
   color: rgba(255, 255, 255, 0.6);
@@ -29,15 +30,18 @@
   margin: 0 0 1px 0;
 }
 
-.position-button:hover {
+.overlay-position-grid .position-button:hover:not(:disabled) {
   border-color: rgba(255, 255, 255, 0.25);
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.6) !important;
+  background-color: rgba(0, 0, 0, 0.6) !important;
   color: rgba(255, 255, 255, 0.9);
+  transform: none;
 }
 
 /* Active state - blue accent */
-.position-button.active {
-  background: var(--accent-primary);
+.overlay-position-grid .position-button.active {
+  background: var(--accent-primary) !important;
+  background-color: var(--accent-primary) !important;
   border-color: var(--accent-primary);
   color: white;
   position: relative;
