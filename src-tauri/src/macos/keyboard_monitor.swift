@@ -290,9 +290,6 @@ func keyboard_event_callback(_ event: UnsafePointer<CChar>)
             return false // Immediately pass through unrelated events
         }
         
-        // Only log for our target key or modifiers
-        print("[KeyboardMonitor] \(eventType) event - keyCode: \(keyCode), flags: \(flags)")
-        
         // Separate keydown and keyup logic for better reliability
         if type == .keyDown {
             // For keydown, only consume when we have the exact complete shortcut
