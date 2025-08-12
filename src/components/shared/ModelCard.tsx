@@ -66,16 +66,6 @@ export function ModelCard<T extends BaseModel>({
     >
       <div className="model-card-header">
         <h3 className="model-name">{model.name}</h3>
-        <a 
-          href={`https://huggingface.co/ggerganov/whisper.cpp`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="model-hf-link"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <span className="model-hf-url">huggingface.co/ggerganov/whisper.cpp</span>
-          <ExternalLink size={12} />
-        </a>
         <div className="model-status-pills">
           {model.downloaded && (
             <span className="model-status-pill installed">
@@ -116,6 +106,18 @@ export function ModelCard<T extends BaseModel>({
       
       {/* Spacer to push buttons to bottom */}
       <div className="model-spacer" />
+      
+      {/* Hugging Face link */}
+      <a 
+        href={`https://huggingface.co/ggerganov/whisper.cpp`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="model-hf-link"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <span className="model-hf-url">https://huggingface.co/ggerganov/whisper.cpp</span>
+        <ExternalLink size={12} />
+      </a>
       
       {/* Action section - only show when there are actions */}
       {(model.downloaded || isDownloading) && (
