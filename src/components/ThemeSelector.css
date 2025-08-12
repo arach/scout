@@ -1,19 +1,19 @@
 .theme-selector-container {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
 }
 
 .theme-categories {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 6px;
 }
 
 .theme-category {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .theme-category-title {
@@ -27,8 +27,8 @@
 
 .theme-options {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 3px;
   max-width: 100%;
 }
 
@@ -37,16 +37,17 @@
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
+  gap: 6px;
+  padding: 6px 8px;
   background: var(--bg-secondary);
   border: none;
-  border-radius: 4px;
+  border-radius: 3px;
   cursor: pointer;
   transition: all 0.15s ease;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-secondary);
   min-height: 0;
+  height: 32px;
 }
 
 .theme-option:hover {
@@ -61,8 +62,8 @@
 }
 
 .theme-option svg {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   flex-shrink: 0;
 }
 
@@ -70,6 +71,10 @@
   text-align: left;
   word-break: break-word;
   flex: 1;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .theme-option.loading {
@@ -106,7 +111,7 @@
 /* Responsive adjustments */
 @media (max-width: 640px) {
   .theme-options {
-    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    grid-template-columns: repeat(3, 1fr);
   }
   
   .theme-option {

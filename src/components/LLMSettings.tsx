@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { ChevronDown, Sparkles, Settings } from 'lucide-react';
 import { LLMModelManager } from './LLMModelManager';
 import { LLMSettings as LLMSettingsType, LLMPromptTemplate } from '../types/llm';
+import { Toggle } from './ui/Toggle';
 import './LLMSettings.css';
 
 interface LLMSettingsProps {
@@ -50,18 +51,11 @@ export const LLMSettings: React.FC<LLMSettingsProps> = ({ settings, onUpdateSett
     <div className="llm-settings">
       {/* Main Toggle */}
       <div className="llm-setting-item">
-        <div className="llm-toggle-container">
-          <span className="llm-toggle-label">Enable AI Post-Processing</span>
-          <div className="toggle-switch">
-            <input
-              type="checkbox"
-              id="llm-enable-toggle"
-              checked={settings.enabled}
-              onChange={(e) => onUpdateSettings({ enabled: e.target.checked })}
-            />
-            <span className="toggle-switch-slider"></span>
-          </div>
-        </div>
+        <Toggle
+          label="Enable AI Post-Processing"
+          checked={settings.enabled}
+          onChange={(checked) => onUpdateSettings({ enabled: checked })}
+        />
       </div>
 
       {/* Model Selection */}
@@ -170,17 +164,12 @@ export const LLMSettings: React.FC<LLMSettingsProps> = ({ settings, onUpdateSett
 
               {/* Auto-download */}
               <div className="llm-setting-item">
-                <label className="llm-toggle-label">
-                  <input
-                    type="checkbox"
-                    checked={settings.auto_download_model}
-                    onChange={(e) => onUpdateSettings({ auto_download_model: e.target.checked })}
-                  />
-                  <span>Auto-download models</span>
-                </label>
-                <p className="llm-setting-hint">
-                  Automatically download AI models when needed
-                </p>
+                <Toggle
+                  label="Auto-download models"
+                  description="Automatically download AI models when needed"
+                  checked={settings.auto_download_model}
+                  onChange={(checked) => onUpdateSettings({ auto_download_model: checked })}
+                />
               </div>
             </div>
           )}

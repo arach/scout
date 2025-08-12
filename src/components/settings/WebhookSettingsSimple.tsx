@@ -67,39 +67,20 @@ export const WebhookSettingsSimple: React.FC = () => {
   return (
     <div className="webhook-settings-simple">
       <div className="setting-item">
-        <div className="setting-row">
-          <label htmlFor="webhooks-enabled">
-            Enable webhooks
-            {webhookCount > 0 && (
-              <span className="webhook-count">
-                {webhookCount} configured
-              </span>
-            )}
-          </label>
-          <div className="setting-controls">
-            <div className="toggle-switch">
-              <input
-                id="webhooks-enabled"
-                type="checkbox"
-                checked={webhooksEnabled}
-                onChange={handleToggleWebhooks}
-                disabled={webhookCount === 0}
-              />
-              <span className="toggle-switch-slider"></span>
-            </div>
-            <button
-              onClick={() => setCurrentView('webhooks')}
-              className="manage-button"
-            >
-              {webhookCount === 0 ? 'Set up' : 'Manage'}
-            </button>
-          </div>
-        </div>
-        {webhookCount === 0 && (
-          <p className="webhook-hint">
-            Send transcriptions to external services automatically
-          </p>
-        )}
+        <Toggle
+          label={`Enable webhooks${webhookCount > 0 ? ` (${webhookCount} configured)` : ''}`}
+          checked={webhooksEnabled}
+          onChange={handleToggleWebhooks}
+          disabled={webhookCount === 0}
+          description={webhookCount === 0 ? 'Send transcriptions to external services automatically' : undefined}
+        />
+        <button
+          onClick={() => setCurrentView('webhooks')}
+          className="manage-button"
+          style={{ marginTop: '12px' }}
+        >
+          {webhookCount === 0 ? 'Set up' : 'Manage'}
+        </button>
       </div>
     </div>
   );

@@ -6,56 +6,58 @@
 /* Override default grid for compact mode */
 .theme-selector-compact .theme-options {
   display: grid;
-  grid-template-columns: repeat(3, 1fr); /* 3 columns for compact containers */
-  gap: 12px;
+  grid-template-columns: repeat(4, 1fr); /* 4 columns for compact containers */
+  gap: 3px;
   max-width: 100%;
   margin-top: 0; /* Remove extra top margin */
 }
 
 /* When in a full-width section, use more columns */
 .collapsible-section--full .theme-selector-compact .theme-options {
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
 }
 
 /* Desktop: more columns for full-width sections */
 @media (min-width: 900px) {
   .collapsible-section--full .theme-selector-compact .theme-options {
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(6, 1fr);
   }
 }
 
 /* Very wide screens: maximum columns for full-width */
 @media (min-width: 1400px) {
   .collapsible-section--full .theme-selector-compact .theme-options {
-    grid-template-columns: repeat(6, 1fr);
+    grid-template-columns: repeat(8, 1fr);
   }
 }
 
 /* Compact theme cards */
 .theme-selector-compact .theme-option {
-  aspect-ratio: 1; /* Square cards */
-  min-height: 90px; /* Larger cards */
-  padding: 12px;
-  gap: 8px;
+  /* Remove aspect-ratio and min-height for horizontal layout */
+  padding: 6px 8px;
+  gap: 6px;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
+  height: 32px;
 }
 
 /* Icons in compact mode */
 .theme-selector-compact .theme-option svg {
-  width: 28px; /* Larger icons */
-  height: 28px;
+  width: 14px;
+  height: 14px;
 }
 
 /* Text */
 .theme-selector-compact .theme-option span {
   font-size: 11px;
-  line-height: 1.3;
-  text-align: center;
+  line-height: 1.1;
+  text-align: left;
   max-width: 100%;
-  word-break: break-word;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Active state - no blue! */
@@ -66,26 +68,26 @@
   position: relative;
 }
 
-/* Add subtle dot indicator for active state */
+/* Add subtle left bar indicator for active state */
 .theme-selector-compact .theme-option.active::after {
   content: '';
   position: absolute;
-  bottom: 4px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: var(--text-primary);
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2px;
+  height: 18px;
+  border-radius: 0 1px 1px 0;
+  background: var(--accent-primary);
 }
 
 /* Category titles more compact */
 .theme-selector-compact .theme-category {
-  gap: 8px; /* Reduced spacing */
+  gap: 4px; /* Reduced spacing */
 }
 
 .theme-selector-compact .theme-categories {
-  gap: 16px; /* Reduced from 24px */
+  gap: 6px; /* Reduced from 24px */
 }
 
 /* Alternative: Horizontal scroll for ultra-compact */

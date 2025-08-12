@@ -15,6 +15,7 @@ import { ThemesSettings } from './settings/ThemesSettings';
 import { WebhookSettingsSimple } from './settings/WebhookSettingsSimple';
 import { ModelManager } from './ModelManager';
 import { LLMSettings } from './LLMSettings';
+import { LLMSettings as LLMSettingsType } from '../types/llm';
 import './SettingsViewV2.css';
 
 interface SidebarItem {
@@ -62,6 +63,14 @@ export const SettingsViewV2 = memo(function SettingsViewV2() {
   const [sidebarWidth, setSidebarWidth] = useState(225);
   const [isResizing, setIsResizing] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [llmSettings, setLlmSettings] = useState<LLMSettingsType>({
+    enabled: false,
+    model_id: '',
+    temperature: 0.7,
+    max_tokens: 2048,
+    auto_download_model: false,
+    enabled_prompts: []
+  });
   const sidebarRef = useRef<HTMLDivElement>(null);
   const MIN_WIDTH = 150;
   const MAX_WIDTH = 350;
@@ -164,16 +173,9 @@ export const SettingsViewV2 = memo(function SettingsViewV2() {
       case 'processing':
         return (
           <LLMSettings 
-                  settings={{
-                    enabled: false,
-                    model_id: '',
-                    temperature: 0.7,
-                    max_tokens: 2048,
-                    auto_download_model: false,
-                    enabled_prompts: []
-                  }}
+                  settings={llmSettings}
                   onUpdateSettings={(updates) => {
-                    console.log('LLM settings update:', updates);
+                    setLlmSettings(prev => ({ ...prev, ...updates }));
                   }}
           />
         );
