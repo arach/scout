@@ -65,28 +65,36 @@ export function ModelCard<T extends BaseModel>({
     >
       <div className="model-card-header">
         <h3 className="model-name">
-          <span>{model.name}</span>
-          <div className="model-status-pills">
-            {model.downloaded && (
-              <span className="model-status-pill installed">
-                <CheckCircle size={10} />
-                Installed
-              </span>
-            )}
-            {model.downloaded && model.coreml_downloaded && (
-              <span className="model-status-pill accelerated">
-                <Zap size={10} />
-                CoreML Accelerated
-              </span>
-            )}
-            {isClickableForDownload && (
-              <span className="model-status-pill download-hint">
-                <Download size={10} />
-                Click to Install
-              </span>
-            )}
-          </div>
+          <a 
+            href={`https://huggingface.co/ggerganov/whisper.cpp`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="model-name-link"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {model.name}
+          </a>
         </h3>
+        <div className="model-status-pills">
+          {model.downloaded && (
+            <span className="model-status-pill installed">
+              <CheckCircle size={10} />
+              Installed
+            </span>
+          )}
+          {model.downloaded && model.coreml_downloaded && (
+            <span className="model-status-pill accelerated">
+              <Zap size={10} />
+              CoreML Accelerated
+            </span>
+          )}
+          {isClickableForDownload && (
+            <span className="model-status-pill download-hint">
+              <Download size={10} />
+              Click to Install
+            </span>
+          )}
+        </div>
       </div>
       
       {/* Model description */}
