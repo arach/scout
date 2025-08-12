@@ -58,11 +58,13 @@ export const useSidebarState = (): SidebarState => {
 
 export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpanded }: SidebarProps) {
   const handleViewChange = async (view: View) => {
-    // Play transition sound when changing views
-    try {
-      await invoke('play_transition_sound');
-    } catch (error) {
-      console.error('Failed to play transition sound:', error);
+    // Play transition sound when changing views (if enabled)
+    if (localStorage.getItem('scout-ui-sounds-enabled') !== 'false') {
+      try {
+        await invoke('play_transition_sound');
+      } catch (error) {
+        console.error('Failed to play transition sound:', error);
+      }
     }
     onViewChange(view);
   };

@@ -626,6 +626,15 @@
   100% { transform: rotate(360deg) scale(1); }
 }
 
+/* Logs slide animation */
+@keyframes logsSlide {
+  0% { transform: translateY(0); }
+  25% { transform: translateY(-2px); }
+  50% { transform: translateY(0); }
+  75% { transform: translateY(2px); }
+  100% { transform: translateY(0); }
+}
+
 /* Apply animations on hover */
 .settings-sidebar-item-webhooks:hover .settings-sidebar-item-icon {
   animation: webhookHook 0.4s cubic-bezier(0.4, 0, 0.2, 1);
@@ -645,6 +654,10 @@
 
 .settings-sidebar-item-processing:hover .settings-sidebar-item-icon {
   animation: sparkle 0.4s ease-out;
+}
+
+.settings-sidebar-item-logs:hover .settings-sidebar-item-icon {
+  animation: logsSlide 0.4s ease-out;
 }
 
 /* Scrollbar Styling */

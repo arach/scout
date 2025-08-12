@@ -5,6 +5,7 @@ import {
   AudioWaveform, 
   Sparkles, 
   Webhook,
+  FileText,
   ChevronLeft,
   ChevronRight
 } from 'lucide-react';
@@ -13,6 +14,7 @@ import { RecordingAudioSettings } from './settings/RecordingAudioSettings';
 import { DisplayInterfaceSettings } from './settings/DisplayInterfaceSettings';
 import { ThemesSettings } from './settings/ThemesSettings';
 import { WebhookSettingsSimple } from './settings/WebhookSettingsSimple';
+import { LogsViewer } from './settings/LogsViewer';
 import { ModelManager } from './ModelManager';
 import { LLMSettings } from './LLMSettings';
 import { LLMSettings as LLMSettingsType } from '../types/llm';
@@ -55,6 +57,12 @@ const sidebarItems: SidebarItem[] = [
     label: 'Webhooks', 
     icon: Webhook,
     description: 'External service integration'
+  },
+  { 
+    id: 'logs', 
+    label: 'Logs', 
+    icon: FileText,
+    description: 'View and export application logs'
   },
 ];
 
@@ -182,6 +190,9 @@ export const SettingsView = memo(function SettingsView() {
 
       case 'webhooks':
         return <WebhookSettingsSimple />;
+
+      case 'logs':
+        return <LogsViewer />;
 
       default:
         return null;
