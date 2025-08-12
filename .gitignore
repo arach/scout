@@ -45,3 +45,4 @@ bundle-analysis.json
 
 # Claude Code files (not relevant for other developers)
 CLAUDE.md
+.claude/settings.local.json
