@@ -33,8 +33,7 @@ export const AppHeader = memo<AppHeaderProps>(({
     settings: 'Settings',
     stats: 'Stats',
     dictionary: 'Dictionary',
-    webhooks: 'Webhooks',
-    'audio-testing': 'Audio Testing'
+    webhooks: 'Webhooks'
   };
 
   return (
