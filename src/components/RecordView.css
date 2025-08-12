@@ -224,24 +224,23 @@
     height: 20px;
     padding: 0;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.85);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(0, 0, 0, 0.06);
-    color: #64748b; /* slate-500 equivalent - lighter */
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
     transition: all 0.3s ease-out;
     z-index: 3;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    
+    /* Always use dark/transparent styles */
+    background: transparent;
+    border: 1px solid transparent;
+    color: rgba(255, 255, 255, 0.3);
+    box-shadow: none;
 }
 
 .mic-settings-button:hover {
     transform: scale(1.1);
-    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-    border-color: rgba(0, 0, 0, 0.12);
+    color: rgba(255, 255, 255, 0.5);
 }
 
 /* Subtle rotation animation for gear icon on hover */
@@ -261,22 +260,7 @@
 /* Active state when mic picker is open */
 .mic-settings-button.active {
     transform: scale(1.05);
-    background: rgba(219, 234, 254, 0.9); /* blue-50 equivalent */
-    border-color: #dbeafe; /* blue-100 equivalent - more subtle */
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-}
-
-/* Icon styles are now handled via className in the component */
-
-@media (prefers-color-scheme: light) {
-    .mic-settings-button {
-        background: rgba(255, 255, 255, 0.9);
-        border-color: #e2e8f0; /* slate-200 equivalent */
-    }
-    
-    .mic-settings-button:hover {
-        border-color: #cbd5e1; /* slate-300 equivalent */
-    }
+    color: rgba(59, 130, 246, 0.8);
 }
 
 .stop-icon-large {
