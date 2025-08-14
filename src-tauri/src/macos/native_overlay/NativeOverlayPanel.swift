@@ -581,22 +581,35 @@ class CancelButton: NSButton {
     private var trackingArea: NSTrackingArea?
     
     override func draw(_ dirtyRect: NSRect) {
-        // Draw X symbol with dark background
+        // Check if we're in wide particles mode for even more subtle appearance
+        let isWideMode = (window as? NativeOverlayPanel)?.isWideParticlesMode ?? false
+        
+        // Draw glassy translucent background
         let buttonSize: CGFloat = bounds.width
         let circleRect = NSRect(x: 0, y: 0, width: buttonSize, height: buttonSize)
         let circlePath = NSBezierPath(ovalIn: circleRect)
         
-        // Dark background circle
-        if isHovering {
-            NSColor(white: 0.2, alpha: 1.0).setFill()
+        // Glassy background - very light and translucent
+        if isWideMode {
+            // Ultra subtle in wide mode
+            if isHovering {
+                NSColor(white: 1.0, alpha: 0.15).setFill()
+            } else {
+                NSColor(white: 1.0, alpha: 0.08).setFill()
+            }
         } else {
-            NSColor(white: 0.15, alpha: 1.0).setFill()
+            // Slightly more visible in normal mode
+            if isHovering {
+                NSColor(white: 0.2, alpha: 0.8).setFill()
+            } else {
+                NSColor(white: 0.15, alpha: 0.6).setFill()
+            }
         }
         circlePath.fill()
         
-        // Draw X symbol - adjusted for smaller button
-        let inset: CGFloat = 5  // Smaller inset for 16px button (was 6)
-        let lineWidth: CGFloat = 1.2  // Slightly thinner line
+        // Draw X symbol - very light
+        let inset: CGFloat = 5
+        let lineWidth: CGFloat = 1.0
         
         let path = NSBezierPath()
         path.lineWidth = lineWidth
@@ -608,10 +621,19 @@ class CancelButton: NSButton {
         path.move(to: NSPoint(x: bounds.width - inset, y: inset))
         path.line(to: NSPoint(x: inset, y: bounds.height - inset))
         
-        if isHovering {
-            NSColor(white: 0.9, alpha: 1.0).setStroke()
+        if isWideMode {
+            // Very light monochrome in wide mode
+            if isHovering {
+                NSColor(white: 1.0, alpha: 0.6).setStroke()
+            } else {
+                NSColor(white: 1.0, alpha: 0.3).setStroke()
+            }
         } else {
-            NSColor(white: 0.7, alpha: 1.0).setStroke()
+            if isHovering {
+                NSColor(white: 0.9, alpha: 1.0).setStroke()
+            } else {
+                NSColor(white: 0.7, alpha: 1.0).setStroke()
+            }
         }
         
         path.stroke()
@@ -717,7 +739,10 @@ class SquareButton: NSButton {
     private var trackingArea: NSTrackingArea?
     
     override func draw(_ dirtyRect: NSRect) {
-        // Modern stop button - red filled square
+        // Check if we're in wide particles mode for even more subtle appearance
+        let isWideMode = (window as? NativeOverlayPanel)?.isWideParticlesMode ?? false
+        
+        // Glassy stop button
         let squareSize: CGFloat = 8
         let squareRect = NSRect(
             x: bounds.midX - squareSize / 2,
@@ -727,18 +752,31 @@ class SquareButton: NSButton {
         )
         let squarePath = NSBezierPath(roundedRect: squareRect, xRadius: 2, yRadius: 2)
         
-        if isHovering {
-            // Brighter red on hover
-            NSColor(calibratedRed: 1.0, green: 0.3, blue: 0.25, alpha: 1.0).setFill()
-            // Add red glow
-            let glowColor = NSColor(calibratedRed: 1.0, green: 0.231, blue: 0.188, alpha: 0.3)
-            glowColor.setStroke()
-            let glowPath = NSBezierPath(roundedRect: squareRect.insetBy(dx: -2, dy: -2), xRadius: 3, yRadius: 3)
-            glowPath.lineWidth = 3
-            glowPath.stroke()
+        if isWideMode {
+            // Very subtle monochrome in wide mode
+            if isHovering {
+                NSColor(white: 1.0, alpha: 0.5).setFill()
+                // Subtle glow
+                let glowPath = NSBezierPath(roundedRect: squareRect.insetBy(dx: -2, dy: -2), xRadius: 3, yRadius: 3)
+                glowPath.lineWidth = 2
+                NSColor(white: 1.0, alpha: 0.2).setStroke()
+                glowPath.stroke()
+            } else {
+                NSColor(white: 1.0, alpha: 0.3).setFill()
+            }
         } else {
-            // Standard red color
-            NSColor(calibratedRed: 0.93, green: 0.27, blue: 0.18, alpha: 1.0).setFill()
+            // Normal mode - still red but translucent
+            if isHovering {
+                NSColor(calibratedRed: 1.0, green: 0.3, blue: 0.25, alpha: 0.9).setFill()
+                // Add red glow
+                let glowColor = NSColor(calibratedRed: 1.0, green: 0.231, blue: 0.188, alpha: 0.3)
+                glowColor.setStroke()
+                let glowPath = NSBezierPath(roundedRect: squareRect.insetBy(dx: -2, dy: -2), xRadius: 3, yRadius: 3)
+                glowPath.lineWidth = 3
+                glowPath.stroke()
+            } else {
+                NSColor(calibratedRed: 0.93, green: 0.27, blue: 0.18, alpha: 0.8).setFill()
+            }
         }
         
         squarePath.fill()
@@ -819,9 +857,9 @@ final class NativeOverlayPanel: NSPanel {
         self.isMovableByWindowBackground = false
     }
     
-    // Override to prevent stealing focus
+    // Override to allow keyboard input while preventing focus stealing
     override var canBecomeKey: Bool {
-        return false  // Never become key to prevent focus stealing
+        return true  // Need to be key to receive keyboard events
     }
     
     override var canBecomeMain: Bool {
@@ -1208,27 +1246,22 @@ class OverlayContentView: NSView {
                 
                 let buttonSize = UIConfig.buttonSize
                 
-                // Hide buttons in wide particles mode for cleaner look
-                if let panel = window as? NativeOverlayPanel, panel.isWideParticlesMode {
-                    cancelButton.isHidden = true
-                    stopButton.isHidden = true
-                } else {
-                    // Cancel button on left
-                    cancelButton.frame = NSRect(
-                        x: contentRect.minX,
-                        y: contentRect.midY - buttonSize / 2,
-                        width: buttonSize,
-                        height: buttonSize
-                    )
-                    
-                    // Stop button on right
-                    stopButton.frame = NSRect(
-                        x: contentRect.maxX - buttonSize,
-                        y: contentRect.midY - buttonSize / 2,
-                        width: buttonSize,
-                        height: buttonSize
-                    )
-                }
+                // Position buttons - they'll be visible but subtle in wide mode
+                // Cancel button on left
+                cancelButton.frame = NSRect(
+                    x: contentRect.minX,
+                    y: contentRect.midY - buttonSize / 2,
+                    width: buttonSize,
+                    height: buttonSize
+                )
+                
+                // Stop button on right
+                stopButton.frame = NSRect(
+                    x: contentRect.maxX - buttonSize,
+                    y: contentRect.midY - buttonSize / 2,
+                    width: buttonSize,
+                    height: buttonSize
+                )
                 
                 // Waveform in the middle between buttons
                 // For wide particles mode, use the full width
@@ -1371,13 +1404,9 @@ class OverlayContentView: NSView {
         isExpanded = expanded
         
         // Update UI based on state
-        // Check if we're in wide particles mode
-        let isWideMode = (window as? NativeOverlayPanel)?.isWideParticlesMode ?? false
-        
         recordButton.isHidden = !(isExpanded && (state == .idle || state == .hovered))
-        // Hide control buttons in wide particles mode
-        cancelButton.isHidden = !(isExpanded && state == .recording && !isWideMode)
-        stopButton.isHidden = !(isExpanded && state == .recording && !isWideMode)
+        cancelButton.isHidden = !(isExpanded && state == .recording)
+        stopButton.isHidden = !(isExpanded && state == .recording)
         activityIndicator.isHidden = true  // Always hidden now
         // Processing dots are handled in layout based on isExpanded
         statusLabel.isHidden = true  // Never show status label anymore
