@@ -31,6 +31,14 @@ export interface ThemeColors {
   // Special colors
   shadowColor?: string;
   overlayBackdrop?: string;
+  
+  // Scrollbar colors
+  scrollbarTrack?: string;
+  scrollbarThumb?: string;
+  scrollbarThumbHover?: string;
+  
+  // Input colors
+  bgInput?: string;
 }
 
 export interface ThemeTypography {
