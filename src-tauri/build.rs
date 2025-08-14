@@ -319,6 +319,7 @@ fn main() {
         // Compile Native NSPanel overlay
         println!("cargo:rerun-if-changed=src/macos/native_overlay/Logger.swift");
         println!("cargo:rerun-if-changed=src/macos/native_overlay/NativeOverlayPanel.swift");
+        println!("cargo:rerun-if-changed=src/macos/native_overlay/ParticleOverlayView.swift");
         println!("cargo:rerun-if-changed=src/macos/native_overlay/OverlayViewController.swift");
         println!("cargo:rerun-if-changed=src/macos/native_overlay/OverlayBridge.swift");
 
@@ -339,6 +340,10 @@ fn main() {
                 ),
                 &format!(
                     "{}/src/macos/native_overlay/NativeOverlayPanel.swift",
+                    env!("CARGO_MANIFEST_DIR")
+                ),
+                &format!(
+                    "{}/src/macos/native_overlay/ParticleOverlayView.swift",
                     env!("CARGO_MANIFEST_DIR")
                 ),
                 &format!(

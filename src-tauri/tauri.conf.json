@@ -18,7 +18,8 @@
         "height": 800,
         "closable": true,
         "minimizable": true,
-        "dragDropEnabled": true
+        "dragDropEnabled": true,
+        "theme": "Dark"
       }
     ],
     "security": {

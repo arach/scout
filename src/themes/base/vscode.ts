@@ -28,6 +28,14 @@ export const vscodeLight: Theme = {
     shadowColor: 'rgba(0, 0, 0, 0.1)',
     bgOverlay: 'rgba(255, 255, 255, 0.95)',
     overlayBackdrop: 'rgba(0, 0, 0, 0.1)',
+    
+    // Scrollbar colors
+    scrollbarTrack: '#f5f5f5',
+    scrollbarThumb: '#c0c0c0',
+    scrollbarThumbHover: '#888888',
+    
+    // Input colors
+    bgInput: '#ffffff',
   },
   typography: {
     fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
@@ -86,6 +94,14 @@ export const vscodeDark: Theme = {
     shadowColor: 'rgba(0, 0, 0, 0.3)',
     bgOverlay: 'rgba(42, 42, 42, 0.95)',
     overlayBackdrop: 'rgba(0, 0, 0, 0.5)',
+    
+    // Scrollbar colors
+    scrollbarTrack: '#2a2a2a',
+    scrollbarThumb: '#4a4a4a',
+    scrollbarThumbHover: '#5a5a5a',
+    
+    // Input colors
+    bgInput: '#3f3f46',
   },
   typography: {
     fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',

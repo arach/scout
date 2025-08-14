@@ -37,11 +37,11 @@
 .search-input-expanded {
     width: 400px;
     padding: 6px 12px;
-    border: 1px solid #e5e7eb !important;
+    border: 1px solid var(--border-primary);
     border-radius: 6px;
     font-size: 13px;
-    background: white !important;
-    color: #111827 !important;
+    background: var(--bg-input);
+    color: var(--text-primary);
     outline: none;
     transition: border-color 0.2s ease, box-shadow 0.2s ease;
     height: 32px;
@@ -49,8 +49,8 @@
 }
 
 .search-input-expanded:focus {
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px var(--accent-primary-alpha-10);
 }
 
 /* 🧠 Header action buttons container */
@@ -78,7 +78,7 @@
     height: 32px;
     white-space: nowrap;
     flex-shrink: 0;
-    background: white;
+    background: var(--bg-primary);
     color: var(--text-primary);
 }
 
@@ -89,9 +89,9 @@
 }
 
 .header-action-btn.select-mode:hover {
-    background: #F3F4F6;
-    border-color: #3B82F6;
-    color: #3B82F6;
+    background: var(--bg-hover);
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
     transform: scale(1.02);
 }
 
@@ -102,9 +102,9 @@
 }
 
 .header-action-btn.select-all:hover {
-    background: #F3F4F6;
-    border-color: #3B82F6;
-    color: #3B82F6;
+    background: var(--bg-hover);
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
     transform: scale(1.02);
 }
 
@@ -125,98 +125,15 @@
 }
 
 .header-action-btn.export:hover {
-    background: #F3F4F6;
-    border-color: #3B82F6;
-    color: #3B82F6;
+    background: var(--bg-hover);
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
     transform: scale(1.02);
 }
 
-@media (prefers-color-scheme: dark) {
-    .search-input-expanded {
-        background: #3f3f46; /* zinc-700 */
-        border-color: #52525b; /* zinc-600 */
-        color: #f4f4f5; /* zinc-100 */
-    }
-    
-    .search-input-expanded:focus {
-        border-color: #60a5fa; /* blue-400 */
-        box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.1);
-    }
-    
-    .search-input-expanded::placeholder {
-        color: #a1a1aa; /* zinc-400 */
-    }
-    
-    .header-action-btn.select-mode {
-        background: #3f3f46; /* zinc-700 */
-        color: #f4f4f5; /* zinc-100 */
-        border: 1px solid #52525b; /* zinc-600 */
-    }
-    
-    .header-action-btn.select-mode:hover {
-        background: #52525b; /* zinc-600 */
-        border-color: #71717a; /* zinc-500 */
-        transform: scale(1.02);
-    }
-    
-    .header-action-btn.select-all {
-        background: #3f3f46; /* zinc-700 */
-        color: #f4f4f5; /* zinc-100 */
-        border: 1px solid #52525b; /* zinc-600 */
-    }
-    
-    .header-action-btn.select-all:hover {
-        background: #52525b; /* zinc-600 */
-        border-color: #71717a; /* zinc-500 */
-        transform: scale(1.02);
-    }
-    
-    .header-action-btn.export {
-        background: #3f3f46; /* zinc-700 */
-        color: #f4f4f5; /* zinc-100 */
-        border: 1px solid #52525b; /* zinc-600 */
-    }
-    
-    .header-action-btn.export:hover {
-        background: #52525b; /* zinc-600 */
-        border-color: #71717a; /* zinc-500 */
-        transform: scale(1.02);
-    }
-}
+/* Dark theme adjustments now handled by CSS variables in themes/vscode-dark.css */
 
-/* Light theme override - MUST come after media query */
-[data-theme="vscode-light"] .search-input-expanded {
-    background: white !important;
-    border-color: #e5e7eb !important;
-    color: #111827 !important;
-}
-
-[data-theme="vscode-light"] .search-input-expanded:focus {
-    border-color: #3b82f6 !important;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1) !important;
-}
-
-[data-theme="vscode-light"] .search-input-expanded::placeholder {
-    color: #9ca3af !important;
-}
-
-/* Prevent dark mode override when in light theme */
-@media (prefers-color-scheme: dark) {
-    [data-theme="vscode-light"] .search-input-expanded {
-        background: white !important;
-        border-color: #e5e7eb !important;  
-        color: #111827 !important;
-    }
-    
-    [data-theme="vscode-light"] .search-input-expanded:focus {
-        border-color: #3b82f6 !important;
-        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1) !important;
-    }
-    
-    [data-theme="vscode-light"] .search-input-expanded::placeholder {
-        color: #9ca3af !important;
-    }
-}
+/* Theme-specific overrides handled by theme system */
 
 /* Transcript view wrapper - fills entire view */
 .transcripts-view-wrapper {
@@ -414,7 +331,7 @@
     height: 100%;
     position: relative;
     scrollbar-width: thin;
-    scrollbar-color: var(--border-primary) var(--bg-tertiary);
+    scrollbar-color: var(--scrollbar-thumb, var(--border-primary)) var(--scrollbar-track, var(--bg-tertiary));
 }
 
 /* Scrollbar styling for non-virtualized list */
@@ -423,16 +340,16 @@
 }
 
 .transcript-list-scrollable::-webkit-scrollbar-track {
-    background: var(--bg-tertiary);
+    background: var(--scrollbar-track, var(--bg-tertiary));
 }
 
 .transcript-list-scrollable::-webkit-scrollbar-thumb {
-    background: var(--border-primary);
+    background: var(--scrollbar-thumb, var(--border-primary));
     border-radius: 4px;
 }
 
 .transcript-list-scrollable::-webkit-scrollbar-thumb:hover {
-    background: var(--border-hover);
+    background: var(--scrollbar-thumb-hover, var(--border-hover));
 }
 
 @media (max-width: 768px) {
@@ -444,7 +361,7 @@
 /* Virtualized list styles */
 .transcript-list-virtual {
     scrollbar-width: thin;
-    scrollbar-color: var(--border-primary) var(--bg-tertiary);
+    scrollbar-color: var(--scrollbar-thumb, var(--border-primary)) var(--scrollbar-track, var(--bg-tertiary));
     /* Ensure the virtual list uses full width and height */
     width: 100% !important;
     height: 100% !important;
@@ -487,16 +404,16 @@
 }
 
 .transcript-list-virtual::-webkit-scrollbar-track {
-    background: var(--bg-tertiary);
+    background: var(--scrollbar-track, var(--bg-tertiary));
 }
 
 .transcript-list-virtual::-webkit-scrollbar-thumb {
-    background: var(--border-primary);
+    background: var(--scrollbar-thumb, var(--border-primary));
     border-radius: 4px;
 }
 
 .transcript-list-virtual::-webkit-scrollbar-thumb:hover {
-    background: var(--border-hover);
+    background: var(--scrollbar-thumb-hover, var(--border-hover));
 }
 
 /* Date grouping styles - removed duplicate */
