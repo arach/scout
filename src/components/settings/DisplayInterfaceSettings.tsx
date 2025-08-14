@@ -87,6 +87,7 @@ export const DisplayInterfaceSettings = memo(function DisplayInterfaceSettings()
             onChange={(value) => actions.updateOverlayTreatment(value as any)}
             options={[
               { value: 'particles', label: 'Particles' },
+              { value: 'wide-particles', label: 'Wide Particles (Experimental)' },
               { value: 'pulsingDot', label: 'Pulsing Dot' },
               { value: 'animatedWaveform', label: 'Waveform' },
               { value: 'gradientOrb', label: 'Gradient Orb' },
