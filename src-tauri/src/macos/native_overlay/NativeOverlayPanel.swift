@@ -400,7 +400,13 @@ class ParticleWaveformView: NSView {
     private var animationTimer: Timer?
     private var volumeLevel: CGFloat = 0.0
     private var lastUpdateTime: TimeInterval = 0
-    private let maxParticles = 100
+    private var maxParticles: Int {
+        // More particles in wide mode to fill the space
+        if let panel = window as? NativeOverlayPanel, panel.isWideParticlesMode {
+            return 150  // Moderate increase
+        }
+        return 100
+    }
     
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -442,27 +448,59 @@ class ParticleWaveformView: NSView {
         volumeLevel = max(0, min(1, level))
     }
     
+    private func createParticle(volumeLevel: CGFloat, isWideMode: Bool) {
+        if isWideMode {
+            // Wide mode - particles spawn from left and flow right (like original but adapted)
+            let spawnX = CGFloat.random(in: -10...10)  // Start from left edge
+            let yPosition = bounds.height / 2 + CGFloat.random(in: -10...10) * volumeLevel
+            
+            // Original-style speed calculation, slightly boosted for wider space
+            let velocityX = (0.5 + volumeLevel * 1.5) * 1.5  // Original speed * 1.5 for wider area
+            
+            // Calculate time to reach right edge
+            let distanceToEdge = bounds.width + 20
+            let timeToEdge = distanceToEdge / (velocityX * 60)
+            
+            let particle = Particle(
+                x: spawnX,
+                y: yPosition,
+                velocityX: velocityX,
+                size: 1.0 + volumeLevel * 2.0,  // Original sizing
+                life: timeToEdge,  // Live long enough to cross
+                opacity: 0.6  // Original opacity
+            )
+            particles.append(particle)
+        } else {
+            // Standard mode - particles flow left to right
+            let yPosition = bounds.height / 2 + CGFloat.random(in: -10...10) * volumeLevel
+            let particle = Particle(
+                x: 0,
+                y: yPosition,
+                velocityX: 0.5 + volumeLevel * 1.5,
+                size: 1.0 + volumeLevel * 2.0,
+                life: 1.0,
+                opacity: 0.6
+            )
+            particles.append(particle)
+        }
+    }
+    
     @objc private func updateAnimation() {
         let currentTime = Date.timeIntervalSinceReferenceDate
         let deltaTime = currentTime - lastUpdateTime
         lastUpdateTime = currentTime
         
-        // Generate new particles based on volume
-        if volumeLevel > 0.05 {  // Threshold to avoid too many particles
-            let particleCount = Int(volumeLevel * 3)  // 0-3 particles per frame
+        // Check if we're in wide mode for different behavior
+        let isWideMode = (window as? NativeOverlayPanel)?.isWideParticlesMode ?? false
+        
+        // Generate new particles based on volume - ORIGINAL STYLE
+        let threshold: CGFloat = 0.05  // Original threshold
+        if volumeLevel > threshold {
+            let particleCount = isWideMode ? Int(volumeLevel * 4) : Int(volumeLevel * 3)  // 0-4 particles, slightly more in wide
             
             for _ in 0..<particleCount {
                 if particles.count < maxParticles {
-                    let yPosition = bounds.height / 2 + CGFloat.random(in: -10...10) * volumeLevel
-                    let particle = Particle(
-                        x: 0,
-                        y: yPosition,
-                        velocityX: 0.5 + volumeLevel * 1.5,  // Faster when louder
-                        size: 1.0 + volumeLevel * 2.0,  // Bigger when louder
-                        life: 1.0,
-                        opacity: 0.6
-                    )
-                    particles.append(particle)
+                    createParticle(volumeLevel: volumeLevel, isWideMode: isWideMode)
                 }
             }
         }
@@ -472,14 +510,23 @@ class ParticleWaveformView: NSView {
     }
     
     private func updateParticles(deltaTime: CGFloat) {
+        let isWideMode = (window as? NativeOverlayPanel)?.isWideParticlesMode ?? false
+        
         // Update existing particles
         particles = particles.compactMap { particle in
             var p = particle
             p.update(deltaTime: deltaTime)
             
             // Remove dead particles or those that left the view
-            if p.life <= 0 || p.x > bounds.width {
-                return nil
+            // More lenient in wide mode
+            if isWideMode {
+                if p.life <= 0 || p.x < -100 || p.x > bounds.width + 100 {
+                    return nil
+                }
+            } else {
+                if p.life <= 0 || p.x > bounds.width {
+                    return nil
+                }
             }
             return p
         }
@@ -734,6 +781,7 @@ final class NativeOverlayPanel: NSPanel {
     private let minimizedSize = UIConfig.minimizedSize
     private let processingSize = UIConfig.processingSize
     private var currentPosition: String = "top-center"
+    var isWideParticlesMode: Bool = false  // Made public for access from OverlayViewController
     
     init() {
         // Start with minimized size
@@ -859,15 +907,30 @@ final class NativeOverlayPanel: NSPanel {
     }
     
     func expand() {
-        animateToSize(expandedSize, anchor: getAnchorForPosition())
+        if isWideParticlesMode {
+            // Much wider for particles - increased dimensions
+            animateToSize(CGSize(width: 400, height: 50), anchor: getAnchorForPosition())
+        } else {
+            animateToSize(expandedSize, anchor: getAnchorForPosition())
+        }
     }
     
     func minimize() {
-        animateToSize(minimizedSize, anchor: getAnchorForPosition())
+        if isWideParticlesMode {
+            // Wider minimized state too - increased dimensions
+            animateToSize(CGSize(width: 300, height: 30), anchor: getAnchorForPosition())
+        } else {
+            animateToSize(minimizedSize, anchor: getAnchorForPosition())
+        }
     }
     
     func showProcessing() {
-        animateToSize(processingSize, anchor: getAnchorForPosition())
+        if isWideParticlesMode {
+            // Wider processing state for particles
+            animateToSize(CGSize(width: 350, height: 35), anchor: getAnchorForPosition())
+        } else {
+            animateToSize(processingSize, anchor: getAnchorForPosition())
+        }
     }
     
     public func setPosition(_ position: String) {
@@ -1073,6 +1136,21 @@ class OverlayContentView: NSView {
         
         backgroundView.frame = bounds
         
+        // Check if we're in wide particles mode and adjust appearance
+        if let panel = window as? NativeOverlayPanel, panel.isWideParticlesMode {
+            // Even more transparent background and no border for wide particles
+            // Use different transparency based on state
+            let alpha: CGFloat = (state == .idle || state == .hovered) ? 0.1 : 0.2  // Very transparent when idle
+            backgroundView.layer?.backgroundColor = NSColor(white: 0.08, alpha: alpha).cgColor
+            backgroundView.layer?.borderWidth = 0  // No border
+            backgroundView.layer?.borderColor = NSColor.clear.cgColor
+        } else {
+            // Standard appearance for other modes
+            backgroundView.layer?.backgroundColor = UIConfig.backgroundColor.cgColor
+            backgroundView.layer?.borderWidth = UIConfig.borderWidth
+            backgroundView.layer?.borderColor = UIConfig.borderColor.cgColor
+        }
+        
         let padding = UIConfig.contentPadding
         let contentRect = bounds.insetBy(dx: padding, dy: padding)
         
@@ -1130,29 +1208,47 @@ class OverlayContentView: NSView {
                 
                 let buttonSize = UIConfig.buttonSize
                 
-                // Cancel button on left
-                cancelButton.frame = NSRect(
-                    x: contentRect.minX,
-                    y: contentRect.midY - buttonSize / 2,
-                    width: buttonSize,
-                    height: buttonSize
-                )
-                
-                // Stop button on right
-                stopButton.frame = NSRect(
-                    x: contentRect.maxX - buttonSize,
-                    y: contentRect.midY - buttonSize / 2,
-                    width: buttonSize,
-                    height: buttonSize
-                )
+                // Hide buttons in wide particles mode for cleaner look
+                if let panel = window as? NativeOverlayPanel, panel.isWideParticlesMode {
+                    cancelButton.isHidden = true
+                    stopButton.isHidden = true
+                } else {
+                    // Cancel button on left
+                    cancelButton.frame = NSRect(
+                        x: contentRect.minX,
+                        y: contentRect.midY - buttonSize / 2,
+                        width: buttonSize,
+                        height: buttonSize
+                    )
+                    
+                    // Stop button on right
+                    stopButton.frame = NSRect(
+                        x: contentRect.maxX - buttonSize,
+                        y: contentRect.midY - buttonSize / 2,
+                        width: buttonSize,
+                        height: buttonSize
+                    )
+                }
                 
                 // Waveform in the middle between buttons
-                let waveformFrame = NSRect(
-                    x: contentRect.minX + buttonSize + 4,
-                    y: contentRect.minY,
-                    width: contentRect.width - (buttonSize * 2) - 8,
-                    height: contentRect.height
-                )
+                // For wide particles mode, use the full width
+                let waveformFrame: NSRect
+                if let panel = window as? NativeOverlayPanel, panel.isWideParticlesMode {
+                    // Use full width for wide particles mode
+                    waveformFrame = NSRect(
+                        x: contentRect.minX,
+                        y: contentRect.minY,
+                        width: contentRect.width,
+                        height: contentRect.height
+                    )
+                } else {
+                    waveformFrame = NSRect(
+                        x: contentRect.minX + buttonSize + 4,
+                        y: contentRect.minY,
+                        width: contentRect.width - (buttonSize * 2) - 8,
+                        height: contentRect.height
+                    )
+                }
                 
                 // Show the selected waveform
                 switch waveformStyle {
@@ -1275,9 +1371,13 @@ class OverlayContentView: NSView {
         isExpanded = expanded
         
         // Update UI based on state
+        // Check if we're in wide particles mode
+        let isWideMode = (window as? NativeOverlayPanel)?.isWideParticlesMode ?? false
+        
         recordButton.isHidden = !(isExpanded && (state == .idle || state == .hovered))
-        cancelButton.isHidden = !(isExpanded && state == .recording)
-        stopButton.isHidden = !(isExpanded && state == .recording)
+        // Hide control buttons in wide particles mode
+        cancelButton.isHidden = !(isExpanded && state == .recording && !isWideMode)
+        stopButton.isHidden = !(isExpanded && state == .recording && !isWideMode)
         activityIndicator.isHidden = true  // Always hidden now
         // Processing dots are handled in layout based on isExpanded
         statusLabel.isHidden = true  // Never show status label anymore
@@ -1326,13 +1426,20 @@ class OverlayContentView: NSView {
     
     func handleKeyDown(_ event: NSEvent) {
         switch event.keyCode {
-        case 53: // Escape key
+        case 53: // Escape key - now stops recording instead of canceling
             if state == .recording {
-                cancelRecording()
+                stopRecording()
             }
         case 36: // Enter/Return key
             if state == .recording {
                 stopRecording()
+            }
+        case 7: // X key
+            // Check for Cmd+X (Mac) or Ctrl+X
+            if event.modifierFlags.contains(.command) || event.modifierFlags.contains(.control) {
+                if state == .recording {
+                    stopRecording()
+                }
             }
         default:
             break

@@ -46,7 +46,7 @@ class ParticleOverlayView: NSView {
     private var animationTimer: Timer?
     private var volumeLevel: CGFloat = 0.0
     private var lastUpdateTime: TimeInterval = 0
-    private let maxParticles = 150  // More particles for wider area
+    private let maxParticles = 250  // Even more particles for denser effect
     private var isAnimating = false
     
     // Visual effects layer for blur
@@ -69,7 +69,7 @@ class ParticleOverlayView: NSView {
         blur.blendingMode = .behindWindow
         blur.material = .hudWindow
         blur.state = .active
-        blur.alphaValue = 0.3  // Very subtle blur
+        blur.alphaValue = 0.15  // Even more subtle blur
         addSubview(blur, positioned: .below, relativeTo: nil)
         self.blurView = blur
         
@@ -120,16 +120,16 @@ class ParticleOverlayView: NSView {
         // Generate new particles based on volume
         // Spawn from center and flow outward horizontally
         if volumeLevel > 0.02 {  // Lower threshold for more particles
-            let particleCount = Int(1 + volumeLevel * 4)  // 1-5 particles per frame
+            let particleCount = Int(2 + volumeLevel * 6)  // 2-8 particles per frame
             
             for _ in 0..<particleCount {
                 if particles.count < maxParticles {
                     createParticle()
                 }
             }
-        } else if particles.count < 20 {
+        } else if particles.count < 40 {  // More baseline particles
             // Always have some minimal particle flow
-            if CGFloat.random(in: 0...1) < 0.2 {
+            if CGFloat.random(in: 0...1) < 0.4 {  // Higher chance to create particles
                 createParticle()
             }
         }
@@ -146,21 +146,30 @@ class ParticleOverlayView: NSView {
         let spawnX = centerX + CGFloat.random(in: -30...30)
         let spawnY = centerY + CGFloat.random(in: -5...5)
         
-        // Particles flow outward horizontally
+        // Particles flow outward horizontally - FASTER
         let direction = CGFloat.random(in: 0...1) > 0.5 ? 1.0 : -1.0
-        let baseSpeed = 0.8 + volumeLevel * 2.0
+        let baseSpeed = 1.5 + volumeLevel * 3.0  // Increased base speed
+        let velocityX = direction * baseSpeed * CGFloat.random(in: 0.8...1.5)
+        
+        // Calculate time needed to reach edge (distance / speed)
+        // Add extra margin to ensure particles reach the edge
+        let distanceToEdge = direction > 0 ? (bounds.width - spawnX + 20) : (spawnX + 20)
+        let timeToEdge = distanceToEdge / abs(velocityX * 60)  // Convert to seconds (60fps normalized)
+        
+        // Set life to ensure particle reaches edge and a bit beyond
+        let particleLife = timeToEdge * CGFloat.random(in: 1.0...1.2)  // 100-120% of time to edge
         
         let particle = Particle(
             x: spawnX,
             y: spawnY,
-            velocityX: direction * baseSpeed * CGFloat.random(in: 0.5...1.5),
+            velocityX: velocityX,
             velocityY: CGFloat.random(in: -0.2...0.2),  // Minimal vertical movement
             size: 1.5 + volumeLevel * 2.5 + CGFloat.random(in: 0...1),
-            life: 2.0 + CGFloat.random(in: 0...1.0),  // 2-3 seconds
-            maxLife: 2.0 + CGFloat.random(in: 0...1.0),
+            life: particleLife,
+            maxLife: particleLife,
             color: isAnimating 
-                ? NSColor(calibratedRed: 1.0, green: 0.231, blue: 0.188, alpha: 1.0)  // Red for recording
-                : NSColor(calibratedWhite: 0.95, alpha: 1.0)  // White for idle
+                ? NSColor(calibratedRed: 1.0, green: 0.231, blue: 0.188, alpha: 0.8)  // Semi-transparent red for recording
+                : NSColor(calibratedWhite: 0.95, alpha: 0.8)  // Semi-transparent white for idle
         )
         particles.append(particle)
     }
@@ -171,8 +180,8 @@ class ParticleOverlayView: NSView {
             var p = particle
             p.update(deltaTime: deltaTime)
             
-            // Remove dead particles or those that left the view
-            if p.life <= 0 || p.x < -20 || p.x > bounds.width + 20 {
+            // Only remove particles that are well past the edges or truly dead
+            if p.life <= 0 || p.x < -50 || p.x > bounds.width + 50 {
                 return nil
             }
             return p
@@ -235,25 +244,28 @@ class ParticleOverlayView: NSView {
 extension NativeOverlayPanel {
     // Configuration for wider particle overlay
     struct WideOverlayConfig {
-        static let width: CGFloat = 400  // Much wider
-        static let height: CGFloat = 60   // Slightly taller
+        static let expandedWidth: CGFloat = 400  // Much wider
+        static let expandedHeight: CGFloat = 60   // Slightly taller
         static let minimizedWidth: CGFloat = 300
         static let minimizedHeight: CGFloat = 40
         static let animationDuration: TimeInterval = 0.3
     }
     
     func configureForWideParticles() {
+        // Set flag for wide particles mode
+        isWideParticlesMode = true
+        
         // Remove borders and background
         backgroundColor = NSColor.clear
         isOpaque = false
         hasShadow = false
         
-        // Set wider frame
+        // Set wider frame (start minimized)
         setFrame(NSRect(
-            x: frame.origin.x - (WideOverlayConfig.width - frame.width) / 2,
+            x: frame.origin.x - (WideOverlayConfig.minimizedWidth - frame.width) / 2,
             y: frame.origin.y,
-            width: WideOverlayConfig.width,
-            height: WideOverlayConfig.height
+            width: WideOverlayConfig.minimizedWidth,
+            height: WideOverlayConfig.minimizedHeight
         ), display: true)
     }
 }

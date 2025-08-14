@@ -368,19 +368,21 @@ class OverlayViewController: NSViewController {
         
         switch style.lowercased() {
         case "classic":
+            panel?.isWideParticlesMode = false
             contentView.setWaveformStyle(.classic)
         case "enhanced":
+            panel?.isWideParticlesMode = false
             contentView.setWaveformStyle(.enhanced)
         case "particles":
+            panel?.isWideParticlesMode = false
             contentView.setWaveformStyle(.particles)
         case "wide-particles":
-            // Switch to the new wide particle overlay
-            if let panel = self.panel {
-                panel.configureForWideParticles()
-            }
+            // Just set the flag and use particles style
+            panel?.isWideParticlesMode = true
             contentView.setWaveformStyle(.particles)
         default:
             // Default to enhanced
+            panel?.isWideParticlesMode = false
             contentView.setWaveformStyle(.enhanced)
         }
     }
