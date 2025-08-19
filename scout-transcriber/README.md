@@ -25,29 +25,34 @@ A high-performance, standalone transcription service built in Rust that uses Pyt
                                                └─────────────────┘
 ```
 
-## Quick Start
+## 🚀 Quick Start
 
-### 1. Install and Build
+### Automated Setup
 
 ```bash
-git clone <repository>
-cd scout-transcriber
-cargo build --release
+# Run the quick start script for automated setup
+./quickstart.sh
 ```
 
-### 2. Run the Service
+### Manual Setup
+
+1. **Install prerequisites** (Rust and UV)
+2. **Build**: `cargo build --release`
+3. **Run**: `./target/release/scout-transcriber`
+
+📚 **For detailed setup instructions, see [SETUP.md](SETUP.md)**
+
+### Basic Usage
 
 ```bash
-# Basic usage with default settings
+# Default configuration (2 workers, /tmp queues)
 ./target/release/scout-transcriber
 
-# Custom configuration
+# Production configuration
 ./target/release/scout-transcriber \
     --workers 4 \
-    --python-cmd uv \
-    --python-args "run transcription_worker.py" \
-    --input-queue /custom/path/input \
-    --output-queue /custom/path/output \
+    --input-queue /var/lib/scout/input \
+    --output-queue /var/lib/scout/output \
     --log-level debug
 ```
 
