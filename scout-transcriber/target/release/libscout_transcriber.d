@@ -1,0 +1,1 @@
+/Users/arach/dev/scout/scout-transcriber/target/release/libscout_transcriber.rlib: /Users/arach/dev/scout/scout-transcriber/src/lib.rs /Users/arach/dev/scout/scout-transcriber/src/protocol/mod.rs /Users/arach/dev/scout/scout-transcriber/src/queue/mod.rs /Users/arach/dev/scout/scout-transcriber/src/worker/mod.rs
