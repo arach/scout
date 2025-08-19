@@ -76,7 +76,12 @@ if [[ "$response" =~ ^[Yy]$ ]]; then
     echo -e "\n${GREEN}Starting Scout Transcriber...${NC}"
     echo "Press Ctrl+C to stop"
     echo ""
-    ./target/release/scout-transcriber --log-level info
+    
+    # Trap Ctrl+C and kill the service properly
+    trap 'echo -e "\n${YELLOW}Stopping service...${NC}"; pkill -f scout-transcriber; exit 0' INT
+    
+    # Run the service (exec replaces the shell process for better signal handling)
+    exec ./target/release/scout-transcriber --log-level info
 else
     echo -e "\n${GREEN}You can start the service later with:${NC}"
     echo "  ./target/release/scout-transcriber"

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.scout.transcriber</string>
+    
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/arach/dev/scout/scout-transcriber/target/release/scout-transcriber</string>
+        <string>--workers</string>
+        <string>2</string>
+        <string>--log-level</string>
+        <string>info</string>
+    </array>
+    
+    <key>WorkingDirectory</key>
+    <string>/Users/arach/dev/scout/scout-transcriber</string>
+    
+    <key>RunAtLoad</key>
+    <false/>
+    
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    
+    <key>StandardOutPath</key>
+    <string>/tmp/scout-transcriber.log</string>
+    
+    <key>StandardErrorPath</key>
+    <string>/tmp/scout-transcriber.error.log</string>
+    
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/arach/.cargo/bin</string>
+        <key>RUST_LOG</key>
+        <string>info</string>
+    </dict>
+</dict>
+</plist>

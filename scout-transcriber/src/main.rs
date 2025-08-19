@@ -5,6 +5,9 @@ use scout_transcriber::{
     queue::{Queue, SledQueue},
     worker::{WorkerConfig, WorkerPool},
 };
+
+#[cfg(feature = "zeromq-queue")]
+use scout_transcriber::queue::{ZmqQueue, ZmqQueueConfig};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -66,6 +69,21 @@ pub struct Args {
     /// Enable queue persistence (disable for in-memory queues)
     #[arg(long, default_value = "true")]
     pub persistent_queues: bool,
+
+    /// ZeroMQ push endpoint for input queue
+    #[cfg(feature = "zeromq-queue")]
+    #[arg(long, default_value = "tcp://127.0.0.1:5555")]
+    pub zmq_push_endpoint: String,
+
+    /// ZeroMQ pull endpoint for output queue  
+    #[cfg(feature = "zeromq-queue")]
+    #[arg(long, default_value = "tcp://127.0.0.1:5556")]
+    pub zmq_pull_endpoint: String,
+
+    /// Use ZeroMQ queues instead of Sled
+    #[cfg(feature = "zeromq-queue")]
+    #[arg(long, default_value = "false")]
+    pub use_zeromq: bool,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -89,10 +107,86 @@ impl From<LogLevel> for tracing::Level {
     }
 }
 
+/// Queue type enumeration to support different queue implementations
+#[derive(Clone)]
+pub enum QueueType<T> {
+    Sled(SledQueue<T>),
+    #[cfg(feature = "zeromq-queue")]
+    ZeroMQ(ZmqQueue<T>),
+}
+
+impl<T> QueueType<T>
+where
+    T: serde::Serialize + serde::de::DeserializeOwned + Clone + Send + Sync + 'static,
+{
+    /// Push an item to the queue
+    pub async fn push(&self, item: &T) -> Result<()> {
+        match self {
+            QueueType::Sled(queue) => queue.push(item).await,
+            #[cfg(feature = "zeromq-queue")]
+            QueueType::ZeroMQ(queue) => queue.push(item).await,
+        }
+    }
+
+    /// Pop an item from the queue
+    pub async fn pop(&self) -> Result<Option<T>> {
+        match self {
+            QueueType::Sled(queue) => queue.pop().await,
+            #[cfg(feature = "zeromq-queue")]
+            QueueType::ZeroMQ(queue) => queue.pop().await,
+        }
+    }
+
+    /// Get an item by ID without removing it
+    pub async fn get(&self, id: &uuid::Uuid) -> Result<Option<T>> {
+        match self {
+            QueueType::Sled(queue) => queue.get(id).await,
+            #[cfg(feature = "zeromq-queue")]
+            QueueType::ZeroMQ(queue) => queue.get(id).await,
+        }
+    }
+
+    /// Remove an item by ID
+    pub async fn remove(&self, id: &uuid::Uuid) -> Result<bool> {
+        match self {
+            QueueType::Sled(queue) => queue.remove(id).await,
+            #[cfg(feature = "zeromq-queue")]
+            QueueType::ZeroMQ(queue) => queue.remove(id).await,
+        }
+    }
+
+    /// Get the current queue length
+    pub async fn len(&self) -> Result<usize> {
+        match self {
+            QueueType::Sled(queue) => queue.len().await,
+            #[cfg(feature = "zeromq-queue")]
+            QueueType::ZeroMQ(queue) => queue.len().await,
+        }
+    }
+
+    /// Check if the queue is empty
+    pub async fn is_empty(&self) -> Result<bool> {
+        match self {
+            QueueType::Sled(queue) => queue.is_empty().await,
+            #[cfg(feature = "zeromq-queue")]
+            QueueType::ZeroMQ(queue) => queue.is_empty().await,
+        }
+    }
+
+    /// Clear all items from the queue
+    pub async fn clear(&self) -> Result<()> {
+        match self {
+            QueueType::Sled(queue) => queue.clear().await,
+            #[cfg(feature = "zeromq-queue")]
+            QueueType::ZeroMQ(queue) => queue.clear().await,
+        }
+    }
+}
+
 /// Main transcription service
 pub struct TranscriptionService {
-    input_queue: SledQueue<AudioChunk>,
-    output_queue: SledQueue<Result<Transcript, TranscriptionError>>,
+    input_queue: QueueType<AudioChunk>,
+    output_queue: QueueType<Result<Transcript, TranscriptionError>>,
     worker_pool: WorkerPool,
     running: Arc<AtomicBool>,
     shutdown_tx: broadcast::Sender<()>,
@@ -114,21 +208,67 @@ impl TranscriptionService {
             }
         }
 
-        // Create queues
-        let input_queue = if args.persistent_queues {
-            SledQueue::new(&args.input_queue)
-                .context("Failed to create input queue")?
+        // Create queues based on configuration
+        #[cfg(feature = "zeromq-queue")]
+        let (input_queue, output_queue) = if args.use_zeromq {
+            info!("Using ZeroMQ queues");
+            
+            let zmq_config = ZmqQueueConfig {
+                push_endpoint: args.zmq_push_endpoint.clone(),
+                pull_endpoint: args.zmq_pull_endpoint.clone(),
+                ..Default::default()
+            };
+
+            let input_queue = ZmqQueue::with_config(zmq_config.clone()).await
+                .context("Failed to create ZeroMQ input queue")?;
+            
+            let output_queue = ZmqQueue::with_config(zmq_config).await
+                .context("Failed to create ZeroMQ output queue")?;
+
+            (QueueType::ZeroMQ(input_queue), QueueType::ZeroMQ(output_queue))
         } else {
-            SledQueue::new_temp()
-                .context("Failed to create temporary input queue")?
+            info!("Using Sled queues");
+            
+            let input_queue = if args.persistent_queues {
+                SledQueue::new(&args.input_queue)
+                    .context("Failed to create input queue")?
+            } else {
+                SledQueue::new_temp()
+                    .context("Failed to create temporary input queue")?
+            };
+
+            let output_queue = if args.persistent_queues {
+                SledQueue::new(&args.output_queue)
+                    .context("Failed to create output queue")?
+            } else {
+                SledQueue::new_temp()
+                    .context("Failed to create temporary output queue")?
+            };
+
+            (QueueType::Sled(input_queue), QueueType::Sled(output_queue))
         };
 
-        let output_queue = if args.persistent_queues {
-            SledQueue::new(&args.output_queue)
-                .context("Failed to create output queue")?
-        } else {
-            SledQueue::new_temp()
-                .context("Failed to create temporary output queue")?
+        #[cfg(not(feature = "zeromq-queue"))]
+        let (input_queue, output_queue) = {
+            info!("Using Sled queues (ZeroMQ feature not enabled)");
+            
+            let input_queue = if args.persistent_queues {
+                SledQueue::new(&args.input_queue)
+                    .context("Failed to create input queue")?
+            } else {
+                SledQueue::new_temp()
+                    .context("Failed to create temporary input queue")?
+            };
+
+            let output_queue = if args.persistent_queues {
+                SledQueue::new(&args.output_queue)
+                    .context("Failed to create output queue")?
+            } else {
+                SledQueue::new_temp()
+                    .context("Failed to create temporary output queue")?
+            };
+
+            (QueueType::Sled(input_queue), QueueType::Sled(output_queue))
         };
 
         // Parse Python arguments
@@ -287,7 +427,7 @@ impl TranscriptionService {
 
     /// Process items from the input queue
     async fn process_input_queue(
-        input_queue: &SledQueue<AudioChunk>,
+        input_queue: &QueueType<AudioChunk>,
         worker_pool: &WorkerPool,
     ) -> Result<usize> {
         let mut processed = 0;
@@ -359,8 +499,8 @@ impl TranscriptionService {
 
     /// Gather service statistics
     async fn gather_stats(
-        input_queue: &SledQueue<AudioChunk>,
-        output_queue: &SledQueue<Result<Transcript, TranscriptionError>>,
+        input_queue: &QueueType<AudioChunk>,
+        output_queue: &QueueType<Result<Transcript, TranscriptionError>>,
         worker_pool: &WorkerPool,
     ) -> Result<String> {
         let input_len = input_queue.len().await?;
@@ -497,6 +637,12 @@ mod tests {
             response_timeout: 5,
             poll_interval: 50,
             persistent_queues: false, // Use in-memory for tests
+            #[cfg(feature = "zeromq-queue")]
+            zmq_push_endpoint: "tcp://127.0.0.1:5555".to_string(),
+            #[cfg(feature = "zeromq-queue")]
+            zmq_pull_endpoint: "tcp://127.0.0.1:5556".to_string(),
+            #[cfg(feature = "zeromq-queue")]
+            use_zeromq: false,
         };
 
         let service = TranscriptionService::new(args).await.unwrap();

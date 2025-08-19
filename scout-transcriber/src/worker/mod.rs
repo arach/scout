@@ -457,7 +457,7 @@ mod tests {
     fn test_worker_config_default() {
         let config = WorkerConfig::default();
         assert_eq!(config.python_command, "uv");
-        assert_eq!(config.script_args, vec!["run", "main.py"]);
+        assert_eq!(config.script_args, vec!["run", "python/transcriber.py"]);
         assert_eq!(config.max_restarts, 10);
     }
     

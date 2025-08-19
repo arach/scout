@@ -7,6 +7,13 @@ use std::sync::Arc;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
+// ZeroMQ queue implementation
+#[cfg(feature = "zeromq-queue")]
+pub mod zeromq;
+
+#[cfg(feature = "zeromq-queue")]
+pub use zeromq::{ZmqQueue, ZmqQueueConfig, ZmqBroker};
+
 /// Trait for queue operations
 pub trait Queue<T> {
     /// Push an item to the queue

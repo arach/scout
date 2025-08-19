@@ -8,11 +8,14 @@ name = "scout-transcriber"
 path = "src/main.rs"
 
 [dependencies]
-# Queue and storage
-sled = "0.34"
+# Queue and messaging
+zeromq = "0.4"
+# Keep sled as optional for persistence if needed
+sled = { version = "0.34", optional = true }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 rmp-serde = "1.3"
 
 # UUID support
@@ -43,5 +46,13 @@ hex = "0.4"
 # Testing utilities (for tempfile in tests)
 tempfile = "3.0"
 
+# Random number generation (used in ZeroMQ tests)
+rand = "0.8"
+
 # Futures utilities
 futures = "0.3"
+
+[features]
+default = ["zeromq-queue", "sled"]
+zeromq-queue = []
+sled-queue = ["sled"]
