@@ -101,19 +101,40 @@ class ZmqServerWorker:
         logger.info(f"Loading {self.model_type} model...")
         
         try:
-            from transformers import WhisperProcessor, WhisperForConditionalGeneration
             import torch
             
-            model_name = "openai/whisper-base"
-            self.processor = WhisperProcessor.from_pretrained(model_name)
-            self.model = WhisperForConditionalGeneration.from_pretrained(model_name)
-            
-            # Move to GPU if available
-            if torch.cuda.is_available():
-                self.model = self.model.to("cuda")
-                logger.info("Model loaded on GPU")
+            if self.model_type == "parakeet":
+                # Load NVIDIA Parakeet TDT 0.6B v3
+                import nemo.collections.asr as nemo_asr
+                
+                model_name = "nvidia/parakeet-tdt-0.6b"
+                logger.info(f"Loading NVIDIA Parakeet TDT model: {model_name}")
+                
+                # Load Parakeet model from NVIDIA
+                self.model = nemo_asr.models.ASRModel.from_pretrained(model_name)
+                self.processor = None  # Parakeet handles its own preprocessing
+                
+                # Move to GPU if available
+                if torch.cuda.is_available():
+                    self.model = self.model.cuda()
+                    logger.info("Parakeet model loaded on GPU")
+                else:
+                    logger.info("Parakeet model loaded on CPU")
+                    
             else:
-                logger.info("Model loaded on CPU")
+                # Default to Whisper
+                from transformers import WhisperProcessor, WhisperForConditionalGeneration
+                
+                model_name = "openai/whisper-base"
+                self.processor = WhisperProcessor.from_pretrained(model_name)
+                self.model = WhisperForConditionalGeneration.from_pretrained(model_name)
+                
+                # Move to GPU if available
+                if torch.cuda.is_available():
+                    self.model = self.model.to("cuda")
+                    logger.info("Whisper model loaded on GPU")
+                else:
+                    logger.info("Whisper model loaded on CPU")
                 
             return self.model
             
@@ -131,25 +152,46 @@ class ZmqServerWorker:
         try:
             import torch
             
-            # Process audio
-            inputs = self.processor(
-                audio, 
-                sampling_rate=sample_rate, 
-                return_tensors="pt"
-            )
-            
-            # Move to same device as model
-            if torch.cuda.is_available():
-                inputs = {k: v.to("cuda") for k, v in inputs.items()}
-            
-            # Generate transcription
-            generated_ids = self.model.generate(inputs["input_features"])
-            transcription = self.processor.batch_decode(
-                generated_ids, 
-                skip_special_tokens=True
-            )[0]
-            
-            return transcription, 0.95
+            if self.model_type == "parakeet":
+                # Parakeet transcription
+                # Ensure audio is in the right format (Parakeet expects 16kHz)
+                if sample_rate != 16000:
+                    logger.warning(f"Parakeet expects 16kHz audio, got {sample_rate}Hz")
+                
+                # Convert to tensor and add batch dimension
+                audio_tensor = torch.from_numpy(audio).unsqueeze(0)
+                
+                # Move to GPU if available
+                if torch.cuda.is_available():
+                    audio_tensor = audio_tensor.cuda()
+                
+                # Transcribe with Parakeet
+                with torch.no_grad():
+                    transcription = self.model.transcribe([audio_tensor])[0]
+                
+                return transcription, 0.95
+                
+            else:
+                # Whisper transcription
+                # Process audio
+                inputs = self.processor(
+                    audio, 
+                    sampling_rate=sample_rate, 
+                    return_tensors="pt"
+                )
+                
+                # Move to same device as model
+                if torch.cuda.is_available():
+                    inputs = {k: v.to("cuda") for k, v in inputs.items()}
+                
+                # Generate transcription
+                generated_ids = self.model.generate(inputs["input_features"])
+                transcription = self.processor.batch_decode(
+                    generated_ids, 
+                    skip_special_tokens=True
+                )[0]
+                
+                return transcription, 0.95
             
         except Exception as e:
             logger.error(f"Transcription failed: {e}")

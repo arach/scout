@@ -570,6 +570,8 @@ impl TranscriptionService {
             cmd.arg("tcp://127.0.0.1:5557");  // Connect to control plane
             cmd.arg("--worker-id");
             cmd.arg(&worker_id);
+            cmd.arg("--model");
+            cmd.arg("parakeet");  // Use Parakeet model
             cmd.arg("--log-level");
             cmd.arg("INFO");
             
@@ -736,6 +738,7 @@ impl TranscriptionService {
         let worker_pool = self.worker_pool.clone();
         let running = Arc::clone(&self.running);
         let mut shutdown_rx = self.shutdown_tx.subscribe();
+        let use_zeromq = self.args.use_zeromq;
 
         tokio::spawn(async move {
             let mut interval = interval(Duration::from_secs(30)); // Check every 30 seconds
@@ -748,13 +751,17 @@ impl TranscriptionService {
                     break;
                 }
 
-                // Check worker health
-                let health_statuses = worker_pool.get_health().await;
-                for status in health_statuses {
-                    if !status.healthy {
-                        warn!("Worker {} is unhealthy", status.worker_id);
-                    } else {
-                        debug!("Worker {} is healthy", status.worker_id);
+                // Only check worker health for non-ZeroMQ mode
+                // In ZeroMQ mode, workers are managed independently and report via control plane
+                if !use_zeromq {
+                    // Check worker health
+                    let health_statuses = worker_pool.get_health().await;
+                    for status in health_statuses {
+                        if !status.healthy {
+                            warn!("Worker {} is unhealthy", status.worker_id);
+                        } else {
+                            debug!("Worker {} is healthy", status.worker_id);
+                        }
                     }
                 }
             }
