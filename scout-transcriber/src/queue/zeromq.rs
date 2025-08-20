@@ -81,7 +81,17 @@ where
 
     /// Create a new ZeroMQ queue with custom configuration
     pub async fn with_config(config: ZmqQueueConfig) -> Result<Self> {
-        info!("Initializing ZeroMQ queue with config: {:?}", config);
+        Self::with_config_and_mode(config, false).await
+    }
+    
+    /// Create a new ZeroMQ queue for server mode (bind instead of connect)
+    pub async fn with_config_server(config: ZmqQueueConfig) -> Result<Self> {
+        Self::with_config_and_mode(config, true).await
+    }
+    
+    /// Internal method to create queue with bind/connect mode
+    async fn with_config_and_mode(config: ZmqQueueConfig, server_mode: bool) -> Result<Self> {
+        info!("Initializing ZeroMQ queue with config: {:?}, server_mode: {}", config, server_mode);
 
         // Create sockets
         let mut push_socket = PushSocket::new();
@@ -91,30 +101,55 @@ where
         // are not available in the zeromq 0.4 API. These would need to be 
         // configured at socket creation time if supported.
 
-        // Connect sockets with timeout
-        // Push socket connects to broker's pull endpoint (where broker receives messages)
-        let push_task = tokio::time::timeout(
-            std::time::Duration::from_millis(config.connect_timeout_ms),
-            push_socket.connect(&config.pull_endpoint)  // Note: reverse logic
-        );
+        // Connect or bind sockets based on mode
+        if server_mode {
+            // Server mode: bind to endpoints
+            // Pull socket binds to receive incoming messages
+            let pull_task = tokio::time::timeout(
+                std::time::Duration::from_millis(config.connect_timeout_ms),
+                pull_socket.bind(&config.push_endpoint)  // Bind to input endpoint
+            );
+            
+            // Push socket binds to send outgoing messages  
+            let push_task = tokio::time::timeout(
+                std::time::Duration::from_millis(config.connect_timeout_ms),
+                push_socket.bind(&config.pull_endpoint)  // Bind to output endpoint
+            );
+            
+            pull_task.await
+                .context("Timeout binding pull socket")?
+                .context("Failed to bind pull socket")?;
+                
+            push_task.await
+                .context("Timeout binding push socket")?
+                .context("Failed to bind push socket")?;
+                
+            info!("ZeroMQ queue bound to endpoints (server mode)");
+        } else {
+            // Client mode: connect to endpoints
+            // Push socket connects to send messages
+            let push_task = tokio::time::timeout(
+                std::time::Duration::from_millis(config.connect_timeout_ms),
+                push_socket.connect(&config.push_endpoint)
+            );
 
-        // Pull socket connects to broker's push endpoint (where broker sends messages)
-        let pull_task = tokio::time::timeout(
-            std::time::Duration::from_millis(config.connect_timeout_ms),
-            pull_socket.connect(&config.push_endpoint)  // Note: reverse logic
-        );
+            // Pull socket connects to receive messages
+            let pull_task = tokio::time::timeout(
+                std::time::Duration::from_millis(config.connect_timeout_ms),
+                pull_socket.connect(&config.pull_endpoint)
+            );
 
-        // Connect both sockets concurrently  
-        let push_result = push_task.await
-            .map_err(|_| anyhow::anyhow!("Timeout connecting push socket"))?;
-        let pull_result = pull_task.await  
-            .map_err(|_| anyhow::anyhow!("Timeout connecting pull socket"))?;
+            // Connect both sockets concurrently  
+            let push_result = push_task.await
+                .map_err(|_| anyhow::anyhow!("Timeout connecting push socket"))?;
+            let pull_result = pull_task.await  
+                .map_err(|_| anyhow::anyhow!("Timeout connecting pull socket"))?;
 
-        push_result.with_context(|| format!("Failed to connect push socket to {}", config.push_endpoint))?;
-        pull_result.with_context(|| format!("Failed to connect pull socket to {}", config.pull_endpoint))?;
+            push_result.with_context(|| format!("Failed to connect push socket to {}", config.push_endpoint))?;
+            pull_result.with_context(|| format!("Failed to connect pull socket to {}", config.pull_endpoint))?;
 
-        info!("Successfully connected to ZeroMQ endpoints: push={}, pull={}", 
-              config.push_endpoint, config.pull_endpoint);
+            info!("ZeroMQ queue connected to endpoints (client mode)");
+        }
 
         Ok(Self {
             push_socket: Arc::new(Mutex::new(push_socket)),
@@ -227,8 +262,15 @@ where
                             }
                         };
                         
-                        let queue_item: QueueItem<T> = rmp_serde::from_slice(message_bytes)
-                            .context("Failed to deserialize popped message")?;
+                        let queue_item: QueueItem<T> = match rmp_serde::from_slice(message_bytes) {
+                            Ok(item) => item,
+                            Err(e) => {
+                                error!("Deserialization error: {}", e);
+                                error!("Message bytes (first 100): {:?}", &message_bytes[..message_bytes.len().min(100)]);
+                                error!("Message hex (first 100): {}", hex::encode(&message_bytes[..message_bytes.len().min(100)]));
+                                return Err(anyhow::anyhow!("Failed to deserialize: {}", e));
+                            }
+                        };
 
                         // Remove from cache if present
                         {

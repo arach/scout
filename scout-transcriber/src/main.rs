@@ -213,16 +213,25 @@ impl TranscriptionService {
         let (input_queue, output_queue) = if args.use_zeromq {
             info!("Using ZeroMQ queues");
             
-            let zmq_config = ZmqQueueConfig {
-                push_endpoint: args.zmq_push_endpoint.clone(),
-                pull_endpoint: args.zmq_pull_endpoint.clone(),
+            // For the service:
+            // Input queue: PULL socket binds to 5555 (receives from clients)
+            // Output queue: PUSH socket binds to 5556 (sends to clients)
+            let input_config = ZmqQueueConfig {
+                push_endpoint: args.zmq_push_endpoint.clone(),  // Where to receive (bind PULL)
+                pull_endpoint: "tcp://127.0.0.1:15555".to_string(),  // Not used in server mode
+                ..Default::default()
+            };
+            
+            let output_config = ZmqQueueConfig {
+                push_endpoint: "tcp://127.0.0.1:15556".to_string(),  // Not used in server mode  
+                pull_endpoint: args.zmq_pull_endpoint.clone(),  // Where to send (bind PUSH)
                 ..Default::default()
             };
 
-            let input_queue = ZmqQueue::with_config(zmq_config.clone()).await
+            let input_queue = ZmqQueue::with_config_server(input_config).await
                 .context("Failed to create ZeroMQ input queue")?;
             
-            let output_queue = ZmqQueue::with_config(zmq_config).await
+            let output_queue = ZmqQueue::with_config_server(output_config).await
                 .context("Failed to create ZeroMQ output queue")?;
 
             (QueueType::ZeroMQ(input_queue), QueueType::ZeroMQ(output_queue))
