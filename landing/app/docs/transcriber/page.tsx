@@ -1,4 +1,6 @@
-import { Metadata } from "next"
+"use client"
+
+import { useState } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -13,12 +15,39 @@ import {
   BookOpen,
   ChevronRight,
   AlertCircle,
-  CheckCircle
+  CheckCircle,
+  Copy,
+  Check
 } from "lucide-react"
+import { PrismCode } from "@/components/prism-code"
 
-export const metadata: Metadata = {
-  title: "Scout Transcriber Service - Documentation",
-  description: "Advanced transcription engine with support for multiple AI models and distributed processing",
+// Code block component with copy functionality
+function CodeBlock({ code, language = "bash", className = "" }: { code: string; language?: string; className?: string }) {
+  const [copied, setCopied] = useState(false)
+  
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(code)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+  
+  return (
+    <div className={`relative group ${className}`}>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="absolute right-2 top-2 h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+        onClick={handleCopy}
+      >
+        {copied ? (
+          <Check className="h-4 w-4 text-green-500" />
+        ) : (
+          <Copy className="h-4 w-4" />
+        )}
+      </Button>
+      <PrismCode code={code} language={language} />
+    </div>
+  )
 }
 
 export default function TranscriberDocsPage() {
@@ -71,11 +100,11 @@ export default function TranscriberDocsPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="bg-slate-900 rounded-lg p-4 mb-4">
-                <code className="text-green-400 font-mono text-sm">
-                  curl -sSf https://scout.arach.dev/transcriber-install.sh | bash
-                </code>
-              </div>
+              <CodeBlock 
+                code="curl -sSf https://scout.arach.dev/transcriber-install.sh | bash"
+                language="bash"
+                className="mb-4"
+              />
               <div className="flex gap-4">
                 <Button variant="outline" size="sm" asChild>
                   <a href="/transcriber-install.txt" target="_blank">
@@ -155,8 +184,8 @@ export default function TranscriberDocsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="bg-slate-900 rounded-lg p-6 font-mono text-xs text-green-400">
-                <pre>{`┌────────────┐        ┌─────────────────┐        ┌──────────────┐
+              <CodeBlock 
+                code={`┌────────────┐        ┌─────────────────┐        ┌──────────────┐
 │   Scout    │        │   Transcriber   │        │   Python     │
 │    App     │◀──────▶│     Service     │◀──────▶│   Workers    │
 └────────────┘        └─────────────────┘        └──────────────┘
@@ -167,8 +196,9 @@ export default function TranscriberDocsPage() {
       ▼                        ▼                         ▼
 ┌────────────┐        ┌─────────────────┐        ┌──────────────┐
 │ Transcripts│        │  Health Status  │        │ Audio Chunks │
-└────────────┘        └─────────────────┘        └──────────────┘`}</pre>
-              </div>
+└────────────┘        └─────────────────┘        └──────────────┘`}
+                language="text"
+              />
             </CardContent>
           </Card>
 
@@ -194,15 +224,16 @@ export default function TranscriberDocsPage() {
               
               <div>
                 <h4 className="font-medium mb-2">Environment Variables</h4>
-                <div className="bg-slate-900 rounded-lg p-4 font-mono text-xs">
-                  <div className="text-gray-400"># Custom ports (defaults: 5555, 5556, 5557)</div>
-                  <div className="text-green-400">export ZMQ_PUSH_PORT=6000</div>
-                  <div className="text-green-400">export ZMQ_PULL_PORT=6001</div>
-                  <div className="text-green-400">export ZMQ_CONTROL_PORT=6002</div>
-                  <div className="text-gray-400 mt-2"># Run with custom settings</div>
-                  <div className="text-green-400">scout-transcriber --workers 4 --model parakeet</div>
-                </div>
-              </div>
+                <CodeBlock 
+                  code={`# Custom ports (defaults: 5555, 5556, 5557)
+export ZMQ_PUSH_PORT=6000
+export ZMQ_PULL_PORT=6001
+export ZMQ_CONTROL_PORT=6002
+
+# Run with custom settings
+scout-transcriber --workers 4 --model parakeet`}
+                  language="bash"
+                />
             </CardContent>
           </Card>
 
@@ -247,12 +278,14 @@ export default function TranscriberDocsPage() {
                   <AlertCircle className="h-4 w-4 text-yellow-500" />
                   Service Not Starting
                 </h4>
-                <div className="bg-slate-900 rounded-lg p-3 font-mono text-xs">
-                  <div className="text-gray-400"># Check if ports are in use</div>
-                  <div className="text-green-400">lsof -i :5555</div>
-                  <div className="text-gray-400 mt-2"># View logs</div>
-                  <div className="text-green-400">tail -f ~/.scout-transcriber/logs/transcriber.log</div>
-                </div>
+                <CodeBlock 
+                  code={`# Check if ports are in use
+lsof -i :5555
+
+# View logs
+tail -f ~/.scout-transcriber/logs/transcriber.log`}
+                  language="bash"
+                />
               </div>
 
               <div>
@@ -260,12 +293,14 @@ export default function TranscriberDocsPage() {
                   <AlertCircle className="h-4 w-4 text-yellow-500" />
                   Connection Failed
                 </h4>
-                <div className="bg-slate-900 rounded-lg p-3 font-mono text-xs">
-                  <div className="text-gray-400"># Check if service is running</div>
-                  <div className="text-green-400">ps aux | grep scout-transcriber</div>
-                  <div className="text-gray-400 mt-2"># Restart service</div>
-                  <div className="text-green-400">scout-transcriber --workers 2</div>
-                </div>
+                <CodeBlock 
+                  code={`# Check if service is running
+ps aux | grep scout-transcriber
+
+# Restart service
+scout-transcriber --workers 2`}
+                  language="bash"
+                />
               </div>
             </CardContent>
           </Card>
@@ -279,11 +314,10 @@ export default function TranscriberDocsPage() {
               <p className="text-sm text-muted-foreground mb-4">
                 To completely remove the transcriber service and all associated files:
               </p>
-              <div className="bg-slate-900 rounded-lg p-4">
-                <code className="text-green-400 font-mono text-sm">
-                  curl -sSf https://scout.arach.dev/transcriber-uninstall.sh | bash
-                </code>
-              </div>
+              <CodeBlock 
+                code="curl -sSf https://scout.arach.dev/transcriber-uninstall.sh | bash"
+                language="bash"
+              />
             </CardContent>
           </Card>
 
