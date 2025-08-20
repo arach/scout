@@ -42,6 +42,10 @@ pub struct Args {
     /// Python script arguments
     #[arg(long, default_value = "run python/transcriber.py")]
     pub python_args: String,
+    
+    /// Model to use for transcription (whisper, wav2vec2, parakeet)
+    #[arg(long, default_value = "whisper")]
+    pub model: String,
 
     /// Working directory for Python processes
     #[arg(long)]
@@ -571,7 +575,7 @@ impl TranscriptionService {
             cmd.arg("--worker-id");
             cmd.arg(&worker_id);
             cmd.arg("--model");
-            cmd.arg("parakeet");  // Use Parakeet model
+            cmd.arg(&self.args.model);  // Use model from args
             cmd.arg("--log-level");
             cmd.arg("INFO");
             

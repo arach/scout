@@ -8,6 +8,8 @@
 #   "torch",
 #   "transformers",
 #   "huggingface-hub",
+#   "mlx",
+#   "scipy",
 # ]
 # ///
 """
@@ -104,22 +106,40 @@ class ZmqServerWorker:
             import torch
             
             if self.model_type == "parakeet":
-                # Load NVIDIA Parakeet TDT 0.6B v3
-                import nemo.collections.asr as nemo_asr
-                
-                model_name = "nvidia/parakeet-tdt-0.6b"
-                logger.info(f"Loading NVIDIA Parakeet TDT model: {model_name}")
-                
-                # Load Parakeet model from NVIDIA
-                self.model = nemo_asr.models.ASRModel.from_pretrained(model_name)
-                self.processor = None  # Parakeet handles its own preprocessing
-                
-                # Move to GPU if available
-                if torch.cuda.is_available():
-                    self.model = self.model.cuda()
-                    logger.info("Parakeet model loaded on GPU")
-                else:
-                    logger.info("Parakeet model loaded on CPU")
+                # Try to load Parakeet MLX model (optimized for Apple Silicon)
+                try:
+                    from parakeet_mlx import from_pretrained
+                    import mlx.core as mx
+                    
+                    logger.info("Loading Parakeet MLX model (optimized for Apple Silicon)")
+                    
+                    # Load the Parakeet TDT model
+                    # The model will be downloaded automatically on first use
+                    model_id = "mlx-community/parakeet-tdt-0.6b-v2"
+                    self.model = from_pretrained(model_id, dtype=mx.bfloat16)
+                    
+                    logger.info(f"Successfully loaded Parakeet MLX model: {model_id}")
+                    
+                except ImportError as e:
+                    logger.warning(f"Parakeet MLX not installed, falling back to Wav2Vec2: {e}")
+                    # Fall back to Wav2Vec2
+                    from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
+                    
+                    model_name = "facebook/wav2vec2-large-960h"
+                    logger.info(f"Loading alternative ASR model (Wav2Vec2): {model_name}")
+                    
+                    self.processor = Wav2Vec2Processor.from_pretrained(model_name)
+                    self.model = Wav2Vec2ForCTC.from_pretrained(model_name)
+                    self.model_type = "wav2vec2"  # Update type for transcribe method
+                    
+                    if torch.cuda.is_available():
+                        self.model = self.model.cuda()
+                        logger.info("Wav2Vec2 model loaded on GPU")
+                    else:
+                        logger.info("Wav2Vec2 model loaded on CPU")
+                except Exception as e:
+                    logger.error(f"Failed to load Parakeet MLX model: {e}")
+                    raise
                     
             else:
                 # Default to Whisper
@@ -153,23 +173,77 @@ class ZmqServerWorker:
             import torch
             
             if self.model_type == "parakeet":
-                # Parakeet transcription
+                # Parakeet MLX transcription
                 # Ensure audio is in the right format (Parakeet expects 16kHz)
                 if sample_rate != 16000:
                     logger.warning(f"Parakeet expects 16kHz audio, got {sample_rate}Hz")
+                    # Resample if needed
+                    import scipy.signal
+                    audio = scipy.signal.resample(audio, int(len(audio) * 16000 / sample_rate))
+                    sample_rate = 16000
                 
-                # Convert to tensor and add batch dimension
-                audio_tensor = torch.from_numpy(audio).unsqueeze(0)
+                # Parakeet MLX expects a file path, so save to temp file
+                import tempfile
+                import wave
+                
+                with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_file:
+                    tmp_path = tmp_file.name
+                    
+                    # Convert float32 to int16 for WAV format
+                    audio_int16 = (audio * 32767).astype(np.int16)
+                    
+                    # Write WAV file
+                    with wave.open(tmp_path, 'wb') as wav_file:
+                        wav_file.setnchannels(1)  # Mono
+                        wav_file.setsampwidth(2)  # 16-bit
+                        wav_file.setframerate(16000)
+                        wav_file.writeframes(audio_int16.tobytes())
+                
+                try:
+                    # Transcribe using Parakeet MLX
+                    result = self.model.transcribe(tmp_path)
+                    
+                    # Extract text from the result
+                    if hasattr(result, 'text'):
+                        text = result.text
+                    else:
+                        text = str(result)
+                    
+                    return text.lower(), 0.95
+                finally:
+                    # Clean up temp file
+                    import os
+                    os.unlink(tmp_path)
+                
+            elif self.model_type == "wav2vec2":
+                # Wav2Vec2 transcription
+                # Ensure audio is in the right format (Wav2Vec2 expects 16kHz)
+                if sample_rate != 16000:
+                    logger.warning(f"Wav2Vec2 expects 16kHz audio, got {sample_rate}Hz")
+                
+                # Process audio
+                inputs = self.processor(
+                    audio,
+                    sampling_rate=sample_rate,
+                    return_tensors="pt",
+                    padding=True
+                )
                 
                 # Move to GPU if available
                 if torch.cuda.is_available():
-                    audio_tensor = audio_tensor.cuda()
+                    inputs = {k: v.cuda() for k, v in inputs.items()}
                 
-                # Transcribe with Parakeet
+                # Get logits from model
                 with torch.no_grad():
-                    transcription = self.model.transcribe([audio_tensor])[0]
+                    logits = self.model(inputs.input_values).logits
                 
-                return transcription, 0.95
+                # Get predicted token ids
+                predicted_ids = torch.argmax(logits, dim=-1)
+                
+                # Decode the tokens to text
+                transcription = self.processor.batch_decode(predicted_ids)[0]
+                
+                return transcription.lower(), 0.95
                 
             else:
                 # Whisper transcription
