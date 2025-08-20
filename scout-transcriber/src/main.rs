@@ -3,6 +3,7 @@ use clap::{Parser, ValueEnum};
 use scout_transcriber::{
     protocol::{AudioChunk, Transcript, TranscriptionError},
     queue::{Queue, SledQueue},
+    tracker::{MessageTracker, MessageTrackerStats},
     worker::{WorkerConfig, WorkerPool},
 };
 
@@ -188,6 +189,7 @@ pub struct TranscriptionService {
     input_queue: QueueType<AudioChunk>,
     output_queue: QueueType<Result<Transcript, TranscriptionError>>,
     worker_pool: WorkerPool,
+    message_tracker: Arc<MessageTracker>,
     running: Arc<AtomicBool>,
     shutdown_tx: broadcast::Sender<()>,
     args: Args,
@@ -302,12 +304,19 @@ impl TranscriptionService {
         // Create worker pool
         let worker_pool = WorkerPool::new(args.workers, worker_config);
 
+        // Create message tracker for monitoring
+        let message_tracker = Arc::new(MessageTracker::new(
+            args.max_restarts as u32,
+            args.response_timeout,
+        ));
+
         let (shutdown_tx, _) = broadcast::channel(1);
 
         Ok(Self {
             input_queue,
             output_queue,
             worker_pool,
+            message_tracker,
             running: Arc::new(AtomicBool::new(false)),
             shutdown_tx,
             args,
@@ -323,9 +332,21 @@ impl TranscriptionService {
 
         info!("Starting transcription service with {} workers", self.args.workers);
 
-        // Start worker pool
-        self.worker_pool.start().await
-            .context("Failed to start worker pool")?;
+        // Start workers
+        if !self.args.use_zeromq {
+            // Traditional stdin/stdout workers
+            self.worker_pool.start().await
+                .context("Failed to start worker pool")?;
+        } else {
+            // ZeroMQ workers that connect directly to queues
+            info!("Starting ZeroMQ workers that connect directly to queues");
+            info!("  - Workers PULL from tcp://127.0.0.1:5555");
+            info!("  - Workers PUSH to tcp://127.0.0.1:5556");
+            
+            // Spawn ZeroMQ workers
+            self.spawn_zeromq_workers().await
+                .context("Failed to spawn ZeroMQ workers")?;
+        }
 
         // Mark as running
         self.running.store(true, Ordering::Relaxed);
@@ -365,9 +386,11 @@ impl TranscriptionService {
         stats_handle.abort();
         health_handle.abort();
 
-        // Stop worker pool
-        self.worker_pool.stop().await
-            .context("Failed to stop worker pool")?;
+        // Stop worker pool only if not using ZeroMQ
+        if !self.args.use_zeromq {
+            self.worker_pool.stop().await
+                .context("Failed to stop worker pool")?;
+        }
 
         // Mark as stopped
         self.running.store(false, Ordering::Relaxed);
@@ -395,11 +418,13 @@ impl TranscriptionService {
     /// Spawn the main queue processing loop
     fn spawn_processing_loop(&self) -> tokio::task::JoinHandle<()> {
         let input_queue = self.input_queue.clone();
-        let _output_queue = self.output_queue.clone();
+        let output_queue = self.output_queue.clone();
         let worker_pool = self.worker_pool.clone();
+        let message_tracker = Arc::clone(&self.message_tracker);
         let running = Arc::clone(&self.running);
         let mut shutdown_rx = self.shutdown_tx.subscribe();
         let poll_interval = Duration::from_millis(self.args.poll_interval);
+        let use_zeromq = self.args.use_zeromq;
 
         tokio::spawn(async move {
             let mut interval = interval(poll_interval);
@@ -412,15 +437,20 @@ impl TranscriptionService {
                     break;
                 }
 
-                // Process input queue
-                match Self::process_input_queue(&input_queue, &worker_pool).await {
-                    Ok(processed) => {
-                        if processed > 0 {
-                            debug!("Processed {} items from input queue", processed);
+                if use_zeromq {
+                    // In ZeroMQ mode, monitor messages and track their lifecycle
+                    Self::monitor_zeromq_queues(&input_queue, &output_queue, &message_tracker).await;
+                } else {
+                    // Process input queue for stdin/stdout workers
+                    match Self::process_input_queue(&input_queue, &worker_pool).await {
+                        Ok(processed) => {
+                            if processed > 0 {
+                                debug!("Processed {} items from input queue", processed);
+                            }
                         }
-                    }
-                    Err(e) => {
-                        error!("Error processing input queue: {}", e);
+                        Err(e) => {
+                            error!("Error processing input queue: {}", e);
+                        }
                     }
                 }
 
@@ -432,6 +462,85 @@ impl TranscriptionService {
 
             info!("Queue processing loop ended");
         })
+    }
+
+    /// Spawn ZeroMQ workers that connect directly to the queues
+    async fn spawn_zeromq_workers(&self) -> Result<()> {
+        use tokio::process::Command;
+        use uuid::Uuid;
+        
+        for i in 0..self.args.workers {
+            let worker_id = Uuid::new_v4().to_string();
+            let mut cmd = Command::new(&self.args.python_cmd);
+            
+            // Use zmq_worker.py for ZeroMQ mode
+            cmd.arg("run");
+            cmd.arg("python/zmq_worker.py");
+            cmd.arg("--input");
+            cmd.arg(&self.args.zmq_push_endpoint);
+            cmd.arg("--output");
+            cmd.arg(&self.args.zmq_pull_endpoint);
+            cmd.arg("--worker-id");
+            cmd.arg(&worker_id);
+            cmd.arg("--log-level");
+            cmd.arg("INFO");
+            
+            // Set working directory if specified
+            if let Some(ref workdir) = self.args.python_workdir {
+                cmd.current_dir(workdir);
+            }
+            
+            // Spawn the worker
+            let child = cmd.spawn()
+                .with_context(|| format!("Failed to spawn ZeroMQ worker {}", i))?;
+            
+            info!("Spawned ZeroMQ worker {} with ID {} (PID: {:?})", i, worker_id, child.id());
+            
+            // Store the process handle for later management
+            // For now, we just let them run independently
+            // TODO: Track and manage ZeroMQ worker processes
+        }
+        
+        Ok(())
+    }
+
+    /// Monitor ZeroMQ queues and track message lifecycle
+    async fn monitor_zeromq_queues(
+        input_queue: &QueueType<AudioChunk>,
+        output_queue: &QueueType<Result<Transcript, TranscriptionError>>,
+        tracker: &Arc<MessageTracker>,
+    ) {
+        // Monitor for new messages in input queue (without consuming)
+        // This is a monitoring-only operation - workers pull messages directly
+        
+        // Check for timed out messages
+        let timed_out = tracker.check_timeouts().await;
+        for message_id in timed_out {
+            if let Ok(can_retry) = tracker.handle_timeout(message_id).await {
+                if can_retry {
+                    info!("Message {} will be retried after timeout", message_id);
+                    // In ZeroMQ mode, the message stays in the queue for another worker to pick up
+                } else {
+                    error!("Message {} permanently failed after timeout", message_id);
+                    // TODO: Move to dead letter queue
+                }
+            }
+        }
+        
+        // Clean up old completed messages
+        tracker.cleanup_old_messages(300).await; // 5 minutes
+        
+        // Log current tracking stats periodically
+        static mut LAST_STATS_LOG: Option<std::time::Instant> = None;
+        unsafe {
+            if LAST_STATS_LOG.is_none() || LAST_STATS_LOG.unwrap().elapsed() > Duration::from_secs(30) {
+                let stats = tracker.get_stats().await;
+                if stats.total > 0 {
+                    info!("Message tracker: {}", stats);
+                }
+                LAST_STATS_LOG = Some(std::time::Instant::now());
+            }
+        }
     }
 
     /// Process items from the input queue
@@ -477,8 +586,10 @@ impl TranscriptionService {
         let worker_pool = self.worker_pool.clone();
         let input_queue = self.input_queue.clone();
         let output_queue = self.output_queue.clone();
+        let message_tracker = Arc::clone(&self.message_tracker);
         let running = Arc::clone(&self.running);
         let mut shutdown_rx = self.shutdown_tx.subscribe();
+        let use_zeromq = self.args.use_zeromq;
 
         tokio::spawn(async move {
             let mut interval = interval(Duration::from_secs(60)); // Report every minute
@@ -492,6 +603,12 @@ impl TranscriptionService {
                 }
 
                 // Gather statistics
+                if use_zeromq {
+                    // Include message tracker stats for ZeroMQ mode
+                    let tracker_stats = message_tracker.get_stats().await;
+                    info!("ZeroMQ tracker stats: {}", tracker_stats);
+                }
+                
                 match Self::gather_stats(&input_queue, &output_queue, &worker_pool).await {
                     Ok(stats) => {
                         info!("Service stats: {}", stats);

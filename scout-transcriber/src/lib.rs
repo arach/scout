@@ -44,6 +44,7 @@
 
 pub mod protocol;
 pub mod queue;
+pub mod tracker;
 pub mod worker;
 
 // Re-export commonly used types for convenience
