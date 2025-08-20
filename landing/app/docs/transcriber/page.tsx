@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
+import type { Metadata } from "next"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -234,6 +235,7 @@ export ZMQ_CONTROL_PORT=6002
 scout-transcriber --workers 4 --model parakeet`}
                   language="bash"
                 />
+              </div>
             </CardContent>
           </Card>
 
