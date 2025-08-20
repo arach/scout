@@ -123,8 +123,8 @@ export const ExternalServiceSettings: React.FC = () => {
   };
 
   const handleInstall = () => {
-    // Open installation instructions in browser
-    invoke('open_url', { url: 'https://scout.arach.dev/transcriber-install.sh' });
+    // Open installation script in browser (as .txt so it displays rather than downloads)
+    invoke('open_url', { url: 'https://scout.arach.dev/transcriber-install.txt' });
   };
 
   const handleToggleEnabled = async () => {
