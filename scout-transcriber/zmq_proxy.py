@@ -57,8 +57,8 @@ def main():
     
     # Backend: Workers pull audio from here
     backend_out = context.socket(zmq.PUSH)
-    backend_out.bind("tcp://127.0.0.1:5557")
-    logger.info("Backend OUT bound to tcp://127.0.0.1:5557 (workers PULL here)")
+    backend_out.bind("tcp://127.0.0.1:5559")
+    logger.info("Backend OUT bound to tcp://127.0.0.1:5559 (workers PULL here)")
     
     # Backend: Workers push results here
     backend_in = context.socket(zmq.PULL)

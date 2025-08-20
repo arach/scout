@@ -213,30 +213,23 @@ impl TranscriptionService {
         // Create queues based on configuration
         #[cfg(feature = "zeromq-queue")]
         let (input_queue, output_queue) = if args.use_zeromq {
-            info!("Using ZeroMQ queues");
+            info!("Using ZeroMQ monitoring mode");
+            info!("  - Python workers bind to 5555 (audio input) and 5556 (transcription output)");
+            info!("  - Rust monitors via control plane on 5557 (process updates)");
             
-            // For the service:
-            // Input queue: PULL socket binds to 5555 (receives from clients)
-            // Output queue: PUSH socket binds to 5556 (sends to clients)
-            let input_config = ZmqQueueConfig {
-                push_endpoint: args.zmq_push_endpoint.clone(),  // Where to receive (bind PULL)
-                pull_endpoint: "tcp://127.0.0.1:15555".to_string(),  // Not used in server mode
-                ..Default::default()
-            };
+            // In monitoring mode, Rust doesn't bind to data ports
+            // Python workers handle the data plane (5555, 5556)
+            // Rust only monitors via control plane (5557)
             
-            let output_config = ZmqQueueConfig {
-                push_endpoint: "tcp://127.0.0.1:15556".to_string(),  // Not used in server mode  
-                pull_endpoint: args.zmq_pull_endpoint.clone(),  // Where to send (bind PUSH)
-                ..Default::default()
-            };
+            // Create dummy Sled queues for the QueueType interface
+            // These won't be used for actual data transfer
+            let input_queue = SledQueue::new_temp()
+                .context("Failed to create temporary input queue")?;
+            
+            let output_queue = SledQueue::new_temp()
+                .context("Failed to create temporary output queue")?;
 
-            let input_queue = ZmqQueue::with_config_server(input_config).await
-                .context("Failed to create ZeroMQ input queue")?;
-            
-            let output_queue = ZmqQueue::with_config_server(output_config).await
-                .context("Failed to create ZeroMQ output queue")?;
-
-            (QueueType::ZeroMQ(input_queue), QueueType::ZeroMQ(output_queue))
+            (QueueType::Sled(input_queue), QueueType::Sled(output_queue))
         } else {
             info!("Using Sled queues");
             
@@ -338,10 +331,11 @@ impl TranscriptionService {
             self.worker_pool.start().await
                 .context("Failed to start worker pool")?;
         } else {
-            // ZeroMQ workers that connect directly to queues
-            info!("Starting ZeroMQ workers that connect directly to queues");
-            info!("  - Workers PULL from tcp://127.0.0.1:5555");
-            info!("  - Workers PUSH to tcp://127.0.0.1:5556");
+            // ZeroMQ workers bind to data ports
+            info!("Starting ZeroMQ worker in server mode");
+            info!("  - Worker binds to tcp://127.0.0.1:5555 (audio input)");
+            info!("  - Worker binds to tcp://127.0.0.1:5556 (transcription output)");
+            info!("  - Worker reports status to tcp://127.0.0.1:5557 (control plane)");
             
             // Spawn ZeroMQ workers
             self.spawn_zeromq_workers().await
@@ -359,6 +353,13 @@ impl TranscriptionService {
 
         // Start health monitoring
         let health_handle = self.spawn_health_monitor();
+        
+        // Start control plane receiver for ZeroMQ mode
+        let control_plane_handle = if self.args.use_zeromq {
+            Some(self.spawn_control_plane_receiver())
+        } else {
+            None
+        };
 
         info!("Transcription service started successfully");
 
@@ -385,6 +386,9 @@ impl TranscriptionService {
         processing_handle.abort();
         stats_handle.abort();
         health_handle.abort();
+        if let Some(handle) = control_plane_handle {
+            handle.abort();
+        }
 
         // Stop worker pool only if not using ZeroMQ
         if !self.args.use_zeromq {
@@ -464,22 +468,106 @@ impl TranscriptionService {
         })
     }
 
+    /// Spawn control plane receiver for worker status updates
+    #[cfg(feature = "zeromq-queue")]
+    fn spawn_control_plane_receiver(&self) -> tokio::task::JoinHandle<()> {
+        let message_tracker = Arc::clone(&self.message_tracker);
+        let running = Arc::clone(&self.running);
+        let mut shutdown_rx = self.shutdown_tx.subscribe();
+        
+        tokio::spawn(async move {
+            use scout_transcriber::queue::monitor::zeromq::{create_control_plane_receiver, process_worker_status};
+            use scout_transcriber::queue::monitor::{QueueMonitor, WorkerStatus};
+            use ::zeromq::SocketRecv;
+            
+            // Create control plane receiver socket
+            let mut control_socket = match create_control_plane_receiver("tcp://127.0.0.1:5557").await {
+                Ok(socket) => socket,
+                Err(e) => {
+                    error!("Failed to create control plane receiver: {}", e);
+                    return;
+                }
+            };
+            
+            // Create queue monitor
+            let queue_monitor = QueueMonitor::new(Duration::from_secs(60));
+            
+            info!("Control plane receiver started on tcp://127.0.0.1:5557");
+            
+            while running.load(Ordering::Relaxed) {
+                // Check for shutdown signal
+                if shutdown_rx.try_recv().is_ok() {
+                    break;
+                }
+                
+                // Try to receive status message with timeout
+                tokio::select! {
+                    result = control_socket.recv() => {
+                        match result {
+                            Ok(msg) => {
+                                // Get bytes from ZmqMessage
+                                let bytes = msg.into_vec()[0].clone();
+                                // Deserialize the worker status
+                                match rmp_serde::from_slice::<WorkerStatus>(&bytes) {
+                                    Ok(status) => {
+                                        debug!("Received worker status: {:?}", status.status);
+                                        if let Err(e) = process_worker_status(status, &queue_monitor, &message_tracker).await {
+                                            error!("Failed to process worker status: {}", e);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        error!("Failed to deserialize worker status: {}", e);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                debug!("Control plane receive error: {}", e);
+                            }
+                        }
+                    }
+                    _ = tokio::time::sleep(Duration::from_millis(100)) => {
+                        // Timeout - continue loop
+                    }
+                }
+            }
+            
+            info!("Control plane receiver stopped");
+        })
+    }
+
+    /// Spawn control plane receiver stub for non-ZeroMQ builds
+    #[cfg(not(feature = "zeromq-queue"))]
+    fn spawn_control_plane_receiver(&self) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async {})
+    }
+
     /// Spawn ZeroMQ workers that connect directly to the queues
     async fn spawn_zeromq_workers(&self) -> Result<()> {
         use tokio::process::Command;
         use uuid::Uuid;
         
-        for i in 0..self.args.workers {
+        // In server mode, only spawn one worker that binds to the ports
+        // Multiple workers would need different ports or a broker
+        let num_workers = if self.args.workers > 1 {
+            warn!("ZeroMQ server mode only supports 1 worker (requested {})", self.args.workers);
+            1
+        } else {
+            self.args.workers
+        };
+        
+        for i in 0..num_workers {
             let worker_id = Uuid::new_v4().to_string();
             let mut cmd = Command::new(&self.args.python_cmd);
             
-            // Use zmq_worker.py for ZeroMQ mode
+            // Use zmq_server_worker.py for ZeroMQ mode (binds to ports)
             cmd.arg("run");
-            cmd.arg("python/zmq_worker.py");
+            cmd.arg("python/zmq_server_worker.py");
             cmd.arg("--input");
-            cmd.arg(&self.args.zmq_push_endpoint);
+            cmd.arg("tcp://127.0.0.1:5555");  // Bind to audio input port
             cmd.arg("--output");
-            cmd.arg(&self.args.zmq_pull_endpoint);
+            cmd.arg("tcp://127.0.0.1:5556");  // Bind to transcription output port
+            cmd.arg("--control");
+            cmd.arg("tcp://127.0.0.1:5557");  // Connect to control plane
             cmd.arg("--worker-id");
             cmd.arg(&worker_id);
             cmd.arg("--log-level");
@@ -506,8 +594,8 @@ impl TranscriptionService {
 
     /// Monitor ZeroMQ queues and track message lifecycle
     async fn monitor_zeromq_queues(
-        input_queue: &QueueType<AudioChunk>,
-        output_queue: &QueueType<Result<Transcript, TranscriptionError>>,
+        _input_queue: &QueueType<AudioChunk>,
+        _output_queue: &QueueType<Result<Transcript, TranscriptionError>>,
         tracker: &Arc<MessageTracker>,
     ) {
         // Monitor for new messages in input queue (without consuming)
@@ -696,11 +784,19 @@ impl TranscriptionService {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    // Initialize logging
+    // Initialize logging with file output
     let log_level: tracing::Level = args.log_level.into();
+    let log_file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/tmp/scout-transcriber.log")
+        .expect("Failed to open log file");
+    
     tracing_subscriber::fmt()
         .with_max_level(log_level)
         .with_target(false)
+        .with_writer(std::sync::Mutex::new(log_file))
+        .with_ansi(false)  // No color codes in file
         .init();
 
     info!("Starting Scout Transcriber v{}", env!("CARGO_PKG_VERSION"));

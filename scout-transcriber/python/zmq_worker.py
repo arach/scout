@@ -27,11 +27,16 @@ import zmq
 import msgpack
 import numpy as np
 
-# Configure logging
+# Configure logging to both stderr and file
+log_handlers = [
+    logging.StreamHandler(sys.stderr),
+    logging.FileHandler('/tmp/scout-transcriber.log', mode='a')
+]
+
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler(sys.stderr)]
+    format='%(asctime)s - [PYTHON] %(name)s - %(levelname)s - %(message)s',
+    handlers=log_handlers
 )
 logger = logging.getLogger(__name__)
 
@@ -42,6 +47,7 @@ class ZmqTranscriptionWorker:
     def __init__(self, 
                  input_endpoint: str = "tcp://127.0.0.1:5555",
                  output_endpoint: str = "tcp://127.0.0.1:5556",
+                 control_endpoint: str = "tcp://127.0.0.1:5557",
                  model_type: str = "whisper",
                  worker_id: Optional[str] = None):
         """
@@ -50,6 +56,7 @@ class ZmqTranscriptionWorker:
         Args:
             input_endpoint: Where to pull audio chunks from
             output_endpoint: Where to push results to
+            control_endpoint: Where to push status updates (control plane)
             model_type: Type of model to use
             worker_id: Optional worker identifier
         """
@@ -65,12 +72,17 @@ class ZmqTranscriptionWorker:
         self.push_socket = self.context.socket(zmq.PUSH)
         self.push_socket.connect(output_endpoint)
         
+        # Create PUSH socket for control plane (status updates)
+        self.control_socket = self.context.socket(zmq.PUSH)
+        self.control_socket.connect(control_endpoint)
+        
         # Set receive timeout
         self.pull_socket.setsockopt(zmq.RCVTIMEO, 1000)  # 1 second timeout
         
         logger.info(f"Worker {self.worker_id} connected to ZeroMQ endpoints:")
         logger.info(f"  Input (PULL): {input_endpoint}")
         logger.info(f"  Output (PUSH): {output_endpoint}")
+        logger.info(f"  Control (PUSH): {control_endpoint}")
         
         # Initialize the model
         self.model = self._load_model()
@@ -145,6 +157,30 @@ class ZmqTranscriptionWorker:
             logger.error(f"Transcription failed: {e}")
             raise
     
+    def send_status(self, status_type: str, **kwargs):
+        """Send status update to control plane."""
+        try:
+            status = {
+                "worker_id": self.worker_id,
+                "status": {
+                    "type": status_type,
+                    **kwargs
+                },
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "metadata": None
+            }
+            
+            # Send status update
+            status_msg = msgpack.packb(status, use_bin_type=True)
+            self.control_socket.send(status_msg, zmq.NOBLOCK)
+            logger.debug(f"Sent status: {status_type}")
+            
+        except zmq.Again:
+            # Control socket is full, skip this update
+            logger.debug(f"Control socket full, skipping status: {status_type}")
+        except Exception as e:
+            logger.error(f"Failed to send status: {e}")
+    
     def process_message(self, message: bytes) -> Optional[Dict[str, Any]]:
         """Process a message from the queue."""
         try:
@@ -165,6 +201,9 @@ class ZmqTranscriptionWorker:
             # Track current processing
             self.current_message_id = chunk_id
             self.processing_start_time = time.time()
+            
+            # Send status: message received
+            self.send_status("MessageReceived", message_id=chunk_id)
             
             logger.info(f"Worker {self.worker_id} processing audio chunk: {chunk_id}")
             
@@ -199,6 +238,12 @@ class ZmqTranscriptionWorker:
             # Wrap in Result::Ok for Rust
             result = {"Ok": transcript}
             
+            # Send status: message completed successfully
+            self.send_status("MessageCompleted", 
+                           message_id=chunk_id, 
+                           success=True,
+                           duration_ms=processing_time_ms)
+            
             self.stats['processed'] += 1
             logger.info(f"Transcribed: '{text[:50]}...'")
             
@@ -208,6 +253,14 @@ class ZmqTranscriptionWorker:
             logger.error(f"Failed to process message: {e}")
             logger.error(traceback.format_exc())
             self.stats['errors'] += 1
+            
+            # Send status: message failed
+            if 'chunk_id' in locals():
+                processing_time_ms = int((time.time() - self.processing_start_time) * 1000) if self.processing_start_time else 0
+                self.send_status("MessageCompleted",
+                               message_id=chunk_id,
+                               success=False,
+                               duration_ms=processing_time_ms)
             
             # Return error result
             error = {
@@ -223,6 +276,9 @@ class ZmqTranscriptionWorker:
     def run(self):
         """Main worker loop."""
         logger.info(f"Starting ZeroMQ transcription worker")
+        
+        # Send started status
+        self.send_status("Started")
         
         while True:
             try:
@@ -241,15 +297,26 @@ class ZmqTranscriptionWorker:
                 
             except zmq.Again:
                 # Timeout - no message available
+                # Send heartbeat if enough time has passed
+                if time.time() - self.stats['last_heartbeat'] > 30:  # Every 30 seconds
+                    uptime = int(time.time() - self.stats['start_time'])
+                    self.send_status("Heartbeat",
+                                   messages_processed=self.stats['processed'],
+                                   uptime_seconds=uptime)
+                    self.stats['last_heartbeat'] = time.time()
                 continue
                 
             except KeyboardInterrupt:
                 logger.info("Interrupted by user")
+                # Send stopping status
+                self.send_status("Stopping")
                 break
                 
             except Exception as e:
                 logger.error(f"Worker error: {e}")
                 logger.error(traceback.format_exc())
+                # Send error status
+                self.send_status("Error", message=str(e))
                 continue
         
         logger.info("Worker shutting down")
@@ -258,6 +325,7 @@ class ZmqTranscriptionWorker:
         # Clean up
         self.pull_socket.close()
         self.push_socket.close()
+        self.control_socket.close()
         self.context.term()
 
 

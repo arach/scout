@@ -11,8 +11,13 @@ use uuid::Uuid;
 #[cfg(feature = "zeromq-queue")]
 pub mod zeromq;
 
+// Queue monitoring
+pub mod monitor;
+
 #[cfg(feature = "zeromq-queue")]
 pub use zeromq::{ZmqQueue, ZmqQueueConfig, ZmqBroker};
+
+pub use monitor::{QueueMonitor, QueueHealth, WorkerStatus, WorkerStatusType};
 
 /// Trait for queue operations
 pub trait Queue<T> {
