@@ -42,9 +42,9 @@ pub struct TranscriptionError {
 pub struct ExternalServiceConfig {
     /// Path to the scout-transcriber binary
     pub binary_path: PathBuf,
-    /// Input queue directory
+    /// Input queue directory (for Sled mode)
     pub input_queue: PathBuf,
-    /// Output queue directory  
+    /// Output queue directory (for Sled mode)
     pub output_queue: PathBuf,
     /// Number of worker processes
     pub workers: usize,
@@ -52,17 +52,29 @@ pub struct ExternalServiceConfig {
     pub managed: bool,
     /// Poll interval for checking results
     pub poll_interval: Duration,
+    /// Use ZeroMQ mode instead of Sled
+    pub use_zeromq: bool,
+    /// ZeroMQ push endpoint (audio input)
+    pub zmq_push_port: u16,
+    /// ZeroMQ pull endpoint (transcripts output)
+    pub zmq_pull_port: u16,
+    /// ZeroMQ control endpoint (status updates)
+    pub zmq_control_port: u16,
 }
 
 impl Default for ExternalServiceConfig {
     fn default() -> Self {
         Self {
             binary_path: PathBuf::from("scout-transcriber"),
-            input_queue: PathBuf::from("/tmp/scout-transcriber/input"),
-            output_queue: PathBuf::from("/tmp/scout-transcriber/output"),
+            input_queue: PathBuf::from("/tmp/transcriber/input"),
+            output_queue: PathBuf::from("/tmp/transcriber/output"),
             workers: 2,
             managed: true,
             poll_interval: Duration::from_millis(100),
+            use_zeromq: true,  // Default to ZeroMQ mode
+            zmq_push_port: 5555,
+            zmq_pull_port: 5556,
+            zmq_control_port: 5557,
         }
     }
 }

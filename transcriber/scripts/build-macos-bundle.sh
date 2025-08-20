@@ -101,11 +101,20 @@ export TRANSFORMERS_CACHE="${HOME}/.transcriber/models"
 # Create config directory if it doesn't exist
 mkdir -p "${HOME}/.transcriber"
 
-# Launch the transcriber with bundled Python
+# Default ports (can be overridden by command line args)
+ZMQ_PUSH_PORT=${ZMQ_PUSH_PORT:-5555}
+ZMQ_PULL_PORT=${ZMQ_PULL_PORT:-5556}
+ZMQ_CONTROL_PORT=${ZMQ_CONTROL_PORT:-5557}
+
+# Launch the transcriber with bundled Python in ZeroMQ mode
 exec "${DIR}/transcriber" \
+    --use-zeromq true \
     --python-cmd "${PYTHONHOME}/bin/python3" \
-    --python-args "run ${BUNDLE_ROOT}/Contents/Resources/python/zmq_server_worker_no_deps.py" \
+    --python-args "${BUNDLE_ROOT}/Contents/Resources/python/zmq_server_worker_no_deps.py" \
     --python-workdir "${BUNDLE_ROOT}/Contents/Resources" \
+    --zmq-push-endpoint "tcp://127.0.0.1:${ZMQ_PUSH_PORT}" \
+    --zmq-pull-endpoint "tcp://127.0.0.1:${ZMQ_PULL_PORT}" \
+    --zmq-control-endpoint "tcp://127.0.0.1:${ZMQ_CONTROL_PORT}" \
     "$@"
 EOF
 chmod +x "${MACOS_DIR}/transcriber-launcher"

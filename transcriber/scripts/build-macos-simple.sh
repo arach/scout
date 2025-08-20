@@ -136,8 +136,9 @@ ZMQ_PUSH_PORT=${ZMQ_PUSH_PORT:-5555}
 ZMQ_PULL_PORT=${ZMQ_PULL_PORT:-5556}
 ZMQ_CONTROL_PORT=${ZMQ_CONTROL_PORT:-5557}
 
-# Launch the transcriber with uv
+# Launch the transcriber with uv in ZeroMQ mode
 exec "${DIR}/transcriber" \
+    --use-zeromq true \
     --python-cmd "${RESOURCES_DIR}/bin/uv" \
     --python-args "run --python ${VENV_DIR}/bin/python ${RESOURCES_DIR}/python/zmq_server_worker_no_deps.py" \
     --python-workdir "${RESOURCES_DIR}" \
