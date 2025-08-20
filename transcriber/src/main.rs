@@ -85,6 +85,11 @@ pub struct Args {
     #[arg(long, default_value = "tcp://127.0.0.1:5556")]
     pub zmq_pull_endpoint: String,
 
+    /// ZeroMQ control plane endpoint for worker status
+    #[cfg(feature = "zeromq-queue")]
+    #[arg(long, default_value = "tcp://127.0.0.1:5557")]
+    pub zmq_control_endpoint: String,
+
     /// Use ZeroMQ queues instead of Sled
     #[cfg(feature = "zeromq-queue")]
     #[arg(long, default_value = "false")]
@@ -218,12 +223,14 @@ impl TranscriptionService {
         #[cfg(feature = "zeromq-queue")]
         let (input_queue, output_queue) = if args.use_zeromq {
             info!("Using ZeroMQ monitoring mode");
-            info!("  - Python workers bind to 5555 (audio input) and 5556 (transcription output)");
-            info!("  - Rust monitors via control plane on 5557 (process updates)");
+            info!("  - Python workers bind to {} (audio input) and {} (transcription output)", 
+                  self.args.zmq_push_endpoint, self.args.zmq_pull_endpoint);
+            info!("  - Rust monitors via control plane on {} (process updates)", 
+                  self.args.zmq_control_endpoint);
             
             // In monitoring mode, Rust doesn't bind to data ports
-            // Python workers handle the data plane (5555, 5556)
-            // Rust only monitors via control plane (5557)
+            // Python workers handle the data plane (push/pull endpoints)
+            // Rust only monitors via control plane
             
             // Create dummy Sled queues for the QueueType interface
             // These won't be used for actual data transfer
@@ -337,9 +344,9 @@ impl TranscriptionService {
         } else {
             // ZeroMQ workers bind to data ports
             info!("Starting ZeroMQ worker in server mode");
-            info!("  - Worker binds to tcp://127.0.0.1:5555 (audio input)");
-            info!("  - Worker binds to tcp://127.0.0.1:5556 (transcription output)");
-            info!("  - Worker reports status to tcp://127.0.0.1:5557 (control plane)");
+            info!("  - Worker binds to {} (audio input)", self.args.zmq_push_endpoint);
+            info!("  - Worker binds to {} (transcription output)", self.args.zmq_pull_endpoint);
+            info!("  - Worker reports status to {} (control plane)", self.args.zmq_control_endpoint);
             
             // Spawn ZeroMQ workers
             self.spawn_zeromq_workers().await
@@ -478,6 +485,7 @@ impl TranscriptionService {
         let message_tracker = Arc::clone(&self.message_tracker);
         let running = Arc::clone(&self.running);
         let mut shutdown_rx = self.shutdown_tx.subscribe();
+        let control_endpoint = self.args.zmq_control_endpoint.clone();
         
         tokio::spawn(async move {
             use transcriber::queue::monitor::zeromq::{create_control_plane_receiver, process_worker_status};
@@ -485,7 +493,7 @@ impl TranscriptionService {
             use ::zeromq::SocketRecv;
             
             // Create control plane receiver socket
-            let mut control_socket = match create_control_plane_receiver("tcp://127.0.0.1:5557").await {
+            let mut control_socket = match create_control_plane_receiver(&control_endpoint).await {
                 Ok(socket) => socket,
                 Err(e) => {
                     error!("Failed to create control plane receiver: {}", e);
@@ -496,7 +504,7 @@ impl TranscriptionService {
             // Create queue monitor
             let queue_monitor = QueueMonitor::new(Duration::from_secs(60));
             
-            info!("Control plane receiver started on tcp://127.0.0.1:5557");
+            info!("Control plane receiver started on {}", control_endpoint);
             
             while running.load(Ordering::Relaxed) {
                 // Check for shutdown signal
@@ -567,11 +575,11 @@ impl TranscriptionService {
             cmd.arg("run");
             cmd.arg("python/zmq_server_worker.py");
             cmd.arg("--input");
-            cmd.arg("tcp://127.0.0.1:5555");  // Bind to audio input port
+            cmd.arg(&self.args.zmq_push_endpoint);  // Bind to audio input port
             cmd.arg("--output");
-            cmd.arg("tcp://127.0.0.1:5556");  // Bind to transcription output port
+            cmd.arg(&self.args.zmq_pull_endpoint);  // Bind to transcription output port
             cmd.arg("--control");
-            cmd.arg("tcp://127.0.0.1:5557");  // Connect to control plane
+            cmd.arg(&self.args.zmq_control_endpoint);  // Connect to control plane
             cmd.arg("--worker-id");
             cmd.arg(&worker_id);
             cmd.arg("--model");
@@ -874,6 +882,8 @@ mod tests {
             zmq_push_endpoint: "tcp://127.0.0.1:5555".to_string(),
             #[cfg(feature = "zeromq-queue")]
             zmq_pull_endpoint: "tcp://127.0.0.1:5556".to_string(),
+            #[cfg(feature = "zeromq-queue")]
+            zmq_control_endpoint: "tcp://127.0.0.1:5557".to_string(),
             #[cfg(feature = "zeromq-queue")]
             use_zeromq: false,
         };
