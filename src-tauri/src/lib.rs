@@ -703,7 +703,13 @@ pub fn run() {
             foundation_models::clean_speech_patterns,
             foundation_models::extract_structured_data,
             foundation_models::format_transcript,
-            foundation_models::check_foundation_models_availability
+            foundation_models::check_foundation_models_availability,
+            crate::commands::check_transcriber_installed,
+            crate::commands::check_external_service_status,
+            crate::commands::test_external_service,
+            crate::commands::start_external_service,
+            crate::commands::stop_external_service,
+            crate::commands::open_url
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

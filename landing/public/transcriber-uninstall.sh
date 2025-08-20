@@ -1,6 +1,6 @@
 #!/bin/bash
 # Scout Transcriber Service Uninstaller
-# Usage: curl -sSf https://scout.arach.dev/uninstall.sh | bash
+# Usage: curl -sSf https://scout.arach.dev/transcriber-uninstall.sh | bash
 
 set -e
 

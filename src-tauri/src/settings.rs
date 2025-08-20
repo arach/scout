@@ -20,6 +20,9 @@ pub struct AppSettings {
 
     // LLM settings
     pub llm: LLMSettings,
+    
+    // External service settings
+    pub external_service: ExternalServiceConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,6 +88,19 @@ pub struct LLMSettings {
     pub enabled_prompts: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ExternalServiceConfig {
+    pub enabled: bool,
+    pub binary_path: Option<String>,
+    pub use_zeromq: bool,
+    pub zmq_push_port: u16,
+    pub zmq_pull_port: u16,
+    pub zmq_control_port: u16,
+    pub workers: usize,
+    pub model: String,
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
@@ -93,6 +109,7 @@ impl Default for AppSettings {
             ui: UISettings::default(),
             processing: ProcessingSettings::default(),
             llm: LLMSettings::default(),
+            external_service: ExternalServiceConfig::default(),
         }
     }
 }
@@ -170,6 +187,21 @@ impl Default for LLMSettings {
                 "bullet_points".to_string(),
                 "action_items".to_string(),
             ],
+        }
+    }
+}
+
+impl Default for ExternalServiceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            binary_path: Some("scout-transcriber".to_string()),
+            use_zeromq: true,
+            zmq_push_port: 5555,
+            zmq_pull_port: 5556,
+            zmq_control_port: 5557,
+            workers: 2,
+            model: "whisper".to_string(),
         }
     }
 }

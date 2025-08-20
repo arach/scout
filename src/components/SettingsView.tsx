@@ -15,7 +15,7 @@ import { DisplayInterfaceSettings } from './settings/DisplayInterfaceSettings';
 import { ThemesSettings } from './settings/ThemesSettings';
 import { WebhookSettingsSimple } from './settings/WebhookSettingsSimple';
 import { LogsViewer } from './settings/LogsViewer';
-import { ModelManager } from './ModelManager';
+import { TranscriptionSettings } from './TranscriptionSettings';
 import { LLMSettings } from './LLMSettings';
 import { LLMSettings as LLMSettingsType } from '../types/llm';
 import './SettingsView.css';
@@ -176,7 +176,7 @@ export const SettingsView = memo(function SettingsView() {
 
 
       case 'transcription':
-        return <ModelManager />;
+        return <TranscriptionSettings />;
 
       case 'processing':
         return (

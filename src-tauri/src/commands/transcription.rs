@@ -344,3 +344,191 @@ pub async fn open_models_folder(state: State<'_, AppState>) -> Result<(), String
     }
     Ok(())
 }
+
+// ============================================================================
+// External Service Commands
+// ============================================================================
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ExternalServiceStatus {
+    pub running: bool,
+    pub healthy: bool,
+    pub last_check: Option<String>,
+    pub error: Option<String>,
+}
+
+#[tauri::command]
+pub async fn check_transcriber_installed() -> Result<bool, String> {
+    // Check if scout-transcriber binary exists in PATH or common locations
+    let paths = [
+        "/usr/local/bin/scout-transcriber",
+        "/usr/local/bin/transcriber",
+    ];
+    
+    for path in &paths {
+        if std::path::Path::new(path).exists() {
+            return Ok(true);
+        }
+    }
+    
+    // Check in home directory
+    if let Some(home) = dirs::home_dir() {
+        let home_path = home.join(".scout-transcriber/bin/transcriber");
+        if home_path.exists() {
+            return Ok(true);
+        }
+    }
+    
+    // Also check if it's in PATH
+    if let Ok(output) = std::process::Command::new("which")
+        .arg("scout-transcriber")
+        .output()
+    {
+        if output.status.success() {
+            return Ok(true);
+        }
+    }
+    
+    Ok(false)
+}
+
+#[tauri::command]
+pub async fn check_external_service_status(state: State<'_, AppState>) -> Result<ExternalServiceStatus, String> {
+    // Check if external service is configured and running
+    let settings = state.settings.lock().await;
+    let external_config = settings.get().external_service.clone();
+    drop(settings);
+    
+    if !external_config.enabled {
+        return Ok(ExternalServiceStatus {
+            running: false,
+            healthy: false,
+            last_check: Some(chrono::Utc::now().to_rfc3339()),
+            error: Some("Service is disabled".to_string()),
+        });
+    }
+    
+    // Try to connect to the ZeroMQ control port to check health
+    let control_endpoint = format!("tcp://127.0.0.1:{}", external_config.zmq_control_port);
+    
+    // Simple TCP connection test
+    use std::net::TcpStream;
+    use std::time::Duration;
+    
+    match TcpStream::connect_timeout(
+        &format!("127.0.0.1:{}", external_config.zmq_control_port).parse().unwrap(),
+        Duration::from_secs(2)
+    ) {
+        Ok(_) => {
+            Ok(ExternalServiceStatus {
+                running: true,
+                healthy: true,
+                last_check: Some(chrono::Utc::now().to_rfc3339()),
+                error: None,
+            })
+        }
+        Err(e) => {
+            Ok(ExternalServiceStatus {
+                running: false,
+                healthy: false,
+                last_check: Some(chrono::Utc::now().to_rfc3339()),
+                error: Some(format!("Cannot connect to service: {}", e)),
+            })
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn test_external_service(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    // Test the external service by sending a small audio sample
+    let settings = state.settings.lock().await;
+    let external_config = settings.get().external_service.clone();
+    drop(settings);
+    
+    if !external_config.enabled {
+        return Ok(serde_json::json!({
+            "success": false,
+            "message": "External service is not enabled"
+        }));
+    }
+    
+    // Check if service is reachable
+    use std::net::TcpStream;
+    use std::time::Duration;
+    
+    let can_connect = TcpStream::connect_timeout(
+        &format!("127.0.0.1:{}", external_config.zmq_control_port).parse().unwrap(),
+        Duration::from_secs(2)
+    ).is_ok();
+    
+    if can_connect {
+        Ok(serde_json::json!({
+            "success": true,
+            "message": format!(
+                "Successfully connected to transcriber service\n\
+                Model: {}\n\
+                Workers: {}\n\
+                Ports: {} (audio), {} (transcripts), {} (control)",
+                external_config.model,
+                external_config.workers,
+                external_config.zmq_push_port,
+                external_config.zmq_pull_port,
+                external_config.zmq_control_port
+            )
+        }))
+    } else {
+        Ok(serde_json::json!({
+            "success": false,
+            "message": "Cannot connect to transcriber service. Please ensure it is running."
+        }))
+    }
+}
+
+#[tauri::command]
+pub async fn start_external_service(state: State<'_, AppState>) -> Result<(), String> {
+    let settings = state.settings.lock().await;
+    let external_config = settings.get().external_service.clone();
+    drop(settings);
+    
+    if !external_config.enabled {
+        return Err("External service is not enabled".to_string());
+    }
+    
+    // Start the external service process
+    use std::process::Command;
+    
+    let binary_path = external_config.binary_path.unwrap_or_else(|| "scout-transcriber".to_string());
+    
+    Command::new(&binary_path)
+        .arg("--workers")
+        .arg(external_config.workers.to_string())
+        .arg("--model")
+        .arg(&external_config.model)
+        .arg("--zmq-push-port")
+        .arg(external_config.zmq_push_port.to_string())
+        .arg("--zmq-pull-port")
+        .arg(external_config.zmq_pull_port.to_string())
+        .arg("--zmq-control-port")
+        .arg(external_config.zmq_control_port.to_string())
+        .spawn()
+        .map_err(|e| format!("Failed to start external service: {}", e))?;
+    
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn stop_external_service() -> Result<(), String> {
+    // Stop the external service process
+    #[cfg(unix)]
+    {
+        use std::process::Command;
+        
+        // Try to find and kill the process
+        let _ = Command::new("pkill")
+            .arg("-f")
+            .arg("scout-transcriber")
+            .output();
+    }
+    
+    Ok(())
+}

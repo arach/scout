@@ -1,6 +1,6 @@
 #!/bin/bash
 # Scout Transcriber Service Installer
-# Usage: curl -sSf https://scout.arach.dev/install.sh | bash
+# Usage: curl -sSf https://scout.arach.dev/transcriber-install.sh | bash
 
 set -e
 
@@ -259,4 +259,4 @@ echo ""
 echo "Logs are stored in: ${CONFIG_DIR}/logs/"
 echo ""
 echo "To uninstall, run:"
-echo "  curl -sSf https://scout.arach.dev/uninstall.sh | bash"
+echo "  curl -sSf https://scout.arach.dev/transcriber-uninstall.sh | bash"

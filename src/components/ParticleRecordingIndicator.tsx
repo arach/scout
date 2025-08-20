@@ -15,6 +15,7 @@ interface Particle {
     life: number;
     maxLife: number;
     opacity: number;
+    color: string;
 }
 
 const ParticleRecordingIndicator: React.FC<ParticleRecordingIndicatorProps> = ({ 
@@ -66,7 +67,8 @@ const ParticleRecordingIndicator: React.FC<ParticleRecordingIndicatorProps> = ({
                 size: 1 + Math.random() * 2 + audioLevel * 2,
                 life: 0,
                 maxLife: 120 + Math.random() * 60,
-                opacity: 0
+                opacity: 0,
+                color: isRecording ? '#007AFF' : '#666666'
             };
         };
 
