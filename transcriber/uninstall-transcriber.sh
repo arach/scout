@@ -1,0 +1,73 @@
+#!/bin/bash
+# Scout Transcriber Service Uninstaller
+# Usage: curl -sSf https://scout.ai/uninstall-transcriber.sh | bash
+
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+echo -e "${BLUE}Scout Transcriber Service Uninstaller${NC}"
+echo "======================================"
+echo ""
+
+# Configuration
+INSTALL_DIR="/usr/local/bin"
+CONFIG_DIR="${HOME}/.scout-transcriber"
+PLIST_PATH="${HOME}/Library/LaunchAgents/com.scout.transcriber.plist"
+
+# Stop and unload LaunchAgent if it exists
+if [ -f "${PLIST_PATH}" ]; then
+    echo -e "${YELLOW}Stopping auto-start service...${NC}"
+    launchctl unload "${PLIST_PATH}" 2>/dev/null || true
+    rm -f "${PLIST_PATH}"
+    echo -e "${GREEN}✓${NC} Auto-start service removed"
+fi
+
+# Stop any running transcriber processes
+echo -e "${YELLOW}Stopping transcriber processes...${NC}"
+pkill -f "scout-transcriber" 2>/dev/null || true
+pkill -f "transcriber.*--use-zeromq" 2>/dev/null || true
+echo -e "${GREEN}✓${NC} Processes stopped"
+
+# Remove binaries
+echo -e "${YELLOW}Removing binaries...${NC}"
+if [ -f "${INSTALL_DIR}/scout-transcriber" ]; then
+    if [ -w "${INSTALL_DIR}" ]; then
+        rm -f "${INSTALL_DIR}/scout-transcriber"
+    else
+        sudo rm -f "${INSTALL_DIR}/scout-transcriber"
+    fi
+    echo -e "${GREEN}✓${NC} Removed scout-transcriber"
+fi
+
+if [ -f "${INSTALL_DIR}/transcriber" ]; then
+    if [ -w "${INSTALL_DIR}" ]; then
+        rm -f "${INSTALL_DIR}/transcriber"
+    else
+        sudo rm -f "${INSTALL_DIR}/transcriber"
+    fi
+    echo -e "${GREEN}✓${NC} Removed transcriber"
+fi
+
+# Ask about removing configuration and models
+echo ""
+read -p "Remove configuration files and downloaded models? (y/n) " -n 1 -r
+echo ""
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+    echo -e "${YELLOW}Removing configuration directory...${NC}"
+    rm -rf "${CONFIG_DIR}"
+    echo -e "${GREEN}✓${NC} Configuration and models removed"
+else
+    echo -e "${YELLOW}Keeping configuration at: ${CONFIG_DIR}${NC}"
+fi
+
+echo ""
+echo -e "${GREEN}✅ Scout Transcriber Service has been uninstalled${NC}"
+echo ""
+echo "To reinstall, run:"
+echo "  curl -sSf https://scout.ai/install-transcriber.sh | bash"

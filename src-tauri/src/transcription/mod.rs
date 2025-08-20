@@ -12,6 +12,7 @@ pub mod ring_buffer_transcriber;
 pub mod streaming_transcriber;
 pub mod native_streaming_strategy;
 pub mod strategy;
+pub mod external_service;
 
 pub use strategy::{
     TranscriptionConfig, TranscriptionResult, TranscriptionStrategy, TranscriptionStrategySelector,
