@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scout Documentation</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 2rem;
+            background: #f5f5f5;
+        }
+        h1 {
+            color: #007AFF;
+            border-bottom: 2px solid #007AFF;
+            padding-bottom: 0.5rem;
+        }
+        h2 {
+            color: #555;
+            margin-top: 2rem;
+        }
+        .doc-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin: 2rem 0;
+        }
+        .doc-card {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 1.5rem;
+            text-decoration: none;
+            color: inherit;
+            transition: all 0.2s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .doc-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+            border-color: #007AFF;
+        }
+        .doc-card h3 {
+            color: #007AFF;
+            margin-top: 0;
+        }
+        .doc-card p {
+            color: #666;
+            margin-bottom: 0;
+        }
+        .quick-links {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin: 1.5rem 0;
+            border: 1px solid #ddd;
+        }
+        .quick-links ul {
+            list-style: none;
+            padding: 0;
+        }
+        .quick-links li {
+            padding: 0.5rem 0;
+        }
+        .quick-links a {
+            color: #007AFF;
+            text-decoration: none;
+        }
+        .quick-links a:hover {
+            text-decoration: underline;
+        }
+        code {
+            background: #f4f4f4;
+            padding: 0.2rem 0.4rem;
+            border-radius: 3px;
+            font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+        }
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            background: #007AFF;
+            color: white;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            margin-left: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <h1>📚 Scout Documentation</h1>
+    
+    <p>Welcome to the Scout documentation. Find guides, references, and resources for getting the most out of Scout.</p>
+    
+    <div class="quick-links">
+        <h2>Quick Links</h2>
+        <ul>
+            <li>🏠 <a href="/">Scout Homepage</a></li>
+            <li>💻 <a href="https://github.com/arach/scout">GitHub Repository</a></li>
+            <li>📥 <a href="https://github.com/arach/scout/releases">Downloads</a></li>
+            <li>🐛 <a href="https://github.com/arach/scout/issues">Report Issues</a></li>
+        </ul>
+    </div>
+    
+    <h2>Documentation</h2>
+    
+    <div class="doc-grid">
+        <a href="/docs/transcriber/" class="doc-card">
+            <h3>🎙️ Transcriber Service</h3>
+            <p>Advanced transcription engine with support for multiple AI models including Whisper, Wav2Vec2, and Parakeet. Features distributed processing with ZeroMQ.</p>
+        </a>
+        
+        <div class="doc-card" style="opacity: 0.6; cursor: not-allowed;">
+            <h3>🚀 Getting Started <span class="badge">Coming Soon</span></h3>
+            <p>Quick start guide for Scout. Learn the basics of voice transcription, keyboard shortcuts, and core features.</p>
+        </div>
+        
+        <div class="doc-card" style="opacity: 0.6; cursor: not-allowed;">
+            <h3>⌨️ Keyboard Shortcuts <span class="badge">Coming Soon</span></h3>
+            <p>Master Scout with keyboard shortcuts. Customize hotkeys, push-to-talk, and quick actions.</p>
+        </div>
+        
+        <div class="doc-card" style="opacity: 0.6; cursor: not-allowed;">
+            <h3>🔌 API Reference <span class="badge">Coming Soon</span></h3>
+            <p>Integrate Scout with your workflow using webhooks and the Scout API.</p>
+        </div>
+    </div>
+    
+    <h2>Installation</h2>
+    
+    <div class="quick-links">
+        <h3>Scout App</h3>
+        <p>Download the latest Scout release for your platform:</p>
+        <ul>
+            <li>🍎 <a href="https://github.com/arach/scout/releases/latest">macOS (Universal)</a></li>
+            <li>🪟 Windows (Coming Soon)</li>
+            <li>🐧 Linux (Coming Soon)</li>
+        </ul>
+        
+        <h3>Transcriber Service (Optional)</h3>
+        <p>Enhanced transcription with additional models:</p>
+        <pre style="background: #2d2d2d; color: #f8f8f2; padding: 1rem; border-radius: 8px; overflow-x: auto;"><code>curl -sSf https://scout.arach.dev/transcriber-install.sh | bash</code></pre>
+        <p><a href="/docs/transcriber/">Learn more about the Transcriber Service →</a></p>
+    </div>
+    
+    <h2>Resources</h2>
+    
+    <div class="quick-links">
+        <ul>
+            <li>📖 <a href="/transcriber-readme.txt">Transcriber README</a></li>
+            <li>📜 <a href="/transcriber-install.txt">View Installer Script</a></li>
+            <li>🗑️ <a href="/transcriber-uninstall.txt">View Uninstaller Script</a></li>
+        </ul>
+    </div>
+    
+    <hr style="margin-top: 3rem; border: none; border-top: 1px solid #ddd;">
+    <p style="text-align: center; color: #999; font-size: 0.9rem;">
+        Scout Documentation • <a href="/">Homepage</a> • <a href="https://github.com/arach/scout">GitHub</a>
+    </p>
+</body>
+</html>

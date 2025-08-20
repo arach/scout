@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scout Transcriber Service</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 2rem;
+            background: #f5f5f5;
+        }
+        h1 {
+            color: #007AFF;
+            border-bottom: 2px solid #007AFF;
+            padding-bottom: 0.5rem;
+        }
+        h2 {
+            color: #555;
+            margin-top: 2rem;
+        }
+        .install-box {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin: 1.5rem 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        code {
+            background: #f4f4f4;
+            padding: 0.2rem 0.4rem;
+            border-radius: 3px;
+            font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+        }
+        pre {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 1rem;
+            border-radius: 8px;
+            overflow-x: auto;
+        }
+        pre code {
+            background: none;
+            color: inherit;
+            padding: 0;
+        }
+        .buttons {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1.5rem;
+        }
+        .button {
+            display: inline-block;
+            padding: 0.75rem 1.5rem;
+            background: #007AFF;
+            color: white;
+            text-decoration: none;
+            border-radius: 6px;
+            transition: background 0.2s;
+        }
+        .button:hover {
+            background: #0051D5;
+        }
+        .button-secondary {
+            background: white;
+            color: #007AFF;
+            border: 2px solid #007AFF;
+        }
+        .button-secondary:hover {
+            background: #f0f8ff;
+        }
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin: 1.5rem 0;
+        }
+        .feature {
+            background: white;
+            padding: 1rem;
+            border-radius: 6px;
+            border-left: 3px solid #007AFF;
+        }
+        .warning {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            border-radius: 6px;
+            padding: 1rem;
+            margin: 1rem 0;
+        }
+    </style>
+</head>
+<body>
+    <nav style="margin-bottom: 2rem;">
+        <a href="/docs/" style="color: #007AFF; text-decoration: none;">← Back to Docs</a>
+    </nav>
+    
+    <h1>🎙️ Scout Transcriber Service</h1>
+    
+    <p>The Scout Transcriber Service is an advanced transcription engine that extends Scout's built-in capabilities with support for multiple AI models and distributed processing.</p>
+    
+    <div class="install-box">
+        <h2>Quick Install</h2>
+        <p>Run this command in your terminal:</p>
+        <pre><code>curl -sSf https://scout.arach.dev/transcriber-install.sh | bash</code></pre>
+        
+        <div class="buttons">
+            <a href="/transcriber-install.txt" class="button button-secondary">View Installer Script</a>
+            <a href="/transcriber-readme.txt" class="button button-secondary">Read Documentation</a>
+        </div>
+    </div>
+    
+    <h2>Features</h2>
+    <div class="features">
+        <div class="feature">
+            <strong>🚀 Multiple Models</strong>
+            <p>Whisper, Wav2Vec2, Parakeet</p>
+        </div>
+        <div class="feature">
+            <strong>⚡ Low Latency</strong>
+            <p>ZeroMQ distributed processing</p>
+        </div>
+        <div class="feature">
+            <strong>🔧 Easy Setup</strong>
+            <p>One-line installation</p>
+        </div>
+        <div class="feature">
+            <strong>🍎 macOS Native</strong>
+            <p>Optimized for Apple Silicon</p>
+        </div>
+    </div>
+    
+    <h2>Requirements</h2>
+    <ul>
+        <li>macOS 11.0 or later</li>
+        <li>~2GB disk space for models</li>
+        <li>Internet connection for initial setup</li>
+    </ul>
+    
+    <h2>Using with Scout</h2>
+    <ol>
+        <li>Install the transcriber service using the command above</li>
+        <li>Open Scout → Settings → Transcription</li>
+        <li>Select "External Service" mode</li>
+        <li>Click "Test Connection" to verify setup</li>
+    </ol>
+    
+    <h2>Configuration</h2>
+    <p>The service uses these default ports (configurable via environment variables):</p>
+    <pre><code>ZMQ_PUSH_PORT=5555    # Audio input
+ZMQ_PULL_PORT=5556    # Transcripts output  
+ZMQ_CONTROL_PORT=5557 # Control plane</code></pre>
+    
+    <h2>Manual Installation</h2>
+    <p>If you prefer to review the installation process:</p>
+    <ol>
+        <li><a href="/transcriber-install.txt">View the installer script</a> or <a href="/transcriber-install.sh">download it</a></li>
+        <li>Review the script contents</li>
+        <li>Run: <code>chmod +x transcriber-install.sh && ./transcriber-install.sh</code></li>
+    </ol>
+    
+    <h2>Uninstall</h2>
+    <p>To remove the transcriber service:</p>
+    <pre><code>curl -sSf https://scout.arach.dev/transcriber-uninstall.sh | bash</code></pre>
+    
+    <div class="warning">
+        <strong>⚠️ Note:</strong> The transcriber service is optional. Scout includes built-in Whisper models that work without any additional setup. The external service adds support for additional models and enhanced performance.
+    </div>
+    
+    <h2>Support</h2>
+    <p>For issues or questions:</p>
+    <ul>
+        <li><a href="https://github.com/arach/scout/issues">GitHub Issues</a></li>
+        <li><a href="https://scout.arach.dev">Scout Homepage</a></li>
+    </ul>
+    
+    <hr style="margin-top: 3rem; border: none; border-top: 1px solid #ddd;">
+    <p style="text-align: center; color: #999; font-size: 0.9rem;">
+        Scout Transcriber Service • Part of the <a href="/">Scout</a> ecosystem
+    </p>
+</body>
+</html>
