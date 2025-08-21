@@ -188,7 +188,7 @@ impl ServiceManager {
                 output_log.push(format!("✓ All ZeroMQ ports responding"));
                 
                 // Run a quick transcription test
-                output_log.push("Running transcription test...");
+                output_log.push("Running transcription test...".to_string());
                 match Self::run_transcription_test().await {
                     Ok(result) => {
                         output_log.push(format!("✓ Transcription test successful: \"{}\"", result));
@@ -212,7 +212,7 @@ impl ServiceManager {
     
     /// Run a quick transcription test using the test_audio.py script
     async fn run_transcription_test() -> Result<String, String> {
-        use std::time::Duration;
+        use tokio::time::{timeout, Duration};
         
         // Check if test_audio.py exists
         let test_script = PathBuf::from("/Users/arach/dev/scout/transcriber/test_audio.py");
@@ -220,14 +220,16 @@ impl ServiceManager {
             return Err("test_audio.py not found".to_string());
         }
         
-        // Run the test script
-        let output = tokio::process::Command::new("uv")
+        // Run the test script with timeout
+        let output_future = tokio::process::Command::new("uv")
             .arg("run")
             .arg("test_audio.py")
             .current_dir("/Users/arach/dev/scout/transcriber")
-            .timeout(Duration::from_secs(10))
-            .output()
+            .output();
+            
+        let output = timeout(Duration::from_secs(10), output_future)
             .await
+            .map_err(|_| "Test timed out after 10 seconds".to_string())?
             .map_err(|e| format!("Failed to run test: {}", e))?;
         
         if output.status.success() {
