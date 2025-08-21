@@ -53,22 +53,22 @@ export function PrismCode({ code, language, className = '' }: PrismCodeProps) {
   const preClassName = `overflow-x-auto language-${language}${className ? ' ' + className : ''}`
 
   return (
-    <div className="relative group">
+    <div className="relative group rounded-lg overflow-hidden border border-border/50 bg-gradient-to-br from-muted/30 to-muted/10 hover:border-primary/30 transition-all duration-300">
       <Button
         variant="ghost"
         size="sm"
-        className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity z-10 h-8 w-8 p-0 bg-background/80 backdrop-blur-sm hover:bg-background/90"
+        className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-all duration-200 z-10 h-8 w-8 p-0 bg-background/90 backdrop-blur-sm hover:bg-background border border-border/50 shadow-sm"
         onClick={copyToClipboard}
       >
         {copied ? (
-          <Check className="h-4 w-4" />
+          <Check className="h-4 w-4 text-green-500" />
         ) : (
           <Copy className="h-4 w-4" />
         )}
       </Button>
       <pre 
         ref={preRef}
-        className={preClassName}
+        className={preClassName + " !m-0 !rounded-none"}
         tabIndex={0}
         suppressHydrationWarning
       >

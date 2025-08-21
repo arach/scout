@@ -53,7 +53,7 @@ function CodeBlock({ code, language = "bash", className = "" }: { code: string; 
 
 export default function TranscriberDocsPage() {
   return (
-    <div className="min-h-screen bg-gradient-to-b from-background to-muted/20">
+    <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/30">
       {/* Header */}
       <div className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container mx-auto px-4 py-4">
@@ -75,10 +75,10 @@ export default function TranscriberDocsPage() {
       <div className="container mx-auto px-4 py-12">
         <div className="max-w-4xl mx-auto">
           <div className="flex items-center gap-2 mb-4">
-            <Badge variant="outline" className="text-blue-600 border-blue-600">
+            <Badge variant="outline" className="text-blue-600 border-blue-600 bg-blue-600/10 hover:bg-blue-600/20 transition-colors">
               Advanced
             </Badge>
-            <Badge variant="outline" className="text-green-600 border-green-600">
+            <Badge variant="outline" className="text-green-600 border-green-600 bg-green-600/10 hover:bg-green-600/20 transition-colors">
               Optional Service
             </Badge>
           </div>
@@ -93,7 +93,7 @@ export default function TranscriberDocsPage() {
           </p>
 
           {/* Quick Install */}
-          <Card className="mb-8 border-blue-500/20 bg-blue-500/5">
+          <Card className="mb-8 border-2 border-blue-500/30 bg-gradient-to-br from-blue-500/10 to-blue-600/5 shadow-lg shadow-blue-500/10 hover:shadow-xl hover:shadow-blue-500/20 transition-all duration-300">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Terminal className="h-5 w-5" />
@@ -125,10 +125,10 @@ export default function TranscriberDocsPage() {
 
           {/* Features Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-            <Card>
+            <Card className="border border-border/50 hover:border-blue-500/30 transition-all duration-300 hover:shadow-lg hover:shadow-blue-500/10 bg-gradient-to-br from-background to-muted/20">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-lg">
-                  <Cpu className="h-5 w-5 text-blue-500" />
+                  <Cpu className="h-5 w-5 text-blue-500 animate-pulse" />
                   Multiple AI Models
                 </CardTitle>
               </CardHeader>
@@ -150,10 +150,10 @@ export default function TranscriberDocsPage() {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="border border-border/50 hover:border-green-500/30 transition-all duration-300 hover:shadow-lg hover:shadow-green-500/10 bg-gradient-to-br from-background to-muted/20">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-lg">
-                  <Zap className="h-5 w-5 text-yellow-500" />
+                  <Zap className="h-5 w-5 text-yellow-500 animate-pulse" />
                   Performance
                 </CardTitle>
               </CardHeader>
@@ -177,7 +177,7 @@ export default function TranscriberDocsPage() {
           </div>
 
           {/* Architecture */}
-          <Card className="mb-8">
+          <Card className="mb-8 border border-border/50 shadow-md hover:shadow-lg transition-shadow duration-300">
             <CardHeader>
               <CardTitle>Architecture</CardTitle>
               <CardDescription>
@@ -204,7 +204,7 @@ export default function TranscriberDocsPage() {
           </Card>
 
           {/* Configuration */}
-          <Card className="mb-8">
+          <Card className="mb-8 border border-purple-500/20 bg-gradient-to-br from-purple-500/5 to-transparent shadow-md hover:shadow-lg transition-all duration-300">
             <CardHeader>
               <CardTitle>Configuration</CardTitle>
               <CardDescription>
@@ -240,7 +240,7 @@ scout-transcriber --workers 4 --model parakeet`}
           </Card>
 
           {/* Security Note */}
-          <Card className="mb-8 border-green-500/20 bg-green-500/5">
+          <Card className="mb-8 border-2 border-green-500/30 bg-gradient-to-br from-green-500/10 to-green-600/5 shadow-lg shadow-green-500/10">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Shield className="h-5 w-5 text-green-500" />
@@ -270,7 +270,7 @@ scout-transcriber --workers 4 --model parakeet`}
           </Card>
 
           {/* Troubleshooting */}
-          <Card className="mb-8">
+          <Card className="mb-8 border border-orange-500/20 bg-gradient-to-br from-orange-500/5 to-transparent shadow-md hover:shadow-lg transition-all duration-300">
             <CardHeader>
               <CardTitle>Troubleshooting</CardTitle>
             </CardHeader>
@@ -308,7 +308,7 @@ scout-transcriber --workers 2`}
           </Card>
 
           {/* Uninstall */}
-          <Card className="mb-8">
+          <Card className="mb-8 border border-slate-500/20 bg-gradient-to-br from-slate-500/5 to-transparent">
             <CardHeader>
               <CardTitle>Uninstallation</CardTitle>
             </CardHeader>
@@ -324,7 +324,7 @@ scout-transcriber --workers 2`}
           </Card>
 
           {/* Resources */}
-          <Card>
+          <Card className="border border-indigo-500/20 bg-gradient-to-br from-indigo-500/5 to-transparent shadow-md hover:shadow-lg transition-all duration-300">
             <CardHeader>
               <CardTitle>Resources</CardTitle>
             </CardHeader>
