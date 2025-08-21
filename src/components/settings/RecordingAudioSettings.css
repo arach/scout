@@ -5,12 +5,35 @@
 /* Main container - ensure dropdowns can extend outside */
 .recording-audio-settings {
   overflow: visible;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Settings section container */
+.settings-section {
+  background: rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  padding: 10px 12px;
+  overflow: visible;
+}
+
+/* Section title */
+.section-title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  margin: 0 0 10px 0;
+  opacity: 0.8;
 }
 
 /* Setting item container - tighter spacing */
 .recording-audio-settings .setting-item {
   overflow: visible; /* Ensure dropdowns can extend outside */
-  margin-bottom: 8px;
+  margin-bottom: 0;
 }
 
 .recording-audio-settings .setting-item label {
@@ -18,6 +41,7 @@
   font-weight: 400;
   color: var(--text-primary);
   margin-bottom: 6px;
+  display: block;
 }
 
 /* Two-column grid for shortcuts */
@@ -106,6 +130,16 @@
 
 /* Light mode adjustments for hotkey display */
 @media (prefers-color-scheme: light) {
+  .settings-section {
+    background: rgba(0, 0, 0, 0.03);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+  }
+  
+  .section-title {
+    color: var(--text-secondary);
+    opacity: 0.7;
+  }
+  
   .hotkey-display {
     background: rgba(0, 0, 0, 0.05);
     border: 1px solid rgba(0, 0, 0, 0.1);
@@ -113,6 +147,11 @@
   
   .hotkey-display:not(.capturing) {
     background: rgba(0, 0, 0, 0.08);
+  }
+  
+  .sound-flow-container {
+    background: rgba(0, 0, 0, 0.06);
+    border: 1px solid rgba(0, 0, 0, 0.1);
   }
 }
 
@@ -132,6 +171,11 @@
   gap: 6px;
   flex: 1;
   overflow: visible; /* Ensure dropdowns can extend outside */
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  margin-top: 0;
 }
 
 /* Sound flow item */
@@ -149,14 +193,16 @@
   color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  opacity: 0.7;
 }
 
 /* Sound flow arrow */
 .sound-flow-arrow {
   color: var(--text-secondary);
   font-size: 14px;
-  padding: 0 2px;
+  padding: 0 8px;
   margin-bottom: 14px; /* Align with dropdown height */
+  opacity: 0.5;
 }
 
 /* Preview button - ensure it looks like a button */
@@ -198,16 +244,16 @@
 .actions-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  margin-bottom: 16px;
+  gap: 12px;
+  margin-bottom: 0;
 }
 
 /* Toggles section - full width */
 .toggles-section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin-bottom: 16px;
+  gap: 8px;
+  margin-bottom: 0;
 }
 
 /* Toggle with action button */
@@ -230,7 +276,7 @@
 }
 
 .toggle-setting label {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--text-primary);
   white-space: nowrap;
 }

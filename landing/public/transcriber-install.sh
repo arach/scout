@@ -1,6 +1,6 @@
 #!/bin/bash
 # Scout Transcriber Service Installer
-# Usage: curl -sSf https://scout.arach.dev/transcriber-install.sh | bash
+# Usage: curl -sSf https://scout.arach.dev/install-transcriber.sh | sh
 
 set -e
 
@@ -14,7 +14,7 @@ NC='\033[0m' # No Color
 # Configuration
 TRANSCRIBER_VERSION="latest"
 INSTALL_DIR="/usr/local/bin"
-CONFIG_DIR="${HOME}/.scout-transcriber"
+CONFIG_DIR="${HOME}/.config/transcriber"
 GITHUB_REPO="arach/scout"
 
 echo -e "${BLUE}Scout Transcriber Service Installer${NC}"
@@ -126,11 +126,11 @@ if [ ! -f "${CONFIG_DIR}/bin/uv" ]; then
 fi
 
 # Create wrapper script for easier invocation
-cat > "${INSTALL_DIR}/scout-transcriber" << 'EOF'
+cat > "${INSTALL_DIR}/transcriber" << 'EOF'
 #!/bin/bash
-# Scout Transcriber Service wrapper
+# Transcriber Service wrapper
 
-CONFIG_DIR="${HOME}/.scout-transcriber"
+CONFIG_DIR="${HOME}/.config/transcriber"
 VENV_DIR="${CONFIG_DIR}/venv"
 UV_BIN="${CONFIG_DIR}/bin/uv"
 
@@ -169,7 +169,7 @@ exec transcriber \
     --zmq-control-endpoint "tcp://127.0.0.1:${ZMQ_CONTROL_PORT}" \
     "$@"
 EOF
-chmod +x "${INSTALL_DIR}/scout-transcriber"
+chmod +x "${INSTALL_DIR}/transcriber"
 
 # Create LaunchAgent for auto-start (optional)
 echo ""
@@ -188,7 +188,7 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
     <string>com.scout.transcriber</string>
     <key>ProgramArguments</key>
     <array>
-        <string>${INSTALL_DIR}/scout-transcriber</string>
+        <string>${INSTALL_DIR}/transcriber</string>
         <string>--workers</string>
         <string>2</string>
     </array>
@@ -220,7 +220,7 @@ fi
 # Test the installation
 echo ""
 echo -e "${YELLOW}Testing installation...${NC}"
-if scout-transcriber --version &>/dev/null; then
+if transcriber --version &>/dev/null; then
     echo -e "${GREEN}✓${NC} Transcriber installed successfully!"
 else
     echo -e "${RED}✗${NC} Installation test failed"
@@ -232,14 +232,14 @@ fi
 echo ""
 echo -e "${GREEN}Installation complete!${NC}"
 echo ""
-echo "The Scout Transcriber Service has been installed to:"
-echo "  Binary: ${INSTALL_DIR}/scout-transcriber"
+echo "The Transcriber Service has been installed to:"
+echo "  Binary: ${INSTALL_DIR}/transcriber"
 echo "  Config: ${CONFIG_DIR}"
 echo ""
 echo "Usage:"
-echo "  scout-transcriber              # Start the service"
-echo "  scout-transcriber --workers 4  # Start with 4 workers"
-echo "  scout-transcriber --help       # Show all options"
+echo "  transcriber              # Start the service"
+echo "  transcriber --workers 4  # Start with 4 workers"
+echo "  transcriber --help       # Show all options"
 echo ""
 echo "To use with Scout app:"
 echo "  1. Open Scout → Settings → Transcription"
@@ -259,4 +259,4 @@ echo ""
 echo "Logs are stored in: ${CONFIG_DIR}/logs/"
 echo ""
 echo "To uninstall, run:"
-echo "  curl -sSf https://scout.arach.dev/transcriber-uninstall.sh | bash"
+echo "  curl -sSf https://scout.arach.dev/uninstall-transcriber.sh | sh"

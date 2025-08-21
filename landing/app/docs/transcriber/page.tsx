@@ -102,7 +102,7 @@ export default function TranscriberDocsPage() {
             </CardHeader>
             <CardContent>
               <CodeBlock 
-                code="curl -sSf https://scout.arach.dev/transcriber-install.sh | bash"
+                code="curl -sSf https://scout.arach.dev/install-transcriber.sh | sh"
                 language="bash"
                 className="mb-4"
               />
@@ -232,7 +232,7 @@ export ZMQ_PULL_PORT=6001
 export ZMQ_CONTROL_PORT=6002
 
 # Run with custom settings
-scout-transcriber --workers 4 --model parakeet`}
+transcriber --workers 4 --model parakeet`}
                   language="bash"
                 />
               </div>
@@ -285,7 +285,7 @@ scout-transcriber --workers 4 --model parakeet`}
 lsof -i :5555
 
 # View logs
-tail -f ~/.scout-transcriber/logs/transcriber.log`}
+tail -f ~/.config/transcriber/logs/transcriber.log`}
                   language="bash"
                 />
               </div>
@@ -297,10 +297,10 @@ tail -f ~/.scout-transcriber/logs/transcriber.log`}
                 </h4>
                 <CodeBlock 
                   code={`# Check if service is running
-ps aux | grep scout-transcriber
+ps aux | grep transcriber
 
 # Restart service
-scout-transcriber --workers 2`}
+transcriber --workers 2`}
                   language="bash"
                 />
               </div>
@@ -317,7 +317,7 @@ scout-transcriber --workers 2`}
                 To completely remove the transcriber service and all associated files:
               </p>
               <CodeBlock 
-                code="curl -sSf https://scout.arach.dev/transcriber-uninstall.sh | bash"
+                code="curl -sSf https://scout.arach.dev/uninstall-transcriber.sh | sh"
                 language="bash"
               />
             </CardContent>

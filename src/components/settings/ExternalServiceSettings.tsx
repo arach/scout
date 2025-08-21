@@ -245,15 +245,15 @@ export const ExternalServiceSettings: React.FC = () => {
             <div className="install-step">
               <div className="step-number">2</div>
               <div className="step-content">
-                <h4>Build Transcriber Service</h4>
-                <p className="step-desc">Compile the Rust binary with ZeroMQ support</p>
+                <h4>Install Transcriber Service</h4>
+                <p className="step-desc">Download and install the transcriber with all dependencies</p>
                 <div className="command-box">
-                  <code>cd ~/dev/scout/transcriber && cargo build --release --features zeromq-queue</code>
+                  <code>curl -sSf https://scout.arach.dev/install-transcriber.sh | sh</code>
                   <button 
                     className="copy-btn"
-                    onClick={() => copyCommand('cd ~/dev/scout/transcriber && cargo build --release --features zeromq-queue', 'transcriber-build')}
+                    onClick={() => copyCommand('curl -sSf https://scout.arach.dev/install-transcriber.sh | sh', 'transcriber-install')}
                   >
-                    {copiedCommand === 'transcriber-build' ? (
+                    {copiedCommand === 'transcriber-install' ? (
                       <Check size={14} className="copied-icon" />
                     ) : (
                       <Copy size={14} />
@@ -266,13 +266,13 @@ export const ExternalServiceSettings: React.FC = () => {
             <div className="install-step">
               <div className="step-number">3</div>
               <div className="step-content">
-                <h4>Verify Build</h4>
-                <p className="step-desc">Check that the binary was built successfully</p>
+                <h4>Verify Installation</h4>
+                <p className="step-desc">Check that the service was installed successfully</p>
                 <div className="command-box">
-                  <code>./target/release/transcriber --version</code>
+                  <code>transcriber --version</code>
                   <button 
                     className="copy-btn"
-                    onClick={() => copyCommand('cd ~/dev/scout/transcriber && ./target/release/transcriber --version', 'transcriber-verify')}
+                    onClick={() => copyCommand('transcriber --version', 'transcriber-verify')}
                   >
                     {copiedCommand === 'transcriber-verify' ? (
                       <Check size={14} className="copied-icon" />
@@ -281,6 +281,9 @@ export const ExternalServiceSettings: React.FC = () => {
                     )}
                   </button>
                 </div>
+                <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px', marginBottom: 0 }}>
+                  If command not found, restart your terminal or run: <code style={{ fontSize: '10px' }}>source ~/.bashrc</code>
+                </p>
               </div>
             </div>
 

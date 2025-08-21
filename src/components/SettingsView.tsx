@@ -35,16 +35,16 @@ const sidebarItems: SidebarItem[] = [
     description: 'Shortcuts and audio settings'
   },
   { 
-    id: 'display', 
-    label: 'Display', 
-    icon: Monitor,
-    description: 'Themes and visual feedback'
-  },
-  { 
     id: 'transcription', 
     label: 'Transcription', 
     icon: AudioWaveform,
     description: 'AI models for speech-to-text'
+  },
+  { 
+    id: 'display', 
+    label: 'Display', 
+    icon: Monitor,
+    description: 'Themes and visual feedback'
   },
   { 
     id: 'processing', 

@@ -49,8 +49,10 @@ export const RecordingAudioSettings = memo(function RecordingAudioSettings() {
   return (
     <div className="recording-audio-settings">
       
-      {/* Recording Shortcuts and Actions - Two Column Grid */}
-      <div className="actions-grid">
+      {/* Recording Shortcuts Section */}
+      <div className="settings-section">
+        <h3 className="section-title">Keyboard Shortcuts</h3>
+        <div className="actions-grid">
         {/* Toggle Recording Shortcut */}
         <div className="setting-item">
           <label>Toggle Recording</label>
@@ -131,10 +133,13 @@ export const RecordingAudioSettings = memo(function RecordingAudioSettings() {
           </div>
         </div>
 
+        </div>
       </div>
 
-      {/* Toggle Settings - Full Width */}
-      <div className="toggles-section">
+      {/* Behavior Settings Section */}
+      <div className="settings-section">
+        <h3 className="section-title">Behavior</h3>
+        <div className="toggles-section">
         {/* Auto-copy Toggle */}
         <Toggle
           label="Auto-copy to clipboard"
@@ -149,8 +154,15 @@ export const RecordingAudioSettings = memo(function RecordingAudioSettings() {
           onChange={actions.toggleAutoPaste}
         />
 
+        </div>
+      </div>
+
+      {/* Sound Configuration Section */}
+      <div className="settings-section">
+        <h3 className="section-title">Sound Configuration</h3>
+        
         {/* Sound Enable Toggle with Preview Button */}
-        <div className="toggle-with-action">
+        <div className="toggle-with-action" style={{ marginBottom: sound.soundEnabled ? '12px' : '0' }}>
           <Toggle
             label="Enable recording sounds"
             checked={sound.soundEnabled}
@@ -201,21 +213,9 @@ export const RecordingAudioSettings = memo(function RecordingAudioSettings() {
               </button>
           )}
         </div>
-
-        {/* UI Sounds Toggle */}
-        <Toggle
-          label="Enable UI sounds (transitions, settings saves)"
-          checked={localStorage.getItem('scout-ui-sounds-enabled') !== 'false'}
-          onChange={(enabled) => {
-            localStorage.setItem('scout-ui-sounds-enabled', enabled.toString());
-            // Settings are saved in localStorage and checked when playing sounds
-          }}
-        />
-      </div>
-
-      {/* Sound flow configuration */}
-      {sound.soundEnabled && (
-        <div className="setting-item">
+        
+        {sound.soundEnabled && (
+          <div className="setting-item">
           <div className="sound-flow-container">
               <div className="sound-flow-item">
                 <div className="sound-flow-label">Start</div>
@@ -247,8 +247,9 @@ export const RecordingAudioSettings = memo(function RecordingAudioSettings() {
                 />
               </div>
           </div>
-        </div>
-      )}
+          </div>
+        )}
+      </div>
 
     </div>
   );

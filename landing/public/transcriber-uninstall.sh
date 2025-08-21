@@ -1,6 +1,6 @@
 #!/bin/bash
 # Scout Transcriber Service Uninstaller
-# Usage: curl -sSf https://scout.arach.dev/transcriber-uninstall.sh | bash
+# Usage: curl -sSf https://scout.arach.dev/uninstall-transcriber.sh | sh
 
 set -e
 
@@ -17,7 +17,7 @@ echo ""
 
 # Configuration
 INSTALL_DIR="/usr/local/bin"
-CONFIG_DIR="${HOME}/.scout-transcriber"
+CONFIG_DIR="${HOME}/.config/transcriber"
 PLIST_PATH="${HOME}/Library/LaunchAgents/com.scout.transcriber.plist"
 
 # Stop and unload LaunchAgent if it exists
@@ -30,21 +30,11 @@ fi
 
 # Stop any running transcriber processes
 echo -e "${YELLOW}Stopping transcriber processes...${NC}"
-pkill -f "scout-transcriber" 2>/dev/null || true
-pkill -f "transcriber.*--use-zeromq" 2>/dev/null || true
+pkill -f "transcriber" 2>/dev/null || true
 echo -e "${GREEN}✓${NC} Processes stopped"
 
 # Remove binaries
 echo -e "${YELLOW}Removing binaries...${NC}"
-if [ -f "${INSTALL_DIR}/scout-transcriber" ]; then
-    if [ -w "${INSTALL_DIR}" ]; then
-        rm -f "${INSTALL_DIR}/scout-transcriber"
-    else
-        sudo rm -f "${INSTALL_DIR}/scout-transcriber"
-    fi
-    echo -e "${GREEN}✓${NC} Removed scout-transcriber"
-fi
-
 if [ -f "${INSTALL_DIR}/transcriber" ]; then
     if [ -w "${INSTALL_DIR}" ]; then
         rm -f "${INSTALL_DIR}/transcriber"
@@ -67,7 +57,7 @@ else
 fi
 
 echo ""
-echo -e "${GREEN}✅ Scout Transcriber Service has been uninstalled${NC}"
+echo -e "${GREEN}✅ Transcriber Service has been uninstalled${NC}"
 echo ""
 echo "To reinstall, run:"
-echo "  curl -sSf https://scout.arach.dev/install.sh | bash"
+echo "  curl -sSf https://scout.arach.dev/install-transcriber.sh | sh"

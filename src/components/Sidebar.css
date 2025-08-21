@@ -246,8 +246,8 @@
   font-size: 12px;
   font-weight: 500;
   pointer-events: none;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-  border: 2px solid var(--border-primary);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   display: none;
 }
 
@@ -266,8 +266,8 @@
   width: 0;
   height: 0;
   border-style: solid;
-  border-width: 6px 6px 6px 0;
-  border-color: transparent var(--border-primary) transparent transparent;
+  border-width: 5px 5px 5px 0;
+  border-color: transparent rgba(255, 255, 255, 0.08) transparent transparent;
 }
 
 .sidebar.collapsed .sidebar-button .sidebar-tooltip::after {
@@ -279,9 +279,9 @@
   width: 0;
   height: 0;
   border-style: solid;
-  border-width: 5px 5px 5px 0;
+  border-width: 4px 4px 4px 0;
   border-color: transparent var(--bg-primary) transparent transparent;
-  margin-right: -1px;
+  margin-right: -0.5px;
 }
 
 /* Show tooltip on hover when sidebar is collapsed */
@@ -434,17 +434,17 @@
   
   /* Fix tooltip colors for dark mode */
   .sidebar.collapsed .sidebar-button .sidebar-tooltip {
-    background-color: var(--bg-tertiary);
-    border-color: var(--border-secondary);
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+    background-color: rgba(30, 34, 39, 0.95);
+    border-color: rgba(255, 255, 255, 0.06);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25), 0 2px 8px rgba(0, 0, 0, 0.15);
   }
   
   .sidebar.collapsed .sidebar-button .sidebar-tooltip::before {
-    border-color: transparent var(--border-secondary) transparent transparent;
+    border-color: transparent rgba(255, 255, 255, 0.06) transparent transparent;
   }
   
   .sidebar.collapsed .sidebar-button .sidebar-tooltip::after {
-    border-color: transparent var(--bg-tertiary) transparent transparent;
+    border-color: transparent rgba(30, 34, 39, 0.95) transparent transparent;
   }
 }
 
