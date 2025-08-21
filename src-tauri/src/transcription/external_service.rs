@@ -8,7 +8,7 @@ use std::path::PathBuf;
 /// Configuration for the external transcription service
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExternalServiceConfig {
-    /// Path to the scout-transcriber binary
+    /// Path to the transcriber binary
     pub binary_path: PathBuf,
     /// Input queue directory (for Sled mode)
     pub input_queue: PathBuf,
@@ -33,7 +33,7 @@ pub struct ExternalServiceConfig {
 impl Default for ExternalServiceConfig {
     fn default() -> Self {
         Self {
-            binary_path: PathBuf::from("scout-transcriber"),
+            binary_path: PathBuf::from("transcriber"),
             input_queue: PathBuf::from("/tmp/transcriber/input"),
             output_queue: PathBuf::from("/tmp/transcriber/output"),
             workers: 2,

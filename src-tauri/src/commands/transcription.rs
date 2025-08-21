@@ -359,42 +359,17 @@ pub struct ExternalServiceStatus {
 
 #[tauri::command]
 pub async fn check_transcriber_installed() -> Result<bool, String> {
-    // Check if scout-transcriber binary exists in PATH or common locations
-    let paths = [
-        "/usr/local/bin/scout-transcriber",
-        "/usr/local/bin/transcriber",
-    ];
+    use crate::service_manager::ServiceManager;
     
-    for path in &paths {
-        if std::path::Path::new(path).exists() {
-            return Ok(true);
-        }
-    }
-    
-    // Check in home directory
-    if let Some(home) = dirs::home_dir() {
-        let home_path = home.join(".scout-transcriber/bin/transcriber");
-        if home_path.exists() {
-            return Ok(true);
-        }
-    }
-    
-    // Also check if it's in PATH
-    if let Ok(output) = std::process::Command::new("which")
-        .arg("scout-transcriber")
-        .output()
-    {
-        if output.status.success() {
-            return Ok(true);
-        }
-    }
-    
-    Ok(false)
+    // Check if transcriber is installed
+    Ok(ServiceManager::check_installed().await)
 }
 
 #[tauri::command]
 pub async fn check_external_service_status(state: State<'_, AppState>) -> Result<ExternalServiceStatus, String> {
-    // Check if external service is configured and running
+    use crate::service_manager::ServiceManager;
+    
+    // Check if external service is configured
     let settings = state.settings.lock().await;
     let external_config = settings.get().external_service.clone();
     drop(settings);
@@ -408,34 +383,38 @@ pub async fn check_external_service_status(state: State<'_, AppState>) -> Result
         });
     }
     
-    // Try to connect to the ZeroMQ control port to check health
-    let control_endpoint = format!("tcp://127.0.0.1:{}", external_config.zmq_control_port);
+    // Get service status from launchctl
+    let service_status = ServiceManager::check_status().await;
     
-    // Simple TCP connection test
-    use std::net::TcpStream;
-    use std::time::Duration;
+    // If service is running, also check TCP connection for health
+    let mut healthy = service_status.running;
+    let mut error = service_status.error;
     
-    match TcpStream::connect_timeout(
-        &format!("127.0.0.1:{}", external_config.zmq_control_port).parse().unwrap(),
-        Duration::from_secs(2)
-    ) {
-        Ok(_) => {
-            Ok(ExternalServiceStatus {
-                running: true,
-                healthy: true,
-                last_check: Some(chrono::Utc::now().to_rfc3339()),
-                error: None,
-            })
-        }
-        Err(e) => {
-            Ok(ExternalServiceStatus {
-                running: false,
-                healthy: false,
-                last_check: Some(chrono::Utc::now().to_rfc3339()),
-                error: Some(format!("Cannot connect to service: {}", e)),
-            })
+    if service_status.running {
+        // Try to connect to the ZeroMQ control port to verify health
+        use std::net::TcpStream;
+        use std::time::Duration;
+        
+        match TcpStream::connect_timeout(
+            &format!("127.0.0.1:{}", external_config.zmq_control_port).parse().unwrap(),
+            Duration::from_secs(2)
+        ) {
+            Ok(_) => {
+                healthy = true;
+            }
+            Err(e) => {
+                healthy = false;
+                error = Some(format!("Service running but cannot connect: {}", e));
+            }
         }
     }
+    
+    Ok(ExternalServiceStatus {
+        running: service_status.running,
+        healthy,
+        last_check: Some(chrono::Utc::now().to_rfc3339()),
+        error,
+    })
 }
 
 #[tauri::command]
@@ -486,6 +465,8 @@ pub async fn test_external_service(state: State<'_, AppState>) -> Result<serde_j
 
 #[tauri::command]
 pub async fn start_external_service(state: State<'_, AppState>) -> Result<(), String> {
+    use crate::service_manager::ServiceManager;
+    
     let settings = state.settings.lock().await;
     let external_config = settings.get().external_service.clone();
     drop(settings);
@@ -494,41 +475,14 @@ pub async fn start_external_service(state: State<'_, AppState>) -> Result<(), St
         return Err("External service is not enabled".to_string());
     }
     
-    // Start the external service process
-    use std::process::Command;
-    
-    let binary_path = external_config.binary_path.unwrap_or_else(|| "scout-transcriber".to_string());
-    
-    Command::new(&binary_path)
-        .arg("--workers")
-        .arg(external_config.workers.to_string())
-        .arg("--model")
-        .arg(&external_config.model)
-        .arg("--zmq-push-port")
-        .arg(external_config.zmq_push_port.to_string())
-        .arg("--zmq-pull-port")
-        .arg(external_config.zmq_pull_port.to_string())
-        .arg("--zmq-control-port")
-        .arg(external_config.zmq_control_port.to_string())
-        .spawn()
-        .map_err(|e| format!("Failed to start external service: {}", e))?;
-    
-    Ok(())
+    // Start the service using launchctl
+    ServiceManager::start_service(&external_config).await
 }
 
 #[tauri::command]
 pub async fn stop_external_service() -> Result<(), String> {
-    // Stop the external service process
-    #[cfg(unix)]
-    {
-        use std::process::Command;
-        
-        // Try to find and kill the process
-        let _ = Command::new("pkill")
-            .arg("-f")
-            .arg("scout-transcriber")
-            .output();
-    }
+    use crate::service_manager::ServiceManager;
     
-    Ok(())
+    // Stop the service using launchctl
+    ServiceManager::stop_service().await
 }

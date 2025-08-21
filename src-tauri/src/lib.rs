@@ -27,6 +27,7 @@ mod profanity_filter;
 mod recording_progress;
 mod recording_workflow;
 mod ring_buffer_monitor;
+mod service_manager;
 mod settings;
 mod sound;
 mod transcription_context;

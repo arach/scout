@@ -195,7 +195,7 @@ impl Default for ExternalServiceConfig {
     fn default() -> Self {
         Self {
             enabled: false,
-            binary_path: Some("scout-transcriber".to_string()),
+            binary_path: Some("transcriber".to_string()),
             use_zeromq: true,
             zmq_push_port: 5555,
             zmq_pull_port: 5556,

@@ -220,6 +220,19 @@
   }
 }
 
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
 .verify-status-btn {
   margin-top: 10px;
   display: inline-flex;
@@ -560,4 +573,63 @@
   min-height: 200px;
   color: var(--text-secondary);
   font-size: 14px;
+}
+
+/* Service Configuration Header */
+.service-config-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.service-config-title {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.service-config-title h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.service-config-link {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.service-config-link:hover {
+  color: var(--accent-primary);
+}
+
+/* Service Status Badge */
+.service-status-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--background-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.service-status-badge .status-icon {
+  flex-shrink: 0;
+}
+
+/* Service Controls Section */
+.service-controls-section {
+  margin-bottom: 24px;
 }

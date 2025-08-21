@@ -11,13 +11,30 @@ export enum TranscriptionMode {
 }
 
 
+interface ServiceStatus {
+  running: boolean;
+  healthy: boolean;
+}
+
 export const TranscriptionSettings: React.FC = () => {
   const [mode, setMode] = useState<TranscriptionMode>(TranscriptionMode.Internal);
   const [loading, setLoading] = useState(true);
+  const [serviceStatus, setServiceStatus] = useState<ServiceStatus | null>(null);
 
   useEffect(() => {
     loadConfig();
+    if (mode === TranscriptionMode.External) {
+      checkServiceStatus();
+    }
   }, []);
+
+  useEffect(() => {
+    if (mode === TranscriptionMode.External) {
+      checkServiceStatus();
+      const interval = setInterval(checkServiceStatus, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [mode]);
 
   const loadConfig = async () => {
     try {
@@ -29,6 +46,16 @@ export const TranscriptionSettings: React.FC = () => {
       console.error('Failed to load transcription config:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const checkServiceStatus = async () => {
+    try {
+      const status = await invoke<ServiceStatus>('check_external_service_status');
+      setServiceStatus(status);
+    } catch (error) {
+      console.error('Failed to check service status:', error);
+      setServiceStatus({ running: false, healthy: false });
     }
   };
 
@@ -84,8 +111,32 @@ export const TranscriptionSettings: React.FC = () => {
           <ModelManager />
         </div>
         <div style={{ display: mode === TranscriptionMode.External ? 'block' : 'none' }}>
-          <h2 className="settings-section-title">Advanced Transcription Service</h2>
-          <ExternalServiceSettings />
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+            <h2 className="settings-section-title" style={{ margin: 0 }}>Transcriber Settings</h2>
+            {serviceStatus && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '4px 10px',
+                background: 'rgba(0, 0, 0, 0.2)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                borderRadius: '12px',
+                fontSize: '12px',
+                fontWeight: '500',
+                color: serviceStatus.running ? 'rgb(16, 185, 129)' : 'rgba(255, 255, 255, 0.5)'
+              }}>
+                <div style={{
+                  width: '6px',
+                  height: '6px',
+                  borderRadius: '50%',
+                  background: serviceStatus.running ? 'rgb(16, 185, 129)' : 'rgba(255, 255, 255, 0.3)'
+                }} />
+                <span>{serviceStatus.running ? 'Running' : 'Not running'}</span>
+              </div>
+            )}
+          </div>
+          <ExternalServiceSettings onStatusChange={setServiceStatus} />
         </div>
       </div>
     </div>
