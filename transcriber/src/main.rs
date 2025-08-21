@@ -94,6 +94,14 @@ pub struct Args {
     #[cfg(feature = "zeromq-queue")]
     #[arg(long, default_value = "false")]
     pub use_zeromq: bool,
+
+    /// Run as daemon (background process)
+    #[arg(long)]
+    pub daemon: bool,
+
+    /// PID file location (only used with --daemon)
+    #[arg(long, default_value = "/tmp/transcriber.pid")]
+    pub pid_file: String,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -224,9 +232,9 @@ impl TranscriptionService {
         let (input_queue, output_queue) = if args.use_zeromq {
             info!("Using ZeroMQ monitoring mode");
             info!("  - Python workers bind to {} (audio input) and {} (transcription output)", 
-                  self.args.zmq_push_endpoint, self.args.zmq_pull_endpoint);
+                  args.zmq_push_endpoint, args.zmq_pull_endpoint);
             info!("  - Rust monitors via control plane on {} (process updates)", 
-                  self.args.zmq_control_endpoint);
+                  args.zmq_control_endpoint);
             
             // In monitoring mode, Rust doesn't bind to data ports
             // Python workers handle the data plane (push/pull endpoints)

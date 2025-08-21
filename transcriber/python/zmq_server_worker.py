@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # /// script
-# requires-python = ">=3.10"
+# requires-python = "==3.10.*"
 # dependencies = [
 #   "pyzmq",
 #   "msgpack",
@@ -10,6 +10,7 @@
 #   "huggingface-hub",
 #   "mlx",
 #   "scipy",
+#   "parakeet-mlx==0.3.5",
 # ]
 # ///
 """
