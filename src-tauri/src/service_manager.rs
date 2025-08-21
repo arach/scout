@@ -83,8 +83,9 @@ impl ServiceManager {
     }
     
     /// Start the transcriber service using launchctl
-    pub async fn start_service(config: &ExternalServiceConfig) -> Result<(), String> {
+    pub async fn start_service(config: &ExternalServiceConfig) -> Result<String, String> {
         let plist_path = Self::plist_path();
+        let mut output_log = Vec::new();
         
         // Ensure LaunchAgents directory exists
         if let Some(parent) = plist_path.parent() {
@@ -96,14 +97,25 @@ impl ServiceManager {
         let plist_content = Self::generate_plist(config);
         fs::write(&plist_path, plist_content)
             .map_err(|e| format!("Failed to write plist file: {}", e))?;
+        output_log.push(format!("Created plist at: {}", plist_path.display()));
         
-        // Unload if already loaded (ignore errors)
-        let _ = Command::new("launchctl")
+        // Unload if already loaded (ignore errors but log output)
+        let unload_output = Command::new("launchctl")
             .arg("unload")
             .arg(&plist_path)
             .output();
         
+        if let Ok(output) = unload_output {
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                if !stderr.contains("Could not find specified service") {
+                    output_log.push(format!("Unload output: {}", stderr.trim()));
+                }
+            }
+        }
+        
         // Load the service
+        output_log.push(format!("Running: launchctl load {}", plist_path.display()));
         let output = Command::new("launchctl")
             .arg("load")
             .arg(&plist_path)
@@ -112,10 +124,17 @@ impl ServiceManager {
         
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("Failed to load service: {}", stderr));
+            output_log.push(format!("launchctl load stderr: {}", stderr.trim()));
+            return Err(format!("Failed to load service: {}\n\nFull log:\n{}", stderr, output_log.join("\n")));
+        } else {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if !stdout.is_empty() {
+                output_log.push(format!("launchctl load stdout: {}", stdout.trim()));
+            }
         }
         
         // Start the service explicitly (some versions of launchctl need this)
+        output_log.push(format!("Running: launchctl start {}", SERVICE_LABEL));
         let output = Command::new("launchctl")
             .arg("start")
             .arg(SERVICE_LABEL)
@@ -124,13 +143,18 @@ impl ServiceManager {
         
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            // Check if it's already running (not an error)
+            // Log but don't fail if already running
             if !stderr.contains("already loaded") {
-                return Err(format!("Failed to start service: {}", stderr));
+                output_log.push(format!("launchctl start stderr: {}", stderr.trim()));
+            }
+        } else {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if !stdout.is_empty() {
+                output_log.push(format!("launchctl start stdout: {}", stdout.trim()));
             }
         }
         
-        Ok(())
+        Ok(output_log.join("\n"))
     }
     
     /// Stop the transcriber service using launchctl

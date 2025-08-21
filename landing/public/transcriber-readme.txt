@@ -7,11 +7,11 @@ Installation
 ------------
 Run this command in your terminal:
 
-    curl -sSf https://scout.arach.dev/transcriber-install.sh | bash
+    curl -sSf https://scout.arach.dev/install-transcriber.sh | sh
 
 Or view the installer script:
 
-    https://scout.arach.dev/transcriber-install.sh
+    https://scout.arach.dev/install-transcriber.sh
 
 Features
 --------
@@ -39,7 +39,7 @@ Uninstallation
 --------------
 To remove the transcriber service:
 
-    curl -sSf https://scout.arach.dev/transcriber-uninstall.sh | bash
+    curl -sSf https://scout.arach.dev/uninstall-transcriber.sh | sh
 
 Support
 -------

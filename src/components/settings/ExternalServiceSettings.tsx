@@ -52,6 +52,7 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
   const [serviceOperation, setServiceOperation] = useState<'idle' | 'starting' | 'stopping'>('idle');
   const [operationResult, setOperationResult] = useState<{ type: 'success' | 'error', message: string } | null>(null);
   const [operationLogs, setOperationLogs] = useState<string[]>([]);
+  const [statusLogs, setStatusLogs] = useState<string[]>([]);
 
   useEffect(() => {
     console.log('[ExternalService] Component mounting, initializing...');
@@ -236,10 +237,27 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
         addLog(`stop_external_service returned: ${result || 'void'}`);
       } else {
         addLog('Calling Tauri command: start_external_service');
-        addLog('This will create a plist at ~/Library/LaunchAgents/');
-        addLog(`Command: transcriber start --workers ${config.workers} --model ${config.model}`);
-        const result = await invoke('start_external_service');
-        addLog(`start_external_service returned: ${result || 'void'}`);
+        addLog('------- BACKEND OUTPUT START -------');
+        
+        try {
+          // Get the actual output from the backend
+          const result = await invoke<string>('start_external_service');
+          
+          // Display the actual backend output line by line
+          if (result) {
+            result.split('\n').forEach(line => {
+              if (line.trim()) {
+                addLog(line);
+              }
+            });
+          } else {
+            addLog('(no output from backend)');
+          }
+        } catch (error) {
+          addLog(`ERROR: ${error}`);
+        }
+        
+        addLog('------- BACKEND OUTPUT END -------');
       }
       
       // Wait a moment for service to start/stop
@@ -665,31 +683,37 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
               <button 
                 className="btn-control"
                 onClick={async () => {
-                  setOperationLogs([]);
-                  addLog('============ CHECKING STATUS ============');
-                  addLog('Fetching current service status...');
+                  setStatusLogs([]);
+                  const timestamp = new Date().toLocaleTimeString();
+                  const addStatusLog = (msg: string) => {
+                    console.log(`[ExternalService] ${msg}`);
+                    setStatusLogs(prev => [...prev, `[${timestamp}] ${msg}`]);
+                  };
+                  
+                  addStatusLog('============ CHECKING STATUS ============');
+                  addStatusLog('Fetching current service status...');
                   await checkServiceStatus();
                   const currentStatus = await invoke<ServiceStatus>('check_external_service_status');
-                  addLog(`Status: running=${currentStatus.running}, healthy=${currentStatus.healthy}`);
+                  addStatusLog(`Status: running=${currentStatus.running}, healthy=${currentStatus.healthy}`);
                   if (currentStatus.error) {
-                    addLog(`Error: ${currentStatus.error}`);
+                    addStatusLog(`Error: ${currentStatus.error}`);
                   }
                   
                   // Additional status info
                   if (!currentStatus.running && !currentStatus.healthy) {
-                    addLog('Service is not running and not reachable');
-                    addLog('Try clicking "Start Service" to start it');
+                    addStatusLog('Service is not running and not reachable');
+                    addStatusLog('Try clicking "Start Service" to start it');
                   } else if (currentStatus.running && currentStatus.healthy) {
-                    addLog('Service is running and healthy');
+                    addStatusLog('Service is running and healthy');
                   } else if (!currentStatus.running && currentStatus.healthy) {
-                    addLog('Service is reachable but not managed by launchctl');
-                    addLog('It may have been started manually');
+                    addStatusLog('Service is reachable but not managed by launchctl');
+                    addStatusLog('It may have been started manually');
                   } else if (currentStatus.running && !currentStatus.healthy) {
-                    addLog('Service is running but not responding');
-                    addLog('Check /tmp/transcriber.error.log for details');
+                    addStatusLog('Service is running but not responding');
+                    addStatusLog('Check /tmp/transcriber.error.log for details');
                   }
                   
-                  addLog('Status check complete');
+                  addStatusLog('Status check complete');
                 }}
                 style={{
                   background: 'rgba(96, 165, 250, 0.1)',
@@ -759,6 +783,57 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
                   {testing ? 'Testing...' : 'Test Connection'}
                 </button>
               )}
+              
+              {/* Debug: Test transcriber command directly */}
+              <button
+                className="btn-secondary"
+                onClick={async () => {
+                  setOperationLogs([]);
+                  addLog('============ TESTING TRANSCRIBER COMMAND ============');
+                  const testCmd = `${config.binary_path || 'transcriber'} --version`;
+                  addLog(`Attempting to run: ${testCmd}`);
+                  
+                  try {
+                    // Check if binary exists first
+                    const installed = await invoke<boolean>('check_transcriber_installed');
+                    addLog(`Binary installed: ${installed}`);
+                    
+                    if (!installed) {
+                      addLog('Transcriber not found in PATH or common locations');
+                      addLog('Expected locations:');
+                      addLog('  - /usr/local/bin/transcriber');
+                      addLog('  - ~/.local/bin/transcriber');
+                      addLog('  - /opt/homebrew/bin/transcriber');
+                    } else {
+                      addLog('Transcriber found! Now checking version...');
+                      
+                      // Actually run transcriber --version
+                      try {
+                        const version = await invoke<string>('get_transcriber_version');
+                        addLog(`✓ Version: ${version}`);
+                        addLog('Service should be able to start.');
+                      } catch (versionError) {
+                        addLog(`✗ Failed to get version: ${versionError}`);
+                        addLog('Transcriber exists but may not be executable or has missing dependencies');
+                        addLog('Check:');
+                        addLog('  1. File permissions: chmod +x /usr/local/bin/transcriber');
+                        addLog('  2. Python/UV installation');
+                        addLog('  3. Error log at /tmp/transcriber.error.log');
+                      }
+                    }
+                  } catch (error) {
+                    addLog(`Error checking transcriber: ${error}`);
+                  }
+                }}
+                style={{
+                  background: 'rgba(156, 163, 175, 0.1)',
+                  border: '1px solid rgba(156, 163, 175, 0.3)',
+                  color: 'rgba(156, 163, 175, 1)',
+                  marginLeft: '8px'
+                }}
+              >
+                Test Command
+              </button>
             </div>
             {status.running && (
               <p style={{ 
@@ -790,6 +865,31 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
                   whiteSpace: 'pre-wrap'
                 }}>
                   {operationLogs.map((log, i) => (
+                    <div key={i} style={{ marginBottom: '2px' }}>{log}</div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {/* Status Check Logs Display - Separate from operation logs */}
+            {statusLogs.length > 0 && (
+              <div style={{
+                marginTop: '12px',
+                padding: '8px',
+                background: 'rgba(59, 130, 246, 0.05)',
+                border: '1px solid rgba(59, 130, 246, 0.2)',
+                borderRadius: '4px',
+                maxHeight: '150px',
+                overflowY: 'auto'
+              }}>
+                <div style={{
+                  fontSize: '10px',
+                  fontFamily: 'monospace',
+                  color: 'rgba(147, 197, 253, 0.9)',
+                  whiteSpace: 'pre-wrap'
+                }}>
+                  <div style={{ marginBottom: '4px', fontWeight: 'bold', color: 'rgba(147, 197, 253, 1)' }}>Status Check Results:</div>
+                  {statusLogs.map((log, i) => (
                     <div key={i} style={{ marginBottom: '2px' }}>{log}</div>
                   ))}
                 </div>

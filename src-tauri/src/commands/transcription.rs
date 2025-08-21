@@ -366,6 +366,25 @@ pub async fn check_transcriber_installed() -> Result<bool, String> {
 }
 
 #[tauri::command]
+pub async fn get_transcriber_version() -> Result<String, String> {
+    use std::process::Command;
+    
+    // Try to run transcriber --version
+    match Command::new("transcriber").arg("--version").output() {
+        Ok(output) => {
+            if output.status.success() {
+                let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                Ok(version)
+            } else {
+                let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                Err(format!("Command failed: {}", error))
+            }
+        }
+        Err(e) => Err(format!("Failed to run transcriber: {}", e))
+    }
+}
+
+#[tauri::command]
 pub async fn check_external_service_status(state: State<'_, AppState>) -> Result<ExternalServiceStatus, String> {
     use crate::service_manager::ServiceManager;
     
@@ -464,7 +483,7 @@ pub async fn test_external_service(state: State<'_, AppState>) -> Result<serde_j
 }
 
 #[tauri::command]
-pub async fn start_external_service(state: State<'_, AppState>) -> Result<(), String> {
+pub async fn start_external_service(state: State<'_, AppState>) -> Result<String, String> {
     use crate::service_manager::ServiceManager;
     
     let settings = state.settings.lock().await;
@@ -475,7 +494,7 @@ pub async fn start_external_service(state: State<'_, AppState>) -> Result<(), St
         return Err("External service is not enabled".to_string());
     }
     
-    // Start the service using launchctl
+    // Start the service using launchctl and return the actual output
     ServiceManager::start_service(&external_config).await
 }
 

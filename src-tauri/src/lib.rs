@@ -706,6 +706,7 @@ pub fn run() {
             foundation_models::format_transcript,
             foundation_models::check_foundation_models_availability,
             crate::commands::check_transcriber_installed,
+            crate::commands::get_transcriber_version,
             crate::commands::check_external_service_status,
             crate::commands::test_external_service,
             crate::commands::start_external_service,
