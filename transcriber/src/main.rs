@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
+use serde::{Deserialize, Serialize};
 use transcriber::{
     protocol::{AudioChunk, Transcript, TranscriptionError},
     queue::{Queue, SledQueue},
@@ -9,6 +10,7 @@ use transcriber::{
 
 #[cfg(feature = "zeromq-queue")]
 use transcriber::queue::{ZmqQueue, ZmqQueueConfig};
+use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -17,6 +19,58 @@ use tokio::signal;
 use tokio::sync::broadcast;
 use tokio::time::interval;
 use tracing::{debug, error, info, warn};
+
+/// Configuration that can be loaded from JSON file
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Config {
+    pub workers: usize,
+    pub model: String,
+    pub use_zeromq: bool,
+    pub zmq_push_port: u16,
+    pub zmq_pull_port: u16,
+    pub zmq_control_port: u16,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            workers: 2,
+            model: "whisper".to_string(),
+            use_zeromq: true,
+            zmq_push_port: 5555,
+            zmq_pull_port: 5556,
+            zmq_control_port: 5557,
+        }
+    }
+}
+
+impl Config {
+    /// Get the default config file path
+    fn default_path() -> PathBuf {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        PathBuf::from(home)
+            .join("Library")
+            .join("Application Support")
+            .join("com.scout.transcriber")
+            .join("config.json")
+    }
+    
+    /// Load config from the default location, falling back to defaults if not found
+    fn load() -> Self {
+        let config_path = Self::default_path();
+        if config_path.exists() {
+            if let Ok(contents) = fs::read_to_string(&config_path) {
+                if let Ok(config) = serde_json::from_str(&contents) {
+                    // Can't use tracing here as it's not initialized yet
+                    eprintln!("Loaded config from: {}", config_path.display());
+                    return config;
+                }
+            }
+        }
+        eprintln!("Using default config (no config file found at: {})", config_path.display());
+        Self::default()
+    }
+}
 
 #[derive(Parser)]
 #[command(name = "transcriber")]
@@ -809,7 +863,22 @@ impl TranscriptionService {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args = Args::parse();
+    let mut args = Args::parse();
+    
+    // Load config from default location
+    let config = Config::load();
+    
+    // Apply config values to args (config takes precedence over defaults)
+    args.workers = config.workers;
+    args.model = config.model;
+    
+    #[cfg(feature = "zeromq-queue")]
+    {
+        args.use_zeromq = config.use_zeromq;
+        args.zmq_push_endpoint = format!("tcp://127.0.0.1:{}", config.zmq_push_port);
+        args.zmq_pull_endpoint = format!("tcp://127.0.0.1:{}", config.zmq_pull_port);
+        args.zmq_control_endpoint = format!("tcp://127.0.0.1:{}", config.zmq_control_port);
+    }
 
     // Initialize logging with file output
     let log_level: tracing::Level = args.log_level.into();
@@ -827,13 +896,23 @@ async fn main() -> Result<()> {
         .init();
 
     info!("Starting Scout Transcriber v{}", env!("CARGO_PKG_VERSION"));
+    info!("Configuration loaded from: {}", Config::default_path().display());
     info!("Configuration:");
     info!("  Input queue: {}", args.input_queue.display());
     info!("  Output queue: {}", args.output_queue.display());
     info!("  Workers: {}", args.workers);
+    info!("  Model: {}", args.model);
     info!("  Python command: {}", args.python_cmd);
     info!("  Python args: {}", args.python_args);
     info!("  Log level: {:?}", args.log_level);
+    
+    #[cfg(feature = "zeromq-queue")]
+    if args.use_zeromq {
+        info!("  ZeroMQ mode enabled");
+        info!("  ZeroMQ push endpoint: {}", args.zmq_push_endpoint);
+        info!("  ZeroMQ pull endpoint: {}", args.zmq_pull_endpoint);
+        info!("  ZeroMQ control endpoint: {}", args.zmq_control_endpoint);
+    }
 
     // Create and start the service
     let service = TranscriptionService::new(args).await
