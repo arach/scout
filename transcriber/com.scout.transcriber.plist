@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.scout.transcriber</string>
+    
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/transcriber</string>
+        <string>--model</string>
+        <string>whisper</string>
+        <string>--workers</string>
+        <string>2</string>
+    </array>
+    
+    <key>RunAtLoad</key>
+    <true/>
+    
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+    
+    <key>StandardOutPath</key>
+    <string>/var/log/transcriber/stdout.log</string>
+    
+    <key>StandardErrorPath</key>
+    <string>/var/log/transcriber/stderr.log</string>
+    
+    <key>WorkingDirectory</key>
+    <string>/usr/local/share/transcriber</string>
+    
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>RUST_LOG</key>
+        <string>info</string>
+    </dict>
+    
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+</dict>
+</plist>

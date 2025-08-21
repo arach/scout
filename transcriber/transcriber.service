@@ -1,0 +1,31 @@
+[Unit]
+Description=Scout Transcriber Service
+After=network.target
+
+[Service]
+Type=simple
+User=transcriber
+Group=transcriber
+WorkingDirectory=/opt/transcriber
+ExecStart=/opt/transcriber/bin/transcriber --model whisper --workers 2
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=10
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/transcriber /var/lib/transcriber
+
+# Resource limits
+LimitNOFILE=65535
+LimitNPROC=4096
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

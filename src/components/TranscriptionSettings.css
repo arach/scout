@@ -15,64 +15,89 @@
 }
 
 .mode-tabs {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin-top: 16px;
+  display: flex;
+  margin-top: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 2px;
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(10px);
+  position: relative;
+}
+
+.mode-indicator {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: calc(50% - 2px);
+  height: calc(100% - 4px);
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.15), rgba(59, 130, 246, 0.08));
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  border-radius: 6px;
+  transition: transform 0.2s ease;
+  z-index: 0;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.1);
+  will-change: transform;
+}
+
+.mode-indicator.right {
+  transform: translateX(calc(100% + 0px));
 }
 
 .mode-tab {
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 16px;
-  background: var(--background-secondary);
-  border: 2px solid var(--border-color);
-  border-radius: 8px;
+  padding: 6px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
   cursor: pointer;
-  transition: all 0.2s ease;
   text-align: center;
-}
-
-.mode-tab:hover {
-  background: var(--background-hover);
-  border-color: var(--accent-color);
-}
-
-.mode-tab.active {
-  background: var(--accent-color-bg);
-  border-color: var(--accent-color);
-}
-
-.mode-icon {
-  font-size: 24px;
-  margin-bottom: 8px;
+  position: relative;
+  z-index: 1;
 }
 
 .mode-label {
-  font-weight: 600;
-  font-size: 14px;
-  color: var(--text-primary);
-  margin-bottom: 4px;
+  font-weight: 500;
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+
+.mode-tab:not(.active) .mode-label {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.mode-tab.active .mode-label {
+  color: #60a5fa;
 }
 
 .mode-desc {
-  font-size: 12px;
-  color: var(--text-secondary);
-  line-height: 1.4;
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.mode-tab:not(.active) .mode-desc {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.mode-tab.active .mode-desc {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.mode-icon {
+  margin-bottom: 4px;
+}
+
+.mode-tab:not(.active) .mode-icon {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.mode-tab.active .mode-icon {
+  color: #60a5fa;
 }
 
 .transcription-content {
-  animation: fadeIn 0.3s ease;
-}
-
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  /* No animation to prevent flicker */
 }

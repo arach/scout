@@ -79,6 +79,7 @@ export function DevTools(props: DevToolsProps) {
   const [showTeleprompter, setShowTeleprompter] = useState(false);
   const [waveformStyle, setWaveformStyle] = useState<'classic' | 'enhanced' | 'particles'>('enhanced');
   const [currentOnboardingStep, setCurrentOnboardingStep] = useState<OnboardingStep>(propsOnboardingStep || 'model');
+  const [transcriberInstallStatus, setTranscriberInstallStatus] = useState<'checking' | 'installed' | 'not_installed' | null>(null);
 
   // Sync with props onboarding step when it changes
   useEffect(() => {
@@ -323,16 +324,76 @@ export function DevTools(props: DevToolsProps) {
             )}
 
             {currentView === 'settings' && (
-              <div className="dev-tool-item primary">
-                <label className="dev-tool-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={showConsoleLog}
-                    onChange={(e) => setShowConsoleLog(e.target.checked)}
-                  />
-                  <span className="checkbox-label">Log Settings Changes</span>
-                </label>
-              </div>
+              <>
+                <div className="dev-tool-item primary">
+                  <label className="dev-tool-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={showConsoleLog}
+                      onChange={(e) => setShowConsoleLog(e.target.checked)}
+                    />
+                    <span className="checkbox-label">Log Settings Changes</span>
+                  </label>
+                </div>
+
+                {/* Transcriber Installation Status Override */}
+                <div className="dev-tool-section">
+                  <h4>Transcriber Service Mock</h4>
+                  <div className="dev-tool-item">
+                    <span className="status-label">Override Install Status:</span>
+                  </div>
+                  <div className="dev-tool-item">
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      <button
+                        className={`dev-tool-button ${transcriberInstallStatus === null ? 'active' : ''}`}
+                        onClick={() => {
+                          setTranscriberInstallStatus(null);
+                          // Set in window for component access
+                          (window as any).__DEV_TRANSCRIBER_STATUS = null;
+                          console.log('[DevTools] Transcriber status override: disabled');
+                        }}
+                      >
+                        Default
+                      </button>
+                      <button
+                        className={`dev-tool-button ${transcriberInstallStatus === 'not_installed' ? 'active' : ''}`}
+                        onClick={() => {
+                          setTranscriberInstallStatus('not_installed');
+                          (window as any).__DEV_TRANSCRIBER_STATUS = 'not_installed';
+                          console.log('[DevTools] Transcriber status override: not_installed');
+                        }}
+                      >
+                        Not Installed
+                      </button>
+                      <button
+                        className={`dev-tool-button ${transcriberInstallStatus === 'installed' ? 'active' : ''}`}
+                        onClick={() => {
+                          setTranscriberInstallStatus('installed');
+                          (window as any).__DEV_TRANSCRIBER_STATUS = 'installed';
+                          console.log('[DevTools] Transcriber status override: installed');
+                        }}
+                      >
+                        Installed
+                      </button>
+                      <button
+                        className={`dev-tool-button ${transcriberInstallStatus === 'checking' ? 'active' : ''}`}
+                        onClick={() => {
+                          setTranscriberInstallStatus('checking');
+                          (window as any).__DEV_TRANSCRIBER_STATUS = 'checking';
+                          console.log('[DevTools] Transcriber status override: checking');
+                        }}
+                      >
+                        Checking
+                      </button>
+                    </div>
+                  </div>
+                  <div className="dev-tool-item">
+                    <span className="status-label" style={{ fontSize: '11px', opacity: 0.7 }}>
+                      Simulates transcriber installation states for UI testing
+                    </span>
+                  </div>
+                </div>
+              </>
             )}
 
             {/* Onboarding Controls */}
