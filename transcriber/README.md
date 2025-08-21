@@ -4,11 +4,15 @@ A high-performance, standalone transcription service built in Rust that uses Pyt
 
 ## Features
 
+- **Multiple Transcription Models**:
+  - **Whisper**: OpenAI's Whisper model for general-purpose transcription
+  - **Parakeet MLX**: NVIDIA's Parakeet model optimized for Apple Silicon (M1/M2/M3)
 - **Multiple Queue Backends**: Choose between Sled (persistent, local) or ZeroMQ (distributed, cross-language) queues
   - **Sled Queues**: Persistent, reliable local queues with UUID-based correlation
   - **ZeroMQ Queues**: Distributed messaging with Push/Pull patterns for cross-language compatibility
 - **MessagePack Serialization**: Efficient binary serialization for minimal overhead
 - **Python Worker Management**: Automatic subprocess management with health monitoring and exponential backoff restarts
+- **Automatic Dependency Management**: UV handles Python versions and all dependencies automatically
 - **Cross-Platform**: Works on macOS, Linux, and Windows
 - **Production Ready**: Comprehensive error handling, logging, and monitoring
 - **Library + Binary**: Use as a standalone service or integrate as a Rust library
@@ -29,31 +33,46 @@ A high-performance, standalone transcription service built in Rust that uses Pyt
 
 ## 🚀 Quick Start
 
-### 1. Initial Setup
+### Prerequisites
+
+- **Rust**: Install from [rustup.rs](https://rustup.rs)
+- **UV**: Python package manager (automatically handles Python versions and dependencies)
+  ```bash
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  ```
+
+### 1. Build the Transcriber
 
 ```bash
-# Automated setup (builds and configures everything)
-./quickstart.sh
+# Build with ZeroMQ support (recommended)
+cargo build --release --features zeromq-queue
+
+# The binary will be at ./target/release/transcriber
 ```
 
-### 2. Service Management
+### 2. Run the Service
 
 ```bash
-# Start the service (runs in background)
-./transcriber start
+# Start with Whisper model (default)
+./target/release/transcriber --use-zeromq
 
-# Check status
-./transcriber status
+# Start with Parakeet model (optimized for Apple Silicon)
+./target/release/transcriber --use-zeromq --model parakeet
 
-# View logs
-./transcriber logs -f
+# Run as daemon (background process)
+./target/release/transcriber --use-zeromq --model parakeet --daemon
 
-# Stop the service
-./transcriber stop
+# With custom worker count
+./target/release/transcriber --use-zeromq --workers 4
 
-# Restart with options
-./transcriber restart --workers 4 --log-level debug
+# View all options
+./target/release/transcriber --help
 ```
+
+**Note**: UV will automatically:
+- Install the correct Python version (3.10 for Parakeet, 3.11+ for Whisper)
+- Download and install all dependencies on first run
+- Cache everything for faster subsequent starts
 
 ### 3. Test the Pipeline
 
@@ -115,8 +134,9 @@ cargo run --example demo
 | `--input-queue` | `/tmp/transcriber/input` | Input queue directory path |
 | `--output-queue` | `/tmp/transcriber/output` | Output queue directory path |
 | `--workers` | `2` | Number of Python worker processes |
+| `--model` | `whisper` | Transcription model (whisper, parakeet) |
 | `--python-cmd` | `uv` | Python command to use |
-| `--python-args` | `run main.py` | Arguments passed to Python command |
+| `--python-args` | `run python/transcriber.py` | Arguments passed to Python command |
 | `--python-workdir` | None | Working directory for Python processes |
 | `--max-restarts` | `10` | Maximum restart attempts per worker |
 | `--heartbeat-interval` | `30` | Heartbeat interval in seconds |
@@ -126,6 +146,9 @@ cargo run --example demo
 | `--use-zeromq` | `false` | Use ZeroMQ queues instead of Sled (requires zeromq-queue feature) |
 | `--zmq-push-endpoint` | `tcp://127.0.0.1:5555` | ZeroMQ push endpoint for input queue |
 | `--zmq-pull-endpoint` | `tcp://127.0.0.1:5556` | ZeroMQ pull endpoint for output queue |
+| `--zmq-control-endpoint` | `tcp://127.0.0.1:5557` | ZeroMQ control plane endpoint |
+| `--daemon` | `false` | Run as background daemon |
+| `--pid-file` | `/tmp/transcriber.pid` | PID file location (when using --daemon) |
 | `--log-level` | `info` | Log level (trace, debug, info, warn, error) |
 
 ## Python Worker Interface

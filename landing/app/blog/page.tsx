@@ -3,6 +3,14 @@ import { ArrowUpRight } from 'lucide-react';
 
 const blogPosts = [
   {
+    title: "Building a Production-Ready Transcription Service: The Architecture Behind Scout Transcriber",
+    slug: "scout-transcriber-architecture",
+    date: "August 21, 2025",
+    excerpt: "How we built a hybrid Rust-Python architecture that bridges system-level performance with ML ecosystem richness. A deep dive into queue-based communication, MessagePack serialization, and the trade-offs of production transcription.",
+    readTime: "12 min read",
+    tags: ["Architecture", "Rust", "Python", "ZeroMQ"]
+  },
+  {
     title: "Building Sub-300ms Transcription with Progressive Processing",
     slug: "progressive-transcription-300ms",
     date: "July 18, 2024",
