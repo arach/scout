@@ -217,10 +217,15 @@ export default function TranscriberDocsPage() {
                 <ol className="list-decimal list-inside space-y-1 text-sm text-muted-foreground">
                   <li>Open Settings (⌘,)</li>
                   <li>Navigate to Transcription tab</li>
-                  <li>Select "External Service" mode</li>
+                  <li>Select "Advanced" mode (was "External Service")</li>
                   <li>Configure model and workers</li>
                   <li>Click "Test Connection"</li>
                 </ol>
+                <div className="mt-2 p-2 bg-blue-500/10 rounded-md">
+                  <p className="text-xs text-blue-600 dark:text-blue-400">
+                    <strong>Note:</strong> Settings now persist correctly when switching between Integrated and Advanced modes.
+                  </p>
+                </div>
               </div>
               
               <div>
@@ -303,6 +308,31 @@ ps aux | grep transcriber
 transcriber --workers 2`}
                   language="bash"
                 />
+              </div>
+
+              <div>
+                <h4 className="font-medium mb-2 flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 text-yellow-500" />
+                  Settings Not Persisting
+                </h4>
+                <p className="text-sm text-muted-foreground mb-2">
+                  If settings aren't saving when switching between Integrated and Advanced modes:
+                </p>
+                <CodeBlock 
+                  code={`# Check settings file
+cat ~/Library/Application\\ Support/com.scout.transcriber/settings.json
+
+# Verify transcription mode
+jq '.transcription.mode' ~/Library/Application\\ Support/com.scout.transcriber/settings.json
+
+# Clear settings cache (if corrupted)
+rm ~/Library/Application\\ Support/com.scout.transcriber/settings.json
+# Restart Scout to recreate with defaults`}
+                  language="bash"
+                />
+                <p className="text-xs text-muted-foreground mt-2">
+                  This issue has been fixed in recent versions. Ensure you're using the latest Scout release.
+                </p>
               </div>
             </CardContent>
           </Card>

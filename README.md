@@ -43,10 +43,13 @@ Scout is a privacy-focused, cross-platform voice transcription application built
 - **Frontend**: React with TypeScript + Vite
 - **Backend**: Rust with Tauri v2
 - **Audio Processing**: cpal (Cross-platform Audio Library) with Voice Activity Detection
-- **Transcription**: whisper-rs with CoreML support for optimized performance
+- **Transcription**: 
+  - **Built-in Mode**: whisper-rs with CoreML support for optimized performance
+  - **External Service Mode**: Standalone transcriber service with multiple AI models (Whisper, Parakeet MLX, Hugging Face)
 - **Database**: SQLite with sqlx for local transcript storage
-- **Settings**: JSON-based configuration system
+- **Settings**: JSON-based configuration system with hot-reload support
 - **File Processing**: Background queue system with audio format conversion
+- **Service Management**: macOS LaunchAgent integration for external transcription services
 
 ## Project Structure
 
@@ -66,8 +69,13 @@ scout/
 │   │   ├── transcription/  # Whisper transcription engine
 │   │   ├── db/             # SQLite database layer
 │   │   ├── llm/            # LLM processing pipeline
+│   │   ├── service_manager.rs  # External service management
 │   │   └── macos/          # macOS-specific overlay implementation
 │   └── Cargo.toml          # Rust dependencies
+├── transcriber/            # Standalone transcription service
+│   ├── src/                # Rust service core
+│   ├── python/             # Python ML workers
+│   └── README.md           # Service documentation
 ├── docs/                   # Technical documentation
 │   ├── architecture/       # System design and structure
 │   ├── features/           # Feature specifications
@@ -154,6 +162,8 @@ This will create platform-specific binaries in `src-tauri/target/release/bundle/
 5. View progress and results in the transcript list
 
 ### Model Management
+
+#### Built-in Models (Integrated Mode)
 1. Open Settings to access the Model Manager
 2. Download different Whisper models based on your needs:
    - **Tiny (39MB)**: Fastest, basic accuracy
@@ -164,11 +174,26 @@ This will create platform-specific binaries in `src-tauri/target/release/bundle/
 3. Switch between models by clicking "Use This Model"
 4. The active model is shown with a green "Active" badge
 
+#### External Service Models (Advanced Mode)
+For enhanced performance and additional model options:
+1. Install the [Scout Transcriber Service](transcriber/README.md)
+2. Open Settings → Transcription → Switch to "Advanced Mode"
+3. Choose from advanced models:
+   - **Parakeet MLX**: NVIDIA's model optimized for Apple Silicon
+   - **Whisper Large V3 Turbo**: Hugging Face's latest optimized model
+   - **Custom Models**: Bring your own fine-tuned models
+4. Configure worker processes for parallel transcription
+5. Monitor service health in real-time
+
 ### Settings & Customization
 - **Global Hotkeys**: Customize the recording shortcut
 - **Overlay Position**: Move the recording indicator to different screen positions
-- **Model Selection**: Choose which Whisper model to use for transcription
+- **Transcription Mode**: 
+  - **Integrated**: Use built-in Whisper models (simple, no setup)
+  - **Advanced**: Connect to external transcriber service (better performance, more models)
+- **Model Selection**: Choose which model to use for transcription
 - **Voice Activity Detection**: Enable/disable automatic silence detection
+- **External Service Configuration**: Set up distributed transcription with custom ports and worker counts
 
 ## Current Status
 
@@ -242,9 +267,17 @@ pnpm test --coverage
 
 ## Performance Targets
 
+### Integrated Mode (Built-in Whisper)
 - User-perceived latency: <300ms
 - Memory usage: <215MB for base model
 - Processing efficiency: 0.1-0.5 RTF for small models
+
+### Advanced Mode (External Service)
+- User-perceived latency: <200ms with Parakeet MLX
+- Parallel processing: 2-8 concurrent transcriptions
+- Memory usage: ~500MB base + 200MB per worker
+- Processing efficiency: 0.03-0.1 RTF with optimized models
+- Automatic failover to built-in mode if service unavailable
 
 ## Security Considerations
 
