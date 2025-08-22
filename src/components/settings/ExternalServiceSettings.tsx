@@ -239,7 +239,18 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
     try {
       await checkServiceStatus();
       if (status.running) {
-        addDiagnosticLog('success', `Service is running (PID: ${status.pid || 'unknown'})`);
+        // Try to read PID from known location
+        let pidInfo = '';
+        try {
+          const result = await invoke<{ pid?: number }>('get_transcriber_pid');
+          if (result.pid) {
+            pidInfo = ` (PID: ${result.pid})`;
+          }
+        } catch {
+          // If we can't get PID, just continue without it
+          pidInfo = status.pid ? ` (PID: ${status.pid})` : '';
+        }
+        addDiagnosticLog('success', `Service is running${pidInfo}`);
       } else {
         addDiagnosticLog('error', 'Service is not running');
       }
@@ -274,17 +285,46 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
   };
 
   const testTranscription = async () => {
-    addDiagnosticLog('info', 'Sending test audio...');
+    addDiagnosticLog('info', 'Generating and sending test audio...');
     
     try {
-      const result = await invoke<{ success: boolean; message: string }>('test_external_service');
+      // Try the new method that actually sends audio
+      const result = await invoke<{ 
+        success: boolean; 
+        message: string;
+        transcription?: string;
+        details?: any;
+      }>('test_external_service_with_audio');
+      
       if (result.success) {
-        addDiagnosticLog('success', `Test successful: "${result.message}"`);
+        addDiagnosticLog('success', `Test successful: ${result.message}`);
+        if (result.transcription) {
+          addDiagnosticLog('info', `Transcription: "${result.transcription}"`);
+        }
+        if (result.details) {
+          addDiagnosticLog('info', `Details: ${JSON.stringify(result.details)}`);
+        }
       } else {
         addDiagnosticLog('error', `Test failed: ${result.message}`);
       }
-    } catch (error) {
-      addDiagnosticLog('error', `Test error: ${error}`);
+    } catch (error: any) {
+      // If the new command doesn't exist, fall back to the old one
+      if (error?.message?.includes('test_external_service_with_audio')) {
+        addDiagnosticLog('info', 'Falling back to connection test...');
+        try {
+          const result = await invoke<{ success: boolean; message: string }>('test_external_service');
+          if (result.success) {
+            addDiagnosticLog('success', `Connection test passed`);
+            addDiagnosticLog('info', result.message);
+          } else {
+            addDiagnosticLog('error', `Connection test failed: ${result.message}`);
+          }
+        } catch (fallbackError) {
+          addDiagnosticLog('error', `Test error: ${fallbackError}`);
+        }
+      } else {
+        addDiagnosticLog('error', `Test error: ${error}`);
+      }
     }
   };
 
@@ -497,136 +537,118 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
       <div className="service-section">
         <h3>Service</h3>
         <div className="service-table">
-          <div className="service-row">
-            <span className="field">Name</span>
-            <span className="value mono">com.scout.transcriber</span>
-          </div>
-          <div className="service-row">
-            <span className="field">Status</span>
-            <div className="status-controls">
+          <div className="service-grid">
+            <div className="service-item-inline">
+              <span className="field">name:</span>
+              <span className="value mono">com.scout.transcriber</span>
+            </div>
+            <div className="service-item-inline">
+              <span className="field">launcher:</span>
+              <span className="value mono">launchctl</span>
+            </div>
+            <div className="service-item-inline">
+              <span className="field">status:</span>
               <span className={`status-badge ${status.running ? 'running' : 'stopped'}`}>
-                {status.running ? 'Running' : 'Stopped'}
+                {status.running ? '● Running' : 'Stopped'}
               </span>
-              {!status.running ? (
-                <button
-                  className="btn-control-inline start"
-                  onClick={handleStartService}
-                  disabled={serviceOperation !== 'idle'}
-                >
-                  {serviceOperation === 'starting' ? (
-                    <>
+            </div>
+            <div className="service-item-inline">
+              <span className="field">actions:</span>
+              <div className="action-buttons">
+                {!status.running ? (
+                  <button
+                    className="btn-control-inline start"
+                    onClick={handleStartService}
+                    disabled={serviceOperation !== 'idle'}
+                  >
+                    {serviceOperation === 'starting' ? (
                       <div className="spinner-small" />
-                      Starting...
-                    </>
-                  ) : (
-                    <>
-                      <Play size={12} />
-                      Start
-                    </>
-                  )}
-                </button>
-              ) : (
-                <>
-                  <button
-                    className="btn-control-inline stop"
-                    onClick={handleStopService}
-                    disabled={serviceOperation !== 'idle'}
-                  >
-                    {serviceOperation === 'stopping' ? (
-                      <>
-                        <div className="spinner-small" />
-                        Stopping...
-                      </>
                     ) : (
                       <>
-                        <Square size={12} />
-                        Stop
+                        <Play size={12} />
+                        <span>Start</span>
                       </>
                     )}
                   </button>
-                  <button
-                    className="btn-control-inline restart"
-                    onClick={handleRestartService}
-                    disabled={serviceOperation !== 'idle'}
-                  >
-                    {serviceOperation === 'restarting' ? (
-                      <>
+                ) : (
+                  <>
+                    <button
+                      className="btn-control-inline stop"
+                      onClick={handleStopService}
+                      disabled={serviceOperation !== 'idle'}
+                    >
+                      {serviceOperation === 'stopping' ? (
                         <div className="spinner-small" />
-                        Restarting...
-                      </>
-                    ) : (
-                      <>
-                        <RefreshCw size={12} />
-                        Restart
-                      </>
-                    )}
-                  </button>
-                </>
-              )}
+                      ) : (
+                        <>
+                          <Square size={12} />
+                          <span>Stop</span>
+                        </>
+                      )}
+                    </button>
+                    <button
+                      className="btn-control-inline restart"
+                      onClick={handleRestartService}
+                      disabled={serviceOperation !== 'idle'}
+                    >
+                      {serviceOperation === 'restarting' ? (
+                        <div className="spinner-small" />
+                      ) : (
+                        <>
+                          <RefreshCw size={12} />
+                          <span>Restart</span>
+                        </>
+                      )}
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
           </div>
           <div className="service-row">
-            <span className="field">PID</span>
-            <span className="value">{status.running && status.pid ? status.pid : 'Unknown'}</span>
-          </div>
-          <div className="service-row">
-            <span className="field">Manager</span>
-            <div className="path-value">
-              <input 
-                type="text" 
-                value="~/Library/LaunchAgents/com.scout.transcriber.plist"
-                readOnly
-                className="path-input"
-              />
-              <button 
-                className="icon-btn"
-                onClick={() => copyCommand('~/Library/LaunchAgents/com.scout.transcriber.plist', 'manager')}
-                title="Copy path"
-              >
+            <span className="field">manager:</span>
+            <div 
+              className="command-box"
+              onClick={() => copyCommand('~/Library/LaunchAgents/com.scout.transcriber.plist', 'manager')}
+            >
+              <code>~/Library/LaunchAgents/com.scout.transcriber.plist</code>
+              <button className="copy-btn">
                 {copiedCommand === 'manager' ? <Check size={14} /> : <Copy size={14} />}
               </button>
             </div>
           </div>
           <div className="service-row">
-            <span className="field">Config</span>
-            <div className="path-value">
-              <input 
-                type="text" 
-                value="~/Library/Application Support/com.scout.transcriber/config.json"
-                readOnly
-                className="path-input"
-              />
-              <button 
-                className="icon-btn"
-                onClick={() => copyCommand('~/Library/Application Support/com.scout.transcriber/config.json', 'config')}
-                title="Copy path"
-              >
+            <span className="field">config:</span>
+            <div 
+              className="command-box"
+              onClick={() => copyCommand('~/Library/Application Support/com.scout.transcriber/config.json', 'config')}
+            >
+              <code>~/Library/Application Support/com.scout.transcriber/config.json</code>
+              <button className="copy-btn">
                 {copiedCommand === 'config' ? <Check size={14} /> : <Copy size={14} />}
               </button>
             </div>
           </div>
           <div className="service-row">
-            <span className="field">Binary</span>
-            <div className="path-value">
-              <span className="path-text">{config.binary_path || '/usr/local/bin/transcriber'}</span>
-              <button 
-                className="icon-btn"
-                onClick={() => copyCommand(config.binary_path || '/usr/local/bin/transcriber', 'binary')}
-                title="Copy path"
-              >
+            <span className="field">binary:</span>
+            <div 
+              className="command-box"
+              onClick={() => copyCommand(config.binary_path || '/usr/local/bin/transcriber', 'binary')}
+            >
+              <code>{config.binary_path || '/usr/local/bin/transcriber'}</code>
+              <button className="copy-btn">
                 {copiedCommand === 'binary' ? <Check size={14} /> : <Copy size={14} />}
               </button>
             </div>
           </div>
           <div className="service-row">
-            <span className="field">Log</span>
-            <div className="path-value">
-              <span className="path-text">/tmp/transcriber.log</span>
-              <button 
-                className="icon-btn"
-                onClick={() => copyCommand('/tmp/transcriber.log', 'log')}
-                title="Copy path"
-              >
+            <span className="field">log:</span>
+            <div 
+              className="command-box"
+              onClick={() => copyCommand('/tmp/transcriber.log', 'log')}
+            >
+              <code>/tmp/transcriber.log</code>
+              <button className="copy-btn">
                 {copiedCommand === 'log' ? <Check size={14} /> : <Copy size={14} />}
               </button>
             </div>
@@ -672,47 +694,26 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
           </button>
         </div>
         
-        {/* Diagnostic Results */}
-        <div className="diagnostic-results">
-          {diagnosticLogs.length > 0 ? (
-            diagnosticLogs.map((log, index) => (
-              <div key={index} className={`diagnostic-message ${log.type}`}>
-                <span className="log-timestamp">{log.timestamp}</span>
-                <span>{log.message}</span>
-              </div>
-            ))
-          ) : (
-            <div className="no-diagnostics">
-              No diagnostic tests run yet
+        {/* Diagnostic Results - Only show when there are logs */}
+        {diagnosticLogs.length > 0 && (
+          <>
+            <div className="diagnostic-results">
+              {diagnosticLogs.map((log, index) => (
+                <div key={index} className={`diagnostic-message ${log.type}`}>
+                  <span className="log-timestamp">{log.timestamp}</span>
+                  <span>{log.message}</span>
+                </div>
+              ))}
             </div>
-          )}
-        </div>
-        
-        {/* Status Indicators */}
-        {status.running && (
-          <div className="status-indicators-row">
-            <div className="status-indicator-item">
-              <span className="indicator-label">LaunchCTL</span>
-              <span className={`indicator-value ${status.running ? 'active' : ''}`}>
-                {status.running ? 'Active' : 'Inactive'}
-              </span>
-            </div>
-            <div className="status-indicator-item">
-              <span className="indicator-label">Health</span>
-              <span className={`indicator-value ${status.healthy ? 'healthy' : ''}`}>
-                {status.healthy ? 'Healthy' : status.running ? 'Unhealthy' : 'N/A'}
-              </span>
-            </div>
-            <div className="status-indicator-item">
-              <span className="indicator-label">Ports</span>
-              <span className={`indicator-value ${status.healthy ? 'connected' : ''}`}>
-                {status.healthy ? 'Connected' : 'Not Connected'}
-              </span>
-            </div>
-          </div>
+            <button 
+              className="clear-logs-btn"
+              onClick={() => setDiagnosticLogs([])}
+            >
+              Clear Logs
+            </button>
+          </>
         )}
       </div>
-
 
       {/* Model Selection Section */}
       <div className="model-section">

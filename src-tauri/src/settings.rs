@@ -23,6 +23,9 @@ pub struct AppSettings {
     
     // External service settings
     pub external_service: ExternalServiceConfig,
+    
+    // Transcription mode selection
+    pub transcription_mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,6 +113,7 @@ impl Default for AppSettings {
             processing: ProcessingSettings::default(),
             llm: LLMSettings::default(),
             external_service: ExternalServiceConfig::default(),
+            transcription_mode: None,  // Will default to "internal" if not set
         }
     }
 }

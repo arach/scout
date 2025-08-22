@@ -709,6 +709,7 @@ pub fn run() {
             crate::commands::get_transcriber_version,
             crate::commands::check_external_service_status,
             crate::commands::test_external_service,
+            crate::commands::test_external_service_with_audio,
             crate::commands::start_external_service,
             crate::commands::stop_external_service,
             crate::commands::open_url
