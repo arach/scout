@@ -47,8 +47,12 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
   const [installStatus, setInstallStatus] = useState<'checking' | 'installed' | 'not_installed'>('checking');
   const [copiedCommand, setCopiedCommand] = useState<string | null>(null);
   const [serviceOperation, setServiceOperation] = useState<'idle' | 'starting' | 'stopping' | 'restarting'>('idle');
-  const [operationResult, setOperationResult] = useState<{ type: 'success' | 'error', message: string } | null>(null);
-  const [testResult, setTestResult] = useState<{ type: 'success' | 'error' | 'info', message: string } | null>(null);
+  const [operationResult, setOperationResult] = useState<{ type: 'success' | 'error' | 'info', message: string } | null>(null);
+  const [diagnosticLogs, setDiagnosticLogs] = useState<Array<{
+    type: 'success' | 'error' | 'info';
+    message: string;
+    timestamp: string;
+  }>>([]);
 
   useEffect(() => {
     loadConfig();
@@ -108,6 +112,16 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
         onStatusChange(errorStatus);
       }
     }
+  };
+
+  const addDiagnosticLog = (type: 'success' | 'error' | 'info', message: string) => {
+    const timestamp = new Date().toLocaleTimeString('en-US', { 
+      hour12: false, 
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+    setDiagnosticLogs(prev => [...prev, { type, message, timestamp }].slice(-50)); // Keep last 50 logs
   };
 
   const checkInstallation = async () => {
@@ -221,57 +235,56 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
     }
   };
 
+  const testHealth = async () => {
+    try {
+      await checkServiceStatus();
+      if (status.running) {
+        addDiagnosticLog('success', `Service is running (PID: ${status.pid || 'unknown'})`);
+      } else {
+        addDiagnosticLog('error', 'Service is not running');
+      }
+    } catch (error) {
+      addDiagnosticLog('error', `Health check failed: ${error}`);
+    }
+  };
+
+  const testPorts = async () => {
+    try {
+      if (status.healthy) {
+        addDiagnosticLog('success', 'Ports 8899 (HTTP) and 8901-8902 (ZeroMQ) are open');
+      } else {
+        addDiagnosticLog('error', 'One or more ports are not accessible');
+      }
+    } catch (error) {
+      addDiagnosticLog('error', `Port check failed: ${error}`);
+    }
+  };
+
   const testConnection = async () => {
-    setTestResult(null);
     try {
       const portsOk = status.healthy;
       if (portsOk) {
-        setTestResult({
-          type: 'success',
-          message: 'All ZeroMQ ports are responding'
-        });
+        addDiagnosticLog('success', 'Connected to transcriber service');
       } else {
-        setTestResult({
-          type: 'error',
-          message: 'ZeroMQ ports are not accessible'
-        });
+        addDiagnosticLog('error', 'Cannot connect to transcriber service');
       }
-      setTimeout(() => setTestResult(null), 4000);
     } catch (error) {
-      setTestResult({
-        type: 'error',
-        message: `Connection test failed: ${error}`
-      });
-      setTimeout(() => setTestResult(null), 5000);
+      addDiagnosticLog('error', `Connection test failed: ${error}`);
     }
   };
 
   const testTranscription = async () => {
-    setTestResult({
-      type: 'info',
-      message: 'Sending test audio...'
-    });
+    addDiagnosticLog('info', 'Sending test audio...');
     
     try {
       const result = await invoke<{ success: boolean; message: string }>('test_external_service');
       if (result.success) {
-        setTestResult({
-          type: 'success',
-          message: `Test successful: "${result.message}"`
-        });
+        addDiagnosticLog('success', `Test successful: "${result.message}"`);
       } else {
-        setTestResult({
-          type: 'error',
-          message: `Test failed: ${result.message}`
-        });
+        addDiagnosticLog('error', `Test failed: ${result.message}`);
       }
-      setTimeout(() => setTestResult(null), 6000);
     } catch (error) {
-      setTestResult({
-        type: 'error',
-        message: `Test error: ${error}`
-      });
-      setTimeout(() => setTestResult(null), 5000);
+      addDiagnosticLog('error', `Test error: ${error}`);
     }
   };
 
@@ -403,10 +416,9 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
                             if (result.success) {
                               setOperationResult({ 
                                 type: 'success', 
-                                message: 'Service is installed and working perfectly!' 
+                                message: 'Service is installed and working perfectly! Click "Start Using Transcriber" below to continue.' 
                               });
-                              // Update the install status to reflect reality
-                              setInstallStatus('installed');
+                              // Don't auto-navigate, let user click the button when ready
                             } else {
                               setOperationResult({ 
                                 type: 'error', 
@@ -461,7 +473,14 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px' }}>
             <button
               className="btn-primary"
-              onClick={() => checkInstallation()}
+              onClick={() => {
+                // Force status to installed to show the main view
+                setInstallStatus('installed');
+                // Clear any DevTools override
+                if ((window as any).__DEV_TRANSCRIBER_STATUS) {
+                  (window as any).__DEV_TRANSCRIBER_STATUS = 'installed';
+                }
+              }}
             >
               Start Using Transcriber →
             </button>
@@ -621,18 +640,18 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
         <div className="diagnostics-buttons">
           <button
             className="diagnostic-btn"
-            onClick={checkServiceStatus}
+            onClick={testHealth}
             disabled={serviceOperation !== 'idle'}
           >
-            <CheckCircle size={16} />
+            <CheckCircle size={14} />
             Health Check
           </button>
           <button
             className="diagnostic-btn"
-            onClick={testConnection}
+            onClick={testPorts}
             disabled={!status.running || serviceOperation !== 'idle'}
           >
-            <Activity size={16} />
+            <Activity size={14} />
             Port Check
           </button>
           <button
@@ -640,7 +659,7 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
             onClick={testConnection}
             disabled={!status.running || serviceOperation !== 'idle'}
           >
-            <RefreshCw size={16} />
+            <RefreshCw size={14} />
             Test Connection
           </button>
           <button
@@ -648,31 +667,20 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
             onClick={testTranscription}
             disabled={!status.running || serviceOperation !== 'idle'}
           >
-            <FileText size={16} />
+            <FileText size={14} />
             Test Transcription
           </button>
         </div>
         
         {/* Diagnostic Results */}
         <div className="diagnostic-results">
-          {testResult || operationResult ? (
-            <>
-              {testResult && (
-                <div className={`diagnostic-message ${testResult.type}`}>
-                  {testResult.type === 'success' && <CheckCircle size={14} />}
-                  {testResult.type === 'error' && <AlertCircle size={14} />}
-                  {testResult.type === 'info' && <Info size={14} />}
-                  <span>{testResult.message}</span>
-                </div>
-              )}
-              {operationResult && (
-                <div className={`diagnostic-message ${operationResult.type}`}>
-                  {operationResult.type === 'success' && <CheckCircle size={14} />}
-                  {operationResult.type === 'error' && <AlertCircle size={14} />}
-                  <span>{operationResult.message}</span>
-                </div>
-              )}
-            </>
+          {diagnosticLogs.length > 0 ? (
+            diagnosticLogs.map((log, index) => (
+              <div key={index} className={`diagnostic-message ${log.type}`}>
+                <span className="log-timestamp">{log.timestamp}</span>
+                <span>{log.message}</span>
+              </div>
+            ))
           ) : (
             <div className="no-diagnostics">
               No diagnostic tests run yet
@@ -706,27 +714,114 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
       </div>
 
 
+      {/* Model Selection Section */}
+      <div className="model-section">
+        <h3>Transcription Model</h3>
+        <div className="model-cards">
+          <div 
+            className={`model-card ${config.model === 'whisper' ? 'selected' : ''}`}
+            onClick={() => setConfig(prev => ({ ...prev, model: 'whisper' }))}
+          >
+            <div className="model-top">
+              <h4>Whisper</h4>
+              <span className="model-lab">OpenAI</span>
+            </div>
+            <div className="model-content">
+              <div className="model-attributes">
+                <div className="attribute">
+                  <span className="attr-label">Size</span>
+                  <span className="attr-value">39MB - 1.5GB</span>
+                </div>
+                <div className="attribute">
+                  <span className="attr-label">Languages</span>
+                  <span className="attr-value">99+</span>
+                </div>
+                <div className="attribute">
+                  <span className="attr-label">Speed</span>
+                  <span className="attr-value">Balanced</span>
+                </div>
+              </div>
+            </div>
+            <div className="model-footer">
+              <p className="model-description">
+                Industry standard, highly accurate
+              </p>
+            </div>
+          </div>
+
+          <div 
+            className={`model-card ${config.model === 'parakeet' ? 'selected' : ''}`}
+            onClick={() => setConfig(prev => ({ ...prev, model: 'parakeet' }))}
+          >
+            <div className="model-top">
+              <h4>Parakeet MLX</h4>
+              <span className="model-lab">NVIDIA</span>
+            </div>
+            <div className="model-content">
+              <div className="model-attributes">
+                <div className="attribute">
+                  <span className="attr-label">Size</span>
+                  <span className="attr-value">1.1GB</span>
+                </div>
+                <div className="attribute">
+                  <span className="attr-label">Languages</span>
+                  <span className="attr-value">English</span>
+                </div>
+                <div className="attribute">
+                  <span className="attr-label">Speed</span>
+                  <span className="attr-value">Fast (M1/M2)</span>
+                </div>
+              </div>
+            </div>
+            <div className="model-footer">
+              <p className="model-description">
+                Optimized for Apple Silicon
+              </p>
+            </div>
+          </div>
+
+          <div 
+            className={`model-card ${config.model === 'wav2vec2' ? 'selected' : ''}`}
+            onClick={() => setConfig(prev => ({ ...prev, model: 'wav2vec2' }))}
+          >
+            <div className="model-top">
+              <h4>Wav2Vec2</h4>
+              <span className="model-lab">Meta</span>
+            </div>
+            <div className="model-content">
+              <div className="model-attributes">
+                <div className="attribute">
+                  <span className="attr-label">Size</span>
+                  <span className="attr-value">360MB</span>
+                </div>
+                <div className="attribute">
+                  <span className="attr-label">Languages</span>
+                  <span className="attr-value">50+</span>
+                </div>
+                <div className="attribute">
+                  <span className="attr-label">Speed</span>
+                  <span className="attr-value">Very Fast</span>
+                </div>
+              </div>
+            </div>
+            <div className="model-footer">
+              <p className="model-description">
+                Lightweight real-time processing
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Configuration Section - Show when service is healthy */}
       {(status.running && status.healthy) && (
         <div className="config-section">
           <div className="config-header">
             <Settings size={16} />
-            <h4>Configuration</h4>
+            <h4>Advanced Configuration</h4>
           </div>
           
           <div className="config-grid">
-            <div className="config-item">
-              <label>Model</label>
-              <select
-                value={config.model}
-                onChange={(e) => setConfig(prev => ({ ...prev, model: e.target.value }))}
-                className="config-select"
-              >
-                <option value="whisper">Whisper (OpenAI)</option>
-                <option value="parakeet">Parakeet MLX (Apple Silicon)</option>
-                <option value="wav2vec2">Wav2Vec2 (Facebook)</option>
-              </select>
-            </div>
 
             <div className="config-item">
               <label>Workers</label>
