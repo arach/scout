@@ -4,27 +4,24 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
-use crate::logger::{debug, info, Component};
+use crate::audio::WhisperAudioConverter;
+use crate::logger::{debug, info, warn, Component};
 use crate::settings::ExternalServiceConfig;
 use crate::transcription::strategy::{TranscriptionConfig, TranscriptionResult, TranscriptionStrategy};
 
 /// Strategy that delegates transcription to the external service via ZeroMQ
 pub struct ExternalServiceStrategy {
     config: ExternalServiceConfig,
-    audio_buffer: Vec<f32>,
+    recording_path: Option<PathBuf>,
     start_time: Option<std::time::Instant>,
-    chunk_id: Option<String>,
-    output_path: Option<PathBuf>,
 }
 
 impl ExternalServiceStrategy {
     pub fn new(config: ExternalServiceConfig) -> Self {
         Self {
             config,
-            audio_buffer: Vec::new(),
+            recording_path: None,
             start_time: None,
-            chunk_id: None,
-            output_path: None,
         }
     }
 }
@@ -49,32 +46,49 @@ impl TranscriptionStrategy for ExternalServiceStrategy {
         output_path: &Path,
         _config: &TranscriptionConfig,
     ) -> Result<(), String> {
-        info(Component::Transcription, "Starting External Service transcription strategy");
+        info(Component::Transcription, &format!(
+            "External Service strategy started for: {:?}",
+            output_path
+        ));
         
+        self.recording_path = Some(output_path.to_path_buf());
         self.start_time = Some(std::time::Instant::now());
-        self.chunk_id = Some(Uuid::new_v4().to_string());
-        self.output_path = Some(output_path.to_path_buf());
-        self.audio_buffer.clear();
         
         Ok(())
     }
 
-    async fn process_samples(&mut self, samples: &[f32]) -> Result<(), String> {
-        // Buffer audio samples
-        self.audio_buffer.extend_from_slice(samples);
+    async fn process_samples(&mut self, _samples: &[f32]) -> Result<(), String> {
+        // External service reads from WAV file after recording completes
         Ok(())
     }
 
     async fn finish_recording(&mut self) -> Result<TranscriptionResult, String> {
         let processing_start = std::time::Instant::now();
         
-        if self.audio_buffer.is_empty() {
-            return Err("No audio data to transcribe".to_string());
+        let recording_path = self.recording_path
+            .as_ref()
+            .ok_or("No recording path set")?;
+
+        // Read and convert WAV file to samples (16kHz mono f32 for Whisper)
+        let samples = match WhisperAudioConverter::convert_wav_file_for_whisper(recording_path) {
+            Ok(s) => s,
+            Err(e) => {
+                warn(Component::Transcription, &format!(
+                    "Failed to read WAV file: {}",
+                    e
+                ));
+                return Err(format!("Failed to read audio file: {}", e));
+            }
+        };
+
+        if samples.is_empty() {
+            return Err("No audio data in recording".to_string());
         }
 
         info(Component::Transcription, &format!(
-            "Sending {} samples to external service via ZeroMQ",
-            self.audio_buffer.len()
+            "Sending {} samples from {:?} to external service via ZeroMQ",
+            samples.len(),
+            recording_path.file_name().unwrap_or_default()
         ));
 
         // Initialize ZeroMQ context
@@ -110,7 +124,7 @@ impl TranscriptionStrategy for ExternalServiceStrategy {
         
         let audio_chunk = json!({
             "id": chunk_id.as_bytes().to_vec(),
-            "audio": self.audio_buffer.clone(),
+            "audio": samples,
             "sample_rate": 16000,
             "timestamp": timestamp,
         });
