@@ -978,6 +978,10 @@
   cursor: pointer;
   transition: all 0.15s ease;
   position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-height: auto;
   box-shadow: 
     0 2px 8px rgba(0, 0, 0, 0.15),
     0 8px 16px rgba(0, 0, 0, 0.08),
@@ -1002,24 +1006,25 @@
 
 .external-service-settings .model-card.selected {
   background: linear-gradient(135deg,
-    rgba(236, 245, 255, 0.98),
-    rgba(219, 237, 255, 1)
+    rgba(245, 250, 255, 0.98),
+    rgba(237, 245, 255, 1)
   );
-  border: 1px solid rgba(96, 165, 250, 0.4);
+  border: 2px solid rgba(59, 130, 246, 0.5);
   box-shadow: 
-    0 2px 8px rgba(96, 165, 250, 0.3),
-    0 8px 16px rgba(96, 165, 250, 0.15),
-    inset -1px 0 1px rgba(96, 165, 250, 0.2),
-    inset 1px 0 1px rgba(96, 165, 250, 0.2),
-    inset 0 1px 2px rgba(255, 255, 255, 0.9);
+    0 2px 12px rgba(59, 130, 246, 0.3),
+    0 8px 20px rgba(59, 130, 246, 0.15),
+    inset -1px 0 1px rgba(59, 130, 246, 0.2),
+    inset 1px 0 1px rgba(59, 130, 246, 0.2),
+    inset 0 1px 2px rgba(255, 255, 255, 0.95);
 }
 
 .external-service-settings .model-top {
-  padding: 2px 6px;
+  padding: 4px 6px;
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
-  height: 16px;
+  align-items: center;
+  height: 18px;
+  margin-bottom: 1px;
 }
 
 .external-service-settings .model-top h4 {
@@ -1028,6 +1033,7 @@
   font-weight: 400;
   color: rgba(0, 0, 0, 0.8);
   margin: 0;
+  line-height: 1;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -1037,6 +1043,7 @@
   font-size: 8px;
   font-weight: 400;
   color: rgba(0, 0, 0, 0.5);
+  line-height: 1;
   text-transform: uppercase;
   letter-spacing: 0.3px;
 }
@@ -1047,15 +1054,15 @@
     rgba(5, 15, 25, 0.95)
   );
   backdrop-filter: blur(10px);
-  padding: 8px 10px;
-  border-radius: 2px;
+  padding: 6px 8px;
+  border-radius: 4px 4px 2px 2px;
   margin: 0 3px;
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .external-service-settings .model-footer {
   padding: 0 4px;
-  height: 20px;
+  height: 50px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1064,8 +1071,8 @@
 .external-service-settings .model-attributes {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-bottom: 8px;
+  gap: 3px;
+  margin-bottom: 4px;
 }
 
 .external-service-settings .attribute {
