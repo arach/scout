@@ -1,43 +1,55 @@
 /* External Service Settings Styles */
 .external-service-settings {
   padding: 20px;
+  padding-left: 0;
   max-width: 800px;
-  margin: 0 auto;
 }
 
-/* Service Info Header */
-.service-info-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px;
-  background: var(--background-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  margin-bottom: 16px;
+/* Service Section - Clean Table Layout */
+.service-section {
+  margin-bottom: 20px;
 }
 
-.service-identity {
+.service-section h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 12px 0;
+  padding: 0;
+}
+
+.service-table {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  flex: 1;
+  gap: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  overflow: hidden;
 }
 
 .service-row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  font-size: 13px;
+  padding: 10px 16px;
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--border-color);
+  min-height: 42px;
 }
 
-.service-row .label {
-  color: var(--text-secondary);
-  min-width: 120px;
+.service-row:last-child {
+  border-bottom: none;
+}
+
+.service-row .field {
+  width: 100px;
+  font-size: 13px;
   font-weight: 500;
+  color: var(--text-secondary);
+  flex-shrink: 0;
 }
 
 .service-row .value {
+  font-size: 13px;
   color: var(--text-primary);
 }
 
@@ -46,62 +58,279 @@
   font-size: 12px;
 }
 
-.service-row .value.path {
-  font-family: 'Monaco', 'Menlo', monospace;
-  font-size: 11px;
-  color: var(--text-secondary);
-}
-
-/* Service Status Badge */
-.service-status-badge {
+/* Status Controls Container */
+.status-controls {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 16px;
-  background: linear-gradient(135deg, rgba(60, 60, 60, 0.4), rgba(40, 40, 40, 0.3));
-  border: 1px solid rgba(140, 140, 140, 0.3);
-  border-radius: 6px;
-  font-size: 13px;
+  flex: 1;
+}
+
+/* Status Badge - Inline */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.status-badge.running {
+  background: rgba(16, 185, 129, 0.15);
+  color: rgb(16, 185, 129);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.status-badge.stopped {
+  background: rgba(120, 120, 120, 0.15);
+  color: rgba(180, 180, 180, 0.9);
+  border: 1px solid rgba(120, 120, 120, 0.3);
+}
+
+/* Inline Control Buttons */
+.btn-control-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-control-inline.start {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.3);
+  color: rgb(16, 185, 129);
+}
+
+.btn-control-inline.start:hover:not(:disabled) {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.4);
+}
+
+.btn-control-inline.stop {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: rgb(239, 68, 68);
+}
+
+.btn-control-inline.stop:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.btn-control-inline.restart {
+  background: rgba(96, 165, 250, 0.1);
+  border-color: rgba(96, 165, 250, 0.3);
+  color: rgb(96, 165, 250);
+}
+
+.btn-control-inline.restart:hover:not(:disabled) {
+  background: rgba(96, 165, 250, 0.15);
+  border-color: rgba(96, 165, 250, 0.4);
+}
+
+.btn-control-inline:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Small Spinner */
+.spinner-small {
+  width: 10px;
+  height: 10px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* Path Values */
+.path-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.path-input {
+  flex: 1;
+  padding: 4px 8px;
+  background: var(--background-primary);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-family: 'Monaco', 'Menlo', monospace;
+  font-size: 11px;
+  transition: all 0.2s ease;
+}
+
+.path-input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  background: var(--background-primary);
+}
+
+.path-text {
+  font-family: 'Monaco', 'Menlo', monospace;
+  font-size: 11px;
+  color: var(--text-primary);
+}
+
+.icon-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.icon-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+}
+
+/* Diagnostics Section */
+.diagnostics-section {
+  background: var(--background-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.diagnostics-section h3 {
+  font-size: 16px;
   font-weight: 600;
   color: var(--text-primary);
-  box-shadow: 
-    0 2px 4px rgba(0, 0, 0, 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  margin: 0 0 16px 0;
 }
 
-.status-indicator {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: rgba(120, 120, 120, 0.6);
-  box-shadow: 0 0 4px rgba(120, 120, 120, 0.4);
+.diagnostics-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
 }
 
-.status-indicator.running {
-  background: rgb(16, 185, 129);
-  box-shadow: 
-    0 0 8px rgba(16, 185, 129, 0.6),
-    0 0 16px rgba(16, 185, 129, 0.3);
-  animation: pulse 2s ease-in-out infinite;
+.diagnostic-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
 }
 
-.status-indicator.stopped {
-  background: rgba(120, 120, 120, 0.6);
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
-}
-
-.status-text {
+.diagnostic-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--text-secondary);
   color: var(--text-primary);
 }
 
-.status-pid {
-  font-size: 11px;
+.diagnostic-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.diagnostic-results {
+  background: var(--background-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 16px;
+  min-height: 80px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.no-diagnostics {
+  text-align: center;
   color: var(--text-tertiary);
-  opacity: 0.7;
+  font-size: 13px;
+}
+
+.diagnostic-message {
+  padding: 10px 12px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  animation: slideIn 0.3s ease;
+  margin-bottom: 8px;
+}
+
+.diagnostic-message:last-child {
+  margin-bottom: 0;
+}
+
+.diagnostic-message.success {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: rgb(16, 185, 129);
+}
+
+.diagnostic-message.error {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: rgb(239, 68, 68);
+}
+
+.diagnostic-message.info {
+  background: rgba(96, 165, 250, 0.1);
+  border: 1px solid rgba(96, 165, 250, 0.3);
+  color: rgb(96, 165, 250);
+}
+
+.status-indicators-row {
+  display: flex;
+  gap: 24px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color);
+}
+
+.status-indicator-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.indicator-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.indicator-value {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.indicator-value.active,
+.indicator-value.healthy,
+.indicator-value.connected {
+  color: rgb(16, 185, 129);
 }
 
 /* Service Control Section */
@@ -339,73 +568,6 @@
   font-size: 13px;
 }
 
-/* Additional Paths Section */
-.additional-info {
-  background: var(--background-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 12px 16px;
-  margin-bottom: 16px;
-}
-
-.additional-info summary {
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-primary);
-  user-select: none;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  list-style: none;
-}
-
-.additional-info summary::-webkit-details-marker {
-  display: none;
-}
-
-.additional-info summary:hover {
-  color: var(--accent-primary);
-}
-
-.additional-info[open] summary .chevron {
-  transform: rotate(90deg);
-}
-
-.additional-info .chevron {
-  transition: transform 0.2s ease;
-}
-
-.paths-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border-color);
-}
-
-.path-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-}
-
-.path-label {
-  color: var(--text-secondary);
-  min-width: 140px;
-}
-
-.path-item code {
-  font-family: 'Monaco', 'Menlo', monospace;
-  font-size: 11px;
-  color: var(--text-primary);
-  background: var(--background-primary);
-  padding: 2px 6px;
-  border-radius: 3px;
-}
-
 /* Buttons Base Styles */
 .btn-primary {
   background: var(--accent-primary);
@@ -469,36 +631,126 @@
   color: var(--accent-primary);
 }
 
-/* Installation Guide */
+/* Installation Guide - Introduction */
 .intro-section {
-  margin-bottom: 24px;
+  background: linear-gradient(135deg, 
+    rgba(59, 130, 246, 0.03), 
+    rgba(96, 165, 250, 0.06)
+  );
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(96, 165, 250, 0.15);
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+  margin-top: -8px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 
+    0 4px 24px rgba(59, 130, 246, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.intro-section::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, 
+    transparent, 
+    rgba(147, 197, 253, 0.5), 
+    transparent
+  );
 }
 
 .intro-section h3 {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 600;
   color: var(--text-primary);
-  margin-bottom: 12px;
+  margin: 0 0 8px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .intro-description {
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.6;
   color: var(--text-secondary);
-  margin: 0;
+  margin: 0 0 12px 0;
+}
+
+.intro-description code {
+  background: rgba(96, 165, 250, 0.1);
+  border: 1px solid rgba(96, 165, 250, 0.2);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'Monaco', 'Menlo', monospace;
+  font-size: 13px;
+  color: rgb(96, 165, 250);
+  font-weight: 500;
+}
+
+.inline-link {
+  color: rgb(96, 165, 250);
+  text-decoration: none;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  border-bottom: 1px solid transparent;
+}
+
+.inline-link:hover {
+  color: rgb(59, 130, 246);
+  border-bottom-color: currentColor;
+}
+
+.intro-links {
+  display: flex;
+  gap: 16px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.intro-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.intro-link:hover {
+  background: rgba(96, 165, 250, 0.1);
+  border-color: rgba(96, 165, 250, 0.3);
+  color: rgb(96, 165, 250);
+  transform: translateY(-1px);
+}
+
+.intro-link svg {
+  transition: transform 0.2s ease;
+}
+
+.intro-link:hover svg {
+  transform: translateX(2px);
 }
 
 .installation-guide {
-  background: var(--background-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 24px;
+  padding: 0;
 }
 
 .install-header {
   display: flex;
-  gap: 16px;
-  margin-bottom: 24px;
+  gap: 12px;
+  margin-bottom: 16px;
+  align-items: flex-start;
 }
 
 .install-icon {
@@ -522,26 +774,34 @@
 .install-steps {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 16px;
 }
 
 .install-step {
   display: flex;
-  gap: 16px;
+  gap: 12px;
+  align-items: flex-start;
 }
 
 .step-number {
-  width: 28px;
-  height: 28px;
-  background: var(--accent-primary);
-  color: white;
+  width: 26px;
+  height: 26px;
+  background: linear-gradient(135deg, 
+    rgba(59, 130, 246, 0.15), 
+    rgba(96, 165, 250, 0.2)
+  );
+  color: rgb(147, 197, 253);
+  border: 1px solid rgba(96, 165, 250, 0.3);
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   flex-shrink: 0;
+  box-shadow: 
+    0 2px 8px rgba(59, 130, 246, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .step-content {
@@ -555,40 +815,63 @@
   margin: 0 0 8px 0;
 }
 
+.step-description {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 8px 0 0 0;
+  opacity: 0.8;
+}
+
 .command-box {
   display: flex;
   align-items: center;
   gap: 8px;
-  background: var(--background-primary);
-  border: 1px solid var(--border-color);
+  background: #0a0a0a;
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 6px;
   padding: 10px 12px;
   margin-top: 8px;
+  position: relative;
+  transition: border-color 0.2s ease;
+}
+
+.command-box:hover {
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 .command-box code {
   flex: 1;
   font-family: 'Monaco', 'Menlo', monospace;
   font-size: 12px;
-  color: var(--text-primary);
+  color: #e0e0e0;
+  letter-spacing: 0.3px;
+  background: transparent !important;
+  padding: 0;
 }
 
 .copy-btn {
   background: transparent;
   border: none;
-  color: var(--text-secondary);
+  color: rgba(255, 255, 255, 0.4);
   cursor: pointer;
-  padding: 4px;
+  padding: 4px 6px;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 4px;
   transition: all 0.2s ease;
+  opacity: 0;
+  visibility: hidden;
+}
+
+.command-box:hover .copy-btn {
+  opacity: 1;
+  visibility: visible;
 }
 
 .copy-btn:hover {
   background: rgba(255, 255, 255, 0.1);
-  color: var(--text-primary);
+  color: rgba(255, 255, 255, 0.8);
 }
 
 .copy-btn svg {
@@ -599,13 +882,63 @@
   transform: scale(0.9);
 }
 
+.verify-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 6px;
+  color: rgb(16, 185, 129);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-top: 8px;
+}
+
+.verify-btn:hover {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.4);
+  transform: translateY(-1px);
+}
+
+.verify-btn:active {
+  transform: translateY(0);
+}
+
+.install-result {
+  margin: 16px 0;
+  padding: 12px 16px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  animation: slideIn 0.3s ease;
+}
+
+.install-result.success {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: rgb(16, 185, 129);
+}
+
+.install-result.error {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: rgb(239, 68, 68);
+}
+
+.install-result.info {
+  background: rgba(96, 165, 250, 0.1);
+  border: 1px solid rgba(96, 165, 250, 0.3);
+  color: rgb(96, 165, 250);
+}
+
 /* Responsive adjustments */
 @media (max-width: 640px) {
-  .service-info-header {
-    flex-direction: column;
-    gap: 12px;
-  }
-  
   .control-buttons {
     flex-direction: column;
   }
