@@ -85,7 +85,7 @@ export const FoundationModelsSettings: React.FC<FoundationModelsSettingsProps> =
         appSettings.ui[settingKey] = value;
       }
       
-      await invoke('update_settings', { settings: appSettings });
+      await invoke('update_settings', { newSettings: appSettings });
       
       setSettings(prev => ({ ...prev, [key]: value }));
       onSettingsChange?.();

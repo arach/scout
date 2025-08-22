@@ -67,6 +67,7 @@ export const TranscriptionSettings: React.FC = () => {
   };
 
   const handleModeChange = async (newMode: TranscriptionMode) => {
+    console.log(`Changing transcription mode from ${mode} to ${newMode}`);
     setMode(newMode);
     try {
       const settings = await invoke<any>('get_settings');
@@ -79,8 +80,20 @@ export const TranscriptionSettings: React.FC = () => {
           enabled: newMode === TranscriptionMode.External
         }
       };
+      console.log('Updating settings with:', {
+        transcription_mode: updatedSettings.transcription_mode,
+        external_service_enabled: updatedSettings.external_service.enabled
+      });
       await invoke('update_settings', {
-        settings: updatedSettings
+        newSettings: updatedSettings
+      });
+      console.log('Settings updated successfully');
+      
+      // Verify the settings were saved
+      const verifySettings = await invoke<any>('get_settings');
+      console.log('Verified settings after update:', {
+        transcription_mode: verifySettings.transcription_mode,
+        external_service_enabled: verifySettings.external_service?.enabled
       });
     } catch (error) {
       console.error('Failed to update transcription mode:', error);
