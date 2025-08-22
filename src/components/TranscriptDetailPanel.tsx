@@ -129,6 +129,19 @@ export function TranscriptDetailPanel({
         }
     }, [showExportMenu]);
 
+    // Handle tab switching when transcript changes
+    useEffect(() => {
+        if (isOpen && transcript) {
+            // Parse metadata to check strategy
+            const metadata = parseTranscriptMetadata(transcript.metadata) || {};
+            
+            // If current tab is logs but transcript used external service, switch to transcript tab
+            if (activeTab === 'logs' && metadata.strategy_used === 'ExternalService') {
+                setActiveTab('transcript');
+            }
+        }
+    }, [transcript?.id]); // Only run when transcript ID changes
+
     // Fetch performance metrics when transcript changes
     useEffect(() => {
         if (isOpen && transcript) {
@@ -601,15 +614,17 @@ export function TranscriptDetailPanel({
                             </svg>
                             Transcript
                         </button>
-                        <button
-                            className={`tab-button ${activeTab === 'logs' ? 'active' : ''}`}
-                            onClick={() => setActiveTab('logs')}
-                        >
-                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <path d="M1 7H3L5 3L7 11L9 7H11L13 7" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"/>
-                            </svg>
-                            Whisper Logs
-                        </button>
+                        {metadata.strategy_used !== 'ExternalService' && (
+                            <button
+                                className={`tab-button ${activeTab === 'logs' ? 'active' : ''}`}
+                                onClick={() => setActiveTab('logs')}
+                            >
+                                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M1 7H3L5 3L7 11L9 7H11L13 7" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"/>
+                                </svg>
+                                Whisper Logs
+                            </button>
+                        )}
                         <button
                             className={`tab-button ${activeTab === 'performance' ? 'active' : ''}`}
                             onClick={() => setActiveTab('performance')}
@@ -677,7 +692,7 @@ export function TranscriptDetailPanel({
                     </div>
                     )}
 
-                    {activeTab === 'logs' && (
+                    {activeTab === 'logs' && metadata.strategy_used !== 'ExternalService' && (
                         <div className="tab-content">
                             <button 
                                 className={`tab-copy-button ${copiedTab === 'logs' ? 'copied' : ''}`}
