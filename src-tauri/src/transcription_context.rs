@@ -21,6 +21,7 @@ pub struct TranscriptionContext {
     model_name: String,
     app_handle: Option<tauri::AppHandle>,
     model_state_manager: Option<Arc<ModelStateManager>>,
+    external_service_config: Option<crate::settings::ExternalServiceConfig>,
 }
 
 impl TranscriptionContext {
@@ -39,6 +40,7 @@ impl TranscriptionContext {
             model_name: "unknown".to_string(),
             app_handle: None,
             model_state_manager: None,
+            external_service_config: None,
         }
     }
 
@@ -106,6 +108,7 @@ impl TranscriptionContext {
                 model_name,
                 app_handle: None,
                 model_state_manager,
+                external_service_config: Some(settings.external_service.clone()),
             })
         } else {
             let model_name = model_path
@@ -188,6 +191,7 @@ impl TranscriptionContext {
                 model_name,
                 app_handle: None,
                 model_state_manager,
+                external_service_config: Some(settings.external_service.clone()),
             })
         }
     }
@@ -245,6 +249,7 @@ impl TranscriptionContext {
                 model_name,
                 app_handle: None,
                 model_state_manager: None,
+                external_service_config: Some(settings.external_service.clone()),
             })
         } else {
             let model_name = model_path
@@ -293,6 +298,7 @@ impl TranscriptionContext {
                 model_name,
                 app_handle: None,
                 model_state_manager: None,
+                external_service_config: Some(settings.external_service.clone()),
             })
         }
     }
@@ -319,6 +325,7 @@ impl TranscriptionContext {
             self.temp_dir.clone(),
             self.app_handle.clone(),
             self.model_state_manager.clone(),
+            self.external_service_config.clone(),
         )
         .await;
 
@@ -457,6 +464,7 @@ impl TranscriptionContext {
 
         let mut ctx = Self::new(transcriber, temp_dir, Some(config));
         ctx.model_state_manager = None;
+        ctx.external_service_config = None;
         ctx
     }
 
