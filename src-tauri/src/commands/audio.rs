@@ -91,6 +91,12 @@ pub async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle, 
                     consecutive_not_recording = 0;
                 }
                 let overlay = overlay_clone.lock().await;
+                // Debug log every 5th update to see if levels are coming through
+                static UPDATE_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+                let count = UPDATE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if count % 5 == 0 && level > 0.01 {
+                    crate::logger::info(crate::logger::Component::Overlay, &format!("Overlay audio level update #{}: {:.4}", count, level));
+                }
                 overlay.set_volume_level(level);
                 drop(overlay);
             }
@@ -154,6 +160,72 @@ pub async fn stop_recording(state: State<'_, AppState>, app: tauri::AppHandle) -
     state.is_recording_overlay_active.store(false, std::sync::atomic::Ordering::Relaxed);
     let _ = app.emit("recording-state-changed", serde_json::json!({ "state": "stopped" }));
     Ok(result)
+}
+
+#[tauri::command]
+pub async fn force_reset_recording(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<String, String> {
+    use crate::logger::{info, warn, Component};
+    
+    info(Component::Recording, "Force resetting recording state...");
+    
+    // 1. Stop any active recording in the audio recorder
+    let recorder = state.recorder.lock().await;
+    let was_recording = recorder.is_recording();
+    if was_recording {
+        if let Err(e) = recorder.stop_recording() {
+            warn(Component::Recording, &format!("Failed to stop recorder: {}", e));
+        }
+    }
+    drop(recorder);
+    
+    // 2. Clear the current recording file
+    let current_file = state.current_recording_file.lock().await.take();
+    
+    // 3. Reset the progress tracker to Idle
+    state.progress_tracker.reset_to_idle();
+    
+    // 4. Reset overlay state
+    state.is_recording_overlay_active.store(false, std::sync::atomic::Ordering::Relaxed);
+    
+    // 5. Reset native overlay on macOS
+    #[cfg(target_os = "macos")]
+    {
+        let overlay = state.native_panel_overlay.lock().await;
+        overlay.set_idle_state();
+        drop(overlay);
+    }
+    
+    // 6. Try to cancel any workflow recording (ignore errors as it might not be active)
+    let _ = state.recording_workflow.cancel_recording().await;
+    
+    // 7. Update menu item
+    if let Some(menu_item) = app.try_state::<tauri::menu::MenuItem<tauri::Wry>>() {
+        let _ = menu_item.set_text("Start Recording");
+    }
+    
+    // 8. Emit state change event to update UI
+    let _ = app.emit("recording-state-changed", serde_json::json!({ 
+        "state": "idle",
+        "reset": true 
+    }));
+    
+    // 9. Clear any processing queue items (if accessible)
+    // Note: ProcessingQueue might need a clear method if it doesn't have one
+    
+    let mut status = vec!["Recording state force reset completed".to_string()];
+    if was_recording {
+        status.push("- Stopped active recording".to_string());
+    }
+    if let Some(file) = current_file {
+        status.push(format!("- Cleared recording file: {}", file));
+    }
+    status.push("- Reset progress tracker to Idle".to_string());
+    status.push("- Reset overlay states".to_string());
+    status.push("- Emitted state change event".to_string());
+    
+    info(Component::Recording, "Force reset completed successfully");
+    
+    Ok(status.join("\n"))
 }
 
 #[tauri::command]

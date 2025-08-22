@@ -23,6 +23,9 @@ pub struct AppSettings {
     
     // External service settings
     pub external_service: ExternalServiceConfig,
+    
+    // Transcription mode selection
+    pub transcription_mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,6 +102,7 @@ pub struct ExternalServiceConfig {
     pub zmq_control_port: u16,
     pub workers: usize,
     pub model: String,
+    pub use_file_paths: Option<bool>,  // None = auto-detect, true = file paths, false = audio data
 }
 
 impl Default for AppSettings {
@@ -110,6 +114,7 @@ impl Default for AppSettings {
             processing: ProcessingSettings::default(),
             llm: LLMSettings::default(),
             external_service: ExternalServiceConfig::default(),
+            transcription_mode: None,  // Will default to "internal" if not set
         }
     }
 }
@@ -202,6 +207,7 @@ impl Default for ExternalServiceConfig {
             zmq_control_port: 5557,
             workers: 2,
             model: "whisper".to_string(),
+            use_file_paths: Some(true),  // Default to file paths for local processing
         }
     }
 }

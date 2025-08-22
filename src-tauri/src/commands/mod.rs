@@ -5,6 +5,9 @@ pub use audio::*;
 pub mod transcription;
 pub use transcription::*;
 
+pub mod test_transcription;
+pub use test_transcription::*;
+
 pub mod ui;
 pub use ui::*;
 

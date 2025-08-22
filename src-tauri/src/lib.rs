@@ -629,6 +629,7 @@ pub fn run() {
             crate::commands::start_recording,
             crate::commands::stop_recording,
             crate::commands::cancel_recording,
+            crate::commands::force_reset_recording,
             crate::commands::is_recording,
             crate::commands::log_from_overlay,
             crate::commands::get_current_recording_file,
@@ -709,6 +710,7 @@ pub fn run() {
             crate::commands::get_transcriber_version,
             crate::commands::check_external_service_status,
             crate::commands::test_external_service,
+            crate::commands::test_external_service_with_audio,
             crate::commands::start_external_service,
             crate::commands::stop_external_service,
             crate::commands::open_url

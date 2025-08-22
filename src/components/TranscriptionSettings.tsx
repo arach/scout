@@ -19,7 +19,7 @@ interface ServiceStatus {
 export const TranscriptionSettings: React.FC = () => {
   const [mode, setMode] = useState<TranscriptionMode>(TranscriptionMode.Internal);
   const [loading, setLoading] = useState(true);
-  const [serviceStatus, setServiceStatus] = useState<ServiceStatus | null>(null);
+  const [, setServiceStatus] = useState<ServiceStatus | null>(null);
 
   useEffect(() => {
     loadConfig();
@@ -39,8 +39,15 @@ export const TranscriptionSettings: React.FC = () => {
   const loadConfig = async () => {
     try {
       const settings = await invoke<any>('get_settings');
+      // Load from transcription_mode field, or check external_service.enabled as fallback
       if (settings.transcription_mode) {
         setMode(settings.transcription_mode as TranscriptionMode);
+      } else if (settings.external_service?.enabled) {
+        // If no explicit mode but external service is enabled, set to External
+        setMode(TranscriptionMode.External);
+      } else {
+        // Default to Internal
+        setMode(TranscriptionMode.Internal);
       }
     } catch (error) {
       console.error('Failed to load transcription config:', error);
@@ -60,14 +67,33 @@ export const TranscriptionSettings: React.FC = () => {
   };
 
   const handleModeChange = async (newMode: TranscriptionMode) => {
+    console.log(`Changing transcription mode from ${mode} to ${newMode}`);
     setMode(newMode);
     try {
       const settings = await invoke<any>('get_settings');
-      await invoke('update_settings', {
-        newSettings: {
-          ...settings,
-          transcription_mode: newMode
+      // Update both the transcription_mode and external_service.enabled
+      const updatedSettings = {
+        ...settings,
+        transcription_mode: newMode,
+        external_service: {
+          ...settings.external_service,
+          enabled: newMode === TranscriptionMode.External
         }
+      };
+      console.log('Updating settings with:', {
+        transcription_mode: updatedSettings.transcription_mode,
+        external_service_enabled: updatedSettings.external_service.enabled
+      });
+      await invoke('update_settings', {
+        newSettings: updatedSettings
+      });
+      console.log('Settings updated successfully');
+      
+      // Verify the settings were saved
+      const verifySettings = await invoke<any>('get_settings');
+      console.log('Verified settings after update:', {
+        transcription_mode: verifySettings.transcription_mode,
+        external_service_enabled: verifySettings.external_service?.enabled
       });
     } catch (error) {
       console.error('Failed to update transcription mode:', error);
@@ -111,31 +137,7 @@ export const TranscriptionSettings: React.FC = () => {
           <ModelManager />
         </div>
         <div style={{ display: mode === TranscriptionMode.External ? 'block' : 'none' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-            <h2 className="settings-section-title" style={{ margin: 0 }}>Transcriber Settings</h2>
-            {serviceStatus && (
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '4px 10px',
-                background: 'rgba(0, 0, 0, 0.2)',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                borderRadius: '12px',
-                fontSize: '12px',
-                fontWeight: '500',
-                color: serviceStatus.running ? 'rgb(16, 185, 129)' : 'rgba(255, 255, 255, 0.5)'
-              }}>
-                <div style={{
-                  width: '6px',
-                  height: '6px',
-                  borderRadius: '50%',
-                  background: serviceStatus.running ? 'rgb(16, 185, 129)' : 'rgba(255, 255, 255, 0.3)'
-                }} />
-                <span>{serviceStatus.running ? 'Running' : 'Not running'}</span>
-              </div>
-            )}
-          </div>
+          <h2 className="settings-section-title">Transcriber Settings</h2>
           <ExternalServiceSettings onStatusChange={setServiceStatus} />
         </div>
       </div>

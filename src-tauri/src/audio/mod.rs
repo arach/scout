@@ -4,6 +4,7 @@ pub mod format;
 pub mod metadata;
 pub mod notifications;
 pub mod recorder;
+pub mod resampler;
 pub mod ring_buffer_recorder;
 pub mod streaming_recorder_16khz;
 pub mod validation;

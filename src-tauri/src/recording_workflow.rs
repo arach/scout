@@ -795,6 +795,13 @@ impl RecordingWorkflow {
                                                             ),
                                                         )
                                                         .await;
+                                                    
+                                                    // Emit event to notify UI that transcript has been saved
+                                                    if let Err(e) = app_handle_clone.emit("transcript-saved", &transcript) {
+                                                        error(Component::UI, &format!("Failed to emit transcript-saved event: {:?}", e));
+                                                    } else {
+                                                        info(Component::UI, &format!("Emitted transcript-saved event for transcript ID: {}", transcript.id));
+                                                    }
 
                                                     // Save performance metrics using the consolidated service
                                                     let mut perf_builder = crate::performance_metrics_service::PerformanceDataBuilder::new(

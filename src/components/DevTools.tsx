@@ -282,6 +282,49 @@ export function DevTools(props: DevToolsProps) {
                 </div>
                 
                 <div className="dev-tool-section">
+                  <h4>Recording Controls</h4>
+                  <div className="dev-tool-item">
+                    <button 
+                      className="dev-tool-button"
+                      onClick={async () => {
+                        try {
+                          await invoke('cancel_recording');
+                          console.log('[DevTools] Recording cancelled');
+                        } catch (error) {
+                          console.error('[DevTools] Failed to cancel recording:', error);
+                        }
+                      }}
+                      disabled={!isRecording && !isProcessing}
+                      title="Cancel the current recording without processing"
+                    >
+                      Cancel Recording
+                    </button>
+                    <button 
+                      className="dev-tool-button"
+                      onClick={async () => {
+                        try {
+                          const result = await invoke('force_reset_recording');
+                          console.log('[DevTools] Force reset result:', result);
+                          // Force refresh the UI
+                          window.location.reload();
+                        } catch (error) {
+                          console.error('[DevTools] Failed to force reset:', error);
+                        }
+                      }}
+                      style={{ marginLeft: '8px', background: '#8b0000' }}
+                      title="Force reset all recording state and clear processing queue"
+                    >
+                      Force Reset
+                    </button>
+                  </div>
+                  <div className="dev-tool-item">
+                    <span className="status-label" style={{ opacity: 0.7 }}>
+                      Status: {isRecording ? 'Recording' : isProcessing ? 'Processing' : 'Idle'}
+                    </span>
+                  </div>
+                </div>
+                
+                <div className="dev-tool-section">
                   <h4>Native Overlay</h4>
                   <div className="dev-tool-item">
                     <label className="dev-tool-checkbox">

@@ -410,21 +410,40 @@ pub async fn check_external_service_status(state: State<'_, AppState>) -> Result
     let mut error = service_status.error;
     
     if service_status.running {
-        // Try to connect to the ZeroMQ control port to verify health
+        // Try to connect to all three ZeroMQ ports to verify health
         use std::net::TcpStream;
         use std::time::Duration;
         
-        match TcpStream::connect_timeout(
-            &format!("127.0.0.1:{}", external_config.zmq_control_port).parse().unwrap(),
-            Duration::from_secs(2)
-        ) {
-            Ok(_) => {
-                healthy = true;
+        // Check all three ports: push (audio in), pull (text out), and control
+        let ports = [
+            ("push (audio in)", external_config.zmq_push_port),
+            ("pull (text out)", external_config.zmq_pull_port),
+            ("control", external_config.zmq_control_port),
+        ];
+        
+        let mut all_ports_healthy = true;
+        let mut port_errors = Vec::new();
+        
+        for (port_name, port_num) in &ports {
+            match TcpStream::connect_timeout(
+                &format!("127.0.0.1:{}", port_num).parse().unwrap(),
+                Duration::from_millis(500)
+            ) {
+                Ok(_) => {
+                    // Port is reachable
+                }
+                Err(e) => {
+                    all_ports_healthy = false;
+                    port_errors.push(format!("{} port {}: {}", port_name, port_num, e));
+                }
             }
-            Err(e) => {
-                healthy = false;
-                error = Some(format!("Service running but cannot connect: {}", e));
-            }
+        }
+        
+        if all_ports_healthy {
+            healthy = true;
+        } else {
+            healthy = false;
+            error = Some(format!("Service running but ZeroMQ ports not accessible: {}", port_errors.join(", ")));
         }
     }
     
@@ -450,13 +469,14 @@ pub async fn test_external_service(state: State<'_, AppState>) -> Result<serde_j
         }));
     }
     
-    // Check if service is reachable
+    // Check if all ZeroMQ ports are reachable
     use std::net::TcpStream;
     use std::time::Duration;
     
+    // Check push port first (where we send audio)
     let can_connect = TcpStream::connect_timeout(
-        &format!("127.0.0.1:{}", external_config.zmq_control_port).parse().unwrap(),
-        Duration::from_secs(2)
+        &format!("127.0.0.1:{}", external_config.zmq_push_port).parse().unwrap(),
+        Duration::from_millis(500)
     ).is_ok();
     
     if can_connect {

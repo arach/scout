@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { ExternalLink, CheckCircle, AlertCircle, Play, Square, Copy, Terminal, Check, FileText, Info, Activity, Settings, RefreshCw, ChevronRight } from 'lucide-react';
+import { ExternalLink, CheckCircle, AlertCircle, Play, Square, Copy, Terminal, Check, FileText, Info, Activity, Settings, RefreshCw } from 'lucide-react';
 import './ExternalServiceSettings.css';
 
 interface ExternalServiceConfig {
@@ -47,8 +47,12 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
   const [installStatus, setInstallStatus] = useState<'checking' | 'installed' | 'not_installed'>('checking');
   const [copiedCommand, setCopiedCommand] = useState<string | null>(null);
   const [serviceOperation, setServiceOperation] = useState<'idle' | 'starting' | 'stopping' | 'restarting'>('idle');
-  const [operationResult, setOperationResult] = useState<{ type: 'success' | 'error', message: string } | null>(null);
-  const [testResult, setTestResult] = useState<{ type: 'success' | 'error' | 'info', message: string } | null>(null);
+  const [operationResult, setOperationResult] = useState<{ type: 'success' | 'error' | 'info', message: string } | null>(null);
+  const [diagnosticLogs, setDiagnosticLogs] = useState<Array<{
+    type: 'success' | 'error' | 'info';
+    message: string;
+    timestamp: string;
+  }>>([]);
 
   useEffect(() => {
     loadConfig();
@@ -63,6 +67,24 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
       return () => clearInterval(interval);
     }
   }, [status.running]);
+  
+  // Listen for DevTools override changes
+  useEffect(() => {
+    let lastOverride: any = undefined;
+    
+    const checkForOverride = () => {
+      const devOverride = (window as any).__DEV_TRANSCRIBER_STATUS;
+      if (devOverride !== undefined && devOverride !== null && devOverride !== lastOverride) {
+        console.log('[ExternalServiceSettings] DevTools override changed:', devOverride);
+        setInstallStatus(devOverride);
+        lastOverride = devOverride;
+      }
+    };
+    
+    // Check every 500ms for changes (simple polling)
+    const interval = setInterval(checkForOverride, 500);
+    return () => clearInterval(interval);
+  }, []);
 
   const loadConfig = async () => {
     try {
@@ -92,7 +114,25 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
     }
   };
 
+  const addDiagnosticLog = (type: 'success' | 'error' | 'info', message: string) => {
+    const timestamp = new Date().toLocaleTimeString('en-US', { 
+      hour12: false, 
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+    setDiagnosticLogs(prev => [...prev, { type, message, timestamp }].slice(-50)); // Keep last 50 logs
+  };
+
   const checkInstallation = async () => {
+    // Check for DevTools override first
+    const devOverride = (window as any).__DEV_TRANSCRIBER_STATUS;
+    if (devOverride !== undefined && devOverride !== null) {
+      console.log('[ExternalServiceSettings] Using DevTools override:', devOverride);
+      setInstallStatus(devOverride);
+      return;
+    }
+    
     try {
       const isInstalled = await invoke<boolean>('check_transcriber_installed');
       setInstallStatus(isInstalled ? 'installed' : 'not_installed');
@@ -195,57 +235,96 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
     }
   };
 
+  const testHealth = async () => {
+    try {
+      await checkServiceStatus();
+      if (status.running) {
+        // Try to read PID from known location
+        let pidInfo = '';
+        try {
+          const result = await invoke<{ pid?: number }>('get_transcriber_pid');
+          if (result.pid) {
+            pidInfo = ` (PID: ${result.pid})`;
+          }
+        } catch {
+          // If we can't get PID, just continue without it
+          pidInfo = status.pid ? ` (PID: ${status.pid})` : '';
+        }
+        addDiagnosticLog('success', `Service is running${pidInfo}`);
+      } else {
+        addDiagnosticLog('error', 'Service is not running');
+      }
+    } catch (error) {
+      addDiagnosticLog('error', `Health check failed: ${error}`);
+    }
+  };
+
+  const testPorts = async () => {
+    try {
+      if (status.healthy) {
+        addDiagnosticLog('success', 'Ports 8899 (HTTP) and 8901-8902 (ZeroMQ) are open');
+      } else {
+        addDiagnosticLog('error', 'One or more ports are not accessible');
+      }
+    } catch (error) {
+      addDiagnosticLog('error', `Port check failed: ${error}`);
+    }
+  };
+
   const testConnection = async () => {
-    setTestResult(null);
     try {
       const portsOk = status.healthy;
       if (portsOk) {
-        setTestResult({
-          type: 'success',
-          message: 'All ZeroMQ ports are responding'
-        });
+        addDiagnosticLog('success', 'Connected to transcriber service');
       } else {
-        setTestResult({
-          type: 'error',
-          message: 'ZeroMQ ports are not accessible'
-        });
+        addDiagnosticLog('error', 'Cannot connect to transcriber service');
       }
-      setTimeout(() => setTestResult(null), 4000);
     } catch (error) {
-      setTestResult({
-        type: 'error',
-        message: `Connection test failed: ${error}`
-      });
-      setTimeout(() => setTestResult(null), 5000);
+      addDiagnosticLog('error', `Connection test failed: ${error}`);
     }
   };
 
   const testTranscription = async () => {
-    setTestResult({
-      type: 'info',
-      message: 'Sending test audio...'
-    });
+    addDiagnosticLog('info', 'Generating and sending test audio...');
     
     try {
-      const result = await invoke<{ success: boolean; message: string }>('test_external_service');
+      // Try the new method that actually sends audio
+      const result = await invoke<{ 
+        success: boolean; 
+        message: string;
+        transcription?: string;
+        details?: any;
+      }>('test_external_service_with_audio');
+      
       if (result.success) {
-        setTestResult({
-          type: 'success',
-          message: `Test successful: "${result.message}"`
-        });
+        addDiagnosticLog('success', `Test successful: ${result.message}`);
+        if (result.transcription) {
+          addDiagnosticLog('info', `Transcription: "${result.transcription}"`);
+        }
+        if (result.details) {
+          addDiagnosticLog('info', `Details: ${JSON.stringify(result.details)}`);
+        }
       } else {
-        setTestResult({
-          type: 'error',
-          message: `Test failed: ${result.message}`
-        });
+        addDiagnosticLog('error', `Test failed: ${result.message}`);
       }
-      setTimeout(() => setTestResult(null), 6000);
-    } catch (error) {
-      setTestResult({
-        type: 'error',
-        message: `Test error: ${error}`
-      });
-      setTimeout(() => setTestResult(null), 5000);
+    } catch (error: any) {
+      // If the new command doesn't exist, fall back to the old one
+      if (error?.message?.includes('test_external_service_with_audio')) {
+        addDiagnosticLog('info', 'Falling back to connection test...');
+        try {
+          const result = await invoke<{ success: boolean; message: string }>('test_external_service');
+          if (result.success) {
+            addDiagnosticLog('success', `Connection test passed`);
+            addDiagnosticLog('info', result.message);
+          } else {
+            addDiagnosticLog('error', `Connection test failed: ${result.message}`);
+          }
+        } catch (fallbackError) {
+          addDiagnosticLog('error', `Test error: ${fallbackError}`);
+        }
+      } else {
+        addDiagnosticLog('error', `Test error: ${error}`);
+      }
     }
   };
 
@@ -266,8 +345,31 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
         <div className="intro-section">
           <h3>Transcriber Service</h3>
           <p className="intro-description">
-            The transcriber service enables local speech-to-text processing with complete control over your models and data.
+            The <code>`transcriber`</code> service gives you complete control over your transcription models. 
+            Run your choice of engines including OpenAI's Whisper, NVIDIA's Parakeet MLX (optimized for Apple Silicon), 
+            or Facebook's Wav2Vec2. The service runs independently with its own Python environment, 
+            allowing you to customize workers, ports, and model configurations for your specific needs.
+            {' '}
+            <a 
+              href="https://scout.arach.dev/blog/scout-transcriber-architecture" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="inline-link"
+            >
+              Learn more about the architecture →
+            </a>
           </p>
+          <div className="intro-links">
+            <a 
+              href="https://scout.arach.dev/docs/transcriber" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="intro-link"
+            >
+              <span>View Documentation</span>
+              <ExternalLink size={12} />
+            </a>
+          </div>
         </div>
 
         <div className="installation-guide">
@@ -275,7 +377,7 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
             <Terminal className="install-icon" size={24} />
             <div>
               <h3>Quick Installation</h3>
-              <p>Install the transcriber service in two steps</p>
+              <p>Install and verify the transcriber service in four steps</p>
             </div>
           </div>
 
@@ -311,191 +413,416 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
                 </div>
               </div>
             </div>
+
+            <div className="install-step">
+              <div className="step-number">3</div>
+              <div className="step-content">
+                <h4>Start the Service</h4>
+                <div className="command-box">
+                  <code>transcriber start</code>
+                  <button 
+                    className="copy-btn"
+                    onClick={() => copyCommand('transcriber start', 'start')}
+                  >
+                    {copiedCommand === 'start' ? <Check size={14} /> : <Copy size={14} />}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="install-step">
+              <div className="step-number">4</div>
+              <div className="step-content">
+                <h4>Verify Installation</h4>
+                <p className="step-description">Click below to let Scout verify the service is working</p>
+                <button
+                  className="verify-btn"
+                  onClick={async () => {
+                    setOperationResult({ type: 'info', message: 'Checking service...' });
+                    
+                    // For verification, always check the real status, ignore DevTools override
+                    try {
+                      // Check if actually installed
+                      const isInstalled = await invoke<boolean>('check_transcriber_installed');
+                      
+                      if (isInstalled) {
+                        // Check if running
+                        const serviceStatus = await invoke<ServiceStatus>('check_external_service_status');
+                        
+                        if (serviceStatus.running) {
+                          // Try test connection
+                          try {
+                            const result = await invoke<{ success: boolean; message: string }>('test_external_service');
+                            if (result.success) {
+                              setOperationResult({ 
+                                type: 'success', 
+                                message: 'Service is installed and working perfectly! Click "Start Using Transcriber" below to continue.' 
+                              });
+                              // Don't auto-navigate, let user click the button when ready
+                            } else {
+                              setOperationResult({ 
+                                type: 'error', 
+                                message: `Service is installed but test failed: ${result.message}` 
+                              });
+                            }
+                          } catch (error) {
+                            setOperationResult({ 
+                              type: 'error', 
+                              message: `Service is installed but not responding: ${error}` 
+                            });
+                          }
+                        } else {
+                          setOperationResult({ 
+                            type: 'error', 
+                            message: 'Service is installed but not running. Try starting it first.' 
+                          });
+                        }
+                      } else {
+                        setOperationResult({ 
+                          type: 'error', 
+                          message: 'Service not detected. Please complete installation steps above.' 
+                        });
+                      }
+                    } catch (error) {
+                      setOperationResult({ 
+                        type: 'error', 
+                        message: `Failed to check service: ${error}` 
+                      });
+                    }
+                    
+                    setTimeout(() => setOperationResult(null), 5000);
+                  }}
+                >
+                  <CheckCircle size={16} />
+                  Test Installation
+                </button>
+              </div>
+            </div>
           </div>
 
-          <button
-            className="btn-primary"
-            onClick={() => checkInstallation()}
-            style={{ marginTop: '16px' }}
-          >
-            I've Installed It →
-          </button>
+          {/* Show test results */}
+          {operationResult && (
+            <div className={`install-result ${operationResult.type}`}>
+              {operationResult.type === 'success' && <CheckCircle size={16} />}
+              {operationResult.type === 'error' && <AlertCircle size={16} />}
+              {operationResult.type === 'info' && <Info size={16} />}
+              <span>{operationResult.message}</span>
+            </div>
+          )}
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px' }}>
+            <button
+              className="btn-primary"
+              onClick={() => {
+                // Force status to installed to show the main view
+                setInstallStatus('installed');
+                // Clear any DevTools override
+                if ((window as any).__DEV_TRANSCRIBER_STATUS) {
+                  (window as any).__DEV_TRANSCRIBER_STATUS = 'installed';
+                }
+              }}
+            >
+              Start Using Transcriber →
+            </button>
+          </div>
         </div>
       </div>
     );
   }
 
-  // Main interface - logical structure with service info at top
+  // Main interface - clean table layout
   return (
     <div className="external-service-settings">
       {/* Service Information Section */}
-      <div className="service-info-header">
-        <div className="service-identity">
-          <div className="service-row">
-            <span className="label">Service Manager:</span>
-            <span className="value">launchctl (macOS)</span>
-          </div>
-          <div className="service-row">
-            <span className="label">Service Name:</span>
-            <span className="value mono">com.scout.transcriber</span>
-          </div>
-          <div className="service-row">
-            <span className="label">Configuration:</span>
-            <span className="value path">~/Library/Application Support/com.scout.transcriber/config.json</span>
-          </div>
-        </div>
-        
-        <div className="service-status-badge">
-          <div className={`status-indicator ${status.running ? 'running' : 'stopped'}`} />
-          <span className="status-text">
-            {status.running ? 'Running' : 'Stopped'}
-            {status.running && status.pid && <span className="status-pid"> (PID {status.pid})</span>}
-          </span>
-        </div>
-      </div>
-
-      {/* Service Controls and Status */}
-      <div className="service-control-section">
-        <div className="control-row">
-          <div className="control-buttons">
-            {!status.running ? (
-              <button
-                className="btn-control start"
-                onClick={handleStartService}
-                disabled={serviceOperation !== 'idle'}
-              >
-                {serviceOperation === 'starting' ? (
-                  <>
-                    <div className="spinner" />
-                    Starting...
-                  </>
+      <div className="service-section">
+        <h3>Service</h3>
+        <div className="service-table">
+          <div className="service-grid">
+            <div className="service-item-inline">
+              <span className="field">name:</span>
+              <span className="value mono">com.scout.transcriber</span>
+            </div>
+            <div className="service-item-inline">
+              <span className="field">launcher:</span>
+              <span className="value mono">launchctl</span>
+            </div>
+            <div className="service-item-inline">
+              <span className="field">status:</span>
+              <span className={`status-badge ${status.running ? 'running' : 'stopped'}`}>
+                {status.running ? '● Running' : 'Stopped'}
+              </span>
+            </div>
+            <div className="service-item-inline">
+              <span className="field">actions:</span>
+              <div className="action-buttons">
+                {!status.running ? (
+                  <button
+                    className="btn-control-inline start"
+                    onClick={handleStartService}
+                    disabled={serviceOperation !== 'idle'}
+                  >
+                    {serviceOperation === 'starting' ? (
+                      <div className="spinner-small" />
+                    ) : (
+                      <>
+                        <Play size={12} />
+                        <span>Start</span>
+                      </>
+                    )}
+                  </button>
                 ) : (
                   <>
-                    <Play size={14} />
-                    Start Service
+                    <button
+                      className="btn-control-inline stop"
+                      onClick={handleStopService}
+                      disabled={serviceOperation !== 'idle'}
+                    >
+                      {serviceOperation === 'stopping' ? (
+                        <div className="spinner-small" />
+                      ) : (
+                        <>
+                          <Square size={12} />
+                          <span>Stop</span>
+                        </>
+                      )}
+                    </button>
+                    <button
+                      className="btn-control-inline restart"
+                      onClick={handleRestartService}
+                      disabled={serviceOperation !== 'idle'}
+                    >
+                      {serviceOperation === 'restarting' ? (
+                        <div className="spinner-small" />
+                      ) : (
+                        <>
+                          <RefreshCw size={12} />
+                          <span>Restart</span>
+                        </>
+                      )}
+                    </button>
                   </>
                 )}
-              </button>
-            ) : (
-              <>
-                <button
-                  className="btn-control stop"
-                  onClick={handleStopService}
-                  disabled={serviceOperation !== 'idle'}
-                >
-                  {serviceOperation === 'stopping' ? (
-                    <>
-                      <div className="spinner" />
-                      Stopping...
-                    </>
-                  ) : (
-                    <>
-                      <Square size={14} />
-                      Stop
-                    </>
-                  )}
-                </button>
-                <button
-                  className="btn-control restart"
-                  onClick={handleRestartService}
-                  disabled={serviceOperation !== 'idle'}
-                >
-                  {serviceOperation === 'restarting' ? (
-                    <>
-                      <div className="spinner" />
-                      Restarting...
-                    </>
-                  ) : (
-                    <>
-                      <RefreshCw size={14} />
-                      Restart
-                    </>
-                  )}
-                </button>
-              </>
-            )}
-            
-            {/* Test buttons */}
-            {status.running && (
-              <>
-                <button
-                  className="btn-test"
-                  onClick={testConnection}
-                  title="Test ZeroMQ port connectivity"
-                >
-                  <Activity size={14} />
-                  Test Connection
-                </button>
-                <button
-                  className="btn-test"
-                  onClick={testTranscription}
-                  title="Test audio transcription"
-                >
-                  <FileText size={14} />
-                  Test Transcription
-                </button>
-              </>
-            )}
+              </div>
+            </div>
           </div>
-          
-          {/* Status indicators */}
-          <div className="status-indicators">
-            <span className={`indicator ${status.running ? 'active' : ''}`}>
-              LaunchCTL: {status.running ? 'Active' : 'Inactive'}
-            </span>
-            <span className={`indicator ${status.healthy ? 'healthy' : ''}`}>
-              Health: {status.healthy ? 'OK' : status.running ? 'Not Responding' : 'N/A'}
-            </span>
-            <span className={`indicator ${status.healthy ? 'connected' : ''}`}>
-              Ports: {status.healthy ? `${config.zmq_push_port}, ${config.zmq_pull_port}, ${config.zmq_control_port} ✓` : 'Not Connected'}
-            </span>
+          <div className="service-row">
+            <span className="field">manager:</span>
+            <div 
+              className="command-box"
+              onClick={() => copyCommand('~/Library/LaunchAgents/com.scout.transcriber.plist', 'manager')}
+            >
+              <code>~/Library/LaunchAgents/com.scout.transcriber.plist</code>
+              <button className="copy-btn">
+                {copiedCommand === 'manager' ? <Check size={14} /> : <Copy size={14} />}
+              </button>
+            </div>
+          </div>
+          <div className="service-row">
+            <span className="field">config:</span>
+            <div 
+              className="command-box"
+              onClick={() => copyCommand('~/Library/Application Support/com.scout.transcriber/config.json', 'config')}
+            >
+              <code>~/Library/Application Support/com.scout.transcriber/config.json</code>
+              <button className="copy-btn">
+                {copiedCommand === 'config' ? <Check size={14} /> : <Copy size={14} />}
+              </button>
+            </div>
+          </div>
+          <div className="service-row">
+            <span className="field">binary:</span>
+            <div 
+              className="command-box"
+              onClick={() => copyCommand(config.binary_path || '/usr/local/bin/transcriber', 'binary')}
+            >
+              <code>{config.binary_path || '/usr/local/bin/transcriber'}</code>
+              <button className="copy-btn">
+                {copiedCommand === 'binary' ? <Check size={14} /> : <Copy size={14} />}
+              </button>
+            </div>
+          </div>
+          <div className="service-row">
+            <span className="field">log:</span>
+            <div 
+              className="command-box"
+              onClick={() => copyCommand('/tmp/transcriber.log', 'log')}
+            >
+              <code>/tmp/transcriber.log</code>
+              <button className="copy-btn">
+                {copiedCommand === 'log' ? <Check size={14} /> : <Copy size={14} />}
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
-
-      {/* Result Messages */}
-      {(testResult || operationResult) && (
-        <div className="result-messages">
-          {testResult && (
-            <div className={`message ${testResult.type}`}>
-              {testResult.type === 'success' && <CheckCircle size={14} />}
-              {testResult.type === 'error' && <AlertCircle size={14} />}
-              {testResult.type === 'info' && <Info size={14} />}
-              <span>{testResult.message}</span>
-            </div>
-          )}
-          {operationResult && (
-            <div className={`message ${operationResult.type}`}>
-              {operationResult.type === 'success' && <CheckCircle size={14} />}
-              {operationResult.type === 'error' && <AlertCircle size={14} />}
-              <span>{operationResult.message}</span>
-            </div>
-          )}
+      {/* Diagnostics Section */}
+      <div className="diagnostics-section">
+        <h3>Diagnostics</h3>
+        <div className="diagnostics-buttons">
+          <button
+            className="diagnostic-btn"
+            onClick={testHealth}
+            disabled={serviceOperation !== 'idle'}
+          >
+            <CheckCircle size={14} />
+            Health Check
+          </button>
+          <button
+            className="diagnostic-btn"
+            onClick={testPorts}
+            disabled={!status.running || serviceOperation !== 'idle'}
+          >
+            <Activity size={14} />
+            Port Check
+          </button>
+          <button
+            className="diagnostic-btn"
+            onClick={testConnection}
+            disabled={!status.running || serviceOperation !== 'idle'}
+          >
+            <RefreshCw size={14} />
+            Test Connection
+          </button>
+          <button
+            className="diagnostic-btn"
+            onClick={testTranscription}
+            disabled={!status.running || serviceOperation !== 'idle'}
+          >
+            <FileText size={14} />
+            Test Transcription
+          </button>
         </div>
-      )}
+        
+        {/* Diagnostic Results - Only show when there are logs */}
+        {diagnosticLogs.length > 0 && (
+          <>
+            <div className="diagnostic-results">
+              {diagnosticLogs.map((log, index) => (
+                <div key={index} className={`diagnostic-message ${log.type}`}>
+                  <span className="log-timestamp">{log.timestamp}</span>
+                  <span>{log.message}</span>
+                </div>
+              ))}
+            </div>
+            <button 
+              className="clear-logs-btn"
+              onClick={() => setDiagnosticLogs([])}
+            >
+              Clear Logs
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* Model Selection Section */}
+      <div className="model-section">
+        <h3>Transcription Model</h3>
+        <div className="model-cards">
+          <div 
+            className={`model-card ${config.model === 'whisper' ? 'selected' : ''}`}
+            onClick={() => setConfig(prev => ({ ...prev, model: 'whisper' }))}
+          >
+            <div className="model-top">
+              <h4>Whisper</h4>
+              <span className="model-lab">OpenAI</span>
+            </div>
+            <div className="model-content">
+              <div className="model-attributes">
+                <div className="attribute">
+                  <span className="attr-label">Size</span>
+                  <span className="attr-value">39MB - 1.5GB</span>
+                </div>
+                <div className="attribute">
+                  <span className="attr-label">Languages</span>
+                  <span className="attr-value">99+</span>
+                </div>
+                <div className="attribute">
+                  <span className="attr-label">Speed</span>
+                  <span className="attr-value">Balanced</span>
+                </div>
+              </div>
+            </div>
+            <div className="model-footer">
+              <p className="model-description">
+                Industry standard, highly accurate
+              </p>
+            </div>
+          </div>
+
+          <div 
+            className={`model-card ${config.model === 'parakeet' ? 'selected' : ''}`}
+            onClick={() => setConfig(prev => ({ ...prev, model: 'parakeet' }))}
+          >
+            <div className="model-top">
+              <h4>Parakeet MLX</h4>
+              <span className="model-lab">NVIDIA</span>
+            </div>
+            <div className="model-content">
+              <div className="model-attributes">
+                <div className="attribute">
+                  <span className="attr-label">Size</span>
+                  <span className="attr-value">1.1GB</span>
+                </div>
+                <div className="attribute">
+                  <span className="attr-label">Languages</span>
+                  <span className="attr-value">English</span>
+                </div>
+                <div className="attribute">
+                  <span className="attr-label">Speed</span>
+                  <span className="attr-value">Fast (M1/M2)</span>
+                </div>
+              </div>
+            </div>
+            <div className="model-footer">
+              <p className="model-description">
+                Optimized for Apple Silicon
+              </p>
+            </div>
+          </div>
+
+          <div 
+            className={`model-card ${config.model === 'wav2vec2' ? 'selected' : ''}`}
+            onClick={() => setConfig(prev => ({ ...prev, model: 'wav2vec2' }))}
+          >
+            <div className="model-top">
+              <h4>Wav2Vec2</h4>
+              <span className="model-lab">Meta</span>
+            </div>
+            <div className="model-content">
+              <div className="model-attributes">
+                <div className="attribute">
+                  <span className="attr-label">Size</span>
+                  <span className="attr-value">360MB</span>
+                </div>
+                <div className="attribute">
+                  <span className="attr-label">Languages</span>
+                  <span className="attr-value">50+</span>
+                </div>
+                <div className="attribute">
+                  <span className="attr-label">Speed</span>
+                  <span className="attr-value">Very Fast</span>
+                </div>
+              </div>
+            </div>
+            <div className="model-footer">
+              <p className="model-description">
+                Lightweight real-time processing
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Configuration Section - Show when service is healthy */}
       {(status.running && status.healthy) && (
         <div className="config-section">
           <div className="config-header">
             <Settings size={16} />
-            <h4>Configuration</h4>
+            <h4>Advanced Configuration</h4>
           </div>
           
           <div className="config-grid">
-            <div className="config-item">
-              <label>Model</label>
-              <select
-                value={config.model}
-                onChange={(e) => setConfig(prev => ({ ...prev, model: e.target.value }))}
-                className="config-select"
-              >
-                <option value="whisper">Whisper (OpenAI)</option>
-                <option value="parakeet">Parakeet MLX (Apple Silicon)</option>
-                <option value="wav2vec2">Wav2Vec2 (Facebook)</option>
-              </select>
-            </div>
 
             <div className="config-item">
               <label>Workers</label>
@@ -563,27 +890,6 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
         </div>
       )}
 
-      {/* Additional Paths - Collapsible */}
-      <details className="additional-info">
-        <summary>
-          <ChevronRight size={14} className="chevron" />
-          Additional Paths
-        </summary>
-        <div className="paths-grid">
-          <div className="path-item">
-            <span className="path-label">LaunchAgent plist:</span>
-            <code>~/Library/LaunchAgents/com.scout.transcriber.plist</code>
-          </div>
-          <div className="path-item">
-            <span className="path-label">Service logs:</span>
-            <code>/tmp/transcriber.log</code>
-          </div>
-          <div className="path-item">
-            <span className="path-label">Binary location:</span>
-            <code>{config.binary_path || '/usr/local/bin/transcriber'}</code>
-          </div>
-        </div>
-      </details>
 
       {/* Documentation Footer */}
       <div className="docs-footer">

@@ -12,10 +12,32 @@ pub async fn get_settings(state: State<'_, AppState>) -> Result<serde_json::Valu
 
 #[tauri::command]
 pub async fn update_settings(state: State<'_, AppState>, new_settings: serde_json::Value) -> Result<(), String> {
+    // Log the incoming settings update
+    if let Some(transcription_mode) = new_settings.get("transcription_mode") {
+        crate::logger::info(crate::logger::Component::Settings, 
+            &format!("Updating transcription_mode to: {:?}", transcription_mode));
+    }
+    if let Some(external_service) = new_settings.get("external_service") {
+        if let Some(enabled) = external_service.get("enabled") {
+            crate::logger::info(crate::logger::Component::Settings, 
+                &format!("Updating external_service.enabled to: {}", enabled));
+        }
+    }
+    
     let mut settings_lock = state.settings.lock().await;
     let app_settings: settings::AppSettings = serde_json::from_value(new_settings)
         .map_err(|e| format!("Invalid settings format: {}", e))?;
+    
+    // Log before update
+    crate::logger::info(crate::logger::Component::Settings, 
+        &format!("Current external_service.enabled: {}", settings_lock.get().external_service.enabled));
+    
     settings_lock.update(|s| *s = app_settings)?;
+    
+    // Log after update
+    crate::logger::info(crate::logger::Component::Settings, 
+        &format!("After update external_service.enabled: {}", settings_lock.get().external_service.enabled));
+    
     Ok(())
 }
 

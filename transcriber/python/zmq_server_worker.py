@@ -18,6 +18,7 @@ ZeroMQ server-mode transcription worker for transcriber.
 Binds to ports and acts as the server for the PUSH/PULL pattern.
 """
 
+import os
 import sys
 import time
 import uuid
@@ -26,9 +27,15 @@ import traceback
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 
+# Ensure FFmpeg is in PATH for Parakeet MLX
+if '/opt/homebrew/bin' not in os.environ.get('PATH', ''):
+    os.environ['PATH'] = '/opt/homebrew/bin:' + os.environ.get('PATH', '')
+
 import zmq
 import msgpack
 import numpy as np
+import soundfile as sf
+import librosa
 
 # Configure logging to both stderr and file
 log_handlers = [
@@ -111,6 +118,22 @@ class ZmqServerWorker:
                 try:
                     from parakeet_mlx import from_pretrained
                     import mlx.core as mx
+                    
+                    # Check FFmpeg availability
+                    import subprocess
+                    try:
+                        result = subprocess.run(['which', 'ffmpeg'], capture_output=True, text=True)
+                        if result.returncode == 0:
+                            logger.info(f"FFmpeg found at: {result.stdout.strip()}")
+                        else:
+                            logger.warning("FFmpeg not found in PATH via 'which'")
+                        
+                        # Also check if FFmpeg runs
+                        result = subprocess.run(['ffmpeg', '-version'], capture_output=True, text=True)
+                        if result.returncode == 0:
+                            logger.info(f"FFmpeg version: {result.stdout.split()[2]}")
+                    except Exception as e:
+                        logger.warning(f"FFmpeg check failed: {e}")
                     
                     logger.info("Loading Parakeet MLX model (optimized for Apple Silicon)")
                     
@@ -313,6 +336,11 @@ class ZmqServerWorker:
             else:
                 chunk_id = str(chunk_id_bytes)
             
+            # Extract recording filename if present (for tracking)
+            recording_filename = audio_chunk.get('recording_filename', None)
+            if recording_filename:
+                logger.info(f"Processing recording: {recording_filename}")
+            
             # Track current processing
             self.current_message_id = chunk_id
             self.processing_start_time = time.time()
@@ -322,9 +350,58 @@ class ZmqServerWorker:
             
             logger.info(f"Worker {self.worker_id} processing audio chunk: {chunk_id}")
             
-            # Extract audio data
-            audio = np.array(audio_chunk['audio'], dtype=np.float32)
-            sample_rate = audio_chunk['sample_rate']
+            # Check audio data type
+            audio_data_type = audio_chunk.get('audio_data_type', 'AUDIO_BUFFER')  # Default to buffer for backwards compatibility
+            
+            if audio_data_type == 'FILE':
+                # File path mode - read audio from file
+                file_path = audio_chunk['file_path']
+                logger.info(f"Reading audio from file (FILE mode): {file_path}")
+                
+                # Use soundfile to read the WAV file (supports more formats)
+                audio, file_sample_rate = sf.read(file_path, dtype='float32')
+                
+                # If stereo, convert to mono by averaging channels
+                if len(audio.shape) > 1 and audio.shape[1] > 1:
+                    audio = np.mean(audio, axis=1)
+                
+                logger.info(f"Loaded {len(audio)} samples at {file_sample_rate}Hz from file")
+                
+                # Resample to 16kHz if necessary (Whisper requirement)
+                if file_sample_rate != 16000:
+                    logger.info(f"Resampling from {file_sample_rate}Hz to 16000Hz for Whisper")
+                    audio = librosa.resample(audio, orig_sr=file_sample_rate, target_sr=16000)
+                    sample_rate = 16000
+                else:
+                    sample_rate = file_sample_rate
+                
+                logger.info(f"Final audio: {len(audio)} samples at {sample_rate}Hz")
+                    
+            elif audio_data_type == 'AUDIO_BUFFER':
+                # Audio data mode - use provided audio buffer
+                logger.info(f"Using provided audio buffer (AUDIO_BUFFER mode)")
+                audio = np.array(audio_chunk['audio'], dtype=np.float32)
+                sample_rate = audio_chunk['sample_rate']
+                logger.info(f"Received {len(audio)} samples at {sample_rate}Hz")
+                
+            else:
+                # Fallback for backwards compatibility - check if we have file_path or audio
+                logger.warning(f"Unknown audio_data_type: {audio_data_type}, falling back to auto-detection")
+                if 'file_path' in audio_chunk:
+                    file_path = audio_chunk['file_path']
+                    logger.info(f"Reading audio from file (legacy mode): {file_path}")
+                    audio, file_sample_rate = sf.read(file_path, dtype='float32')
+                    if len(audio.shape) > 1 and audio.shape[1] > 1:
+                        audio = np.mean(audio, axis=1)
+                    # Resample if needed
+                    if file_sample_rate != 16000:
+                        audio = librosa.resample(audio, orig_sr=file_sample_rate, target_sr=16000)
+                        sample_rate = 16000
+                    else:
+                        sample_rate = file_sample_rate
+                else:
+                    audio = np.array(audio_chunk['audio'], dtype=np.float32)
+                    sample_rate = audio_chunk['sample_rate']
             
             # Transcribe
             text, confidence = self.transcribe(audio, sample_rate)
@@ -349,6 +426,10 @@ class ZmqServerWorker:
                     }
                 }
             }
+            
+            # Include recording filename if provided (for tracking)
+            if 'recording_filename' in locals() and recording_filename:
+                transcript['recording_filename'] = recording_filename
             
             # Wrap in Result::Ok for Rust
             result = {"Ok": transcript}

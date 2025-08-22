@@ -1251,7 +1251,16 @@ impl TranscriptionStrategySelector {
         temp_dir: std::path::PathBuf,
         app_handle: Option<tauri::AppHandle>,
         model_state_manager: Option<Arc<crate::model_state::ModelStateManager>>,
+        external_service_config: Option<crate::settings::ExternalServiceConfig>,
     ) -> Box<dyn TranscriptionStrategy> {
+        // Check if external service is enabled first
+        if let Some(ext_config) = external_service_config {
+            if ext_config.enabled {
+                info(Component::Transcription, "🎯 STRATEGY SELECTION: Using EXTERNAL SERVICE strategy");
+                info(Component::Transcription, "📝 External service: Audio buffer → ZeroMQ → Python transcriber → MessagePack response");
+                return Box::new(crate::transcription::external_strategy::ExternalServiceStrategy::new(ext_config));
+            }
+        }
         // Check for environment variable override first
         if let Ok(env_strategy) = std::env::var("FORCE_TRANSCRIPTION_STRATEGY") {
             match env_strategy.as_str() {
