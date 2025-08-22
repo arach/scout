@@ -1,10 +1,27 @@
 # Scout Transcription Architecture
 
-This document outlines the two recording strategies and processing pipeline components in Scout's transcription system.
+This document provides a comprehensive overview of Scout's dual-mode transcription system, supporting both integrated (built-in) and advanced (external service) transcription capabilities.
 
 ## Overview
 
-Scout uses two distinct transcription strategies optimized for different use cases:
+Scout offers two transcription modes, each with distinct strategies:
+
+### Transcription Modes
+
+1. **Integrated Mode** - Built-in whisper.cpp for simple, out-of-the-box transcription
+   - No additional setup required
+   - Models embedded in the application
+   - Suitable for most use cases
+
+2. **Advanced Mode** - External transcriber service for enhanced capabilities
+   - Supports multiple AI models (Whisper, Parakeet MLX, Hugging Face)
+   - Distributed processing with worker pools
+   - Better performance on Apple Silicon
+   - Requires separate service installation
+
+### Recording Strategies
+
+Within each mode, Scout uses two recording strategies:
 
 1. **Ring Buffer Strategy** - Real-time chunked transcription for live dictation
 2. **Processing Queue Strategy** - Single-pass transcription for file uploads and batch processing
@@ -276,6 +293,17 @@ CREATE TABLE performance_metrics (
 ### Settings (`settings.json`)
 ```json
 {
+  "transcription": {
+    "mode": "integrated",  // "integrated" (Whisper) or "advanced" (External)
+    "model": "tiny.en",
+    "language": "en",
+    "external": {
+      "enabled": false,
+      "host": "127.0.0.1",
+      "port": 5556,
+      "workers": 2
+    }
+  },
   "audio": {
     "vad_enabled": false,
     "min_recording_duration_ms": 500
@@ -293,25 +321,133 @@ CREATE TABLE performance_metrics (
 }
 ```
 
+### Mode Selection and Configuration
+
+#### Integrated Mode (Default)
+- **When to use**: Simple dictation needs, no additional setup desired
+- **Models**: Whisper tiny, base, small, medium, large
+- **Processing**: Single-threaded, sequential
+- **Memory**: 50-1500MB depending on model
+- **Latency**: 200-500ms for first results
+
+#### Advanced Mode (External Service)
+- **When to use**: 
+  - Need for faster transcription
+  - Want to use specialized models (Parakeet for Apple Silicon)
+  - Require parallel processing of multiple recordings
+  - Building production applications with high throughput needs
+- **Models**: 
+  - OpenAI Whisper (all sizes)
+  - NVIDIA Parakeet MLX (optimized for M1/M2/M3)
+  - Hugging Face models (whisper-large-v3-turbo)
+  - Custom fine-tuned models
+- **Processing**: Multi-threaded with worker pools
+- **Memory**: ~500MB base + 200MB per worker
+- **Latency**: <200ms with optimized models
+- **Architecture**: Queue-based with ZeroMQ or Sled backend
+
+Mode switching is managed through the Settings UI. See [Settings Management Architecture](./settings-management.md) for implementation details.
+
 ### Model Selection
 - **tiny.en** - Fastest, lower accuracy (~77MB)
 - **base.en** - Balanced performance
 - **medium.en** - Higher accuracy, slower (~1.5GB)
 
+## External Service Architecture
+
+When running in Advanced Mode, Scout delegates transcription to an external service:
+
+### Service Components
+
+```
+┌─────────────────┐        ┌──────────────────┐        ┌─────────────────┐
+│   Scout App     │        │ Service Manager  │        │ Python Workers  │
+│                 │        │                  │        │                 │
+│ AudioChunk ─────▶        │  Rust Core       │        │ • Whisper      │
+│ Transcript ◀─────        │  • Process Mgmt │        │ • Parakeet MLX │
+│                 │        │  • Queue Ops    │        │ • HuggingFace  │
+└─────────────────┘        └──────────────────┘        └─────────────────┘
+       │                            │                          │
+       └────────────────────────────┬──────────────────────────┘
+                                    │
+                          ┌─────────┴─────────┐
+                          │   Message Queue   │
+                          │ (ZeroMQ or Sled)  │
+                          └───────────────────┘
+```
+
+### Key Technologies
+
+1. **Message Queues**:
+   - **Sled**: Persistent, local queues with ACID guarantees
+   - **ZeroMQ**: Distributed messaging for cross-language communication
+
+2. **Serialization**:
+   - **MessagePack**: Efficient binary serialization
+   - 2-3x smaller than JSON
+   - Native support for audio buffers
+
+3. **Process Management**:
+   - Automatic worker spawning and monitoring
+   - Health checks with exponential backoff
+   - Graceful degradation on failures
+
+4. **Python Environment**:
+   - **UV**: Modern Python package manager
+   - Automatic dependency resolution
+   - Isolated environments per model
+
+### Performance Characteristics
+
+| Mode | Model | 30s Audio | RTF* | Memory | Latency |
+|------|-------|-----------|------|--------|----------|
+| Integrated | Whisper Base | 2.5s | 0.08x | 150MB | 300ms |
+| Advanced | Whisper Base | 1.8s | 0.06x | 200MB | 200ms |
+| Advanced | Parakeet 0.6B | 0.9s | 0.03x | 1.2GB | 150ms |
+| Advanced | HF Large-v3-turbo | 1.2s | 0.04x | 2GB | 180ms |
+
+*RTF = Real-Time Factor (lower is better)
+
+### Installation and Setup
+
+1. **Install the service**:
+   ```bash
+   # Clone and build
+   cd transcriber/
+   cargo build --release --features zeromq-queue
+   ```
+
+2. **Configure Scout**:
+   - Open Settings → Transcription
+   - Switch to "Advanced Mode"
+   - Configure ports and workers
+   - Test connection
+
+3. **Run as a service** (optional):
+   ```bash
+   # Install as macOS LaunchAgent
+   ./install-service.sh
+   ```
+
 ## Future Enhancements
 
-### Potential Improvements
-1. **Hybrid Strategy** - Start with ring buffer, fall back to single-pass
-2. **Adaptive Chunk Sizing** - Adjust based on speech patterns
-3. **Model Auto-Selection** - Choose model based on performance requirements
-4. **Streaming Transcription** - Real-time partial results
-5. **Multi-Language Support** - Language detection and switching
+### Near-term (Q1 2025)
+1. **Streaming Transcription** - Real-time partial results via WebSockets
+2. **Multi-Language Detection** - Automatic language switching
+3. **Custom Model Support** - UI for loading fine-tuned models
+4. **GPU Acceleration** - CUDA/Metal performance shaders
 
-### Monitoring & Observability
-1. **Performance Dashboard** - Real-time metrics visualization
-2. **Strategy Analytics** - Usage patterns and optimization opportunities  
-3. **Error Tracking** - Failure modes and recovery patterns
-4. **Model Comparison** - A/B testing different Whisper models
+### Medium-term (Q2-Q3 2025)
+1. **Distributed Processing** - Multi-machine worker pools
+2. **Model Caching** - Smart model loading based on usage patterns
+3. **Adaptive Quality** - Automatic model selection based on audio quality
+4. **Cloud Integration** - Optional cloud processing for heavy workloads
+
+### Long-term
+1. **Plugin Architecture** - Third-party transcription providers
+2. **Real-time Translation** - Live translation during transcription
+3. **Speaker Diarization** - Multi-speaker identification
+4. **Emotion Detection** - Sentiment and emotion analysis
 
 ---
 

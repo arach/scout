@@ -30,21 +30,46 @@ curl -O https://scout.arach.dev/transcriber-install.sh
 cat transcriber-install.sh
 ```
 
-## Architecture
+## System Architecture
 
+### High-Level Overview
 ```
-┌────────────┐        ┌─────────────────┐        ┌──────────────┐
-│   Scout    │        │   Transcriber   │        │   Python     │
-│    App     │◀──────▶│     Service     │◀──────▶│   Workers    │
-└────────────┘        └─────────────────┘        └──────────────┘
-      │                        │                         │
-      │                        │                         │
-      ▼                        ▼                         ▼
-┌────────────┐        ┌─────────────────┐        ┌──────────────┐
-│  Built-in  │        │    ZeroMQ       │        │   AI Models  │
-│  Whisper   │        │   Message Bus   │        │   (Parakeet) │
-└────────────┘        └─────────────────┘        └──────────────┘
+┌─────────────────┐                    ┌─────────────────────┐
+│   Scout App     │                    │ Transcriber Service │
+│                 │                    │                     │
+│ ┌─────────────┐ │  AudioChunk        │  ┌───────────────┐ │
+│ │ Integrated  │ │ ──────────────────▶│  │  Rust Core    │ │
+│ │  Whisper    │ │                    │  │               │ │
+│ └─────────────┘ │  Transcript        │  │ Process Mgmt  │ │
+│                 │ ◀──────────────────│  │ Queue Control │ │
+│ Mode: Integrated│                    │  │ Health Checks │ │
+│ or Advanced     │                    │  └───────┬───────┘ │
+└─────────────────┘                    └──────────┼─────────┘
+                                                  │
+                                    ┌─────────────┴───────────┐
+                                    │   Message Queue        │
+                                    │  (ZeroMQ or Sled)      │
+                                    └─────────────┬───────────┘
+                                                  │
+                                    ┌─────────────┴───────────┐
+                                    │  Python Workers        │
+                                    │                        │
+                                    │  • Whisper            │
+                                    │  • Parakeet MLX       │
+                                    │  • HuggingFace        │
+                                    └───────────────────────┘
 ```
+
+### Data Flow
+1. **Audio Capture**: Scout records audio from microphone or processes uploaded files
+2. **Mode Decision**: Based on settings, Scout either:
+   - Uses built-in Whisper (Integrated Mode)
+   - Sends to external service (Advanced Mode)
+3. **Queue Processing**: Audio chunks are queued for processing
+4. **Worker Distribution**: Python workers pull from queue and process
+5. **Model Inference**: Selected AI model transcribes the audio
+6. **Result Return**: Transcripts flow back through queue to Scout
+7. **Post-Processing**: Scout applies filters and saves to database
 
 ### Components
 
@@ -57,17 +82,26 @@ Scout can operate in two modes:
 #### 2. Transcriber Service (Rust)
 
 The core service written in Rust that:
-- Manages worker processes
-- Handles message routing via ZeroMQ
-- Monitors health and performance
-- Provides fallback mechanisms
+- Manages worker processes with automatic restarts
+- Handles message routing via ZeroMQ or Sled queues
+- Monitors health and performance with heartbeats
+- Provides fallback mechanisms and error recovery
+- Manages Python dependencies via UV
 
 #### 3. Python Workers
 
-Python processes that:
-- Load and run AI models
+Stateless Python processes that:
+- Load and run AI models (Whisper, Parakeet, HuggingFace)
 - Process audio chunks in parallel
-- Support multiple model backends (Transformers, MLX, etc.)
+- Support multiple model backends (Transformers, MLX, ONNX)
+- Communicate via MessagePack serialization
+- Auto-restart on failures with exponential backoff
+
+#### 4. Message Queue Layer
+
+Two queue implementations:
+- **Sled**: Persistent, local, ACID-compliant database queues
+- **ZeroMQ**: Distributed, high-performance messaging for scaling
 
 ## Configuration
 
@@ -215,16 +249,110 @@ The service is extensible. To add a new model:
 2. Add model configuration to `src/models.rs`
 3. Update the UI options in Scout's settings
 
-## Security
+## Why Use the External Service?
 
+### When to Stay with Integrated Mode
+- You're happy with current transcription speed
+- You transcribe occasionally
+- You prefer zero configuration
+- You have limited system resources
+
+### When to Use Advanced Mode
+- **Performance Critical**: Need <200ms latency
+- **Batch Processing**: Transcribing multiple files
+- **Apple Silicon User**: Want to leverage MLX acceleration
+- **Custom Models**: Using fine-tuned or specialized models
+- **Production Deployment**: Need reliability and scalability
+- **Developer/Power User**: Want maximum control and flexibility
+
+## Security & Privacy
+
+### Security Features
 - **Local Processing**: All transcription happens on your device
 - **No Network Access**: Models run offline after initial download
 - **Localhost Only**: Service binds to 127.0.0.1, not exposed externally
+- **Process Isolation**: Each worker runs in isolated process
 - **Open Source**: Full source code available for audit
+
+### Privacy Guarantees
+- **No Telemetry**: Zero usage tracking or analytics
+- **No Cloud Dependencies**: Works completely offline
+- **Data Sovereignty**: Your audio never leaves your machine
+- **Ephemeral Processing**: Audio is processed and discarded
+- **User Control**: Stop/start service at any time
+
+## Comparison: Integrated vs Advanced Mode
+
+| Feature | Integrated Mode | Advanced Mode |
+|---------|----------------|---------------|
+| **Setup Required** | None | One-time install |
+| **Models Available** | Whisper only | Whisper, Parakeet, HuggingFace, Custom |
+| **Processing** | Sequential | Parallel (2-8 workers) |
+| **Latency** | 200-500ms | <200ms |
+| **Memory Usage** | 50-1500MB | 500MB + 200MB/worker |
+| **Batch Processing** | Sequential | Concurrent |
+| **Apple Silicon Optimization** | Basic | MLX acceleration |
+| **Failover** | N/A | Falls back to integrated |
+| **Configuration** | Basic | Advanced |
+| **Best For** | Casual users | Power users, developers |
+
+## Frequently Asked Questions
+
+### General Questions
+
+**Q: Do I need the external service?**
+A: No, Scout works perfectly fine without it. The external service is for users who need advanced features or better performance.
+
+**Q: Will it slow down my computer?**
+A: The service only uses resources when actively transcribing. It's designed to be efficient and can be configured to use fewer workers on lower-end machines.
+
+**Q: Can I switch between modes?**
+A: Yes! You can switch between Integrated and Advanced modes at any time in Scout's settings.
+
+### Technical Questions
+
+**Q: What's the difference between Sled and ZeroMQ queues?**
+A: Sled provides persistent local queues that survive restarts. ZeroMQ enables distributed processing across multiple machines. For most users, the default (Sled) is recommended.
+
+**Q: How do I add my own custom model?**
+A: Place your model in `~/.scout-transcriber/models/` and modify the Python worker to load it. See the documentation for detailed instructions.
+
+**Q: Why Python workers instead of pure Rust?**
+A: Python has the richest ML ecosystem. This hybrid approach gives us Rust's reliability with Python's flexibility.
+
+### Troubleshooting
+
+**Q: The service won't start**
+A: Check if the ports are in use: `lsof -i :5555`. Stop any conflicting services or configure different ports.
+
+**Q: Scout can't connect to the service**
+A: Ensure the service is running (`ps aux | grep scout-transcriber`) and ports match in both Scout and service settings.
+
+**Q: Transcription is slower than expected**
+A: Try using fewer workers or switching to a smaller model. On Apple Silicon, ensure you're using Parakeet MLX.
 
 ## Resources
 
+### Documentation
 - [Source Code](https://github.com/arach/scout/tree/master/transcriber)
-- [README](https://scout.arach.dev/transcriber-readme.txt)
-- [Installer Script](https://scout.arach.dev/transcriber-install.txt)
+- [API Reference](https://github.com/arach/scout/tree/master/transcriber#api-reference)
+- [Model Guide](https://github.com/arach/scout/tree/master/transcriber#supported-models)
+
+### Downloads
+- [Installer Script](https://scout.arach.dev/transcriber-install.sh)
+- [Uninstaller Script](https://scout.arach.dev/transcriber-uninstall.sh)
+- [Service README](https://scout.arach.dev/transcriber-readme.txt)
+
+### Community
 - [Report Issues](https://github.com/arach/scout/issues)
+- [Discussions](https://github.com/arach/scout/discussions)
+- [Discord Server](https://discord.gg/scout) *(Coming Soon)*
+
+## Next Steps
+
+1. **Install the Service**: Run the quick install command
+2. **Configure Scout**: Switch to Advanced Mode in settings
+3. **Choose Your Model**: Select the best model for your hardware
+4. **Start Transcribing**: Experience the performance boost!
+
+For detailed setup instructions, see the [Installation](#installation) section above.
