@@ -18,6 +18,7 @@ ZeroMQ server-mode transcription worker for transcriber.
 Binds to ports and acts as the server for the PUSH/PULL pattern.
 """
 
+import os
 import sys
 import time
 import uuid
@@ -25,6 +26,10 @@ import logging
 import traceback
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
+
+# Ensure FFmpeg is in PATH for Parakeet MLX
+if '/opt/homebrew/bin' not in os.environ.get('PATH', ''):
+    os.environ['PATH'] = '/opt/homebrew/bin:' + os.environ.get('PATH', '')
 
 import zmq
 import msgpack
@@ -113,6 +118,22 @@ class ZmqServerWorker:
                 try:
                     from parakeet_mlx import from_pretrained
                     import mlx.core as mx
+                    
+                    # Check FFmpeg availability
+                    import subprocess
+                    try:
+                        result = subprocess.run(['which', 'ffmpeg'], capture_output=True, text=True)
+                        if result.returncode == 0:
+                            logger.info(f"FFmpeg found at: {result.stdout.strip()}")
+                        else:
+                            logger.warning("FFmpeg not found in PATH via 'which'")
+                        
+                        # Also check if FFmpeg runs
+                        result = subprocess.run(['ffmpeg', '-version'], capture_output=True, text=True)
+                        if result.returncode == 0:
+                            logger.info(f"FFmpeg version: {result.stdout.split()[2]}")
+                    except Exception as e:
+                        logger.warning(f"FFmpeg check failed: {e}")
                     
                     logger.info("Loading Parakeet MLX model (optimized for Apple Silicon)")
                     
