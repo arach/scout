@@ -91,6 +91,12 @@ pub async fn start_recording(state: State<'_, AppState>, app: tauri::AppHandle, 
                     consecutive_not_recording = 0;
                 }
                 let overlay = overlay_clone.lock().await;
+                // Debug log every 5th update to see if levels are coming through
+                static UPDATE_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+                let count = UPDATE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if count % 5 == 0 && level > 0.01 {
+                    crate::logger::info(crate::logger::Component::Overlay, &format!("Overlay audio level update #{}: {:.4}", count, level));
+                }
                 overlay.set_volume_level(level);
                 drop(overlay);
             }

@@ -394,6 +394,9 @@ struct AudioRecorderWorker {
     recording_state_changed: Arc<Condvar>,
     current_metadata: Option<AudioMetadata>,
     requested_config: Option<cpal::StreamConfig>,
+    // Resampler for downsampling from 48kHz to 16kHz
+    resampler: Arc<Mutex<Option<crate::audio::resampler::Resampler>>>,
+    sample_buffer: Arc<Mutex<Vec<u8>>>, // Generic buffer for any sample type
     // New validation and monitoring components
     format_validator: Option<AudioFormatValidator>,
     capability_checker: Option<DeviceCapabilityChecker>,
@@ -426,6 +429,8 @@ impl AudioRecorderWorker {
             recording_state_changed,
             current_metadata: None,
             requested_config: None,
+            resampler: Arc::new(Mutex::new(None)),
+            sample_buffer: Arc::new(Mutex::new(Vec::new())),
             format_validator: None,
             capability_checker: None,
             last_callback_time: Instant::now(),
@@ -852,13 +857,25 @@ impl AudioRecorderWorker {
         *self.sample_count.lock().unwrap() = 0;
 
         // Create WAV spec that exactly matches hardware format
-        let spec = native_format.to_wav_spec();
-
-        info(Component::Recording, &format!("WAV file specification:"));
+        // Create WAV spec at 16kHz for optimal Whisper transcription
+        let mut spec = native_format.to_wav_spec();
+        let original_sample_rate = spec.sample_rate;
+        
+        // Downsample to 16kHz for Whisper
+        spec.sample_rate = 16000;
+        
+        info(Component::Recording, &format!("Recording configuration:"));
         info(
             Component::Recording,
             &format!(
-                "  Sample Rate: {} Hz (native hardware rate)",
+                "  Input Sample Rate: {} Hz (native hardware rate)",
+                original_sample_rate
+            ),
+        );
+        info(
+            Component::Recording,
+            &format!(
+                "  Output Sample Rate: {} Hz (optimized for Whisper)",
                 spec.sample_rate
             ),
         );
@@ -994,6 +1011,56 @@ impl AudioRecorderWorker {
         // Drop the stream immediately - the stream itself handles proper shutdown
         if let Some(stream) = self.stream.take() {
             drop(stream);
+        }
+
+        // Flush any remaining samples in the resampling buffer
+        if let Some(ref resampler_impl) = *self.resampler.lock().unwrap() {
+            let buffer_data = self.sample_buffer.lock().unwrap().clone();
+            if !buffer_data.is_empty() {
+                info(Component::Recording, &format!("Flushing {} bytes from resampling buffer", buffer_data.len()));
+                
+                if let Some(ref mut writer) = *self.writer.lock().unwrap() {
+                    // Determine the sample format and process accordingly
+                    match self.sample_format {
+                        Some(cpal::SampleFormat::F32) => {
+                            let bytes_per_sample = std::mem::size_of::<f32>();
+                            let samples = unsafe {
+                                std::slice::from_raw_parts(
+                                    buffer_data.as_ptr() as *const f32,
+                                    buffer_data.len() / bytes_per_sample,
+                                )
+                            };
+                            let resampled = resampler_impl.resample_f32(samples, self.channels);
+                            for &sample in resampled.iter() {
+                                if let Err(e) = writer.write_sample(sample) {
+                                    error(Component::Recording, &format!("Failed to write flushed sample: {}", e));
+                                }
+                            }
+                        }
+                        Some(cpal::SampleFormat::I16) => {
+                            let bytes_per_sample = std::mem::size_of::<i16>();
+                            let samples = unsafe {
+                                std::slice::from_raw_parts(
+                                    buffer_data.as_ptr() as *const i16,
+                                    buffer_data.len() / bytes_per_sample,
+                                )
+                            };
+                            let resampled = resampler_impl.resample_i16(samples, self.channels);
+                            for &sample in resampled.iter() {
+                                if let Err(e) = writer.write_sample(sample) {
+                                    error(Component::Recording, &format!("Failed to write flushed sample: {}", e));
+                                }
+                            }
+                        }
+                        _ => {
+                            warn(Component::Recording, "Unknown sample format during buffer flush");
+                        }
+                    }
+                }
+                
+                // Clear the buffer after flushing
+                self.sample_buffer.lock().unwrap().clear();
+            }
         }
 
         // Check if we need to pad with silence
@@ -1204,6 +1271,21 @@ impl AudioRecorderWorker {
         // Clone config values to move into closure
         let channels = config.channels;
         let device_sample_rate = config.sample_rate.0;
+        
+        // Create resampler if we're downsampling from 48kHz to 16kHz
+        let needs_resampling = device_sample_rate == 48000;
+        if needs_resampling {
+            let resampler_impl = crate::audio::resampler::Resampler::new(48000, 16000)
+                .map_err(|e| format!("Failed to create resampler: {}", e))?;
+            *self.resampler.lock().unwrap() = Some(resampler_impl);
+            info(Component::Recording, "Initialized resampler for 48kHz to 16kHz downsampling");
+        } else {
+            *self.resampler.lock().unwrap() = None;
+        }
+        
+        // Clone the resampler and buffer for use in the closure
+        let resampler = Arc::clone(&self.resampler);
+        let sample_buffer = Arc::clone(&self.sample_buffer);
 
         device
             .build_input_stream(
@@ -1269,11 +1351,85 @@ impl AudioRecorderWorker {
                                 );
                             }
 
-                            // Write samples directly in their native format
-                            // NO conversion, NO resampling, NO channel mixing
-                            for &sample in data.iter() {
-                                if let Err(e) = writer.write_sample(sample) {
-                                    error(Component::Recording, &format!("Sample write failed: {}", e));
+                            // Handle resampling if needed
+                            if let Some(ref resampler_impl) = *resampler.lock().unwrap() {
+                                // We need to resample from 48kHz to 16kHz
+                                // Convert samples to bytes and accumulate in buffer
+                                let sample_bytes = unsafe {
+                                    std::slice::from_raw_parts(
+                                        data.as_ptr() as *const u8,
+                                        data.len() * std::mem::size_of::<T>(),
+                                    )
+                                };
+                                
+                                let mut buffer = sample_buffer.lock().unwrap();
+                                buffer.extend_from_slice(sample_bytes);
+                                
+                                // Process in chunks of reasonable size (e.g., 4800 samples = 100ms at 48kHz)
+                                // This becomes 1600 samples at 16kHz
+                                let bytes_per_sample = std::mem::size_of::<T>();
+                                let chunk_size = 4800 * channels as usize * bytes_per_sample; // Account for all channels
+                                
+                                while buffer.len() >= chunk_size {
+                                    let chunk_bytes: Vec<u8> = buffer.drain(..chunk_size).collect();
+                                    
+                                    // Convert bytes back to samples
+                                    let chunk = unsafe {
+                                        std::slice::from_raw_parts(
+                                            chunk_bytes.as_ptr() as *const T,
+                                            chunk_bytes.len() / bytes_per_sample,
+                                        )
+                                    };
+                                    
+                                    // Resample the chunk
+                                    let resampled = if TypeId::of::<T>() == TypeId::of::<f32>() {
+                                        // For f32 samples
+                                        let f32_samples = unsafe {
+                                            std::slice::from_raw_parts(
+                                                chunk.as_ptr() as *const f32,
+                                                chunk.len(),
+                                            )
+                                        };
+                                        let resampled_f32 = resampler_impl.resample_f32(f32_samples, channels);
+                                        unsafe {
+                                            std::slice::from_raw_parts(
+                                                resampled_f32.as_ptr() as *const T,
+                                                resampled_f32.len(),
+                                            ).to_vec()
+                                        }
+                                    } else if TypeId::of::<T>() == TypeId::of::<i16>() {
+                                        // For i16 samples
+                                        let i16_samples = unsafe {
+                                            std::slice::from_raw_parts(
+                                                chunk.as_ptr() as *const i16,
+                                                chunk.len(),
+                                            )
+                                        };
+                                        let resampled_i16 = resampler_impl.resample_i16(i16_samples, channels);
+                                        unsafe {
+                                            std::slice::from_raw_parts(
+                                                resampled_i16.as_ptr() as *const T,
+                                                resampled_i16.len(),
+                                            ).to_vec()
+                                        }
+                                    } else {
+                                        // Unsupported format, write original
+                                        chunk.to_vec()
+                                    };
+                                    
+                                    // Write resampled samples
+                                    for &sample in resampled.iter() {
+                                        if let Err(e) = writer.write_sample(sample) {
+                                            error(Component::Recording, &format!("Sample write failed: {}", e));
+                                        }
+                                    }
+                                }
+                            } else {
+                                // No resampling needed, write samples directly
+                                for &sample in data.iter() {
+                                    if let Err(e) = writer.write_sample(sample) {
+                                        error(Component::Recording, &format!("Sample write failed: {}", e));
+                                    }
                                 }
                             }
 

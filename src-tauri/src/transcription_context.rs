@@ -70,11 +70,16 @@ impl TranscriptionContext {
             );
             // Fall back to finding any available model
             let model_path = Self::find_model_file(&models_dir)?;
-            let model_name = model_path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("unknown")
-                .to_string();
+            // Use external service model if enabled, otherwise use local model name
+            let model_name = if settings.external_service.enabled {
+                settings.external_service.model.clone()
+            } else {
+                model_path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("unknown")
+                    .to_string()
+            };
             info(
                 Component::Transcription,
                 &format!("Using fallback model file: {:?}", model_path),
@@ -111,11 +116,16 @@ impl TranscriptionContext {
                 external_service_config: Some(settings.external_service.clone()),
             })
         } else {
-            let model_name = model_path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("unknown")
-                .to_string();
+            // Use external service model if enabled, otherwise use local model name
+            let model_name = if settings.external_service.enabled {
+                settings.external_service.model.clone()
+            } else {
+                model_path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("unknown")
+                    .to_string()
+            };
             info(
                 Component::Transcription,
                 &format!(
@@ -216,11 +226,16 @@ impl TranscriptionContext {
             );
             // Fall back to finding any available model
             let model_path = Self::find_model_file(&models_dir)?;
-            let model_name = model_path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("unknown")
-                .to_string();
+            // Use external service model if enabled, otherwise use local model name
+            let model_name = if settings.external_service.enabled {
+                settings.external_service.model.clone()
+            } else {
+                model_path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("unknown")
+                    .to_string()
+            };
             info(
                 Component::Transcription,
                 &format!("Using fallback model file: {:?}", model_path),
@@ -252,11 +267,16 @@ impl TranscriptionContext {
                 external_service_config: Some(settings.external_service.clone()),
             })
         } else {
-            let model_name = model_path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("unknown")
-                .to_string();
+            // Use external service model if enabled, otherwise use local model name
+            let model_name = if settings.external_service.enabled {
+                settings.external_service.model.clone()
+            } else {
+                model_path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("unknown")
+                    .to_string()
+            };
             info(
                 Component::Transcription,
                 &format!(

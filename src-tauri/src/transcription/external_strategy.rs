@@ -127,18 +127,32 @@ impl TranscriptionStrategy for ExternalServiceStrategy {
             let path_str = recording_path.to_str()
                 .ok_or("Failed to convert path to string")?;
             
-            info(Component::Transcription, "Using FILE mode for external service");
+            // Extract the filename for tracking
+            let filename = recording_path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+            
+            info(Component::Transcription, &format!("Using FILE mode for external service, recording: {}", filename));
             
             json!({
                 "id": chunk_id.as_bytes().to_vec(),
                 "audio_data_type": "FILE",
                 "file_path": path_str,
+                "recording_filename": filename,
                 "sample_rate": 16000,  // Scout always records at 16kHz
                 "timestamp": timestamp,
             })
         } else {
             // Send audio data (for remote processing or when file access isn't available)
-            info(Component::Transcription, "Using AUDIO_BUFFER mode for external service");
+            
+            // Extract the filename for tracking
+            let filename = recording_path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+            
+            info(Component::Transcription, &format!("Using AUDIO_BUFFER mode for external service, recording: {}", filename));
             
             // Read and convert WAV file to samples
             let samples = match WhisperAudioConverter::convert_wav_file_for_whisper(recording_path) {
@@ -160,6 +174,7 @@ impl TranscriptionStrategy for ExternalServiceStrategy {
                 "id": chunk_id.as_bytes().to_vec(),
                 "audio_data_type": "AUDIO_BUFFER",
                 "audio": samples,
+                "recording_filename": filename,
                 "sample_rate": 16000,
                 "timestamp": timestamp,
             })
@@ -195,6 +210,17 @@ impl TranscriptionStrategy for ExternalServiceStrategy {
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
                         .to_string();
+                    
+                    // Log if we got the recording filename back
+                    if let Some(returned_filename) = ok_value.get("recording_filename").and_then(|v| v.as_str()) {
+                        info(Component::Transcription, &format!(
+                            "Received transcription for recording: {} - text: {} chars",
+                            returned_filename,
+                            text.len()
+                        ));
+                    } else {
+                        warn(Component::Transcription, "Transcription response missing recording_filename");
+                    }
                     
                     let processing_time_ms = processing_start.elapsed().as_millis() as u64;
                     

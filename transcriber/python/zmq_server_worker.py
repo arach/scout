@@ -336,6 +336,11 @@ class ZmqServerWorker:
             else:
                 chunk_id = str(chunk_id_bytes)
             
+            # Extract recording filename if present (for tracking)
+            recording_filename = audio_chunk.get('recording_filename', None)
+            if recording_filename:
+                logger.info(f"Processing recording: {recording_filename}")
+            
             # Track current processing
             self.current_message_id = chunk_id
             self.processing_start_time = time.time()
@@ -421,6 +426,10 @@ class ZmqServerWorker:
                     }
                 }
             }
+            
+            # Include recording filename if provided (for tracking)
+            if 'recording_filename' in locals() and recording_filename:
+                transcript['recording_filename'] = recording_filename
             
             # Wrap in Result::Ok for Rust
             result = {"Ok": transcript}
