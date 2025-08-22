@@ -629,6 +629,7 @@ pub fn run() {
             crate::commands::start_recording,
             crate::commands::stop_recording,
             crate::commands::cancel_recording,
+            crate::commands::force_reset_recording,
             crate::commands::is_recording,
             crate::commands::log_from_overlay,
             crate::commands::get_current_recording_file,

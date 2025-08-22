@@ -294,13 +294,32 @@ export function DevTools(props: DevToolsProps) {
                           console.error('[DevTools] Failed to cancel recording:', error);
                         }
                       }}
-                      disabled={!isRecording}
+                      disabled={!isRecording && !isProcessing}
                       title="Cancel the current recording without processing"
                     >
                       Cancel Recording
                     </button>
-                    <span className="status-label" style={{ marginLeft: '8px', opacity: 0.7 }}>
-                      {isRecording ? '(Recording in progress)' : '(No active recording)'}
+                    <button 
+                      className="dev-tool-button"
+                      onClick={async () => {
+                        try {
+                          const result = await invoke('force_reset_recording');
+                          console.log('[DevTools] Force reset result:', result);
+                          // Force refresh the UI
+                          window.location.reload();
+                        } catch (error) {
+                          console.error('[DevTools] Failed to force reset:', error);
+                        }
+                      }}
+                      style={{ marginLeft: '8px', background: '#8b0000' }}
+                      title="Force reset all recording state and clear processing queue"
+                    >
+                      Force Reset
+                    </button>
+                  </div>
+                  <div className="dev-tool-item">
+                    <span className="status-label" style={{ opacity: 0.7 }}>
+                      Status: {isRecording ? 'Recording' : isProcessing ? 'Processing' : 'Idle'}
                     </span>
                   </div>
                 </div>

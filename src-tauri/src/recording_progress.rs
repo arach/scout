@@ -28,6 +28,10 @@ impl ProgressTracker {
     pub fn update(&self, progress: RecordingProgress) {
         let _ = self.sender.send(progress);
     }
+    
+    pub fn reset_to_idle(&self) {
+        let _ = self.sender.send(RecordingProgress::Idle);
+    }
 
     pub fn subscribe(&self) -> watch::Receiver<RecordingProgress> {
         self.receiver.clone()
