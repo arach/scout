@@ -282,6 +282,30 @@ export function DevTools(props: DevToolsProps) {
                 </div>
                 
                 <div className="dev-tool-section">
+                  <h4>Recording Controls</h4>
+                  <div className="dev-tool-item">
+                    <button 
+                      className="dev-tool-button"
+                      onClick={async () => {
+                        try {
+                          await invoke('cancel_recording');
+                          console.log('[DevTools] Recording cancelled');
+                        } catch (error) {
+                          console.error('[DevTools] Failed to cancel recording:', error);
+                        }
+                      }}
+                      disabled={!isRecording}
+                      title="Cancel the current recording without processing"
+                    >
+                      Cancel Recording
+                    </button>
+                    <span className="status-label" style={{ marginLeft: '8px', opacity: 0.7 }}>
+                      {isRecording ? '(Recording in progress)' : '(No active recording)'}
+                    </span>
+                  </div>
+                </div>
+                
+                <div className="dev-tool-section">
                   <h4>Native Overlay</h4>
                   <div className="dev-tool-item">
                     <label className="dev-tool-checkbox">
