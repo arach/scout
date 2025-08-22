@@ -102,6 +102,7 @@ pub struct ExternalServiceConfig {
     pub zmq_control_port: u16,
     pub workers: usize,
     pub model: String,
+    pub use_file_paths: Option<bool>,  // None = auto-detect, true = file paths, false = audio data
 }
 
 impl Default for AppSettings {
@@ -206,6 +207,7 @@ impl Default for ExternalServiceConfig {
             zmq_control_port: 5557,
             workers: 2,
             model: "whisper".to_string(),
+            use_file_paths: Some(true),  // Default to file paths for local processing
         }
     }
 }

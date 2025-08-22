@@ -69,26 +69,23 @@ impl TranscriptionStrategy for ExternalServiceStrategy {
             .as_ref()
             .ok_or("No recording path set")?;
 
-        // Read and convert WAV file to samples (16kHz mono f32 for Whisper)
-        let samples = match WhisperAudioConverter::convert_wav_file_for_whisper(recording_path) {
-            Ok(s) => s,
-            Err(e) => {
-                warn(Component::Transcription, &format!(
-                    "Failed to read WAV file: {}",
-                    e
-                ));
-                return Err(format!("Failed to read audio file: {}", e));
-            }
-        };
+        // Verify the file exists
+        if !recording_path.exists() {
+            return Err(format!("Recording file not found: {:?}", recording_path));
+        }
 
-        if samples.is_empty() {
-            return Err("No audio data in recording".to_string());
+        // Get file metadata for validation
+        let metadata = std::fs::metadata(recording_path)
+            .map_err(|e| format!("Failed to read file metadata: {}", e))?;
+        
+        if metadata.len() == 0 {
+            return Err("Recording file is empty".to_string());
         }
 
         info(Component::Transcription, &format!(
-            "Sending {} samples from {:?} to external service via ZeroMQ",
-            samples.len(),
-            recording_path.file_name().unwrap_or_default()
+            "Sending file path {:?} ({} bytes) to external service via ZeroMQ",
+            recording_path.file_name().unwrap_or_default(),
+            metadata.len()
         ));
 
         // Initialize ZeroMQ context
@@ -122,12 +119,51 @@ impl TranscriptionStrategy for ExternalServiceStrategy {
             .map_err(|e| format!("Time error: {}", e))?
             .as_secs_f64();
         
-        let audio_chunk = json!({
-            "id": chunk_id.as_bytes().to_vec(),
-            "audio": samples,
-            "sample_rate": 16000,
-            "timestamp": timestamp,
-        });
+        // Determine whether to use file paths or audio data
+        let use_file_paths = self.config.use_file_paths.unwrap_or(true);
+        
+        let audio_chunk = if use_file_paths {
+            // Send file path (more efficient for local processing)
+            let path_str = recording_path.to_str()
+                .ok_or("Failed to convert path to string")?;
+            
+            info(Component::Transcription, "Using FILE mode for external service");
+            
+            json!({
+                "id": chunk_id.as_bytes().to_vec(),
+                "audio_data_type": "FILE",
+                "file_path": path_str,
+                "sample_rate": 16000,  // Scout always records at 16kHz
+                "timestamp": timestamp,
+            })
+        } else {
+            // Send audio data (for remote processing or when file access isn't available)
+            info(Component::Transcription, "Using AUDIO_BUFFER mode for external service");
+            
+            // Read and convert WAV file to samples
+            let samples = match WhisperAudioConverter::convert_wav_file_for_whisper(recording_path) {
+                Ok(s) => s,
+                Err(e) => {
+                    warn(Component::Transcription, &format!(
+                        "Failed to read WAV file: {}",
+                        e
+                    ));
+                    return Err(format!("Failed to read audio file: {}", e));
+                }
+            };
+            
+            if samples.is_empty() {
+                return Err("No audio data in recording".to_string());
+            }
+            
+            json!({
+                "id": chunk_id.as_bytes().to_vec(),
+                "audio_data_type": "AUDIO_BUFFER",
+                "audio": samples,
+                "sample_rate": 16000,
+                "timestamp": timestamp,
+            })
+        };
         
         let queue_item = json!({
             "data": audio_chunk,

@@ -21,6 +21,8 @@ Binds to ports and acts as the server for the PUSH/PULL pattern.
 import sys
 import time
 import uuid
+import wave
+import struct
 import logging
 import traceback
 from typing import Dict, Any, Optional
@@ -322,9 +324,53 @@ class ZmqServerWorker:
             
             logger.info(f"Worker {self.worker_id} processing audio chunk: {chunk_id}")
             
-            # Extract audio data
-            audio = np.array(audio_chunk['audio'], dtype=np.float32)
-            sample_rate = audio_chunk['sample_rate']
+            # Check audio data type
+            audio_data_type = audio_chunk.get('audio_data_type', 'AUDIO_BUFFER')  # Default to buffer for backwards compatibility
+            
+            if audio_data_type == 'FILE':
+                # File path mode - read audio from file
+                file_path = audio_chunk['file_path']
+                logger.info(f"Reading audio from file (FILE mode): {file_path}")
+                
+                with wave.open(file_path, 'rb') as wav_file:
+                    frames = wav_file.readframes(wav_file.getnframes())
+                    # Convert bytes to numpy array based on sample width
+                    sample_width = wav_file.getsampwidth()
+                    n_frames = wav_file.getnframes()
+                    
+                    if sample_width == 2:  # 16-bit audio
+                        audio_data = struct.unpack(f'{n_frames}h', frames)
+                        audio = np.array(audio_data, dtype=np.float32) / 32768.0
+                    elif sample_width == 4:  # 32-bit audio
+                        audio_data = struct.unpack(f'{n_frames}f', frames)
+                        audio = np.array(audio_data, dtype=np.float32)
+                    else:
+                        raise ValueError(f"Unsupported sample width: {sample_width}")
+                    
+                    sample_rate = wav_file.getframerate()
+                    logger.info(f"Loaded {len(audio)} samples at {sample_rate}Hz from file")
+                    
+            elif audio_data_type == 'AUDIO_BUFFER':
+                # Audio data mode - use provided audio buffer
+                logger.info(f"Using provided audio buffer (AUDIO_BUFFER mode)")
+                audio = np.array(audio_chunk['audio'], dtype=np.float32)
+                sample_rate = audio_chunk['sample_rate']
+                logger.info(f"Received {len(audio)} samples at {sample_rate}Hz")
+                
+            else:
+                # Fallback for backwards compatibility - check if we have file_path or audio
+                logger.warning(f"Unknown audio_data_type: {audio_data_type}, falling back to auto-detection")
+                if 'file_path' in audio_chunk:
+                    file_path = audio_chunk['file_path']
+                    logger.info(f"Reading audio from file (legacy mode): {file_path}")
+                    with wave.open(file_path, 'rb') as wav_file:
+                        frames = wav_file.readframes(wav_file.getnframes())
+                        audio_data = struct.unpack(f'{wav_file.getnframes()}h', frames)
+                        audio = np.array(audio_data, dtype=np.float32) / 32768.0
+                        sample_rate = wav_file.getframerate()
+                else:
+                    audio = np.array(audio_chunk['audio'], dtype=np.float32)
+                    sample_rate = audio_chunk['sample_rate']
             
             # Transcribe
             text, confidence = self.transcribe(audio, sample_rate)
