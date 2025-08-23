@@ -699,7 +699,7 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
             <span className="field">ZMQ PORTS:</span>
             <div className="port-inputs-inline">
               <div className="port-group-inline">
-                <label className="port-label">AUDIO</label>
+                <label className="port-label">AUDIO INPUT</label>
                 <input
                   type="text"
                   value={config.zmq_push_port}
@@ -714,7 +714,7 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
                 />
               </div>
               <div className="port-group-inline">
-                <label className="port-label">OUTPUT</label>
+                <label className="port-label">TEXT OUTPUT</label>
                 <input
                   type="text"
                   value={config.zmq_pull_port}
@@ -729,7 +729,7 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
                 />
               </div>
               <div className="port-group-inline">
-                <label className="port-label">CONTROL</label>
+                <label className="port-label">CONTROL PANEL</label>
                 <input
                   type="text"
                   value={config.zmq_control_port}
