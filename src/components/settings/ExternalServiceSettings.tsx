@@ -659,7 +659,7 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
 
       {/* Model Selection Section */}
       <div className="model-section">
-        <h3>Transcription Model</h3>
+        <h3>Advanced Models</h3>
         <div className="model-cards">
           <div 
             className={`model-card ${config.model === 'whisper' ? 'selected' : ''}`}
@@ -689,6 +689,16 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
               <p className="model-description">
                 Industry standard, highly accurate
               </p>
+              <a 
+                href="https://pypi.org/project/openai-whisper/" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="model-link"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <ExternalLink size={10} />
+                PyPI Package
+              </a>
             </div>
           </div>
 
@@ -720,6 +730,16 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
               <p className="model-description">
                 Optimized for Apple Silicon
               </p>
+              <a 
+                href="https://github.com/NVIDIA/NeMo" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="model-link"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <ExternalLink size={10} />
+                GitHub Repo
+              </a>
             </div>
           </div>
 
@@ -751,6 +771,16 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
               <p className="model-description">
                 Lightweight real-time processing
               </p>
+              <a 
+                href="https://pypi.org/project/transformers/" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="model-link"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <ExternalLink size={10} />
+                Transformers
+              </a>
             </div>
           </div>
         </div>
