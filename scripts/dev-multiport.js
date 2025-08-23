@@ -10,9 +10,13 @@
  *   pnpm tauri:dev:1430
  */
 
-const fs = require('fs');
-const path = require('path');
-const { spawn } = require('child_process');
+import fs from 'fs';
+import path from 'path';
+import { spawn } from 'child_process';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const port = process.argv[2] || '5173';
 const hmrPort = (parseInt(port) + 1).toString();
@@ -58,8 +62,7 @@ process.on('exit', cleanup);
 
 // Run pnpm tauri dev
 const tauri = spawn('pnpm', ['tauri', 'dev'], {
-  stdio: 'inherit',
-  shell: true
+  stdio: 'inherit'
 });
 
 tauri.on('close', (code) => {
