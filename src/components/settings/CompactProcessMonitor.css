@@ -1,0 +1,157 @@
+.compact-monitor {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-top: 12px;
+  font-size: 12px;
+}
+
+.monitor-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.monitor-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  flex-wrap: wrap;
+}
+
+.monitor-status .healthy {
+  color: #10b981;
+}
+
+.monitor-status .unhealthy {
+  color: #ef4444;
+}
+
+.pid {
+  font-weight: 600;
+  color: var(--text-primary);
+  padding: 2px 6px;
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+}
+
+.stat {
+  color: var(--text-secondary);
+  padding: 2px 6px;
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: monospace;
+}
+
+.stat:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.monitor-ports {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.port {
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: monospace;
+}
+
+.port.open {
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.port.closed {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.monitor-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.mini-btn {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 4px 6px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mini-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--text-primary);
+}
+
+.mini-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.mini-btn.danger:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border-color: #ef4444;
+}
+
+.spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.monitor-warning {
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  border-radius: 4px;
+  color: #fbbf24;
+  font-size: 11px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .monitor-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  
+  .monitor-status {
+    width: 100%;
+  }
+  
+  .monitor-ports {
+    width: 100%;
+  }
+  
+  .monitor-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}

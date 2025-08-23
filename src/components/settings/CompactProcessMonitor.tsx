@@ -23,6 +23,7 @@ interface ServiceStatus {
     memory_mb: number;
     cpu_percent: number;
     children: number[];
+    started_at?: number;
   };
 }
 
@@ -35,6 +36,17 @@ export const CompactProcessMonitor: React.FC = () => {
     const interval = setInterval(checkStatus, 5000);
     return () => clearInterval(interval);
   }, []);
+
+  const formatDuration = (startedAt?: number) => {
+    if (!startedAt) return '';
+    const now = Date.now() / 1000;
+    const diff = now - startedAt;
+    
+    if (diff < 60) return `${Math.floor(diff)}s`;
+    if (diff < 3600) return `${Math.floor(diff / 60)}m`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ${Math.floor((diff % 3600) / 60)}m`;
+    return `${Math.floor(diff / 86400)}d ${Math.floor((diff % 86400) / 3600)}h`;
+  };
 
   const checkStatus = async () => {
     if (isRefreshing) return;
@@ -82,6 +94,11 @@ export const CompactProcessMonitor: React.FC = () => {
         <div className="monitor-status">
           <Activity size={12} className={status.healthy ? 'healthy' : 'unhealthy'} />
           <span className="pid">PID {status.pid}</span>
+          {status.process_stats?.started_at && (
+            <span className="stat" title="Uptime">
+              ⏱ {formatDuration(status.process_stats.started_at)}
+            </span>
+          )}
           {status.memory_mb && (
             <span className="stat" title="Memory usage">
               {status.memory_mb.toFixed(0)}MB
@@ -90,6 +107,11 @@ export const CompactProcessMonitor: React.FC = () => {
           {status.cpu_percent !== undefined && (
             <span className="stat" title="CPU usage">
               {status.cpu_percent.toFixed(0)}%
+            </span>
+          )}
+          {status.process_stats?.children && status.process_stats.children.length > 0 && (
+            <span className="stat" title={`Child processes: ${status.process_stats.children.join(', ')}`}>
+              +{status.process_stats.children.length}
             </span>
           )}
           {status.control_plane?.is_healthy && (
