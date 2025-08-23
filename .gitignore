@@ -6,6 +6,8 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+dev.log
+scout_test.log
 
 node_modules
 dist
@@ -24,6 +26,14 @@ package-lock.json
 *.njsproj
 *.sln
 *.sw?
+*.swp
+*.swo
+*~
+.AppleDouble
+.LSOverride
+Thumbs.db
+*.iml
+*.sublime-*
 
 # Tauri
 src-tauri/target/
@@ -31,17 +41,69 @@ src-tauri/WixTools/
 
 # Database
 *.db
+*.db-*
 *.sqlite
 *.sqlite3
+scout.db
+benchmark.db*
 
 # whisper.cpp models
 models/
+*.mlmodelc/
+*.mlmodel
+*.ggml
+*.bin
+ggml-*.en*
 
 # MCP configuration with secrets
 mcps.mcp.json
 
 # Build artifacts
 bundle-analysis.json
+*.o
+*.a
+*.dylib
+*.so
+*.dll
+/landing/out/
+/landing/.next/
+
+# Application bundles & installers
+*.app/
+*.dmg
+!releases/**/*.dmg
+
+# Test artifacts
+test_recordings_*/
+*.test.log
+/tmp/
+/temp/
+*.tmp
+*.temp
+*.cache
+*.pid
+
+# Archive folders (use git history instead)
+/archive/
+/docs/archive/
+
+# Audio test files (except organized fixtures)
+*.wav
+*.aiff
+*.mp3
+!test-fixtures/**/*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.Python
+
+# Rust
+/target/
+/transcriber/target/
+**/*.rs.bk
 
 # Claude Code files (not relevant for other developers)
 CLAUDE.md
