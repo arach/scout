@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-shell';
-import { ExternalLink, CheckCircle, AlertCircle, Play, Square, Copy, Terminal, Check, FileText, Info, Activity, Settings, RefreshCw } from 'lucide-react';
+import { NumberField } from '@base-ui-components/react/number-field';
+import { ExternalLink, CheckCircle, AlertCircle, Play, Square, Copy, Terminal, Check, FileText, Info, Activity, Settings, RefreshCw, Plus, Minus } from 'lucide-react';
 import './ExternalServiceSettings.css';
 
 interface ExternalServiceConfig {
@@ -666,50 +667,87 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
         <div className="service-table with-indent">
           <div className="service-row">
             <span className="field">WORKERS:</span>
-            <input
-              type="number"
+            <NumberField.Root
               value={config.workers}
-              onChange={(e) => setConfig(prev => ({ ...prev, workers: parseInt(e.target.value) || 2 }))}
-              min="1"
-              max="8"
-              className="config-input-inline"
-            />
+              onValueChange={(value) => setConfig(prev => ({ ...prev, workers: value || 2 }))}
+              min={1}
+              max={8}
+              className="number-field-root"
+            >
+              <NumberField.Decrement className="number-field-button">
+                <Minus size={10} />
+              </NumberField.Decrement>
+              <NumberField.Input className="number-field-input" />
+              <NumberField.Increment className="number-field-button">
+                <Plus size={10} />
+              </NumberField.Increment>
+            </NumberField.Root>
           </div>
           <div className="service-row">
-            <span className="field">ZMQ PORTS:</span>
+            <span className="field">ADVANCED:</span>
             <div className="port-inputs">
-              <div className="port-group">
-                <label className="port-label">AUDIO</label>
-                <input
-                  type="number"
-                  value={config.zmq_push_port}
-                  onChange={(e) => setConfig(prev => ({ ...prev, zmq_push_port: parseInt(e.target.value) || 5555 }))}
-                  min="1024"
-                  max="65535"
-                  className="config-input-compact"
-                />
+              <div className="port-inputs-header">
+                <span className="port-inputs-title">ZeroMQ Port Configuration</span>
+                <button
+                  className="port-inputs-link"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    open('https://scout.arach.dev/docs/transcriber#zeromq-configuration');
+                  }}
+                >
+                  <FileText size={10} />
+                  Docs
+                </button>
               </div>
-              <div className="port-group">
-                <label className="port-label">OUTPUT</label>
-                <input
-                  type="number"
-                  value={config.zmq_pull_port}
-                  onChange={(e) => setConfig(prev => ({ ...prev, zmq_pull_port: parseInt(e.target.value) || 5556 }))}
-                  min="1024"
-                  max="65535"
-                  className="config-input-compact"
-                />
-              </div>
-              <div className="port-group">
-                <label className="port-label">CONTROL</label>
-                <input
-                  type="number"
-                  value={config.zmq_control_port}
-                  onChange={(e) => setConfig(prev => ({ ...prev, zmq_control_port: parseInt(e.target.value) || 5557 }))}
-                  min="1024"
-                  max="65535"
-                  className="config-input-compact"
-                />
+              <div className="port-inputs-grid">
+                <div className="port-group">
+                  <label className="port-label">AUDIO INPUT</label>
+                  <input
+                    type="text"
+                    value={config.zmq_push_port}
+                    onChange={(e) => {
+                      const value = e.target.value.replace(/\D/g, '');
+                      if (value === '' || (parseInt(value) >= 1 && parseInt(value) <= 65535)) {
+                        setConfig(prev => ({ ...prev, zmq_push_port: parseInt(value) || 5555 }));
+                      }
+                    }}
+                    className="config-input-compact"
+                    placeholder="5555"
+                  />
+                  <div className="port-description">Audio stream ingress</div>
+                </div>
+                <div className="port-group">
+                  <label className="port-label">TEXT OUTPUT</label>
+                  <input
+                    type="text"
+                    value={config.zmq_pull_port}
+                    onChange={(e) => {
+                      const value = e.target.value.replace(/\D/g, '');
+                      if (value === '' || (parseInt(value) >= 1 && parseInt(value) <= 65535)) {
+                        setConfig(prev => ({ ...prev, zmq_pull_port: parseInt(value) || 5556 }));
+                      }
+                    }}
+                    className="config-input-compact"
+                    placeholder="5556"
+                  />
+                  <div className="port-description">Transcription results</div>
+                </div>
+                <div className="port-group">
+                  <label className="port-label">CONTROL API</label>
+                  <input
+                    type="text"
+                    value={config.zmq_control_port}
+                    onChange={(e) => {
+                      const value = e.target.value.replace(/\D/g, '');
+                      if (value === '' || (parseInt(value) >= 1 && parseInt(value) <= 65535)) {
+                        setConfig(prev => ({ ...prev, zmq_control_port: parseInt(value) || 5557 }));
+                      }
+                    }}
+                    className="config-input-compact"
+                    placeholder="5557"
+                  />
+                  <div className="port-description">Service commands</div>
+                </div>
               </div>
             </div>
           </div>

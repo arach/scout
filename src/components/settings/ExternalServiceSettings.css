@@ -1252,50 +1252,178 @@
   border-color: var(--text-secondary);
 }
 
-/* Port Inputs Group */
+/* Number Field Styles */
+.number-field-root {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  overflow: hidden;
+  transition: all 0.2s ease;
+  height: 26px;
+  max-width: 120px;
+}
+
+.number-field-root:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.number-field-root:focus-within {
+  border-color: var(--text-secondary);
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.number-field-button {
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  padding: 0;
+}
+
+.number-field-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+}
+
+.number-field-button:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  transform: scale(0.95);
+}
+
+.number-field-button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.number-field-input {
+  background: transparent;
+  border: none;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  font-family: 'Monaco', 'Menlo', monospace;
+  font-size: 13px;
+  text-align: center;
+  width: 60px;
+  height: 100%;
+  padding: 0;
+}
+
+.number-field-input:focus {
+  outline: none;
+}
+
+/* Port Inputs Group - Enhanced */
 .port-inputs {
   display: flex;
-  gap: 8px;
+  flex-direction: column;
+  gap: 10px;
   flex: 1;
+  padding: 8px 12px;
+  background: rgba(59, 130, 246, 0.03);
+  border: 1px solid rgba(59, 130, 246, 0.15);
+  border-radius: 4px;
+}
+
+.port-inputs-header {
+  display: flex;
   align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.port-inputs-title {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.port-inputs-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: rgb(96, 165, 250);
+  text-decoration: none;
+  opacity: 0.7;
+  transition: opacity 0.2s ease;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.port-inputs-link:hover {
+  opacity: 1;
+}
+
+.port-inputs-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
 }
 
 .port-group {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 4px;
 }
 
 .port-label {
   font-size: 10px;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  font-weight: 500;
+}
+
+.port-description {
+  font-size: 9px;
+  color: var(--text-tertiary);
   opacity: 0.7;
+  margin-top: 2px;
 }
 
 .config-input-compact {
-  padding: 4px 6px;
-  background: rgba(0, 0, 0, 0.3);
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.4);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 3px;
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: 13px;
   font-family: 'Monaco', 'Menlo', monospace;
   transition: all 0.2s ease;
-  height: 22px;
-  width: 65px;
+  height: 28px;
+  width: 100%;
 }
 
 .config-input-compact:hover {
-  background: rgba(0, 0, 0, 0.4);
+  background: rgba(0, 0, 0, 0.5);
   border-color: rgba(255, 255, 255, 0.15);
 }
 
 .config-input-compact:focus {
   outline: none;
-  background: rgba(0, 0, 0, 0.5);
-  border-color: var(--text-secondary);
+  background: rgba(0, 0, 0, 0.6);
+  border-color: rgb(96, 165, 250);
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.1);
+}
+
+.config-input-compact::placeholder {
+  color: var(--text-tertiary);
+  opacity: 0.5;
 }
 
 /* Chrome number input spinner styling */
