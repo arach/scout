@@ -30,6 +30,7 @@
     "@tauri-apps/plugin-fs": "^2.4.0",
     "@tauri-apps/plugin-http": "^2.5.0",
     "@tauri-apps/plugin-opener": "^2.4.0",
+    "@tauri-apps/plugin-shell": "^2.3.0",
     "@types/marked": "^6.0.0",
     "@types/react-window": "^1.8.8",
     "@wavesurfer/react": "^1.0.11",
