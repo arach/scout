@@ -7,14 +7,14 @@ use tokio::sync::{mpsc, oneshot};
 use crate::audio::AudioRecorder;
 use crate::db::Database;
 use crate::logger::{debug, error, info, warn, Component};
-use crate::model_state::ModelStateManager;
-use crate::performance_tracker::PerformanceTracker;
+use crate::models::model_state::ModelStateManager;
+use crate::monitoring::performance_tracker::PerformanceTracker;
 use crate::processing_queue::ProcessingQueue;
-use crate::recording_progress::RecordingProgress;
+use crate::core::recording_progress::RecordingProgress;
 use crate::settings::SettingsManager;
-use crate::transcription_context::TranscriptionContext;
-use crate::whisper_log_interceptor::WhisperLogInterceptor;
-use crate::whisper_logger;
+use crate::core::transcription_context::TranscriptionContext;
+use crate::monitoring::whisper_log_interceptor::WhisperLogInterceptor;
+use crate::monitoring::whisper_logger;
 
 // Consolidated timeout for transcription completion
 const TRANSCRIPTION_TIMEOUT: Duration = Duration::from_secs(180);

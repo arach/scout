@@ -359,7 +359,7 @@ pub struct ExternalServiceStatus {
 
 #[tauri::command]
 pub async fn check_transcriber_installed() -> Result<bool, String> {
-    use crate::service_manager::ServiceManager;
+    use crate::services::service_manager::ServiceManager;
     
     // Check if transcriber is installed
     Ok(ServiceManager::check_installed().await)
@@ -386,7 +386,7 @@ pub async fn get_transcriber_version() -> Result<String, String> {
 
 #[tauri::command]
 pub async fn check_external_service_status(state: State<'_, AppState>) -> Result<ExternalServiceStatus, String> {
-    use crate::service_manager::ServiceManager;
+    use crate::services::service_manager::ServiceManager;
     
     // Check if external service is configured
     let settings = state.settings.lock().await;
@@ -504,7 +504,7 @@ pub async fn test_external_service(state: State<'_, AppState>) -> Result<serde_j
 
 #[tauri::command]
 pub async fn start_external_service(state: State<'_, AppState>) -> Result<String, String> {
-    use crate::service_manager::ServiceManager;
+    use crate::services::service_manager::ServiceManager;
     
     let settings = state.settings.lock().await;
     let external_config = settings.get().external_service.clone();
@@ -520,7 +520,7 @@ pub async fn start_external_service(state: State<'_, AppState>) -> Result<String
 
 #[tauri::command]
 pub async fn stop_external_service() -> Result<(), String> {
-    use crate::service_manager::ServiceManager;
+    use crate::services::service_manager::ServiceManager;
     
     // Stop the service using launchctl
     ServiceManager::stop_service().await

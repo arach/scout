@@ -4,7 +4,7 @@ use tokio::sync::Mutex;
 
 use crate::audio::AudioRecorder;
 use crate::logger::{info, Component};
-use crate::recording_progress::ProgressTracker;
+use crate::core::recording_progress::ProgressTracker;
 use crate::recording_workflow::RecordingWorkflow;
 
 pub struct RecordingService {

@@ -1,39 +1,84 @@
+// Public API modules
 pub mod benchmarking;
 pub mod commands;
 pub mod db;
-pub mod model_state;
 pub mod services;
-pub mod strategies;
 pub mod transcription;
 
+// Re-export commonly used types for backward compatibility
+pub use models::model_state;
+pub use monitoring::performance_tracker;
+pub use monitoring::performance_logger;
+pub use monitoring::performance_metrics_service;
+pub use core::recording_progress;
+pub use core::transcription_context;
+pub use monitoring::whisper_log_interceptor;
+pub use monitoring::whisper_logger;
+pub use post_processing::dictionary_processor;
+pub use post_processing::profanity_filter;
+
+// Internal modules - organized by domain
 mod audio;
-mod clipboard;
-mod dictionary_processor;
-mod env;
-mod file_based_ring_buffer_monitor;
-mod foundation_models;
-mod keyboard_monitor;
-mod lazy_model;
-mod llm;
-mod logger;
-mod models;
-mod overlay_position;
-mod performance_logger;
-mod performance_metrics_service;
-mod performance_tracker;
-mod post_processing;
+
+// Core functionality - kept at root for wide usage
 mod processing_queue;
-mod profanity_filter;
-mod recording_progress;
 mod recording_workflow;
-mod ring_buffer_monitor;
-mod service_manager;
 mod settings;
-mod sound;
-mod transcription_context;
+mod logger;
+
+// Core functionality - organized
+mod core {
+    pub mod recording_progress;
+    pub mod transcription_context;
+}
+
+// External integrations
+mod integrations {
+    pub mod clipboard;
+    pub mod keyboard_monitor;
+}
+
+// Model management
+mod models {
+    pub mod lazy_model;
+    pub mod model_state;
+    pub mod models;
+}
+mod foundation_models;
+
+// Monitoring and logging
+mod monitoring {
+    pub mod file_based_ring_buffer_monitor;
+    pub mod performance_logger;
+    pub mod performance_metrics_service;
+    pub mod performance_tracker;
+    pub mod ring_buffer_monitor;
+    pub mod whisper_log_interceptor;
+    pub mod whisper_logger;
+}
+
+// Post-processing pipeline
+mod post_processing {
+    pub mod dictionary_processor;
+    pub mod post_processing;
+    pub mod profanity_filter;
+}
+mod llm;
+
+// UI components
+mod ui {
+    pub mod overlay_position;
+    pub mod sound;
+}
+
+// Utilities
+mod utils {
+    pub mod env;
+    pub mod strategies;
+}
+
+// External services
 mod webhooks;
-mod whisper_log_interceptor;
-mod whisper_logger;
 
 #[cfg(target_os = "macos")]
 mod macos;
@@ -54,14 +99,14 @@ use tokio::sync::Mutex;
 use crate::{
     audio::AudioRecorder,
     db::Database,
-    keyboard_monitor::KeyboardMonitor,
+    integrations::keyboard_monitor::KeyboardMonitor,
     processing_queue::{ProcessingQueue, ProcessingStatus},
-    recording_progress::ProgressTracker,
+    core::recording_progress::ProgressTracker,
     recording_workflow::RecordingWorkflow,
     settings::SettingsManager,
     logger::{debug, error, info, warn, Component},
-    model_state::ModelStateManager,
-    performance_tracker::PerformanceTracker,
+    models::model_state::ModelStateManager,
+    monitoring::performance_tracker::PerformanceTracker,
     transcription::Transcriber,
 };
 
@@ -314,7 +359,7 @@ pub fn run() {
 
             app.manage(state);
 
-            sound::SoundPlayer::preload_sounds();
+            ui::sound::SoundPlayer::preload_sounds();
             
             // Warm up audio system to avoid first-record delay
             {

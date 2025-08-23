@@ -2,7 +2,7 @@ use tauri::{Emitter, Manager, State};
 
 use crate::recording_workflow::RecordingResult;
 use crate::services::{audio_devices, recording::RecordingService};
-use crate::{sound, AppState};
+use crate::{ui::sound, AppState};
 
 // ============================================================================
 // Audio Device Commands

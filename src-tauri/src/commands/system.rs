@@ -1,7 +1,7 @@
 use tauri::State;
 
 use crate::db;
-use crate::performance_tracker;
+use crate::monitoring::performance_tracker;
 use crate::services::diagnostics as diag;
 use crate::AppState;
 

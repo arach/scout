@@ -1,6 +1,6 @@
 use crate::audio::WhisperAudioConverter;
 use crate::logger::{info, warn, Component};
-use crate::model_state::ModelStateManager;
+use crate::models::model_state::ModelStateManager;
 use once_cell::sync::Lazy;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

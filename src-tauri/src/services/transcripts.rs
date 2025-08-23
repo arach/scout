@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::db;
 use crate::logger::Component;
-use crate::performance_tracker;
+use crate::monitoring::performance_tracker;
 
 // Helper function to format duration
 fn format_duration_ms(ms: i32) -> String {
