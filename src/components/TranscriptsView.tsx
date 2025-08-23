@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback, memo, useRef } from 'react';
 import { TranscriptDetailPanel } from './TranscriptDetailPanel';
 import { TranscriptItem } from './TranscriptItem';
 import { VirtualizedTranscriptList } from './VirtualizedTranscriptList';
+import { useTranscriptGrouping } from '../hooks/useTranscriptGrouping';
 import { ChevronDown } from 'lucide-react';
 import { Transcript } from '../types/transcript';
 import './TranscriptsView.css';
@@ -100,8 +101,7 @@ export const TranscriptsView = memo(function TranscriptsView({
             const transcript = transcripts.find(t => t.id === selectedTranscriptId);
             if (transcript) {
                 // Find the group this transcript belongs to and expand it
-                const groups = groupTranscriptsByDate(transcripts);
-                for (const group of groups) {
+                for (const group of transcriptGroups) {
                     if (group.transcripts.some(t => t.id === selectedTranscriptId)) {
                         setExpandedGroups(prev => new Set([...prev, group.title]));
                         break;
@@ -137,59 +137,15 @@ export const TranscriptsView = memo(function TranscriptsView({
         }
     }, [showExportMenu, showFloatingExportMenu]);
 
-    // Group transcripts by date
-    const groupTranscriptsByDate = (transcripts: Transcript[]) => {
-        const groups: { [key: string]: Transcript[] } = {};
-        const now = new Date();
-        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const yesterday = new Date(today);
-        yesterday.setDate(yesterday.getDate() - 1);
-        const thisWeek = new Date(today);
-        thisWeek.setDate(thisWeek.getDate() - 7);
-        const thisMonth = new Date(today);
-        thisMonth.setDate(thisMonth.getDate() - 30);
-
-        transcripts.forEach(transcript => {
-            const date = new Date(transcript.created_at);
-            let groupKey: string;
-
-            if (date >= today) {
-                groupKey = 'Today';
-            } else if (date >= yesterday) {
-                groupKey = 'Yesterday';
-            } else if (date >= thisWeek) {
-                groupKey = 'This Week';
-            } else if (date >= thisMonth) {
-                groupKey = 'This Month';
-            } else {
-                groupKey = 'Older';
-            }
-
-            if (!groups[groupKey]) {
-                groups[groupKey] = [];
-            }
-            groups[groupKey].push(transcript);
-        });
-
-        // Return in order
-        const orderedGroups: { title: string; transcripts: Transcript[] }[] = [];
-        const order = ['Today', 'Yesterday', 'This Week', 'This Month', 'Older'];
-        order.forEach(key => {
-            if (groups[key]) {
-                orderedGroups.push({ title: key, transcripts: groups[key] });
-            }
-        });
-
-        return orderedGroups;
-    };
+    // Use optimized transcript grouping hook
+    const transcriptGroups = useTranscriptGrouping(transcripts);
     
-    // Calculate paginated transcripts
+    // Calculate paginated transcripts using optimized groups
     const paginatedGroups = useMemo(() => {
-        const groups = groupTranscriptsByDate(transcripts);
         let itemCount = 0;
-        const result: typeof groups = [];
+        const result: typeof transcriptGroups = [];
         
-        for (const group of groups) {
+        for (const group of transcriptGroups) {
             const visibleTranscripts: Transcript[] = [];
             
             for (const transcript of group.transcripts) {
@@ -205,12 +161,12 @@ export const TranscriptsView = memo(function TranscriptsView({
         }
         
         return result;
-    }, [transcripts, displayedItems]);
+    }, [transcriptGroups, displayedItems]);
     
     const hasMore = transcripts.length > displayedItems;
     
-    // Get all groups (unpaginated) for select all functionality
-    const allGroups = useMemo(() => groupTranscriptsByDate(transcripts), [transcripts]);
+    // Use the already computed groups for select all functionality
+    const allGroups = transcriptGroups;
     
     // Ref for the list container
     const listContainerRef = useRef<HTMLDivElement>(null);
@@ -231,7 +187,7 @@ export const TranscriptsView = memo(function TranscriptsView({
                             placeholder="Search transcripts..."
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            onKeyPress={(e) => e.key === 'Enter' && searchTranscripts()}
+                            onKeyDown={(e) => e.key === 'Enter' && searchTranscripts()}
                         />
                     </div>
                     
@@ -357,7 +313,7 @@ export const TranscriptsView = memo(function TranscriptsView({
                         <div className="transcript-list-scrollable">
                         {paginatedGroups.map(group => {
                             // Find the full group data for this title
-                            const fullGroup = allGroups.find(g => g.title === group.title);
+                            const fullGroup = transcriptGroups.find(g => g.title === group.title);
                             const fullGroupTranscripts = fullGroup?.transcripts || [];
                             
                             return (

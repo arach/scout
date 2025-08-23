@@ -196,11 +196,8 @@ export const VirtualizedTranscriptList = memo(function VirtualizedTranscriptList
         >
             <AutoSizer>
                 {({ height, width }) => {
-                    console.log('AutoSizer dimensions:', { height, width });
-                    
                     // Ensure we have valid dimensions
                     if (!height || !width || height === 0 || width === 0) {
-                        console.warn('AutoSizer returned invalid dimensions');
                         return (
                             <div style={{ padding: '20px', textAlign: 'center' }}>
                                 Loading transcripts...
