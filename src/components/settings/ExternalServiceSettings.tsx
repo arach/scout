@@ -657,65 +657,6 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
         </div>
       </div>
 
-      {/* Diagnostics Section */}
-      <div className="diagnostics-section">
-        <h3>Diagnostics</h3>
-        <div className="diagnostics-buttons">
-          <button
-            className="diagnostic-btn"
-            onClick={testHealth}
-            disabled={serviceOperation !== 'idle'}
-          >
-            <CheckCircle size={14} />
-            Health Check
-          </button>
-          <button
-            className="diagnostic-btn"
-            onClick={testPorts}
-            disabled={!status.running || serviceOperation !== 'idle'}
-          >
-            <Activity size={14} />
-            Port Check
-          </button>
-          <button
-            className="diagnostic-btn"
-            onClick={testConnection}
-            disabled={!status.running || serviceOperation !== 'idle'}
-          >
-            <RefreshCw size={14} />
-            Test Connection
-          </button>
-          <button
-            className="diagnostic-btn"
-            onClick={testTranscription}
-            disabled={!status.running || serviceOperation !== 'idle'}
-          >
-            <FileText size={14} />
-            Test Transcription
-          </button>
-        </div>
-        
-        {/* Diagnostic Results - Only show when there are logs */}
-        {diagnosticLogs.length > 0 && (
-          <>
-            <div className="diagnostic-results">
-              {diagnosticLogs.map((log, index) => (
-                <div key={index} className={`diagnostic-message ${log.type}`}>
-                  <span className="log-timestamp">{log.timestamp}</span>
-                  <span>{log.message}</span>
-                </div>
-              ))}
-            </div>
-            <button 
-              className="clear-logs-btn"
-              onClick={() => setDiagnosticLogs([])}
-            >
-              Clear Logs
-            </button>
-          </>
-        )}
-      </div>
-
       {/* Model Selection Section */}
       <div className="model-section">
         <h3>Transcription Model</h3>
@@ -891,6 +832,64 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
         </div>
       )}
 
+      {/* Diagnostics Section */}
+      <div className="diagnostics-section">
+        <h3>Diagnostics</h3>
+        <div className="diagnostics-buttons">
+          <button
+            className="diagnostic-btn"
+            onClick={testHealth}
+            disabled={serviceOperation !== 'idle'}
+          >
+            <CheckCircle size={14} />
+            Health Check
+          </button>
+          <button
+            className="diagnostic-btn"
+            onClick={testPorts}
+            disabled={!status.running || serviceOperation !== 'idle'}
+          >
+            <Activity size={14} />
+            Port Check
+          </button>
+          <button
+            className="diagnostic-btn"
+            onClick={testConnection}
+            disabled={!status.running || serviceOperation !== 'idle'}
+          >
+            <RefreshCw size={14} />
+            Test Connection
+          </button>
+          <button
+            className="diagnostic-btn"
+            onClick={testTranscription}
+            disabled={!status.running || serviceOperation !== 'idle'}
+          >
+            <FileText size={14} />
+            Test Transcription
+          </button>
+        </div>
+        
+        {/* Diagnostic Results - Only show when there are logs */}
+        {diagnosticLogs.length > 0 && (
+          <>
+            <div className="diagnostic-results">
+              {diagnosticLogs.map((log, index) => (
+                <div key={index} className={`diagnostic-message ${log.type}`}>
+                  <span className="log-timestamp">{log.timestamp}</span>
+                  <span>{log.message}</span>
+                </div>
+              ))}
+            </div>
+            <button 
+              className="clear-logs-btn"
+              onClick={() => setDiagnosticLogs([])}
+            >
+              Clear Logs
+            </button>
+          </>
+        )}
+      </div>
 
       {/* Documentation Footer */}
       <div className="docs-footer">
