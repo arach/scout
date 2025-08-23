@@ -115,14 +115,17 @@ export const VirtualizedTranscriptList = memo(function VirtualizedTranscriptList
             
             return (
                 <div style={style} className={`transcript-group ${expandedGroups.has(group.title) ? 'expanded' : ''}`}>
-                    <div className="transcript-group-header">
+                    <div className="transcript-group-header" onClick={() => toggleGroup(group.title)}>
                         <div className="group-header-left">
                             <button 
                                 className="group-toggle-btn"
-                                onClick={() => toggleGroup(group.title)}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleGroup(group.title);
+                                }}
                             >
                                 <ChevronDown 
-                                    size={16} 
+                                    size={12} 
                                     className="chevron-icon"
                                 />
                             </button>
@@ -136,12 +139,10 @@ export const VirtualizedTranscriptList = memo(function VirtualizedTranscriptList
                                         const allGroupIds = fullGroupTranscripts.map(t => t.id);
                                         toggleTranscriptGroupSelection(allGroupIds);
                                     }}
+                                    onClick={(e) => e.stopPropagation()}
                                 />
                             )}
-                            <h3 
-                                className="transcript-group-title"
-                                onClick={() => toggleGroup(group.title)}
-                            >
+                            <h3 className="transcript-group-title">
                                 {group.title}
                             </h3>
                             <span className="group-count">({fullGroupTranscripts.length})</span>

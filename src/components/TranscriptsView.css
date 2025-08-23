@@ -173,6 +173,7 @@
     padding: 0; /* Remove padding to allow full-width hover */
     display: block;
     position: relative;
+    margin-top: 0; /* Ensure no gap from container */
 }
 
 /* Mobile responsive adjustments */
@@ -384,19 +385,73 @@
 
 /* Wrapper for transcript items in virtual list - removed, no longer needed */
 
-/* No transcripts state */
-.no-transcripts-container {
-    flex: 1;
+/* Empty state with table structure - matching SessionTranscripts */
+.transcripts-empty-table {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    overflow: visible;
+    margin-top: 16px;
+}
+
+.transcripts-table-header {
+    display: grid;
+    grid-template-columns: 120px 100px 1fr 40px;
+    padding: 6px 16px;
+    background: transparent;
+    border-bottom: 1px solid var(--border-primary);
+    font-size: var(--font-size-sm, 11px);
+    font-weight: var(--font-weight-medium, 500);
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    opacity: 0.8;
+}
+
+.transcript-column-time,
+.transcript-column-duration,
+.transcript-column-content,
+.transcript-column-actions {
+    display: flex;
+    align-items: center;
+}
+
+.transcripts-empty-body {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: var(--grid-padding-horizontal);
+    padding: 60px 32px;
 }
 
-@media (max-width: 768px) {
-    .no-transcripts-container {
-        padding: var(--grid-padding-horizontal-mobile);
-    }
+.transcripts-empty-message {
+    text-align: center;
+    max-width: 400px;
+}
+
+.empty-title {
+    font-size: var(--font-size-md, 13px);
+    font-weight: var(--font-weight-medium, 500);
+    color: var(--text-primary);
+    margin: 0 0 8px 0;
+}
+
+.empty-subtitle {
+    font-size: var(--font-size-base, 12px);
+    color: var(--text-tertiary);
+    margin: 0;
+    line-height: 1.5;
+}
+
+.shortcut-hint {
+    display: inline-flex;
+    padding: 2px 6px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-primary);
+    border-radius: 3px;
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm, 11px);
+    color: var(--text-secondary);
+    margin: 0 4px;
 }
 
 .transcript-list-virtual::-webkit-scrollbar {
@@ -420,7 +475,7 @@
 
 /* Group Styles */
 .transcript-group {
-    margin-bottom: 24px;
+    margin-bottom: 16px;
     background: transparent;
     border: none;
     border-radius: 0;
@@ -446,29 +501,44 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 16px 8px 12px; /* Less padding on left for better alignment */
-    margin: 0;
+    padding: 6px 16px 6px 12px;
+    margin: 0 0 4px 0;
     background: transparent;
     user-select: none;
-    transition: var(--transition);
+    transition: all 0.2s ease;
     border: none;
+    border-bottom: 1px solid transparent;
     border-radius: 0;
-    min-height: 32px;
+    min-height: 28px;
     box-sizing: border-box;
     position: relative;
-    font-weight: 500;
     z-index: 1;
     cursor: pointer;
 }
 
-.transcript-group-header:hover {
-    background: rgba(0, 0, 0, 0.02);
+/* Expanded state - add visual distinction with matte background */
+.transcript-group.expanded .transcript-group-header {
+    background: rgba(255, 255, 255, 0.02);
+    background-image: linear-gradient(to bottom, rgba(255, 255, 255, 0.03), rgba(0, 0, 0, 0.02));
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border-primary);
+    margin-bottom: 0;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+    position: relative;
+    z-index: 2;
 }
 
+/* Dark mode matte effect */
 @media (prefers-color-scheme: dark) {
-    .transcript-group-header:hover {
-        background: rgba(255, 255, 255, 0.02);
+    .transcript-group.expanded .transcript-group-header {
+        background: rgba(255, 255, 255, 0.015);
+        background-image: linear-gradient(to bottom, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01));
     }
+}
+
+.transcript-group-header:hover {
+    background: var(--bg-hover, rgba(0, 0, 0, 0.04));
 }
 
 /* Light theme overrides for group headers - removed backgrounds to prevent overlap */
@@ -506,20 +576,22 @@
 .group-toggle-btn {
     background: none;
     border: none;
-    padding: 4px;
-    margin-right: 8px; /* Space before checkbox */
+    padding: 2px;
+    margin-right: 6px; /* Space before checkbox */
     margin-left: 0; /* Remove negative margin */
     cursor: pointer;
-    color: var(--text-secondary);
+    color: var(--text-tertiary);
+    opacity: 0.6;
     display: flex;
     align-items: center;
     justify-content: center;
     transition: all 0.2s ease;
-    border-radius: 4px;
+    border-radius: 3px;
 }
 
 .group-toggle-btn:hover {
-    background: rgba(0, 0, 0, 0.05);
+    opacity: 1;
+    background: rgba(0, 0, 0, 0.03);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -548,14 +620,21 @@
 }
 
 .transcript-group-title {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text-primary);
+    font-size: var(--font-size-sm, 11px);
+    font-weight: var(--font-weight-medium, 500);
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
     margin: 0;
     cursor: pointer;
     user-select: none;
-    letter-spacing: -0.01em;
     margin-left: 12px; /* Default margin when no checkbox */
+    transition: color 0.2s ease;
+}
+
+/* When expanded, make title slightly more prominent */
+.transcript-group.expanded .transcript-group-title {
+    color: var(--text-secondary);
 }
 
 /* When checkbox is present, remove the margin */
@@ -568,10 +647,11 @@
 }
 
 .group-count {
-    font-size: 13px;
+    font-size: var(--font-size-sm, 11px);
     color: var(--text-tertiary);
-    font-weight: 400;
-    margin-left: 8px;
+    font-weight: var(--font-weight-normal, 400);
+    margin-left: 6px;
+    opacity: 0.7;
 }
 
 .group-clear-btn {
@@ -599,8 +679,16 @@
 .transcript-group-items {
     background: transparent;
     padding: 0;
-    margin-top: 0;
+    margin-top: -8px; /* Remove the 8px gap */
+    position: relative;
+    z-index: 1;
     display: block;
+}
+
+/* Ensure first transcript item connects seamlessly to expanded header */
+.transcript-group.expanded .transcript-group-items .transcript-item:first-child {
+    margin-top: 8px; /* Add back 8px to first item only */
+    border-top: none;
     position: relative;
 }
 
