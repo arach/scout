@@ -734,7 +734,8 @@ pub fn run() {
             crate::commands::get_process_status,
             crate::commands::check_service_health,
             crate::commands::get_control_plane_status,
-            crate::commands::restart_unhealthy_services
+            crate::commands::restart_unhealthy_services,
+            crate::commands::get_dev_info
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -25,3 +25,6 @@ pub use storage::*;
 
 pub mod process_management;
 pub use process_management::*;
+
+pub mod dev_info;
+pub use dev_info::*;
