@@ -541,8 +541,10 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
           <div className="service-row">
             <span className="field">NAME:</span>
             <div className="service-info">
-              <span className="value mono">com.scout.transcriber</span>
-              <span className="value-detail">launchctl</span>
+              <span className="value mono">
+                com.scout.transcriber
+                <span className="value-detail-hover">(launchctl)</span>
+              </span>
             </div>
           </div>
           <div className="service-row">

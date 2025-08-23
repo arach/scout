@@ -128,6 +128,19 @@
   opacity: 0.7;
 }
 
+.value-detail-hover {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-family: 'Monaco', 'Menlo', monospace;
+  margin-left: 6px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.service-row:hover .value-detail-hover {
+  opacity: 0.6;
+}
+
 /* Status Controls Container */
 .status-controls {
   display: flex;
