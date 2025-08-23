@@ -124,15 +124,12 @@ cd scout
 pnpm install
 ```
 
-3. Download Whisper models:
-```bash
-./scripts/download-models.sh
-```
-
-4. Run in development mode:
+3. Run in development mode:
 ```bash
 pnpm tauri dev
 ```
+
+The application will automatically download a Whisper model on first launch.
 
 ## Building
 
@@ -236,9 +233,6 @@ pnpm tauri dev        # Run full app in development mode
 # Build
 pnpm build            # TypeScript + Vite build
 pnpm tauri build      # Build production binaries
-
-# Setup
-./scripts/download-models.sh  # Download Whisper models (required)
 
 # Testing
 cd src-tauri && cargo test    # Run Rust tests
