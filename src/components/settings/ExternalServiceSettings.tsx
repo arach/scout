@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-shell';
 import { NumberField } from '@base-ui-components/react/number-field';
 import { ExternalLink, CheckCircle, AlertCircle, Play, Square, Copy, Terminal, Check, FileText, Info, Activity, RefreshCw, Plus, Minus } from 'lucide-react';
-import { ProcessMonitor } from './ProcessMonitor';
+import { CompactProcessMonitor } from './CompactProcessMonitor';
 import './ExternalServiceSettings.css';
 
 interface ExternalServiceConfig {
@@ -961,7 +961,7 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
 
       {/* Process Monitor - show when service is running */}
       {status.running && (
-        <ProcessMonitor />
+        <CompactProcessMonitor />
       )}
 
       {/* Documentation Footer */}

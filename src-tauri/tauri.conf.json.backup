@@ -1,0 +1,57 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Scout",
+  "version": "0.5.0",
+  "identifier": "com.jdi.scout",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1430",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Scout - Voice Transcription",
+        "width": 1080,
+        "height": 800,
+        "closable": true,
+        "minimizable": true,
+        "dragDropEnabled": true,
+        "theme": "Dark"
+      }
+    ],
+    "security": {
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$APPDATA/recordings/**"
+        ]
+      }
+    },
+    "macOSPrivateApi": true
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "app"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/Scout_proper.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "entitlements": "./entitlements.plist",
+      "exceptionDomain": "",
+      "frameworks": [],
+      "minimumSystemVersion": "10.15",
+      "providerShortName": null,
+      "signingIdentity": null
+    }
+  }
+}
