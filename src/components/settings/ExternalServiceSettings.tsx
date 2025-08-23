@@ -676,37 +676,42 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
             />
           </div>
           <div className="service-row">
-            <span className="field">AUDIO PORT:</span>
-            <input
-              type="number"
-              value={config.zmq_push_port}
-              onChange={(e) => setConfig(prev => ({ ...prev, zmq_push_port: parseInt(e.target.value) || 5555 }))}
-              min="1024"
-              max="65535"
-              className="config-input-inline"
-            />
-          </div>
-          <div className="service-row">
-            <span className="field">OUTPUT PORT:</span>
-            <input
-              type="number"
-              value={config.zmq_pull_port}
-              onChange={(e) => setConfig(prev => ({ ...prev, zmq_pull_port: parseInt(e.target.value) || 5556 }))}
-              min="1024"
-              max="65535"
-              className="config-input-inline"
-            />
-          </div>
-          <div className="service-row">
-            <span className="field">CONTROL PORT:</span>
-            <input
-              type="number"
-              value={config.zmq_control_port}
-              onChange={(e) => setConfig(prev => ({ ...prev, zmq_control_port: parseInt(e.target.value) || 5557 }))}
-              min="1024"
-              max="65535"
-              className="config-input-inline"
-            />
+            <span className="field">ZMQ PORTS:</span>
+            <div className="port-inputs">
+              <div className="port-group">
+                <label className="port-label">AUDIO</label>
+                <input
+                  type="number"
+                  value={config.zmq_push_port}
+                  onChange={(e) => setConfig(prev => ({ ...prev, zmq_push_port: parseInt(e.target.value) || 5555 }))}
+                  min="1024"
+                  max="65535"
+                  className="config-input-compact"
+                />
+              </div>
+              <div className="port-group">
+                <label className="port-label">OUTPUT</label>
+                <input
+                  type="number"
+                  value={config.zmq_pull_port}
+                  onChange={(e) => setConfig(prev => ({ ...prev, zmq_pull_port: parseInt(e.target.value) || 5556 }))}
+                  min="1024"
+                  max="65535"
+                  className="config-input-compact"
+                />
+              </div>
+              <div className="port-group">
+                <label className="port-label">CONTROL</label>
+                <input
+                  type="number"
+                  value={config.zmq_control_port}
+                  onChange={(e) => setConfig(prev => ({ ...prev, zmq_control_port: parseInt(e.target.value) || 5557 }))}
+                  min="1024"
+                  max="65535"
+                  className="config-input-compact"
+                />
+              </div>
+            </div>
           </div>
           {/* Only show save button when service is running */}
           {status.running && (

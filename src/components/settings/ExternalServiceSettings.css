@@ -132,13 +132,14 @@
   font-size: 11px;
   color: var(--text-tertiary);
   font-family: 'Monaco', 'Menlo', monospace;
-  margin-left: 6px;
+  margin-left: 8px;
   opacity: 0;
-  transition: opacity 0.2s ease;
+  transition: opacity 0.15s ease;
+  display: inline;
 }
 
 .service-row:hover .value-detail-hover {
-  opacity: 0.6;
+  opacity: 0.5;
 }
 
 /* Status Controls Container */
@@ -1246,15 +1247,65 @@
   border-color: var(--text-secondary);
 }
 
+/* Port Inputs Group */
+.port-inputs {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+  align-items: center;
+}
+
+.port-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.port-label {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  opacity: 0.7;
+}
+
+.config-input-compact {
+  padding: 4px 6px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: 'Monaco', 'Menlo', monospace;
+  transition: all 0.2s ease;
+  height: 22px;
+  width: 65px;
+}
+
+.config-input-compact:hover {
+  background: rgba(0, 0, 0, 0.4);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.config-input-compact:focus {
+  outline: none;
+  background: rgba(0, 0, 0, 0.5);
+  border-color: var(--text-secondary);
+}
+
 /* Chrome number input spinner styling */
 .config-input-inline::-webkit-inner-spin-button,
-.config-input-inline::-webkit-outer-spin-button {
+.config-input-inline::-webkit-outer-spin-button,
+.config-input-compact::-webkit-inner-spin-button,
+.config-input-compact::-webkit-outer-spin-button {
   opacity: 0.5;
   height: 20px;
 }
 
 .config-input-inline:hover::-webkit-inner-spin-button,
-.config-input-inline:hover::-webkit-outer-spin-button {
+.config-input-inline:hover::-webkit-outer-spin-button,
+.config-input-compact:hover::-webkit-inner-spin-button,
+.config-input-compact:hover::-webkit-outer-spin-button {
   opacity: 1;
 }
 
