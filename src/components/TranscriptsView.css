@@ -523,7 +523,7 @@
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
     border-bottom: 1px solid var(--border-primary);
-    margin-bottom: 0;
+    margin-bottom: 0 !important; /* Force zero margin - this is the key fix */
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
     position: relative;
     z-index: 2;
@@ -679,17 +679,15 @@
 .transcript-group-items {
     background: transparent;
     padding: 0;
-    margin-top: -8px; /* Remove the 8px gap */
     position: relative;
     z-index: 1;
     display: block;
 }
 
-/* Ensure first transcript item connects seamlessly to expanded header */
+
+/* Remove any border from first transcript item in expanded groups for seamless connection */
 .transcript-group.expanded .transcript-group-items .transcript-item:first-child {
-    margin-top: 8px; /* Add back 8px to first item only */
     border-top: none;
-    position: relative;
 }
 
 /* Dark mode border removed */
