@@ -1,7 +1,7 @@
 use crate::db::Database;
 use crate::logger::{debug, error, info, warn, Component};
-use crate::model_state::ModelStateManager;
-use crate::performance_logger::PerformanceLogger;
+use crate::models::model_state::ModelStateManager;
+use crate::monitoring::performance_logger::PerformanceLogger;
 use crate::transcription::{
     Transcriber, TranscriptionConfig, TranscriptionResult, TranscriptionStrategy,
     TranscriptionStrategySelector,

@@ -3,12 +3,12 @@ use tokio::time::{sleep, Duration};
 
 use crate::{
     db::Database,
-    dictionary_processor::DictionaryProcessor,
+    post_processing::dictionary_processor::DictionaryProcessor,
     foundation_models::{FoundationModelsConfig, FoundationModelsProcessor, ProcessingOperation},
     llm::{pipeline::LLMPipeline, CandleEngine, GenerationOptions, LLMEngine, ModelManager, PromptManager},
     logger::{Component, debug, error, info},
-    performance_metrics_service::{PerformanceMetricsService, TranscriptionPerformanceData},
-    profanity_filter::ProfanityFilter,
+    monitoring::performance_metrics_service::{PerformanceMetricsService, TranscriptionPerformanceData},
+    post_processing::profanity_filter::ProfanityFilter,
     settings::SettingsManager,
 };
 

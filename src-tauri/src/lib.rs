@@ -14,8 +14,7 @@ pub use core::recording_progress;
 pub use core::transcription_context;
 pub use monitoring::whisper_log_interceptor;
 pub use monitoring::whisper_logger;
-pub use post_processing::dictionary_processor;
-pub use post_processing::profanity_filter;
+pub use post_processing::{dictionary_processor, profanity_filter, PostProcessingHooks};
 
 // Internal modules - organized by domain
 mod audio;
@@ -27,55 +26,27 @@ mod settings;
 mod logger;
 
 // Core functionality - organized
-mod core {
-    pub mod recording_progress;
-    pub mod transcription_context;
-}
+mod core;
 
 // External integrations
-mod integrations {
-    pub mod clipboard;
-    pub mod keyboard_monitor;
-}
+mod integrations;
 
 // Model management
-mod models {
-    pub mod lazy_model;
-    pub mod model_state;
-    pub mod models;
-}
+mod models;
 mod foundation_models;
 
 // Monitoring and logging
-mod monitoring {
-    pub mod file_based_ring_buffer_monitor;
-    pub mod performance_logger;
-    pub mod performance_metrics_service;
-    pub mod performance_tracker;
-    pub mod ring_buffer_monitor;
-    pub mod whisper_log_interceptor;
-    pub mod whisper_logger;
-}
+mod monitoring;
 
 // Post-processing pipeline
-mod post_processing {
-    pub mod dictionary_processor;
-    pub mod post_processing;
-    pub mod profanity_filter;
-}
+mod post_processing;
 mod llm;
 
 // UI components
-mod ui {
-    pub mod overlay_position;
-    pub mod sound;
-}
+mod ui;
 
 // Utilities
-mod utils {
-    pub mod env;
-    pub mod strategies;
-}
+mod utils;
 
 // External services
 mod webhooks;
