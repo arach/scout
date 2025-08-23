@@ -23,9 +23,6 @@ path = "src/main.rs"
 name = "benchmark"
 path = "src/bin/benchmark.rs"
 
-[[bin]]
-name = "test_singleton"
-path = "src/bin/test_singleton.rs"
 
 [[bin]]
 name = "create_benchmark_corpus"
@@ -77,6 +74,7 @@ async-trait = "0.1"
 rdev = "0.5"
 clap = { version = "4.0", features = ["derive"] }
 regex = "1.10"
+sysinfo = "0.30"
 uuid = { version = "1.0", features = ["v4"] }
 url = "2.5"
 thiserror = "1.0"

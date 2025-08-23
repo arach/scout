@@ -729,7 +729,12 @@ pub fn run() {
             crate::commands::test_external_service_with_audio,
             crate::commands::start_external_service,
             crate::commands::stop_external_service,
-            crate::commands::open_url
+            crate::commands::open_url,
+            crate::commands::kill_orphaned_processes,
+            crate::commands::get_process_status,
+            crate::commands::check_service_health,
+            crate::commands::get_control_plane_status,
+            crate::commands::restart_unhealthy_services
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
