@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { open } from '@tauri-apps/plugin-shell';
 import { ExternalLink, CheckCircle, AlertCircle, Play, Square, Copy, Terminal, Check, FileText, Info, Activity, Settings, RefreshCw } from 'lucide-react';
 import './ExternalServiceSettings.css';
 
@@ -657,6 +658,70 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
         </div>
       </div>
 
+      {/* Configuration Section */}
+      <div className="service-section">
+        <h3>Configuration</h3>
+        <div className="service-table with-indent">
+          <div className="service-row">
+            <span className="field">WORKERS:</span>
+            <input
+              type="number"
+              value={config.workers}
+              onChange={(e) => setConfig(prev => ({ ...prev, workers: parseInt(e.target.value) || 2 }))}
+              min="1"
+              max="8"
+              className="config-input-inline"
+            />
+          </div>
+          <div className="service-row">
+            <span className="field">AUDIO PORT:</span>
+            <input
+              type="number"
+              value={config.zmq_push_port}
+              onChange={(e) => setConfig(prev => ({ ...prev, zmq_push_port: parseInt(e.target.value) || 5555 }))}
+              min="1024"
+              max="65535"
+              className="config-input-inline"
+            />
+          </div>
+          <div className="service-row">
+            <span className="field">OUTPUT PORT:</span>
+            <input
+              type="number"
+              value={config.zmq_pull_port}
+              onChange={(e) => setConfig(prev => ({ ...prev, zmq_pull_port: parseInt(e.target.value) || 5556 }))}
+              min="1024"
+              max="65535"
+              className="config-input-inline"
+            />
+          </div>
+          <div className="service-row">
+            <span className="field">CONTROL PORT:</span>
+            <input
+              type="number"
+              value={config.zmq_control_port}
+              onChange={(e) => setConfig(prev => ({ ...prev, zmq_control_port: parseInt(e.target.value) || 5557 }))}
+              min="1024"
+              max="65535"
+              className="config-input-inline"
+            />
+          </div>
+          {/* Only show save button when service is running */}
+          {status.running && (
+            <div className="service-row">
+              <span className="field"></span>
+              <button
+                className="btn-primary-inline"
+                onClick={saveConfig}
+                disabled={saving}
+              >
+                {saving ? 'Saving...' : 'Save & Restart'}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Model Selection Section */}
       <div className="model-section">
         <h3>Advanced Models</h3>
@@ -689,16 +754,16 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
               <p className="model-description">
                 Industry standard, highly accurate
               </p>
-              <a 
-                href="https://pypi.org/project/openai-whisper/" 
-                target="_blank" 
-                rel="noopener noreferrer"
+              <button
                 className="model-link"
-                onClick={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  open('https://pypi.org/project/openai-whisper/');
+                }}
               >
                 <ExternalLink size={10} />
                 PyPI Package
-              </a>
+              </button>
             </div>
           </div>
 
@@ -730,16 +795,16 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
               <p className="model-description">
                 Optimized for Apple Silicon
               </p>
-              <a 
-                href="https://github.com/NVIDIA/NeMo" 
-                target="_blank" 
-                rel="noopener noreferrer"
+              <button
                 className="model-link"
-                onClick={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  open('https://github.com/NVIDIA/NeMo');
+                }}
               >
                 <ExternalLink size={10} />
                 GitHub Repo
-              </a>
+              </button>
             </div>
           </div>
 
@@ -771,96 +836,20 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
               <p className="model-description">
                 Lightweight real-time processing
               </p>
-              <a 
-                href="https://pypi.org/project/transformers/" 
-                target="_blank" 
-                rel="noopener noreferrer"
+              <button
                 className="model-link"
-                onClick={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  open('https://pypi.org/project/transformers/');
+                }}
               >
                 <ExternalLink size={10} />
                 Transformers
-              </a>
+              </button>
             </div>
           </div>
         </div>
       </div>
-
-      {/* Configuration Section - Show when service is healthy */}
-      {(status.running && status.healthy) && (
-        <div className="config-section">
-          <div className="config-header">
-            <Settings size={16} />
-            <h4>Advanced Configuration</h4>
-          </div>
-          
-          <div className="config-grid">
-
-            <div className="config-item">
-              <label>Workers</label>
-              <input
-                type="number"
-                value={config.workers}
-                onChange={(e) => setConfig(prev => ({ ...prev, workers: parseInt(e.target.value) || 2 }))}
-                min="1"
-                max="8"
-                className="config-input"
-              />
-            </div>
-
-            <div className="config-item">
-              <label>Audio Port</label>
-              <input
-                type="number"
-                value={config.zmq_push_port}
-                onChange={(e) => setConfig(prev => ({ ...prev, zmq_push_port: parseInt(e.target.value) || 5555 }))}
-                min="1024"
-                max="65535"
-                className="config-input"
-              />
-            </div>
-
-            <div className="config-item">
-              <label>Output Port</label>
-              <input
-                type="number"
-                value={config.zmq_pull_port}
-                onChange={(e) => setConfig(prev => ({ ...prev, zmq_pull_port: parseInt(e.target.value) || 5556 }))}
-                min="1024"
-                max="65535"
-                className="config-input"
-              />
-            </div>
-
-            <div className="config-item">
-              <label>Control Port</label>
-              <input
-                type="number"
-                value={config.zmq_control_port}
-                onChange={(e) => setConfig(prev => ({ ...prev, zmq_control_port: parseInt(e.target.value) || 5557 }))}
-                min="1024"
-                max="65535"
-                className="config-input"
-              />
-            </div>
-          </div>
-
-          <button
-            className="btn-primary save-config"
-            onClick={saveConfig}
-            disabled={saving}
-          >
-            {saving ? (
-              <>
-                <div className="spinner" />
-                Saving...
-              </>
-            ) : (
-              'Save Configuration'
-            )}
-          </button>
-        </div>
-      )}
 
       {/* Diagnostics Section */}
       <div className="diagnostics-section">
