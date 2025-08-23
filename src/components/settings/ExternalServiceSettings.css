@@ -10,21 +10,21 @@
 .service-section {
   background: var(--background-secondary);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 10px;
-  margin-bottom: 10px;
+  border-radius: 6px;
+  padding: 8px;
+  margin-bottom: 12px;
   margin-left: 0;
   margin-top: 0;
 }
 
 .service-section h3 {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  color: var(--text-secondary);
-  margin: 0 0 6px 0;
+  color: var(--text-tertiary);
+  margin: 0 0 4px 2px;
   padding: 0;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.8px;
 }
 
 .service-grid {
@@ -41,9 +41,10 @@
 }
 
 .service-item-inline .field {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
   letter-spacing: 0.5px;
   min-width: 60px;
 }
@@ -60,29 +61,42 @@
   border: 1px solid var(--border-color);
   border-radius: 4px;
   overflow: hidden;
+  background: var(--background-secondary);
+}
+
+.service-table.with-indent {
+  margin-left: 12px;
 }
 
 .service-row {
   display: flex;
   align-items: center;
-  padding: 4px 0;
-  background: var(--background-secondary);
-  border-bottom: 1px solid var(--border-color);
-  min-height: 28px;
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  min-height: 32px;
+  transition: background 0.15s ease;
+}
+
+.service-row:hover {
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .service-row .field {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
   letter-spacing: 0.5px;
-  min-width: 60px;
+  min-width: 70px;
   flex-shrink: 0;
 }
 
 .service-row .command-box {
   flex: 1;
-  margin-left: 4px;
+  margin-left: 8px;
+  padding: 0;
+  background: transparent;
+  border: none;
 }
 
 .service-row:last-child {
@@ -97,6 +111,21 @@
 .service-row .value.mono {
   font-family: 'Monaco', 'Menlo', monospace;
   font-size: 12px;
+}
+
+/* Service Info */
+.service-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.value-detail {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-family: 'Monaco', 'Menlo', monospace;
+  opacity: 0.7;
 }
 
 /* Status Controls Container */
@@ -264,55 +293,79 @@
 .diagnostics-section {
   background: var(--background-secondary);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 10px;
-  margin-bottom: 10px;
+  border-radius: 6px;
+  padding: 8px;
+  margin-bottom: 12px;
   margin-left: 0;
 }
 
 .diagnostics-section h3 {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  color: var(--text-secondary);
-  margin: 0 0 6px 0;
+  color: var(--text-tertiary);
+  margin: 0 0 8px 2px;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.8px;
 }
 
 .diagnostics-buttons {
-  display: flex;
-  flex-direction: row;
-  gap: 6px;
-  margin-bottom: 6px;
-  justify-content: flex-start;
-  align-items: center;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
 }
 
 .diagnostic-btn {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  background: transparent;
-  border: 1px solid var(--border-color);
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 14px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 4px;
-  color: var(--text-secondary);
-  font-size: 11px;
+  color: var(--text-primary);
+  font-size: 12px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
-  width: fit-content;
+  min-height: 38px;
+  position: relative;
+  overflow: hidden;
+}
+
+.diagnostic-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, transparent, rgba(255, 255, 255, 0.03));
+  opacity: 0;
+  transition: opacity 0.2s ease;
 }
 
 .diagnostic-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: var(--text-secondary);
-  color: var(--text-primary);
+  background: rgba(0, 0, 0, 0.4);
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.diagnostic-btn:hover:not(:disabled)::before {
+  opacity: 1;
+}
+
+.diagnostic-btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
 }
 
 .diagnostic-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
+  background: rgba(0, 0, 0, 0.1);
 }
 
 .diagnostic-results {
@@ -896,24 +949,27 @@
 .command-box {
   display: flex;
   align-items: center;
-  gap: 6px;
-  background: #0a0a0a;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 4px;
-  padding: 4px 8px;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  padding: 3px 6px;
   margin-top: 0;
   position: relative;
-  transition: border-color 0.2s ease;
+  transition: all 0.15s ease;
+  height: 22px;
 }
 
 .command-box:hover {
-  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.5);
+  border-color: rgba(255, 255, 255, 0.15);
 }
 
 .command-box code {
   flex: 1;
   font-family: 'Monaco', 'Menlo', monospace;
   font-size: 11px;
+  line-height: 1;
   color: #e0e0e0;
   letter-spacing: 0.3px;
   background: transparent !important;
@@ -925,14 +981,15 @@
   border: none;
   color: rgba(255, 255, 255, 0.4);
   cursor: pointer;
-  padding: 4px 6px;
+  padding: 2px 4px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
-  transition: all 0.2s ease;
+  border-radius: 2px;
+  transition: all 0.15s ease;
   opacity: 0;
   visibility: hidden;
+  height: 16px;
 }
 
 .command-box:hover .copy-btn {

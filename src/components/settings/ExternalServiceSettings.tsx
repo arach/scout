@@ -536,77 +536,78 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
       {/* Service Information Section */}
       <div className="service-section">
         <h3>Service</h3>
-        <div className="service-table">
-          <div className="service-grid">
-            <div className="service-item-inline">
-              <span className="field">name:</span>
+        <div className="service-table with-indent">
+          <div className="service-row">
+            <span className="field">NAME:</span>
+            <div className="service-info">
               <span className="value mono">com.scout.transcriber</span>
-            </div>
-            <div className="service-item-inline">
-              <span className="field">launcher:</span>
-              <span className="value mono">launchctl</span>
-            </div>
-            <div className="service-item-inline">
-              <span className="field">status:</span>
-              <span className={`status-badge ${status.running ? 'running' : 'stopped'}`}>
-                {status.running ? '● Running' : 'Stopped'}
-              </span>
-            </div>
-            <div className="service-item-inline">
-              <span className="field">actions:</span>
-              <div className="action-buttons">
-                {!status.running ? (
-                  <button
-                    className="btn-control-inline start"
-                    onClick={handleStartService}
-                    disabled={serviceOperation !== 'idle'}
-                  >
-                    {serviceOperation === 'starting' ? (
-                      <div className="spinner-small" />
-                    ) : (
-                      <>
-                        <Play size={12} />
-                        <span>Start</span>
-                      </>
-                    )}
-                  </button>
-                ) : (
-                  <>
-                    <button
-                      className="btn-control-inline stop"
-                      onClick={handleStopService}
-                      disabled={serviceOperation !== 'idle'}
-                    >
-                      {serviceOperation === 'stopping' ? (
-                        <div className="spinner-small" />
-                      ) : (
-                        <>
-                          <Square size={12} />
-                          <span>Stop</span>
-                        </>
-                      )}
-                    </button>
-                    <button
-                      className="btn-control-inline restart"
-                      onClick={handleRestartService}
-                      disabled={serviceOperation !== 'idle'}
-                    >
-                      {serviceOperation === 'restarting' ? (
-                        <div className="spinner-small" />
-                      ) : (
-                        <>
-                          <RefreshCw size={12} />
-                          <span>Restart</span>
-                        </>
-                      )}
-                    </button>
-                  </>
-                )}
-              </div>
+              <span className="value-detail">launchctl</span>
             </div>
           </div>
           <div className="service-row">
-            <span className="field">manager:</span>
+            <span className="field">STATUS:</span>
+            <div className="status-controls">
+              <span className={`status-badge ${status.running ? 'running' : 'stopped'}`}>
+                {status.running ? '● Running' : 'Stopped'}
+              </span>
+              {!status.running ? (
+                <button
+                  className="btn-control-inline start"
+                  onClick={handleStartService}
+                  disabled={serviceOperation !== 'idle'}
+                >
+                  {serviceOperation === 'starting' ? (
+                    <div className="spinner-small" />
+                  ) : (
+                    <>
+                      <Play size={12} />
+                      <span>Start</span>
+                    </>
+                  )}
+                </button>
+              ) : (
+                <>
+                  <button
+                    className="btn-control-inline stop"
+                    onClick={handleStopService}
+                    disabled={serviceOperation !== 'idle'}
+                  >
+                    {serviceOperation === 'stopping' ? (
+                      <div className="spinner-small" />
+                    ) : (
+                      <>
+                        <Square size={12} />
+                        <span>Stop</span>
+                      </>
+                    )}
+                  </button>
+                  <button
+                    className="btn-control-inline restart"
+                    onClick={handleRestartService}
+                    disabled={serviceOperation !== 'idle'}
+                  >
+                    {serviceOperation === 'restarting' ? (
+                      <div className="spinner-small" />
+                    ) : (
+                      <>
+                        <RefreshCw size={12} />
+                        <span>Restart</span>
+                      </>
+                    )}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Paths Section */}
+      <div className="service-section">
+        <h3>Paths</h3>
+        <div className="service-table">
+          <div className="service-row">
+            <span className="field">MANAGER:</span>
             <div 
               className="command-box"
               onClick={() => copyCommand('~/Library/LaunchAgents/com.scout.transcriber.plist', 'manager')}
@@ -618,7 +619,7 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
             </div>
           </div>
           <div className="service-row">
-            <span className="field">config:</span>
+            <span className="field">CONFIG:</span>
             <div 
               className="command-box"
               onClick={() => copyCommand('~/Library/Application Support/com.scout.transcriber/config.json', 'config')}
@@ -630,7 +631,7 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
             </div>
           </div>
           <div className="service-row">
-            <span className="field">binary:</span>
+            <span className="field">BINARY:</span>
             <div 
               className="command-box"
               onClick={() => copyCommand(config.binary_path || '/usr/local/bin/transcriber', 'binary')}
@@ -642,7 +643,7 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
             </div>
           </div>
           <div className="service-row">
-            <span className="field">log:</span>
+            <span className="field">LOG:</span>
             <div 
               className="command-box"
               onClick={() => copyCommand('/tmp/transcriber.log', 'log')}
