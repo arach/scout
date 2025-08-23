@@ -3,6 +3,7 @@ use tokio::time::{sleep, Duration};
 
 use crate::{
     db::Database,
+    integrations::clipboard,
     post_processing::dictionary_processor::DictionaryProcessor,
     foundation_models::{FoundationModelsConfig, FoundationModelsProcessor, ProcessingOperation},
     llm::{pipeline::LLMPipeline, CandleEngine, GenerationOptions, LLMEngine, ModelManager, PromptManager},
@@ -129,7 +130,7 @@ impl PostProcessingHooks {
         
         if auto_copy {
             info(Component::Processing, "📋 Auto-copy is enabled, copying transcript to clipboard");
-            match crate::clipboard::copy_to_clipboard(transcript) {
+            match clipboard::copy_to_clipboard(transcript) {
                 Ok(()) => {
                     info(Component::Processing, "✅ Auto-copy completed successfully");
                 }
@@ -153,7 +154,7 @@ impl PostProcessingHooks {
                 // Copy to clipboard first (required for paste)
                 let copy_result = if !auto_copy {
                     info(Component::Processing, "📋 Auto-copy was disabled, copying transcript for auto-paste");
-                    crate::clipboard::copy_to_clipboard(transcript)
+                    clipboard::copy_to_clipboard(transcript)
                 } else {
                     info(Component::Processing, "📋 Auto-copy already completed, proceeding with paste");
                     Ok(()) // Auto-copy already happened
@@ -175,7 +176,7 @@ impl PostProcessingHooks {
                             paste_attempts += 1;
                             info(Component::Processing, &format!("🖱️ Paste attempt {} of {}", paste_attempts, max_attempts));
                             
-                            match crate::clipboard::simulate_paste() {
+                            match clipboard::simulate_paste() {
                                 Ok(()) => {
                                     info(Component::Processing, "✅ Auto-paste completed successfully");
                                     break;

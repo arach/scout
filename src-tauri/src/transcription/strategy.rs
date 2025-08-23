@@ -1,6 +1,8 @@
 use crate::logger::{debug, info, warn, Component};
 use crate::transcription::Transcriber;
 use crate::transcription::native_streaming_strategy::{NativeStreamingTranscriptionStrategy, PerformanceTarget};
+use crate::monitoring::file_based_ring_buffer_monitor::FileBasedRingBufferMonitor;
+use crate::monitoring::ring_buffer_monitor::RingBufferMonitor;
 use async_trait::async_trait;
 use std::path::Path;
 use std::sync::Arc;
@@ -168,7 +170,7 @@ pub struct RingBufferTranscriptionStrategy {
     transcriber: Arc<tokio::sync::Mutex<Transcriber>>,
     file_based_transcriber: Option<crate::transcription::file_based_ring_buffer_transcriber::FileBasedRingBufferTranscriber>,
     monitor_handle: Option<(
-        tokio::task::JoinHandle<crate::file_based_ring_buffer_monitor::FileBasedRingBufferMonitor>,
+        tokio::task::JoinHandle<FileBasedRingBufferMonitor>,
         tokio::sync::mpsc::Sender<()>,
     )>,
     temp_dir: std::path::PathBuf,
@@ -259,7 +261,7 @@ impl TranscriptionStrategy for RingBufferTranscriptionStrategy {
             )?;
 
         // Initialize and start file-based monitor
-        let mut monitor = crate::file_based_ring_buffer_monitor::FileBasedRingBufferMonitor::new(
+        let mut monitor = FileBasedRingBufferMonitor::new(
             output_path.to_path_buf()
         );
         if let Some(ref app_handle) = self.app_handle {
@@ -521,7 +523,7 @@ pub struct ProgressiveTranscriptionStrategy {
     ring_buffer: Option<Arc<crate::audio::ring_buffer_recorder::RingBufferRecorder>>,
     ring_transcriber: Option<crate::transcription::ring_buffer_transcriber::RingBufferTranscriber>,
     monitor_handle: Option<(
-        tokio::task::JoinHandle<crate::ring_buffer_monitor::RingBufferMonitor>,
+        tokio::task::JoinHandle<RingBufferMonitor>,
         tokio::sync::mpsc::Sender<()>,
     )>,
     refinement_handle: Option<tokio::task::JoinHandle<()>>,
@@ -951,7 +953,7 @@ impl TranscriptionStrategy for ProgressiveTranscriptionStrategy {
             );
 
         // Initialize and start monitor
-        let mut monitor = crate::ring_buffer_monitor::RingBufferMonitor::new(ring_buffer.clone());
+        let mut monitor = RingBufferMonitor::new(ring_buffer.clone());
         if let Some(ref app_handle) = self.app_handle {
             monitor = monitor.with_app_handle(app_handle.clone());
         }

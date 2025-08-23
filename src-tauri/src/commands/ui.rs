@@ -129,7 +129,7 @@ pub async fn update_push_to_talk_shortcut(app: tauri::AppHandle, state: State<'_
 
 #[tauri::command]
 pub async fn paste_text() -> Result<(), String> {
-    crate::clipboard::simulate_paste()
+    crate::integrations::clipboard::simulate_paste()
 }
 
 // ============================================================================

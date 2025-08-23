@@ -460,7 +460,7 @@ impl ProcessingQueue {
                                             drop(settings_guard);
 
                                             if processing_duration_ms > threshold_ms {
-                                                crate::sound::SoundPlayer::play_success();
+                                                crate::ui::sound::SoundPlayer::play_success();
                                             }
 
                                             // Clean up temporary WAV file if we converted
