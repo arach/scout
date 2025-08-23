@@ -224,7 +224,7 @@ impl WebhookService {
 
     /// Deliver webhook with retry logic
     async fn deliver_webhook_with_retries(&self, webhook: &Webhook, payload: &WebhookPayload) -> Result<DeliveryResult, WebhookError> {
-        let mut last_error = None;
+        let mut _last_error = None;
 
         for attempt in 1..=(self.max_retries + 1) {
             match self.attempt_delivery(webhook, payload, attempt as i32).await {
@@ -245,12 +245,12 @@ impl WebhookService {
                     } else {
                         warn(Component::Webhooks, &format!("Webhook delivery failed to {} on attempt {}: status {}", 
                             webhook.url, attempt, result.status_code.unwrap_or(0)));
-                        last_error = result.error_message.clone();
+                        _last_error = result.error_message.clone();
                     }
                 }
                 Err(e) => {
                     error(Component::Webhooks, &format!("Webhook delivery error to {} on attempt {}: {}", webhook.url, attempt, e));
-                    last_error = Some(e.to_string());
+                    _last_error = Some(e.to_string());
                 }
             }
 
@@ -294,7 +294,7 @@ impl WebhookService {
 
         // Serialize payload
         let payload_json = serde_json::to_string(payload)?;
-        let payload_size = payload_json.len() as i32;
+        let _payload_size = payload_json.len() as i32;
 
         // Validate URL
         if !webhook.url.starts_with("http://") && !webhook.url.starts_with("https://") {

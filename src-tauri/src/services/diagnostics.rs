@@ -375,7 +375,6 @@ fn corrupt_wav_sample_rate(wav_path: &std::path::Path, speed_factor: f32) -> Res
         info(Component::Recording, &format!("Updated byte rate from {} to {}", current_byte_rate, new_byte_rate));
     }
     let mut output_file = File::create(wav_path).map_err(|e| format!("Failed to create output file: {}", e))?;
-    use std::io::Write as _;
     output_file.write_all(&data).map_err(|e| format!("Failed to write modified WAV data: {}", e))?;
     info(Component::Recording, "Successfully modified WAV header with new sample rate");
     Ok(())

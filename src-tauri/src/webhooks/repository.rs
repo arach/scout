@@ -195,7 +195,7 @@ impl WebhookRepository {
         // For simplicity, let's implement basic filtering without dynamic queries
         // This can be enhanced later with more complex query building
         
-        let (logs_query, count_query) = if let Some(webhook_id) = filters.webhook_id {
+        let (logs_query, count_query) = if let Some(_webhook_id) = filters.webhook_id {
             (
                 r#"
                 SELECT 

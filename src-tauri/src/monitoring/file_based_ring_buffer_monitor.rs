@@ -23,7 +23,7 @@ pub struct FileBasedRingBufferMonitor {
 
 impl FileBasedRingBufferMonitor {
     /// Create a new file-based ring buffer monitor
-    pub fn new(wav_file_path: PathBuf) -> Self {
+    pub fn new(_wav_file_path: PathBuf) -> Self {
         Self {
             transcriber: None,
             chunk_interval: Duration::from_secs(2), // Check every 2 seconds

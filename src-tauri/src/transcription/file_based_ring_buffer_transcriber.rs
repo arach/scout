@@ -37,7 +37,7 @@ impl FileBasedRingBufferTranscriber {
         let wav_reader = loop {
             match WavFileReader::new(&wav_file_path) {
                 Ok(reader) => break reader,
-                Err(e) if attempts < 50 => {
+                Err(_e) if attempts < 50 => {
                     // File might not be ready yet, wait 1ms and retry
                     attempts += 1;
                     std::thread::sleep(Duration::from_millis(1));
