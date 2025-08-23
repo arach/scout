@@ -6,6 +6,11 @@ import { analyzer } from 'vite-bundle-analyzer';
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
+// @ts-expect-error process is a nodejs global
+const port = process.env.VITE_PORT ? parseInt(process.env.VITE_PORT) : 5173;
+// @ts-expect-error process is a nodejs global
+const hmrPort = process.env.VITE_HMR_PORT ? parseInt(process.env.VITE_HMR_PORT) : port + 1;
+
 // https://vitejs.dev/config/
 export default defineConfig(async () => {
   // @ts-expect-error process is a nodejs global
@@ -39,14 +44,14 @@ export default defineConfig(async () => {
   clearScreen: false,
   // 2. tauri expects a fixed port, fail if that port is not available
   server: {
-    port: 5173,
+    port: port,
     strictPort: true,
     host: host || false,
     hmr: host
       ? {
           protocol: "ws",
           host,
-          port: 5174,
+          port: hmrPort,
         }
       : undefined,
     watch: {
