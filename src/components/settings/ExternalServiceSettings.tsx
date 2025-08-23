@@ -663,7 +663,19 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
 
       {/* Configuration Section */}
       <div className="service-section">
-        <h3>Configuration</h3>
+        <div className="section-header">
+          <h3>Configuration</h3>
+          <button
+            className="config-docs-link"
+            onClick={(e) => {
+              e.stopPropagation();
+              open('https://scout.arach.dev/docs/transcriber#zeromq-configuration');
+            }}
+          >
+            <FileText size={10} />
+            <span>Configuration Docs</span>
+          </button>
+        </div>
         <div className="service-table with-indent">
           <div className="service-row">
             <span className="field">WORKERS:</span>
@@ -684,69 +696,52 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
             </NumberField.Root>
           </div>
           <div className="service-row">
-            <span className="field">ZMQ:</span>
-            <div className="port-inputs">
-              <div className="port-inputs-header">
-                <button
-                  className="port-inputs-link"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    open('https://scout.arach.dev/docs/transcriber#zeromq-configuration');
+            <span className="field">ZMQ PORTS:</span>
+            <div className="port-inputs-inline">
+              <div className="port-group-inline">
+                <label className="port-label">AUDIO</label>
+                <input
+                  type="text"
+                  value={config.zmq_push_port}
+                  onChange={(e) => {
+                    const value = e.target.value.replace(/\D/g, '');
+                    if (value === '' || (parseInt(value) >= 1 && parseInt(value) <= 65535)) {
+                      setConfig(prev => ({ ...prev, zmq_push_port: parseInt(value) || 5555 }));
+                    }
                   }}
-                >
-                  <FileText size={10} />
-                  Configuration Docs
-                </button>
+                  className="config-input-port"
+                  placeholder="5555"
+                />
               </div>
-              <div className="port-inputs-stack">
-                <div className="port-group">
-                  <label className="port-label">AUDIO INPUT PORT</label>
-                  <input
-                    type="text"
-                    value={config.zmq_push_port}
-                    onChange={(e) => {
-                      const value = e.target.value.replace(/\D/g, '');
-                      if (value === '' || (parseInt(value) >= 1 && parseInt(value) <= 65535)) {
-                        setConfig(prev => ({ ...prev, zmq_push_port: parseInt(value) || 5555 }));
-                      }
-                    }}
-                    className="config-input-compact"
-                    placeholder="5555"
-                  />
-                  <div className="port-description">Audio stream ingress</div>
-                </div>
-                <div className="port-group">
-                  <label className="port-label">TEXT OUTPUT PORT</label>
-                  <input
-                    type="text"
-                    value={config.zmq_pull_port}
-                    onChange={(e) => {
-                      const value = e.target.value.replace(/\D/g, '');
-                      if (value === '' || (parseInt(value) >= 1 && parseInt(value) <= 65535)) {
-                        setConfig(prev => ({ ...prev, zmq_pull_port: parseInt(value) || 5556 }));
-                      }
-                    }}
-                    className="config-input-compact"
-                    placeholder="5556"
-                  />
-                  <div className="port-description">Transcription results</div>
-                </div>
-                <div className="port-group">
-                  <label className="port-label">CONTROL API PORT</label>
-                  <input
-                    type="text"
-                    value={config.zmq_control_port}
-                    onChange={(e) => {
-                      const value = e.target.value.replace(/\D/g, '');
-                      if (value === '' || (parseInt(value) >= 1 && parseInt(value) <= 65535)) {
-                        setConfig(prev => ({ ...prev, zmq_control_port: parseInt(value) || 5557 }));
-                      }
-                    }}
-                    className="config-input-compact"
-                    placeholder="5557"
-                  />
-                  <div className="port-description">Service commands</div>
-                </div>
+              <div className="port-group-inline">
+                <label className="port-label">OUTPUT</label>
+                <input
+                  type="text"
+                  value={config.zmq_pull_port}
+                  onChange={(e) => {
+                    const value = e.target.value.replace(/\D/g, '');
+                    if (value === '' || (parseInt(value) >= 1 && parseInt(value) <= 65535)) {
+                      setConfig(prev => ({ ...prev, zmq_pull_port: parseInt(value) || 5556 }));
+                    }
+                  }}
+                  className="config-input-port"
+                  placeholder="5556"
+                />
+              </div>
+              <div className="port-group-inline">
+                <label className="port-label">CONTROL</label>
+                <input
+                  type="text"
+                  value={config.zmq_control_port}
+                  onChange={(e) => {
+                    const value = e.target.value.replace(/\D/g, '');
+                    if (value === '' || (parseInt(value) >= 1 && parseInt(value) <= 65535)) {
+                      setConfig(prev => ({ ...prev, zmq_control_port: parseInt(value) || 5557 }));
+                    }
+                  }}
+                  className="config-input-port"
+                  placeholder="5557"
+                />
               </div>
             </div>
           </div>

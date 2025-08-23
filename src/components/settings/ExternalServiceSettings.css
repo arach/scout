@@ -976,7 +976,8 @@
   position: relative;
   transition: all 0.15s ease;
   height: 22px;
-  max-width: 420px; /* Limit width to make fields less long */
+  width: 100%; /* Use full available width */
+  max-width: none; /* Remove max-width constraint */
 }
 
 .command-box:hover {
@@ -1323,93 +1324,82 @@
   outline: none;
 }
 
-/* Port Inputs Group */
-.port-inputs {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  flex: 1;
-}
-
-.port-inputs-header {
+/* Section Header with Docs Link */
+.section-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   margin-bottom: 4px;
 }
 
-.port-inputs-link {
+.config-docs-link {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   font-size: 10px;
   color: var(--text-tertiary);
   text-decoration: none;
-  opacity: 0.6;
-  transition: opacity 0.2s ease;
+  opacity: 0.5;
+  transition: all 0.2s ease;
   cursor: pointer;
   background: none;
   border: none;
-  padding: 0;
+  padding: 2px 0;
 }
 
-.port-inputs-link:hover {
+.config-docs-link:hover {
   opacity: 1;
   color: var(--text-secondary);
 }
 
-.port-inputs-stack {
+/* Port Inputs Inline Layout */
+.port-inputs-inline {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 12px;
+  flex: 1;
 }
 
-.port-group {
+.port-group-inline {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  gap: 6px;
 }
 
 .port-label {
   font-size: 10px;
-  color: var(--text-secondary);
+  color: var(--text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   font-weight: 500;
-}
-
-.port-description {
-  font-size: 9px;
-  color: var(--text-tertiary);
   opacity: 0.7;
-  margin-top: 2px;
 }
 
-.config-input-compact {
-  padding: 6px 8px;
-  background: rgba(0, 0, 0, 0.4);
+.config-input-port {
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.3);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 3px;
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 12px;
   font-family: 'Monaco', 'Menlo', monospace;
   transition: all 0.2s ease;
-  height: 28px;
-  width: 100%;
+  height: 24px;
+  width: 70px;
 }
 
-.config-input-compact:hover {
-  background: rgba(0, 0, 0, 0.5);
+.config-input-port:hover {
+  background: rgba(0, 0, 0, 0.4);
   border-color: rgba(255, 255, 255, 0.15);
 }
 
-.config-input-compact:focus {
+.config-input-port:focus {
   outline: none;
-  background: rgba(0, 0, 0, 0.6);
-  border-color: rgb(96, 165, 250);
-  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.1);
+  background: rgba(0, 0, 0, 0.5);
+  border-color: var(--text-secondary);
 }
 
-.config-input-compact::placeholder {
+.config-input-port::placeholder {
   color: var(--text-tertiary);
   opacity: 0.5;
 }
@@ -1433,7 +1423,8 @@
 .save-button-row {
   justify-content: flex-end;
   padding-top: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-top: none;
+  border-bottom: none !important;
   margin-top: 8px;
 }
 
