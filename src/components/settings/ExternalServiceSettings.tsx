@@ -676,7 +676,7 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
             <span>Configuration Docs</span>
           </button>
         </div>
-        <div className="service-table with-indent">
+        <div className="service-table">
           <div className="service-row">
             <span className="field">WORKERS:</span>
             <NumberField.Root
