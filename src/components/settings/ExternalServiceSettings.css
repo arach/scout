@@ -1323,41 +1323,28 @@
   outline: none;
 }
 
-/* Port Inputs Group - Enhanced */
+/* Port Inputs Group */
 .port-inputs {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   flex: 1;
-  padding: 8px 12px;
-  background: rgba(59, 130, 246, 0.03);
-  border: 1px solid rgba(59, 130, 246, 0.15);
-  border-radius: 4px;
 }
 
 .port-inputs-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 6px;
-}
-
-.port-inputs-title {
-  font-size: 11px;
-  color: var(--text-secondary);
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  margin-bottom: 4px;
 }
 
 .port-inputs-link {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   font-size: 10px;
-  color: rgb(96, 165, 250);
+  color: var(--text-tertiary);
   text-decoration: none;
-  opacity: 0.7;
+  opacity: 0.6;
   transition: opacity 0.2s ease;
   cursor: pointer;
   background: none;
@@ -1367,12 +1354,13 @@
 
 .port-inputs-link:hover {
   opacity: 1;
+  color: var(--text-secondary);
 }
 
-.port-inputs-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
+.port-inputs-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .port-group {
@@ -1442,26 +1430,50 @@
   opacity: 1;
 }
 
-.btn-primary-inline {
-  padding: 6px 12px;
-  background: var(--text-secondary);
-  color: var(--background-primary);
-  border: none;
-  border-radius: 3px;
+.save-button-row {
+  justify-content: flex-end;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  margin-top: 8px;
+}
+
+.btn-save-config {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: rgba(96, 165, 250, 0.1);
+  border: 1px solid rgba(96, 165, 250, 0.3);
+  color: rgb(96, 165, 250);
+  border-radius: 4px;
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
+  margin-left: auto;
 }
 
-.btn-primary-inline:hover:not(:disabled) {
-  background: var(--text-primary);
+.btn-save-config:hover:not(:disabled) {
+  background: rgba(96, 165, 250, 0.15);
+  border-color: rgba(96, 165, 250, 0.4);
   transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(96, 165, 250, 0.15);
 }
 
-.btn-primary-inline:disabled {
+.btn-save-config:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.btn-save-config:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  transform: none;
+}
+
+.btn-save-config .spinner-small {
+  width: 12px;
+  height: 12px;
+  border-width: 2px;
 }
 
 .external-service-settings .model-attributes {

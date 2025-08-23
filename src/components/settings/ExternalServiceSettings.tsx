@@ -684,10 +684,9 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
             </NumberField.Root>
           </div>
           <div className="service-row">
-            <span className="field">ADVANCED:</span>
+            <span className="field">ZMQ:</span>
             <div className="port-inputs">
               <div className="port-inputs-header">
-                <span className="port-inputs-title">ZeroMQ Port Configuration</span>
                 <button
                   className="port-inputs-link"
                   onClick={(e) => {
@@ -696,12 +695,12 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
                   }}
                 >
                   <FileText size={10} />
-                  Docs
+                  Configuration Docs
                 </button>
               </div>
-              <div className="port-inputs-grid">
+              <div className="port-inputs-stack">
                 <div className="port-group">
-                  <label className="port-label">AUDIO INPUT</label>
+                  <label className="port-label">AUDIO INPUT PORT</label>
                   <input
                     type="text"
                     value={config.zmq_push_port}
@@ -717,7 +716,7 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
                   <div className="port-description">Audio stream ingress</div>
                 </div>
                 <div className="port-group">
-                  <label className="port-label">TEXT OUTPUT</label>
+                  <label className="port-label">TEXT OUTPUT PORT</label>
                   <input
                     type="text"
                     value={config.zmq_pull_port}
@@ -733,7 +732,7 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
                   <div className="port-description">Transcription results</div>
                 </div>
                 <div className="port-group">
-                  <label className="port-label">CONTROL API</label>
+                  <label className="port-label">CONTROL API PORT</label>
                   <input
                     type="text"
                     value={config.zmq_control_port}
@@ -753,14 +752,23 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
           </div>
           {/* Only show save button when service is running */}
           {status.running && (
-            <div className="service-row">
-              <span className="field"></span>
+            <div className="service-row save-button-row">
               <button
-                className="btn-primary-inline"
+                className="btn-save-config"
                 onClick={saveConfig}
                 disabled={saving}
               >
-                {saving ? 'Saving...' : 'Save & Restart'}
+                {saving ? (
+                  <>
+                    <div className="spinner-small" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw size={12} />
+                    <span>Save & Restart</span>
+                  </>
+                )}
               </button>
             </div>
           )}
