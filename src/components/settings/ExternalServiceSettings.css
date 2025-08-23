@@ -963,15 +963,16 @@
 .command-box {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   background: rgba(0, 0, 0, 0.4);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 3px;
-  padding: 3px 6px;
+  padding: 0;
   margin-top: 0;
   position: relative;
   transition: all 0.15s ease;
   height: 22px;
+  max-width: 420px; /* Limit width to make fields less long */
 }
 
 .command-box:hover {
@@ -987,7 +988,7 @@
   color: #e0e0e0;
   letter-spacing: 0.3px;
   background: transparent !important;
-  padding: 0;
+  padding: 3px 3px 3px 10px; /* Add left padding for the text */
 }
 
 .copy-btn {
@@ -995,7 +996,7 @@
   border: none;
   color: rgba(255, 255, 255, 0.4);
   cursor: pointer;
-  padding: 2px 4px;
+  padding: 2px 6px 2px 4px;
   display: flex;
   align-items: center;
   justify-content: center;
