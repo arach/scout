@@ -274,6 +274,7 @@ impl ProcessManager {
         }
     }
     
+    
     /// Kill a specific process by PID
     pub async fn kill_process(&self, pid: u32) -> Result<(), String> {
         use std::process::Command;
@@ -329,6 +330,62 @@ impl ProcessManager {
         processes.clone()
     }
     
+    /// Get total memory for process tree using bash script
+    #[cfg(target_os = "macos")]
+    fn get_total_memory_mb(pid: u32) -> Option<f32> {
+        use std::process::Command;
+        
+        // Create a simple inline script to get all descendants and sum memory
+        let script = format!(r#"
+            pid={}
+            total=0
+            
+            # Function to get all descendants
+            get_descendants() {{
+                local p=$1
+                echo $p
+                for child in $(pgrep -P $p 2>/dev/null); do
+                    get_descendants $child
+                done
+            }}
+            
+            # Get all PIDs
+            all_pids=$(get_descendants $pid)
+            
+            # Sum memory for all PIDs
+            for p in $all_pids; do
+                mem=$(top -l 1 -pid $p -stats pid,mem 2>/dev/null | tail -1 | awk '{{print $2}}')
+                if [[ ! -z "$mem" ]]; then
+                    if [[ $mem == *G ]]; then
+                        mb=$(echo "$mem" | sed 's/G//' | awk '{{print $1 * 1024}}')
+                    elif [[ $mem == *M ]]; then
+                        mb=$(echo "$mem" | sed 's/M//')
+                    elif [[ $mem == *K ]]; then
+                        mb=$(echo "$mem" | sed 's/K//' | awk '{{print $1 / 1024}}')
+                    else
+                        mb=0
+                    fi
+                    total=$(echo "$total + $mb" | bc)
+                fi
+            done
+            
+            echo "$total"
+        "#, pid);
+        
+        let output = Command::new("bash")
+            .arg("-c")
+            .arg(&script)
+            .output()
+            .ok()?;
+            
+        if !output.status.success() {
+            return None;
+        }
+        
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        stdout.trim().parse().ok()
+    }
+    
     /// Get stats for a specific process by PID
     pub async fn get_process_stats(&self, pid: u32) -> Result<ProcessInfo, String> {
         let mut system = self.system.write().await;
@@ -339,15 +396,27 @@ impl ProcessManager {
             // Get child processes
             let child_pids = Self::get_child_processes(&system, pid_obj);
             
-            // Calculate total memory including children
-            let mut total_memory_kb = process.memory() as f32;
-            let mut total_cpu = process.cpu_usage();
+            // Get total memory for entire process tree (no caching - fresh on each call)
+            let total_memory_mb = Self::get_total_memory_mb(pid)
+                .unwrap_or_else(|| {
+                    // Fallback: use sysinfo if top command fails
+                    let mut mem = (process.memory() as f64 / 1024.0) as f32;
+                    for child_pid in &child_pids {
+                        if let Some(child) = system.process(*child_pid) {
+                            mem += (child.memory() as f64 / 1024.0) as f32;
+                        }
+                    }
+                    log::debug!("Using sysinfo fallback for PID {} memory: {:.2} MB", pid, mem);
+                    mem
+                });
             
-            // Add memory and CPU from all child processes
+            log::debug!("Process {} total memory: {:.2} MB", pid, total_memory_mb);
+            
+            // Calculate total CPU
+            let mut total_cpu = process.cpu_usage();
             for child_pid in &child_pids {
-                if let Some(child_process) = system.process(*child_pid) {
-                    total_memory_kb += child_process.memory() as f32;
-                    total_cpu += child_process.cpu_usage();
+                if let Some(child) = system.process(*child_pid) {
+                    total_cpu += child.cpu_usage();
                 }
             }
             
@@ -356,7 +425,7 @@ impl ProcessManager {
                 name: process.name().to_string(),
                 command: process.cmd().join(" "),
                 started_at: process.start_time() as i64,
-                memory_mb: total_memory_kb / 1024.0, // Convert KB to MB (sysinfo returns KB)
+                memory_mb: total_memory_mb,
                 cpu_percent: total_cpu,
                 children: child_pids
                     .iter()

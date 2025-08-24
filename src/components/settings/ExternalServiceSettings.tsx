@@ -66,20 +66,13 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
   const [processStats, setProcessStats] = useState<ProcessStats | null>(null);
   const [expandedPid, setExpandedPid] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingStats, setLoadingStats] = useState(false);
 
   useEffect(() => {
     loadConfig();
-    checkServiceStatus();
+    checkServiceStatus(); // Check once on component mount
     checkInstallation();
   }, []);
-
-  // Auto-refresh status every 5 seconds when service is running
-  useEffect(() => {
-    if (status.running) {
-      const interval = setInterval(checkServiceStatus, 5000);
-      return () => clearInterval(interval);
-    }
-  }, [status.running]);
   
   // Listen for DevTools override changes
   useEffect(() => {
@@ -121,6 +114,7 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
       
       // If service is running, get process stats
       if (serviceStatus.running && serviceStatus.pid) {
+        setLoadingStats(true);
         console.log('Getting process stats for PID:', serviceStatus.pid);
         try {
           const stats = await invoke<any>('get_process_stats', { pid: serviceStatus.pid });
@@ -137,6 +131,8 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
         } catch (error) {
           console.error('Failed to get process stats:', error);
           setProcessStats(null);
+        } finally {
+          setLoadingStats(false);
         }
       } else {
         setProcessStats(null);
@@ -284,6 +280,21 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
   const formatMemory = (mb: number) => {
     if (mb < 1024) return `${mb.toFixed(0)}MB`;
     return `${(mb / 1024).toFixed(1)}GB`;
+  };
+
+  // Braille spinner animation
+  const BrailleSpinner = () => {
+    const [frame, setFrame] = useState(0);
+    const patterns = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+    
+    useEffect(() => {
+      const interval = setInterval(() => {
+        setFrame(f => (f + 1) % patterns.length);
+      }, 80);
+      return () => clearInterval(interval);
+    }, []);
+    
+    return <span style={{ fontFamily: 'monospace', opacity: 0.7 }}>{patterns[frame]}</span>;
   };
 
   const handleRestartService = async () => {
@@ -637,8 +648,9 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
                     >
                       <Activity size={12} className={status.healthy ? 'healthy' : 'unhealthy'} />
                       <span className="pid-value">{status.pid}</span>
+                      {loadingStats && <BrailleSpinner />}
                     </div>
-                    {processStats ? (
+                    {processStats && !loadingStats ? (
                       <>
                         <span className="status-separator">|</span>
                         <span className="process-stat">
@@ -656,11 +668,7 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
                           {processStats.cpu_percent.toFixed(1)}%
                         </span>
                       </>
-                    ) : (
-                      <span className="status-separator" style={{ fontSize: '10px', opacity: 0.5 }}>
-                        (loading stats...)
-                      </span>
-                    )}
+                    ) : null}
                   </>
                 )}
               </div>
