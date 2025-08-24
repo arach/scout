@@ -47,8 +47,8 @@ src-tauri/WixTools/
 scout.db
 benchmark.db*
 
-# whisper.cpp models
-models/
+# whisper.cpp models (only in root directory, not src code)
+/models/
 *.mlmodelc/
 *.mlmodel
 *.ggml

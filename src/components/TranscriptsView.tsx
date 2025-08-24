@@ -2,8 +2,8 @@ import { useState, useEffect, useMemo, useCallback, memo, useRef } from 'react';
 import { TranscriptDetailPanel } from './TranscriptDetailPanel';
 import { TranscriptItem } from './TranscriptItem';
 import { VirtualizedTranscriptList } from './VirtualizedTranscriptList';
+import { useTranscriptGrouping } from '../hooks/useTranscriptGrouping';
 import { ChevronDown } from 'lucide-react';
-import { formatShortcut } from '../lib/formatShortcut';
 import { Transcript } from '../types/transcript';
 import './TranscriptsView.css';
 import '../styles/grid-system.css';
@@ -12,7 +12,7 @@ interface TranscriptsViewProps {
     transcripts: Transcript[];
     selectedTranscripts: Set<number>;
     searchQuery: string;
-    hotkey: string;
+    hotkey: string;  // Keep for potential future use
     setSearchQuery: (query: string) => void;
     searchTranscripts: () => void;
     toggleTranscriptSelection: (id: number) => void;
@@ -35,7 +35,7 @@ export const TranscriptsView = memo(function TranscriptsView({
     transcripts,
     selectedTranscripts,
     searchQuery,
-    hotkey,
+    hotkey: _hotkey,  // Prefix with underscore to indicate intentionally unused
     setSearchQuery,
     searchTranscripts,
     toggleTranscriptSelection,
@@ -101,8 +101,7 @@ export const TranscriptsView = memo(function TranscriptsView({
             const transcript = transcripts.find(t => t.id === selectedTranscriptId);
             if (transcript) {
                 // Find the group this transcript belongs to and expand it
-                const groups = groupTranscriptsByDate(transcripts);
-                for (const group of groups) {
+                for (const group of transcriptGroups) {
                     if (group.transcripts.some(t => t.id === selectedTranscriptId)) {
                         setExpandedGroups(prev => new Set([...prev, group.title]));
                         break;
@@ -138,59 +137,15 @@ export const TranscriptsView = memo(function TranscriptsView({
         }
     }, [showExportMenu, showFloatingExportMenu]);
 
-    // Group transcripts by date
-    const groupTranscriptsByDate = (transcripts: Transcript[]) => {
-        const groups: { [key: string]: Transcript[] } = {};
-        const now = new Date();
-        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const yesterday = new Date(today);
-        yesterday.setDate(yesterday.getDate() - 1);
-        const thisWeek = new Date(today);
-        thisWeek.setDate(thisWeek.getDate() - 7);
-        const thisMonth = new Date(today);
-        thisMonth.setDate(thisMonth.getDate() - 30);
-
-        transcripts.forEach(transcript => {
-            const date = new Date(transcript.created_at);
-            let groupKey: string;
-
-            if (date >= today) {
-                groupKey = 'Today';
-            } else if (date >= yesterday) {
-                groupKey = 'Yesterday';
-            } else if (date >= thisWeek) {
-                groupKey = 'This Week';
-            } else if (date >= thisMonth) {
-                groupKey = 'This Month';
-            } else {
-                groupKey = 'Older';
-            }
-
-            if (!groups[groupKey]) {
-                groups[groupKey] = [];
-            }
-            groups[groupKey].push(transcript);
-        });
-
-        // Return in order
-        const orderedGroups: { title: string; transcripts: Transcript[] }[] = [];
-        const order = ['Today', 'Yesterday', 'This Week', 'This Month', 'Older'];
-        order.forEach(key => {
-            if (groups[key]) {
-                orderedGroups.push({ title: key, transcripts: groups[key] });
-            }
-        });
-
-        return orderedGroups;
-    };
+    // Use optimized transcript grouping hook
+    const transcriptGroups = useTranscriptGrouping(transcripts);
     
-    // Calculate paginated transcripts
+    // Calculate paginated transcripts using optimized groups
     const paginatedGroups = useMemo(() => {
-        const groups = groupTranscriptsByDate(transcripts);
         let itemCount = 0;
-        const result: typeof groups = [];
+        const result: typeof transcriptGroups = [];
         
-        for (const group of groups) {
+        for (const group of transcriptGroups) {
             const visibleTranscripts: Transcript[] = [];
             
             for (const transcript of group.transcripts) {
@@ -206,12 +161,12 @@ export const TranscriptsView = memo(function TranscriptsView({
         }
         
         return result;
-    }, [transcripts, displayedItems]);
+    }, [transcriptGroups, displayedItems]);
     
     const hasMore = transcripts.length > displayedItems;
     
-    // Get all groups (unpaginated) for select all functionality
-    const allGroups = useMemo(() => groupTranscriptsByDate(transcripts), [transcripts]);
+    // Use the already computed groups for select all functionality
+    const allGroups = transcriptGroups;
     
     // Ref for the list container
     const listContainerRef = useRef<HTMLDivElement>(null);
@@ -232,7 +187,7 @@ export const TranscriptsView = memo(function TranscriptsView({
                             placeholder="Search transcripts..."
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            onKeyPress={(e) => e.key === 'Enter' && searchTranscripts()}
+                            onKeyDown={(e) => e.key === 'Enter' && searchTranscripts()}
                         />
                     </div>
                     
@@ -318,16 +273,20 @@ export const TranscriptsView = memo(function TranscriptsView({
             {/* Transcripts section - full width for headers */}
             <div className="transcripts-list-section">
                 {transcripts.length === 0 ? (
-                    <div className="no-transcripts-container">
-                        <div className="no-transcripts">
-                            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.3">
-                                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
-                                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                                <line x1="12" y1="19" x2="12" y2="22" />
-                                <line x1="8" y1="22" x2="16" y2="22" />
-                            </svg>
-                            <h3>No transcripts yet</h3>
-                            <p>Press <span title={hotkey}>{formatShortcut(hotkey)}</span> or click "Start Recording" to begin</p>
+                    <div className="transcripts-empty-table">
+                        <div className="transcripts-table-header">
+                            <div className="transcript-column-time">TIME</div>
+                            <div className="transcript-column-duration">DURATION</div>
+                            <div className="transcript-column-content">TRANSCRIPT</div>
+                            <div className="transcript-column-actions"></div>
+                        </div>
+                        <div className="transcripts-empty-body">
+                            <div className="transcripts-empty-message">
+                                <p className="empty-title">No transcripts yet</p>
+                                <p className="empty-subtitle">
+                                    Start recording or upload an audio file to begin
+                                </p>
+                            </div>
                         </div>
                     </div>
                 ) : shouldUseVirtualization ? (
@@ -354,18 +313,21 @@ export const TranscriptsView = memo(function TranscriptsView({
                         <div className="transcript-list-scrollable">
                         {paginatedGroups.map(group => {
                             // Find the full group data for this title
-                            const fullGroup = allGroups.find(g => g.title === group.title);
+                            const fullGroup = transcriptGroups.find(g => g.title === group.title);
                             const fullGroupTranscripts = fullGroup?.transcripts || [];
                             
                             return (
                                 <div key={group.title} className={`transcript-group ${expandedGroups.has(group.title) ? 'expanded' : ''}`}>
-                                    <div className="transcript-group-header">
+                                    <div className="transcript-group-header" onClick={() => toggleGroup(group.title)}>
                                         <div className="group-header-left">
                                             <button 
                                                 className="group-toggle-btn"
-                                                onClick={() => toggleGroup(group.title)}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    toggleGroup(group.title);
+                                                }}
                                             >
-                                                <ChevronDown size={16} className="chevron-icon" />
+                                                <ChevronDown size={12} className="chevron-icon" />
                                             </button>
                                             {isSelectionMode && (
                                                 <input
@@ -377,12 +339,10 @@ export const TranscriptsView = memo(function TranscriptsView({
                                                         const allGroupIds = fullGroupTranscripts.map(t => t.id);
                                                         toggleTranscriptGroupSelection(allGroupIds);
                                                     }}
+                                                    onClick={(e) => e.stopPropagation()}
                                                 />
                                             )}
-                                            <h3 
-                                                className="transcript-group-title"
-                                                onClick={() => toggleGroup(group.title)}
-                                            >
+                                            <h3 className="transcript-group-title">
                                                 {group.title}
                                             </h3>
                                             <span className="group-count">({fullGroupTranscripts.length})</span>

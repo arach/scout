@@ -1,8 +1,9 @@
-import { useState, useRef, useEffect, memo } from 'react';
+import { useState, useRef, useEffect, memo, useCallback } from 'react';
 import { Trash2, Copy, Check, Play, Pause, Download, Eye } from 'lucide-react';
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
-import { useAudioBlob } from '../hooks/useAudioBlob';
+import { useLazyAudioBlob } from '../hooks/useLazyAudioBlob';
+import { useOptimizedDateFormat } from '../hooks/useOptimizedDateFormat';
 import { Transcript } from '../types/transcript';
 import './TranscriptItem.css';
 
@@ -38,8 +39,8 @@ export const TranscriptItem = memo(function TranscriptItem({
     const [audioUrl, setAudioUrl] = useState<string | null>(null);
     const isBlankAudio = transcript.text === "[BLANK_AUDIO]";
     
-    // Use the audio blob hook
-    const { blob: audioBlob, isLoading: isAudioLoading } = useAudioBlob(transcript.audio_path || '');
+    // Use lazy audio loading - only load when needed
+    const { blob: audioBlob, isLoading: isAudioLoading, loadAudio } = useLazyAudioBlob(transcript.audio_path || '');
     
     // Create audio URL from blob
     useEffect(() => {
@@ -87,61 +88,47 @@ export const TranscriptItem = memo(function TranscriptItem({
         }
     }, [showDownloadMenu]);
     
-    const formatTime = (dateString: string) => {
-        // Parse the UTC timestamp correctly
-        // If the dateString doesn't include timezone info, append 'Z' to indicate UTC
-        const utcDateString = dateString.includes('Z') || dateString.includes('+') || dateString.includes('T') 
-            ? dateString 
-            : dateString.replace(' ', 'T') + 'Z';
-        const date = new Date(utcDateString);
-        
-        // Always use time-only format for compact variant
-        if (variant === 'compact') {
-            return date.toLocaleTimeString([], { 
-                hour: '2-digit', 
-                minute: '2-digit'
-            });
-        }
-        
-        // Use the EXACT same logic as TranscriptsView grouping
-        const now = new Date();
-        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const tomorrow = new Date(today);
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        
-        // Item is "Today" if date >= today AND date < tomorrow
-        const isToday = date >= today && date < tomorrow;
-        
-        // Always show just time for Today items
-        if (isToday) {
-            return date.toLocaleTimeString([], { 
-                hour: 'numeric', 
-                minute: '2-digit'
-            });
-        }
-        
-        // For other dates, use a more compact format
-        const yearPart = date.getFullYear() !== now.getFullYear() ? '2-digit' : undefined;
-        const formatted = date.toLocaleDateString([], { 
-            month: 'short', 
-            day: 'numeric',
-            year: yearPart
-        });
-        const time = date.toLocaleTimeString([], {
-            hour: 'numeric',
-            minute: '2-digit'
-        });
-        return `${formatted}, ${time}`;
-    };
+    // Use memoized date formatting hook
+    const formattedTime = useOptimizedDateFormat(transcript.created_at, variant);
     
-    const handleCopy = async (e: React.MouseEvent) => {
+    const handleCopy = useCallback(async (e: React.MouseEvent) => {
         e.stopPropagation();
         if (!isBlankAudio) {
             await navigator.clipboard.writeText(transcript.text);
             setCopied(true);
             setTimeout(() => setCopied(false), 2000);
         }
-    };
+    }, [isBlankAudio, transcript.text]);
+    
+    const handlePlayPause = useCallback(async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        
+        if (isPlaying && audioRef.current) {
+            audioRef.current.pause();
+            setIsPlaying(false);
+        } else {
+            // Load audio on demand
+            if (!audioBlob && !isAudioLoading) {
+                await loadAudio();
+            }
+            
+            if (audioBlob) {
+                // Create audio element if it doesn't exist
+                if (!audioRef.current) {
+                    const url = URL.createObjectURL(audioBlob);
+                    audioRef.current = new Audio(url);
+                    audioRef.current.onended = () => setIsPlaying(false);
+                }
+                
+                try {
+                    await audioRef.current.play();
+                    setIsPlaying(true);
+                } catch (error) {
+                    console.error('Failed to play audio:', error);
+                }
+            }
+        }
+    }, [isPlaying, audioBlob, isAudioLoading, loadAudio]);
     
     const handleClick = () => {
         if (onClick) {
@@ -185,35 +172,15 @@ export const TranscriptItem = memo(function TranscriptItem({
                     )}
                 </div>
                 
-                <span className="transcript-time">{formatTime(transcript.created_at)}</span>
+                <span className="transcript-time">{formattedTime}</span>
                 
                 <div className="transcript-actions">
                     {transcript.audio_path && (
                         <button
                             className="transcript-action-button play"
-                            onClick={async (e) => {
-                                e.stopPropagation();
-                                
-                                if (isPlaying && audioRef.current) {
-                                    audioRef.current.pause();
-                                    setIsPlaying(false);
-                                } else if (audioUrl && !isAudioLoading) {
-                                    // Create audio element if it doesn't exist
-                                    if (!audioRef.current) {
-                                        audioRef.current = new Audio(audioUrl);
-                                        audioRef.current.onended = () => setIsPlaying(false);
-                                    }
-                                    
-                                    try {
-                                        await audioRef.current.play();
-                                        setIsPlaying(true);
-                                    } catch (error) {
-                                        console.error('Failed to play audio:', error);
-                                    }
-                                }
-                            }}
+                            onClick={handlePlayPause}
                             title={isPlaying ? "Pause audio" : "Play audio"}
-                            disabled={isAudioLoading || !audioUrl}
+                            disabled={isAudioLoading}
                         >
                             {isPlaying ? <Pause size={14} /> : <Play size={14} />}
                         </button>
