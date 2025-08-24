@@ -189,6 +189,15 @@ class ZmqServerWorker:
     
     def transcribe(self, audio: np.ndarray, sample_rate: int) -> tuple[str, float]:
         """Transcribe audio to text."""
+        # Safety check for empty or very short audio
+        if len(audio) == 0:
+            logger.warning("Cannot transcribe empty audio")
+            return "", 0.0
+        
+        if len(audio) < 160:  # Less than 10ms at 16kHz
+            logger.warning(f"Audio too short for transcription: {len(audio)} samples")
+            return "", 0.0
+        
         if self.model is None:
             # Mock transcription for testing
             return f"[Mock] Transcribed {len(audio)} samples at {sample_rate}Hz", 0.95
@@ -403,8 +412,18 @@ class ZmqServerWorker:
                     audio = np.array(audio_chunk['audio'], dtype=np.float32)
                     sample_rate = audio_chunk['sample_rate']
             
-            # Transcribe
-            text, confidence = self.transcribe(audio, sample_rate)
+            # Validate audio is not empty
+            if len(audio) == 0:
+                logger.warning(f"Received empty audio (0 samples)")
+                text = ""
+                confidence = 0.0
+            elif len(audio) < 160:  # Less than 10ms at 16kHz
+                logger.warning(f"Audio too short: {len(audio)} samples (minimum 160 required)")
+                text = ""
+                confidence = 0.0
+            else:
+                # Transcribe
+                text, confidence = self.transcribe(audio, sample_rate)
             
             # Calculate actual processing time
             processing_time_ms = int((time.time() - self.processing_start_time) * 1000)

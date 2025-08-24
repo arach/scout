@@ -3,6 +3,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use serde::{Serialize, Deserialize};
 use crate::settings::ExternalServiceConfig;
+use super::process_manager::ProcessManager;
+use super::control_plane_monitor;
+use once_cell::sync::Lazy;
 
 const SERVICE_LABEL: &str = "com.scout.transcriber";
 const PID_FILE: &str = "/tmp/transcriber.pid";
@@ -38,6 +41,9 @@ impl From<&ExternalServiceConfig> for TranscriberConfig {
         }
     }
 }
+
+// Global process manager instance
+static PROCESS_MANAGER: Lazy<ProcessManager> = Lazy::new(|| ProcessManager::new());
 
 pub struct ServiceManager;
 
@@ -178,6 +184,14 @@ impl ServiceManager {
         // Wait a moment for the service to initialize
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
         
+        // Initialize control plane monitor to receive status messages
+        if let Err(e) = control_plane_monitor::init_control_plane_monitor().await {
+            log::warn!("Failed to initialize control plane monitor: {}", e);
+            output_log.push(format!("⚠ Control plane monitor not available: {}", e));
+        } else {
+            output_log.push("✓ Control plane monitor started on port 5557".to_string());
+        }
+        
         // Check the actual status
         let status = Self::check_status().await;
         if status.running {
@@ -247,11 +261,23 @@ impl ServiceManager {
         }
     }
     
-    /// Stop the transcriber service using launchctl
+    /// Stop the transcriber service using launchctl and clean up all processes
     pub async fn stop_service() -> Result<(), String> {
         let plist_path = Self::plist_path();
         
-        // Stop the service
+        // First, use process manager to kill all transcriber processes
+        let killed_pids = PROCESS_MANAGER.kill_all_matching("transcriber").await?;
+        if !killed_pids.is_empty() {
+            log::info!("Killed {} transcriber processes: {:?}", killed_pids.len(), killed_pids);
+        }
+        
+        // Also kill any Python ZMQ workers
+        let killed_python = PROCESS_MANAGER.kill_all_matching("zmq_server_worker").await?;
+        if !killed_python.is_empty() {
+            log::info!("Killed {} Python worker processes: {:?}", killed_python.len(), killed_python);
+        }
+        
+        // Stop the service via launchctl
         let _ = Command::new("launchctl")
             .arg("stop")
             .arg(SERVICE_LABEL)
@@ -274,6 +300,12 @@ impl ServiceManager {
         
         // Clean up PID file if it exists
         let _ = fs::remove_file(PID_FILE);
+        
+        // Clean up any zombie processes
+        let zombies = PROCESS_MANAGER.cleanup_zombies().await?;
+        if zombies > 0 {
+            log::info!("Cleaned up {} zombie processes", zombies);
+        }
         
         Ok(())
     }
@@ -324,33 +356,28 @@ impl ServiceManager {
     
     /// Check if ZeroMQ ports are listening
     async fn check_zeromq_ports() -> bool {
-        use std::net::{TcpStream, SocketAddr};
-        use std::time::Duration;
+        // Use the process manager's health check
+        let health = PROCESS_MANAGER.check_service_health("transcriber", &[5555, 5556, 5557]).await;
+        health.healthy
+    }
+    
+    /// Get detailed process information
+    pub async fn get_process_info() -> Result<String, String> {
+        let processes = PROCESS_MANAGER.get_all_status().await;
         
-        let ports = [5555, 5556, 5557];
-        let timeout = Duration::from_millis(500);
-        
-        for port in &ports {
-            let addr_str = format!("127.0.0.1:{}", port);
-            if let Ok(addr) = addr_str.parse::<SocketAddr>() {
-                match TcpStream::connect_timeout(&addr, timeout) {
-                    Ok(_) => {
-                        // Port is open, connection succeeded
-                        continue;
-                    }
-                    Err(_) => {
-                        // Port is not accessible
-                        return false;
-                    }
-                }
-            } else {
-                // Failed to parse address
-                return false;
-            }
+        if processes.is_empty() {
+            return Ok("No managed processes running".to_string());
         }
         
-        // All ports are accessible
-        true
+        let mut info = Vec::new();
+        for (name, process) in processes {
+            info.push(format!(
+                "{}: PID={}, Memory={:.1}MB, CPU={:.1}%, Children={}",
+                name, process.pid, process.memory_mb, process.cpu_percent, process.children.len()
+            ));
+        }
+        
+        Ok(info.join("\n"))
     }
     
     /// Check if transcriber binary is installed

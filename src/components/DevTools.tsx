@@ -32,6 +32,12 @@ interface DevToolsProps {
   onStepChange?: (step: OnboardingStep) => void;
 }
 
+interface DevInfo {
+  branch: string;
+  commit: string;
+  rust_env: string;
+}
+
 export function DevTools(props: DevToolsProps) {
   const {
     currentView,
@@ -80,6 +86,7 @@ export function DevTools(props: DevToolsProps) {
   const [waveformStyle, setWaveformStyle] = useState<'classic' | 'enhanced' | 'particles'>('enhanced');
   const [currentOnboardingStep, setCurrentOnboardingStep] = useState<OnboardingStep>(propsOnboardingStep || 'model');
   const [transcriberInstallStatus, setTranscriberInstallStatus] = useState<'checking' | 'installed' | 'not_installed' | null>(null);
+  const [devInfo, setDevInfo] = useState<DevInfo | null>(null);
 
   // Sync with props onboarding step when it changes
   useEffect(() => {
@@ -104,6 +111,13 @@ export function DevTools(props: DevToolsProps) {
       }
     }
   }, [showFirstRun, propsOnboardingStep]);
+
+  // Fetch dev info (branch, commit, etc)
+  useEffect(() => {
+    invoke<DevInfo>('get_dev_info')
+      .then(setDevInfo)
+      .catch(console.error);
+  }, []);
 
   // Only show in development
   const isDev = import.meta.env.DEV;
@@ -244,13 +258,23 @@ export function DevTools(props: DevToolsProps) {
 
   return (
     <>
-      {/* DEV Button - Circular with Animation */}
+      {/* DEV Button - Shows port for identification */}
       <button 
         className={getButtonClass()}
         onClick={handleToggle}
-        title="Developer Tools"
+        title={`Developer Tools - Port ${window.location.port || '5173'}`}
+        style={{
+          borderColor: window.location.port === '1425' ? '#61dafb' : 
+                       window.location.port === '1430' ? '#f39c12' : 
+                       '#646cff'
+        }}
       >
-        DEV
+        <div style={{ fontSize: '10px', lineHeight: 1.2 }}>
+          <div>DEV</div>
+          <div style={{ fontSize: '8px', opacity: 0.8 }}>
+            :{window.location.port || '5173'}
+          </div>
+        </div>
       </button>
 
       {/* Dev Tools Panel - Context Aware */}
@@ -604,6 +628,29 @@ export function DevTools(props: DevToolsProps) {
             <div className="dev-tool-section">
               <h4>App Info</h4>
               <div className="status-grid">
+                <span className="status-label">Port:</span>
+                <span className="status-value" style={{ 
+                  color: window.location.port === '1425' ? '#61dafb' : 
+                         window.location.port === '1430' ? '#f39c12' : 
+                         '#646cff' 
+                }}>
+                  {window.location.port || '5173'}
+                </span>
+                
+                {devInfo && (
+                  <>
+                    <span className="status-label">Branch:</span>
+                    <span className="status-value" style={{ color: '#4ade80' }}>
+                      {devInfo.branch.length > 25 ? 
+                        `${devInfo.branch.slice(0, 25)}...` : 
+                        devInfo.branch}
+                    </span>
+                    
+                    <span className="status-label">Commit:</span>
+                    <span className="status-value">{devInfo.commit}</span>
+                  </>
+                )}
+                
                 <span className="status-label">Version:</span>
                 <span className="status-value">{appVersion}</span>
                 

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-shell';
 import { NumberField } from '@base-ui-components/react/number-field';
-import { ExternalLink, CheckCircle, AlertCircle, Play, Square, Copy, Terminal, Check, FileText, Info, Activity, Settings, RefreshCw, Plus, Minus } from 'lucide-react';
+import { ExternalLink, CheckCircle, AlertCircle, Play, Square, Copy, Terminal, Check, FileText, Info, Activity, RefreshCw, Plus, Minus, Cpu, HardDrive, Clock, GitBranch, XCircle } from 'lucide-react';
 import './ExternalServiceSettings.css';
 
 interface ExternalServiceConfig {
@@ -22,6 +22,14 @@ interface ServiceStatus {
   pid?: number;
   last_check?: string;
   error?: string;
+}
+
+interface ProcessStats {
+  pid: number;
+  memory_mb: number;
+  cpu_percent: number;
+  started_at?: number;
+  children: number[];
 }
 
 interface ExternalServiceSettingsProps {
@@ -55,20 +63,16 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
     message: string;
     timestamp: string;
   }>>([]);
+  const [processStats, setProcessStats] = useState<ProcessStats | null>(null);
+  const [expandedPid, setExpandedPid] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadingStats, setLoadingStats] = useState(false);
 
   useEffect(() => {
     loadConfig();
-    checkServiceStatus();
+    checkServiceStatus(); // Check once on component mount
     checkInstallation();
   }, []);
-
-  // Auto-refresh status every 5 seconds when service is running
-  useEffect(() => {
-    if (status.running) {
-      const interval = setInterval(checkServiceStatus, 5000);
-      return () => clearInterval(interval);
-    }
-  }, [status.running]);
   
   // Listen for DevTools override changes
   useEffect(() => {
@@ -102,9 +106,36 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
   const checkServiceStatus = async () => {
     try {
       const serviceStatus = await invoke<ServiceStatus>('check_external_service_status');
+      console.log('Service status:', serviceStatus);
       setStatus(serviceStatus);
       if (onStatusChange) {
         onStatusChange(serviceStatus);
+      }
+      
+      // If service is running, get process stats
+      if (serviceStatus.running && serviceStatus.pid) {
+        setLoadingStats(true);
+        console.log('Getting process stats for PID:', serviceStatus.pid);
+        try {
+          const stats = await invoke<any>('get_process_stats', { pid: serviceStatus.pid });
+          console.log('Process stats response:', stats);
+          // Map the response to our ProcessStats interface
+          const processStats: ProcessStats = {
+            pid: stats.pid || serviceStatus.pid,
+            memory_mb: stats.memory_mb || 0,
+            cpu_percent: stats.cpu_percent || 0,
+            started_at: stats.started_at,
+            children: stats.children || []
+          };
+          setProcessStats(processStats);
+        } catch (error) {
+          console.error('Failed to get process stats:', error);
+          setProcessStats(null);
+        } finally {
+          setLoadingStats(false);
+        }
+      } else {
+        setProcessStats(null);
       }
     } catch (error) {
       console.error('Failed to check service status:', error);
@@ -113,6 +144,7 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
       if (onStatusChange) {
         onStatusChange(errorStatus);
       }
+      setProcessStats(null);
     }
   };
 
@@ -212,6 +244,57 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
       setServiceOperation('idle');
       setTimeout(() => setOperationResult(null), 4000);
     }
+  };
+
+  const handleForceKill = async () => {
+    if (!status.pid) return;
+    setServiceOperation('stopping');
+    try {
+      await invoke('force_kill_process', { pid: status.pid });
+      setOperationResult({
+        type: 'success',
+        message: 'Process forcefully terminated'
+      });
+      await checkServiceStatus();
+    } catch (error) {
+      setOperationResult({
+        type: 'error',
+        message: `Failed to kill process: ${error}`
+      });
+    } finally {
+      setServiceOperation('idle');
+      setTimeout(() => setOperationResult(null), 4000);
+    }
+  };
+
+  const formatDuration = (startedAt?: number) => {
+    if (!startedAt) return '';
+    const now = Date.now() / 1000;
+    const diff = now - startedAt;
+    if (diff < 60) return `${Math.floor(diff)}s`;
+    if (diff < 3600) return `${Math.floor(diff / 60)}m`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
+    return `${Math.floor(diff / 86400)}d`;
+  };
+
+  const formatMemory = (mb: number) => {
+    if (mb < 1024) return `${mb.toFixed(0)}MB`;
+    return `${(mb / 1024).toFixed(1)}GB`;
+  };
+
+  // Braille spinner animation
+  const BrailleSpinner = () => {
+    const [frame, setFrame] = useState(0);
+    const patterns = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+    
+    useEffect(() => {
+      const interval = setInterval(() => {
+        setFrame(f => (f + 1) % patterns.length);
+      }, 80);
+      return () => clearInterval(interval);
+    }, []);
+    
+    return <span style={{ fontFamily: 'monospace', opacity: 0.7 }}>{patterns[frame]}</span>;
   };
 
   const handleRestartService = async () => {
@@ -551,58 +634,131 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
           <div className="service-row">
             <span className="field">STATUS:</span>
             <div className="status-controls">
-              <span className={`status-badge ${status.running ? 'running' : 'stopped'}`}>
-                {status.running ? '● Running' : 'Stopped'}
-              </span>
-              {!status.running ? (
-                <button
-                  className="btn-control-inline start"
-                  onClick={handleStartService}
-                  disabled={serviceOperation !== 'idle'}
-                >
-                  {serviceOperation === 'starting' ? (
-                    <div className="spinner-small" />
-                  ) : (
-                    <>
-                      <Play size={12} />
-                      <span>Start</span>
-                    </>
-                  )}
-                </button>
-              ) : (
-                <>
+              <div className="status-info-row">
+                <span className={`status-badge ${status.running ? 'running' : 'stopped'}`}>
+                  {status.running ? '● Running' : 'Stopped'}
+                </span>
+                {status.running && status.pid && (
+                  <>
+                    <span className="status-separator">|</span>
+                    <div 
+                      className="pid-info clickable"
+                      onClick={() => setExpandedPid(!expandedPid)}
+                      title="Click to expand process details"
+                    >
+                      <Activity size={12} className={status.healthy ? 'healthy' : 'unhealthy'} />
+                      <span className="pid-value">{status.pid}</span>
+                      {loadingStats && <BrailleSpinner />}
+                    </div>
+                    {processStats && !loadingStats ? (
+                      <>
+                        <span className="status-separator">|</span>
+                        <span className="process-stat">
+                          <Clock size={11} />
+                          {formatDuration(processStats.started_at)}
+                        </span>
+                        <span className="status-separator">|</span>
+                        <span className="process-stat">
+                          <HardDrive size={11} />
+                          {formatMemory(processStats.memory_mb)}
+                        </span>
+                        <span className="status-separator">|</span>
+                        <span className="process-stat">
+                          <Cpu size={11} />
+                          {processStats.cpu_percent.toFixed(1)}%
+                        </span>
+                      </>
+                    ) : null}
+                  </>
+                )}
+              </div>
+              <div className="status-actions">
+                {!status.running ? (
                   <button
-                    className="btn-control-inline stop"
-                    onClick={handleStopService}
+                    className="btn-control-inline start"
+                    onClick={handleStartService}
                     disabled={serviceOperation !== 'idle'}
                   >
-                    {serviceOperation === 'stopping' ? (
+                    {serviceOperation === 'starting' ? (
                       <div className="spinner-small" />
                     ) : (
                       <>
-                        <Square size={12} />
-                        <span>Stop</span>
+                        <Play size={12} />
+                        <span>Start</span>
                       </>
                     )}
                   </button>
-                  <button
-                    className="btn-control-inline restart"
-                    onClick={handleRestartService}
-                    disabled={serviceOperation !== 'idle'}
-                  >
-                    {serviceOperation === 'restarting' ? (
-                      <div className="spinner-small" />
-                    ) : (
-                      <>
-                        <RefreshCw size={12} />
-                        <span>Restart</span>
-                      </>
-                    )}
-                  </button>
-                </>
-              )}
+                ) : (
+                  <>
+                    <button
+                      className="btn-control-inline stop"
+                      onClick={handleStopService}
+                      disabled={serviceOperation !== 'idle'}
+                    >
+                      {serviceOperation === 'stopping' ? (
+                        <div className="spinner-small" />
+                      ) : (
+                        <>
+                          <Square size={12} />
+                          <span>Stop</span>
+                        </>
+                      )}
+                    </button>
+                    <button
+                      className="btn-control-inline restart"
+                      onClick={handleRestartService}
+                      disabled={serviceOperation !== 'idle'}
+                    >
+                      {serviceOperation === 'restarting' ? (
+                        <div className="spinner-small" />
+                      ) : (
+                        <>
+                          <RefreshCw size={12} />
+                          <span>Restart</span>
+                        </>
+                      )}
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
           </div>
+          {expandedPid && status.running && processStats && (
+            <div className="pid-details">
+              <div className="pid-detail-item">
+                <GitBranch size={12} />
+                <span className="detail-label">Child Processes:</span>
+                <span className="detail-value">{processStats.children.length}</span>
+                {processStats.children.length > 0 && (
+                  <span className="child-pids">({processStats.children.join(', ')})</span>
+                )}
+              </div>
+              <div className="pid-detail-actions">
+                <button
+                  className="btn-control-inline danger"
+                  onClick={handleForceKill}
+                  disabled={serviceOperation !== 'idle'}
+                  title="Force kill the process and all children"
+                >
+                  <XCircle size={12} />
+                  <span>Force Kill</span>
+                </button>
+                <button
+                  className="btn-control-inline refresh"
+                  onClick={async () => {
+                    setRefreshing(true);
+                    await checkServiceStatus();
+                    setTimeout(() => setRefreshing(false), 500);
+                  }}
+                  disabled={refreshing}
+                  title="Refresh process stats"
+                >
+                  <RefreshCw size={12} className={refreshing ? 'spinning' : ''} />
+                  <span>Refresh</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -957,6 +1113,7 @@ export const ExternalServiceSettings: React.FC<ExternalServiceSettingsProps> = (
           </>
         )}
       </div>
+
 
       {/* Documentation Footer */}
       <div className="docs-footer">

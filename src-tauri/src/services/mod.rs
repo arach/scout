@@ -19,3 +19,9 @@ pub use downloads::*;
 pub mod service_manager;
 pub use service_manager::*;
 
+pub mod process_manager;
+pub use process_manager::*;
+
+pub mod control_plane_monitor;
+pub use control_plane_monitor::*;
+
