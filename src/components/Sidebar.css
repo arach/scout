@@ -217,9 +217,9 @@
 
 /* Label for expanded state */
 .sidebar-label {
-  font-family: 'Silkscreen', monospace;
-  font-size: 12px;
-  font-weight: 400;
+  font-family: 'Inter', var(--font-family);
+  font-size: 14px;  /* Increased from 13px */
+  font-weight: var(--font-weight-semibold);  /* Increased from medium */
   text-transform: uppercase;
   letter-spacing: 0.08em;
   white-space: nowrap;

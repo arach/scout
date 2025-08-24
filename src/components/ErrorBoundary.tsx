@@ -117,15 +117,15 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       return (
         <div className="error-boundary">
           <div className="error-boundary-content">
-            <div className="error-boundary-icon">⚠️</div>
-            <h2 className="error-boundary-title">Something went wrong</h2>
+            <div className="error-boundary-icon">😅</div>
+            <h2 className="error-boundary-title">Oops, hit a snag!</h2>
             <p className="error-boundary-message">
-              {name} encountered an unexpected error and couldn't be displayed.
+              The {name || 'component'} had a little hiccup. No worries though!
             </p>
             
             {process.env.NODE_ENV === 'development' && (
               <details className="error-boundary-details">
-                <summary>Error Details (Development)</summary>
+                <summary>Tech details (for debugging)</summary>
                 <div className="error-boundary-error-info">
                   <p><strong>Error ID:</strong> {errorId}</p>
                   <p><strong>Message:</strong> {error?.message}</p>
@@ -143,7 +143,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
                   onClick={this.handleRetry}
                   type="button"
                 >
-                  Try Again ({this.maxRetries - this.retryCount} attempts left)
+                  Give it another shot
                 </button>
               )}
               <button 
@@ -151,7 +151,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
                 onClick={this.handleReload}
                 type="button"
               >
-                Reload Page
+                Refresh page
               </button>
             </div>
           </div>

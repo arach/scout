@@ -416,7 +416,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete, onSt
               onClick={startModelDownload}
               className="onboarding-btn onboarding-btn-primary"
             >
-              <Download className="inline mr-1" style={{ width: '12px', height: '12px' }} />
+              <Download style={{ width: '16px', height: '16px' }} />
               Download model (39 MB)
             </button>
             <p className="onboarding-note">You can always download a better model later.</p>
@@ -492,23 +492,22 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete, onSt
             </div>
             
             <div className="onboarding-mic-selector" style={{ marginTop: '24px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: 500 }}>
+              <label style={{ display: 'block', marginBottom: '12px', fontSize: '14px', fontWeight: 600, color: 'rgba(255, 255, 255, 0.9)' }}>
                 Select Microphone
               </label>
-              <MicrophoneSelector
-                selectedMic={selectedMic}
-                onMicChange={setSelectedMic}
-                disabled={isTestingMic}
-              />
-              
-              <div style={{ marginTop: '16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                <MicrophoneSelector
+                  selectedMic={selectedMic}
+                  onMicChange={setSelectedMic}
+                  disabled={isTestingMic}
+                />
                 <button
                   onClick={testMicrophone}
                   className={`onboarding-btn ${isTestingMic ? 'onboarding-btn-secondary' : 'onboarding-btn-primary'}`}
-                  style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '0.375rem 1.625rem', position: 'relative', top: '3px' }}
                 >
                   <Mic size={18} />
-                  {isTestingMic ? 'Stop Test' : 'Test Microphone'}
+                  {isTestingMic ? 'Stop' : 'Test'}
                 </button>
                 
                 {isTestingMic && (
@@ -663,7 +662,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete, onSt
       {!isCapturingPTT && !isCapturingToggle && (
         <div className="onboarding-shortcut-hint">
           <p>Recommended: Use modifier keys (Cmd, Shift, Alt) for better compatibility</p>
-          <p>Avoid conflicts with system shortcuts</p>
+          <p>We'll check for conflicts with system shortcuts</p>
         </div>
       )}
 

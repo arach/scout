@@ -42,27 +42,24 @@
 
 /* Integrated import button in empty state */
 .import-audio-button-integrated {
-    background: var(--bg-secondary);
+    background: transparent;
     border: 1px solid var(--border-primary);
     color: var(--text-secondary);
-    padding: 8px 16px;
-    border-radius: 6px;
+    padding: 6px 14px;
+    border-radius: 4px;
     cursor: pointer;
-    font-size: 13px;
-    font-weight: 500;
+    font-size: var(--font-size-base, 12px);
+    font-weight: var(--font-weight-medium, 500);
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     transition: all 0.2s ease;
-    margin-top: 16px;
 }
 
 .import-audio-button-integrated:hover {
-    background: var(--bg-hover);
+    background: var(--bg-secondary);
     border-color: var(--accent-primary);
     color: var(--accent-primary);
-    transform: translateY(-1px);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .import-audio-button-integrated svg {
@@ -180,25 +177,70 @@
     }
 }
 
-/* Empty state styles */
-.session-empty-state {
-    text-align: center;
-    padding: 32px 16px;
+/* Table structure for empty and populated states */
+.session-table-container {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-primary);
+    border-radius: var(--border-radius, 6px);
+    overflow: hidden;
+}
+
+.session-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--font-size-base, 12px);
+}
+
+.session-table thead {
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-primary);
+}
+
+.session-table th {
+    text-align: left;
+    padding: 10px 16px;
+    font-weight: var(--font-weight-medium, 500);
     color: var(--text-tertiary);
+    font-size: var(--font-size-sm, 11px);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
 }
 
-.session-empty-icon {
-    font-size: 32px;
-    margin-bottom: 12px;
-    opacity: 0.6;
+.session-table th:first-child {
+    width: 120px;
 }
 
-.session-empty-message {
-    font-size: 14px;
-    line-height: 1.5;
-    margin: 0;
-    max-width: 280px;
+.session-table th:nth-child(2) {
+    width: 100px;
+}
+
+.session-table th:last-child {
+    width: 40px;
+}
+
+/* Empty state styles */
+.session-empty-row td {
+    padding: 60px 32px;
+    text-align: center;
+}
+
+.session-empty-content {
+    max-width: 400px;
     margin: 0 auto;
+}
+
+.session-empty-title {
+    font-size: var(--font-size-md, 13px);
+    font-weight: var(--font-weight-medium, 500);
+    color: var(--text-primary);
+    margin: 0 0 8px 0;
+}
+
+.session-empty-subtitle {
+    font-size: var(--font-size-base, 12px);
+    color: var(--text-tertiary);
+    margin: 0 0 24px 0;
+    line-height: 1.5;
 }
 
 /* Dark mode styles removed - now handled by theme system */

@@ -110,8 +110,10 @@
   align-items: center;
   gap: 12px;
   color: var(--text-secondary);
-  font-size: 14px;
-  font-weight: 300;
+  font-family: 'Inter', var(--font-family);
+  font-size: 14px;  /* Increased for better readability */
+  font-weight: var(--font-weight-medium);
+  letter-spacing: -0.015em;
   cursor: pointer;
   transition: all 0.15s ease;
   text-align: left;

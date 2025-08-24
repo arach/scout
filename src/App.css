@@ -9,21 +9,40 @@
   -webkit-text-size-adjust: 100%;
 
   /* Theme-controlled properties - values set by theme system */
-  font-family: var(--font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", "SF Pro Text", "Roboto", sans-serif);
-  font-size: var(--font-size-base, 13px);
+  /* Inter as primary font - used by Linear, Raycast, Midday, etc. */
+  font-family: var(--font-family, 'Inter', -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "Roboto", sans-serif);
+  font-size: var(--font-size-base, 12px);  /* Smaller, more refined */
   line-height: var(--line-height-normal, 1.5);
-  font-weight: var(--font-weight-normal, 400);
+  font-weight: var(--font-weight-normal, 420);  /* Slightly heavier than 400 for Inter */
+  
+  /* Enable font features for better rendering */
+  font-feature-settings: 'cv11' 1, 'ss01' 1, 'ss03' 1;
+  letter-spacing: -0.006em;  /* Tighter for small text */
   color: var(--text-primary);
   background-color: var(--bg-primary);
   
-  /* Type scale for consistency */
-  --font-size-xs: 11px;
-  --font-size-sm: 12px;
-  --font-size-base: 13px;
-  --font-size-md: 14px;
-  --font-size-lg: 16px;
-  --font-size-xl: 20px;
-  --font-size-2xl: 24px;
+  /* Type scale - compact and refined for dense UIs */
+  --font-size-xs: 10px;   /* Tiny labels */
+  --font-size-sm: 11px;   /* Small labels */
+  --font-size-base: 12px; /* Body text */
+  --font-size-md: 13px;   /* Emphasis */
+  --font-size-lg: 15px;   /* Headings */
+  --font-size-xl: 18px;   /* Large headings */
+  --font-size-2xl: 22px;  /* Hero text */
+  
+  /* Font weights - Inter has 9 weights */
+  --font-weight-thin: 100;
+  --font-weight-extralight: 200;
+  --font-weight-light: 300;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  --font-weight-extrabold: 800;
+  --font-weight-black: 900;
+  
+  /* Monospace font stack */
+  --font-mono: 'JetBrains Mono', 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', monospace;
 }
 
 .app-container {

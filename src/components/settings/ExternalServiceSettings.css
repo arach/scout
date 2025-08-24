@@ -110,7 +110,7 @@
 }
 
 .service-row .value.mono {
-  font-family: 'Monaco', 'Menlo', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
 }
 
@@ -125,14 +125,14 @@
 .value-detail {
   font-size: 11px;
   color: var(--text-tertiary);
-  font-family: 'Monaco', 'Menlo', monospace;
+  font-family: var(--font-mono);
   opacity: 0.7;
 }
 
 .value-detail-hover {
   font-size: 11px;
   color: var(--text-tertiary);
-  font-family: 'Monaco', 'Menlo', monospace;
+  font-family: var(--font-mono);
   margin-left: 8px;
   opacity: 0;
   transition: opacity 0.15s ease;
@@ -417,7 +417,7 @@
   border: 1px solid transparent;
   border-radius: 4px;
   color: var(--text-primary);
-  font-family: 'Monaco', 'Menlo', monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   transition: all 0.2s ease;
 }
@@ -429,7 +429,7 @@
 }
 
 .path-text {
-  font-family: 'Monaco', 'Menlo', monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-primary);
 }
@@ -540,7 +540,7 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  font-family: 'Monaco', 'Menlo', monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   animation: slideDown 0.3s ease-out;
 }
@@ -597,7 +597,7 @@
 .log-timestamp {
   color: var(--text-tertiary);
   opacity: 0.6;
-  font-family: 'Monaco', 'Menlo', monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   min-width: 60px;
 }
@@ -974,7 +974,7 @@
   border: 1px solid rgba(96, 165, 250, 0.2);
   padding: 2px 6px;
   border-radius: 4px;
-  font-family: 'Monaco', 'Menlo', monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   color: rgb(96, 165, 250);
   font-weight: 500;
@@ -1132,7 +1132,7 @@
 
 .command-box code {
   flex: 1;
-  font-family: 'Monaco', 'Menlo', monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1;
   color: #e0e0e0;
@@ -1307,7 +1307,7 @@
 }
 
 .external-service-settings .model-top h4 {
-  font-family: 'Monaco', 'Menlo', monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 400;
   color: rgba(0, 0, 0, 0.8);
@@ -1318,7 +1318,7 @@
 }
 
 .external-service-settings .model-lab {
-  font-family: 'Monaco', 'Menlo', monospace;
+  font-family: var(--font-mono);
   font-size: 8px;
   font-weight: 400;
   color: rgba(0, 0, 0, 0.5);
@@ -1380,7 +1380,7 @@
   border-radius: 3px;
   color: var(--text-primary);
   font-size: 13px;
-  font-family: 'Monaco', 'Menlo', monospace;
+  font-family: var(--font-mono);
   transition: all 0.2s ease;
   height: 24px;
   min-width: 80px;
@@ -1457,7 +1457,7 @@
   border-left: 1px solid rgba(255, 255, 255, 0.1);
   border-right: 1px solid rgba(255, 255, 255, 0.1);
   color: var(--text-primary);
-  font-family: 'Monaco', 'Menlo', monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   text-align: center;
   width: 60px;
@@ -1529,7 +1529,7 @@
   border-radius: 3px;
   color: var(--text-primary);
   font-size: 12px;
-  font-family: 'Monaco', 'Menlo', monospace;
+  font-family: var(--font-mono);
   transition: all 0.2s ease;
   height: 24px;
   width: 70px;
@@ -1625,7 +1625,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-family: 'Monaco', 'Menlo', monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
 }
 
@@ -1640,7 +1640,7 @@
 }
 
 .external-service-settings .model-description {
-  font-family: 'Monaco', 'Menlo', monospace;
+  font-family: var(--font-mono);
   font-size: 9px;
   line-height: 1.2;
   color: rgba(0, 0, 0, 0.7);
