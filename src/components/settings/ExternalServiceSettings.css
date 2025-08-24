@@ -147,8 +147,152 @@
 .status-controls {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
   flex: 1;
+}
+
+/* Status Info Row */
+.status-info-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.status-separator {
+  color: var(--text-tertiary);
+  opacity: 0.3;
+  font-size: 12px;
+}
+
+/* PID Info */
+.pid-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--bg-tertiary);
+  transition: all 0.2s;
+}
+
+.pid-info.clickable {
+  cursor: pointer;
+}
+
+.pid-info.clickable:hover {
+  background: var(--bg-hover);
+  transform: translateY(-1px);
+}
+
+.pid-info .healthy {
+  color: #10b981;
+}
+
+.pid-info .unhealthy {
+  color: #ef4444;
+}
+
+.pid-value {
+  font-family: monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* Process Stats */
+.process-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--bg-tertiary);
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.process-stat:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* Status Actions */
+.status-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* PID Details Dropdown */
+.pid-details {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: rgba(59, 130, 246, 0.05);
+  border-top: 1px solid rgba(59, 130, 246, 0.1);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  animation: slideDown 0.2s ease;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.pid-detail-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.detail-label {
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+
+.detail-value {
+  font-family: monospace;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.child-pids {
+  font-family: monospace;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  opacity: 0.8;
+}
+
+.pid-detail-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.btn-control-inline.danger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border-color: #ef4444;
+}
+
+.btn-control-inline.refresh {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.spinning {
+  animation: spin 1s linear infinite;
 }
 
 /* Status Badge - Inline */

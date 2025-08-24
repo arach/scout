@@ -274,6 +274,37 @@ impl ProcessManager {
         }
     }
     
+    /// Kill a specific process by PID
+    pub async fn kill_process(&self, pid: u32) -> Result<(), String> {
+        use std::process::Command;
+        
+        #[cfg(target_os = "macos")]
+        {
+            let output = Command::new("kill")
+                .arg("-9")
+                .arg(pid.to_string())
+                .output()
+                .map_err(|e| format!("Failed to execute kill command: {}", e))?;
+            
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(format!("Failed to kill process {}: {}", pid, stderr));
+            }
+        }
+        
+        #[cfg(not(target_os = "macos"))]
+        {
+            let mut system = self.system.write().await;
+            if let Some(process) = system.process(sysinfo::Pid::from_u32(pid)) {
+                process.kill();
+            } else {
+                return Err(format!("Process {} not found", pid));
+            }
+        }
+        
+        Ok(())
+    }
+    
     /// Get current status of all managed processes
     pub async fn get_all_status(&self) -> HashMap<String, ProcessInfo> {
         let mut system = self.system.write().await;
@@ -305,14 +336,29 @@ impl ProcessManager {
         
         let pid_obj = sysinfo::Pid::from_u32(pid);
         if let Some(process) = system.process(pid_obj) {
+            // Get child processes
+            let child_pids = Self::get_child_processes(&system, pid_obj);
+            
+            // Calculate total memory including children
+            let mut total_memory_kb = process.memory() as f32;
+            let mut total_cpu = process.cpu_usage();
+            
+            // Add memory and CPU from all child processes
+            for child_pid in &child_pids {
+                if let Some(child_process) = system.process(*child_pid) {
+                    total_memory_kb += child_process.memory() as f32;
+                    total_cpu += child_process.cpu_usage();
+                }
+            }
+            
             let info = ProcessInfo {
                 pid,
                 name: process.name().to_string(),
                 command: process.cmd().join(" "),
                 started_at: process.start_time() as i64,
-                memory_mb: (process.memory() as f32) / 1024.0 / 1024.0, // Convert KB to MB
-                cpu_percent: process.cpu_usage(),
-                children: Self::get_child_processes(&system, pid_obj)
+                memory_mb: total_memory_kb / 1024.0, // Convert KB to MB (sysinfo returns KB)
+                cpu_percent: total_cpu,
+                children: child_pids
                     .iter()
                     .map(|p| p.as_u32())
                     .collect(),

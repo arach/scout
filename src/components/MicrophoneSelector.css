@@ -1,5 +1,6 @@
 .microphone-selector {
   display: inline-block;
+  height: 40px;
 }
 
 .microphone-selector.loading {

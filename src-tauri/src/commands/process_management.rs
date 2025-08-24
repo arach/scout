@@ -62,6 +62,40 @@ pub async fn get_process_status() -> Result<serde_json::Value, String> {
     }))
 }
 
+/// Get stats for a specific process by PID
+#[tauri::command]
+pub async fn get_process_stats(pid: u32) -> Result<serde_json::Value, String> {
+    let manager = ProcessManager::new();
+    let stats = manager.get_process_stats(pid).await?;
+    
+    Ok(json!({
+        "pid": stats.pid,
+        "memory_mb": stats.memory_mb,
+        "cpu_percent": stats.cpu_percent,
+        "started_at": stats.started_at,
+        "children": stats.children,
+    }))
+}
+
+/// Force kill a process by PID
+#[tauri::command]
+pub async fn force_kill_process(pid: u32) -> Result<String, String> {
+    let manager = ProcessManager::new();
+    
+    // First try to get process info to see if it has children
+    if let Ok(stats) = manager.get_process_stats(pid).await {
+        // Kill children first
+        for child_pid in &stats.children {
+            let _ = manager.kill_process(*child_pid).await;
+        }
+    }
+    
+    // Kill the main process
+    manager.kill_process(pid).await?;
+    
+    Ok(format!("Process {} and its children have been terminated", pid))
+}
+
 /// Check health of external services
 #[tauri::command]
 pub async fn check_service_health() -> Result<serde_json::Value, String> {

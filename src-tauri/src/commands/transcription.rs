@@ -353,6 +353,7 @@ pub async fn open_models_folder(state: State<'_, AppState>) -> Result<(), String
 pub struct ExternalServiceStatus {
     pub running: bool,
     pub healthy: bool,
+    pub pid: Option<u32>,
     pub last_check: Option<String>,
     pub error: Option<String>,
 }
@@ -397,6 +398,7 @@ pub async fn check_external_service_status(state: State<'_, AppState>) -> Result
         return Ok(ExternalServiceStatus {
             running: false,
             healthy: false,
+            pid: None,
             last_check: Some(chrono::Utc::now().to_rfc3339()),
             error: Some("Service is disabled".to_string()),
         });
@@ -450,6 +452,7 @@ pub async fn check_external_service_status(state: State<'_, AppState>) -> Result
     Ok(ExternalServiceStatus {
         running: service_status.running,
         healthy,
+        pid: service_status.pid,
         last_check: Some(chrono::Utc::now().to_rfc3339()),
         error,
     })
