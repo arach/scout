@@ -1,15 +1,64 @@
 import { notFound } from 'next/navigation';
 import fs from 'fs';
 import path from 'path';
-import { marked } from 'marked';
+import { Marked } from 'marked';
+import { markedHighlight } from 'marked-highlight';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
+import BlogContent from './BlogContent';
 import '../blog.css';
+import Prism from 'prismjs';
+// Import dark theme as base for token structure
+import 'prismjs/themes/prism-dark.css';
+import 'prismjs/components/prism-rust';
+import 'prismjs/components/prism-python';
+import 'prismjs/components/prism-bash';
+import 'prismjs/components/prism-typescript';
+import 'prismjs/components/prism-json';
+import 'prismjs/components/prism-yaml';
+import 'prismjs/components/prism-toml';
+import 'prismjs/components/prism-javascript';
+import 'prismjs/components/prism-jsx';
+import 'prismjs/components/prism-tsx';
 
-// Configure marked for better code highlighting
+// Configure marked with Prism.js highlighting
+const marked = new Marked(
+  markedHighlight({
+    highlight(code, lang) {
+      // Handle text/plain for ASCII diagrams
+      if (lang === 'text' || lang === 'plain' || lang === 'txt') {
+        return code; // Don't highlight, but preserve formatting
+      }
+      
+      // Map common language aliases
+      const langMap: { [key: string]: string } = {
+        'js': 'javascript',
+        'ts': 'typescript',
+        'py': 'python',
+        'rb': 'ruby',
+        'yml': 'yaml',
+        'sh': 'bash',
+        'shell': 'bash'
+      };
+      
+      const mappedLang = langMap[lang] || lang;
+      
+      if (Prism.languages[mappedLang]) {
+        try {
+          return Prism.highlight(code, Prism.languages[mappedLang], mappedLang);
+        } catch (e) {
+          console.warn(`Failed to highlight ${mappedLang}:`, e);
+          return code;
+        }
+      }
+      return code;
+    }
+  })
+);
+
 marked.setOptions({
   gfm: true,
-  breaks: true,
+  breaks: true
 });
 
 // Generate static params for all blog posts
@@ -37,7 +86,7 @@ export default async function BlogPost({ params }: { params: Promise<{ slug: str
   
   // Read and parse markdown
   const markdown = fs.readFileSync(filePath, 'utf-8');
-  const html = marked(markdown);
+  const html = await marked.parse(markdown);
   
   // Extract title and date from markdown
   const titleMatch = markdown.match(/^# (.+)$/m);
@@ -50,7 +99,7 @@ export default async function BlogPost({ params }: { params: Promise<{ slug: str
   const readTime = Math.ceil(wordCount / 200);
   
   return (
-    <article className="max-w-4xl mx-auto px-6 py-12">
+    <article className="max-w-4xl mx-auto px-6 py-8">
         {/* Back button */}
         <Link 
           href="/blog"
@@ -61,137 +110,19 @@ export default async function BlogPost({ params }: { params: Promise<{ slug: str
         </Link>
         
         {/* Article header */}
-        <header className="mb-12">
-          <div className="flex items-center gap-3 mb-8 text-sm text-gray-500 dark:text-gray-400">
+        <header className="mb-8">
+          <div className="flex items-center gap-3 mb-4 text-sm text-gray-500 dark:text-gray-400">
             {date && <time className="font-normal">{date}</time>}
             {date && <span className="text-gray-300 dark:text-gray-700">·</span>}
             <span className="font-normal">{readTime} min read</span>
           </div>
-          <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-gray-900 dark:text-white leading-tight">
+          <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-gray-900 dark:text-white leading-tight">
             {title}
           </h1>
         </header>
         
         {/* Article content */}
-        <div 
-          className="
-            prose prose-lg 
-            prose-gray dark:prose-invert 
-            max-w-none
-            
-            /* Base font */
-            prose-base:font-normal
-            
-            /* Headings */
-            prose-headings:font-semibold 
-            prose-headings:tracking-tight
-            prose-h2:text-3xl 
-            prose-h2:mt-12 
-            prose-h2:mb-6
-            prose-h3:text-xl 
-            prose-h3:mt-8 
-            prose-h3:mb-4
-            prose-h4:text-lg
-            prose-h4:mt-6
-            prose-h4:mb-3
-            
-            /* Paragraphs and text */
-            prose-p:text-gray-600 
-            dark:prose-p:text-gray-400
-            prose-p:leading-[1.8]
-            prose-p:mb-6
-            prose-strong:font-semibold
-            prose-strong:text-gray-900
-            dark:prose-strong:text-white
-            
-            /* Links */
-            prose-a:text-gray-700
-            dark:prose-a:text-gray-300
-            prose-a:no-underline
-            prose-a:font-medium
-            prose-a:transition-all
-            hover:prose-a:text-gray-900
-            dark:hover:prose-a:text-gray-100
-            prose-a:relative
-            prose-a:after:content-['']
-            prose-a:after:absolute
-            prose-a:after:left-0
-            prose-a:after:bottom-0
-            prose-a:after:w-full
-            prose-a:after:h-px
-            prose-a:after:bg-gray-600/30
-            dark:prose-a:after:bg-gray-400/30
-            prose-a:after:scale-x-0
-            prose-a:after:origin-left
-            prose-a:after:transition-transform
-            hover:prose-a:after:scale-x-100
-            
-            /* Lists */
-            prose-ul:my-6
-            prose-ol:my-6
-            prose-li:text-gray-600
-            dark:prose-li:text-gray-400
-            prose-li:leading-[1.8]
-            prose-li:my-2
-            prose-ul:list-disc
-            prose-ol:list-decimal
-            
-            /* Quotes */
-            prose-blockquote:border-l-4
-            prose-blockquote:border-gray-400
-            prose-blockquote:pl-6
-            prose-blockquote:py-2
-            prose-blockquote:my-8
-            prose-blockquote:text-gray-600
-            dark:prose-blockquote:text-gray-400
-            prose-blockquote:italic
-            
-            /* Code */
-            prose-code:font-mono
-            prose-code:text-sm
-            prose-code:bg-gray-100
-            dark:prose-code:bg-gray-800/50
-            prose-code:text-gray-700
-            dark:prose-code:text-gray-300
-            prose-code:px-1.5
-            prose-code:py-0.5
-            prose-code:rounded
-            prose-code:before:content-none
-            prose-code:after:content-none
-            
-            /* Code blocks */
-            prose-pre:bg-gray-50
-            dark:prose-pre:bg-gray-900
-            prose-pre:text-gray-800
-            dark:prose-pre:text-gray-200
-            prose-pre:border
-            prose-pre:border-gray-200
-            dark:prose-pre:border-gray-800
-            prose-pre:rounded-lg
-            prose-pre:shadow-sm
-            prose-pre:my-6
-            
-            /* Tables */
-            prose-table:my-8
-            prose-th:font-semibold
-            prose-th:text-gray-900
-            dark:prose-th:text-white
-            prose-th:text-left
-            prose-td:text-gray-600
-            dark:prose-td:text-gray-400
-            
-            /* Horizontal rules */
-            prose-hr:border-gray-200
-            dark:prose-hr:border-gray-800
-            prose-hr:my-12
-            
-            /* Images */
-            prose-img:rounded-lg
-            prose-img:shadow-md
-            prose-img:my-8
-          "
-          dangerouslySetInnerHTML={{ __html: html }}
-        />
+        <BlogContent html={html} />
     </article>
   );
 }

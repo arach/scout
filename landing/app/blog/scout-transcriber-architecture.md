@@ -14,13 +14,13 @@ We could have gone all-in on Python (simple but potentially fragile) or pure Rus
 
 ## The Architecture: Best of Both Worlds
 
-```
+```text
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
 │   Rust Core     │    │  Message Queue   │    │ Python Workers  │
 │                 │    │                  │    │                 │
-│ • Process Mgmt  │───▶│ • ZeroMQ/Sled   │───▶│ • Whisper      │
-│ • Queue Control │    │ • MessagePack    │    │ • Parakeet MLX │
-│ • Health Checks │◀───│ • Persistent     │◀───│ • Auto-restart │
+│ • Process Mgmt  │───▶│ • ZeroMQ/Sled    │───▶│ • Whispe r      │
+│ • Queue Control │    │ • MessagePack    │    │ • Parakeet MLX  │
+│ • Health Checks │◀───│ • Persistent     │◀───│ • Auto-restart  │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
 ```
 

@@ -4,7 +4,7 @@ import { ArrowUpRight } from 'lucide-react';
 const blogPosts = [
   {
     title: "Building a Production-Ready Transcription Service: The Architecture Behind Scout's Transcriber",
-    slug: "transcriber-architecture",
+    slug: "scout-transcriber-architecture",
     date: "August 21, 2025",
     excerpt: "How we built a hybrid Rust-Python architecture that bridges system-level performance with ML ecosystem richness. A deep dive into queue-based communication, MessagePack serialization, and the trade-offs of production transcription.",
     readTime: "12 min read",
@@ -32,11 +32,11 @@ export default function BlogPage() {
   return (
     <>
       {/* Hero */}
-      <div className="max-w-5xl mx-auto px-6 pt-12 pb-8">
-        <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-gray-900 dark:text-white mb-4">
+      <div className="max-w-5xl mx-auto px-6 pt-8 pb-4">
+        <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-gray-900 dark:text-white mb-3">
           Engineering Blog
         </h1>
-        <p className="text-lg text-gray-600 dark:text-gray-400 leading-relaxed max-w-3xl">
+        <p className="text-base text-gray-600 dark:text-gray-400 leading-relaxed max-w-3xl">
           Technical deep dives on building high-performance local voice transcription. 
           Architecture decisions, performance optimizations, and implementation details.
         </p>
@@ -52,7 +52,7 @@ export default function BlogPage() {
             >
               <Link 
                 href={`/blog/${post.slug}`}
-                className="block py-8 px-2 -mx-2 hover:bg-gray-50 dark:hover:bg-gray-900/50 rounded-xl transition-all duration-200"
+                className="block py-6 px-2 -mx-2 hover:bg-gray-50 dark:hover:bg-gray-900/50 rounded-xl transition-all duration-200"
               >
                 <div className="flex items-start justify-between gap-8">
                   <div className="flex-1">
@@ -65,10 +65,10 @@ export default function BlogPage() {
                         {post.readTime}
                       </span>
                     </div>
-                    <h2 className="text-xl md:text-2xl font-semibold tracking-tight text-gray-900 dark:text-white mb-3 group-hover:text-gray-700 dark:group-hover:text-gray-300 transition-colors">
+                    <h2 className="text-lg md:text-xl font-semibold tracking-tight text-gray-900 dark:text-white mb-2 group-hover:text-gray-700 dark:group-hover:text-gray-300 transition-colors">
                       {post.title}
                     </h2>
-                    <p className="text-base text-gray-600 dark:text-gray-400 leading-relaxed line-clamp-2">
+                    <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed line-clamp-2">
                       {post.excerpt}
                     </p>
                     <div className="flex items-center gap-2 mt-4">

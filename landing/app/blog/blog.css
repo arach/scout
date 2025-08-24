@@ -1,23 +1,199 @@
-/* Code blocks with syntax highlighting */
+/* Code blocks with Prism syntax highlighting */
 .prose pre {
-  @apply bg-gray-50 dark:bg-gray-900 rounded-lg overflow-x-auto;
-  @apply border border-gray-200 dark:border-gray-800;
+  background: rgb(2 6 23) !important; /* slate-950 - force dark background */
+  @apply rounded-lg overflow-x-auto;
   @apply text-sm leading-relaxed;
+  @apply my-4;
+  @apply shadow-xl;
   tab-size: 2;
+  position: relative;
 }
 
 .prose pre code {
-  @apply bg-transparent p-0 rounded-none;
+  background: transparent !important; /* Ensure code doesn't override */
+  @apply p-0 rounded-none;
   @apply font-mono text-sm;
-  @apply text-gray-800 dark:text-gray-100;
+  color: #e2e8f0 !important; /* slate-200 base text color */
+}
+
+/* Override any Prism theme backgrounds */
+pre[class*="language-"],
+.prose pre[class*="language-"] {
+  background: rgb(2 6 23) !important; /* slate-950 */
+  margin: 0 !important;
+  padding: 1.25rem !important;
+  color: #e2e8f0 !important; /* slate-200 */
+}
+
+code[class*="language-"],
+.prose code[class*="language-"] {
+  background: transparent !important;
+  text-shadow: none !important;
+  font-size: 0.875rem !important;
+  line-height: 1.7 !important;
+  color: #e2e8f0 !important;
+  font-family: 'SF Mono', Monaco, Inconsolata, 'Fira Code', 'Courier New', monospace !important;
+}
+
+/* Vibrant token colors - VS Code Dark+ inspired */
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+  color: #608b4e !important; /* Green comments - more visible */
+  font-style: italic !important;
+}
+
+.token.punctuation {
+  color: #d4d4d4 !important; /* Light gray */
+}
+
+.token.namespace {
+  color: #4ec9b0 !important;
+}
+
+/* Properties, numbers, booleans */
+.token.property,
+.token.tag,
+.token.boolean,
+.token.number,
+.token.constant,
+.token.symbol,
+.token.deleted {
+  color: #b5cea8 !important; /* Light green for numbers */
+}
+
+/* Strings */
+.token.selector,
+.token.attr-name,
+.token.string,
+.token.char,
+.token.builtin,
+.token.inserted {
+  color: #ce9178 !important; /* Warm orange for strings */
+}
+
+/* Operators */
+.token.operator,
+.token.entity,
+.token.url,
+.language-css .token.string,
+.style .token.string {
+  color: #d4d4d4 !important;
+}
+
+/* Keywords */
+.token.atrule,
+.token.attr-value,
+.token.keyword {
+  color: #569cd6 !important; /* Bright blue for keywords */
+  font-weight: 500 !important;
+}
+
+/* Functions and classes */
+.token.function,
+.token.class-name {
+  color: #dcdcaa !important; /* Bright yellow for functions */
+}
+
+/* Variables */
+.token.regex,
+.token.important,
+.token.variable {
+  color: #9cdcfe !important; /* Light blue for variables */
+}
+
+.token.important,
+.token.bold {
+  font-weight: bold !important;
+}
+
+.token.italic {
+  font-style: italic !important;
+}
+
+.token.entity {
+  cursor: help !important;
+}
+
+/* Rust-specific tokens */
+.language-rust .token.macro {
+  color: #9cdcfe !important; /* Light blue for macros */
+}
+
+.language-rust .token.lifetime {
+  color: #4ec9b0 !important; /* Teal for lifetimes */
+}
+
+.language-rust .token.keyword {
+  color: #569cd6 !important; /* Bright blue */
+  font-weight: 500 !important;
+}
+
+.language-rust .token.type-definition,
+.language-rust .token.class-name {
+  color: #4ec9b0 !important; /* Teal for types */
+}
+
+.language-rust .token.punctuation.bracket,
+.language-rust .token.punctuation.angle-bracket {
+  color: #d4d4d4 !important;
+}
+
+/* Python-specific tokens */
+.language-python .token.decorator {
+  color: #dcdcaa !important; /* Yellow for decorators */
+}
+
+.language-python .token.builtin {
+  color: #4ec9b0 !important; /* Teal for builtins */
+}
+
+/* Better styling for text/ASCII diagrams */
+pre.language-text,
+pre.language-plain {
+  background: linear-gradient(135deg, rgb(30 41 59) 0%, rgb(15 23 42) 100%) !important; /* Gradient for ASCII art */
+  color: rgb(148 163 184) !important; /* slate-400 for ASCII characters */
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace !important;
+  border: 1px solid rgb(51 65 85) !important; /* slate-700 border */
+  box-shadow: inset 0 2px 4px 0 rgb(0 0 0 / 0.06) !important;
+}
+
+/* Make ASCII box drawing characters more visible */
+pre.language-text code,
+pre.language-plain code {
+  color: rgb(148 163 184) !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.025em !important;
+}
+
+/* Ensure code blocks have proper padding even without Prism classes */
+.prose pre:not([class*="language-"]) {
+  padding: 1rem;
+  background: rgb(2 6 23) !important;
+}
+
+/* Override any potential light theme backgrounds from Prism */
+pre,
+.prose pre,
+pre code,
+.prose pre code {
+  background-color: rgb(2 6 23) !important;
+}
+
+/* Specific overrides for common Prism theme classes */
+.token,
+.prose .token {
+  background: transparent !important;
 }
 
 /* Inline code */
-.prose code {
+.prose code:not([class*="language-"]) {
   @apply font-mono text-xs;
-  @apply bg-gray-100 dark:bg-gray-800;
-  @apply text-gray-700 dark:text-gray-300;
+  @apply bg-slate-100 dark:bg-slate-800;
+  @apply text-slate-700 dark:text-slate-300;
   @apply px-1.5 py-0.5 rounded;
+  @apply border border-slate-200 dark:border-slate-700;
 }
 
 .prose code::before,
@@ -92,7 +268,7 @@
 
 /* Tighter paragraph spacing */
 .prose p {
-  @apply my-4;
+  @apply my-3;
 }
 
 /* Smooth scrolling for anchor links */
@@ -102,33 +278,33 @@ html {
 
 /* Better list spacing */
 .prose ul, .prose ol {
-  @apply my-4;
+  @apply my-3;
 }
 
 .prose li {
-  @apply my-1;
+  @apply my-0.5;
 }
 
 /* Improved blockquotes */
 .prose blockquote {
   @apply border-l-4 border-gray-300 dark:border-gray-700;
   @apply pl-6 italic;
-  @apply my-6;
+  @apply my-4;
 }
 
-/* Section spacing */
+/* Section spacing - more compact */
 .prose h2 {
-  @apply scroll-mt-20;
+  @apply scroll-mt-20 mt-6 mb-3;
 }
 
 .prose h3 {
-  @apply scroll-mt-20;
+  @apply scroll-mt-20 mt-4 mb-2;
 }
 
 /* Image styling */
 .prose img {
   @apply rounded-lg shadow-sm;
-  @apply my-6;
+  @apply my-4;
 }
 
 /* Link hover effects */
