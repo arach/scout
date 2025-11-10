@@ -185,10 +185,10 @@ export function Sidebar({ currentView, onViewChange, isExpanded, onToggleExpande
   }, [isResizing, handleMouseMove, handleMouseUp]);
 
   return (
-    <div 
+    <div
       ref={sidebarRef}
       className={`sidebar ${isExpanded ? 'expanded' : 'collapsed'} ${isResizing ? 'resizing' : ''}`}
-      style={{}}
+      style={isExpanded ? { width: `${width}px` } : {}}
     >
       <button 
         className="sidebar-toggle-zone"

@@ -28,31 +28,36 @@
 
 /* ==================== Dark Mode Overrides ==================== */
 @media (prefers-color-scheme: dark) {
+  /* Tooltip text color override for dark mode */
+  :root {
+    --tooltip-text: #e5e7eb; /* Light gray for tooltip text - readable on dark backgrounds */
+  }
+
   /* Drag overlay adjustments */
   .drag-drop-backdrop {
     background: rgba(0, 0, 0, 0.6);
   }
-  
+
   .drag-drop-border {
     background: rgba(42, 42, 42, 0.95);
     border-color: rgba(255, 255, 255, 0.15);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   }
-  
+
   .drag-drop-icon {
     background: rgba(255, 255, 255, 0.08);
   }
-  
+
   .drag-drop-icon svg {
     color: rgba(255, 255, 255, 0.7);
   }
-  
+
   .format-badge {
     background: rgba(255, 255, 255, 0.08);
     border-color: rgba(255, 255, 255, 0.15);
     color: rgba(255, 255, 255, 0.6);
   }
-  
+
   /* Time display color for all dark themes */
   .transcript-time {
     color: #a1a1aa !important; /* zinc-400 for better visibility */

@@ -236,15 +236,15 @@ impl AudioRecorder {
             ),
         );
 
-        // Wait for the recording state to actually change with shorter timeout
+        // Wait for the recording state to actually change with sufficient timeout for buffer flush
         let wait_start = std::time::Instant::now();
         let wait_result = self
             .recording_state_changed
             .wait_timeout(
                 self.is_recording.lock().unwrap(),
-                Duration::from_millis(50),  // Reduced from 100ms for faster response
+                Duration::from_millis(500),  // Increased to allow time for buffer flush and finalization
             );
-        
+
         // Handle timeout gracefully - don't panic
         if wait_result.is_err() {
             warn(Component::Recording, "Recording state wait timed out, but continuing");
@@ -994,15 +994,14 @@ impl AudioRecorderWorker {
             total_samples, expected_channels, sample_rate, total_frames, duration_seconds
         ));
 
-        // Set recording to false and notify waiting threads
+        // Set recording to false but DON'T notify yet - we need to flush buffers first
         {
             let mut recording = self.is_recording.lock().unwrap();
             *recording = false;
-            self.recording_state_changed.notify_all();
         }
         debug(
             Component::Recording,
-            "Set is_recording to false and notified waiters",
+            "Set is_recording to false (notification will happen after flush)",
         );
 
         // Reset audio level only after recording stops
@@ -1121,6 +1120,13 @@ impl AudioRecorderWorker {
                 .finalize()
                 .map_err(|e| format!("Failed to finalize recording: {}", e))?;
         }
+
+        // NOW notify waiting threads that recording is complete and file is ready
+        self.recording_state_changed.notify_all();
+        debug(
+            Component::Recording,
+            "Notified waiting threads - recording complete, WAV file ready",
+        );
 
         Ok(())
     }
