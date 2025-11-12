@@ -5,8 +5,12 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { ScoutLogo } from "@/components/scout-logo"
 import Header from "@/components/header"
-import { ClientDevBar } from "@/components/client-devbar"
 import { Mic, Download, Github, Shield, Zap, Infinity, Star } from "lucide-react"
+
+// Only load DevBar in development
+const ClientDevBar = process.env.NODE_ENV === 'development'
+  ? require("@/components/client-devbar").ClientDevBar
+  : () => null
 
 export default function LandingPage() {
   const [showBackdrop, setShowBackdrop] = useState(true)
