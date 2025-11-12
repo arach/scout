@@ -1,24 +1,41 @@
 import type { Metadata } from "next"
-import { Inter } from "next/font/google"
-import Header from "@/components/header"
-import { ThemeProvider } from "@/components/theme-provider"
+import { Silkscreen, IBM_Plex_Mono, Crimson_Pro } from "next/font/google"
 import "./globals.css"
 
-const inter = Inter({ subsets: ["latin"] })
+const silkscreen = Silkscreen({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-silkscreen",
+  weight: ["400", "700"],
+})
+
+const ibmPlexMono = IBM_Plex_Mono({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-ibm-plex-mono",
+  weight: ["300", "400", "500", "600"],
+})
+
+const crimsonPro = Crimson_Pro({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-crimson-pro",
+  weight: ["300", "400", "500", "600", "700"],
+})
 
 export const metadata: Metadata = {
   title: "Scout - Local-First Voice Recording & Transcription for Mac",
   description: "Privacy-focused voice recording and transcription app for Mac. Local processing with Whisper AI, no cloud required. Fast, secure, and completely free.",
   keywords: ["voice recording", "transcription", "Mac app", "privacy", "local AI", "Whisper", "dictation", "speech to text"],
   authors: [{ name: "Scout" }],
-  metadataBase: new URL('https://arach.github.io/scout'),
+  metadataBase: new URL('https://openscout.app'),
   openGraph: {
     type: "website",
-    url: "https://arach.github.io/scout/",
+    url: "https://openscout.app/",
     title: "Scout - Local-First Voice Recording & Transcription",
     description: "Privacy-focused voice recording and transcription app for Mac. Local processing with Whisper AI, no cloud required.",
-    images: [{ 
-      url: "https://arach.github.io/scout/og-image.png",
+    images: [{
+      url: "https://openscout.app/og-image.png",
       width: 1200,
       height: 630,
       alt: "Scout - Local-First Voice Transcription"
@@ -30,7 +47,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Scout - Local-First Voice Recording & Transcription",
     description: "Privacy-focused voice recording and transcription app for Mac. Local processing with Whisper AI, no cloud required.",
-    images: ["https://arach.github.io/scout/og-image.png"],
+    images: ["https://openscout.app/og-image.png"],
     creator: "@arach",
   },
   robots: {
@@ -48,11 +65,9 @@ export const metadata: Metadata = {
 
 export default function RootLayout({
   children,
-}: {
-  children: React.ReactNode
-}) {
+}: any) {
   return (
-    <html lang="en">
+    <html lang="en" className={`${silkscreen.variable} ${ibmPlexMono.variable} ${crimsonPro.variable} antialiased`}>
       <head>
         {/* Counter.dev Analytics - 100% free, privacy-friendly */}
         <script src="https://cdn.counter.dev/script.js" data-id="a12a7689-236b-4ccf-9422-18a39a239553" data-utcoffset="-4"></script>
@@ -75,7 +90,7 @@ export default function RootLayout({
               "author": {
                 "@type": "Organization",
                 "name": "Scout",
-                "url": "https://arach.github.io/scout/"
+                "url": "https://openscout.app/"
               },
               "datePublished": "2025-01-30",
               "softwareVersion": "0.1.0",
@@ -94,12 +109,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className={inter.className}>
-        <ThemeProvider>
-          <Header />
-          {children}
-        </ThemeProvider>
-      </body>
+      <body>{children}</body>
     </html>
   )
 }

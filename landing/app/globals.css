@@ -1,194 +1,59 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@100;200;300;400;500;600;700;800;900&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 0 0% 0%;
-    --card: 0 0% 100%;
-    --card-foreground: 0 0% 0%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 0%;
-    --primary: 0 0% 0%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 0 0% 96%;
-    --secondary-foreground: 0 0% 0%;
-    --muted: 0 0% 96%;
+    /* Updated color tokens to use warmer orange and red tones */
+    --background: 38 15% 97%;
+    --foreground: 0 0% 15%;
+    --card: 38 50% 99%;
+    --card-foreground: 0 0% 20%;
+    --popover: 38 50% 99%;
+    --popover-foreground: 0 0% 15%;
+    --primary: 0 0% 15%;
+    --primary-foreground: 38 50% 99%;
+    --secondary: 38 50% 99%;
+    --secondary-foreground: 0 0% 15%;
+    --muted: 38 15% 94%;
     --muted-foreground: 0 0% 45%;
-    --accent: 0 0% 96%;
-    --accent-foreground: 0 0% 0%;
+    --accent: 38 20% 85%;
+    --accent-foreground: 0 0% 15%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 90%;
-    --input: 0 0% 90%;
-    --ring: 0 0% 60%;
+    --border: 38 15% 90%;
+    --input: 38 15% 96%;
+    --ring: 0 0% 15%;
     --radius: 0.5rem;
   }
-  
+
   .dark {
-    --background: 0 0% 0%;
-    --foreground: 0 0% 100%;
-    --card: 0 0% 0%;
-    --card-foreground: 0 0% 100%;
-    --popover: 0 0% 0%;
-    --popover-foreground: 0 0% 100%;
-    --primary: 0 0% 100%;
-    --primary-foreground: 0 0% 0%;
-    --secondary: 0 0% 10%;
-    --secondary-foreground: 0 0% 100%;
-    --muted: 0 0% 10%;
-    --muted-foreground: 0 0% 60%;
-    --accent: 0 0% 10%;
-    --accent-foreground: 0 0% 100%;
+    --background: 0 0% 14.5%;
+    --foreground: 0 0% 98.5%;
+    --card: 0 0% 14.5%;
+    --card-foreground: 0 0% 98.5%;
+    --popover: 0 0% 14.5%;
+    --popover-foreground: 0 0% 98.5%;
+    --primary: 0 0% 98.5%;
+    --primary-foreground: 0 0% 20.5%;
+    --secondary: 0 0% 26.9%;
+    --secondary-foreground: 0 0% 98.5%;
+    --muted: 0 0% 26.9%;
+    --muted-foreground: 0 0% 70.8%;
+    --accent: 0 0% 26.9%;
+    --accent-foreground: 0 0% 98.5%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 15%;
-    --input: 0 0% 15%;
-    --ring: 0 0% 40%;
+    --border: 0 0% 26.9%;
+    --input: 0 0% 26.9%;
+    --ring: 0 0% 43.9%;
   }
-}
 
-@layer base {
   * {
     @apply border-border;
   }
-  
-  html {
-    @apply antialiased;
-    font-feature-settings: 'cv11', 'ss01', 'ss03';
-    text-rendering: optimizeLegibility;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-  }
-  
+
   body {
     @apply bg-background text-foreground;
-    @apply font-sans text-base;
-    @apply selection:bg-gray-300 selection:text-black dark:selection:bg-gray-700 dark:selection:text-white;
-    background-image: 
-      radial-gradient(at 40% 20%, hsla(280, 100%, 90%, 0.1) 0px, transparent 50%),
-      radial-gradient(at 80% 0%, hsla(189, 100%, 90%, 0.1) 0px, transparent 50%),
-      radial-gradient(at 0% 50%, hsla(355, 100%, 90%, 0.1) 0px, transparent 50%),
-      radial-gradient(at 80% 50%, hsla(210, 100%, 90%, 0.1) 0px, transparent 50%),
-      radial-gradient(at 0% 100%, hsla(269, 100%, 90%, 0.1) 0px, transparent 50%);
-  }
-  
-  .dark body {
-    background-image: 
-      radial-gradient(at 40% 20%, hsla(280, 100%, 70%, 0.05) 0px, transparent 50%),
-      radial-gradient(at 80% 0%, hsla(189, 100%, 70%, 0.05) 0px, transparent 50%),
-      radial-gradient(at 0% 50%, hsla(355, 100%, 70%, 0.05) 0px, transparent 50%),
-      radial-gradient(at 80% 50%, hsla(210, 100%, 70%, 0.05) 0px, transparent 50%),
-      radial-gradient(at 0% 100%, hsla(269, 100%, 70%, 0.05) 0px, transparent 50%);
-  }
-  
-  /* Improved heading styles */
-  h1 {
-    @apply font-semibold tracking-tight text-gray-900 dark:text-white;
-  }
-  
-  h2 {
-    @apply font-semibold tracking-tight text-gray-900 dark:text-white;
-  }
-  
-  h3 {
-    @apply font-medium tracking-tight text-gray-900 dark:text-white;
-  }
-  
-  /* Better paragraph spacing */
-  p {
-    @apply text-gray-600 dark:text-gray-400 leading-relaxed;
-  }
-  
-  /* Smooth focus states */
-  :focus {
-    @apply outline-none ring-2 ring-gray-400 ring-offset-2 ring-offset-background dark:ring-gray-600;
-  }
-  
-  :focus:not(:focus-visible) {
-    @apply ring-0 ring-offset-0;
-  }
-}
-
-@layer utilities {
-  @keyframes fade-in {
-    from {
-      opacity: 0;
-      transform: translateY(10px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
-  @keyframes gradient {
-    0%, 100% {
-      background-size: 200% 200%;
-      background-position: left center;
-    }
-    50% {
-      background-size: 200% 200%;
-      background-position: right center;
-    }
-  }
-  
-  @keyframes float {
-    0%, 100% {
-      transform: translateY(0) translateX(0) scale(1);
-    }
-    33% {
-      transform: translateY(-30px) translateX(20px) scale(1.05);
-    }
-    66% {
-      transform: translateY(20px) translateX(-20px) scale(0.95);
-    }
-  }
-  
-  @keyframes float-delayed {
-    0%, 100% {
-      transform: translateY(0) translateX(0) scale(1);
-    }
-    33% {
-      transform: translateY(25px) translateX(-15px) scale(0.98);
-    }
-    66% {
-      transform: translateY(-20px) translateX(15px) scale(1.02);
-    }
-  }
-  
-  @keyframes pulse-glow {
-    0%, 100% {
-      opacity: 0.3;
-      filter: blur(40px);
-    }
-    50% {
-      opacity: 0.6;
-      filter: blur(60px);
-    }
-  }
-
-  .animate-fade-in {
-    animation: fade-in 0.6s ease-out;
-  }
-
-  .animate-gradient {
-    background-size: 200% 200%;
-    animation: gradient 6s ease infinite;
-  }
-  
-  .animate-float {
-    animation: float 20s ease-in-out infinite;
-  }
-  
-  .animate-float-delayed {
-    animation: float-delayed 25s ease-in-out infinite;
-  }
-  
-  .animate-pulse-glow {
-    animation: pulse-glow 10s ease-in-out infinite;
   }
 }
