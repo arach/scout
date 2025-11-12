@@ -33,23 +33,42 @@ jobs:
         with:
           version: 8
 
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v3
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
       - name: Install dependencies
-        run: pnpm install
+        run: |
+          cd landing
+          pnpm install --frozen-lockfile
 
       - name: Build
-        run: pnpm run build
+        run: |
+          cd landing
+          pnpm run build
         env:
           NODE_ENV: production
 
       - name: Add .nojekyll and CNAME
         run: |
+          cd landing
           touch out/.nojekyll
           echo 'openscout.app' > out/CNAME
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./out
+          path: ./landing/out
 
   deploy:
     environment:
