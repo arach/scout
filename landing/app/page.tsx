@@ -159,7 +159,7 @@ export default function LandingPage() {
           <div className="max-w-6xl mx-auto">
             <div className="grid md:grid-cols-2 gap-8">
               {/* Main Recording Interface */}
-              <div className="rounded-2xl h-80" style={{
+              <div className="rounded-2xl h-80 overflow-hidden" style={{
                 backgroundColor: '#FDFBF7',
                 border: '1px solid #D4C4B0',
                 boxShadow: '0 10px 40px rgba(139, 105, 87, 0.08)',
@@ -172,18 +172,21 @@ export default function LandingPage() {
                   <span className="font-sans text-sm text-muted-foreground ml-3"><ScoutLogo size="sm" showIcon={false} className="inline" /> - Recording</span>
                 </div>
 
-                <div className="flex items-center justify-center px-8" style={{ height: 'calc(100% - 40px)' }}>
-                  <div className="text-center">
-                    <div className="w-16 h-16 bg-muted rounded-xl flex items-center justify-center mx-auto mb-4">
-                      <Mic className="w-8 h-8 text-muted-foreground" suppressHydrationWarning />
-                    </div>
-                    <p className="font-sans text-muted-foreground text-sm">Main Recording Interface</p>
-                  </div>
+                <div className="flex items-center justify-center px-4" style={{ height: 'calc(100% - 40px)' }}>
+                  <video
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    className="w-full h-full object-contain"
+                  >
+                    <source src="/scout-recording-demo.mp4" type="video/mp4" />
+                  </video>
                 </div>
               </div>
 
               {/* Recording Notification */}
-              <div className="rounded-2xl h-80" style={{
+              <div className="rounded-2xl h-80 overflow-hidden" style={{
                 backgroundColor: '#FDFBF7',
                 border: '1px solid #D4C4B0',
                 boxShadow: '0 10px 40px rgba(139, 105, 87, 0.08)',
@@ -196,13 +199,12 @@ export default function LandingPage() {
                   <span className="font-sans text-sm text-muted-foreground ml-3"><ScoutLogo size="sm" showIcon={false} className="inline" /> - Recording Indicator</span>
                 </div>
 
-                <div className="flex items-center justify-center px-8" style={{ height: 'calc(100% - 40px)' }}>
-                  <div className="text-center">
-                    <div className="w-16 h-16 bg-primary/20 rounded-xl flex items-center justify-center mx-auto mb-4">
-                      <ScoutLogo size="base" showIcon={true} className="justify-center" textClassName="hidden" />
-                    </div>
-                    <p className="font-sans text-muted-foreground text-sm">Recording Notification</p>
-                  </div>
+                <div className="flex items-center justify-center px-4" style={{ height: 'calc(100% - 40px)' }}>
+                  <img
+                    src="/scout-recording-indicator.gif"
+                    alt="Recording Indicator"
+                    className="w-full h-full object-contain"
+                  />
                 </div>
               </div>
             </div>
