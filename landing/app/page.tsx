@@ -7,10 +7,8 @@ import { ScoutLogo } from "@/components/scout-logo"
 import Header from "@/components/header"
 import { Mic, Download, Github, Shield, Zap, Infinity, Star } from "lucide-react"
 
-// Only load DevBar in development
-const ClientDevBar = process.env.NODE_ENV === 'development'
-  ? require("@/components/client-devbar").ClientDevBar
-  : () => null
+// DevBar removed - can be re-enabled when @arach/devbar is available
+const ClientDevBar = () => null
 
 export default function LandingPage() {
   const [showBackdrop, setShowBackdrop] = useState(true)
@@ -452,9 +450,9 @@ export default function LandingPage() {
       }}>
         <div className="container mx-auto max-w-4xl">
           <div className="text-center mb-12">
-            <h2 className="font-serif font-semibold text-3xl sm:text-4xl text-foreground mb-4">Simple, Honest Pricing</h2>
+            <h2 className="font-serif font-semibold text-3xl sm:text-4xl text-foreground mb-4">Free & Open Source</h2>
             <p className="font-sans text-xs sm:text-sm text-muted-foreground max-w-2xl mx-auto font-light">
-              Pay once, own forever. No subscriptions, no hidden fees, no data harvesting.
+              No subscriptions, no hidden fees, no data harvesting. Scout is completely free.
             </p>
           </div>
 
@@ -467,10 +465,9 @@ export default function LandingPage() {
               <div className="text-center mb-6">
                 <h3 className="font-serif font-semibold text-2xl text-foreground mb-2">Scout</h3>
                 <div className="flex items-baseline justify-center gap-2 mb-4">
-                  <span className="font-serif font-bold text-5xl text-foreground">$29</span>
-                  <span className="font-sans text-sm text-muted-foreground">one-time</span>
+                  <span className="font-serif font-bold text-5xl text-foreground">Free</span>
                 </div>
-                <p className="font-sans text-xs text-muted-foreground">Lifetime updates included</p>
+                <p className="font-sans text-xs text-muted-foreground">Open source & forever free</p>
               </div>
 
               <div className="space-y-3 mb-8">
@@ -497,11 +494,11 @@ export default function LandingPage() {
                 className="w-full font-sans font-medium text-sm bg-foreground text-background hover:bg-foreground/90 cursor-pointer"
               >
                 <Download className="w-4 h-4 mr-2" suppressHydrationWarning />
-                Buy Scout for $29
+                Download Scout
               </Button>
 
               <p className="font-sans text-xs text-center text-muted-foreground mt-4">
-                30-day money-back guarantee
+                macOS 11.0 or later
               </p>
             </div>
 
@@ -510,7 +507,7 @@ export default function LandingPage() {
               border: '1px solid rgba(194, 154, 108, 0.3)'
             }}>
               <p className="font-sans text-xs" style={{ color: '#8B6F47' }}>
-                <strong>Early Access:</strong> Get Scout at $29 during beta. Price increases to $39 at v1.0 launch.
+                <strong>Beta Release:</strong> Scout v0.1.0 is free and open source. Help shape the future by providing feedback.
               </p>
             </div>
           </div>
