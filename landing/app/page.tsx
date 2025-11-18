@@ -7,8 +7,15 @@ import { ScoutLogo } from "@/components/scout-logo"
 import Header from "@/components/header"
 import { Mic, Download, Github, Shield, Zap, Infinity, Star } from "lucide-react"
 
-// DevBar removed - can be re-enabled when @arach/devbar is available
-const ClientDevBar = () => null
+// Only load DevBar in development
+let ClientDevBar = () => null
+if (process.env.NODE_ENV === 'development') {
+  try {
+    ClientDevBar = require("@/components/client-devbar").ClientDevBar
+  } catch (e) {
+    console.log('DevBar not available')
+  }
+}
 
 export default function LandingPage() {
   const [showBackdrop, setShowBackdrop] = useState(true)
@@ -41,7 +48,7 @@ export default function LandingPage() {
   }
 
   const handleDownload = () => {
-    window.open("https://github.com/arach/scout/releases/download/v0.1.0/Scout_0.1.0_aarch64.dmg", "_blank")
+    window.open("https://github.com/arach/scout/releases/download/v0.5.1/Scout_0.5.1_aarch64.dmg", "_blank")
   }
 
   // Return minimal shell during SSR to avoid hydration issues with icons
@@ -120,7 +127,7 @@ export default function LandingPage() {
               </Badge>
               <Badge variant="outline" className="font-sans text-xs px-3 py-1.5 font-normal border-muted-foreground/20 bg-muted/30 rounded-full">
                 <Star className="w-3 h-3 mr-1.5" suppressHydrationWarning />
-                v0.1.0 Released
+                v0.5.1 Released
               </Badge>
             </div>
           </div>
@@ -507,7 +514,7 @@ export default function LandingPage() {
               border: '1px solid rgba(194, 154, 108, 0.3)'
             }}>
               <p className="font-sans text-xs" style={{ color: '#8B6F47' }}>
-                <strong>Beta Release:</strong> Scout v0.1.0 is free and open source. Help shape the future by providing feedback.
+                <strong>Latest Release:</strong> Scout v0.5.1 is free and open source. Help shape the future by providing feedback.
               </p>
             </div>
           </div>
@@ -552,7 +559,7 @@ export default function LandingPage() {
         <div className="container mx-auto max-w-4xl text-center relative z-10">
           <h2 className="font-serif font-semibold text-3xl sm:text-4xl text-foreground mb-4">Ready to Start?</h2>
           <p className="font-sans text-xs sm:text-sm text-muted-foreground mb-8 font-light">
-            Download Scout v0.1.0 and experience the future of voice transcription
+            Download Scout v0.5.1 and experience the future of voice transcription
           </p>
           <div className="mb-8">
             <Button
@@ -561,7 +568,7 @@ export default function LandingPage() {
               className="font-sans font-medium text-sm px-8 bg-foreground text-background hover:bg-foreground/90 cursor-pointer"
             >
               <Download className="w-4 h-4 mr-2" suppressHydrationWarning />
-              Download for macOS (v0.1.0)
+              Download for macOS (v0.5.1)
             </Button>
           </div>
           <div className="inline-block text-left p-6 rounded-lg" style={{
@@ -576,7 +583,7 @@ export default function LandingPage() {
               <li>• 500MB-5GB storage (depending on models)</li>
             </ul>
             <p className="font-sans text-xs mt-3" style={{ color: '#A68B5B' }}>
-              Current release: v0.1.0 (Apple Silicon)
+              Current release: v0.5.1 (Apple Silicon)
             </p>
           </div>
         </div>
