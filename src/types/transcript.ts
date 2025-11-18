@@ -71,6 +71,7 @@ export interface TranscriptMetadata {
   app_context?: AppContext;
   original_transcript?: string;
   filter_analysis?: string[];
+  strategy_used?: string;
 }
 
 export interface Transcript {

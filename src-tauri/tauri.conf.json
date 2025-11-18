@@ -4,9 +4,9 @@
   "version": "0.5.0",
   "identifier": "com.jdi.scout",
   "build": {
-    "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:1421",
-    "beforeBuildCommand": "npm run build",
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "pnpm build",
     "frontendDist": "../dist"
   },
   "app": {

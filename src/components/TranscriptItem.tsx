@@ -36,7 +36,7 @@ export const TranscriptItem = memo(function TranscriptItem({
     const [isPlaying, setIsPlaying] = useState(false);
     const [showDownloadMenu, setShowDownloadMenu] = useState(false);
     const audioRef = useRef<HTMLAudioElement | null>(null);
-    const [audioUrl, setAudioUrl] = useState<string | null>(null);
+    const [, setAudioUrl] = useState<string | null>(null);
     const isBlankAudio = transcript.text === "[BLANK_AUDIO]";
     
     // Use lazy audio loading - only load when needed

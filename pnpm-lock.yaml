@@ -144,6 +144,9 @@ importers:
 
   landing:
     dependencies:
+      '@arach/devbar':
+        specifier: ^0.0.4
+        version: 0.0.4(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
       '@radix-ui/react-slot':
         specifier: ^1.1.0
         version: 1.2.3(@types/react@19.2.4)(react@19.2.0)
@@ -233,6 +236,12 @@ packages:
   '@ampproject/remapping@2.3.0':
     resolution: {integrity: sha512-30iZtAPgz+LTIYoeivqYo853f02jBYSd5uGnGpkFV0M3xOt9aN73erkgYAmZU43x4VfqcnLxW9Kpg3R5LC4YYw==}
     engines: {node: '>=6.0.0'}
+
+  '@arach/devbar@0.0.4':
+    resolution: {integrity: sha512-V4OdilvixNW9yDEI+/nxKQ1bRIUikujcOeLe1ietX7kOOKLXnyXhp5vz+y7zPJP7g+8+T28tlroIQ6vBBqxSGQ==}
+    peerDependencies:
+      react: '>=16.8.0'
+      react-dom: '>=16.8.0'
 
   '@arach/speakeasy@0.1.6':
     resolution: {integrity: sha512-+n4MRSK0Mk5qUGBGOPCdB4oYY8I+HfaX6/p6bd3ROumwF4Pi+Q6pkldP9iKLXTQvQi+Y4BRygH6XPsrKueSLGQ==}
@@ -3264,6 +3273,11 @@ packages:
     resolution: {integrity: sha512-Jo6dJ04CmSjuznwJSS3pUeWmd/H0ffTlkXXgwZi+eq1UCmqQwCh+eLsYOYCwY991i2Fah4h1BEMCx4qThGbsiA==}
     engines: {node: '>=10'}
 
+  lucide-react@0.263.1:
+    resolution: {integrity: sha512-keqxAx97PlaEN89PXZ6ki1N8nRjGWtDa4021GFYLNj0RgruM5odbpl8GHTExj0hhPq3sF6Up0gnxt6TSHu+ovw==}
+    peerDependencies:
+      react: ^16.5.1 || ^17.0.0 || ^18.0.0
+
   lucide-react@0.522.0:
     resolution: {integrity: sha512-jnJbw974yZ7rQHHEFKJOlWAefG3ATSCZHANZxIdx8Rk/16siuwjgA4fBULpXEAWx/RlTs3FzmKW/udWUuO0aRw==}
     peerDependencies:
@@ -4820,6 +4834,12 @@ snapshots:
     dependencies:
       '@jridgewell/gen-mapping': 0.3.13
       '@jridgewell/trace-mapping': 0.3.31
+
+  '@arach/devbar@0.0.4(react-dom@19.2.0(react@19.2.0))(react@19.2.0)':
+    dependencies:
+      lucide-react: 0.263.1(react@19.2.0)
+      react: 19.2.0
+      react-dom: 19.2.0(react@19.2.0)
 
   '@arach/speakeasy@0.1.6':
     dependencies:
@@ -7974,6 +7994,10 @@ snapshots:
     dependencies:
       yallist: 4.0.0
     optional: true
+
+  lucide-react@0.263.1(react@19.2.0):
+    dependencies:
+      react: 19.2.0
 
   lucide-react@0.522.0(react@18.3.1):
     dependencies:
