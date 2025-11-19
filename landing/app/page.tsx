@@ -27,9 +27,24 @@ export default function LandingPage() {
   const [mounted, setMounted] = useState(false)
   const [isHoveringWhyScout, setIsHoveringWhyScout] = useState(false)
   const [isHoveringReady, setIsHoveringReady] = useState(false)
+  const [latestReleaseUrl, setLatestReleaseUrl] = useState<string | null>(null)
 
   useEffect(() => {
     setMounted(true)
+
+    // Fetch latest release URL
+    fetch('https://api.github.com/repos/arach/scout/releases/latest')
+      .then(res => res.json())
+      .then(data => {
+        const dmgAsset = data.assets?.find((asset: any) => asset.name.endsWith('.dmg'))
+        if (dmgAsset) {
+          setLatestReleaseUrl(dmgAsset.browser_download_url)
+        }
+      })
+      .catch(() => {
+        // Fallback to hardcoded URL if API fails
+        setLatestReleaseUrl('https://github.com/arach/scout/releases/download/v0.5.1/Scout_0.5.1_aarch64.dmg')
+      })
   }, [])
 
   const themes = {
@@ -48,7 +63,8 @@ export default function LandingPage() {
   }
 
   const handleDownload = () => {
-    window.open("https://github.com/arach/scout/releases/download/v0.5.1/Scout_0.5.1_aarch64.dmg", "_blank")
+    const downloadUrl = latestReleaseUrl || "https://github.com/arach/scout/releases/download/v0.5.1/Scout_0.5.1_aarch64.dmg"
+    window.open(downloadUrl, "_blank")
   }
 
   // Return minimal shell during SSR to avoid hydration issues with icons
