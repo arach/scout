@@ -60,17 +60,16 @@ function firstNonEmptyLine(value: string): string | null {
     .find(Boolean) ?? null;
 }
 
-export function resolveScoutLocalEdgeRootCertificatePath(env: NodeJS.ProcessEnv = process.env): string {
-  return join(
-    env.HOME?.trim() || homedir(),
-    "Library",
-    "Application Support",
-    "Caddy",
-    "pki",
-    "authorities",
-    "local",
-    "root.crt",
-  );
+export function resolveScoutLocalEdgeRootCertificatePath(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const home = env.HOME?.trim() || homedir();
+  // Caddy's data directory: Application Support on macOS, XDG data elsewhere.
+  const caddyDataDirectory = platform === "darwin"
+    ? join(home, "Library", "Application Support", "Caddy")
+    : join(env.XDG_DATA_HOME?.trim() || join(home, ".local", "share"), "caddy");
+  return join(caddyDataDirectory, "pki", "authorities", "local", "root.crt");
 }
 
 function shellQuote(value: string): string {
@@ -95,7 +94,7 @@ export function inspectScoutLocalEdgeTrust(options: ScoutLocalEdgeTrustOptions =
   const env = options.env ?? process.env;
   const platform = options.platform ?? process.platform;
   const runCommand = options.runCommand ?? defaultRunCommand;
-  const rootCertificatePath = resolveScoutLocalEdgeRootCertificatePath(env);
+  const rootCertificatePath = resolveScoutLocalEdgeRootCertificatePath(env, platform);
   const trustCommand = platform === "darwin" ? MACOS_TRUST_COMMAND_LABEL : "caddy trust";
 
   if (!existsSync(rootCertificatePath)) {
@@ -105,6 +104,31 @@ export function inspectScoutLocalEdgeTrust(options: ScoutLocalEdgeTrustOptions =
       trustCommand,
       detail: "Caddy has not generated its local CA root yet. Start `scout server edge` once to create it.",
     };
+  }
+
+  if (platform === "linux") {
+    // A self-signed root only verifies when it is in the system trust store.
+    const opensslResult = runCommand("openssl", ["verify", rootCertificatePath], {
+      encoding: "utf8",
+      timeout: 10_000,
+      env,
+    });
+    if (opensslResult.status === 0) {
+      return {
+        status: "trusted",
+        rootCertificatePath,
+        trustCommand: null,
+        detail: "Caddy's local CA root is trusted by the system certificate store.",
+      };
+    }
+    if (opensslResult.status !== null && !opensslResult.error) {
+      return {
+        status: "untrusted",
+        rootCertificatePath,
+        trustCommand: "caddy trust",
+        detail: "Caddy's local CA root exists, but the system certificate store does not trust it yet. Run `caddy trust`.",
+      };
+    }
   }
 
   if (platform !== "darwin") {

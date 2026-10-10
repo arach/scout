@@ -86,6 +86,36 @@ export function resolveOpenScoutLocalEdgeDiscoveryHosts(input: {
   ].filter((host): host is string => host !== null))];
 }
 
+export type OpenScoutLocalEdgeMdnsCommand = { command: string; args: string[] };
+
+/**
+ * Commands that advertise one local-edge host over mDNS as a proxy for
+ * 127.0.0.1. macOS registers the host record and the service in one
+ * `dns-sd -P`; Avahi needs the address records and the service published
+ * separately. Other platforms have no supported publisher.
+ */
+export function buildOpenScoutLocalEdgeMdnsCommands(
+  input: { name: string; host: string; port: number; scheme: "http" | "https" },
+  platform: NodeJS.Platform = process.platform,
+): OpenScoutLocalEdgeMdnsCommand[] {
+  const type = input.scheme === "https" ? "_https._tcp" : "_http._tcp";
+  if (platform === "darwin") {
+    return [{
+      command: "/usr/bin/dns-sd",
+      args: ["-P", input.name, type, "local", String(input.port), input.host, "127.0.0.1", "path=/"],
+    }];
+  }
+  if (platform === "linux") {
+    return [
+      { command: "avahi-publish", args: ["-a", "-R", input.host, "127.0.0.1"] },
+      // Without an AAAA answer every lookup waits out the resolver's IPv6 timeout.
+      { command: "avahi-publish", args: ["-a", "-R", input.host, "::1"] },
+      { command: "avahi-publish", args: ["-s", "-H", input.host, input.name, type, String(input.port), "path=/"] },
+    ];
+  }
+  return [];
+}
+
 function uniqRoutes(routes: OpenScoutLocalEdgeRoute[]): OpenScoutLocalEdgeRoute[] {
   const seen = new Set<string>();
   const out: OpenScoutLocalEdgeRoute[] = [];

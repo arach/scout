@@ -11,6 +11,7 @@ import {
   resolveWebPort,
 } from "@openscout/runtime/local-config";
 import {
+  buildOpenScoutLocalEdgeMdnsCommands,
   renderOpenScoutCaddyfile,
   resolveOpenScoutLocalEdgeConfig,
   type OpenScoutLocalEdgeConfig,
@@ -722,19 +723,15 @@ function spawnMdnsProxy(input: {
   name: string;
   host: string;
   port: number;
-  scheme: OpenScoutLocalEdgeScheme;
-}): ReturnType<typeof spawn> {
-  return spawn("/usr/bin/dns-sd", [
-    "-P",
-    input.name,
-    input.scheme === "https" ? "_https._tcp" : "_http._tcp",
-    "local",
-    String(input.port),
-    input.host,
-    "127.0.0.1",
-    "path=/",
-  ], {
-    stdio: "ignore",
+  scheme: "http" | "https";
+}): ReturnType<typeof spawn>[] {
+  return buildOpenScoutLocalEdgeMdnsCommands(input).map(({ command, args }) => {
+    const child = spawn(command, args, { stdio: "ignore" });
+    // Discovery is best effort: a missing publisher must not take the edge down.
+    child.once("error", (error) => {
+      console.warn(`[local-edge] mDNS advertisement for ${input.host} failed: ${error.message}`);
+    });
+    return child;
   });
 }
 
@@ -748,13 +745,13 @@ async function runScoutLocalEdge(env: NodeJS.ProcessEnv): Promise<void> {
     const edgePort = scheme === "https" ? 443 : 80;
     const suffix = scheme.toUpperCase();
     return [
-      spawnMdnsProxy({
+      ...spawnMdnsProxy({
         name: `Scout Local ${suffix}`,
         host: config.portalHost,
         port: edgePort,
         scheme,
       }),
-      spawnMdnsProxy({
+      ...spawnMdnsProxy({
         name: `Scout ${config.nodeHost} ${suffix}`,
         host: config.nodeHost,
         port: edgePort,

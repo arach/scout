@@ -128,6 +128,45 @@ describe("local edge dependencies", () => {
 
     expect(report.status).toBe("skipped");
     expect(report.caddyPath).toBeNull();
+    expect(report.installCommand).toBeNull();
     expect(calls).toBe(0);
+  });
+
+  test("judges Linux trust from Caddy's CA root under the XDG data directory", () => {
+    const directory = mkdtempSync(join(tmpdir(), "openscout-caddy-linux-root-"));
+    testDirectories.add(directory);
+    const rootPath = join(directory, ".local", "share", "caddy", "pki", "authorities", "local", "root.crt");
+    mkdirSync(dirname(rootPath), { recursive: true });
+    writeFileSync(rootPath, "test root\n", "utf8");
+
+    const inspect = (status: number | null) => ensureScoutLocalEdgeTrust({
+      env: { PATH: directory, HOME: directory },
+      platform: "linux",
+      runCommand: (command, args) => {
+        expect([command, ...args]).toEqual(["openssl", "verify", rootPath]);
+        return { status, stdout: "", stderr: "" };
+      },
+    });
+
+    expect(inspect(0)).toMatchObject({ status: "trusted", rootCertificatePath: rootPath });
+    expect(inspect(2)).toMatchObject({ status: "untrusted", trustCommand: "caddy trust" });
+    // openssl missing: trust cannot be judged either way.
+    expect(inspect(null).status).toBe("skipped");
+  });
+
+  test("suggests the Linux package manager that is present instead of Homebrew", () => {
+    const directory = mkdtempSync(join(tmpdir(), "openscout-caddy-linux-hint-"));
+    testDirectories.add(directory);
+    createExecutable(directory, "pacman");
+
+    const report = inspectScoutLocalEdgeDependencies({
+      env: { PATH: directory, HOME: directory },
+      platform: "linux",
+      commonDirectories: [],
+      runCommand: () => ({ status: 1, stdout: "", stderr: "" }),
+    });
+
+    expect(report.status).toBe("missing");
+    expect(report.installCommand).toBe("sudo pacman -S caddy");
   });
 });

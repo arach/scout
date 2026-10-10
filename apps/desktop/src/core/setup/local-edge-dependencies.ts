@@ -48,6 +48,12 @@ type LocalEdgeDependencyOptions = {
 
 const CADDY_INSTALL_COMMAND = "brew install caddy";
 
+const LINUX_CADDY_INSTALL_COMMANDS: ReadonlyArray<readonly [manager: string, command: string]> = [
+  ["pacman", "sudo pacman -S caddy"],
+  ["apt-get", "sudo apt-get install caddy"],
+  ["dnf", "sudo dnf install caddy"],
+];
+
 function defaultRunCommand(
   command: string,
   args: string[],
@@ -86,6 +92,22 @@ function resolveBrewExecutable(env: NodeJS.ProcessEnv, commonDirectories?: strin
   })?.path ?? null;
 }
 
+function caddyInstallCommand(
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv,
+  commonDirectories?: string[],
+): string | null {
+  if (platform === "darwin") {
+    return CADDY_INSTALL_COMMAND;
+  }
+  if (platform !== "linux") {
+    return null;
+  }
+  return LINUX_CADDY_INSTALL_COMMANDS.find(([manager]) =>
+    resolveExecutableFromSearch({ env, names: [manager], commonDirectories }),
+  )?.[1] ?? null;
+}
+
 function readCaddyVersion(caddyPath: string, runCommand: RunCommand): string | null {
   const result = runCommand(caddyPath, ["version"], {
     encoding: "utf8",
@@ -120,7 +142,7 @@ export function inspectScoutLocalEdgeDependencies(
     status: "missing",
     caddyPath: null,
     caddyVersion: null,
-    installCommand: CADDY_INSTALL_COMMAND,
+    installCommand: caddyInstallCommand(platform, env, options.commonDirectories),
     trust,
     detail: "Caddy is not installed. Scout needs it for `scout server edge`.",
   };
@@ -149,7 +171,6 @@ export function ensureScoutLocalEdgeDependencies(
     return {
       ...current,
       status: "skipped",
-      installCommand: null,
       detail: "Automatic Caddy install is only enabled on macOS. Install Caddy and set OPENSCOUT_CADDY_BIN if it is not on PATH.",
     };
   }

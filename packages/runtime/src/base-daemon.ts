@@ -33,6 +33,7 @@ import {
 import {
   renderOpenScoutCaddyfile,
   resolveOpenScoutLocalEdgeConfig,
+  buildOpenScoutLocalEdgeMdnsCommands,
   resolveOpenScoutLocalEdgeDiscoveryHosts,
   type OpenScoutLocalEdgeConfig,
   type OpenScoutLocalEdgeScheme,
@@ -359,19 +360,17 @@ function spawnMdnsProxy(input: {
   host: string;
   port: number;
   scheme: "http" | "https";
-}): ChildProcess {
-  return spawn("/usr/bin/dns-sd", [
-    "-P",
-    input.name,
-    input.scheme === "https" ? "_https._tcp" : "_http._tcp",
-    "local",
-    String(input.port),
-    input.host,
-    "127.0.0.1",
-    "path=/",
-  ], {
-    argv0: MDNS_PROCESS_NAME,
-    stdio: ["ignore", logFile("mdns.stdout.log"), logFile("mdns.stderr.log")],
+}): ChildProcess[] {
+  return buildOpenScoutLocalEdgeMdnsCommands(input).map(({ command, args }) => {
+    const child = spawn(command, args, {
+      argv0: MDNS_PROCESS_NAME,
+      stdio: ["ignore", logFile("mdns.stdout.log"), logFile("mdns.stderr.log")],
+    });
+    // Discovery is best effort: a missing publisher must not take the edge down.
+    child.once("error", (error) => {
+      console.warn(`[local-edge] mDNS advertisement for ${input.host} failed: ${error.message}`);
+    });
+    return child;
   });
 }
 
@@ -461,7 +460,7 @@ function startLocalEdge(): void {
   mdnsProcesses = schemes.flatMap((scheme) => {
     const edgePort = scheme === "https" ? 443 : 80;
     const suffix = scheme.toUpperCase();
-    return resolveOpenScoutLocalEdgeDiscoveryHosts(edgeConfig).map((host) =>
+    return resolveOpenScoutLocalEdgeDiscoveryHosts(edgeConfig).flatMap((host) =>
       spawnMdnsProxy({
         name: host === edgeConfig.portalHost ? `Scout Local ${suffix}` : `Scout ${host} ${suffix}`,
         host,
