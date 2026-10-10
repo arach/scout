@@ -2048,6 +2048,37 @@ describe("invocation flight-status shadow columns", () => {
     store.recordInvocation(invocation);
   }
 
+  test("recordInvocation keeps a mesh-forwarded invocation whose message and work record live on the sender", () => {
+    const store = createStore();
+    try {
+      seedAgent(store);
+      store.upsertActor({ id: "operator", kind: "person", displayName: "Operator" });
+      store.recordInvocation({
+        ...invocation,
+        id: "inv-forwarded-1",
+        messageId: "msg-on-sender",
+        collaborationRecordId: "work-on-sender",
+      });
+      store.recordFlight({
+        id: "flight-forwarded-1",
+        invocationId: "inv-forwarded-1",
+        requesterId: "operator",
+        targetAgentId: "agent-1",
+        state: "running",
+        startedAt: 120,
+      });
+
+      const db = getWritableDb(store);
+      expect(db.query(
+        "SELECT message_id, collaboration_record_id FROM invocations WHERE id = 'inv-forwarded-1'",
+      ).get()).toEqual({ message_id: null, collaboration_record_id: null });
+      expect(db.query("SELECT invocation_id FROM flights WHERE id = 'flight-forwarded-1'").get())
+        .toEqual({ invocation_id: "inv-forwarded-1" });
+    } finally {
+      store.close();
+    }
+  });
+
   test("recordFlight dual-writes the flight status onto the invocation row", () => {
     const store = createStore();
     try {
