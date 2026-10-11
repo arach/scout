@@ -106,8 +106,10 @@ import {
 import { shouldBlockLaneDeckStartup } from "./lanes-preflight.ts";
 
 // Keep the full floor and its 3D studio outside the basic npm client graph.
-const AgentFloorView = BASIC_WEB ? null : lazy(() => import("./AgentFloorView.tsx").then((module) => ({ default: module.AgentFloorView })));
-const ObservatoryFloor = BASIC_WEB ? null : lazy(() => import("./observatory/ObservatoryFloor.tsx"));
+// The env check is inline (not BASIC_WEB) so the build folds it and the basic
+// bundle drops these chunks and the world art behind them.
+const AgentFloorView = import.meta.env.VITE_SCOUT_WEB_PROFILE === "basic" ? null : lazy(() => import("./AgentFloorView.tsx").then((module) => ({ default: module.AgentFloorView })));
+const ObservatoryFloor = import.meta.env.VITE_SCOUT_WEB_PROFILE === "basic" ? null : lazy(() => import("./observatory/ObservatoryFloor.tsx"));
 
 const LANE_HORIZON_STORAGE_KEY = "openscout:agent-lanes-horizon";
 const LANE_LAYOUT_STORAGE_KEY = "openscout:agent-lanes-layout";
