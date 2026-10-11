@@ -664,6 +664,14 @@ describe("web db query flights", () => {
       // Same answer from the Scout session id alone.
       expect(queryFollowTarget({ sessionId: "scout-session-1" }).harnessSessionId)
         .toBe("2fcba627-da26-4d4b-9ecd-d052e4b8b27d");
+      // Ticket-only links resolve the same invocation, including after retry
+      // URLs retain an older session handle.
+      expect(queryFollowTarget({ workId: "work-1" })).toMatchObject({
+        flightId: "flight-1", invocationId: "inv-1", sessionId: "scout-session-1",
+        harnessSessionId: "2fcba627-da26-4d4b-9ecd-d052e4b8b27d",
+      });
+      expect(queryFollowTarget({ flightId: "flight-1", sessionId: "old-session" }).sessionId)
+        .toBe("scout-session-1");
     } finally {
       store.close();
     }
@@ -699,6 +707,17 @@ describe("web db query flights", () => {
     } finally {
       store.close();
     }
+  });
+
+  test("a queued task does not borrow the owner's unrelated session", () => {
+    const store = createSeededStore();
+    try {
+      store.recordFlight({ id: "flight-1", invocationId: "inv-1", requesterId: "operator", targetAgentId: "agent-1", state: "queued" });
+      store.upsertEndpoint({ id: "unrelated-endpoint", agentId: "agent-1", nodeId: "node-1", harness: "codex", transport: "codex_app_server", state: "active", sessionId: "other-task", metadata: { threadId: "other-task" } });
+      expect(queryFollowTarget({ workId: "work-1" })).toMatchObject({
+        workId: "work-1", flightId: "flight-1", sessionId: null, harnessSessionId: null,
+      });
+    } finally { store.close(); }
   });
 
   test("does not route ownerless work back to the operator as an agent", () => {
@@ -3065,13 +3084,14 @@ describe("web db query fleet", () => {
         id,
         kind: "work_item",
         title,
-        createdById: "operator",
+        // Agent-declared handbacks: only those are operator attention.
+        createdById: "agent-1",
         ownerId: "agent-1",
         nextMoveOwnerId: "operator",
         conversationId: "c.conv-1",
         state,
         acceptanceState: "pending",
-        requestedById: "operator",
+        requestedById: "agent-1",
         createdAt: updatedAt - 1_000,
         updatedAt,
       });
@@ -3441,7 +3461,7 @@ describe("web db query fleet", () => {
       expect(fleet.totals).toMatchObject({
         active: 1,
         recentCompleted: 1,
-        needsAttention: 2,
+        needsAttention: 1,
       });
 
       expect(fleet.activeAsks).toHaveLength(1);
@@ -3459,17 +3479,10 @@ describe("web db query fleet", () => {
       });
       expect(fleet.recentCompleted.some((ask) => ask.invocationId === "inv-dismissed-failure")).toBe(false);
 
+      // The operator's own dispatched work coming back for review is that ask
+      // ending — only the agent-declared question is operator attention.
+      expect(fleet.needsAttention.some((item) => item.recordId === "work-pending-unresolved")).toBe(false);
       expect(fleet.needsAttention).toEqual([
-        expect.objectContaining({
-          kind: "work_item",
-          recordId: "work-pending-unresolved",
-          title: "Review pending without a later owner action",
-          agentId: "agent-3",
-          agentName: "Agent Three",
-          conversationId: "conv-3",
-          state: "review",
-          acceptanceState: "pending",
-        }),
         expect.objectContaining({
           kind: "question",
           recordId: "question-1",
@@ -3492,7 +3505,7 @@ describe("web db query fleet", () => {
     }
   });
 
-  test("uses explicit collaboration transitions for operator attention", () => {
+  test("operator-sent asks end on reply; only agent-declared records are operator attention", () => {
     const store = createSeededStore();
     const now = Date.now();
 
@@ -3563,8 +3576,8 @@ describe("web db query fleet", () => {
         completedAt: now - 48_000,
       });
 
-      // A later unrelated dispatch in the same conversation does not resolve
-      // an explicit review handback. The collaboration record stays canonical.
+      // A review handback on the operator's own dispatch, followed by an
+      // unrelated failed re-dispatch in the same conversation.
       seedAgent("agent-6", "conv-6", "Agent Six");
       store.recordCollaborationRecord({
         id: "work-review-superseded",
@@ -3627,7 +3640,7 @@ describe("web db query fleet", () => {
         completedAt: now - 28_000,
       });
 
-      // A genuine, unanswered review handback keeps its claim.
+      // An unanswered review handback on the operator's own dispatch.
       seedAgent("agent-7", "conv-7", "Agent Seven");
       store.recordCollaborationRecord({
         id: "work-review-live",
@@ -3726,9 +3739,8 @@ describe("web db query fleet", () => {
         updatedAt: now - 10_000,
       });
 
-      // Creation provenance is not ownership. Even when the operator created
-      // a record, an eligible state explicitly assigned back to the operator
-      // is attention until that next move changes.
+      // Operator-created work assigned back to the operator is still the
+      // operator's own ask, not an agent asking.
       seedAgent("agent-9", "conv-9", "Agent Nine");
       store.recordCollaborationRecord({
         id: "work-creator-awaiting",
@@ -3770,96 +3782,81 @@ describe("web db query fleet", () => {
 
       const fleet = queryFleet({ limit: 10, activityLimit: 5 });
 
-      const needsAttentionAsks = fleet.activeAsks.filter(
-        (ask) => ask.status === "needs_attention",
-      );
-      expect(needsAttentionAsks.map((ask) => ask.invocationId)).toEqual([
-        "inv-creator-awaiting",
-        "inv-review-read",
-        "inv-review-live",
-        "inv-superseded",
-      ]);
+      // Every invocation here is an ask the operator SENT. The agent's reply
+      // and the broker's automatic review handback end that ask; none of them
+      // is the agent asking the operator, however the record is assigned.
+      expect(fleet.activeAsks.some((ask) => ask.status === "needs_attention")).toBe(false);
 
       const byInvocationId = new Map(
         [...fleet.activeAsks, ...fleet.recentCompleted].map((ask) => [ask.invocationId, ask]),
       );
       expect(byInvocationId.get("inv-born-pending")?.status).toBe("completed");
-      expect(byInvocationId.get("inv-superseded")?.status).toBe("needs_attention");
+      expect(byInvocationId.get("inv-superseded")?.status).toBe("completed");
       expect(byInvocationId.get("inv-failed-redispatch")?.status).toBe("failed");
-      expect(byInvocationId.get("inv-review-read")?.status).toBe("needs_attention");
-      expect(byInvocationId.get("inv-creator-awaiting")?.status).toBe("needs_attention");
+      expect(byInvocationId.get("inv-review-live")?.status).toBe("completed");
+      expect(byInvocationId.get("inv-review-read")?.status).toBe("completed");
+      expect(byInvocationId.get("inv-creator-awaiting")?.status).toBe("completed");
+      for (const id of ["inv-review-live", "inv-review-read", "inv-creator-awaiting"]) {
+        expect(byInvocationId.get(id)?.attention).toBe("silent");
+      }
+      // The operator's own handbacks are not Inbox attention either.
+      expect(fleet.needsAttention).toEqual([]);
 
-      expect(fleet.needsAttention.map((item) => item.recordId)).toEqual([
-        "work-creator-awaiting",
-        "work-review-read",
-        "work-review-live",
-        "work-review-superseded",
+      // A question the operator asked, answered by the agent, is the operator's
+      // ask ending — not attention. A question an agent declared to the
+      // operator is attention until an explicit transition resolves it.
+      store.recordCollaborationRecord({
+        id: "question-operator-asked",
+        kind: "question",
+        title: "Operator asked the agent",
+        createdById: "operator",
+        ownerId: "agent-7",
+        nextMoveOwnerId: "operator",
+        conversationId: "conv-7",
+        state: "answered",
+        acceptanceState: "pending",
+        askedById: "operator",
+        askedOfId: "agent-7",
+        createdAt: now - 4_000,
+        updatedAt: now - 3_000,
+      });
+      const declaredQuestion = {
+        id: "question-declared",
+        kind: "question" as const,
+        title: "Which export target?",
+        createdById: "agent-7",
+        ownerId: "agent-7",
+        nextMoveOwnerId: "operator",
+        conversationId: "conv-7",
+        state: "open" as const,
+        acceptanceState: "none" as const,
+        askedById: "agent-7",
+        askedOfId: "operator",
+        createdAt: now - 2_500,
+        updatedAt: now - 2_000,
+      };
+      store.recordCollaborationRecord(declaredQuestion);
+
+      const withDeclared = queryFleet({ limit: 10, activityLimit: 5 });
+      expect(withDeclared.needsAttention.map((item) => item.recordId)).toEqual([
+        "question-declared",
       ]);
 
-      // Only explicit state/next-move changes resolve the claims. Reassign one
-      // review and complete the other while keeping its old next-move value to
-      // prove that both explicit dimensions are honored.
       store.recordCollaborationRecord({
-        id: "work-review-superseded",
-        kind: "work_item",
-        title: "Handback reassigned to the agent",
-        createdById: "operator",
-        ownerId: "agent-6",
-        nextMoveOwnerId: "agent-6",
-        conversationId: "conv-6",
-        state: "review",
-        acceptanceState: "pending",
-        requestedById: "operator",
-        createdAt: now - 44_000,
-        updatedAt: now - 2_000,
-      });
-      store.recordCollaborationRecord({
-        id: "work-review-read",
-        kind: "work_item",
-        title: "Handback explicitly accepted",
-        createdById: "operator",
-        ownerId: "agent-8",
-        nextMoveOwnerId: "operator",
-        conversationId: "conv-8",
-        state: "done",
+        ...declaredQuestion,
+        state: "closed",
         acceptanceState: "accepted",
-        requestedById: "operator",
-        createdAt: now - 18_000,
-        updatedAt: now - 1_000,
-        completedAt: now - 1_000,
-      });
-      store.recordCollaborationRecord({
-        id: "work-creator-awaiting",
-        kind: "work_item",
-        title: "Operator-created work reassigned",
-        createdById: "operator",
-        ownerId: "agent-9",
-        nextMoveOwnerId: "agent-9",
-        conversationId: "conv-9",
-        state: "waiting",
-        acceptanceState: "pending",
-        requestedById: "operator",
-        createdAt: now - 14_000,
+        nextMoveOwnerId: undefined,
         updatedAt: now - 500,
       });
-
       const afterTransitions = queryFleet({ limit: 10, activityLimit: 5 });
-      expect(afterTransitions.needsAttention.map((item) => item.recordId)).toEqual([
-        "work-review-live",
-      ]);
-      const afterByInvocationId = new Map(
-        [...afterTransitions.activeAsks, ...afterTransitions.recentCompleted]
-          .map((ask) => [ask.invocationId, ask]),
-      );
-      expect(afterByInvocationId.get("inv-superseded")?.status).toBe("completed");
-      expect(afterByInvocationId.get("inv-review-read")?.status).toBe("completed");
-      expect(afterByInvocationId.get("inv-creator-awaiting")?.status).toBe("completed");
+      expect(afterTransitions.needsAttention).toEqual([]);
     } finally {
       store.close();
     }
   });
 
-  test("a standing operator dismissal resolves the ask until the record moves again", () => {
+  test("a standing operator dismissal resolves a declared handback until the record moves again", () => {
     const store = createSeededStore();
     const now = Date.now();
 
@@ -3886,44 +3883,26 @@ describe("web db query fleet", () => {
         authorityNodeId: "node-1",
         participantIds: ["agent-10", "operator"],
       });
+      // An agent-declared handback (the agent created it and returned the
+      // next move to the operator) — the only kind of record that is attention.
       const record = {
         id: "work-dismissed-standing",
         kind: "work_item" as const,
         title: "Handback the operator dismissed",
-        createdById: "operator",
+        createdById: "agent-10",
         ownerId: "agent-10",
         nextMoveOwnerId: "operator",
         conversationId: "conv-10",
         state: "waiting" as const,
         acceptanceState: "pending" as const,
-        requestedById: "operator",
+        requestedById: "agent-10",
         createdAt: now - 30_000,
         updatedAt: now - 20_000,
       };
       store.recordCollaborationRecord(record);
-      store.recordInvocation({
-        id: "inv-dismissed-standing",
-        requesterId: "operator",
-        requesterNodeId: "node-1",
-        targetAgentId: "agent-10",
-        action: "consult",
-        task: "Dismissed handback dispatch",
-        collaborationRecordId: "work-dismissed-standing",
-        conversationId: "conv-10",
-        ensureAwake: true,
-        stream: false,
-        createdAt: now - 30_000,
-      });
-      store.recordFlight({
-        id: "flight-dismissed-standing",
-        invocationId: "inv-dismissed-standing",
-        requesterId: "operator",
-        targetAgentId: "agent-10",
-        state: "completed",
-        summary: "Agent Ten handed the work back.",
-        startedAt: now - 29_000,
-        completedAt: now - 28_000,
-      });
+      expect(queryFleet({ limit: 10, activityLimit: 5 }).needsAttention
+        .some((item) => item.recordId === "work-dismissed-standing")).toBe(true);
+
       store.recordCollaborationEvent({
         id: "event-work-dismissed-standing",
         recordId: "work-dismissed-standing",
@@ -3935,20 +3914,14 @@ describe("web db query fleet", () => {
       });
 
       // The dismissal outdates the record's last movement, so the handback is
-      // resolved everywhere: no needs_attention ask, no attention row.
+      // resolved: no attention row.
       const fleet = queryFleet({ limit: 10, activityLimit: 5 });
-      const ask = [...fleet.activeAsks, ...fleet.recentCompleted]
-        .find((entry) => entry.invocationId === "inv-dismissed-standing");
-      expect(ask?.status).toBe("completed");
       expect(fleet.needsAttention.some((item) => item.recordId === "work-dismissed-standing")).toBe(false);
 
       // New movement on the record outdates the dismissal; the handback is
-      // attention again on both surfaces.
+      // attention again.
       store.recordCollaborationRecord({ ...record, updatedAt: now - 5_000 });
       const revived = queryFleet({ limit: 10, activityLimit: 5 });
-      const revivedAsk = [...revived.activeAsks, ...revived.recentCompleted]
-        .find((entry) => entry.invocationId === "inv-dismissed-standing");
-      expect(revivedAsk?.status).toBe("needs_attention");
       expect(revived.needsAttention.some((item) => item.recordId === "work-dismissed-standing")).toBe(true);
     } finally {
       store.close();
@@ -4329,7 +4302,46 @@ describe("web db query fleet", () => {
     }
   });
 
-  test("requester timeout preserves an explicit operator review handback", () => {
+  test("an agent's reply to the operator's ask never reads as the agent asking", () => {
+    // Regression: a completed consult is promoted by the broker to a `review`
+    // work item with the next move on the operator and an automatic
+    // `review_requested` event under the agent's id. That is the operator's
+    // ask ending, not a declared ask addressed to the operator.
+    const store = createSeededStore();
+    const now = Date.now();
+    try {
+      store.recordCollaborationRecord({
+        id: "work-replied", kind: "work_item", title: "Quick high-level design feedback",
+        createdById: "operator", ownerId: "agent-1", nextMoveOwnerId: "operator",
+        conversationId: "c.conv-1", state: "review", acceptanceState: "pending",
+        requestedById: "operator", createdAt: now - 60_000, updatedAt: now - 20_000,
+      });
+      store.recordCollaborationEvent({
+        id: "event-work-replied-review", recordId: "work-replied", recordKind: "work_item",
+        kind: "review_requested", actorId: "agent-1", summary: "Overall shape is right.",
+        at: now - 20_000,
+      });
+      store.recordInvocation({
+        id: "inv-replied", requesterId: "operator", requesterNodeId: "node-1",
+        targetAgentId: "agent-1", action: "consult", task: "Quick high-level design feedback, please.",
+        collaborationRecordId: "work-replied", conversationId: "c.conv-1",
+        ensureAwake: true, stream: false, createdAt: now - 60_000,
+      });
+      store.recordFlight({
+        id: "flight-replied", invocationId: "inv-replied", requesterId: "operator",
+        targetAgentId: "agent-1", state: "completed", summary: "Agent One replied.",
+        startedAt: now - 59_000, completedAt: now - 20_000,
+      });
+      const fleet = queryFleet({ limit: 10, activityLimit: 20 });
+      expect(fleet.activeAsks.some((ask) => ask.invocationId === "inv-replied")).toBe(false);
+      const ask = fleet.recentCompleted.find((item) => item.invocationId === "inv-replied");
+      expect(ask?.status).toBe("completed");
+      expect(ask?.attention).toBe("silent");
+      expect(fleet.needsAttention.some((item) => item.recordId === "work-replied")).toBe(false);
+    } finally { store.close(); }
+  });
+
+  test("requester timeout on the operator's own reviewed dispatch ends quietly, not as an ask", () => {
     const store = createSeededStore();
     const now = Date.now();
     try {
@@ -4354,9 +4366,10 @@ describe("web db query fleet", () => {
       const fleet = queryFleet({ limit: 10, activityLimit: 20 });
       const ask = [...fleet.activeAsks, ...fleet.recentCompleted]
         .find((item) => item.invocationId === "inv-timeout-review");
-      expect(ask?.status).toBe("needs_attention");
-      expect(ask?.statusLabel).not.toBe("Stopped waiting");
-      expect(ask?.attention).toBe("badge");
+      expect(ask?.status).toBe("completed");
+      expect(ask?.statusLabel).toBe("Stopped waiting");
+      expect(ask?.attention).toBe("silent");
+      expect(fleet.needsAttention.some((item) => item.recordId === "work-timeout-review")).toBe(false);
     } finally { store.close(); }
   });
 

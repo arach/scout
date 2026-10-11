@@ -29,7 +29,7 @@ import { actorColor } from "../../lib/colors.ts";
 import { useOptionalFlag } from "hudsonkit/flags";
 import { isAgentBusy, normalizeAgentState } from "../../lib/agent-state.ts";
 import { ensureAgentChat } from "../../lib/agent-chat.ts";
-import { usePersistentNumber, usePersistentString } from "../../lib/persistent-state.ts";
+import { usePersistentString } from "../../lib/persistent-state.ts";
 import {
   createRuntimeCatalogLoader,
   RUNTIME_CAPABILITY_SEED,
@@ -86,7 +86,7 @@ import {
   type WorkingAgentContext,
 } from "./home-moving.ts";
 import { HomeMovingSignalList } from "./home-moving-signal.tsx";
-import { agentLaneTailRecentLimit, isAgentLaneLive, type AgentLane } from "../ops/agent-lanes-model.ts";
+import { agentLaneTailRecentLimit, isAgentLaneLive, type AgentLane, type AgentLaneHorizonKey } from "../ops/agent-lanes-model.ts";
 
 type LookbackOption = { label: string; value: number; activityLimit: number };
 type HomeMovingCardItem =
@@ -109,14 +109,21 @@ type HomeMovingCardItem =
       lastActivityAt: number;
     };
 
+/** Same actor, same line, this close together: one event logged twice. */
+const ACTIVITY_ECHO_WINDOW_MS = 60_000;
+
 const LOOKBACK_WINDOWS: LookbackOption[] = [
   { label: "30m", value: 30 * 60_000, activityLimit: 80 },
   { label: "6h", value: 6 * 60 * 60_000, activityLimit: 250 },
   { label: "24h", value: 24 * 60 * 60_000, activityLimit: 800 },
 ];
 const DEFAULT_LOOKBACK_MS = LOOKBACK_WINDOWS[2].value;
-const LOOKBACK_STORAGE_KEY = "openscout.home.lookbackMs.v1";
-const MOVING_WINDOW_STORAGE_KEY = "openscout.home.movingWindow.v1";
+// The skeletons already say Home is loading; the trace strip is for a real
+// stall. Quota gauges routinely take a few seconds, and a shorter delay
+// flashed a gray band across the bottom of the page on ordinary loads.
+const HOME_TRACE_DELAY_MS = 8_000;
+// The auto ladder for What's moving skips 5m: it is a pick, never a default.
+const MOVING_WINDOW_LADDER: AgentLaneHorizonKey[] = ["30m", "4h", "24h"];
 const MOVING_SORT_STORAGE_KEY = "openscout.home.movingSort.v1";
 // The server owns provider-specific freshness and request coalescing, so the
 // homepage can poll cheaply without holding an hour-old client snapshot.
@@ -309,7 +316,7 @@ export function HomeContent({
   /** Extra Home sections, laid out after What's moving. */
   children?: React.ReactNode;
 }) {
-  const { agents: allAgents, onboarding, reload, route, apiConnection } = useScout();
+  const { agents: allAgents, onboarding, reload, route, apiConnection, openContextCapture } = useScout();
   const machineId = routeMachineId(route);
   const scopedAgentIds = useMemo(
     () => machineScopedAgentIds(allAgents, machineId),
@@ -319,21 +326,26 @@ export function HomeContent({
     () => filterAgentsByMachineScope(allAgents, machineId),
     [allAgents, machineId],
   );
-  const [lookbackMs, setLookbackMs] = usePersistentNumber(
-    LOOKBACK_STORAGE_KEY,
-    DEFAULT_LOOKBACK_MS,
-  );
+  // Both windows open on the smallest one that holds something (30m, then
+  // wider). A pick pins a window for this visit; nothing is stored, so the
+  // next visit opens on what's there again. The iOS Home does the same.
+  const [lookbackPick, setLookbackPick] = useState<number | null>(null);
+  // Start where the last settled load ended up, so a quiet stretch does not
+  // walk 30m → 6h → 24h (three fetches, three reshapes) on every open.
+  const [lookbackAuto, setLookbackAuto] = useState(() => {
+    const remembered = readHomeLayoutHint().lookback;
+    return LOOKBACK_WINDOWS.some((option) => option.value === remembered) ? remembered! : LOOKBACK_WINDOWS[0]!.value;
+  });
+  const lookbackMs = lookbackPick ?? lookbackAuto;
   const lookbackOption = useMemo<LookbackOption>(
     () =>
       LOOKBACK_WINDOWS.find((opt) => opt.value === lookbackMs)
         ?? LOOKBACK_WINDOWS[LOOKBACK_WINDOWS.length - 1]!,
     [lookbackMs],
   );
-  const [movingWindowKeyRaw, setMovingWindowKeyRaw] = usePersistentString(
-    MOVING_WINDOW_STORAGE_KEY,
-    HOME_MOVING_HORIZON,
-  );
-  const movingWindowKey = normalizeHomeMovingWindowKey(movingWindowKeyRaw);
+  const [movingPick, setMovingPick] = useState<AgentLaneHorizonKey | null>(null);
+  const [movingAuto, setMovingAuto] = useState<AgentLaneHorizonKey>(HOME_MOVING_HORIZON);
+  const movingWindowKey = movingPick ?? movingAuto;
   const movingWindow = homeMovingWindowOption(movingWindowKey);
   const [movingSortRaw, setMovingSortRaw] = usePersistentString(
     MOVING_SORT_STORAGE_KEY,
@@ -370,6 +382,11 @@ export function HomeContent({
     };
   });
   const [fleet, setFleet] = useState<FleetState | null>(warmStart.fleet);
+  // The lookback the fleet in hand was fetched with, so the auto window only
+  // widens on an answer for the window it asked about.
+  const [fleetLookbackMs, setFleetLookbackMs] = useState<number | null>(
+    warmStart.fleet ? lookbackOption.value : null,
+  );
   const [heartrate, setHeartrate] = useState<HeartrateBucketView[]>(warmStart.heartrate?.buckets ?? []);
   const [heartrateWindow, setHeartrateWindow] = useState(warmStart.heartrate?.windowLabel ?? "trailing 7d");
   const [heartrateBucketLabel, setHeartrateBucketLabel] = useState(
@@ -427,15 +444,12 @@ export function HomeContent({
       activityLimit: String(lookbackOption.activityLimit),
     }).toString();
 
-    // Heartrate only feeds the hero's velocity chart, which basic omits.
     const [fleetResult, heartrateResult] = await Promise.allSettled([
       loadHomeSource("Home activity", () => loadFleet(fleetQuery), traceLoad, {
         retries: hasSnapshot && mode === "background" ? 0 : 2,
         active: () => requestId === requestIdRef.current,
       }),
-      basic
-        ? Promise.resolve(null)
-        : loadHomeSource("Activity chart", () => api<{
+      loadHomeSource("Activity chart", () => api<{
           windowLabel: string;
           bucketLabel?: string;
           buckets: HeartrateBucketView[];
@@ -448,6 +462,7 @@ export function HomeContent({
     if (fleetResult.status === "fulfilled") {
       fleetRef.current = fleetResult.value;
       setFleet(fleetResult.value);
+      setFleetLookbackMs(lookbackOption.value);
     }
     if (heartrateResult.status === "fulfilled" && heartrateResult.value) {
       setHeartrate(heartrateResult.value.buckets);
@@ -463,7 +478,7 @@ export function HomeContent({
     }
     setLoading(false);
     setRefreshing(false);
-  }, [basic, reload, lookbackOption, traceLoad]);
+  }, [reload, lookbackOption, traceLoad]);
 
   useEffect(() => {
     void load();
@@ -472,7 +487,6 @@ export function HomeContent({
   useBrokerRefresh(() => void load("background"), HOME_FLEET_REFRESH_POLICY);
 
   useEffect(() => {
-    if (basic) return;
     let cancelled = false;
     const fetchBudgets = async () => {
       try {
@@ -503,7 +517,7 @@ export function HomeContent({
       window.removeEventListener("focus", refreshWhenVisible);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
-  }, [basic, fetchServiceGauges, traceLoad]);
+  }, [fetchServiceGauges, traceLoad]);
 
   const loadLocalTailSnapshot = useCallback(async () => {
     try {
@@ -543,12 +557,12 @@ export function HomeContent({
       }
       lastForegroundRefreshAtRef.current = now;
       // The fleet itself refreshes through useBrokerRefresh above.
-      if (!basic) void fetchServiceGauges().then(setServiceGauges).catch(() => null);
+      void fetchServiceGauges().then(setServiceGauges).catch(() => null);
       void loadLocalTailSnapshot();
     };
 
     return onScoutSurfaceActivated(refreshIfActive);
-  }, [basic, fetchServiceGauges, loadLocalTailSnapshot]);
+  }, [fetchServiceGauges, loadLocalTailSnapshot]);
 
   const [nowMs, setNowMs] = useState(() => Date.now());
 
@@ -684,19 +698,19 @@ export function HomeContent({
       && (normalizeTimestampMs(item.ts) ?? 0) >= sinceMs
     );
     // Collapse machine echoes: the firehose logs some events twice with
-    // identical copy but different kinds (e.g. `ask opened` immediately
-    // followed by `invocation recorded`). The feed is newest-first, so drop a
-    // row when the one just above it says the same thing at the same time —
-    // keeps the first (more human-readable) line, hides the duplicate.
-    return items.filter((item, i) => {
-      const prev = items[i - 1];
-      if (!prev) return true;
-      const sameContent =
-        prev.title === item.title
-        && prev.summary === item.summary
-        && prev.conversationId === item.conversationId
-        && Math.abs((normalizeTimestampMs(prev.ts) ?? 0) - (normalizeTimestampMs(item.ts) ?? 0)) <= 5_000;
-      return !sameContent;
+    // identical copy but different kinds (`agent message` then `invocation
+    // recorded`, `ask opened` then `invocation recorded`), not always adjacent
+    // and not always within the same second. Two rows are one when they would
+    // read the same — same actor, same line — within a minute. The feed is
+    // newest-first, so the first (more human-readable) line is the one kept.
+    const keptAt = new Map<string, number>();
+    return items.filter((item) => {
+      const key = `${item.actorName ?? ""}\u0000${item.title ?? item.summary ?? ""}`;
+      const ts = normalizeTimestampMs(item.ts) ?? 0;
+      const kept = keptAt.get(key);
+      if (kept !== undefined && Math.abs(kept - ts) <= ACTIVITY_ECHO_WINDOW_MS) return false;
+      keptAt.set(key, ts);
+      return true;
     });
   }, [scopedFleet?.activity, sinceMs]);
   const activityShape = useMemo(
@@ -772,6 +786,28 @@ export function HomeContent({
       .catch(() => {});
   }, [fetchServiceGauges, load]);
 
+  // Inside the Mac app the native composer owns new chats (⌘N); in a browser
+  // the web one opens.
+  const startNewChat = useCallback(() => {
+    const native = (window as unknown as {
+      webkit?: { messageHandlers?: { scoutNativeUI?: { postMessage: (message: unknown) => void } } };
+    }).webkit?.messageHandlers?.scoutNativeUI;
+    if (native) {
+      try {
+        native.postMessage({ kind: "ui-action", action: { type: "new-chat" } });
+        return;
+      } catch {
+        // Fall through to the web composer.
+      }
+    }
+    // Basic mounts no context-capture overlay; a new chat starts in DMs.
+    if (basic) {
+      navigate({ view: "messages" });
+      return;
+    }
+    openContextCapture();
+  }, [basic, navigate, openContextCapture]);
+
   const heroProps = {
     now,
     operatorName,
@@ -780,6 +816,7 @@ export function HomeContent({
     loading,
     refreshing,
     onRefresh: handleRefresh,
+    onNewChat: startNewChat,
     navigate,
     opsEnabled,
     heartrate: combinedHeartrate,
@@ -795,12 +832,15 @@ export function HomeContent({
     !loading &&
     !error &&
     liveActivity.length === 0 &&
+    fleetLookbackMs === lookbackMs &&
     lookbackMs >= DEFAULT_LOOKBACK_MS;
   const composerEmbedded = useMessageComposerEmbedded();
   const showQuietStart =
     !loading &&
     !error &&
-    liveActivity.length === 0;
+    liveActivity.length === 0 &&
+    fleetLookbackMs === lookbackMs &&
+    (lookbackPick !== null || lookbackMs >= DEFAULT_LOOKBACK_MS);
   const showActivitySection =
     loading ||
     liveActivity.length > 0 ||
@@ -839,8 +879,27 @@ export function HomeContent({
   const totalMovingCount = movingCards.length + movingAsksWithoutWorkingAgent.length;
   // Moving rows are joined from fleet, tail, and discovery; until the first
   // fleet and tail answers land, an empty list means "not known yet".
-  const movingPending = (loading || !tailSettled) && totalMovingCount === 0;
-  const activityPending = loading && liveActivity.length === 0;
+  const nextMovingWindow = MOVING_WINDOW_LADDER[MOVING_WINDOW_LADDER.indexOf(movingWindowKey) + 1];
+  const movingWidening =
+    movingPick === null && totalMovingCount === 0 && nextMovingWindow !== undefined;
+  const activityWidening =
+    lookbackPick === null && !error && liveActivity.length === 0 && nextLookbackOption !== null;
+  useEffect(() => {
+    if (!movingWidening || loading || !tailSettled || !nextMovingWindow) return;
+    setMovingAuto(nextMovingWindow);
+  }, [movingWidening, loading, tailSettled, nextMovingWindow]);
+  useEffect(() => {
+    if (!activityWidening || loading || fleetLookbackMs !== lookbackMs || !nextLookbackOption) return;
+    setLookbackAuto(nextLookbackOption.value);
+  }, [activityWidening, loading, fleetLookbackMs, lookbackMs, nextLookbackOption]);
+  // While the window is still widening, the section holds its skeleton
+  // instead of flashing "nothing in the last 30m".
+  const movingPending = (loading || !tailSettled || movingWidening) && totalMovingCount === 0;
+  // Also pending while the answer for the window on screen is still out: the
+  // last widening step has no next step, and would otherwise flash the empty
+  // line (and lift the tail) before its rows land.
+  const activityAnswered = fleetLookbackMs === lookbackMs;
+  const activityPending = (loading || activityWidening || !activityAnswered) && liveActivity.length === 0;
 
   const settled = !loading && gaugesSettled && tailSettled;
   const settledQuotaCount = serviceGauges.filter((gauge) => gauge.kind === "quota").length;
@@ -848,6 +907,16 @@ export function HomeContent({
     combinedHeartrate.reduce((total, bucket) => total + bucket.count, 0) >= HEARTRATE_COMBINED_EVENT_THRESHOLD;
   const settledMovingRows = movingCardCount + movingAsksWithoutWorkingAgent.length;
   const settledActivityRows = Math.min(liveActivity.length, 30);
+  // The narrowest window holding the newest row, once the auto window has
+  // stopped widening (a pick is not remembered). Narrowest, so a busier
+  // stretch starts narrow again next time.
+  const newestActivityMs = liveActivity.reduce((max, item) => Math.max(max, normalizeTimestampMs(item.ts) ?? 0), 0);
+  const settledLookback =
+    lookbackPick === null && !activityWidening && fleetLookbackMs === lookbackMs
+      ? (newestActivityMs > 0
+        ? (LOOKBACK_WINDOWS.find((option) => nowMs - newestActivityMs <= option.value)?.value ?? lookbackAuto)
+        : lookbackAuto)
+      : null;
   useEffect(() => {
     if (!settled) return;
     writeHomeLayoutHint({
@@ -855,13 +924,27 @@ export function HomeContent({
       heartrate: settledHeartrate,
       moving: settledMovingRows,
       activity: settledActivityRows,
+      lookback: settledLookback ?? undefined,
     });
-  }, [settled, settledQuotaCount, settledHeartrate, settledMovingRows, settledActivityRows]);
+  }, [settled, settledQuotaCount, settledHeartrate, settledMovingRows, settledActivityRows, settledLookback]);
 
   const movingSectionLabel =
     totalMovingCount > movingCardCount && movingCardCount > 0
       ? `What's moving · ${movingCardCount} of ${totalMovingCount}`
       : `What's moving · ${totalMovingCount}`;
+
+  // The load trace is for a slow or stuck load. A normal load lands well
+  // inside this, and a footer that appears and leaves in a second is motion.
+  const traceLoading = loading || !gaugesSettled || !tailSettled;
+  const [traceVisible, setTraceVisible] = useState(false);
+  useEffect(() => {
+    if (!traceLoading) {
+      setTraceVisible(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setTraceVisible(true), HOME_TRACE_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [traceLoading]);
 
   if (!fleet && error && !loading) {
     return <div className="s-home-load-state"><ConnectionState notice={homeLoadNotice(error)} trace={loadTrace} onRetry={() => void load("manual")} /></div>;
@@ -872,8 +955,10 @@ export function HomeContent({
     <div className="s-fleet-home" aria-busy={loading || undefined}>
       <div className="s-fleet-home-inner">
         {/* ── Home header ─────────────────────────────────────────── */}
-        {!basic && <HomeHero {...heroProps} />}
-        {basic && error && !refreshing && (
+        <HomeHero {...heroProps} />
+        {/* Held through retries: hiding it per refresh flashed the band and
+            shifted the page on every poll. A successful load clears error. */}
+        {basic && error && (
           <div className="sys-banner sys-banner-warning" role="alert">
             <strong>Refresh failed.</strong>
             <span>{error}</span>
@@ -894,7 +979,7 @@ export function HomeContent({
                     sort={movingSort}
                     onSortChange={setMovingSortRaw}
                     windowKey={movingWindow.key}
-                    onWindowChange={setMovingWindowKeyRaw}
+                    onWindowChange={(key) => setMovingPick(normalizeHomeMovingWindowKey(key))}
                   />
                   <button
                     className="s-link-btn"
@@ -939,7 +1024,7 @@ export function HomeContent({
         </div>
 
         {/* ── Scout coordination stream ─────────────────────────── */}
-        {!basic && showActivitySection && (
+        {showActivitySection && (
           <div className="s-fleet-section">
             <SectionRule
               label={activityPending
@@ -948,7 +1033,7 @@ export function HomeContent({
               right={
                 <LookbackPicker
                   value={lookbackMs}
-                  onChange={setLookbackMs}
+                  onChange={setLookbackPick}
                   refreshing={refreshing && !loading}
                 />
               }
@@ -985,7 +1070,7 @@ export function HomeContent({
               <LiveActivityEmpty
                 lookbackMs={lookbackMs}
                 nextOption={nextLookbackOption}
-                onWiden={(opt) => setLookbackMs(opt.value)}
+                onWiden={(opt) => setLookbackPick(opt.value)}
                 error={error}
                 onRetry={() => void load("manual")}
               />
@@ -1011,7 +1096,7 @@ export function HomeContent({
             only when coordination is empty. Inside an embed the host owns the
             composer (MessageComposer renders nothing), so the Message panel is
             skipped rather than drawn as an empty frame. */}
-        {!basic && <div className="s-fleet-section s-fleet-section--quiet-start">
+        <div className="s-fleet-section s-fleet-section--quiet-start">
           <div className="s-quiet-start">
             {showQuietStart && !composerEmbedded && (
               <QuietStartPanel
@@ -1021,12 +1106,12 @@ export function HomeContent({
             )}
             <LocalTailPanel navigate={navigate} />
           </div>
-        </div>}
+        </div>
 
         {children}
       </div>
     </div>
-    {(loading || (!basic && !gaugesSettled) || !tailSettled) && (
+    {traceVisible && (
       <ConnectionTraceLog trace={loadTrace} label="Loading Scout" />
     )}
     </div>
@@ -1115,6 +1200,10 @@ function MovingAskRow({
       className="s-moving-ask-row"
       onClick={() => navigate(route)}
     >
+      <span className="s-moving-ask-time">
+        {timeAgo(ask.updatedAt)}
+      </span>
+      <span aria-hidden="true" />
       <span className="s-moving-ask-agent">
         {ask.agentName ?? ask.agentId}
       </span>
@@ -1123,9 +1212,6 @@ function MovingAskRow({
       </span>
       <span className="s-moving-ask-state">
         {ask.statusLabel}
-      </span>
-      <span className="s-moving-ask-time">
-        {timeAgo(ask.updatedAt)}
       </span>
     </button>
   );
@@ -1198,9 +1284,10 @@ function ActivityStreamSkeleton({ rows }: { rows: number }) {
       {Array.from({ length: Math.max(rows, 3) }, (_, i) => (
         <div key={i} className="s-mc-stream-row">
           <span className="s-mc-stream-time"><span className="home-skel" style={{ width: 20 }} />{"\u00a0"}</span>
+          <span className="s-mc-stream-mark" />
           <span className="s-mc-stream-actor"><span className="home-skel" style={{ width: 96 }} /></span>
-          <span className="s-mc-stream-verb"><span className="home-skel" style={{ width: 72 }} /></span>
           <span className="s-mc-stream-text"><span className="home-skel" style={{ width: `${52 + ((i * 23) % 40)}%` }} /></span>
+          <span className="s-mc-stream-verb"><span className="home-skel" style={{ width: 72 }} /></span>
         </div>
       ))}
     </div>
@@ -1497,9 +1584,10 @@ function ActivityRow({
   return (
     <button type="button" className="s-mc-stream-row" onClick={onOpen}>
       <span className="s-mc-stream-time">{formatAge(item.ts, nowMs)}</span>
+      <span className="s-mc-stream-mark" aria-hidden="true" />
       <span className="s-mc-stream-actor">{actor}</span>
-      <span className="s-mc-stream-verb">{verb}</span>
       <span className="s-mc-stream-text">{text}</span>
+      <span className="s-mc-stream-verb">{verb}</span>
     </button>
   );
 }

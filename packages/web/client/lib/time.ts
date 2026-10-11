@@ -69,27 +69,42 @@ export function fullTimestamp(ts: TimestampInput): string {
   });
 }
 
+// Building an Intl.DateTimeFormat costs far more than formatting with one,
+// and tables call these per row per render: build each format once.
+let absoluteFormatCache: Intl.DateTimeFormat | null = null;
+const clockFormatCache = new Map<boolean, Intl.DateTimeFormat>();
+
+function absoluteFormat(): Intl.DateTimeFormat {
+  return absoluteFormatCache ??= new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+function clockFormat(milliseconds: boolean): Intl.DateTimeFormat {
+  let format = clockFormatCache.get(milliseconds);
+  if (!format) {
+    format = new Intl.DateTimeFormat(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      fractionalSecondDigits: milliseconds ? 3 : undefined,
+      hour12: false,
+    });
+    clockFormatCache.set(milliseconds, format);
+  }
+  return format;
+}
+
 /** Compact absolute timestamp for titles and thread headers. */
 export function formatAbsoluteTimestamp(ts: TimestampInput): string {
   const tsMs = normalizeTimestampMs(ts);
   if (tsMs === null) return "";
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(tsMs);
+  return absoluteFormat().format(tsMs);
 }
 
 /** Local wall-clock timestamp for tail/log tables. */
 export function formatClockTimestamp(ts: TimestampInput, options: { milliseconds?: boolean } = {}): string {
   const tsMs = normalizeTimestampMs(ts);
   if (tsMs === null) return "";
-  return new Intl.DateTimeFormat(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    fractionalSecondDigits: options.milliseconds ? 3 : undefined,
-    hour12: false,
-  }).format(tsMs);
+  return clockFormat(Boolean(options.milliseconds)).format(tsMs);
 }
 
 /** Duration label for elapsed times. Never use this for epoch timestamps. */

@@ -1,0 +1,17 @@
+.minimap { position: absolute; bottom: 18px; left: 22px; width: 200px; padding: 9px 8px 6px; border: 1px solid #ffffff24; border-radius: 7px; background: #0b0c0df2; z-index: 40; cursor: default; }
+.caption { display: flex; align-items: center; justify-content: space-between; padding: 0 4px 4px; color: #c8c5bc; font-size: 10px; }
+.caption > span { text-transform: uppercase; letter-spacing: .12em; }
+.caption small { font: inherit; color: #888a8a; }
+.map { position: relative; width: 100%; aspect-ratio: 184 / 112; overflow: hidden; cursor: grab; touch-action: none; border-radius: 3px; }
+.map:active { cursor: grabbing; }
+.map > svg { width: 100%; height: 100%; pointer-events: none; }
+.platform { fill: #c2b99a12; stroke: #c2b99a48; stroke-width: .7; }
+.person { fill: #e0d6bc; opacity: .65; }
+.space { fill: none; stroke: #e0d6bc70; stroke-width: .6; }
+.view { fill: #c5deec12; stroke: #c5deec99; stroke-width: 1; }
+.island { position: absolute; transform: translate(-50%, -50%); width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
+.island > span { width: 6px; height: 6px; border-radius: 50%; background: #c9d9df; border: 1px solid #f3efdc88; box-shadow: 0 0 0 3px #0b0c0d80; }
+.island:hover > span, .island:focus-visible > span { background: #fff4cd; box-shadow: 0 0 0 4px #fff4cd22; }
+.map:focus-visible { outline: 2px solid #d8c9a6; outline-offset: 2px; }
+@media (max-width: 800px) { .minimap { left: 14px; bottom: 76px; width: 152px; } }
+@media (pointer: coarse) { .island { width: 36px; height: 36px; } }

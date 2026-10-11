@@ -1,3 +1,4 @@
+import { getDestination } from "../../scout/nav-destinations.ts";
 import { useCallback, useEffect, useState } from "react";
 import "../../scout/slots/ctx-panel.css";
 import {
@@ -101,7 +102,7 @@ export function OpsAdvisorLeft() {
             onClick={() => navigate({ view: "ops", mode: "lanes" })}
           >
             <Cpu size={13} />
-            <span>Agent Lanes</span>
+            <span>{getDestination("lanes").label}</span>
           </button>
           <button
             type="button"
@@ -109,7 +110,7 @@ export function OpsAdvisorLeft() {
             onClick={() => navigate({ view: "harnesses" })}
           >
             <Gauge size={13} />
-            <span>Agent Providers & Quotas</span>
+            <span>{getDestination("providers").label}</span>
           </button>
           <button
             type="button"

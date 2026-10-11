@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 export type MenuItem =
-  | { kind: "action"; label: string; shortcut?: string; onSelect: () => void }
+  | { kind: "action"; label: string; shortcut?: string; tone?: "danger"; onSelect: () => void }
   | { kind: "separator" };
 
 type Position = { x: number; y: number };
@@ -17,7 +17,7 @@ const ContextMenuContext = {
 };
 
 export function useContextMenu() {
-  return useCallback((event: React.MouseEvent, items: MenuItem[]) => {
+  return useCallback((event: { preventDefault: () => void; stopPropagation: () => void; clientX: number; clientY: number }, items: MenuItem[]) => {
     event.preventDefault();
     event.stopPropagation();
     ContextMenuContext.setMenu?.({
@@ -101,7 +101,12 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
           className="s-context-menu"
           style={{ left: menu.position.x, top: menu.position.y, visibility: "hidden" }}
           role="menu"
-          onMouseDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => {
+            // Keep the text caret where the right-click happened so Cut,
+            // Copy, and Paste still see that selection.
+            e.preventDefault();
+            e.stopPropagation();
+          }}
         >
           {menu.items.map((item, i) =>
             item.kind === "separator" ? (
@@ -110,7 +115,7 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
               <button
                 key={i}
                 type="button"
-                className="s-context-menu-item"
+                className={item.tone === "danger" ? "s-context-menu-item s-context-menu-item--danger" : "s-context-menu-item"}
                 role="menuitem"
                 onClick={() => {
                   item.onSelect();

@@ -21,6 +21,13 @@
   max-width: 1480px;
   margin: 0 auto;
   padding: var(--space-6xl) var(--space-6xl) var(--space-8xl);
+  /* One row grid for every Home list (What's moving, its asks, Scout
+     coordination): the same gutter, row height and columns, so time, who
+     and the text line up down the page. */
+  --home-gutter: var(--space-lg);
+  --home-row-pad: var(--space-md);
+  --home-col-gap: var(--space-lg);
+  --home-cols: 44px 16px minmax(96px, 168px) minmax(0, 1fr) auto;
 }
 
 /* ── Eyebrow label ─────────────────────────────────────────────────── */
@@ -71,10 +78,10 @@
 
 .s-hero-lede {
   margin: 0;
-  font-family: "Inter Tight", "Inter", system-ui, sans-serif;
+  font-family: var(--font-accent-title);
   font-size: var(--text-9xl);
-  font-weight: 600;
-  letter-spacing: -0.028em;
+  font-weight: 500;
+  letter-spacing: -0.022em;
   line-height: var(--leading-none);
   color: var(--ink);
   text-wrap: balance;
@@ -87,10 +94,10 @@
 
 .s-hero-sub {
   margin: var(--space-xl) 0 0;
-  font-family: "Inter Tight", "Inter", system-ui, sans-serif;
+  font-family: var(--font-accent-title);
   font-size: var(--text-5xl);
-  font-weight: 400;
-  letter-spacing: -0.012em;
+  font-weight: var(--font-weight-body);
+  letter-spacing: -0.008em;
   line-height: var(--leading-tight);
   color: var(--muted);
   max-width: 620px;
@@ -143,7 +150,7 @@
 
 .s-btn-fleet--primary {
   background: var(--accent);
-  color: var(--bg);
+  color: var(--on-accent, var(--bg));
   border-color: var(--accent);
 }
 
@@ -252,7 +259,8 @@
   align-items: center;
   gap: var(--space-lg);
   padding: var(--space-2xs) 0;
-  margin-bottom: var(--space-4xl);
+  /* Same rule-to-content step as the cockpit header (band + hd gap). */
+  margin-bottom: calc(var(--space-sm) + var(--space-md));
 }
 
 /* Home's section titles are the page's structure, so they sit one step
@@ -340,7 +348,14 @@
 }
 
 .s-fleet-section--quiet-start {
-  margin-top: var(--space-4xl);
+  margin-top: var(--space-7xl);
+}
+
+/* The warning banner's text sits on the same gutter as the cards' rows. */
+.s-fleet-home-inner > .sys-banner {
+  margin-top: var(--space-md);
+  padding-inline: var(--home-gutter);
+  align-items: baseline;
 }
 
 .s-fleet-section--quiet-start .s-quiet-start {
@@ -768,23 +783,24 @@
 }
 
 .s-moving-ask-list {
-  margin-top: var(--space-xl);
+  margin-top: var(--space-md);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
+  background: color-mix(in srgb, var(--surface) 75%, var(--bg));
   overflow: hidden;
 }
 
 .s-moving-ask-row {
   width: 100%;
-  min-height: 38px;
-  padding: var(--space-md) var(--space-lg);
+  padding: var(--home-row-pad) var(--home-gutter);
   border: 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
   background: transparent;
   color: inherit;
+  font: inherit;
   display: grid;
-  grid-template-columns: minmax(120px, 0.35fr) minmax(220px, 1fr) 96px 74px;
-  gap: var(--space-md);
+  grid-template-columns: var(--home-cols);
+  gap: var(--space-sm) var(--home-col-gap);
   align-items: center;
   text-align: left;
   cursor: pointer;
@@ -826,6 +842,13 @@
 }
 
 .s-moving-ask-time {
+  text-align: right;
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.s-moving-ask-state {
+  font-size: var(--text-xs);
   text-align: right;
 }
 
@@ -1855,7 +1878,7 @@
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-sm);
-  padding: 0 var(--space-3xs) var(--space-md);
+  padding: 0 0 var(--space-md);
   margin-top: calc(-1 * var(--space-md));
   font-family: var(--font-mono);
   font-size: var(--text-sm);
@@ -1955,6 +1978,28 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-lg);
+}
+
+/* The tail's head is a label, not a toolbar: slimmer than its siblings. */
+.s-quiet-panel--tail .s-quiet-panel-head {
+  min-height: 30px;
+  padding: var(--space-2xs) var(--space-sm) var(--space-2xs) var(--home-gutter);
+}
+
+/* The embedded tail's status line and rows start on the Home gutter. */
+.s-quiet-tail-frame .s-tail--embedded .s-tail-status,
+.s-quiet-tail-frame .s-tail--embedded .s-tail-row {
+  padding-inline: var(--home-gutter);
+}
+
+.s-quiet-panel--tail .s-quiet-panel-head .s-eyebrow {
+  font-size: var(--text-xs);
+}
+
+.s-quiet-panel--tail .s-quiet-panel-head .s-icon-btn {
+  min-height: 22px;
+  padding: 0 var(--space-sm);
+  font-size: var(--text-xs);
 }
 
 .s-quiet-tail-frame {

@@ -12,7 +12,7 @@
 
 .vtl-lanes-kicker {
   margin: 0 0 8px;
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.02em;
   color: var(--scout-chrome-ink-faint);
@@ -112,7 +112,7 @@
 .vtl-tick-label {
   position: absolute;
   top: 24px;
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   line-height: 10px;
   letter-spacing: 0.01em;
@@ -162,7 +162,7 @@
   position: absolute;
   top: 2px;
   transform: translateX(-50%);
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
   color: var(--scout-chrome-ink-ghost);
@@ -172,7 +172,7 @@
 
 .vtl-empty-line {
   margin: 0;
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.5;
   color: var(--scout-chrome-ink-faint);
@@ -265,7 +265,7 @@
 }
 
 .vtl-settle-total {
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
   color: var(--scout-chrome-ink-ghost);
@@ -299,7 +299,7 @@
 }
 
 .vtl-settle time {
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
   color: var(--scout-chrome-ink-ghost);
@@ -316,7 +316,7 @@
 
 .vtd-summary {
   cursor: pointer;
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.02em;
   color: var(--scout-chrome-ink-faint);
@@ -346,7 +346,7 @@
 .vtd-facts div { display: flex; gap: 6px; align-items: baseline; }
 
 .vtd-facts dt {
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -359,7 +359,7 @@
   width: 100%;
   margin-top: 12px;
   border-collapse: collapse;
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 10.5px;
   font-variant-numeric: tabular-nums;
 }
@@ -390,7 +390,7 @@
 
 .vtd-kicker {
   margin: 0 0 6px;
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -401,7 +401,7 @@
 
 .vtd-line code,
 .vtd-session-head code {
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   color: var(--scout-chrome-ink-strong);
   user-select: all;
@@ -413,7 +413,7 @@
 .vtd-pair b {
   display: inline-block;
   min-width: 46px;
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 9px;
   font-weight: 600;
   text-transform: uppercase;
@@ -439,7 +439,7 @@
 }
 
 .vtd-open {
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 9px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -459,7 +459,7 @@
   flex-wrap: wrap;
   gap: 3px 10px;
   align-items: baseline;
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
 }

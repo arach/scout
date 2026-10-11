@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { Route } from "../lib/types.ts";
 import type { useScout } from "../scout/Provider.tsx";
+import { RequestsScreen } from "./requests/RequestsScreen.tsx";
 import { ActivityContent } from "./activity/index.ts";
 import { AgentsContent, AgentsLeft, AgentsRight } from "./agents/index.ts";
 import { ProjectsRail, ProjectsScreen, ProjectsThreadAside } from "./projects/index.ts";
@@ -16,7 +17,7 @@ import { MeshOpsContent, MeshOpsLeft, MeshOpsRight } from "./mesh-ops/index.ts";
 import { OpsContent, OpsLeft } from "./ops/index.ts";
 import { ReposContent, ReposRight } from "./repos/index.ts";
 import { SearchContent, SearchRight } from "./search/index.ts";
-import { SessionsContent, SessionsRight } from "./sessions/index.ts";
+import { SessionsContent } from "./sessions/index.ts";
 import { SettingsContent } from "./settings/index.ts";
 import { TerminalContent, TerminalLeft, TerminalRight } from "./terminal/index.ts";
 import { WorkContent, WorkRight } from "./work/index.ts";
@@ -27,6 +28,8 @@ type Navigate = ReturnType<typeof useScout>["navigate"];
 /** Left pane for the current route. Falls back to HomeLeft when a surface has no custom left. */
 export function resolveLeftPane(route: Route, navigate: Navigate): ReactNode {
   switch (route.view) {
+    case "requests":
+      return null;
     case "ops":
       return <OpsLeft />;
     case "agents-v2":
@@ -55,6 +58,8 @@ export function resolveContentPane(
   agents: ReturnType<typeof useScout>["agents"] = [],
 ): ReactNode {
   switch (route.view) {
+    case "requests":
+      return <RequestsScreen navigate={navigate} />;
     case "conversation":
     case "messages":
       return <ChatContent route={route} navigate={navigate} />;
@@ -121,7 +126,7 @@ export function resolveRightPane(route: Route, navigate: Navigate): ReactNode {
     case "agent-info":
       return <AgentsRight />;
     case "sessions":
-      return route.flightId ? null : <SessionsRight />;
+      return null;
     case "search":
       return <SearchRight />;
     case "conversation":

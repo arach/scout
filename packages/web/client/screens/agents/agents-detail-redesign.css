@@ -1706,7 +1706,7 @@
 
 .s-agent-detail-actions .s-btn-primary {
   background: var(--ink);
-  color: var(--bg);
+  color: var(--on-accent, var(--bg));
   border-color: var(--ink);
   font-size: var(--text-md);
   padding: var(--space-xs) var(--space-2xl);

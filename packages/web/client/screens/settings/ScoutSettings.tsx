@@ -19,6 +19,7 @@ import { useOptionalTheme } from "hudsonkit/theme";
 import {
   Activity,
   ArrowUpCircle,
+  Bot,
   Check,
   Info,
   KeyRound,
@@ -54,6 +55,7 @@ import {
   type HostPermissionState,
   type HostSettingKey,
   type HostSettingsSnapshot,
+  type HostVoiceTest,
 } from "../../lib/host-settings-bridge.ts";
 import { canNavigateBrowserBack, navigateBrowserBack, routePath } from "../../lib/router.ts";
 
@@ -113,6 +115,7 @@ import { useScout } from "../../scout/Provider.tsx";
 import { OnboardingEmbedGate } from "../../scout/takeover/OnboardingEmbedGate.tsx";
 import { defineSurface } from "../../surfaces/types.ts";
 import { BASIC_WEB } from "../../basic/profile.ts";
+import { HostsSection } from "./HostsSection.tsx";
 import { AppearanceFrame, LiveAppearancePreview, PaletteSample, ShellSample } from "./AppearanceSamples.tsx";
 // CastPicker is styled by the older settings sheet.
 import "./settings-drawer.css";
@@ -132,20 +135,25 @@ type PageDef = {
   icon: LucideIcon;
   /** the page exists only when the Scout app hosts it */
   hostOnly?: boolean;
+  /** the nav group it sits in; About has none and sits alone at the end */
+  group?: PageGroup;
 };
 
+type PageGroup = "You" | "Agents" | "This Mac" | "Reach";
+const GROUPS: PageGroup[] = ["You", "Agents", "This Mac", "Reach"];
+
 const PAGES: PageDef[] = [
-  { id: "appearance", title: "Appearance", promise: "How Scout looks, here and in the browser.", icon: Palette },
-  { id: "operator", title: "Operator", promise: "Who the agents are working for, and what they should know first.", icon: UserRound },
-  { id: "comms", title: "Communication", promise: "When agents may interrupt you, where, and how they write.", icon: MessageSquare },
-  { id: "voice", title: "Voice", promise: "Talk to Scout, and hear it answer.", icon: Mic },
-  { id: "terminal", title: "Terminal", promise: "The terminals Scout draws, and the one it hands off to.", icon: SquareTerminal, hostOnly: true },
-  { id: "credentials", title: "Keys", promise: "Keys Scout uses on your behalf. Saved on this Mac, never shown again.", icon: KeyRound },
-  { id: "assistants", title: "Connected assistants", promise: "Review requests and manage assistants allowed into your Scout.", icon: UserRound, hostOnly: true },
-  { id: "devices", title: "Devices", promise: "Phones and iPads that can reach this Scout.", icon: Smartphone },
-  { id: "mesh", title: "Mesh", promise: "The other Scouts this Mac works with.", icon: Network },
-  { id: "pro", title: "Solo Pro", promise: "Whether this account has it, what is installed here, and what is running.", icon: PackageCheck },
-  { id: "system", title: "System", promise: "What is running, and what to do when it isn't.", icon: Activity },
+  { id: "operator", group: "You", title: "Operator", promise: "Who the agents are working for, and what they should know first.", icon: UserRound },
+  { id: "appearance", group: "You", title: "Appearance", promise: "How Scout looks, here and in the browser.", icon: Palette },
+  { id: "voice", group: "You", title: "Voice", promise: "Talk to Scout, and hear it answer.", icon: Mic },
+  { id: "comms", group: "Agents", title: "Communication", promise: "When agents may interrupt you, where, and how they write.", icon: MessageSquare },
+  { id: "assistants", group: "Agents", title: "Connected assistants", promise: "Review requests and manage assistants allowed into your Scout.", icon: Bot, hostOnly: true },
+  { id: "credentials", group: "Agents", title: "Keys", promise: "Keys Scout uses on your behalf. Saved on this Mac, never shown again.", icon: KeyRound },
+  { id: "terminal", group: "This Mac", title: "Terminal", promise: "The terminals Scout draws, and the one it hands off to.", icon: SquareTerminal, hostOnly: true },
+  { id: "system", group: "This Mac", title: "System", promise: "What is running, and what to do when it isn't.", icon: Activity },
+  { id: "pro", group: "This Mac", title: "Scout Pro", promise: "Whether this account has it, what is installed here, and what is running.", icon: PackageCheck },
+  { id: "mesh", group: "Reach", title: "Mesh", promise: "The other Scouts this Mac works with.", icon: Network },
+  { id: "devices", group: "Reach", title: "Devices", promise: "Phones and iPads that can reach this Scout.", icon: Smartphone },
   { id: "about", title: "About", promise: "Contact, support, and which Scout this is.", icon: Info },
 ];
 
@@ -1367,6 +1375,7 @@ function VoicePage({ host }: { host: Host }) {
                 onChange={(value) => host.set("spokenReplies.model", value)}
               />
             </Row>
+            <VoiceTestRow spoken={spoken} />
           </>
         ) : null}
       </Section>
@@ -1437,6 +1446,53 @@ function VoicePage({ host }: { host: Host }) {
         </Row>
       </Section>
     </>
+  );
+}
+
+/** Plays a sample through the same path replies use and says what actually
+ * spoke. A failed voice falls back to the macOS system voice silently in a
+ * reply; here the fallback and its reason are said out loud. */
+function VoiceTestRow({ spoken }: { spoken: NonNullable<HostSettingsSnapshot["spokenReplies"]> }) {
+  const [state, setState] = useState<"idle" | "playing">("idle");
+  const [result, setResult] = useState<HostVoiceTest | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const label = (options: HostOption[], value: string) => options.find((option) => option.value === value)?.label ?? value;
+
+  const run = async () => {
+    setState("playing");
+    setError(null);
+    setResult(null);
+    try {
+      setResult(await hostSettings.testVoice());
+    } catch (err) {
+      setError(errorText(err, "Scout did not answer."));
+    } finally {
+      setState("idle");
+    }
+  };
+
+  const detail = error
+    ? error
+    : state === "playing"
+      ? "Playing on this Mac…"
+      : !result
+        ? "Plays a short line with the voice and model above, the way replies are read."
+        : result.outcome === "failed"
+          ? `Nothing played: ${result.error}`
+          : result.outcome === "cancelled"
+            ? "Stopped before it finished."
+            : result.fallbackReason
+              ? `${label(spoken.modelOptions, spoken.model)} failed (${result.fallbackReason}), so the macOS system voice read it instead.`
+              : `Played with ${label(spoken.modelOptions, result.modelId)} · ${label(spoken.voiceOptions, result.voiceId)}.`;
+  const fellBack = result?.outcome === "finished" && result.fallbackReason !== null;
+
+  return (
+    <Row title="Test voice" detail={detail}>
+      {fellBack ? <Status bad>System voice</Status> : null}
+      <Button disabled={state === "playing"} onClick={() => void run()}>
+        {state === "playing" ? "Playing" : "Play sample"}
+      </Button>
+    </Row>
   );
 }
 
@@ -1846,34 +1902,38 @@ function MeshPage({ host }: { host: Host }) {
         </Row>
       </Section>
 
-      <Section label="Hosts">
-        {hosts.length === 0 ? (
-          <Row title="No other Scouts yet" detail="Scan to look for them on your tailnet and local network." />
-        ) : hosts.map((node) => {
-          const seen = node.lastSeenAt ?? null;
-          const online = seen !== null && Date.now() - seen < ONLINE_WINDOW_MS;
-          return (
-            <Row
-              key={node.id}
-              title={node.name}
-              detail={
-                <span className="sq-mono">
-                  {[node.hostName !== node.name ? node.hostName : null, node.host?.scoutVersion ? `Scout ${node.host.scoutVersion}` : null, seen ? `seen ${timeAgo(seen)}` : null]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </span>
-              }
-            >
-              {online ? <Status ok>Online</Status> : <Status>Away</Status>}
-            </Row>
-          );
-        })}
-        <Row title="Find machines" detail="Look for Scouts on your tailnet and local network.">
-          <Button disabled={busy !== null} onClick={() => void act("scan", "/api/machines/scan")}>
-            {busy === "scan" ? "Scanning" : "Scan"}
-          </Button>
-        </Row>
-      </Section>
+      {BASIC_WEB ? (
+        <Section label="Hosts">
+          {hosts.length === 0 ? (
+            <Row title="No other Scouts yet" detail="Scan to look for them on your tailnet and local network." />
+          ) : hosts.map((node) => {
+            const seen = node.lastSeenAt ?? null;
+            const online = seen !== null && Date.now() - seen < ONLINE_WINDOW_MS;
+            return (
+              <Row
+                key={node.id}
+                title={node.name}
+                detail={
+                  <span className="sq-mono">
+                    {[node.hostName !== node.name ? node.hostName : null, node.host?.scoutVersion ? `Scout ${node.host.scoutVersion}` : null, seen ? `seen ${timeAgo(seen)}` : null]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                }
+              >
+                {online ? <Status ok>Online</Status> : <Status>Away</Status>}
+              </Row>
+            );
+          })}
+          <Row title="Find machines" detail="Look for Scouts on your tailnet and local network.">
+            <Button disabled={busy !== null} onClick={() => void act("scan", "/api/machines/scan")}>
+              {busy === "scan" ? "Scanning" : "Scan"}
+            </Button>
+          </Row>
+        </Section>
+      ) : (
+        <HostsSection />
+      )}
 
       <Section label="Tailscale">
         <Row
@@ -2167,7 +2227,7 @@ function SystemPage({ host }: { host: Host }) {
   );
 }
 
-/* ── Solo Pro ───────────────────────────────────────────────────────────── */
+/* ── Scout Pro ───────────────────────────────────────────────────────────── */
 
 // Three facts, kept apart: what the account has (asked of the download host
 // only when you check), what is installed here, and what is running. Setup
@@ -2175,9 +2235,9 @@ function SystemPage({ host }: { host: Host }) {
 
 const SOLO_PRO_LEAD: Record<SoloProPhase, string> = {
   active: "Access is confirmed, and every required part is installed and running.",
-  finish_setup: "This account has Solo Pro. Install what is missing below; there is nothing to buy.",
+  finish_setup: "This account has Scout Pro. Install what is missing below; there is nothing to buy.",
   not_ready: "The full web app is installed, but this web server isn't serving it yet.",
-  no_access: "This machine keeps working as Solo. Anything already installed stays where it is.",
+  no_access: "This machine keeps working as Scout. Anything already installed stays where it is.",
   unconfirmed: "Scout hasn't confirmed what this account has. Nothing is turned on or off while it's unknown.",
 };
 
@@ -2278,7 +2338,7 @@ function SoloProPage({ navigate }: { navigate: (route: Route) => void }) {
       setStatus(await api<SoloProStatus>("/api/solo-pro"));
       setError(null);
     } catch (err) {
-      setError(errorText(err, "Couldn't read Solo Pro status from this Scout."));
+      setError(errorText(err, "Couldn't read Scout Pro status from this Scout."));
     } finally {
       setLoading(false);
     }
@@ -2310,7 +2370,7 @@ function SoloProPage({ navigate }: { navigate: (route: Route) => void }) {
 
   if (!status) {
     return (
-      <Section label="Solo Pro" note={error ? <span style={{ color: "var(--sq-danger)" }}>{error}</span> : undefined}>
+      <Section label="Scout Pro" note={error ? <span style={{ color: "var(--sq-danger)" }}>{error}</span> : undefined}>
         {error ? (
           <Row title="Couldn't read this machine" detail="The page asks this Scout's web server; nothing about your account changed.">
             <Button disabled={loading} onClick={() => void load()}>{loading ? "Reading" : "Try again"}</Button>
@@ -2323,8 +2383,8 @@ function SoloProPage({ navigate }: { navigate: (route: Route) => void }) {
   const { access, components } = status;
   // The tag names the machine the facts describe; only a Mac gets "This Mac".
   const onMac = status.platform === "darwin";
-  const accessStatus = access.state === "granted" ? <Status ok>Solo Pro</Status>
-    : access.state === "denied" ? <Status>Solo</Status>
+  const accessStatus = access.state === "granted" ? <Status ok>Scout Pro</Status>
+    : access.state === "denied" ? <Status>Scout</Status>
       : <Status bad={access.state === "credential_rejected" || access.state === "unavailable"}>{access.title}</Status>;
   const actionProps = { onCheck: () => void check(), checking, copy };
 
@@ -2333,7 +2393,7 @@ function SoloProPage({ navigate }: { navigate: (route: Route) => void }) {
       <div className="sq-pro-summary" data-phase={status.phase} role="status">
         <div className="sq-pro-kicker">
           <span className="sq-pro-sigil" aria-hidden="true"><ScoutMark /></span>
-          Solo Pro
+          Scout Pro
         </div>
         <div className="sq-pro-headline">{status.headline}</div>
         <p className="sq-pro-lead">{SOLO_PRO_LEAD[status.phase]}</p>
@@ -2559,7 +2619,6 @@ export function ScoutSettings({
   );
   const def = pages.find((page) => page.id === section) ?? pages[0]!;
   const update = host.snapshot?.update ?? null;
-  const version = host.snapshot?.host.appVersion ?? null;
 
   // ⌘1–9 switch pages. Only the Scout app gets them: a browser keeps those
   // keys for its tabs, so the sidebar shows them only where they work.
@@ -2585,34 +2644,48 @@ export function ScoutSettings({
 
   return (
     <div className="sq-win" data-frame={frame} data-inset={inset || undefined}>
+      {/* The nav is a card laid over the stage, inset a hairline (studio:
+          scout-settings-nav, take C). Groups follow PAGES order, so ⌘1–9 run
+          down the card as drawn. */}
       <aside className="sq-side">
-        <div className="sq-side-eyebrow">Settings</div>
+        <div className="sq-side-title">Settings</div>
         <nav className="sq-nav" aria-label="Settings pages">
-          {pages.map((page, index) => {
-            const Icon = page.icon;
+          {[...GROUPS, undefined].map((group) => {
+            const rows = pages.filter((page) => page.group === group);
+            if (!rows.length) return null;
             return (
-              <a
-                key={page.id}
-                className="sq-nav-row"
-                title={page.title}
-                href={routePath({ view: "settings", section: page.id })}
-                aria-current={page.id === def.id ? "page" : undefined}
-                onClick={(event) => {
-                  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-                  event.preventDefault();
-                  onSectionChange(page.id);
-                }}
-              >
-                <Icon className="sq-nav-icon" strokeWidth={1.6} aria-hidden />
-                <span className="sq-nav-label">{page.title}</span>
-                {host.available && index < 9 ? <span className="sq-nav-key">⌘{index + 1}</span> : null}
-              </a>
+              <div key={group ?? "end"} className="sq-nav-group" data-end={group ? undefined : true}>
+                {group ? <div className="sq-nav-group-label">{group}</div> : null}
+                {rows.map((page) => {
+                  const Icon = page.icon;
+                  const index = pages.indexOf(page);
+                  return (
+                    <a
+                      key={page.id}
+                      className="sq-nav-row"
+                      title={page.title}
+                      href={routePath({ view: "settings", section: page.id })}
+                      aria-current={page.id === def.id ? "page" : undefined}
+                      onClick={(event) => {
+                        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                        event.preventDefault();
+                        onSectionChange(page.id);
+                      }}
+                    >
+                      <Icon className="sq-nav-icon" strokeWidth={1.6} aria-hidden />
+                      <span className="sq-nav-label">{page.title}</span>
+                      {host.available && index < 9 ? <span className="sq-nav-key">⌘{index + 1}</span> : null}
+                    </a>
+                  );
+                })}
+              </div>
             );
           })}
         </nav>
-        <div className="sq-foot">
-          {/* In the Scout app its own sidebar already carries this pill. */}
-          {update?.availableVersion && host.snapshot?.host.surface !== "app" ? (
+        {/* In the Scout app the update lives in its own sidebar; the version
+            lives on About. A browser has no such sidebar, so it keeps the pill. */}
+        {update?.availableVersion && host.snapshot?.host.surface !== "app" ? (
+          <div className="sq-foot">
             <button
               type="button"
               className="sq-update"
@@ -2624,13 +2697,8 @@ export function ScoutSettings({
                 <small>Restarts Scout</small>
               </span>
             </button>
-          ) : null}
-          <div className="sq-brand">
-            <ScoutMark />
-            <span className="sq-brand-name">Scout</span>
-            {version ? <span className="sq-brand-version">{version}</span> : null}
           </div>
-        </div>
+        ) : null}
       </aside>
 
       <main className="sq-main" ref={mainRef}>
@@ -2695,6 +2763,21 @@ export function SettingsEmbedScreen({
     url.searchParams.set("section", next);
     window.history.replaceState(window.history.state, "", url);
   }, []);
+  // The Mac app asks for a page ("Manage hosts…" → Mesh) with a one-shot
+  // `scout:settings-section` event; a request that lands before this listener
+  // mounts waits on `__scoutPendingSettingsSection`.
+  useEffect(() => {
+    const pending = window as Window & { __scoutPendingSettingsSection?: string };
+    const take = (value: unknown) => {
+      pending.__scoutPendingSettingsSection = undefined;
+      const next = value === "keys" ? "credentials" : value;
+      if (isScoutSettingsSection(next)) change(next);
+    };
+    if (pending.__scoutPendingSettingsSection) take(pending.__scoutPendingSettingsSection);
+    const onRequest = (event: Event) => take((event as CustomEvent<{ section?: unknown }>).detail?.section);
+    window.addEventListener("scout:settings-section", onRequest);
+    return () => window.removeEventListener("scout:settings-section", onRequest);
+  }, [change]);
   const settings = <ScoutSettings section={section} onSectionChange={change} navigate={navigate} frame={frame} inset={inset} />;
   // Opened without a section, the page is the Mac app's first-run window: it
   // shows setup until the canonical record is completed or skipped. Hosts that

@@ -31,6 +31,8 @@ import {
   isAgentMember,
   isApiParticipant,
   isAskableMember,
+  listTime,
+  freshestRowPreview,
   maskedTokenHint,
   memberDisplayName,
   memberOrFallback,
@@ -144,6 +146,32 @@ describe("time", () => {
     expect(dayLabel(NOW - HOUR, NOW)).toBe("Today");
     expect(dayLabel(NOW - DAY, NOW)).toBe("Yesterday");
     expect(dayLabel(NOW - 5 * DAY, NOW)).not.toBe("Today");
+    const sep30 = new Date(2026, 8, 30, 12).getTime();
+    expect(dayLabel(sep30, new Date(2026, 9, 3, 12).getTime())).toBe("Wednesday, September 30th");
+    expect(dayLabel(new Date(2026, 8, 1, 12).getTime(), sep30)).toBe("Tuesday, September 1st");
+    expect(dayLabel(new Date(2026, 8, 12, 12).getTime(), sep30)).toBe("Saturday, September 12th");
+    expect(dayLabel(new Date(2025, 11, 23, 12).getTime(), sep30)).toBe("Tuesday, December 23rd, 2025");
+  });
+
+  test("sidebar times read clock today, weekday this week, date before", () => {
+    const now = new Date(2026, 8, 30, 15, 0).getTime();
+    expect(listTime(new Date(2026, 8, 30, 14, 57).getTime(), now)).toBe("14:57");
+    expect(listTime(new Date(2026, 8, 29, 9, 0).getTime(), now)).toBe("Tue");
+    expect(listTime(new Date(2026, 8, 12, 9, 0).getTime(), now)).toBe("Sep 12");
+  });
+
+  test("a row preview takes the fresher of the feed and the bootstrap summary", () => {
+    const served = { id: "m-2", actorId: "gh-1", authorName: "Owner", text: "served", createdAt: 200, fromViewer: true as const };
+    const seen = { who: "Kepler", text: "seen", at: 100 };
+    expect(freshestRowPreview(undefined, undefined, "gh-1")).toBeUndefined();
+    expect(freshestRowPreview(seen, undefined, "gh-1")).toBe(seen);
+    expect(freshestRowPreview(undefined, served, null)).toEqual({ who: "You", text: "served", at: 200 });
+    expect(freshestRowPreview(seen, served, null)?.text).toBe("served");
+    expect(freshestRowPreview({ ...seen, at: 300 }, served, null)?.text).toBe("seen");
+    expect(freshestRowPreview({ ...seen, at: 200 }, served, null)?.text).toBe("seen");
+    const other = { ...served, fromViewer: undefined, actorId: "agent-1", authorName: "Vega" };
+    expect(freshestRowPreview(undefined, other, "gh-1")?.who).toBe("Vega");
+    expect(freshestRowPreview(undefined, { ...other, actorId: "gh-1" }, "gh-1")?.who).toBe("You");
   });
 
   test("an absent expiry is said out loud, not left blank", () => {
@@ -467,6 +495,24 @@ describe("feed projection", () => {
     expect(threadReplies(projection, "m2").map((reply) => reply.id)).toEqual(["r1", "r2"]);
     expect(threadReplies(projection, "m1")).toEqual([]);
     expect(projection.lastMessageAt).toBe(NOW - 30 * MINUTE);
+  });
+
+  test("a reply to a reply files under the thread it started from", () => {
+    const projection = projectFeed({
+      messages: [
+        message({ id: "m1", createdAt: NOW - 2 * HOUR, body: "hello" }),
+        message({ id: "r1", createdAt: NOW - HOUR, body: "how are you?", replyToMessageId: "m1" }),
+        message({ id: "r2", createdAt: NOW - 30 * MINUTE, body: "doing great", replyToMessageId: "r1" }),
+      ],
+      requests: [],
+      nowMs: NOW,
+    });
+
+    const turn = projection.entries.find((entry) => entry.kind === "turn");
+    if (turn?.kind !== "turn") throw new Error("expected a turn");
+    expect(turn.replyCount).toBe(2);
+    expect(threadReplies(projection, "m1").map((reply) => reply.id)).toEqual(["r1", "r2"]);
+    expect(threadReplies(projection, "r1")).toEqual([]);
   });
 
   const continuations = (messages: MessageRecord[]) =>

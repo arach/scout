@@ -5,30 +5,32 @@
  * projection (SCO-083). Prefer this module for new call sites.
  */
 import type { Route } from "../lib/types.ts";
+import { getDestination } from "./nav-destinations.ts";
 
 /** Human labels for primary/detail route views used in breadcrumbs and chrome. */
 export const ROUTE_VIEW_LABELS: Record<string, string> = {
-  inbox: "Home",
+  requests: getDestination("requests").label,
+  inbox: getDestination("home").label,
   conversation: "Conversation",
   "agent-info": "Agent",
-  "agents-v2": "Agents",
-  messages: "Chat",
-  sessions: "Sessions",
-  terminal: "Terminals",
-  repos: "Repositories",
+  "agents-v2": getDestination("projects").label,
+  messages: getDestination("chat").label,
+  sessions: getDestination("sessions").label,
+  terminal: getDestination("terminals").label,
+  repos: getDestination("repos").label,
   "repo-diff": "Diff",
-  harnesses: "Agent Providers",
-  search: "Search",
-  activity: "Activity Log",
+  harnesses: getDestination("providers").label,
+  search: getDestination("search").label,
+  activity: getDestination("activity").label,
   briefings: "Briefings",
-  mesh: "Network",
-  "mesh-ops": "Mesh Ops",
-  broker: "Broker",
+  mesh: getDestination("mesh").label,
+  "mesh-ops": getDestination("mesh-ops").label,
+  broker: getDestination("dispatch").label,
   settings: "Settings",
   work: "Work",
   follow: "Follow",
-  code: "Code Browser",
-  ops: "Ops",
+  code: getDestination("code").label,
+  ops: getDestination("ops").label,
   voice: "Live Voice",
 };
 
@@ -40,7 +42,7 @@ export const ROUTE_VIEW_LABELS: Record<string, string> = {
  */
 export function routeBreadcrumbForRoute(route: Route): string | null {
   if (route.view === "settings" && route.section === "agents") {
-    return "Configuration";
+    return getDestination("agent-config").label;
   }
   switch (route.view) {
     case "conversation":
@@ -56,28 +58,27 @@ export function routeBreadcrumbForRoute(route: Route): string | null {
     case "activity":
     case "follow":
     case "voice":
-    // Sessions lives under the Terminals tab now; the crumb says which
-    // surface of that tab is open.
-    case "sessions":
       return ROUTE_VIEW_LABELS[route.view] ?? route.view;
     case "ops": {
-      if (route.mode === "tail") return "Live Activity";
-      if (route.mode === "lanes") return "Agent Lanes";
-      if (route.mode === "world") return "World";
-      if (route.mode === "atop") return "Runtime Monitor";
-      if (route.mode === "advisor") return "Host Advisor";
+      if (route.mode === "tail") return getDestination("tail").label;
+      if (route.mode === "lanes") return getDestination("lanes").label;
+      if (route.mode === "world") return getDestination("world").label;
+      if (route.mode === "week") return getDestination("week").label;
+      if (route.mode === "atop") return getDestination("runtime").label;
+      if (route.mode === "advisor") return getDestination("advisor").label;
       if (route.mode === "mission" || route.mode === "issues" || route.mode === undefined) {
-        return "Mission Control";
+        return getDestination("mission-control").label;
       }
       return ROUTE_VIEW_LABELS.ops ?? "Ops";
     }
     case "settings":
       return "Settings";
+    case "sessions":
     case "inbox":
     case "agents-v2":
     case "messages":
     case "search":
-    // Broker and Terminals are top tabs; the tab conveys the location.
+    // Dispatch and Terminals are top tabs; the tab conveys the location.
     case "broker":
     case "terminal":
     default:

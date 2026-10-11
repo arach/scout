@@ -14,7 +14,7 @@ import type { ChatMessage } from "./chat-api.ts";
 import { bodySegments } from "./chat-space-model.ts";
 
 const INLINE_PATTERN =
-  /`([^`\n]+)`|\*\*(.+?)\*\*|\*([^*\s][^*]*?)\*|\[([^\]\n]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s<>"')\]]+)/gu;
+  /`([^`\n]+)`|\*\*(.+?)\*\*|\*([^*\s][^*]*?)\*|\[([^\]\n]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s<>"')\]]+)|<u>(.+?)<\/u>|~~(.+?)~~/gu;
 
 function safeHref(value: string): boolean {
   return /^(?:https?:\/\/|mailto:|#)/iu.test(value);
@@ -32,9 +32,9 @@ function InlineMarkdown({ text }: { text: string }) {
     if (match[1] !== undefined) {
       nodes.push(<code key={`c${index}`} className="chat-md-code">{match[1]}</code>);
     } else if (match[2] !== undefined) {
-      nodes.push(<strong key={`b${index}`}>{match[2]}</strong>);
+      nodes.push(<strong key={`b${index}`}>{/[*`~]|<u>/.test(match[2]) ? <InlineMarkdown text={match[2]} /> : match[2]}</strong>);
     } else if (match[3] !== undefined) {
-      nodes.push(<em key={`e${index}`}>{match[3]}</em>);
+      nodes.push(<em key={`e${index}`}>{/[*`~]|<u>/.test(match[3]) ? <InlineMarkdown text={match[3]} /> : match[3]}</em>);
     } else if (match[4] !== undefined && match[5] !== undefined && safeHref(match[5])) {
       nodes.push(
         <a key={`l${index}`} className="chat-url" href={match[5]} target="_blank" rel="noreferrer">
@@ -50,6 +50,10 @@ function InlineMarkdown({ text }: { text: string }) {
         </a>,
       );
       if (trailing) nodes.push(<span key={`p${index}`}>{trailing}</span>);
+    } else if (match[7] !== undefined) {
+      nodes.push(<u key={`underline${index}`}><InlineMarkdown text={match[7]} /></u>);
+    } else if (match[8] !== undefined) {
+      nodes.push(<s key={`strike${index}`}><InlineMarkdown text={match[8]} /></s>);
     } else {
       nodes.push(<span key={`r${index}`}>{match[0]}</span>);
     }

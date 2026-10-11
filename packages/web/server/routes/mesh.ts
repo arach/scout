@@ -16,13 +16,26 @@ import {
 import { machineAnnotationBody, tailnetProbeBody, tailscaleControlBody } from "../../shared/api/mesh.ts";
 import { readJsonBody } from "../request-body.ts";
 import type { MeshNodeStateStore } from "../core/mesh/node-state.ts";
+import {
+  createReadinessStore,
+  loadSshConfigSummary,
+  machineWayIn,
+} from "../core/machines/readiness.ts";
+import { openLocalTerminalAttach } from "../local-terminal-open.ts";
 
 export type MeshRouteDeps = {
   meshNodeStateStore: MeshNodeStateStore;
+  readiness?: ReturnType<typeof createReadinessStore>;
+  openLocalTerminal?: (argv: readonly string[], options: { cwd?: string | null }) => Promise<{ app: string }> | { app: string };
+  loadMachines?: typeof loadMachines;
+  loadMachine?: typeof loadMachine;
 };
 
 export function mountMeshRoutes(app: Hono, deps: MeshRouteDeps) {
   const { meshNodeStateStore } = deps;
+  const readiness = deps.readiness ?? createReadinessStore();
+  const listMachines = deps.loadMachines ?? loadMachines;
+  const getMachine = deps.loadMachine ?? loadMachine;
 
   // ── Machines (docs/eng/sco-104-machines.md) ──────────────────────────
   // Every handler forwards to the broker, which owns the scan and the durable
@@ -42,6 +55,55 @@ export function mountMeshRoutes(app: Hono, deps: MeshRouteDeps) {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return c.json({ error: message }, 500);
+    }
+  });
+  // ── Hosts (Settings › Hosts) ─────────────────────────────────────────
+  // Registered before /:reference so these names never read as machines.
+  // Test runs a fixed read-only script; Open terminal hands `ssh <name>` to the
+  // operator's terminal app. The client names a machine, never a command.
+  app.get("/api/machines/readiness", (c) => c.json({ readings: readiness.snapshot() }));
+  app.get("/api/machines/ssh-config", async (c) => {
+    try {
+      return c.json(await loadSshConfigSummary());
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message }, 500);
+    }
+  });
+  app.post("/api/machines/test", async (c) => {
+    try {
+      const { machines } = await listMachines();
+      await readiness.testAll(machines);
+      return c.json({ readings: readiness.snapshot() });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message }, 500);
+    }
+  });
+  app.post("/api/machines/:reference/test", async (c) => {
+    try {
+      const machine = await getMachine(c.req.param("reference"));
+      const reading = await readiness.test(machine);
+      if (!reading) return c.json({ error: "There is no way in to this machine over SSH." }, 409);
+      return c.json({ reading });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message }, 500);
+    }
+  });
+  app.post("/api/machines/:reference/open-terminal", async (c) => {
+    try {
+      const machine = await getMachine(c.req.param("reference"));
+      const way = machineWayIn(machine);
+      if (!way || way.kind !== "ssh") {
+        return c.json({ error: machine.isSelf ? "This is the Mac you're on." : "There is no way in to this machine over SSH." }, 409);
+      }
+      const open = deps.openLocalTerminal ?? openLocalTerminalAttach;
+      const result = await open(["ssh", way.destination], {});
+      return c.json({ ok: true, app: result.app, destination: way.destination });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ ok: false, error: message }, 502);
     }
   });
   app.get("/api/machines/:reference", async (c) => {

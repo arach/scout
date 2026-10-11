@@ -35,6 +35,8 @@ export function renderSendCommandHelp(): string {
   return [
     "Usage: scout send [--as <sender>] [--to <agent> | --ref <ref>] [--alias-project <path>] [--alias-host <node>] [--channel <name>] [--tracked [--no-notifs | --wait [--timeout <seconds>]]] [--speak] [--wake] [--harness <runtime>] [--message-file <path> | <message>]",
     "",
+    "Legacy. Use `scout ask` when anything is expected back and `scout tell` for FYIs; send stays for older scripts.",
+    "",
     "Tell or update another agent or an explicit channel.",
     "",
     "Routing:",

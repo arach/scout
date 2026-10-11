@@ -4,6 +4,8 @@ import type { VoiceUsageMode } from "../shared/voice-usage.ts";
 import { SCOUT_RUNTIME_CATALOG } from "@openscout/protocol";
 import { scoutbotUiContext } from "../shared/scoutbot-navigation.ts";
 import { createScoutbotFileLookup, type ScoutbotFileLookup } from "./scoutbot-file-lookup.ts";
+import type { ScoutbotAssistantSessionStore } from "./scoutbot-assistant-store.ts";
+import type { ScoutbotBrain } from "./scoutbot-brain.ts";
 
 // Only the callable fetch contract is required; injected fetches need no Bun preconnect helper.
 type ScoutbotFetch = (...args: Parameters<typeof fetch>) => ReturnType<typeof fetch>;
@@ -259,6 +261,8 @@ type StoredSession = {
   model: string;
   responseProvider: ScoutbotAssistantProvider | null;
   previousResponseId: string | null;
+  /** The Pi Durable conversation that holds this chat's model transcript. */
+  brainConversationId?: number | null;
   messages: ScoutbotAssistantMessage[];
   archivedAt: number | null;
 };
@@ -400,13 +404,30 @@ export function createScoutbotAssistantService(input: {
   agentAvailable?: () => boolean;
   /** File lookup behind a spoken turn's find_files tool; defaults to the workspace's git listing. */
   findFiles?: ScoutbotFileLookup;
+  /** Where conversations survive a restart; without one they live in memory only. */
+  store?: ScoutbotAssistantSessionStore;
+  /**
+   * Durable model transcript for typed chat (Pi Durable). When set, auto and
+   * openai turns go through it first; the provider ladder is the fallback.
+   */
+  brain?: ScoutbotBrain;
   env?: NodeJS.ProcessEnv;
   fetchImpl?: ScoutbotFetch;
 }): ScoutbotAssistantService {
   const env = input.env ?? process.env;
   const fetchImpl = input.fetchImpl ?? fetch;
-  const sessions: StoredSession[] = [];
-  let activeSessionId: string | null = null;
+  const saved = input.store?.load() ?? null;
+  const sessions: StoredSession[] = (saved?.sessions ?? [])
+    .filter(isStoredSession)
+    .map((session) => ({
+      ...session,
+      responseProvider: session.responseProvider ?? null,
+      previousResponseId: session.previousResponseId ?? null,
+    }));
+  let activeSessionId: string | null = saved?.activeSessionId ?? null;
+  const persist = (): void => {
+    input.store?.save({ version: 1, activeSessionId, sessions });
+  };
   let model = firstNonEmptyString(
     env.OPENSCOUT_SCOUTBOT_ASSISTANT_MODEL,
     env.OPENSCOUT_SCOUTBOT_MODEL,
@@ -450,6 +471,7 @@ export function createScoutbotAssistantService(input: {
     sessions.unshift(session);
     activeSessionId = session.id;
     enforceSessionRetention();
+    persist();
     return session;
   };
 
@@ -583,6 +605,45 @@ export function createScoutbotAssistantService(input: {
     };
   };
 
+  // Typed chat on the durable brain: the model sees its own stored transcript,
+  // so no history is replayed. Returns null when the brain can't take the
+  // turn (not configured, Codex pinned, no key, or it failed before any text),
+  // and the provider ladder answers instead.
+  const replyThroughBrain = async (turn: {
+    session: StoredSession;
+    body: string;
+    context: ScoutbotAssistantContextSnapshot;
+    requestModel: string;
+    observeRequest: UsageObserver;
+    signal?: AbortSignal;
+    onDelta?: (delta: string) => void;
+  }): Promise<AssistantModelResult | null> => {
+    const brain = input.brain;
+    if (!brain || providerPreference === "codex" || providerPreference === "agent") return null;
+    if (!(await resolveApiKey())) return null;
+    let sawDelta = false;
+    try {
+      const reply = await turn.observeRequest("openai", () => brain.reply({
+        conversationId: turn.session.brainConversationId ?? null,
+        body: turn.body,
+        state: JSON.stringify(turn.context),
+        model: turn.requestModel,
+        systemPrompt,
+        signal: turn.signal,
+        onDelta: turn.onDelta
+          ? (delta) => { sawDelta = true; turn.onDelta!(delta); }
+          : undefined,
+      }));
+      turn.session.brainConversationId = reply.conversationId;
+      if (!reply.text.trim()) throw new ScoutbotAssistantError("Scoutbot returned an empty response.", 502);
+      return { provider: "openai", id: null, text: reply.text, usage: reply.usage };
+    } catch (error) {
+      if (sawDelta || turn.signal?.aborted) throw error;
+      console.warn("[scoutbot] Brain could not take the turn; using the provider ladder:", errorMessage(error));
+      return null;
+    }
+  };
+
   // Shared tail of respond/respondStream: abort gate, empty-reply guard,
   // durable history append, retention. A disconnected or superseded voice turn
   // may finish provider work, but it must not append history after cancel.
@@ -624,6 +685,7 @@ export function createScoutbotAssistantService(input: {
       session.title = titleFromRequest(trimmedBody);
     }
     enforceSessionRetention();
+    persist();
 
     return {
       ...snapshot(),
@@ -653,6 +715,7 @@ export function createScoutbotAssistantService(input: {
         throw new ScoutbotAssistantError(`Scoutbot session "${id}" not found.`, 404);
       }
       activeSessionId = target.id;
+      persist();
       return snapshot();
     },
     archiveSession: (id) => {
@@ -666,6 +729,7 @@ export function createScoutbotAssistantService(input: {
         activeSessionId = null;
       }
       enforceSessionRetention();
+      persist();
       return snapshot();
     },
     respond: async ({ body, route, uiContext, signal, usageMode = "chat" }) => {
@@ -691,6 +755,10 @@ export function createScoutbotAssistantService(input: {
         throwIfScoutbotAborted(signal);
         const requestModel = spoken ? spokenModel(env) : model;
         const observeRequest = usageObserver(session.id, usageMode, requestModel);
+        const viaBrain = spoken ? null : await replyThroughBrain({
+          session, body: trimmed, context, requestModel, observeRequest, signal,
+        });
+        if (viaBrain) return finalizeAssistantReply(session, trimmed, viaBrain, requestModel, signal);
         const response = await callAssistantModel({
           apiKey: await resolveApiKey(),
           codexInvoker: input.invokeCodex,
@@ -769,6 +837,29 @@ export function createScoutbotAssistantService(input: {
         };
 
         let response: AssistantModelResult | null = null;
+        if (!spoken) {
+          const splitter = createScoutbotSentenceSplitter();
+          let sawDelta = false;
+          try {
+            response = await replyThroughBrain({
+              session, body: trimmed, context, requestModel, observeRequest, signal,
+              onDelta: (delta) => {
+                if (signal?.aborted) return;
+                sawDelta = true;
+                for (const sentence of splitter.push(delta)) emitSentence(sentence);
+              },
+            });
+          } catch (error) {
+            if (sawDelta && !signal?.aborted) {
+              for (const sentence of splitter.flush()) emitSentence(sentence);
+            }
+            throw error;
+          }
+          if (response) {
+            for (const sentence of splitter.flush()) emitSentence(sentence);
+            return finalizeAssistantReply(session, trimmed, response, requestModel, signal);
+          }
+        }
         for (const [index, provider] of candidates.entries()) {
           const splitter = createScoutbotSentenceSplitter();
           let sawDelta = false;
@@ -2640,6 +2731,24 @@ function stringField(value: unknown, fallback: string): string {
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
+}
+
+function isStoredSession(value: unknown): value is StoredSession {
+  if (!value || typeof value !== "object") return false;
+  const session = value as Partial<StoredSession>;
+  return typeof session.id === "string"
+    && typeof session.title === "string"
+    && typeof session.createdAt === "number"
+    && typeof session.updatedAt === "number"
+    && typeof session.model === "string"
+    && Array.isArray(session.messages)
+    && session.messages.every((message) =>
+      Boolean(message)
+      && typeof message.id === "string"
+      && (message.role === "user" || message.role === "assistant")
+      && typeof message.body === "string"
+      && typeof message.createdAt === "number")
+    && (session.archivedAt === null || typeof session.archivedAt === "number");
 }
 
 function createSession(model: string): StoredSession {

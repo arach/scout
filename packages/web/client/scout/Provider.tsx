@@ -11,7 +11,7 @@ import {
 import {
   DARK_THEME_VARS,
   LIGHT_THEME_VARS,
-  type ThemeVars,
+  scoutThemeAugmentVars,
 } from "../lib/theme-vars.ts";
 import { useOptionalFlag } from "hudsonkit/flags";
 import { useOptionalTheme } from "hudsonkit/theme";
@@ -21,6 +21,7 @@ import {
 } from "../lib/router.ts";
 import { api } from "../lib/api.ts";
 import { listenForAmbientPageActions } from "../lib/ambient-voice-actions.ts";
+import { deliverWorldCommand } from "../lib/world-command.ts";
 import { friendlyApiError, isOfflineApiError } from "../lib/api-errors.ts";
 import { readWithRetry } from "../lib/api-retry.ts";
 import { useBrokerRefresh, type BrokerRefreshPolicy } from "../lib/broker-refresh.ts";
@@ -201,43 +202,6 @@ function keepPreviousIfJsonEqual<T>(previous: T, next: T): T {
 // it without importing this provider. Re-exported here because the design-sync
 // preview provider (client/_ds/) reads it from `scout/Provider.tsx`.
 export { DARK_THEME_VARS, LIGHT_THEME_VARS };
-
-const HUDSON_MANAGED_THEME_VARS = new Set([
-  // Raw palette inputs must come from appearance.css too. Inline fallback
-  // values would override the chosen palette before Hudson resolves it.
-  "--background",
-  "--foreground",
-  "--card",
-  "--card-foreground",
-  "--popover",
-  "--popover-foreground",
-  "--muted-foreground",
-  "--hud-bg",
-  "--hud-surface",
-  "--hud-ink",
-  "--hud-muted",
-  "--hud-dim",
-  "--hud-border",
-  "--hud-accent",
-  "--hud-accent-soft",
-  "--hud-shadow-soft",
-  "--hud-chrome-border",
-  "--hud-shadow-panel",
-  "--hud-shadow-panel-hover",
-  "--hud-shadow-bar",
-  "--hud-shadow-nav",
-  "--hud-shadow-minimap",
-  "--hud-status-ok",
-  "--hud-status-warn",
-  "--hud-status-error",
-]);
-
-function scoutThemeAugmentVars(theme: ScoutTheme): ThemeVars {
-  const source = theme === "light" ? LIGHT_THEME_VARS : DARK_THEME_VARS;
-  return Object.fromEntries(
-    Object.entries(source).filter(([key]) => !HUDSON_MANAGED_THEME_VARS.has(key)),
-  ) as ThemeVars;
-}
 
 export function useOptionalScout() {
   return useContext(ScoutContext);
@@ -565,7 +529,7 @@ export function ScoutProvider({
   const closeFilePreview = useCallback(() => setFilePreviewPath(null), []);
 
   const applyScoutbotUiAction = useCallback((action: ScoutbotUiAction) => {
-    if (action.type !== "select-project" && forwardScoutbotUiActionToNativeHost(action)) return;
+    if (action.type !== "select-project" && action.type !== "world.command" && forwardScoutbotUiActionToNativeHost(action)) return;
     switch (action.type) {
       case "navigate":
         navigate(action.route);
@@ -584,6 +548,9 @@ export function ScoutProvider({
         break;
       case "select-project":
         applyEmbedProjectSelection(action, navigate);
+        break;
+      case "world.command":
+        deliverWorldCommand(action);
         break;
     }
   }, [navigate, openFilePreview, reload]);

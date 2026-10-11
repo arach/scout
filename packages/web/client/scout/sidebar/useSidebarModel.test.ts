@@ -11,8 +11,8 @@ describe("sidebar model seam (SCO-083)", () => {
     expect(isScopePath("/")).toBe(false);
   });
 
-  test("scout model has eight primary destinations", () => {
-    expect(PRIMARY_AREAS).toHaveLength(8);
+  test("scout model has nine primary destinations", () => {
+    expect(PRIMARY_AREAS).toHaveLength(9);
     expect(primaryAreaForRoute({ view: "ops", mode: "tail" })).toBe("ops");
     expect(primaryAreaForRoute({ view: "broker" })).toBe("dispatch");
   });

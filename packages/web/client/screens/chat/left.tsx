@@ -53,6 +53,15 @@ import {
 } from "../../lib/sessionRead.ts";
 import { useConversationList } from "../../lib/use-conversation-list.ts";
 import { useFleetActiveAsks } from "../../lib/use-fleet-active-asks.ts";
+import { useOperatorRequests } from "../../lib/use-operator-requests.ts";
+import {
+  EMPTY_DECLARED_REQUEST_INDEX,
+  buildDeclaredRequestIndex,
+  declaredRequestForAgentIds,
+  declaredRequestForSession,
+  declaredRequestLabel,
+  type DeclaredRequestIndex,
+} from "../../lib/declared-requests.ts";
 import { useScout } from "../../scout/Provider.tsx";
 import {
   filterSessionsByMachineScope,
@@ -61,7 +70,7 @@ import {
 import { routeMachineId } from "../../lib/router.ts";
 import { conversationalMessagePreview } from "../../lib/message-visibility.ts";
 import { RailRow } from "../../scout/slots/RailRow.tsx";
-import type { Agent, FleetAsk, SessionEntry } from "../../lib/types.ts";
+import type { Agent, FleetAsk, OperatorAttentionItem, SessionEntry } from "../../lib/types.ts";
 import {
   agentIdentityGroupKey,
   canonicalAgentForIdentity,
@@ -135,6 +144,13 @@ export function ChatLeft() {
     setRailPrefs((prev) => saveMessagesRailPrefs({ ...prev, groupBy: next }));
   }, []);
   const asksByAgent = useFleetActiveAsks();
+  // Requests are DECLARED only (operator needs, approvals, session questions) —
+  // never inferred from a flight, message text, or a reply to your own ask.
+  const { state: requestsState } = useOperatorRequests();
+  const declaredRequests = useMemo(
+    () => buildDeclaredRequestIndex(requestsState?.items ?? []),
+    [requestsState?.items],
+  );
   const machineId = routeMachineId(route);
   const scopedAgentIds = useMemo(
     () => machineScopedAgentIds(agents, machineId),
@@ -177,22 +193,22 @@ export function ChatLeft() {
   );
 
   /**
-   * The precedence layer: operator DMs whose agent has an open ask.
-   * Computed off the UNFILTERED list so the header stat stays an honest global
-   * readout while you type a filter; the section itself is filtered below.
+   * The precedence layer: your conversations holding a DECLARED request
+   * (an operator need, a question, an approval). Computed off the UNFILTERED
+   * list so the header stat stays an honest global readout while you type a
+   * filter; the section itself is filtered below.
    */
   const needsYouAll = useMemo(() => {
-    const askUpdatedAt = (s: SessionEntry) =>
-      fleetAskForSession(asksByAgent, s)?.updatedAt ?? 0;
+    const requestUpdatedAt = (s: SessionEntry) =>
+      declaredRequestForSession(declaredRequests, s)?.updatedAt ?? 0;
     return machineScoped
       .filter((s) => {
         if (isArchived(s.id, prefs)) return false;
-        if (!isOperatorDm(s)) return false;
-        const ask = fleetAskForSession(asksByAgent, s);
-        return ask?.status === "needs_attention";
+        if (!isOperatorDm(s) && !isChannelConversation(s)) return false;
+        return Boolean(declaredRequestForSession(declaredRequests, s));
       })
-      .sort((a, b) => askUpdatedAt(b) - askUpdatedAt(a));
-  }, [machineScoped, prefs, asksByAgent]);
+      .sort((a, b) => requestUpdatedAt(b) - requestUpdatedAt(a));
+  }, [machineScoped, prefs, declaredRequests]);
 
   const needsYou = useMemo(
     () => (query ? needsYouAll.filter((s) => matchesQuery(s, query)) : needsYouAll),
@@ -526,6 +542,7 @@ export function ChatLeft() {
 
   return (
     <RenameContext.Provider value={rename}>
+    <DeclaredRequestsContext.Provider value={declaredRequests}>
     <div className="ctx-panel">
       <div className="ctx-panel-toolbar">
         <input
@@ -794,6 +811,7 @@ export function ChatLeft() {
         )}
       </div>
     </div>
+    </DeclaredRequestsContext.Provider>
     </RenameContext.Provider>
   );
 }
@@ -815,6 +833,7 @@ type RenameState = {
 };
 
 const RenameContext = createContext<RenameState | null>(null);
+const DeclaredRequestsContext = createContext<DeclaredRequestIndex>(EMPTY_DECLARED_REQUEST_INDEX);
 
 function useRenameState(): RenameState {
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -998,11 +1017,11 @@ function SessionRailRow({
   const observed = isObservedDirect(s);
   const agent = s.agentId ? agentById.get(s.agentId) : undefined;
   const ask = fleetAskForSession(asksByAgent, s);
-  // D4 — emphasis is ADDRESSED-ONLY: an open ask, never recency.
-  // Channel rows carry none because there is no addressed-mention (@you)
-  // backend yet; until mentions land, channels order by recency only.
+  const declared = declaredRequestForSession(useContext(DeclaredRequestsContext), s);
+  // D4 — emphasis is ADDRESSED-ONLY: a DECLARED request (need, question,
+  // approval), never recency and never the agent's reply to your own ask.
   // D5 — Observed has no unread state at all; its count is inventory.
-  const unread = !channel && !observed && ask?.status === "needs_attention";
+  const unread = !observed && Boolean(declared);
   const identifier = threadIdentifier(s, agent);
   const agentLabel = agent?.name ?? s.agentName ?? undefined;
   const baseSub = channel
@@ -1012,8 +1031,9 @@ function SessionRailRow({
       : identifier.toLowerCase() === title.toLowerCase()
         ? undefined
         : identifier;
-  const rawSub =
-    !channel && !taskTitled && ask ? activeAskSubtitle(s, agent, ask) : baseSub;
+  const rawSub = !taskTitled && declared
+    ? declaredRequestSubtitle(declared)
+    : !channel && !taskTitled && ask ? activeAskSubtitle(s, agent, ask) : baseSub;
   // Folded into the one recency list, an observed row sits next to your own
   // conversations and would otherwise be indistinguishable from them. The
   // "Observed" header used to carry that fact; now the row does.
@@ -1024,7 +1044,9 @@ function SessionRailRow({
       depth={depth}
       name={depth === 1 ? conversationChildLabel(s, agent, ask) : title}
       sub={depth === 1 ? threadIdentifier(s, agent) : sub}
-      meta={ask ? timeAgo(ask.updatedAt) : s.lastMessageAt ? timeAgo(s.lastMessageAt) : undefined}
+      meta={declared
+        ? timeAgo(declared.updatedAt)
+        : ask ? timeAgo(ask.updatedAt) : s.lastMessageAt ? timeAgo(s.lastMessageAt) : undefined}
       tone={
         channel
           ? "channel"
@@ -1046,8 +1068,8 @@ function SessionRailRow({
       active={active}
       unread={unread}
       pinned={pinned}
-      activityLabel={ask ? askActivityLabel(ask) : undefined}
-      activityTone={ask ? askActivityTone(ask) : undefined}
+      activityLabel={declared ? declaredRequestLabel(declared) : ask ? askActivityLabel(ask) : undefined}
+      activityTone={declared ? "attention" : ask ? askActivityTone(ask) : undefined}
       worktreeLabel={worktreeLabel ?? undefined}
       title={depth === 1 ? conversationChildTooltip(s, agent, ask) : undefined}
       actions={rename?.editingId === s.id ? undefined : actions}
@@ -1088,6 +1110,7 @@ function AgentRailEntryRow({
 }) {
   const rowId = `agent-${entry.agentId}`;
   const agent = entry.agent;
+  const declared = declaredRequestForAgentIds(useContext(DeclaredRequestsContext), entry.memberAgentIds);
   const time = ask
     ? timeAgo(ask.updatedAt)
     : entry.latest.lastMessageAt
@@ -1103,9 +1126,9 @@ function AgentRailEntryRow({
       avatarName={entry.name}
       avatarKind="user"
       active={rowId === nav.activeId}
-      unread={ask?.status === "needs_attention"}
-      activityLabel={ask ? askActivityLabel(ask) : undefined}
-      activityTone={ask ? askActivityTone(ask) : undefined}
+      unread={Boolean(declared)}
+      activityLabel={declared ? declaredRequestLabel(declared) : ask ? askActivityLabel(ask) : undefined}
+      activityTone={declared ? "attention" : ask ? askActivityTone(ask) : undefined}
       tabIndex={rovingTabIndex(
         rowId === nav.activeRowId,
         nav.activeRowId !== undefined,
@@ -1144,6 +1167,7 @@ function GroupOrRow({
   onToggleArchive: (id: string) => void;
   onContextMenu: (event: MouseEvent, s: SessionEntry) => void;
 }) {
+  const declaredRequests = useContext(DeclaredRequestsContext);
   if (group.conversations.length === 1) {
     const s = group.conversations[0]!;
     return (
@@ -1173,7 +1197,8 @@ function GroupOrRow({
     .filter((ask): ask is FleetAsk => Boolean(ask));
   const activeAskCount = groupAsks.length;
   const workingAskCount = groupAsks.filter((ask) => ask.status === "working").length;
-  const attentionAskCount = groupAsks.filter((ask) => ask.status === "needs_attention").length;
+  const attentionAskCount = group.conversations
+    .filter((candidate) => declaredRequestForSession(declaredRequests, candidate)).length;
   const anyActive = group.conversations.some((c) => c.id === nav.activeId);
 
   return (
@@ -1290,6 +1315,12 @@ function matchesQuery(s: SessionEntry, query: string): boolean {
 
 function needsReplyLabel(count: number): string {
   return count === 1 ? "1 needs a reply" : `${count} need a reply`;
+}
+
+function declaredRequestSubtitle(item: OperatorAttentionItem): string {
+  const label = declaredRequestLabel(item);
+  const text = trimPreview(item.title);
+  return text ? `${label} · ${text}` : label;
 }
 
 function askActivityLabel(ask: FleetAsk): string {

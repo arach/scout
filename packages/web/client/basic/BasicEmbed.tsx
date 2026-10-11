@@ -1,7 +1,7 @@
 /**
  * Embeds the basic client carries for native hosts. The Mac app loads these
  * paths into web views; basic serves the ones that match what it already has
- * (Settings, Home, a thread, a session) and says plainly when a path needs
+ * (Settings, Home, Requests, a thread, a session) and says plainly when a path needs
  * the full web app, instead of folding it onto the basic shell.
  *
  * Nothing here may reach the full app's pane resolver or the discovery glob:
@@ -50,6 +50,7 @@ const BASIC_EMBEDS: Record<BasicEmbedPath, ComponentType> = {
   "/embed/settings": surfaceEmbed("../screens/settings/ScoutSettings.tsx", () => import("../screens/settings/ScoutSettings.tsx")),
   "/embed/thread": surfaceEmbed("../screens/chat/ConversationScreen.tsx", () => import("../screens/chat/ConversationScreen.tsx")),
   "/embed/home": HomeEmbed,
+  "/embed/requests": surfaceEmbed("../screens/requests/RequestsScreen.tsx", () => import("../screens/requests/RequestsScreen.tsx")),
   "/embed/session": SessionEmbed,
 };
 

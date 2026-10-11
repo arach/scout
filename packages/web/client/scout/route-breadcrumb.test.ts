@@ -10,14 +10,14 @@ describe("route breadcrumbs (SCO-083)", () => {
     // Broker and Terminals are top-level tabs now; no crumb repeats the tab.
     expect(routeBreadcrumbForRoute({ view: "broker" })).toBeNull();
     expect(routeBreadcrumbForRoute({ view: "terminal" })).toBeNull();
-    // Sessions is a sub-surface of the Terminals tab: the crumb names it.
-    expect(routeBreadcrumbForRoute({ view: "sessions" })).toBe("Sessions");
+    // Sessions is its own area; the slot toolbar owns its heading.
+    expect(routeBreadcrumbForRoute({ view: "sessions" })).toBeNull();
   });
 
   test("uses agent-first labels for Agents workspace routes", () => {
     expect(ROUTE_VIEW_LABELS["agents-v2"]).toBe("Agents");
-    expect(ROUTE_VIEW_LABELS.code).toBe("Code Browser");
-    expect(ROUTE_VIEW_LABELS.repos).toBe("Repositories");
+    expect(ROUTE_VIEW_LABELS.code).toBe("Code");
+    expect(ROUTE_VIEW_LABELS.repos).toBe("Repos");
   });
 
   test("labels detail and ops surfaces", () => {
@@ -25,15 +25,15 @@ describe("route breadcrumbs (SCO-083)", () => {
       "Conversation",
     );
     expect(routeBreadcrumbForRoute({ view: "settings", section: "agents" })).toBe(
-      "Configuration",
+      "Agent Configuration",
     );
     expect(routeBreadcrumbForRoute({ view: "settings" })).toBe("Settings");
     expect(routeBreadcrumbForRoute({ view: "ops" })).toBe("Mission Control");
-    expect(routeBreadcrumbForRoute({ view: "ops", mode: "tail" })).toBe("Live Activity");
-    expect(routeBreadcrumbForRoute({ view: "ops", mode: "lanes" })).toBe("Agent Lanes");
-    expect(routeBreadcrumbForRoute({ view: "ops", mode: "world" })).toBe("World");
-    expect(routeBreadcrumbForRoute({ view: "repos" })).toBe("Repositories");
-    expect(routeBreadcrumbForRoute({ view: "code" })).toBe("Code Browser");
+    expect(routeBreadcrumbForRoute({ view: "ops", mode: "tail" })).toBe("Tail");
+    expect(routeBreadcrumbForRoute({ view: "ops", mode: "lanes" })).toBe("Lanes");
+    expect(routeBreadcrumbForRoute({ view: "ops", mode: "world" })).toBe("Fleet");
+    expect(routeBreadcrumbForRoute({ view: "repos" })).toBe("Repos");
+    expect(routeBreadcrumbForRoute({ view: "code" })).toBe("Code");
     expect(routeBreadcrumbForRoute({ view: "repo-diff", path: "/tmp/x" })).toBe("Diff");
   });
 

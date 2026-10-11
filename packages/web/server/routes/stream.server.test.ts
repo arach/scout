@@ -14,6 +14,27 @@ await loadWebServerUnderTest();
 installWebServerTestHooks();
 
 describe("createOpenScoutWebServer: stream routes", () => {
+  test("forwards exact session history and isolates its cache from fleet and other tasks", async () => {
+    const urls: URL[] = [];
+    globalThis.fetch = (async (input) => {
+      const url = new URL(String(input));
+      urls.push(url);
+      return Response.json({ events: [{ id: url.searchParams.get("sessionId") ?? "fleet" }] });
+    }) as typeof fetch;
+    const server = await createOpenScoutWebServer({ currentDirectory: "/tmp/openscout", assetMode: "static", staticRoot: makeStaticRoot() });
+    try {
+      for (const sessionId of [undefined, "session/a", "session-b"]) {
+        const query = new URLSearchParams({ transcripts: "true", limit: "10" });
+        if (sessionId) query.set("sessionId", sessionId);
+        const response = await server.app.request(`http://localhost/api/tail/recent?${query}`);
+        expect(response.status).toBe(200);
+        expect((await response.json()).events).toEqual([{ id: sessionId ?? "fleet" }]);
+      }
+      expect(urls.map((url) => url.searchParams.get("sessionId"))).toEqual([null, "session/a", "session-b"]);
+    } finally {
+      await server.stop();
+    }
+  });
   test("waits for canonical broker data before serving a cold tail cache", async () => {
     const fetchUrls: string[] = [];
     let resolveBroker!: (response: Response) => void;

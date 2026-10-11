@@ -173,7 +173,7 @@
   font-weight: 650;
   letter-spacing: 0.03em;
   text-transform: uppercase;
-  color: var(--bg);
+  color: var(--on-accent, var(--bg));
   background: var(--accent);
   padding: 1px 6px;
   border-radius: 999px;
@@ -281,7 +281,7 @@
   color: var(--dim);
 }
 .s-dir-detail-status[data-tone="needs"] {
-  color: var(--bg);
+  color: var(--on-accent, var(--bg));
   background: var(--accent);
   padding: 2px 8px;
   border-radius: 999px;
@@ -403,7 +403,7 @@
   font-weight: 650;
   letter-spacing: 0.02em;
   text-transform: uppercase;
-  color: var(--bg);
+  color: var(--on-accent, var(--bg));
   background: var(--accent);
   padding: 2px 7px;
   border-radius: 999px;
@@ -474,7 +474,7 @@
 }
 /* Request primary action — filled accent so "Respond" reads as the next move. */
 .s-dir-start--accent {
-  color: var(--bg);
+  color: var(--on-accent, var(--bg));
   background: var(--accent);
 }
 .s-dir-start--accent:hover {
@@ -606,7 +606,7 @@
   font-weight: 650;
   letter-spacing: 0.03em;
   text-transform: uppercase;
-  color: var(--bg);
+  color: var(--on-accent, var(--bg));
   background: var(--accent);
   padding: 1px 6px;
   border-radius: 999px;

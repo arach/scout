@@ -3350,3 +3350,15 @@ export function SessionObserve({
     </div>
   );
 }
+
+/** Same transcript/tool/diff blocks, without session controls or another composer. */
+export function SessionObserveEvents({ events, sessionStartMs, operatorName }: {
+  events: SessionEvent[];
+  sessionStartMs?: number;
+  operatorName?: string;
+}) {
+  return <ReplayStream events={events.map((event) => event.kind === "ask" && event.to
+      ? { ...event, kind: "message", text: `Question: ${event.text}${event.answer ? `\n\nAnswer: ${event.answer}` : ""}` }
+      : event)} followEnd={false} conversationMode sessionStartMs={sessionStartMs}
+    laneOperatorName={operatorName} conversationAssistantName="Agent" />;
+}

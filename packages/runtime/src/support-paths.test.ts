@@ -1,14 +1,27 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join, relative } from "node:path";
 
-import { assertTestIsolatedUserData, resolveOpenScoutSupportPaths } from "./support-paths.js";
+import { assertTestIsolatedUserData, ensureOpenScoutCleanSlateSync, resolveOpenScoutSupportPaths } from "./support-paths.js";
 
 const originalEnv = {
   NODE_ENV: process.env.NODE_ENV,
   OPENSCOUT_SUPPORT_DIRECTORY: process.env.OPENSCOUT_SUPPORT_DIRECTORY,
+  OPENSCOUT_CONTROL_HOME: process.env.OPENSCOUT_CONTROL_HOME,
+  OPENSCOUT_RELAY_HUB: process.env.OPENSCOUT_RELAY_HUB,
   XDG_DATA_HOME: process.env.XDG_DATA_HOME,
 };
+const testDirectories = new Set<string>();
+
+function isolatedSupportPaths() {
+  const root = mkdtempSync(join(tmpdir(), "openscout-support-preservation-"));
+  testDirectories.add(root);
+  process.env.OPENSCOUT_SUPPORT_DIRECTORY = join(root, "support");
+  process.env.OPENSCOUT_CONTROL_HOME = join(root, "control");
+  process.env.OPENSCOUT_RELAY_HUB = join(root, "relay");
+  return { root, ...resolveOpenScoutSupportPaths() };
+}
 
 function withPlatform<T>(platform: NodeJS.Platform, run: () => T): T {
   const previous = Object.getOwnPropertyDescriptor(process, "platform");
@@ -28,6 +41,8 @@ function withPlatform<T>(platform: NodeJS.Platform, run: () => T): T {
 }
 
 afterEach(() => {
+  for (const directory of testDirectories) rmSync(directory, { recursive: true, force: true });
+  testDirectories.clear();
   for (const [key, value] of Object.entries(originalEnv)) {
     if (value === undefined) {
       delete process.env[key];
@@ -35,6 +50,78 @@ afterEach(() => {
       process.env[key] = value;
     }
   }
+});
+
+describe("ensureOpenScoutCleanSlateSync", () => {
+  test("preserves existing agent homes, startup logs, mesh state and coordination data without a marker", () => {
+    const paths = isolatedSupportPaths();
+    const sentinels = [
+      join(paths.supportDirectory, "settings.json"),
+      join(paths.relayAgentsDirectory, "scoutbot", "prompt.txt"),
+      join(paths.relayAgentsDirectory, "scoutbot", "state.json"),
+      join(paths.runtimeDirectory, "codex-background-home", "config.toml"),
+      join(paths.logsDirectory, "base", "broker.stdout.log"),
+      join(paths.runtimeDirectory, "mesh-bridge.json"),
+      join(paths.controlHome, "control-plane.sqlite"),
+      join(paths.controlHome, "control-plane.sqlite-wal"),
+      join(paths.controlHome, "control-plane.sqlite-shm"),
+      join(paths.relayHubDirectory, "keep.txt"),
+    ];
+    for (const path of sentinels) {
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, `preserve ${path}\n`);
+    }
+    const identities = sentinels.map((path) => lstatSync(path).ino);
+    // Synthetic credential fixture and relative link, entirely inside this test's root.
+    const authSource = join(paths.root, "operator-auth.json");
+    const authTarget = join(paths.runtimeDirectory, "codex-background-home", "auth.json");
+    const authLink = relative(dirname(authTarget), authSource);
+    writeFileSync(authSource, "synthetic auth fixture\n");
+    symlinkSync(authLink, authTarget);
+    expect(existsSync(paths.cutoverMarkerPath)).toBe(false);
+
+    ensureOpenScoutCleanSlateSync();
+
+    expect(sentinels.map((path) => existsSync(path))).toEqual(sentinels.map(() => true));
+    expect(sentinels.map((path) => lstatSync(path).ino)).toEqual(identities);
+    for (const path of sentinels) expect(readFileSync(path, "utf8")).toBe(`preserve ${path}\n`);
+    expect(readlinkSync(authTarget)).toBe(authLink);
+    expect(readFileSync(authSource, "utf8")).toBe("synthetic auth fixture\n");
+    expect(existsSync(paths.cutoverMarkerPath)).toBe(true);
+  });
+
+  test("initializes an empty support directory and compatibility marker", () => {
+    const paths = isolatedSupportPaths();
+    expect(existsSync(paths.supportDirectory)).toBe(false);
+
+    ensureOpenScoutCleanSlateSync();
+
+    expect(lstatSync(paths.supportDirectory).isDirectory()).toBe(true);
+    expect(readFileSync(paths.cutoverMarkerPath, "utf8")).toMatch(/^\d+\n$/);
+    expect(existsSync(paths.controlHome)).toBe(false);
+    expect(existsSync(paths.relayHubDirectory)).toBe(false);
+  });
+
+  test("leaves an existing compatibility marker and data unchanged on repeated startup", () => {
+    const paths = isolatedSupportPaths();
+    mkdirSync(paths.supportDirectory, { recursive: true });
+    writeFileSync(paths.cutoverMarkerPath, "existing marker\n");
+    writeFileSync(paths.settingsPath, "existing settings\n");
+    const marker = lstatSync(paths.cutoverMarkerPath);
+
+    ensureOpenScoutCleanSlateSync();
+    ensureOpenScoutCleanSlateSync();
+
+    expect(readFileSync(paths.cutoverMarkerPath, "utf8")).toBe("existing marker\n");
+    expect(lstatSync(paths.cutoverMarkerPath).ino).toBe(marker.ino);
+    expect(lstatSync(paths.cutoverMarkerPath).mtimeMs).toBe(marker.mtimeMs);
+    expect(readFileSync(paths.settingsPath, "utf8")).toBe("existing settings\n");
+  });
+
+  test("refuses initialization without test isolation", () => {
+    delete process.env.OPENSCOUT_SUPPORT_DIRECTORY;
+    expect(() => ensureOpenScoutCleanSlateSync()).toThrow(/without OPENSCOUT_SUPPORT_DIRECTORY set/);
+  });
 });
 
 describe("assertTestIsolatedUserData", () => {

@@ -194,7 +194,9 @@ def manager_for(record: Dict[str, object], records: Sequence[Dict[str, object]])
             continue
         if other.get("commonDir") == candidate_common:
             path = other.get("path")
-            if isinstance(path, Path):
+            # ``exists`` was observed before this run started removing copies;
+            # a sibling retired earlier in the same apply pass is gone now.
+            if isinstance(path, Path) and path.is_dir():
                 return path
     return None
 

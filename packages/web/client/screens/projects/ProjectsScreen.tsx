@@ -1,3 +1,4 @@
+import { getDestination } from "../../scout/nav-destinations.ts";
 import type { Route } from "../../lib/types.ts";
 import { useScout } from "../../scout/Provider.tsx";
 import { defineSurface } from "../../surfaces/types.ts";
@@ -44,7 +45,7 @@ export function ProjectsEmbedScreen({
   const { route } = useScout();
   const projectsRoute: Extract<Route, { view: "agents-v2" }> = route.view === "agents-v2"
     ? route
-    : { view: "agents-v2" };
+    : { view: "agents-v2", indexView: "projects" };
 
   useHostProjectSelection(projectsRoute, navigate);
 
@@ -57,8 +58,8 @@ export function ProjectsEmbedScreen({
 
 export const scoutSurface = defineSurface({
   id: "projects",
-  label: "Projects",
-  route: { view: "agents-v2" },
+  label: getDestination("project-list").label,
+  route: { view: "agents-v2", indexView: "projects" },
   webPath: "/projects",
   screen: "ProjectsEmbedScreen",
   embed: {

@@ -36,7 +36,7 @@ async function harness() {
     page: (_room, after, limit) => { counts.page++; return events.filter(e => e.seq > after).slice(0, limit); },
     message: id => { counts.lookup++; return snapshot.messages[id]; } };
   const source = createLocalChatListeningSource({ conversation: id => snapshot.conversations[id], nodeId: "node", feed: () => feed, verify: async () => {
-    if (!allowed) throw new ChatListeningError("membership_denied");
+    if (!allowed) throw new ChatListeningError("membership_denied", true);
     return { actorId: member.actorId, channelId: "room", space: "home", nodeId: "node", expiresAt: fixtureExpiresAt };
   } });
   const options = { sourceKind: "local-changes-v2" as const, path: join(home, "private", "state.json"), source, isDurableAgent: (id: string) => agentExists && id === "durable" };
@@ -102,7 +102,7 @@ describe("listening accumulator persistence", () => {
     const h = await harness(), s = await h.store.enroll("durable", member, "operator");
     h.deny(); h.snapshot.messages.a = message("a"); await h.store.tick();
     expect(h.store.status("durable")[0]).toMatchObject({ membership: "denied", connection: "membership_denied", unreadCount: 0 });
-    h.allow(); await h.store.tick();
+    h.allow(); await h.store.enroll("durable", member, "operator"); await h.store.tick();
     expect(h.store.status("durable")[0]?.unreadCount).toBe(1);
     expect(s.policy).toMatchObject({ awake: "queue", idle: "hold", mode: "catch-up", active: false, revision: 1, author: "operator" });
     expect(JSON.stringify(h.store.status("durable"))).not.toContain(member.token);
@@ -331,8 +331,8 @@ test("pinned endpoint reuse ends the saved binding across restart and rejects re
 });
 
 test("source capacity failure reports its code without advancing the saved frontier", async () => {
-  const h = await harness(); let blocked = false;
-  const options = { ...h.options, source: { read: async (...args: Parameters<typeof h.source.read>) => {
+  const h = await harness(); let blocked = false, now = Date.now();
+  const options = { ...h.options, now: () => now, source: { read: async (...args: Parameters<typeof h.source.read>) => {
     if (blocked) throw new ChatListeningError("source_cursor_capacity");
     return h.source.read(...args);
   } } };
@@ -342,6 +342,6 @@ test("source capacity failure reports its code without advancing the saved front
   h.snapshot.messages.new = message("new"); blocked = true; await store.tick();
   expect(store.status("durable")[0]).toMatchObject({ connection: "source_cursor_capacity", ingestedCount: 0, readPosition: 0 });
   expect(await readFile(h.options.path, "utf8")).toBe(before);
-  blocked = false; await store.tick();
+  blocked = false; now += 5000; await store.tick();
   expect((await store.catchUp("durable", enrolled.id)).messages.map(m => m.id)).toEqual(["new"]);
 });

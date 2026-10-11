@@ -6,7 +6,11 @@ description: >
   the user wants to message or ask another agent, ping or question the
   operator, find prior Codex/Claude/Kimi session work, hand off or fan out
   work, continue a Scout flight/ref/session, route by project, harness, or
-  machine, or check who is around — including `/scout` and `@agent` mentions.
+  machine, check who is around, or pin this Codex chat to Scout's desktop
+  figures — including `/scout` and `@agent` mentions. Also load it before
+  putting an agent on another machine: "on archie", "on the mini", "on the
+  remote box", "ssh in and run codex/claude", "have the agent on <host> do X".
+  Scout starts work on mesh machines directly; don't ssh in to launch agents.
   Prefer connected Scout MCP tools; use the Scout CLI when MCP is unavailable or
   the operator asks for it. Prefer `scout search` over grepping harness home
   dirs. Never invent agent names. Never use `scout send`.
@@ -46,6 +50,16 @@ card starts a fresh session. To continue an exact harness session, use only
 (`scout ask Fable to …` or `--profile`); `--to Fable` would look for an agent
 instead.
 
+**Cards: this session vs. a new identity.** `card` with no other target, run
+inside a live session, means "give *this* conversation an address": call MCP
+`session_attach_current`, which binds the address to this same process so
+asks land here. It works for Codex, and for Claude, Grok and other TUIs running
+in a tmux pane or a Ghostty terminal. If it refuses (another terminal with no
+tmux), say so plainly and offer `scout session transfer`, which moves this same
+conversation into tmux; don't fall back to `card_create`. Use `card_create` only when a fresh,
+separate identity is wanted: it starts a new session on first use and never
+reaches the conversation you're in.
+
 **Who gets it.** One recipient → DM. A group → an explicit `--channel`. Several
 recipients without a channel → one ask per target. `broadcast` reaches everyone
 on `channel.shared`; confirm with the operator first. Put routes in flags, never
@@ -57,7 +71,16 @@ in the message body.
 the whole file in. `--message-file` isn't an ask flag; it would be sent as
 literal text.
 
-**Other machines.** Pin a remote agent as `@reviewer.node:studio`.
+**Other machines: ask with `--on`, never ssh.** To put an agent on another
+machine, `scout ask --on archie --project <path on archie> --harness codex
+--prompt-file ./brief.md` (MCP: `ask` with `on` + `projectPath`). Scout starts a
+fresh session in that folder there, forwards the brief and mirrors the receipt
+and replies back here. `scout hosts` (MCP `hosts_list`) shows which machines
+answer, what each is doing, and its project paths. The path is the path *on that
+machine*. Don't ssh in to run `codex exec` or `claude -p`, and don't scp briefs
+around: that work is invisible to the operator and leaves no receipt. If `--on`
+fails, report the error it gives (it names the fix) instead of falling back to ssh.
+To continue an agent that already lives there, pin it: `@reviewer.node:studio`.
 `scout machines` lists every box it can see, including ones without Scout; only
 trusted mesh peers (`scout mesh peers`) are routable, and adding one is
 `scout mesh enroll`. Never grant trust, enroll a peer, or use a public proxy
@@ -88,6 +111,12 @@ grepping `~/.claude`, `~/.codex` or `~/.kimi-code`. For a Herdr panel, call
 `sessions_inventory` or `herdr_workspaces` first; those hits aren't routing
 addresses. Correlate sessions by exact id, never by title or folder. Never read
 broker storage or call broker HTTP yourself.
+
+**Pin this chat.** When the operator asks to pin, follow or "scout" the
+current Codex chat, run `scout session pin` with no arguments: it reads
+`CODEX_THREAD_ID`, makes a standing work item for the chat and puts a figure on
+their desktop that can start voice in it. Report what it prints. Never resume or
+attach the thread to do this.
 
 **Chat invites are credentials.** Keep them in this session.
 

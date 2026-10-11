@@ -1,4 +1,10 @@
 import { registerIntegrationTools } from "./integrations.ts";
+import { loadScoutMeshOverview, renderScoutMeshOverviewLines, type ScoutMeshMachine, type ScoutMeshOverview } from "../mesh/overview.ts";
+import {
+  detectCurrentLiveTerminalSession,
+  type LiveTerminalDetection,
+  type LiveTerminalSession,
+} from "@openscout/runtime/live-terminal-session";
 import { registerChatListeningTools } from "./chat-listening-tools.ts";
 import { chatListeningRequest } from "../../cli/commands/chat-listening.ts";
 import { setTimeout as delay } from "node:timers/promises";
@@ -102,6 +108,7 @@ import { classifySendInteraction } from "../broker/send-interaction.ts";
 import { SCOUT_APP_VERSION } from "../../shared/product.ts";
 import { registerAttachmentReaderTool } from "./attachment-reader.ts";
 import { herdrWorkspacesDependencies, registerHerdrWorkspaceTools } from "./herdr-workspaces.ts";
+import { registerRoutingTools, routingToolDependencies } from "./routing-tools.ts";
 import { registerSessionDiscoveryTools, sessionDiscoveryDependencies } from "./session-discovery.ts";
 import { waitForStdioServerClosure } from "./stdio-server-lifecycle.ts";
 
@@ -489,14 +496,17 @@ type ScoutMcpDependencies = {
   }) => Promise<ScoutAgentStatus>;
   attachCurrentLocalSession: (input: {
     externalSessionId: string;
-    transport: "codex_app_server";
+    transport: "codex_app_server" | "tmux" | "ghostty";
     currentDirectory: string;
     projectRoot?: string;
     agentId?: string;
     alias?: string;
     displayName?: string;
+    liveTerminal?: LiveTerminalSession;
   }) => Promise<ScoutManagedLocalSessionAttachment>;
+  detectCurrentLiveTerminalSession: () => Promise<LiveTerminalDetection>;
   sendMessage: (input: {
+    requestId?: string;
     senderId: string;
     body: string;
     targetLabel?: string;
@@ -598,6 +608,7 @@ type ScoutMcpDependencies = {
     baseUrl: string,
     options?: { since?: number | null; limit?: number | null },
   ) => Promise<ScoutLabelFeed | null>;
+  loadMeshOverview?: (machine?: string) => Promise<ScoutMeshOverview>;
 };
 
 const flightSchema = z.object({
@@ -1080,6 +1091,12 @@ const searchResultSchema = z.object({
   currentDirectory: z.string(),
   query: z.string(),
   candidates: z.array(agentCandidateSchema),
+  /**
+   * Set when the query names a mesh machine: whether it answers, what it
+   * holds, and the ask that starts fresh work there. Agent cards on a machine
+   * can all be offline while the machine itself is up.
+   */
+  machine: z.record(z.string(), z.unknown()).optional(),
 });
 
 const resolveResultSchema = z.object({
@@ -1110,11 +1127,11 @@ const followIdsSchema = z.object({
 });
 
 const followLinksSchema = z.object({
-  follow: z.string().nullable(),
-  tail: z.string().nullable(),
+  follow: z.string().nullable().describe("Share this URL with the user as 'Follow the task'. Opens the work ticket when available."),
+  tail: z.string().nullable().describe("Secondary diagnostic view of session events; use the work ticket for task progress."),
   session: z.string().nullable(),
   chat: z.string().nullable(),
-  work: z.string().nullable(),
+  work: z.string().nullable().describe("Durable work ticket: request, status, progress, and results. Preferred user-facing task link."),
   agent: z.string().nullable(),
   observe: z.string().nullable(),
 });
@@ -1230,7 +1247,9 @@ const agentStartResultSchema = z.object({
 const currentSessionAttachResultSchema = z.object({
   currentDirectory: z.string(),
   externalSessionId: z.string(),
-  transport: z.literal("codex_app_server"),
+  transport: z.enum(["codex_app_server", "tmux", "ghostty"]),
+  harness: z.string().optional(),
+  surface: z.string().optional(),
   agentId: z.string(),
   selector: z.string().nullable(),
   endpointId: z.string(),
@@ -1274,6 +1293,8 @@ const askResultSchema = z.object({
 });
 
 const askReceiptSchema = z.object({
+  links: followLinksSchema.optional(),
+  followUrl: z.string().nullable().optional(),
   ok: z.boolean(),
   state: z.enum(["queued", "completed", "failed", "ambiguous"]),
   ids: z.object({
@@ -1451,6 +1472,10 @@ function renderFollowLinkText(result: {
   followUrl?: string | null;
   links?: ScoutFollowLinks;
 }): string {
+  const workUrl = result.links?.work;
+  if (workUrl) {
+    return ` Follow the task: ${workUrl}`;
+  }
   const observeUrl = result.links?.observe ?? result.followUrl ?? null;
   const tailUrl = result.links?.tail ?? null;
   const observeLabel = isSessionObserveUrl(observeUrl)
@@ -1714,16 +1739,22 @@ function buildScoutFollowArtifacts(
     flight: ScoutFlightRecord | null;
     conversationId: string | null;
     workItem: ScoutTrackedWorkItem | null;
+    workId?: string | null;
+    flightId?: string | null;
+    invocationId?: string | null;
     targetSessionId?: string | null;
     targetAgentId: string | null;
   },
   env: NodeJS.ProcessEnv,
 ): { ids: ScoutFollowIds; links: ScoutFollowLinks; followUrl: string | null } {
   const ids: ScoutFollowIds = {
-    flightId: input.flight?.id ?? null,
-    invocationId: input.flight?.invocationId ?? null,
-    conversationId: input.conversationId,
-    workId: input.workItem?.id ?? null,
+    flightId: input.flight?.id ?? input.flightId ?? null,
+    invocationId: input.flight?.invocationId ?? input.invocationId ?? null,
+    conversationId: input.conversationId ?? metadataStringValue(input.flight?.metadata, "conversationId"),
+    workId: input.workItem?.id
+      ?? input.workId
+      ?? metadataStringValue(input.flight?.metadata, "workId")
+      ?? metadataStringValue(input.flight?.metadata, "collaborationRecordId"),
     sessionId: input.targetSessionId ?? null,
     targetAgentId: input.targetAgentId ?? input.flight?.targetAgentId ?? null,
   };
@@ -1735,8 +1766,8 @@ function buildScoutFollowArtifacts(
     : ids.targetAgentId
     ? `/agents/${encodeURIComponent(ids.targetAgentId)}?tab=observe`
     : null;
-  const followPath = observePath
-    ?? (ids.workId ? `/work/${encodeURIComponent(ids.workId)}` : null)
+  const followPath = (ids.workId ? `/work/${encodeURIComponent(ids.workId)}` : null)
+    ?? observePath
     ?? (ids.conversationId ? `/c/${encodeURIComponent(ids.conversationId)}` : null)
     ?? buildFollowPath(ids, "tail");
 
@@ -2976,6 +3007,7 @@ function defaultScoutMcpDependencies(
       agentId,
       alias,
       displayName,
+      liveTerminal,
     }) =>
       attachScoutManagedLocalSession({
         externalSessionId,
@@ -2985,8 +3017,11 @@ function defaultScoutMcpDependencies(
         agentId,
         alias,
         displayName,
+        liveTerminal,
       }),
+    detectCurrentLiveTerminalSession: () => detectCurrentLiveTerminalSession(),
     sendMessage: ({
+      requestId,
       senderId,
       body,
       targetLabel,
@@ -2999,6 +3034,7 @@ function defaultScoutMcpDependencies(
       aliasScope,
     }) =>
       sendScoutMessage({
+        requestId,
         senderId,
         body,
         targetLabel,
@@ -3138,6 +3174,7 @@ function defaultScoutMcpDependencies(
     readLabelBrief: (label, baseUrl) => readScoutLabelBrief(label, baseUrl),
     readLabelFeed: (label, baseUrl, options) =>
       readScoutLabelFeed(label, options, baseUrl),
+    loadMeshOverview: (machine) => loadScoutMeshOverview(machine ? { machine } : {}),
   };
 }
 
@@ -3148,6 +3185,21 @@ function resolveToolCurrentDirectory(
   const trimmed = currentDirectory?.trim();
   return trimmed || fallback;
 }
+
+/**
+ * Server instructions: the one Scout text every connected session reads on
+ * its first turn, in every harness. Each line names what to reach for and
+ * when; it is not a feature list. Keep it short — reach is the point.
+ */
+export const SCOUT_MCP_INSTRUCTIONS = [
+  "Scout carries work between agents on this machine and on the operator's other mesh machines.",
+  "- Another agent should do something: `ask` (owned work, returns a receipt). An FYI only: `messages_send`.",
+  "- Work on another machine: `ask` with `on` (the machine, e.g. archie), `projectPath` (the folder on that machine) and `runtime` or `harness`. Scout starts a fresh session there and forwards the ask. Do not ssh in to launch an agent or copy briefs by hand.",
+  "- Which machines exist, what they hold: `hosts_list` (live; each machine's projects and the exact ask for it). Don't know an agent's name: `agents_search`. Never invent names.",
+  "- After an ask: the receipt is proof it was accepted; `invocations_wait` / `invocations_get` follow it, including work running on another machine.",
+  "- The operator: `consult_operator` for a question or permission request, `notify_operator` for news.",
+  "- When Scout cannot do what you need, say which call failed and how, instead of working around it silently.",
+].join("\n");
 
 export function createScoutMcpServer(options: {
   defaultCurrentDirectory: string;
@@ -3164,6 +3216,8 @@ export function createScoutMcpServer(options: {
   const server = new McpServer({
     name: "openscout",
     version: SCOUT_APP_VERSION,
+  }, {
+    instructions: SCOUT_MCP_INSTRUCTIONS,
   });
 
   const notificationLifetime = new AbortController();
@@ -3185,6 +3239,7 @@ export function createScoutMcpServer(options: {
     }) as typeof server.registerTool;
   }
 
+  registerRoutingTools(server, routingToolDependencies(deps.resolveBrokerUrl()));
   registerSessionDiscoveryTools(server, sessionDiscoveryDependencies(resolveScoutWebOrigin(env), { env }));
   registerHerdrWorkspaceTools(server, herdrWorkspacesDependencies(resolveScoutWebOrigin(env), { env }));
   registerAttachmentReaderTool(server, {
@@ -3437,6 +3492,32 @@ export function createScoutMcpServer(options: {
       return {
         content: createTextContent(structuredContent),
         structuredContent,
+      };
+    },
+  );
+
+  server.registerTool(
+    "hosts_list",
+    {
+      title: "Scout Mesh Hosts",
+      description:
+        "List the operator's machines, read live: whether each answers, what it is doing, the projects it holds (absolute paths to pass as projectPath), and the ask that starts work there. Use before `ask` with `on` when you need a machine name or a folder on it. A machine that does not answer comes back with the reason, not as idle.",
+      inputSchema: z.object({
+        host: z.string().optional().describe("One machine (name or node id); omit for all."),
+      }),
+      annotations: {
+        readOnlyHint: true,
+        idempotentHint: true,
+        destructiveHint: false,
+        openWorldHint: false,
+      },
+    },
+    async ({ host }) => {
+      const load = deps.loadMeshOverview ?? ((machine?: string) => loadScoutMeshOverview(machine ? { machine } : {}));
+      const overview = await load(host?.trim() || undefined);
+      return {
+        content: [{ type: "text" as const, text: renderScoutMeshOverviewLines(overview, { projectsPerMachine: host ? 64 : 8, roots: true }).join("\n") }],
+        structuredContent: overview as unknown as Record<string, unknown>,
       };
     },
   );
@@ -3908,9 +3989,9 @@ export function createScoutMcpServer(options: {
   server.registerTool(
     "session_attach_current",
     {
-      title: "Attach Current Codex Session",
+      title: "Attach Current Session",
       description:
-        "Attach the current live Codex session to Scout so other agents can route direct messages and asks back to it. This requires a Codex host that exposes CODEX_THREAD_ID; Claude and other hosts do not support this attach path yet.",
+        "Give the current live harness session a Scout address so other agents' messages and asks land in this same process. Codex attaches by CODEX_THREAD_ID. Claude, Grok and other TUIs attach when they run in a tmux pane or a Ghostty terminal: asks are typed into that surface (without changing focus) and Scout never starts a replacement beside it. In any other terminal the call refuses and says why instead of creating a spawn-on-demand card.",
       inputSchema: z.object({
         currentDirectory: z.string().optional(),
         projectPath: z.string().optional(),
@@ -3931,20 +4012,62 @@ export function createScoutMcpServer(options: {
         currentDirectory,
         options.defaultCurrentDirectory,
       );
-      const externalSessionId = resolveCurrentCodexThreadId(env);
-      const attached = await deps.attachCurrentLocalSession({
-        externalSessionId,
-        transport: "codex_app_server",
+      const common = {
         currentDirectory: resolvedCurrentDirectory,
         projectRoot: projectPath?.trim() ? resolve(projectPath.trim()) : undefined,
         agentId: agentId?.trim() || undefined,
         alias: alias?.trim() || undefined,
         displayName: displayName?.trim() || undefined,
+      };
+      if (env.CODEX_THREAD_ID?.trim()) {
+        const externalSessionId = resolveCurrentCodexThreadId(env);
+        const attached = await deps.attachCurrentLocalSession({
+          ...common,
+          externalSessionId,
+          transport: "codex_app_server",
+        });
+        const structuredContent = {
+          currentDirectory: resolvedCurrentDirectory,
+          externalSessionId,
+          transport: "codex_app_server" as const,
+          agentId: attached.agentId,
+          selector: attached.selector ?? null,
+          endpointId: attached.endpointId,
+          sessionId: attached.sessionId,
+        };
+        return {
+          content: createPlainTextContent(
+            `Current Codex session attached as ${attached.selector ?? attached.agentId}.`,
+          ),
+          structuredContent,
+        };
+      }
+
+      const detection = await deps.detectCurrentLiveTerminalSession();
+      if (!detection.ok) {
+        throw new Error(
+          `This session cannot be attached: ${detection.detail}`
+            + (detection.reason === "no_surface"
+              ? " Run the harness inside tmux or Ghostty to make it reachable in place."
+              : ""),
+        );
+      }
+      const live = detection.session;
+      const surfaceLabel = live.surface.backend === "tmux"
+        ? `tmux pane ${live.surface.pane} (${live.surface.session})`
+        : `Ghostty terminal ${live.surface.terminalId}`;
+      const attached = await deps.attachCurrentLocalSession({
+        ...common,
+        externalSessionId: live.nativeSessionId ?? "",
+        transport: live.surface.backend,
+        liveTerminal: live,
       });
       const structuredContent = {
         currentDirectory: resolvedCurrentDirectory,
-        externalSessionId,
-        transport: "codex_app_server" as const,
+        externalSessionId: live.nativeSessionId ?? "",
+        transport: live.surface.backend,
+        harness: live.harness,
+        surface: surfaceLabel,
         agentId: attached.agentId,
         selector: attached.selector ?? null,
         endpointId: attached.endpointId,
@@ -3952,9 +4075,8 @@ export function createScoutMcpServer(options: {
       };
       return {
         content: createPlainTextContent(
-          attached.selector
-            ? `Current Codex session attached as ${attached.selector}.`
-            : `Current Codex session attached as ${attached.agentId}.`,
+          `Current ${live.harness} session attached as ${attached.selector ?? attached.agentId}; `
+            + `asks are typed into ${surfaceLabel}.`,
         ),
         structuredContent,
       };
@@ -4126,12 +4248,27 @@ export function createScoutMcpServer(options: {
     },
   );
 
+  /** The mesh machine a search query names, read live; undefined when it names none. */
+  async function machineForQuery(query: string): Promise<ScoutMeshMachine | undefined> {
+    const host = query.replace(/^@/, "").trim();
+    if (!host || /\s/.test(host)) return undefined;
+    const load = deps.loadMeshOverview ?? ((machine?: string) => loadScoutMeshOverview(machine ? { machine } : {}));
+    try {
+      const overview = await load(host);
+      return overview.machines.length === 1 ? overview.machines[0] : undefined;
+    } catch {
+      // Not a machine name, or the broker could not list machines: the agent
+      // search above still answers on its own.
+      return undefined;
+    }
+  }
+
   server.registerTool(
     "agents_search",
     {
       title: "Search Scout Agents",
       description:
-        "Search the live Scout broker and discovered agent inventory for routing candidates. Use this when the target is unknown or ambiguous, not as a required preflight for every send.",
+        "Search the live Scout broker and discovered agent inventory for routing candidates. Use this when the target is unknown or ambiguous, not as a required preflight for every send. When the query names a machine (e.g. archie), the result also says whether that machine answers, its projects, and the `ask` with `on` that starts fresh work there; offline agent cards do not mean the machine is down.",
       inputSchema: z.object({
         query: z
           .string()
@@ -4154,15 +4291,20 @@ export function createScoutMcpServer(options: {
         currentDirectory,
         options.defaultCurrentDirectory,
       );
-      const candidates = await deps.searchAgents({
-        query,
-        currentDirectory: resolvedCurrentDirectory,
-        limit,
-      });
+      const trimmedQuery = query?.trim() ?? "";
+      const [candidates, machine] = await Promise.all([
+        deps.searchAgents({
+          query,
+          currentDirectory: resolvedCurrentDirectory,
+          limit,
+        }),
+        machineForQuery(trimmedQuery),
+      ]);
       const structuredContent = {
         currentDirectory: resolvedCurrentDirectory,
-        query: query?.trim() ?? "",
+        query: trimmedQuery,
         candidates,
+        ...(machine ? { machine: machine as unknown as Record<string, unknown> } : {}),
       };
       return {
         content: createTextContent(structuredContent),
@@ -4221,8 +4363,9 @@ export function createScoutMcpServer(options: {
     {
       title: "Ask",
       description:
-        "Ask another agent to answer, review, try, build, compare, or give feedback. Exact runtime requests accept `runtime` as harness/model/effort (for example codex/gpt-5.6-sol/xhigh), or separate harness/model/reasoningEffort fields. A profile is a base preset and explicit dimensions override it when legal. Exact runtime requests create a fresh isolated session; targetSessionId fails closed unless the selected session's observed runtime matches. Ask may create message, invocation, flight, delivery, and work records as side effects; use invocations_get/invocations_wait and the execution-resolution receipt to verify requested, resolved, and observed values.",
+        "Ask another agent to answer, review, try, build, compare, or give feedback — on this machine or on another mesh machine. To start work on another machine, pass `on` (the machine, e.g. archie) with `projectPath` as the folder on that machine, plus harness/runtime; Scout starts a fresh session there and forwards the ask, so never ssh in to launch an agent yourself. Exact runtime requests accept `runtime` as harness/model/effort (for example codex/gpt-5.6-sol/xhigh), or separate harness/model/reasoningEffort fields. A profile is a base preset and explicit dimensions override it when legal. Exact runtime requests create a fresh isolated session; targetSessionId fails closed unless the selected session's observed runtime matches. Ask may create message, invocation, flight, delivery, and work records as side effects; use invocations_get/invocations_wait and the execution-resolution receipt to verify requested, resolved, and observed values.",
       inputSchema: z.object({
+        requestId: z.string().min(1).max(256).optional().describe("Requester-scoped idempotency key; reuse on retries."),
         to: z
           .string()
           .min(1)
@@ -4230,6 +4373,13 @@ export function createScoutMcpServer(options: {
           .describe("Agent id, label, sibling, specialist, recent collaborator, target:<name>, or ⌖name."),
         targetSessionId: targetSessionIdInputSchema,
         projectPath: projectPathInputSchema,
+        on: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            "Mesh machine to start the session on (e.g. archie). Requires projectPath, read as a path on that machine (sent as typed, `~` expands there). Starts a fresh session; list machines with whoami or `scout machines`.",
+          ),
         aliasProject: z.string().optional().describe("Explicit project root for a to=alias:<name> target."),
         aliasHost: z.string().optional().describe("Explicit authority node id/name for a to=alias:<name> target."),
         body: z.string().min(1),
@@ -4300,9 +4450,11 @@ export function createScoutMcpServer(options: {
       }),
     },
     async ({
+      requestId,
       to,
       targetSessionId,
       projectPath,
+      on: onHost,
       aliasProject,
       aliasHost,
       body,
@@ -4360,7 +4512,10 @@ export function createScoutMcpServer(options: {
       const resolvedModel = model ?? (parsedRuntime?.ok ? parsedRuntime.value.model : undefined);
       const resolvedReasoningEffort = reasoningEffort
         ?? (parsedRuntime?.ok ? parsedRuntime.value.reasoningEffort : undefined);
-      const targetProjectPath = projectPath?.trim()
+      // A path on another machine is that machine's to resolve.
+      const targetProjectPath = projectPath?.trim() && onHost?.trim()
+        ? projectPath.trim()
+        : projectPath?.trim()
         ? resolve(resolvedCurrentDirectory, projectPath.trim())
         : !targetTo && !profile && (runtime || resolvedHarness || resolvedModel || resolvedReasoningEffort)
           ? resolvedCurrentDirectory
@@ -4403,6 +4558,7 @@ export function createScoutMcpServer(options: {
             },
           }
         : await deps.scoutAskHandler({
+            requestId,
             senderId: resolvedSenderId,
             ...(profile
               ? {
@@ -4441,6 +4597,7 @@ export function createScoutMcpServer(options: {
             replyMode: resolvedReplyMode,
             currentDirectory: resolvedCurrentDirectory,
             source: "scout-mcp",
+            ...(onHost?.trim() ? { host: onHost.trim() } : {}),
             aliasScope: aliasProject || aliasHost ? {
               ...(aliasProject ? { projectRoot: resolve(resolvedCurrentDirectory, aliasProject) } : {}),
               ...(aliasHost ? { nodeId: aliasHost } : {}),
@@ -4487,6 +4644,9 @@ export function createScoutMcpServer(options: {
         const followArtifacts = buildScoutFollowArtifacts(
           {
             flight,
+            workId: structuredContent.ids.workId,
+            flightId: structuredContent.ids.flightId,
+            invocationId: structuredContent.ids.invocationId,
             conversationId: structuredContent.ids.conversationId ?? null,
             workItem: null,
             targetAgentId: structuredContent.ids.targetAgentId ?? flight?.targetAgentId ?? null,
@@ -4509,7 +4669,7 @@ export function createScoutMcpServer(options: {
             flightId: structuredContent.ids.flightId,
             workItem: null,
             workId: structuredContent.ids.workId ?? null,
-            workUrl: null,
+            workUrl: followArtifacts.links.work,
             ids: followArtifacts.ids,
             links: followArtifacts.links,
             followUrl: followArtifacts.followUrl,
@@ -4541,11 +4701,25 @@ export function createScoutMcpServer(options: {
         };
       }
 
+      const followArtifacts = buildScoutFollowArtifacts({
+        flight: null,
+        flightId: structuredContent.ids.flightId,
+        invocationId: structuredContent.ids.invocationId,
+        workId: structuredContent.ids.workId,
+        workItem: null,
+        conversationId: structuredContent.ids.conversationId ?? null,
+        targetAgentId: structuredContent.ids.targetAgentId ?? null,
+        targetSessionId: targetSession ?? null,
+      }, env);
       return {
         content: createPlainTextContent(
-          renderMcpAskPrimitiveSummary(structuredContent),
+          renderMcpAskPrimitiveSummary(structuredContent) + renderFollowLinkText(followArtifacts),
         ),
-        structuredContent,
+        structuredContent: {
+          ...structuredContent,
+          links: followArtifacts.links,
+          followUrl: followArtifacts.followUrl,
+        },
       };
     },
   );
@@ -4700,6 +4874,7 @@ export function createScoutMcpServer(options: {
         "For new agent-to-agent work, use ask instead. To continue prior context, pass targetSessionId through ask. " +
         "Opt-in: interaction='work' turns one directed send into tracked work on the ask lifecycle (same as scout send --tracked); the default stays message-only.",
       inputSchema: z.object({
+        requestId: z.string().min(1).max(256).optional().describe("Requester-scoped idempotency key; reuse on retries."),
         body: z.string().min(1),
         currentDirectory: z.string().optional(),
         senderId: z.string().optional(),
@@ -4753,6 +4928,7 @@ export function createScoutMcpServer(options: {
       }),
     },
     async ({
+      requestId,
       body,
       currentDirectory,
       senderId,
@@ -4777,6 +4953,9 @@ export function createScoutMcpServer(options: {
         resolvedCurrentDirectory,
         env,
       );
+      if (requestId && (!targetLabel?.trim() || targetAgentId || mentionAgentIds?.length || interaction === "work" || wake)) {
+        throw new Error("requestId messages_send requires targetLabel and message-only delivery; use ask for work");
+      }
       const explicitTargetIds = [
         ...new Set(
           [
@@ -5166,6 +5345,7 @@ export function createScoutMcpServer(options: {
           };
         }
         const result = await deps.sendMessage({
+          requestId,
           senderId: resolvedSenderId,
           body,
           targetLabel: targetLabel.trim(),

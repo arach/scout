@@ -481,6 +481,18 @@ records local-signed artifacts, a blocked first-run preservation check, and
 `latest` held at 0.3.2. Do not relabel/promote those historical candidates.
 A new dev channel does not approve their onboarding or waive that blocker.
 
+### Cross-host asks in 0.3.6-dev.3
+
+`scout ask --on <host>` (MCP `on`) starts or reaches an agent on another of
+the operator's machines through the broker. Names that match more than one
+machine are refused; the node id picks one. `scout hosts` (MCP `hosts_list`)
+lists machines and the projects each one serves, `scout where` shortlists
+routes, and `scout check` shows live work by topic or machine. `scout setup
+agents-md` and `scout setup permissions` help other agents find Scout.
+Linux hosts advertise a local edge over Avahi, and forwarded invocations are
+kept in the broker's SQLite projection. The basic client keeps 0.3.6-dev.2's
+sidebar, Lanes and Tail, and terminal toolbar, and adds Sessions.
+
 ### Shared navigation in 0.3.6-dev.2
 
 The basic npm client uses the shared sidebar for Home, Chat, Terminals, Broker,

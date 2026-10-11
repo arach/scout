@@ -2,7 +2,6 @@
 
 .s-moving-signal-stage {
   position: relative;
-  min-height: 100px;
   isolation: isolate;
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
@@ -54,7 +53,6 @@
 .s-moving-signal-list {
   display: flex;
   flex-direction: column;
-  padding: var(--space-2xs) 0;
 }
 
 .s-moving-signal-item {
@@ -67,14 +65,13 @@
 
 .s-moving-signal-row {
   display: grid;
-  grid-template-columns: 44px 16px minmax(96px, 168px) minmax(0, 1fr) auto;
-  gap: var(--space-sm) var(--space-lg);
+  grid-template-columns: var(--home-cols, 44px 16px minmax(96px, 168px) minmax(0, 1fr) auto);
+  gap: var(--space-sm) var(--home-col-gap, var(--space-lg));
   align-items: center;
   width: 100%;
   margin: 0;
-  padding: var(--space-md) var(--space-xl);
+  padding: var(--home-row-pad, var(--space-md)) var(--home-gutter, var(--space-xl));
   border: 0;
-  border-left: 2px solid transparent;
   background: transparent;
   color: inherit;
   text-align: left;
@@ -89,7 +86,8 @@
 
 .s-moving-signal-row.is-selected {
   background: color-mix(in srgb, var(--accent) 9%, var(--surface));
-  border-left-color: var(--accent);
+  /* An inset edge, not a border, so selection never shifts the columns. */
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .s-moving-signal-row:focus-visible {
@@ -102,6 +100,7 @@
 .s-moving-signal-age {
   display: inline-flex;
   align-items: center;
+  justify-content: flex-end;
   gap: var(--space-xs);
   color: var(--dim);
   font-variant-numeric: tabular-nums;

@@ -11,6 +11,7 @@ import {
   buildPairingSessionCandidate,
   type PairingSession,
 } from "./pairing-session-agents.js";
+import type { LiveTerminalSession } from "./live-terminal-session.js";
 import { resolveAgentLabel, type RuntimeSnapshot } from "./scout-dispatcher.js";
 
 export type ManagedLocalSessionTransport = "codex_app_server" | "claude_stream_json";
@@ -333,6 +334,126 @@ export function buildManagedLocalSessionPairingEndpointBinding(input: {
   };
 }
 
+const LIVE_TERMINAL_HARNESS_NAMES: Record<LiveTerminalSession["harness"], string> = {
+  claude: "Claude",
+  grok: "Grok",
+  codex: "Codex",
+  pi: "Pi",
+  kimi: "Kimi",
+  opencode: "OpenCode",
+};
+
+export function liveTerminalDefaultDisplayName(input: { harness: LiveTerminalSession["harness"]; projectRoot?: string; cwd: string }): string {
+  const projectName = basename(input.projectRoot ?? input.cwd) || input.cwd;
+  return `${LIVE_TERMINAL_HARNESS_NAMES[input.harness]} (${projectName})`;
+}
+
+export function suggestedLiveTerminalSelector(input: { harness: LiveTerminalSession["harness"]; projectRoot?: string; cwd: string }): string {
+  const projectName = normalizeAgentSelectorSegment(basename(input.projectRoot ?? input.cwd) || "session") || "session";
+  return `@${input.harness}-${projectName}`;
+}
+
+export function buildLiveTerminalSessionAgent(input: {
+  live: LiveTerminalSession;
+  selector: string;
+  cwd: string;
+  projectRoot?: string;
+  displayName?: string;
+  nodeId: string;
+  createId: (prefix: string) => string;
+}): AgentDefinition {
+  const id = input.createId("local-session-agent");
+  return {
+    id,
+    kind: "agent",
+    definitionId: id,
+    displayName: input.displayName?.trim() || liveTerminalDefaultDisplayName({ harness: input.live.harness, ...input }),
+    handle: selectorHandle(input.selector),
+    labels: ["local-session", "managed", "live-terminal", input.live.harness],
+    metadata: {
+      source: "scout-managed",
+      managedByScout: true,
+      identityKind: "scout_managed_local_session_agent",
+      externalSource: "local-session",
+      selector: input.selector,
+      defaultSelector: input.selector,
+      sessionBacked: true,
+      attachedTransport: input.live.surface.backend,
+      attachedLive: true,
+    },
+    selector: input.selector,
+    defaultSelector: input.selector,
+    agentClass: "general",
+    capabilities: ["chat", "invoke", "deliver"],
+    wakePolicy: "manual",
+    homeNodeId: input.nodeId,
+    authorityNodeId: input.nodeId,
+    advertiseScope: "local",
+  };
+}
+
+/**
+ * Endpoint for a harness the operator started in their own terminal (a tmux
+ * pane or a Ghostty terminal). `attachedLive` tells delivery to type into that
+ * surface and never spawn, resume or fork a replacement when it is gone.
+ */
+export function buildLiveTerminalEndpointBinding(input: {
+  agentId: string;
+  live: LiveTerminalSession;
+  cwd: string;
+  projectRoot?: string;
+  existingEndpoint?: AgentEndpoint | null;
+  selector?: string | null;
+  definitionId?: string | null;
+  nodeId: string;
+}): AgentEndpoint {
+  const projectRoot = resolve(input.projectRoot ?? input.cwd);
+  const cwd = resolve(input.cwd);
+  const { live } = input;
+  const { surface } = live;
+  return {
+    id: input.existingEndpoint?.id ?? `endpoint.${input.agentId}.${input.nodeId}.${surface.backend}`,
+    agentId: input.agentId,
+    nodeId: input.nodeId,
+    harness: live.harness,
+    transport: surface.backend,
+    state: "idle",
+    cwd,
+    projectRoot,
+    ...(surface.backend === "tmux"
+      ? { sessionId: surface.session, pane: surface.pane }
+      : { sessionId: surface.terminalId }),
+    metadata: {
+      source: "local-session",
+      managedByScout: true,
+      sessionBacked: true,
+      externalSource: "local-session",
+      agentName: input.agentId,
+      definitionId: input.definitionId?.trim() || selectorHandle(input.selector ?? input.agentId),
+      project: basename(projectRoot) || projectRoot,
+      projectRoot,
+      attachedLive: true,
+      placement: "attached",
+      livePid: live.pid,
+      liveTty: live.tty,
+      ...(live.nativeSessionId
+        ? { externalSessionId: live.nativeSessionId, nativeSessionId: live.nativeSessionId }
+        : {}),
+      ...(surface.backend === "tmux"
+        ? {
+          tmuxSession: surface.session,
+          tmuxPane: surface.pane,
+          terminalSurface: { backend: "tmux", sessionName: surface.session, paneId: surface.pane },
+        }
+        : {
+          ghosttyTerminalId: surface.terminalId,
+          terminalSurface: { backend: "ghostty", terminalId: surface.terminalId },
+        }),
+      startedAt: String(Date.now()),
+    },
+  };
+}
+
 export function managedPairingEndpointForAgent(
   snapshot: RuntimeSnapshot,
   agentId: string,
@@ -372,6 +493,7 @@ export function managedLocalSessionEndpointForAgent(
       endpoint.transport === "codex_app_server"
       || endpoint.transport === "claude_stream_json"
       || endpoint.transport === "pairing_bridge"
+      || ((endpoint.transport === "tmux" || endpoint.transport === "ghostty") && endpoint.metadata?.attachedLive === true)
     )
     && isManagedLocalSessionMetadata(endpoint.metadata)
   )) ?? null;

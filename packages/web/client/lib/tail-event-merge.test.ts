@@ -4,6 +4,7 @@ import {
   appendLiveTailEvent,
   dedupeTailEvents,
   mergeHydratedTailEvents,
+  mergeTailSessionPresence,
   tailEventKey,
 } from "./tail-event-merge.ts";
 import type { TailEvent } from "./types.ts";
@@ -83,5 +84,32 @@ describe("dedupeTailEvents", () => {
     ]);
     expect(deduped).toHaveLength(1);
     expect(deduped[0].id).toBe("codex:S:312");
+  });
+});
+
+describe("session presence alongside bounded detail", () => {
+  test("a quiet Claude remains present while Codex fills and advances the detail buffer", () => {
+    const now = 4 * 60 * 60_000;
+    const claude = event({ id: "quiet-claude", source: "claude", sessionId: "C", kind: "assistant", ts: now - 90 * 60_000, summary: "Finished checking the design" });
+    let detail = Array.from({ length: 1_200 }, (_, i) => event({ id: String(i), ts: now - 1_200 + i, summary: `Read ${i}` }));
+    detail = mergeHydratedTailEvents([], detail, 1_000);
+    for (let i = 0; i < 100; i++) detail = appendLiveTailEvent(detail, event({ id: `live-${i}`, ts: now + i, summary: `Live ${i}` }), 1_000);
+    const merged = mergeTailSessionPresence(detail, [claude], now + 100, now);
+    expect(detail).toHaveLength(1_000);
+    expect(merged).toHaveLength(1_001);
+    expect(merged.find(e => e.sessionId === "C")).toEqual(claude);
+  });
+  test("presence keeps one real reply per source and session inside the chosen horizon", () => {
+    const old = event({ id: "old", kind: "assistant", ts: 10 });
+    const latest = event({ id: "new", kind: "assistant", ts: 80 });
+    const otherSource = event({ id: "claude", kind: "assistant", source: "claude", ts: 70 });
+    const duplicates = event({ ...latest, id: "live-copy" });
+    const merged = mergeTailSessionPresence([duplicates], [old, latest, otherSource,
+      event({ id: "heartbeat", kind: "system", ts: 90 }),
+      event({ id: "future", kind: "assistant", ts: 101 }),
+      event({ id: "nan", kind: "assistant", ts: Number.NaN }),
+    ], 100, 50);
+    expect(merged.map(e => e.id)).toEqual(["claude", "new"]);
+    expect(mergeTailSessionPresence([], [latest], 200, 50)).toHaveLength(0);
   });
 });

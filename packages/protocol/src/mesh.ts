@@ -1,7 +1,8 @@
 import type { AdvertiseScope, MetadataMap, ScoutId } from "./common.js";
 
 export const OPENSCOUT_MESH_PROTOCOL_VERSION = 1;
-export const OPENSCOUT_IROH_MESH_ALPN = "openscout/mesh/0";
+// mesh/1 requires end-to-end Scout peer proofs; mesh/0 silently lost provenance.
+export const OPENSCOUT_IROH_MESH_ALPN = "openscout/mesh/1";
 export const DEFAULT_OPENSCOUT_MESH_RENDEZVOUS_URL = "https://mesh.oscout.net";
 export const DEFAULT_OPENSCOUT_MOBILE_PAIRING_RELAY_URL = "wss://mesh.oscout.net/v1/relay";
 

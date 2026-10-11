@@ -1048,3 +1048,110 @@ describe("budget advice completion after provider-ladder merge", () => {
     expect(agentCalls).toBe(0);
   });
 });
+
+describe("Scoutbot conversations survive a restart", () => {
+  test("a new service reloads the saved sessions and the active one", async () => {
+    const { mkdtempSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { createScoutbotAssistantFileStore } = await import("./scoutbot-assistant-store.ts");
+    const filePath = join(mkdtempSync(join(tmpdir(), "scoutbot-sessions-")), "sessions.json");
+    const boot = () => createScoutbotAssistantService({
+      currentDirectory: "/tmp/openscout",
+      loadContext: () => ({ ok: true }),
+      store: createScoutbotAssistantFileStore(filePath),
+      env: { OPENAI_API_KEY: "sk-test", OPENSCOUT_SCOUTBOT_ASSISTANT_PROVIDER: "openai" } as NodeJS.ProcessEnv,
+      fetchImpl: async () => Response.json({ id: "resp_1", output_text: "Kept." }),
+    });
+
+    const first = boot();
+    const older = first.resetSession().session.id;
+    first.resetSession();
+    await first.respond({ body: "Remember the build is green." });
+    const active = first.getSessionState().session;
+
+    const second = boot();
+    const state = second.getSessionState();
+    expect(state.session.id).toBe(active.id);
+    expect(state.session.messages.map((message) => message.body)).toEqual(["Remember the build is green.", "Kept."]);
+    expect(state.sessions.map((session) => session.id)).toContain(older);
+  });
+
+  test("an unreadable file starts clean instead of failing", async () => {
+    const { mkdtempSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { createScoutbotAssistantFileStore } = await import("./scoutbot-assistant-store.ts");
+    const filePath = join(mkdtempSync(join(tmpdir(), "scoutbot-sessions-")), "sessions.json");
+    writeFileSync(filePath, "{not json");
+    const scoutbot = createScoutbotAssistantService({
+      currentDirectory: "/tmp/openscout",
+      loadContext: () => ({}),
+      store: createScoutbotAssistantFileStore(filePath),
+    });
+    expect(scoutbot.getSessionState().session.messages).toEqual([]);
+  });
+});
+
+describe("Scoutbot typed chat on the durable brain", () => {
+  const boot = (brain: import("./scoutbot-brain.ts").ScoutbotBrain, fetchCalls: string[]) => createScoutbotAssistantService({
+    currentDirectory: "/tmp/openscout",
+    loadContext: () => ({ fleet: "quiet" }),
+    brain,
+    env: { OPENAI_API_KEY: "sk-test", OPENSCOUT_SCOUTBOT_ASSISTANT_PROVIDER: "auto" } as NodeJS.ProcessEnv,
+    fetchImpl: async (_url, init) => {
+      fetchCalls.push(String(init?.body ?? ""));
+      return Response.json({ id: "resp_ladder", output_text: "From the ladder." });
+    },
+  });
+
+  test("answers through the brain and keeps its conversation for the next turn", async () => {
+    const calls: Array<{ conversationId: number | null; body: string; state?: string }> = [];
+    const fetchCalls: string[] = [];
+    const scoutbot = boot({
+      reply: async (input) => {
+        calls.push({ conversationId: input.conversationId, body: input.body, state: input.state });
+        return { conversationId: 7, text: `brain heard: ${input.body}`, usage: null };
+      },
+      close: async () => undefined,
+    }, fetchCalls);
+
+    const first = await scoutbot.respond({ body: "Remember 42." });
+    const second = await scoutbot.respond({ body: "Which number?" });
+
+    expect(first.reply.body).toBe("brain heard: Remember 42.");
+    expect(second.reply.body).toBe("brain heard: Which number?");
+    expect(calls.map((call) => call.conversationId)).toEqual([null, 7]);
+    // The brain holds the transcript, so no history is replayed into the body.
+    expect(calls[1]!.body).toBe("Which number?");
+    expect(calls[1]!.state).toContain("quiet");
+    expect(fetchCalls).toHaveLength(0);
+  });
+
+  test("falls back to the provider ladder when the brain fails before any text", async () => {
+    const fetchCalls: string[] = [];
+    const scoutbot = boot({
+      reply: async () => { throw new Error("provider down"); },
+      close: async () => undefined,
+    }, fetchCalls);
+
+    const reply = await scoutbot.respond({ body: "Status?" });
+    expect(reply.reply.body).toBe("From the ladder.");
+    expect(fetchCalls).toHaveLength(1);
+  });
+
+  test("streams brain deltas as sentences", async () => {
+    const scoutbot = boot({
+      reply: async (input) => {
+        input.onDelta?.("All quiet. ");
+        input.onDelta?.("Nothing is running.");
+        return { conversationId: 3, text: "All quiet. Nothing is running.", usage: null };
+      },
+      close: async () => undefined,
+    }, []);
+    const sentences: string[] = [];
+    const reply = await scoutbot.respondStream({ body: "Status?", onSentence: (sentence) => sentences.push(sentence) });
+    expect(reply.reply.body).toBe("All quiet. Nothing is running.");
+    expect(sentences.join(" ")).toBe("All quiet. Nothing is running.");
+  });
+});

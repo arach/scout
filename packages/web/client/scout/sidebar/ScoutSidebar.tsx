@@ -26,7 +26,7 @@
  */
 import type { CSSProperties, HTMLAttributes } from "react";
 import { usePlatform } from "@hudsonkit";
-import { Bell, Plus } from "lucide-react";
+import { Bell, Plus, Inbox } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -58,6 +58,7 @@ import {
   primaryAreaForRoute,
   type PrimaryArea,
   type PrimaryAreaId,
+  type NavigationEntryId,
 } from "../primary-areas.ts";
 import {
   sidebarSubNavForRoute,
@@ -65,10 +66,15 @@ import {
 } from "../nav-destinations.ts";
 import { useOptionalFlag } from "hudsonkit/flags";
 import { useSidebarModel } from "./useSidebarModel.ts";
+import { useOperatorRequests } from "../../lib/use-operator-requests.ts";
+import { RequestsCount } from "../../screens/requests/RequestsCount.tsx";
+import { requestsCountState } from "../../screens/requests/requests-model.ts";
+import { getDestination } from "../nav-destinations.ts";
+import "../../screens/requests/requests.css";
 import { ScoutMark } from "../../components/ScoutMark.tsx";
 
 const ACTIVE_MENU_CLASS =
-  "data-active:bg-sidebar-accent data-active:font-medium data-active:text-sidebar-accent-foreground data-active:shadow-[inset_2px_0_0_0_var(--sidebar-primary,var(--hud-accent,oklch(0.86_0.17_125)))]";
+  "data-active:bg-sidebar-accent data-active:font-medium data-active:text-sidebar-accent-foreground";
 
 function AreaMenuItems({
   areas,
@@ -81,7 +87,7 @@ function AreaMenuItems({
   presentation,
 }: {
   areas: readonly PrimaryArea[];
-  activeAreaId: PrimaryAreaId;
+  activeAreaId: NavigationEntryId;
   onNavigateArea: (id: PrimaryAreaId) => void;
   route: Route;
   navigate: (route: Route) => void;
@@ -161,6 +167,7 @@ export function ScoutSidebar({
   areas,
   areaRoutes,
   subNav = true,
+  showRequests = true,
   onNewTask,
 }: {
   /**
@@ -169,17 +176,28 @@ export function ScoutSidebar({
    */
   brandLabel?: string;
   presentation?: "scout" | "slack";
-  /** Limit this shared sidebar to destinations carried by the current build. */
+  /**
+   * The areas this build serves, when it serves fewer than all of them (basic).
+   * Same sidebar, same order and labels; areas outside the set are left out,
+   * so adding a surface to a build is adding its id here.
+   */
   areas?: readonly PrimaryAreaId[];
-  /** Override an area entry route when a build serves a subset of its pages. */
+  /** Where an area opens in this build, when not the full app's default (basic's Ops is Lanes). */
   areaRoutes?: Partial<Record<PrimaryAreaId, Route>>;
+  /** Area sub-destinations under the active row; a build that serves only the area's front page turns them off. */
   subNav?: boolean;
+  /** Requests lives on the full shell; a build without it hides the row. */
+  showRequests?: boolean;
+  /** The build's own "new task" when it has no context-capture overlay. */
   onNewTask?: () => void;
 }) {
   const { route, navigate, openSettings, openContextCapture } = useScout();
   const { titleBarInset, dragRegionProps, onInteractiveMouseDown } = usePlatform();
   const opsControlEnabled = useOptionalFlag("ops.control", true);
   const model = useSidebarModel(route);
+  const attention = useOperatorRequests();
+  const requestsCount = requestsCountState(attention.state?.items.length ?? 0);
+  const requestsLabel = getDestination("requests").label;
   const activeAreaId = primaryAreaForRoute(route);
   const served = (area: PrimaryArea) => !areas || areas.includes(area.id);
   const navigateAreas = PRIMARY_AREAS.filter((a) => a.section === "navigate" && served(a));
@@ -374,9 +392,19 @@ export function ScoutSidebar({
       </SidebarContent>
 
       <SidebarFooter className="border-t border-sidebar-border">
-        {/* Settings stays pinned here across every route. In the
-            icon rail they remain deterministic targets with hover tooltips. */}
+        {/* Requests and Settings stay pinned here across every route — utilities,
+            not primary areas. In the icon rail they remain deterministic
+            targets with hover tooltips. */}
         <SidebarMenu className="gap-1">
+          {showRequests ? <SidebarMenuItem>
+            <SidebarMenuButton type="button" isActive={route.view === "requests"} tooltip={requestsLabel}
+              aria-label={`${requestsLabel}, ${requestsCount.count} open`} aria-current={route.view === "requests" ? "page" : undefined}
+              data-entry="requests" className={cn("scout-requests-nav-row font-mono text-sm", ACTIVE_MENU_CLASS)}
+              onClick={() => navigate({ view: "requests" })}>
+              <Inbox size={16} strokeWidth={1.6} aria-hidden /><span className="scout-requests-nav-label">{requestsLabel}</span>
+              <RequestsCount count={requestsCount.count} navigation pending={attention.loading && !attention.state} />
+            </SidebarMenuButton>
+          </SidebarMenuItem> : null}
           <SidebarMenuItem>
             <SidebarMenuButton
               type="button"
@@ -402,7 +430,7 @@ export function ScoutSidebar({
 }
 
 /** Hook-friendly active area for tests / consumers. */
-export function sidebarActiveAreaId(route: Route): PrimaryAreaId {
+export function sidebarActiveAreaId(route: Route): NavigationEntryId {
   return primaryAreaForRoute(route);
 }
 

@@ -376,6 +376,21 @@ describe("agents route parsing", () => {
     expect(routePath(route)).toBe("/ops/tail?q=019ddb1b-test-thread");
   });
 
+  test("the week keeps its live source param, ?live included, and drops it elsewhere", () => {
+    expect(routeFromUrl("http://127.0.0.1:43120/ops/week?source=live")).toMatchObject({ view: "ops", mode: "week", source: "live" });
+    expect(routeFromUrl("http://127.0.0.1:43120/ops/week?live")).toMatchObject({ source: "live" });
+    expect(routePath(routeFromUrl("http://127.0.0.1:43120/ops/week?source=otlp&data=team"))).toBe("/ops/week?data=team&source=otlp");
+    expect(routeFromUrl("http://127.0.0.1:43120/ops/week?source=nope")).not.toHaveProperty("source");
+    expect(routeFromUrl("http://127.0.0.1:43120/ops/lanes?source=live")).not.toHaveProperty("source");
+  });
+  test("the week keeps its team dataset param and drops it elsewhere", () => {
+    const route = routeFromUrl("http://127.0.0.1:43120/ops/week?data=team");
+    expect(route).toMatchObject({ view: "ops", mode: "week", dataset: "team" });
+    expect(routePath(route)).toBe("/ops/week?data=team");
+    expect(routePath(routeFromUrl("http://127.0.0.1:43120/ops/week"))).toBe("/ops/week");
+    expect(routeFromUrl("http://127.0.0.1:43120/ops/lanes?data=team")).not.toHaveProperty("dataset");
+  });
+
   test("agent lanes bypass the broad ops feature gate", () => {
     expect(routeFromUrl("http://127.0.0.1:43120/ops/lanes?no-ops")).toEqual({
       view: "ops",
@@ -958,5 +973,14 @@ describe("session catalog selection", () => {
         "missing-session",
       ),
     ).toBe("active-session");
+  });
+});
+
+
+describe("Requests entry routing", () => {
+  test("shell and native embed resolve to the same standalone entry", () => {
+    expect(routeFromUrl("http://localhost:43122/requests")).toEqual({ view: "requests" });
+    expect(routeFromUrl("http://localhost:43122/embed/requests?profile=macos.requests")).toEqual({ view: "requests" });
+    expect(routePath({ view: "requests" })).toBe("/requests");
   });
 });

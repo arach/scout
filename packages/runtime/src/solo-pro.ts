@@ -1,7 +1,7 @@
-// Solo Pro, as three separate facts about this machine:
+// Scout Pro, as three separate facts about this machine:
 //
 //   access     what the download host last said about the account's full web
-//              app (Solo Pro is that access; there is no other Pro policy)
+//              app (Scout Pro is that access; there is no other Pro policy)
 //   installed  which Pro components are actually on disk
 //   ready      whether the installed ones are serving or running right now
 //
@@ -49,7 +49,7 @@ export type SoloProComponentId = "full_web_app" | "native_app" | "herdr";
 export type SoloProComponent = {
   id: SoloProComponentId;
   label: string;
-  /** Required for "Solo Pro is set up"; optional parts never block it. */
+  /** Required for "Scout Pro is set up"; optional parts never block it. */
   required: boolean;
   installed: "installed" | "missing" | "not_applicable" | "unknown";
   installedDetail: string;
@@ -278,7 +278,7 @@ export function summarizeSoloProAccess(access: ExpandedWebAccess): SoloProAccess
         ...base,
         confirmed: true,
         tier: "solo_pro",
-        title: "Solo Pro",
+        title: "Scout Pro",
         detail: `${access.account.login} has the full web app.`,
         actions: [CHECK],
       };
@@ -287,7 +287,7 @@ export function summarizeSoloProAccess(access: ExpandedWebAccess): SoloProAccess
         ...base,
         confirmed: true,
         tier: "solo",
-        title: "Solo",
+        title: "Scout",
         detail: "The download host says this account doesn't have the full web app. Your account page shows what it includes.",
         actions: [{ kind: "link", label: "See your account", href: SCOUT_ACCOUNT_URL }, CHECK],
       };
@@ -388,8 +388,8 @@ function fullWebAppComponent(
   };
 }
 
-// Optional: Solo Pro is the full web app. Scout for Mac is reported on its own
-// and never decides whether Solo Pro is set up.
+// Optional: Scout Pro is the full web app. Scout for Mac is reported on its own
+// and never decides whether Scout Pro is set up.
 async function nativeAppComponent(probes: SoloProProbes): Promise<SoloProComponent> {
   const base = { id: "native_app" as const, label: "Scout for Mac", required: false };
   const install: SoloProAction = { kind: "command", label: "Install Scout for Mac", command: "scout install" };
@@ -485,11 +485,11 @@ export function soloProPhase(access: SoloProAccessSummary, components: SoloProCo
 }
 
 const HEADLINES: Record<SoloProPhase, string> = {
-  active: "Solo Pro is set up on this machine",
-  finish_setup: "Finish setting up Solo Pro",
-  not_ready: "Solo Pro is installed but not being served yet",
-  no_access: "This account doesn't have Solo Pro",
-  unconfirmed: "Solo Pro access isn't confirmed",
+  active: "Scout Pro is set up on this machine",
+  finish_setup: "Finish setting up Scout Pro",
+  not_ready: "Scout Pro is installed but not being served yet",
+  no_access: "This account doesn't have Scout Pro",
+  unconfirmed: "Scout Pro access isn't confirmed",
 };
 
 export async function readSoloProStatus(options: {

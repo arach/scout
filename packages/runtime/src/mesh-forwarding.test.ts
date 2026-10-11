@@ -378,3 +378,15 @@ describe("mesh forwarding", () => {
     })).rejects.toBeInstanceOf(PeerUnreachableError);
   });
 });
+
+test("Iroh authentication rejection never falls back to an HTTP route", async () => {
+  for (const status of [401, 403]) {
+    let httpCalls = 0;
+    const peer = makePeerNode({ brokerUrl: "http://127.0.0.1:1", meshEntrypoints: [makeIrohEntrypoint()] });
+    await expect(forwardMeshMessage(peer, makeBundle(), {
+      iroh: { forwarder: async () => ({ status, body: { error: "access_denied" } }) },
+      peerFetch: async () => { httpCalls++; return Response.json({ ok: true }); },
+    })).rejects.toThrow(`Iroh-forwarded request: ${status}`);
+    expect(httpCalls).toBe(0);
+  }
+});

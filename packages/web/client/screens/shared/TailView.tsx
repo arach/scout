@@ -1,6 +1,7 @@
 import "../ops/ops-tail.css";
 
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -36,6 +37,9 @@ import type {
 } from "../../lib/types.ts";
 
 const BUFFER_LIMIT = 5_000;
+/** Rows in the DOM. The buffer keeps 5,000 for filtering; drawing them all
+    on every event is what pinned a core (and, in dev, filled memory). */
+const RENDER_LIMIT = 600;
 const DEFAULT_RECENT_LIMIT = 500;
 const DISCOVERY_REFRESH_MS = 30_000;
 const DISPLAY_MODE_STORAGE_KEY = "openscout:tail-display-mode";
@@ -98,8 +102,16 @@ function formatTime(ts: number): string {
   return formatClockTimestamp(ts, { milliseconds: true }) || "—";
 }
 
-function tailRowKey(event: TailEvent, index: number, repeatCount = 1): string {
-  return `${event.id}:${event.ts}:${repeatCount}:${index}`;
+/** Keys must not carry the row's position: when the buffer slides by one,
+    a positional key remounts every row. Repeats of one id get a suffix. */
+function tailRowKeys(rows: readonly { event: TailEvent }[]): string[] {
+  const seen = new Map<string, number>();
+  return rows.map(({ event }) => {
+    const base = `${event.id}:${event.ts}`;
+    const n = seen.get(base) ?? 0;
+    seen.set(base, n + 1);
+    return n ? `${base}#${n}` : base;
+  });
 }
 
 function readStoredDisplayMode(): TailDisplayMode {
@@ -346,13 +358,26 @@ export function TailView({
   const filterInputRef = useRef<HTMLInputElement | null>(null);
   const wasAtBottomRef = useRef(true);
 
+  // Events arrive in bursts; take them once a frame, not once each. A hidden
+  // tab gets no frames, so it holds the queue (capped) and draws nothing.
+  const queuedRef = useRef<TailEvent[]>([]);
+  const flushRef = useRef(0);
+  useEffect(() => () => cancelAnimationFrame(flushRef.current), []);
   const handleEvent = useCallback((event: TailEvent) => {
     if (scopedSessionId && event.sessionId !== scopedSessionId) return;
-    setEvents((prev) => {
-      const next = prev.length >= BUFFER_LIMIT
-        ? [...prev.slice(prev.length - BUFFER_LIMIT + 1), event]
-        : [...prev, event];
-      return next;
+    const queue = queuedRef.current;
+    queue.push(event);
+    if (queue.length > BUFFER_LIMIT) queue.splice(0, queue.length - BUFFER_LIMIT);
+    if (flushRef.current) return;
+    flushRef.current = requestAnimationFrame(() => {
+      flushRef.current = 0;
+      const batch = queuedRef.current;
+      queuedRef.current = [];
+      if (!batch.length) return;
+      setEvents((prev) => {
+        const next = prev.concat(batch);
+        return next.length > BUFFER_LIMIT ? next.slice(next.length - BUFFER_LIMIT) : next;
+      });
     });
   }, [scopedSessionId]);
 
@@ -456,10 +481,12 @@ export function TailView({
     const narrowed = filtered.filter(({ event }) =>
       displayMode === "all" || !isTailNoiseEvent(event),
     );
-    return collapseTailDisplayRows(
+    const rows = collapseTailDisplayRows(
       narrowed.map((row) => ({ event: row.event, meta: row.severity })),
     );
+    return rows.length > RENDER_LIMIT ? rows.slice(rows.length - RENDER_LIMIT) : rows;
   }, [displayMode, filtered]);
+  const displayKeys = useMemo(() => tailRowKeys(displayRows), [displayRows]);
 
   // Auto-scroll-to-bottom unless paused.
   useLayoutEffect(() => {
@@ -696,7 +723,7 @@ export function TailView({
         ) : (
           displayRows.map(({ event, repeatCount, meta: severity }, index) => (
             <TailRow
-              key={tailRowKey(event, index, repeatCount)}
+              key={displayKeys[index]}
               event={event}
               repeatCount={repeatCount}
               issueSeverity={severity}
@@ -754,7 +781,7 @@ export function TailView({
   );
 }
 
-function TailRow({
+const TailRow = memo(function TailRow({
   event,
   repeatCount = 1,
   issueSeverity,
@@ -838,7 +865,7 @@ function TailRow({
       </span>
     </div>
   );
-}
+});
 
 /**
  * Inline hyperlink-style span. If `onClick` is provided, the span renders as a

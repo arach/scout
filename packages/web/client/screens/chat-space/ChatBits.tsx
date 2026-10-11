@@ -13,8 +13,10 @@ import { ChatMessageCorrectionControls, type CorrectChatMessage } from "./ChatMe
  */
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { Bookmark, MessageSquare, Pin } from "lucide-react";
+import { Bookmark, Ellipsis, MessageSquare, Pin } from "lucide-react";
 import { copyTextToClipboard } from "../../lib/clipboard.ts";
+import { useContextMenu } from "../../components/ContextMenu.tsx";
+import { messageMenuItems } from "./ChatContextMenu.tsx";
 import {
   REACTION_EMOJI_MORE,
   REACTION_EMOJI_QUICK,
@@ -296,6 +298,21 @@ function ChatLinkCard({ url }: { url: string }) {
   );
 }
 
+/** Interactive bits inside a turn keep their own click. The rest starts a reply. */
+const REPLY_CLICK_SKIP =
+  "a, button, input, textarea, select, video, audio, label, summary, [contenteditable='true'], [role='button'], [role='link']";
+
+export function messageClickStartsReply(
+  target: EventTarget | null,
+  selectedText: string,
+): boolean {
+  if (selectedText.trim()) return false;
+  const node = target as { closest?: (selector: string) => unknown; parentElement?: { closest: (selector: string) => unknown } | null } | null;
+  const element = node && typeof node.closest === "function" ? node : node?.parentElement ?? null;
+  if (!element || typeof element.closest !== "function") return false;
+  return element.closest(REPLY_CLICK_SKIP) == null;
+}
+
 /**
  * One avatar-led turn. Flat by design: the card is reserved for the tracked
  * ask, and there are no delivery ticks anywhere on a message.
@@ -308,6 +325,7 @@ export function Turn({
   replyCount,
   lastReplyAt,
   onOpenThread,
+  onReply,
   onOpenMember,
   onReact,
   onCopyLink,
@@ -331,6 +349,8 @@ export function Turn({
   replyCount?: number;
   lastReplyAt?: number | null;
   onOpenThread?: () => void;
+  /** Click on the message body. Defaults to opening the thread when that is all the caller passed. */
+  onReply?: () => void;
   onOpenMember?: (actorId: string) => void;
   onReact?: (messageId: string, emoji: string, remove: boolean) => void;
   onCopyLink?: (messageId: string) => void;
@@ -353,11 +373,14 @@ export function Turn({
   withTargetOnChip?: boolean;
 }) {
   const capabilities = useChatCapabilities();
+  const openMenu = useContextMenu();
   const correction = readChatMessageCorrection(message.metadata);
   const deleted = correction?.deletedAt != null;
   const authored = message.actorId === viewerActorId || (viewerIsOperator === true && message.actorId === "owner");
   const [pickerPinned, setPickerPinned] = useState(false);
   const press = useRef<{ timer: number; x: number; y: number } | null>(null);
+  const swallowClick = useRef(false);
+  const startReply = onReply ?? onOpenThread;
   const author = memberOrFallback(members, message.actorId, message.actorName);
   const target = request ? members.get(request.targetActorId) ?? null : null;
   const name = memberDisplayName(author);
@@ -430,6 +453,27 @@ export function Turn({
     ) : null,
   ].filter(Boolean);
   const tools = picker || toolButtons.length ? <>{picker}{toolButtons}</> : null;
+  // The top-right hover bar is how these get used. Right-click opens the same
+  // list; this button opens it without that gesture.
+  const more = (
+    <button
+      type="button"
+      className="chat-turn-tool"
+      aria-label="More actions"
+      title="More actions"
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const rect = event.currentTarget.getBoundingClientRect();
+        openMenu(
+          { preventDefault() {}, stopPropagation() {}, clientX: rect.left, clientY: rect.bottom + 4 },
+          messageMenuItems(event.currentTarget),
+        );
+      }}
+    >
+      <Ellipsis size={15} strokeWidth={1.8} aria-hidden />
+    </button>
+  );
 
   return (
     <article
@@ -438,6 +482,18 @@ export function Turn({
       data-continues={continues ? "true" : undefined}
       data-focused={focused ? "true" : undefined}
       data-reacting={pickerPinned ? "true" : undefined}
+      data-replyable={startReply ? "true" : undefined}
+      onClick={(event) => {
+        if (!startReply || event.defaultPrevented) return;
+        // A long-press opens the reaction picker; that gesture is not a reply.
+        if (swallowClick.current) {
+          swallowClick.current = false;
+          return;
+        }
+        const selected = typeof window !== "undefined" ? window.getSelection?.()?.toString() ?? "" : "";
+        if (!messageClickStartsReply(event.target, selected)) return;
+        startReply();
+      }}
       onPointerDown={(event) => {
         if (!canReact) return;
         if (event.pointerType === "mouse") return;
@@ -450,6 +506,7 @@ export function Turn({
           y,
           timer: window.setTimeout(() => {
             press.current = null;
+            swallowClick.current = true;
             setPickerPinned(true);
           }, 450),
         };
@@ -463,7 +520,12 @@ export function Turn({
         if (dx * dx + dy * dy > 64) clearPress();
       }}
       onContextMenu={(event) => {
-        if (canReact && pickerPinned) event.preventDefault();
+        // Option-click and Shift-click keep the browser menu (Inspect Element).
+        // A normal right-click is the chat menu, so a long-press must not also
+        // pin the reaction picker on top of it.
+        if (event.altKey || event.shiftKey) return;
+        clearPress();
+        if (pickerPinned) setPickerPinned(false);
       }}
     >
       {continues ? (
@@ -492,8 +554,8 @@ export function Turn({
         {deleted ? <p className="chat-message-deleted">Message deleted</p> : <MessageBody message={message} />}
         {!deleted && correction?.editedAt != null ? <span className="chat-message-edited" title={new Date(correction.editedAt).toLocaleString()}>Edited</span> : null}
         {onCorrect
-          ? <ChatMessageCorrectionControls key={`${viewerActorId}:${message.id}`} message={message} canEdit={authored} canDelete={authored || viewerIsOperator === true} onCorrect={onCorrect} tools={tools} />
-          : tools ? <div className="chat-turn-tools" role="toolbar" aria-label="Message actions">{tools}</div> : null}
+          ? <ChatMessageCorrectionControls key={`${viewerActorId}:${message.id}`} message={message} canEdit={authored} canDelete={authored || viewerIsOperator === true} onCorrect={onCorrect} tools={tools} more={more} />
+          : <div className="chat-turn-tools" role="toolbar" aria-label="Message actions">{tools}{more}</div>}
         <ChatAttachments attachments={deleted ? [] : message.attachments ?? []} />
         {request ? (
           <TrackedAskCard

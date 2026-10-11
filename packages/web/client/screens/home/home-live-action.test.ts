@@ -97,6 +97,10 @@ describe("prettifyToolLine", () => {
   });
 
   test("keeps command body for shell tools", () => {
+    expect(prettifyToolLine("bash", 'text(await tools.exec_command({cmd:"rg -n \\"sub\\" bin/cli.ts", yield_time_ms:1000}))'))
+      .toBe('bash · rg -n "sub" bin/cli.ts');
+    expect(prettifyToolLine("bash", 'text(await tools.exec_command({cmd:"bun -e \'const p=1'))
+      .toBe("bash · bun -e 'const p=1");
     expect(prettifyToolLine("bash", "bun test home-live-action.test.ts"))
       .toBe("bash · bun test home-live-action.test.ts");
   });

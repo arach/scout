@@ -306,6 +306,7 @@ export function mountStreamRoutes(app: Hono) {
     const limitParam = parseOptionalPositiveInt(c.req.query("limit"), 500) ?? 500;
     const includeTranscripts = c.req.query("transcripts") === "true" || c.req.query("transcripts") === "1";
     const mode = c.req.query("mode") === "assistant-replies" ? "assistant-replies" : null;
+    const sessionId = c.req.query("sessionId")?.trim() || undefined;
     const requestedWindowMs = parseOptionalPositiveInt(c.req.query("windowMs"));
     const windowMs = requestedWindowMs === undefined
       ? undefined
@@ -318,14 +319,18 @@ export function mountStreamRoutes(app: Hono) {
     if (mode) {
       url.searchParams.set("mode", mode);
     }
+    if (sessionId) url.searchParams.set("sessionId", sessionId);
     if (windowMs !== undefined) {
       url.searchParams.set("windowMs", String(windowMs));
     }
-    const cacheKey = `limit=${limitParam};transcripts=${includeTranscripts ? "1" : "0"};mode=${mode ?? "all"};window=${windowMs ?? "all"}`;
+    const cacheKey = `limit=${limitParam};transcripts=${includeTranscripts ? "1" : "0"};mode=${mode ?? "all"};window=${windowMs ?? "all"};session=${JSON.stringify(sessionId ?? null)}`;
     let cache = tailRecentCaches.get(cacheKey);
     if (!cache) {
       cache = createBrokerJsonCache<TailRecentPayload>();
       tailRecentCaches.set(cacheKey, cache);
+      // Session-specific histories add one key per visited task. Bound the
+      // retained snapshots just as the client bounds its request cache.
+      while (tailRecentCaches.size > 64) tailRecentCaches.delete(tailRecentCaches.keys().next().value!);
     }
     return serveCachedBrokerJson(
       c,

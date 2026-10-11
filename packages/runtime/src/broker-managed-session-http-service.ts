@@ -11,6 +11,7 @@ import {
 } from "./local-agents.js";
 import type { RuntimeSnapshot } from "./scout-dispatcher.js";
 import type { ManagedLocalSessionTransport } from "./broker-managed-session-helpers.js";
+import type { LiveTerminalSession } from "./live-terminal-session.js";
 
 export type ManagedPairingAttachBody = {
   externalSessionId?: string;
@@ -26,12 +27,13 @@ export type ManagedPairingDetachBody = {
 
 export type ManagedLocalSessionAttachBody = {
   externalSessionId?: string;
-  transport?: ManagedLocalSessionTransport;
+  transport?: ManagedLocalSessionTransport | "tmux" | "ghostty";
   cwd?: string;
   projectRoot?: string;
   agentId?: string;
   alias?: string;
   displayName?: string;
+  liveTerminal?: LiveTerminalSession;
 };
 
 export type ManagedLocalSessionEnsureBody = {
@@ -60,12 +62,13 @@ export type BrokerManagedSessionHttpServiceDeps = {
   ) => Promise<{ agentId: string; endpointId: string | null; detached: boolean }>;
   attachManagedLocalSession: (input: {
     externalSessionId: string;
-    transport: ManagedLocalSessionTransport;
+    transport: ManagedLocalSessionTransport | "tmux" | "ghostty";
     cwd: string;
     projectRoot?: string;
     agentId?: string;
     alias?: string;
     displayName?: string;
+    liveTerminal?: LiveTerminalSession;
   }) => Promise<{ agentId: string; selector: string | null; endpointId: string; sessionId: string }>;
   detachManagedLocalSession: (
     input: ManagedLocalSessionDetachBody,
@@ -116,6 +119,7 @@ export class BrokerManagedSessionHttpService {
       agentId: input.agentId,
       alias: input.alias,
       displayName: input.displayName,
+      ...(input.liveTerminal ? { liveTerminal: input.liveTerminal } : {}),
     });
     return { ok: true, ...result };
   };

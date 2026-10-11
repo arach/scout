@@ -124,3 +124,9 @@ describe("installScoutMcpForHosts", () => {
     ]);
   });
 });
+
+test("launch registration uses a stable executable rather than the active package script", async () => {
+  const { resolveCurrentScoutMcpLaunchCommand } = await import("./mcp-install.ts");
+  expect(resolveCurrentScoutMcpLaunchCommand({ OPENSCOUT_CLI_BIN: process.execPath, PATH: "" }))
+    .toEqual({ command: process.execPath, args: ["mcp"] });
+});

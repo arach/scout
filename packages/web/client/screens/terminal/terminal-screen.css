@@ -82,7 +82,8 @@
   .s-herdr-layout,
   .s-herdr-layout-window,
   .s-term-preview-peek .ctx-panel-tmux-peek-screen,
-  .s-term-preview-peek .ctx-panel-tmux-peek-empty
+  .s-term-preview-peek .ctx-panel-tmux-peek-empty,
+  .s-term-rest
 ) {
   --term-ink-rgb: 255 255 255;
   --term-warm-rgb: 219 255 248;
@@ -610,6 +611,7 @@ a.s-term-topline-button {
 }
 
 .s-term-body {
+  position: relative;
   flex: 1;
   min-height: 0;
   overflow: hidden;
@@ -702,6 +704,76 @@ a.s-term-topline-button {
 .s-term-workspace-library-empty p {
   max-width: 520px;
   color: rgb(var(--term-ink-rgb) / 0.38);
+}
+
+.s-term-workspace-library-found {
+  display: grid;
+  gap: var(--space-lg);
+  max-width: 720px;
+}
+
+.s-term-workspace-library-found h2,
+.s-term-workspace-library-found p {
+  margin: 0;
+}
+
+.s-term-workspace-library-found h2 {
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  font-weight: 520;
+  color: rgb(var(--term-ink-rgb) / 0.8);
+}
+
+.s-term-workspace-library-found p {
+  margin-top: var(--space-xs);
+  color: rgb(var(--term-ink-rgb) / 0.38);
+}
+
+.s-term-workspace-library-found ul {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid rgb(var(--term-ink-rgb) / 0.09);
+  border-radius: var(--radius-md);
+  background: rgb(var(--term-ink-rgb) / 0.022);
+}
+
+.s-term-workspace-library-found li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-lg);
+  padding: var(--space-md) var(--space-lg);
+}
+
+.s-term-workspace-library-found li + li {
+  border-top: 1px solid rgb(var(--term-ink-rgb) / 0.07);
+}
+
+.s-term-workspace-library-found li > div {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 2px;
+}
+
+.s-term-workspace-library-found strong,
+.s-term-workspace-library-found li span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.s-term-workspace-library-found strong {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: rgb(var(--term-ink-rgb) / 0.82);
+}
+
+.s-term-workspace-library-found li span {
+  font-size: var(--text-xs);
+  color: rgb(var(--term-ink-rgb) / 0.4);
 }
 
 .s-term-workspace-library-grid {
@@ -4073,6 +4145,124 @@ a.s-term-topline-button {
   align-items: center;
   gap: var(--space-sm);
   white-space: nowrap;
+}
+
+.s-term-rest {
+  position: absolute;
+  right: var(--space-lg);
+  bottom: var(--space-lg);
+  left: var(--space-lg);
+  z-index: 2;
+  display: grid;
+  gap: var(--space-lg);
+  padding-top: var(--space-md);
+  border-top: 1px dashed rgb(var(--term-ink-rgb) / 0.1);
+  color: rgb(var(--term-ink-rgb) / 0.78);
+  font: var(--text-md) / 1.5 var(--font-mono);
+  pointer-events: none;
+  animation: s-term-rest-in 240ms ease-out;
+}
+
+@keyframes s-term-rest-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.s-term-rest-facts {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  row-gap: var(--space-2xs);
+  column-gap: var(--space-md);
+}
+
+.s-term-rest-facts dt,
+.s-term-rest-label {
+  color: rgb(var(--term-ink-rgb) / 0.32);
+  font-size: var(--text-xs);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.s-term-rest-facts dd {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.s-term-rest-facts em,
+.s-term-rest-label em {
+  margin-left: var(--space-sm);
+  color: rgb(var(--term-ink-rgb) / 0.38);
+  font-style: normal;
+}
+
+.s-term-rest-label {
+  padding-bottom: var(--space-xs);
+}
+
+.s-term-rest-label em {
+  letter-spacing: 0;
+}
+
+.s-term-rest-agents {
+  display: grid;
+}
+
+.s-term-rest-agent {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-2xs) 0;
+  border-top: 1px solid rgb(var(--term-ink-rgb) / 0.05);
+}
+
+.s-term-rest-mark {
+  display: grid;
+  place-items: center;
+  color: rgb(var(--term-ink-rgb) / 0.6);
+}
+
+.s-term-rest-agent-title {
+  overflow: hidden;
+  color: rgb(var(--term-ink-rgb) / 0.85);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.s-term-rest-agent-meta,
+.s-term-rest-agent-state {
+  color: rgb(var(--term-ink-rgb) / 0.42);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.s-term-rest-agent-state {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-xs);
+  min-width: 56px;
+}
+
+.s-term-rest-agent-state--working {
+  color: rgb(var(--term-accent-rgb));
+}
+
+.s-term-rest-agent-state--working i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.s-term-rest-more {
+  padding-top: var(--space-2xs);
+  padding-left: calc(20px + var(--space-sm));
+  color: rgb(var(--term-ink-rgb) / 0.32);
+  font-size: var(--text-sm);
 }
 
 /* Standalone browser workspaces give a single live terminal the available

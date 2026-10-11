@@ -12,6 +12,8 @@ import { mergeChatMessageRevisions, newestChatMessage } from "./chat-message-rev
 import type { CorrectChatMessage } from "./ChatMessageCorrectionControls.tsx";
 import { ChatSearch } from "./ChatSearch.tsx";
 import { compareMessagesAsc } from "../../../shared/message-pagination.ts";
+import { readCursorForSeenMessages } from "./chat-seen-read.ts";
+import { useReportSeenMessages } from "./use-seen-read.ts";
 import { useChatMessageContext } from "./use-chat-message-context.ts";
 import { ChatAttention } from "./ChatAttention.tsx";
 /**
@@ -58,11 +60,13 @@ import {
 } from "../../scout/sidebar/useSidebarCollapse.ts";
 
 import { ChatSpaceTheme, useScoutStandaloneAppearance } from "./ChatSpaceTheme.tsx";
-import { ChannelSidebar } from "./ChannelSidebar.tsx";
+import { ChannelSidebar, conversationFacts, useSidebarSeen, type ConversationFacts } from "./ChannelSidebar.tsx";
 import { ChannelComposer } from "./ChannelComposer.tsx";
 import { ChatRightPanel, type PanelView } from "./ChatRightPanel.tsx";
 import { Facepile } from "./ChatAvatar.tsx";
+import { ScoutMark } from "../../components/ScoutMark.tsx";
 import { Turn } from "./ChatBits.tsx";
+import { ChatContextMenu } from "./ChatContextMenu.tsx";
 import { InviteSheet } from "./InviteSheet.tsx";
 import { JumpPalette } from "./JumpPalette.tsx";
 import { TeamPanel } from "./TeamPanel.tsx";
@@ -108,6 +112,15 @@ import { useChatReadState } from "./use-chat-read-state.ts";
  * first paint matches what this surface used to do.
  */
 const CHAT_SIDEBAR_COLLAPSE_KEY = "appshell.chat.sidebar.manualCollapsed";
+/**
+ * Chat's list is two-line rows (board N1), so its column opens at 320, wider
+ * than the shared 260. The hook persists whatever width it renders, so every
+ * earlier visit stored the old default; that exact value is moved to the new
+ * one once. A width somebody dragged to is left alone.
+ */
+const CHAT_SIDEBAR_WIDTH = 320;
+const CHAT_SIDEBAR_WIDTH_KEY = "appshell.chat.sidebar.width";
+const CHAT_SIDEBAR_WIDTH_SEEDED_KEY = "openscout.chat.sidebar.width.v320";
 const CHAT_PANEL_WIDTH_KEY = "openscout.chat.panel.width";
 const CHAT_PANEL_DEFAULT = 360;
 const CHAT_PANEL_MIN = 280;
@@ -115,6 +128,17 @@ const CHAT_PANEL_MAX = 520;
 
 function seedChatSidebarCollapse(): void {
   if (typeof window === "undefined") return;
+  try {
+    if (window.localStorage.getItem(CHAT_SIDEBAR_WIDTH_SEEDED_KEY) == null) {
+      const stored = window.localStorage.getItem(CHAT_SIDEBAR_WIDTH_KEY);
+      if (stored == null || Number(JSON.parse(stored)) === SIDEBAR_EXPANDED_WIDTH) {
+        window.localStorage.setItem(CHAT_SIDEBAR_WIDTH_KEY, JSON.stringify(CHAT_SIDEBAR_WIDTH));
+      }
+      window.localStorage.setItem(CHAT_SIDEBAR_WIDTH_SEEDED_KEY, "1");
+    }
+  } catch {
+    // Storage unavailable: the hook's default below still opens at 320.
+  }
   try {
     if (window.localStorage.getItem(CHAT_SIDEBAR_COLLAPSE_KEY) != null) return;
     const railed = window.localStorage.getItem("openscout.chat.rail") === "1";
@@ -245,6 +269,7 @@ export function ChatSpaceSurface({ signedOut }: ChatSpaceSurfaceProps = {}) {
 
   const [phase, setPhase] = useState<Phase>("loading");
   const [gateMessage, setGateMessage] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
   const [bootstrap, setBootstrap] = useState<ChatBootstrap | null>(null);
   const [channelId, setChannelId] = useState<string | null>(() => address.read().channelId);
   const [focusMessageId, setFocusMessageId] = useState<string | null>(() => address.read().messageId);
@@ -301,6 +326,7 @@ export function ChatSpaceSurface({ signedOut }: ChatSpaceSurfaceProps = {}) {
     "chat",
     isCompact ? 1600 : viewportWidth,
     SLACK_SIDEBAR_COLLAPSED_WIDTH,
+    CHAT_SIDEBAR_WIDTH,
   );
   const sidebarDragTargetRef = useRef(sidebarCollapse.width);
   const [panelWidth, setPanelWidth] = useState(readPanelWidth);
@@ -590,6 +616,26 @@ export function ChatSpaceSurface({ signedOut }: ChatSpaceSurfaceProps = {}) {
   );
 
   const viewer = bootstrap?.viewer ?? null;
+  const sidebarSeen = useSidebarSeen({
+    channelId,
+    feed,
+    feedIsCurrent: feedChannel.current === channelId,
+    members,
+    membersAreCurrent: rosterForChannel.current === channelId,
+    viewerActorId: viewer?.actorId ?? null,
+  });
+
+  // ⌘K shows the sidebar's own facts per conversation; computed only while open.
+  const paletteFacts = useMemo<Record<string, ConversationFacts>>(() => {
+    if (!paletteOpen) return {};
+    const input = {
+      readStates: readState.states,
+      seen: sidebarSeen,
+      lastMessages: bootstrap?.lastMessages ?? {},
+      viewerActorId: viewer?.actorId ?? null,
+    };
+    return Object.fromEntries([...channels, ...directs].map((conversation) => [conversation.id, conversationFacts(conversation, input)]));
+  }, [bootstrap?.lastMessages, channels, directs, paletteOpen, readState.states, sidebarSeen, viewer?.actorId]);
 
   const addressedChannelIds = useMemo(() => {
     const ids = new Set<string>();
@@ -603,9 +649,15 @@ export function ChatSpaceSurface({ signedOut }: ChatSpaceSurfaceProps = {}) {
   }, [channelId, members, projection, viewer]);
 
   const draftScope = viewer && channelId ? { actorId: viewer.actorId, space, channelId } : null;
-  const visibleMessageIds = useMemo(
-    () => projection.entries.filter((entry) => entry.kind === "turn").map((entry) => entry.message.id),
+  const visibleRootMessages = useMemo(
+    () => projection.entries.flatMap((entry) => entry.kind === "turn"
+      ? [{ id: entry.message.id, createdAt: entry.message.createdAt }]
+      : []),
     [projection.entries],
+  );
+  const visibleMessageIds = useMemo(
+    () => visibleRootMessages.map((message) => message.id),
+    [visibleRootMessages],
   );
   const selectedReadState = channelId ? readState.states[channelId] : undefined;
   const rootReadLane = selectedReadState?.lanes.find((lane) => lane.rootMessageId === null);
@@ -627,19 +679,32 @@ export function ChatSpaceSurface({ signedOut }: ChatSpaceSurfaceProps = {}) {
     unreadArrival.current = { key: unreadVisitKey, messageId: rootReadLane.unreadMessageIds[0] ?? null };
   }
 
-  useEffect(() => {
-    if (!channelId || !rootReadLane || !latestVisibleRootId || reading.away
-      || feedChannel.current !== channelId
-      || !rootReadLane.unreadMessageIds.some((id) => visibleMessageIds.includes(id))
-      || rootReadLane.lastReadMessageId === latestVisibleRootId
-      || (isCompact && compactView !== "channel")) return;
-    const timer = window.setTimeout(() => {
-      if (document.visibilityState === "visible" && feedScrollRef.current?.getClientRects().length) {
-        void readState.markRead(channelId, latestVisibleRootId);
-      }
-    }, 800);
-    return () => window.clearTimeout(timer);
-  }, [channelId, compactView, isCompact, latestVisibleRootId, reading.away, readState.markRead, rootReadLane, visibleMessageIds]);
+  const threadRootId = panel.kind === "thread" ? panel.rootMessageId : null;
+  const seenFeedIds = useRef<string[]>([]);
+  const seenThreadIds = useRef<string[]>([]);
+  const threadSeenFor = useRef<string | null>(null);
+  if (threadSeenFor.current !== threadRootId) {
+    threadSeenFor.current = threadRootId;
+    seenThreadIds.current = [];
+  }
+  const channelFeedOnScreen = Boolean(channelId && selectedReadState && feedChannel.current === channelId
+    && (!isCompact || compactView === "channel"));
+  // Replies live in the channel read lane. The feed only shows roots, so a
+  // reply counts as read when the open thread actually has it on screen.
+  const acknowledgeSeen = () => {
+    if (!channelId || !selectedReadState || !feed || feedChannel.current !== channelId) return;
+    const messageId = readCursorForSeenMessages({
+      messages: feed.messages.map((message) => ({ id: message.id, createdAt: message.createdAt })),
+      seenIds: new Set([...seenFeedIds.current, ...seenThreadIds.current]),
+      lastReadMessageId: rootReadLane?.lastReadMessageId ?? null,
+      unreadMessageIds: rootReadLane?.unreadMessageIds,
+    });
+    if (messageId) void readState.markRead(channelId, messageId);
+  };
+  useReportSeenMessages(feedScrollRef, channelFeedOnScreen, `${phase}:${latestVisibleRootId ?? ""}`, (seenIds) => {
+    seenFeedIds.current = seenIds;
+    acknowledgeSeen();
+  });
 
   // Replies under a root the viewer is looking at arrive as a reply count on
   // that root; they must not leave the channel badged while it is on screen.
@@ -658,7 +723,6 @@ export function ChatSpaceSurface({ signedOut }: ChatSpaceSurfaceProps = {}) {
   /* ── sending ───────────────────────────────────────────────────────────── */
 
   const channelDraft = useChatDraft(draftScope);
-  const threadRootId = panel.kind === "thread" ? panel.rootMessageId : null;
   const messageContext = useChatMessageContext(chatApi, bootstrap?.viewer.actorId ?? null, space, channelId, focusMessageId ?? threadRootId);
   const onQuestionResponse = async (questionId: string, change: ChatQuestionChange) => {
     if (!channelId || !chatApi.respondQuestion) throw new Error("Question responses are unavailable.");
@@ -729,6 +793,13 @@ export function ChatSpaceSurface({ signedOut }: ChatSpaceSurfaceProps = {}) {
 
   // The intro's starters nudge the composer; they never post or ask by themselves.
   const [composerRequest, setComposerRequest] = useState<{ kind: "focus" | "ask"; at: number } | null>(null);
+  // Set only when a message click (or the reply control) should put the caret
+  // in the thread composer. Cleared once that thread is no longer open, so a
+  // later deep link does not steal focus.
+  const [threadReplyFocus, setThreadReplyFocus] = useState<{ kind: "focus"; at: number } | null>(null);
+  useEffect(() => {
+    if (panel.kind !== "thread") setThreadReplyFocus(null);
+  }, [panel.kind]);
   const channelHasAskable = capabilities.asks && members.some(isAskableMember);
 
   const setAskTarget = useCallback(
@@ -925,6 +996,15 @@ export function ChatSpaceSurface({ signedOut }: ChatSpaceSurfaceProps = {}) {
     setFocusMessageId(null);
     setPanel(next);
     setCompactView(next.kind === "none" ? "channel" : "panel");
+  }, []);
+
+  const beginReply = useCallback((rootMessageId: string) => {
+    openPanel({ kind: "thread", rootMessageId });
+    setThreadReplyFocus({ kind: "focus", at: Date.now() });
+  }, [openPanel]);
+
+  const focusThreadReply = useCallback(() => {
+    setThreadReplyFocus({ kind: "focus", at: Date.now() });
   }, []);
 
   const scrolledToMessage = useRef<string | null>(null);
@@ -1248,7 +1328,9 @@ export function ChatSpaceSurface({ signedOut }: ChatSpaceSurfaceProps = {}) {
   if (phase === "loading") {
     return (
       <ChatSpaceTheme theme={theme} className="chat-centered">
-        <p className="chat-card-meta">Loading Scout Chat…</p>
+        <ChatContextMenu>
+          <p className="chat-card-meta">Loading Scout Chat…</p>
+        </ChatContextMenu>
       </ChatSpaceTheme>
     );
   }
@@ -1270,38 +1352,53 @@ export function ChatSpaceSurface({ signedOut }: ChatSpaceSurfaceProps = {}) {
     const isGate = phase === "gate";
     return (
       <ChatSpaceTheme theme={theme} className="chat-centered">
-        <div className="chat-card">
-          <span className="chat-card-eyebrow">Scout Chat</span>
-          <h1>{isGate ? "You are not signed in" : "Scout Chat is unavailable"}</h1>
-          <p>
-            {isGate
-              ? capabilities.signIn.prompt
-              : gateMessage ?? "The chat service did not answer."}
-          </p>
-          {isGate ? (
-            <>
-              {/* The door belongs to the deployment: local Scout's own login,
-                  hosted Chat's GitHub OAuth. Both come off the transport so the
-                  sentence beside the button is true of the door it opens. */}
-              <a
-                className="btn btn--accent"
-                href={`${capabilities.signIn.startPath}?${capabilities.signIn.returnToParam}=${
-                  encodeURIComponent(window.location.pathname + window.location.search)
-                }`}
+        <ChatContextMenu>
+          <section className="chat-notice" aria-labelledby="chat-notice-title">
+            <span className="chat-notice-mark" aria-hidden="true">
+              <ScoutMark />
+            </span>
+            <h1 id="chat-notice-title">{isGate ? "You are not signed in" : "Scout Chat is unavailable"}</h1>
+            {isGate ? (
+              <p className="chat-notice-body">{capabilities.signIn.prompt}</p>
+            ) : (
+              <p className="chat-notice-status">
+                <span className="dot dot--sm dot--warning" aria-hidden="true" />
+                {gateMessage ?? "The chat service did not answer."}
+              </p>
+            )}
+            {isGate ? (
+              <>
+                {/* The door belongs to the deployment: local Scout's own login,
+                    hosted Chat's GitHub OAuth. Both come off the transport so the
+                    sentence beside the button is true of the door it opens. */}
+                <a
+                  className="btn btn--accent"
+                  href={`${capabilities.signIn.startPath}?${capabilities.signIn.returnToParam}=${
+                    encodeURIComponent(window.location.pathname + window.location.search)
+                  }`}
+                >
+                  {capabilities.signIn.label}
+                </a>
+                {capabilities.signIn.note ? (
+                  <p className="chat-notice-note">{capabilities.signIn.note}</p>
+                ) : null}
+              </>
+            ) : (
+              <button
+                type="button"
+                className="btn"
+                disabled={retrying}
+                onClick={() => {
+                  setRetrying(true);
+                  void loadBootstrap(true).finally(() => setRetrying(false));
+                }}
               >
-                {capabilities.signIn.label}
-              </a>
-              {capabilities.signIn.note ? (
-                <p className="chat-card-note">{capabilities.signIn.note}</p>
-              ) : null}
-            </>
-          ) : (
-            <button type="button" className="btn" onClick={() => void loadBootstrap(true)}>
-              Try again
-            </button>
-          )}
-          {isGate && gateMessage ? <p className="chat-card-note">{gateMessage}</p> : null}
-        </div>
+                {retrying ? "Trying…" : "Try again"}
+              </button>
+            )}
+            {isGate && gateMessage ? <p className="chat-notice-note">{gateMessage}</p> : null}
+          </section>
+        </ChatContextMenu>
       </ChatSpaceTheme>
     );
   }
@@ -1353,14 +1450,17 @@ export function ChatSpaceSurface({ signedOut }: ChatSpaceSurfaceProps = {}) {
       railed={railed}
       style={chromeStyle}
     >
+      <ChatContextMenu>
       <header className="chat-topbar">
         {/* The sidebar's header band. One chevron, the same cell in both states:
             tucked against the column's inner edge when it is open, centred when
             it is a rail — so collapse happens in place and nothing jumps. */}
         <div className="chat-topbar-band">
-          <div className="chat-space-name">
-            <b>Scout Chat</b>
-            {channel ? <span>{spaces.find((entry) => entry.slug === space)?.title ?? space}</span> : null}
+          {/* The brand, not the space: the space lives in the sidebar's
+              switcher when there is a choice to make (ChannelSidebar). */}
+          <div className="chat-space-name chat-brand">
+            <ScoutMark className="chat-brand-mark" />
+            <b>Chat</b>
           </div>
           {isCompact ? null : (
             <RailToggle
@@ -1391,6 +1491,10 @@ export function ChatSpaceSurface({ signedOut }: ChatSpaceSurfaceProps = {}) {
           addressedChannelIds={addressedChannelIds}
           readStates={readState.states}
           questionCounts={bootstrap?.questionCounts}
+          seen={sidebarSeen}
+          lastMessages={bootstrap?.lastMessages}
+          viewerActorId={viewer?.actorId ?? null}
+          nowMs={nowMs}
           canCreate={viewer?.isOperator === true}
           viewerName={viewerName}
           viewerIsHost={viewer?.isOperator === true}
@@ -1579,7 +1683,8 @@ export function ChatSpaceSurface({ signedOut }: ChatSpaceSurfaceProps = {}) {
                     request={entry.request}
                     replyCount={entry.replyCount}
                     lastReplyAt={entry.lastReplyAt}
-                    onOpenThread={() => openPanel({ kind: "thread", rootMessageId: entry.message.id })}
+                    onOpenThread={() => beginReply(entry.message.id)}
+                    onReply={() => beginReply(entry.message.id)}
                     onOpenMember={(actorId) => openPanel({ kind: "member", actorId })}
                     onReact={onReact}
                     onCopyLink={onCopyLink}
@@ -1630,6 +1735,14 @@ export function ChatSpaceSurface({ signedOut }: ChatSpaceSurfaceProps = {}) {
                 sending={sending}
                 error={sendError}
                 placeholder={`Message ${channelLabel(channel.title)}`}
+                onInvite={() => setSheetOpen(true)}
+                onDirect={(name) => {
+                  const direct = directs.find(item => item.title.toLowerCase() === name.toLowerCase());
+                  if (direct) { selectChannel(direct.id); return; }
+                  const member = members.find(member => (member.displayName.toLowerCase() === name.toLowerCase() || memberDisplayName(member).toLowerCase() === name.toLowerCase()));
+                  if (member) openPanel({ kind: "member", actorId: member.actorId });
+                  else setPaletteOpen(true);
+                }}
                 request={composerRequest}
               />
             </div>
@@ -1663,7 +1776,7 @@ export function ChatSpaceSurface({ signedOut }: ChatSpaceSurfaceProps = {}) {
             onDoubleClick={(event) => {
               event.preventDefault();
               if (railed) {
-                sidebarCollapse.setExpandedWidth(SIDEBAR_EXPANDED_WIDTH);
+                sidebarCollapse.setExpandedWidth(CHAT_SIDEBAR_WIDTH);
                 sidebarCollapse.setCollapsed(false);
               } else {
                 sidebarCollapse.resetExpandedWidth();
@@ -1747,6 +1860,8 @@ export function ChatSpaceSurface({ signedOut }: ChatSpaceSurfaceProps = {}) {
               replyDraft.store.update((current) => ({ ...current, body: value }));
             }}
             onSendThreadReply={onSendThreadReply}
+            onReplyInThread={focusThreadReply}
+            threadReplyRequest={threadReplyFocus}
             onReact={onReact}
             onCopyLink={onCopyLink}
             onCorrect={chatApi.correctMessage ? onCorrect : undefined}
@@ -1777,6 +1892,21 @@ export function ChatSpaceSurface({ signedOut }: ChatSpaceSurfaceProps = {}) {
               : undefined}
             onMarkThreadRead={capabilities.readState && threadRootId && threadReplyList.length > 0
               ? () => void readState.markRead(channelId!, threadReplyList.at(-1)!.id, threadRootId)
+              : undefined}
+            onMessagesSeen={capabilities.readState && channelId && selectedReadState && threadRootId
+              ? (seenIds) => {
+                  seenThreadIds.current = seenIds;
+                  acknowledgeSeen();
+                  const threadLane = selectedReadState.lanes.find((lane) => lane.rootMessageId === threadRootId);
+                  if (!threadLane) return;
+                  const replyId = readCursorForSeenMessages({
+                    messages: threadReplyList.map((message) => ({ id: message.id, createdAt: message.createdAt })),
+                    seenIds: new Set(seenIds),
+                    lastReadMessageId: threadLane.lastReadMessageId,
+                    unreadMessageIds: threadLane.unreadMessageIds,
+                  });
+                  if (replyId) void readState.markRead(channelId, replyId, threadRootId);
+                }
               : undefined}
             onClose={closePanel}
             onBack={() => openPanel({ kind: "members" })}
@@ -1838,8 +1968,10 @@ export function ChatSpaceSurface({ signedOut }: ChatSpaceSurfaceProps = {}) {
 
       {paletteOpen ? (
         <JumpPalette
-          channels={[...channels, ...directs]}
+          rooms={channels}
+          directs={directs}
           members={members}
+          facts={paletteFacts}
           onClose={() => setPaletteOpen(false)}
           onPick={(target) => {
             setPaletteOpen(false);
@@ -1848,6 +1980,7 @@ export function ChatSpaceSurface({ signedOut }: ChatSpaceSurfaceProps = {}) {
           }}
         />
       ) : null}
+      </ChatContextMenu>
     </ChatSpaceTheme>
     </ChatQuestionResponder.Provider>
     </ChatApprovalAccess.Provider>

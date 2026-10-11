@@ -231,6 +231,7 @@ export function startBridgeServerTRPC(options: {
   if (secure && !identity) {
     throw new Error("[bridge-trpc] secure mode requires an identity (key pair)");
   }
+  const ownPublicKeyHex = identity ? bytesToHex(identity.publicKey) : null;
 
   // -------------------------------------------------------------------------
   // Hono app — HTTP surface
@@ -295,7 +296,7 @@ export function startBridgeServerTRPC(options: {
       const msgs = Array.isArray(msgJSON) ? msgJSON : [msgJSON];
 
       for (const raw of msgs) {
-        log.info("rpc:req", `→ ${raw.params?.path ?? raw.method ?? "?"}`);
+        log.debug("rpc:req", `→ ${raw.params?.path ?? raw.method ?? "?"}`);
         const parsed = parseTRPCMessage(raw, bridgeRouter._def._config.transformer);
         const { id, method } = parsed;
 
@@ -660,7 +661,7 @@ export function startBridgeServerTRPC(options: {
       backpressureLimit: limits.backpressureBytes,
       closeOnBackpressureLimit: true,
       open(ws) {
-        log.info("srv", "client connected");
+        log.debug("srv", "client connected");
 
         const state: SocketState = {
           abortController: new AbortController(),
@@ -693,7 +694,12 @@ export function startBridgeServerTRPC(options: {
               onReady: (remotePublicKey, readyInfo) => {
                 if (!queryOnly) clearTimeout(state.lifetimeTimer);
                 const pubHex = bytesToHex(remotePublicKey);
-                const trusted = readyInfo.wasTrustedPeer && isTrustedPeer(pubHex);
+                // This machine's own processes (broker, web server) authenticate
+                // with the bridge's own identity key: holding the private key
+                // proves the same user on the same Mac. They are never written
+                // to the paired-device list (trustOnComplete is false here).
+                const trusted = pubHex === ownPublicKeyHex
+                  || (readyInfo.wasTrustedPeer && isTrustedPeer(pubHex));
                 state.deviceId = pubHex.slice(0, 16);
                 state.secureTransport = true;
                 state.trustedPeer = trusted;
@@ -752,7 +758,7 @@ export function startBridgeServerTRPC(options: {
                 state.abortController.abort();
               },
             },
-            { trustOnComplete: false },
+            { trustOnComplete: false, skipTrustWrite: (hex) => hex === ownPublicKeyHex },
           );
 
           state.transport = transport;
@@ -788,7 +794,7 @@ export function startBridgeServerTRPC(options: {
       },
 
       close(ws) {
-        log.info("srv", "client disconnected");
+        log.debug("srv", "client disconnected");
         const state = socketState.get(ws);
         if (!state) return;
         socketState.delete(ws);

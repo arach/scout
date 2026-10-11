@@ -1,21 +1,12 @@
+import { deckLanes, deckLaneCapabilities } from "./deck-lanes.ts";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 
 import type { Hono } from "hono";
-import {
-  connectCodexDeckThread,
-  getCodexDeckThreadSnapshot,
-  getLocalAgentConfig,
-  isCodexDeckThreadConnected,
-  interruptCodexDeckTurn,
-  startCodexDeckTurn,
-  steerCodexDeckTurn,
-} from "@openscout/runtime/local-agents";
 import { snapshotRecentEvents, type TailEvent } from "@openscout/runtime/tail";
 
 import { queryAgents } from "../db/agents.ts";
 import type { WebAgent } from "../../shared/api/web.ts";
-import { createScoutSession } from "../core/mobile/service.ts";
 import {
   SCOUT_SURFACE_LIMITS,
   SCOUT_SURFACE_METHOD_POLICY,
@@ -104,12 +95,7 @@ export function createScoutDeckSurfaceService(
   const hostId = options.hostId?.trim() || `web:${hostName.toLowerCase()}`;
   const listAgents = options.listAgents ?? (() => queryAgents(500));
   const recentTail = options.recentTail ?? ((limit) => snapshotRecentEvents(limit));
-  const codex = options.codex ?? {
-    snapshot: defaultCodexSnapshot,
-    start: startCodexDeckTurn,
-    steer: steerCodexDeckTurn,
-    interrupt: interruptCodexDeckTurn,
-  };
+  const codex = options.codex ?? deckLanes;
   const startCodexSession = options.startCodexSession ?? (async (source: WebAgent) => {
     const workspaceRoot = normalizedPath(source.projectRoot ?? source.cwd);
     if (!workspaceRoot) {
@@ -163,17 +149,20 @@ export function createScoutDeckSurfaceService(
 
   const requireRoute = (route: CodexDeckRoute): WebAgent => {
     const agent = requireAgentLane(route);
-    if (agent.harness !== "codex" || agent.transport !== "codex_app_server") {
+    if (!deckLaneCapabilities(agent.transport).send) {
       throw new DeckSurfaceFailure(
         "unsupported_capability",
-        "The selected lane does not expose Scout's managed Codex adapter.",
+        "The selected lane does not expose a supported managed Deck adapter.",
       );
     }
     return agent;
   };
 
-  const fleetAgents = (): FleetAgentSnapshot => {
+  const fleetAgents = async (): Promise<FleetAgentSnapshot> => {
     const agents = visibleAgents().map(toSurfaceAgent);
+    if (!options.codex) await Promise.all(agents.filter(a => a.capabilities?.send).map(async a => {
+      try { const state = await codex.snapshot(a.id, false); a.phase = state.phase; a.pendingApproval = state.pendingApproval; } catch { a.phase = "offline"; }
+    }));
     const sequence = agents.reduce((latest, agent) => Math.max(latest, agent.updatedAt ?? 0), 0);
     return {
       hosts: [{
@@ -188,6 +177,11 @@ export function createScoutDeckSurfaceService(
     const agents = visibleAgents();
     const events = (await recentTail(Math.min(Math.max(limit, 1), 1_000)))
       .map((event) => toSurfaceTailEvent(event, agents));
+    if (!options.codex) await Promise.all(agents.filter(a => deckLaneCapabilities(a.transport).history).map(async a => {
+      try { const state = await codex.snapshot(a.id, false); const end = state.completion;
+        if (end) events.push({ id: `turn.completed:${a.id}:${end.turnId}`, at: end.endedAt ?? a.updatedAt ?? 0, agentId: a.id, sessionId: state.threadId, kind: "turn.completed", text: end.text, detail: end.status });
+      } catch { /* Offline lanes do not break the fleet snapshot. */ }
+    }));
     const sequence = events.reduce((latest, event) => Math.max(latest, event.at), 0);
     return {
       hosts: [{
@@ -274,7 +268,7 @@ export function createScoutDeckSurfaceService(
               activity: "visible",
             }, deadline);
           case "agents.list":
-            return successReply(request, fleetAgents(), deadline);
+            return successReply(request, await fleetAgents(), deadline);
           case "agents.observe": {
             const agentIds = readStringArray(request.params, "agentIds", SCOUT_SURFACE_LIMITS.agentIds);
             if (agentIds.length === 0) throw new DeckSurfaceFailure("invalid_params", "agentIds are required.");
@@ -312,14 +306,17 @@ export function createScoutDeckSurfaceService(
           case "codex.thread.connect": {
             const route = readCodexRoute(request.params);
             requireRoute(route);
-            return successReply(request, await codex.snapshot(route.agentId, request.method === "codex.thread.connect"), deadline);
+            return successReply(request, await codex.snapshot(route.agentId, request.method.endsWith("thread.connect")), deadline);
           }
           case "codex.turn.start":
           case "codex.turn.steer": {
             const route = readCodexRoute(request.params);
-            requireRoute(route);
+            const agent = requireRoute(route);
+            if (request.method.endsWith("turn.steer") && !deckLaneCapabilities(agent.transport).steer) {
+              throw new DeckSurfaceFailure("unsupported_capability", "This lane cannot steer mid-turn. Start a follow-up only after it is idle.");
+            }
             const text = readRequiredString(readRecord(request.params), "text", SCOUT_SURFACE_LIMITS.stringBytes);
-            const receipt = request.method === "codex.turn.steer"
+            const receipt = request.method.endsWith("turn.steer")
               ? await codex.steer(route.agentId, text)
               : await codex.start(route.agentId, text);
             return successReply(request, receipt, deadline);
@@ -345,51 +342,6 @@ export function createScoutDeckSurfaceService(
         );
       }
     },
-  };
-}
-
-async function defaultCodexSnapshot(agentId: string, connect: boolean): Promise<CodexDeckThreadSnapshot> {
-  const config = await getLocalAgentConfig(agentId);
-  if (!config) {
-    throw new DeckSurfaceFailure("invalid_route", `Agent ${agentId} is not configured on this host.`);
-  }
-  if (config.runtime.transport !== "codex_app_server") {
-    throw new DeckSurfaceFailure(
-      "unsupported_capability",
-      `Agent ${agentId} uses ${config.runtime.transport}; the Deck requires codex_app_server.`,
-    );
-  }
-
-  const connected = connect ? await connectCodexDeckThread(agentId) : null;
-  const online = connected ? true : await isCodexDeckThreadConnected(agentId);
-  const snapshot = await getCodexDeckThreadSnapshot(agentId);
-  const currentTurn = snapshot?.currentTurnId
-    ? snapshot.turns.find((turn) => turn.id === snapshot.currentTurnId) ?? null
-    : null;
-  const running = Boolean(currentTurn && !["completed", "interrupted", "error"].includes(currentTurn.status));
-  const observedThreadId = snapshot?.session.providerMeta?.threadId;
-  const threadId = connected?.threadId
-    ?? (typeof observedThreadId === "string" ? observedThreadId : snapshot?.session.id ?? null);
-
-  return {
-    adapter: "codex_app_server",
-    agentId,
-    threadId,
-    turnId: online && running ? currentTurn?.id ?? null : null,
-    state: online ? running ? "running" : "idle" : "disconnected",
-    capabilities: {
-      connect: true,
-      start: true,
-      steer: true,
-      interrupt: true,
-      queue: false,
-      approvals: false,
-    },
-    capabilityNotes: {
-      queue: "The Deck sends directly to Scout's managed Codex session and does not invent a client-side queue.",
-      approvals: "Approval prompts remain runtime-owned and are not actionable from Deck yet.",
-    },
-    snapshot,
   };
 }
 
@@ -464,6 +416,9 @@ function rankDeckAgents(agents: readonly WebAgent[], currentDirectory: string): 
 
 function toSurfaceAgent(agent: WebAgent): SurfaceAgent {
   return {
+    capabilities: deckLaneCapabilities(agent.transport),
+    phase: ["working", "running", "active", "busy"].includes(agent.state ?? "") ? "working" : ["offline", "stopped", "disconnected"].includes(agent.state ?? "") ? "offline" : "idle",
+    pendingApproval: null,
     id: agent.id,
     name: agent.name,
     handle: agent.handle,

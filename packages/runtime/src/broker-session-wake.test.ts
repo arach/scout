@@ -6,6 +6,8 @@ import {
   MESH_SESSION_START_PATH,
   MESH_SESSION_WAKE_PATH,
   rankPeersForProjectPath,
+  resolveMeshHost,
+  suggestHostForProjectPath,
   startSessionOnPeers,
   flatDispatchSessionId,
   isCodexThreadHeldByWriter,
@@ -411,7 +413,14 @@ describe("startSessionOnPeers", () => {
       { projectPath: "/srv/missing" },
     );
 
-    expect(result).toEqual({ ok: false, peersTried: 2 });
+    expect(result).toEqual({
+      ok: false,
+      peersTried: 2,
+      failures: [
+        { peerNodeId: "node-a", host: "peer", reason: "peer_unreachable", detail: "connect ECONNREFUSED" },
+        { peerNodeId: "node-b", host: "peer", reason: "project_unknown", detail: "not here" },
+      ],
+    });
     expect(posts.map((post) => post.brokerBaseUrl)).toEqual(["http://a.example:43110", "http://b.example:43110"]);
   });
 
@@ -425,7 +434,16 @@ describe("startSessionOnPeers", () => {
       { projectPath: "/srv/project" },
     );
 
-    expect(result).toEqual({ ok: false, peersTried: 1 });
+    expect(result).toEqual({
+      ok: false,
+      peersTried: 1,
+      failures: [{
+        peerNodeId: "node-b",
+        host: "peer",
+        reason: "endpoint_owner_mismatch",
+        detail: "returned an endpoint owned by node-elsewhere",
+      }],
+    });
     expect(upsertedEndpoints).toEqual([]);
   });
 
@@ -548,5 +566,77 @@ describe("isCodexThreadHeldByWriter", () => {
     expect(await isCodexThreadHeldByWriter("t1", { codexHome: "/codex", exists: () => true, holders })).toBe(true);
     expect(seen).toEqual(["/codex/thread-writer-locks/t1.lock"]);
     expect(await isCodexThreadHeldByWriter("t1", { codexHome: "/codex", exists: () => true, holders: async () => [] })).toBe(false);
+  });
+});
+
+describe("suggestHostForProjectPath", () => {
+  const archie = { id: "archie-openscout", meshId: "openscout", name: "archie" } as NodeDefinition;
+  const hutch = { id: "hutch-openscout", meshId: "openscout", name: "hutch" } as NodeDefinition;
+  const roots: Record<string, string[]> = {
+    "archie-openscout": ["/home/arach/renders/arsenal-x", "/home/arach/dev/peal"],
+    "hutch-openscout": ["/root/dev/peal"],
+  };
+  const lookup = (id: string) => roots[id] ?? [];
+
+  test("names the one peer holding a repo with that folder name", () => {
+    expect(suggestHostForProjectPath("/Users/art/renders/arsenal-x/", [archie, hutch], lookup))
+      .toEqual({ host: "archie", root: "/home/arach/renders/arsenal-x" });
+  });
+
+  test("stays quiet when the name is ambiguous or unknown", () => {
+    expect(suggestHostForProjectPath("~/dev/peal", [archie, hutch], lookup)).toBeUndefined();
+    expect(suggestHostForProjectPath("~/dev/nowhere", [archie, hutch], lookup)).toBeUndefined();
+  });
+});
+
+describe("resolveMeshHost", () => {
+  const local = node({ id: "arts-mini-mesh-1", name: "arts-mini", brokerUrl: "http://127.0.0.1:43110" });
+  const archie = node({ id: "archie-mesh-1", name: "archie", hostName: "archie.local", brokerUrl: "http://archie:43110" });
+  const studio = node({ id: "studio-mesh-1", name: "studio", brokerUrl: "http://studio:43110" });
+  const nodes = [local, archie, studio];
+  const resolve = (host: string, overrides: Partial<Parameters<typeof resolveMeshHost>[0]> = {}) => resolveMeshHost({
+    host,
+    localNode: local,
+    nodes,
+    trustedNodeIds: new Set([archie.id]),
+    isReachable: () => true,
+    ...overrides,
+  });
+
+  test("names a trusted peer by label, host name, or node id", () => {
+    expect(resolve("archie")).toEqual({ kind: "peer", node: archie });
+    expect(resolve("ARCHIE.local")).toEqual({ kind: "peer", node: archie });
+    expect(resolve("archie-mesh-1")).toEqual({ kind: "peer", node: archie });
+  });
+
+  test("names this machine as local", () => {
+    expect(resolve("arts-mini")).toEqual({ kind: "local" });
+  });
+
+  test("refuses a known but untrusted peer instead of starting work there", () => {
+    expect(resolve("studio")).toEqual({ kind: "not_trusted", node: studio });
+  });
+
+  test("reports a trusted peer that is not reachable", () => {
+    expect(resolve("archie", { isReachable: () => false })).toEqual({ kind: "unreachable", node: archie });
+  });
+
+  test("an unknown name lists the machines it could have meant", () => {
+    expect(resolve("acrhie")).toEqual({ kind: "unknown", knownHosts: ["archie", "studio"] });
+  });
+
+  test("a name this machine and a peer share is refused, never resolved to local", () => {
+    const shadow = node({ id: "mini-mesh-1", name: "mini", hostName: "archie", brokerUrl: "http://127.0.0.1:43110" });
+    expect(resolve("archie", { localNode: shadow, nodes: [shadow, archie] })).toEqual({ kind: "ambiguous", nodes: [shadow, archie] });
+    expect(resolve("archie-mesh-1", { localNode: shadow, nodes: [shadow, archie] })).toEqual({ kind: "peer", node: archie });
+  });
+
+  test("two peers with one name are refused whatever their order", () => {
+    const a = node({ id: "a-mesh-1", name: "duplicate", brokerUrl: "http://a:43110" });
+    const b = node({ id: "b-mesh-1", name: "duplicate", brokerUrl: "http://b:43110" });
+    for (const order of [[local, a, b], [local, b, a]]) {
+      expect(resolve("duplicate", { nodes: order, trustedNodeIds: new Set([a.id, b.id]) }).kind).toBe("ambiguous");
+    }
+    expect(resolve("b-mesh-1", { nodes: [local, a, b], trustedNodeIds: new Set([a.id, b.id]) })).toEqual({ kind: "peer", node: b });
   });
 });

@@ -11,6 +11,7 @@ export * from "./sqlite-store.js";
 export * from "./mesh-discovery.js";
 export * from "./mesh-forwarding.js";
 export * from "./mesh-peer-client.js";
+export * from "./mesh-approvals.js";
 export * from "./mesh-rendezvous.js";
 export * from "./node-identity.js";
 export * from "./node-tls-identity.js";

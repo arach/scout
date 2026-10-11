@@ -8,6 +8,7 @@ import type {
 } from "@openscout/protocol";
 
 import { BrokerUnavailableTargetService } from "./broker-unavailable-target-service.js";
+import { evaluateBrokerAvailability } from "./broker-endpoint-selection.js";
 import { createRuntimeRegistrySnapshot } from "./registry.js";
 
 function agent(input: Partial<AgentDefinition> = {}): AgentDefinition {
@@ -158,7 +159,7 @@ describe("broker unavailable target service", () => {
         online: endpoint({
           id: "online",
           agentId: "online",
-          state: "waiting",
+          state: "idle",
         }),
         managed: endpoint({
           id: "managed",
@@ -175,7 +176,12 @@ describe("broker unavailable target service", () => {
     const { service } = createService();
 
     expect(service.describe(snapshot, online)).toBeNull();
-    expect(service.describe(snapshot, managed)).toBeNull();
+    expect(service.describe(snapshot, managed)).not.toBeNull();
+    const verified = new BrokerUnavailableTargetService({ nodeId: "node-local",
+      describeRemoteAuthorityIssue: () => null,
+      verifiedLaunchRoute: () => ({ projectRoot: "/repo", harness: "codex" }),
+    });
+    expect(verified.describe(snapshot, managed)).toBeNull();
   });
 
   test("delegates remote authority issues and builds unavailable envelopes", () => {
@@ -200,8 +206,8 @@ describe("broker unavailable target service", () => {
     });
     const { service, remoteCalls } = createService({ remoteIssue, now: 12_345 });
 
-    expect(service.describe(snapshot, remote)).toBe(remoteIssue);
-    expect(remoteCalls).toEqual([{ agent: remote, authorityNode: snapshot.nodes["node-peer"] }]);
+    expect(service.describe(snapshot, remote)?.detail).toContain("peer unavailable");
+    expect(remoteCalls.length).toBeGreaterThan(0);
     expect(service.buildEnvelope("@remote", remoteIssue)).toEqual({
       kind: "unavailable",
       askedLabel: "@remote",
@@ -212,4 +218,75 @@ describe("broker unavailable target service", () => {
       dispatcherNodeId: "node-local",
     });
   });
+});
+
+
+describe("availability admission table", () => {
+  const launcher = { projectRoot: "/repo", harness: "codex" as const };
+  const cases = [
+    { name: "offline remote with reachable authority", endpoint: endpoint(), state: "gone" },
+    { name: "missing transport", endpoint: endpoint({ state: "idle", transport: "local_socket" }), state: "gone" },
+    { name: "busy without queue", endpoint: endpoint({ state: "active" }), state: "gone" },
+    { name: "busy with verified queue", endpoint: endpoint({ state: "active" }), queueSupported: true, state: "ready" },
+    { name: "valid launcher", endpoint: endpoint(), launchRoute: launcher, state: "can_start" },
+    { name: "unavailable authority with launcher", endpoint: endpoint(), authorityAvailable: false, launchRoute: launcher, state: "gone" },
+    { name: "retired", endpoint: endpoint({ state: "idle" }), agent: agent({ metadata: { retiredFromFleet: true } }), launchRoute: launcher, state: "gone" },
+    { name: "stale endpoint", endpoint: endpoint({ state: "idle", metadata: { staleLocalRegistration: true } }), launchRoute: launcher, state: "gone" },
+    { name: "failed liveness probe", endpoint: endpoint({ state: "idle" }), alive: false, state: "gone" },
+    { name: "exact offline cannot launch", endpoint: endpoint(), targetSessionId: "session-1", launchRoute: launcher, state: "gone" },
+    { name: "exact mismatched session cannot launch", endpoint: endpoint({ state: "idle" }), targetSessionId: "other", launchRoute: launcher, state: "gone" },
+    { name: "exact live attachment", endpoint: endpoint({ state: "idle" }), targetSessionId: "session-1", state: "ready" },
+    { name: "wake policy not launch evidence", endpoint: null, agent: agent({ wakePolicy: "on_demand" }), state: "gone" },
+  ];
+  for (const row of cases) test(row.name, () => {
+    const result = evaluateBrokerAvailability({
+      agent: agent(), authority: "node-peer", authorityAvailable: true,
+      checkedAt: 123, ...row,
+    });
+    expect(result.state).toBe(row.state);
+    expect(result.checkedAt).toBe(123);
+    expect(result.authority).toBe("node-peer");
+    if (row.state === "gone") {
+      expect(result.supportedActions).toEqual([]);
+      expect(result.selectedRoute).toBeNull();
+    }
+  });
+
+  test("reachable remote authority alone is refused with remediation", () => {
+    const target = agent({ authorityNodeId: "node-peer", wakePolicy: "on_demand" });
+    const snapshot = createRuntimeRegistrySnapshot({ agents: { [target.id]: target },
+      endpoints: { offline: endpoint() }, nodes: { "node-peer": node() } });
+    const issue = createService().service.describe(snapshot, target);
+    expect(issue?.detail).toContain('scout ask --project "/repo" --harness codex');
+  });
+});
+
+
+test("remote receive evidence must be fresh; reachable authority is insufficient", () => {
+  const target = agent({ authorityNodeId: "node-peer" });
+  const { service } = createService({ now: 100_000 });
+  for (const [lastSeenAt, expected] of [[99_000, "ready"], [1_000, "gone"], [undefined, "gone"]] as const) {
+    const attachment = endpoint({ nodeId: "node-peer", state: "idle",
+      metadata: { lastSeenAt } });
+    const snapshot = createRuntimeRegistrySnapshot({
+      agents: { [target.id]: target }, endpoints: { attachment },
+      nodes: { "node-peer": node() },
+    });
+    expect(service.evaluate(snapshot, target).state).toBe(expected);
+  }
+});
+
+test("exact continuation selects the requested endpoint rather than the home endpoint", () => {
+  const target = agent();
+  const snapshot = createRuntimeRegistrySnapshot({ agents: { [target.id]: target },
+    endpoints: {
+      home: endpoint({ id: "home", preferred: true, state: "idle", sessionId: "home-session" }),
+      exact: endpoint({ id: "exact", state: "offline", sessionId: "exact-session" }),
+    } });
+  const service = new BrokerUnavailableTargetService({ nodeId: "node-local",
+    describeRemoteAuthorityIssue: () => null,
+    verifiedLaunchRoute: () => ({ projectRoot: "/repo", harness: "codex" }),
+  });
+  expect(service.evaluate(snapshot, target).state).toBe("ready");
+  expect(service.evaluate(snapshot, target, "exact-session").state).toBe("gone");
 });

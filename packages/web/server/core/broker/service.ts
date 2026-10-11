@@ -3278,6 +3278,64 @@ export async function sendScoutDirectMessage(input: {
   };
 }
 
+/** Pending approvals on other machines that share them with this one (runtime mesh-approvals.ts). */
+export type ScoutRemoteApprovalNode = {
+  nodeId: string;
+  label: string;
+  state: "connecting" | "live" | "stale" | "not_shared" | "unreachable";
+  approvals: Array<{
+    sessionId: string;
+    sessionName: string;
+    adapterType: string;
+    turnId: string;
+    turnStartedAt?: number;
+    blockId: string;
+    version: number;
+    risk: "low" | "medium" | "high";
+    title: string;
+    description: string;
+    detail: string | null;
+    actionKind: string;
+  }>;
+  truncated: boolean;
+  updatedAt: number | null;
+};
+
+export async function loadScoutRemoteApprovals(): Promise<ScoutRemoteApprovalNode[]> {
+  const broker = await loadScoutBrokerContext().catch(() => null);
+  if (!broker) return [];
+  try {
+    const payload = await brokerReadJson<{ nodes?: ScoutRemoteApprovalNode[] }>(broker.baseUrl, "/v1/approvals/remote", {
+      signal: AbortSignal.timeout(2_000),
+    });
+    return Array.isArray(payload.nodes) ? payload.nodes : [];
+  } catch {
+    // Older broker without the route, or busy — remote approvals are optional.
+    return [];
+  }
+}
+
+export async function decideScoutRemoteApproval(input: {
+  nodeId: string;
+  sessionId: string;
+  turnId: string;
+  blockId: string;
+  version: number;
+  decision: "approve" | "deny";
+  reason?: string | null;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const broker = await loadScoutBrokerContext();
+  if (!broker) return { ok: false, error: "local broker is unavailable" };
+  const { reason, ...rest } = input;
+  const result = await brokerPostJson<{ ok?: true; error?: string }>(
+    broker.baseUrl,
+    "/v1/approvals/remote/decide",
+    { ...rest, ...(reason?.trim() ? { reason: reason.trim() } : {}) },
+    { acceptErrorJson: (value): value is { error: string } => Boolean(value && typeof (value as { error?: unknown }).error === "string") },
+  );
+  return result.error ? { ok: false, error: result.error } : { ok: true };
+}
+
 export async function requestScoutHostWeb(input: { nodeId: string; path: string; method: "GET" | "POST"; body?: unknown }): Promise<{ status: number; body: unknown; binary?: { data: string; contentType: string } }> {
   const broker = await loadScoutBrokerContext();
   if (!broker) return { status: 503, body: { error: "Local broker is unavailable" } };

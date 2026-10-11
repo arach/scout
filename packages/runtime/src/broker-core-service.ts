@@ -137,7 +137,7 @@ export type BrokerCoreServiceDeps = {
   readStorageStatus?: () => ScoutBrokerStorageStatus;
   readMemoryStatus?: () => unknown;
   readHome?: () => Promise<unknown>;
-  readMeshNodeState?: () => Promise<unknown> | unknown;
+  readMeshNodeState?: (query?: import("./mesh-node-state.js").MeshNodeStateQuery) => Promise<unknown> | unknown;
   readCapabilities?: (
     query?: ScoutBrokerCapabilitiesQuery,
   ) => Promise<ScoutCapabilityMatrixSnapshot>;

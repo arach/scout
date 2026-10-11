@@ -30,6 +30,11 @@ export const MESH_NODE_STATE_ROSTER_LIMIT = 24;
 /** Sessions and work are shorter lists; a machine with more is summarised. */
 export const MESH_NODE_STATE_SESSION_LIMIT = 16;
 export const MESH_NODE_STATE_WORK_LIMIT = 16;
+/**
+ * Project roots are what a peer needs to start work here (`scout ask --on`),
+ * so the list is longer than the roster but still capped.
+ */
+export const MESH_NODE_STATE_PROJECT_LIMIT = 64;
 /** Free text crossing the mesh is clipped; this is a status line, not a log. */
 const SUMMARY_MAX = 160;
 
@@ -65,6 +70,17 @@ export type MeshNodeStateWork = {
   completedAt: number | null;
 };
 
+export type MeshNodeStateProject = {
+  /** Absolute repo root on this node: pass it as `--project` with `--on`. */
+  root: string;
+  /** Last path segment, for display. */
+  name: string;
+  /** Agents homed here that belong to this repo. */
+  agents: number;
+  /** Live sessions in this repo right now. */
+  liveSessions: number;
+};
+
 export type MeshNodeStateReport = {
   /** Wire-shape version, so a client can tell an old twin from a new one. */
   kind: "mesh-node-state";
@@ -81,7 +97,7 @@ export type MeshNodeStateReport = {
     working: number;
     available: number;
     offline: number;
-    /** True when the roster below was cut; totals stay exact. */
+    /** True at the roster cap (or beyond); totals stay exact. */
     truncated: boolean;
   };
   roster: MeshNodeStateAgent[];
@@ -98,6 +114,16 @@ export type MeshNodeStateReport = {
     truncated: boolean;
     items: MeshNodeStateWork[];
   };
+  /**
+   * Repos this node knows, from its homed agents and sessions: where a peer can
+   * start fresh work. Optional on the wire — peers older than this field omit
+   * it, which means "unknown", never "no projects".
+   */
+  projects?: {
+    total: number;
+    truncated: boolean;
+    items: MeshNodeStateProject[];
+  };
 };
 
 export type MeshNodeStateDeps = {
@@ -109,6 +135,13 @@ export type MeshNodeStateDeps = {
   rosterLimit?: number;
   sessionLimit?: number;
   workLimit?: number;
+  projectLimit?: number;
+};
+
+/** Exact, conjunctive scope. Applied before any of the three caps. */
+export type MeshNodeStateQuery = {
+  projectRoot?: string;
+  agentId?: string;
 };
 
 /**
@@ -118,13 +151,19 @@ export type MeshNodeStateDeps = {
  * not receive this broker's second-hand view of a third machine, which would
  * make one stale mirror look like live evidence on the asking node.
  */
-export function readMeshNodeState(deps: MeshNodeStateDeps): MeshNodeStateReport {
+export function readMeshNodeState(deps: MeshNodeStateDeps, query: MeshNodeStateQuery = {}): MeshNodeStateReport {
   const snapshot = deps.snapshot();
   const node = snapshot.nodes?.[deps.nodeId] ?? null;
   const limit = deps.rosterLimit ?? MESH_NODE_STATE_ROSTER_LIMIT;
 
+  const nodeSessions = Object.values(snapshot.endpoints ?? {})
+    .filter((endpoint) => endpoint.nodeId === deps.nodeId)
+    .sort((a, b) => sessionRank(snapshot, b) - sessionRank(snapshot, a));
   const own = projectHomeAgents(snapshot, deps.actorDisplayName)
-    .filter((agent) => agent.homeNodeId === deps.nodeId);
+    .filter((agent) => agent.homeNodeId === deps.nodeId)
+    .filter((agent) => !query.agentId || agent.id === query.agentId)
+    // Do not use the home projection's cwd fallback, even for filtering.
+    .filter((agent) => !query.projectRoot || repoRoot(snapshot, agent.id, nodeSessions) === query.projectRoot);
 
   const workload = { total: own.length, working: 0, available: 0, offline: 0 };
   for (const agent of own) {
@@ -144,12 +183,13 @@ export function readMeshNodeState(deps: MeshNodeStateDeps): MeshNodeStateReport 
   // oldest records — a live session or a running flight would fall off the end
   // behind a window of finished work. Rank before the cap: live first, then
   // most recent.
-  const sessions = Object.values(snapshot.endpoints ?? {})
-    .filter((endpoint) => endpoint.nodeId === deps.nodeId && ownAgentIds.has(endpoint.agentId))
-    .sort((a, b) => sessionRank(snapshot, b) - sessionRank(snapshot, a));
+  const sessions = nodeSessions.filter((endpoint) => ownAgentIds.has(endpoint.agentId));
   const work = Object.values(snapshot.flights ?? {})
     .filter((flight) => ownAgentIds.has(flight.targetAgentId))
     .sort((a, b) => flightRank(b) - flightRank(a));
+
+  const projects = projectList(snapshot, own.map((agent) => agent.id), sessions);
+  const projectLimit = deps.projectLimit ?? MESH_NODE_STATE_PROJECT_LIMIT;
 
   return {
     kind: "mesh-node-state",
@@ -160,7 +200,7 @@ export function readMeshNodeState(deps: MeshNodeStateDeps): MeshNodeStateReport 
     hostName: node?.hostName ?? null,
     capabilities: node?.capabilities ?? [],
     observedAt: deps.now?.() ?? Date.now(),
-    workload: { ...workload, truncated: own.length > limit },
+    workload: { ...workload, truncated: own.length >= limit },
     roster: own.slice(0, limit).map((agent) => ({
       id: agent.id,
       title: agent.title,
@@ -175,7 +215,7 @@ export function readMeshNodeState(deps: MeshNodeStateDeps): MeshNodeStateReport 
     })),
     sessions: {
       total: sessions.length,
-      truncated: sessions.length > sessionLimit,
+      truncated: sessions.length >= sessionLimit,
       items: sessions.slice(0, sessionLimit).map((endpoint) => ({
         id: endpoint.id,
         agentId: endpoint.agentId,
@@ -190,7 +230,7 @@ export function readMeshNodeState(deps: MeshNodeStateDeps): MeshNodeStateReport 
     work: {
       total: work.length,
       running: work.filter((flight) => isWorkingFlightState(flight.state)).length,
-      truncated: work.length > workLimit,
+      truncated: work.length >= workLimit,
       items: work.slice(0, workLimit).map((flight) => ({
         id: flight.id,
         targetAgentId: flight.targetAgentId,
@@ -200,7 +240,42 @@ export function readMeshNodeState(deps: MeshNodeStateDeps): MeshNodeStateReport 
         completedAt: flight.completedAt ?? null,
       })),
     },
+    projects: {
+      total: projects.length,
+      truncated: projects.length > projectLimit,
+      items: projects.slice(0, projectLimit),
+    },
   };
+}
+
+/**
+ * One row per repo root, ranked by live sessions then agent count then name.
+ * Built from declared repo roots only (agent metadata, session projectRoot),
+ * never a pane's cwd — the same promise the roster makes.
+ */
+function projectList(
+  snapshot: RuntimeRegistrySnapshot,
+  agentIds: readonly string[],
+  sessions: readonly AgentEndpoint[],
+): MeshNodeStateProject[] {
+  const rows = new Map<string, MeshNodeStateProject>();
+  const row = (root: string) => {
+    let existing = rows.get(root);
+    if (!existing) {
+      existing = { root, name: root.split("/").filter(Boolean).pop() ?? root, agents: 0, liveSessions: 0 };
+      rows.set(root, existing);
+    }
+    return existing;
+  };
+  for (const agentId of agentIds) {
+    const root = repoRoot(snapshot, agentId, sessions);
+    if (root) row(root).agents += 1;
+  }
+  for (const endpoint of sessions) {
+    if (endpoint.projectRoot && !isStaleLocalEndpoint(snapshot, endpoint)) row(endpoint.projectRoot).liveSessions += 1;
+  }
+  return [...rows.values()].sort((a, b) =>
+    b.liveSessions - a.liveSessions || b.agents - a.agents || a.name.localeCompare(b.name));
 }
 
 /**

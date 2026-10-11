@@ -262,6 +262,48 @@ describe("createOpenScoutWebServer: attention routes", () => {
     expect(ids).toContain("ask:inv-visible");
   });
 
+  test("lists declared operator questions until the operator replies", async () => {
+    const now = Date.now();
+    const need = (id: string, conversationId: string, createdAt: number) => ({
+      id, conversationId, actorId: "agent-1", body: "Ship to staging or prod?", createdAt,
+      metadata: { operatorSignal: { kind: "need", question: "Ship to staging or prod?", options: ["staging", "prod"], blockedReason: "Deploy is ready" } },
+    });
+    stubs.scoutBrokerContextResult = {
+      baseUrl: "http://broker.test",
+      node: { id: "node-1" },
+      snapshot: {
+        actors: { "agent-1": { id: "agent-1", displayName: "Agent One" } },
+        conversations: {},
+        flights: {},
+        messages: {
+          open: need("msg-open", "chn-open", now - 60_000),
+          answered: need("msg-answered", "c.answered", now - 120_000),
+          reply: { id: "msg-reply", conversationId: "c.answered", actorId: "operator", body: "staging", createdAt: now - 30_000 },
+        },
+      },
+    };
+    const server = await createOpenScoutWebServer({
+      currentDirectory: "/tmp/openscout",
+      assetMode: "static",
+      staticRoot: makeStaticRoot(),
+    });
+    const response = await server.app.request("http://localhost/api/operator-attention");
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as { items: Array<Record<string, unknown>> };
+    const questions = body.items.filter((item) => String(item.id).startsWith("need:"));
+    expect(questions).toHaveLength(1);
+    expect(questions[0]).toMatchObject({
+      id: "need:msg-open",
+      kind: "question",
+      title: "Ship to staging or prod?",
+      summary: "Blocked: Deploy is ready",
+      agentName: "Agent One",
+      conversationId: "chn-open",
+      answer: { conversationId: "chn-open", replyToMessageId: "msg-open", options: ["staging", "prod"] },
+    });
+  });
+
   test("persists a dismissed conversation failure on the broker conversation", async () => {
     stubs.scoutBrokerContextResult = {
       baseUrl: "http://broker.test",

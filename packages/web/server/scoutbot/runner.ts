@@ -9,6 +9,7 @@ import type {
   OutgoingAttachmentInput,
 } from "../core/broker/service.ts";
 import type { ActorIdentity } from "@openscout/protocol";
+import { resolveOperatorName } from "@openscout/runtime/user-config";
 import {
   loadScoutBrokerContext,
   resolveScoutBrokerUrl,
@@ -165,7 +166,7 @@ export async function startScoutbotRunner(
       if (!ctx) throw new Error("broker unreachable");
       const thread = await threadMap.createThread(input.name, { ...input, transportSessionId: null });
       const conversation = buildScoutbotThreadConversation(thread, ctx.snapshot, ctx.node.id);
-      if (conversation) await postJson(baseUrl, "/v1/conversations", conversation);
+      if (conversation) await postScoutbotThreadConversation(baseUrl, ctx.snapshot, conversation);
       return thread;
     },
     async postOperatorMessage(input) {
@@ -327,9 +328,38 @@ async function ensureScoutbotBootstrapped(input: {
   const latest = await loadScoutBrokerContext(input.baseUrl);
   const conversation = buildScoutbotThreadConversation(thread, latest?.snapshot ?? snapshot, latest?.node.id ?? nodeId);
   if (conversation) {
-    await postJson(input.baseUrl, "/v1/conversations", conversation);
+    await postScoutbotThreadConversation(input.baseUrl, latest?.snapshot ?? snapshot, conversation);
   }
   return true;
+}
+
+/**
+ * Scoutbot threads are operator ⇄ scoutbot DMs. On a fresh install nothing has
+ * registered the operator actor yet, and the conversation's member row has a
+ * foreign key on actors, so register the operator first.
+ */
+async function postScoutbotThreadConversation(
+  baseUrl: string,
+  snapshot: ScoutBrokerSnapshot,
+  conversation: ScoutBrokerConversationRecord,
+): Promise<void> {
+  if (!snapshot.actors?.[SCOUTBOT_OPERATOR_ACTOR_ID]) {
+    await postJson(baseUrl, "/v1/actors", buildScoutbotOperatorActor());
+  }
+  await postJson(baseUrl, "/v1/conversations", conversation);
+}
+
+const SCOUTBOT_OPERATOR_ACTOR_ID = "operator";
+
+function buildScoutbotOperatorActor(): ActorIdentity {
+  return {
+    id: SCOUTBOT_OPERATOR_ACTOR_ID,
+    kind: "person",
+    displayName: resolveOperatorName().trim() || SCOUTBOT_OPERATOR_ACTOR_ID,
+    handle: SCOUTBOT_OPERATOR_ACTOR_ID,
+    labels: ["scout"],
+    metadata: { source: "scoutbot" },
+  };
 }
 
 async function ensureScoutbotRegistered(
@@ -550,7 +580,7 @@ async function postOperatorThreadMessage(input: {
   const conversation = ctx.snapshot.conversations[input.thread.conversationId]
     ?? buildScoutbotThreadConversation(input.thread, ctx.snapshot, ctx.node.id);
   if (conversation && !ctx.snapshot.conversations[input.thread.conversationId]) {
-    await postJson(input.baseUrl, "/v1/conversations", conversation);
+    await postScoutbotThreadConversation(input.baseUrl, ctx.snapshot, conversation);
   }
 
   const parsed = parseScoutbotDirectives(input.body);

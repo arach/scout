@@ -497,9 +497,13 @@ export function mountScoutVoiceRoutes(app: Hono, deps: ScoutVoiceRouteDeps = {})
           }
         };
         const heartbeat = setInterval(() => safeEnqueue(`: keep-alive ${Date.now()}\n\n`), 15_000);
-        const unsubscribe = ambientVoice.subscribePageActions((batch) => {
-          safeEnqueue(`event: actions\ndata: ${JSON.stringify(batch)}\n\n`);
-        });
+        // ?presence=<page>: a page saying it's open (always-on routes its moves there); it gets no batches
+        const presence = c.req.query("presence")?.trim().slice(0, 32);
+        const unsubscribe = presence
+          ? ambientVoice.markPageOpen(presence)
+          : ambientVoice.subscribePageActions((batch) => {
+            safeEnqueue(`event: actions\ndata: ${JSON.stringify(batch)}\n\n`);
+          });
         signal.addEventListener("abort", () => {
           if (closed) return;
           closed = true;

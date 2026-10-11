@@ -49,6 +49,9 @@ MCP gateway (docs/eng/sco-095-remote-mcp-gateway.md):
 Scoped identity and resource access:
   scout mesh access       Person/service keys, policy, grants, and signed calls
 
+Approvals across machines:
+  scout mesh approvals    Share this Mac's permission requests with a peer, or watch theirs
+
 Legacy machine trust (docs/proposals/mesh-trust-cone.md):
   scout mesh peers        List trusted peers
   scout mesh grant        Adjust a peer's tier
@@ -141,6 +144,12 @@ export async function runMeshCommand(context: ScoutCommandContext, args: string[
     case "access": {
       const { runMeshAccessCommand } = await import("./mesh-access.ts");
       await runMeshAccessCommand(context, args.slice(1));
+      return;
+    }
+
+    case "approvals": {
+      const { runMeshApprovalsCommand } = await import("./mesh-approvals.ts");
+      await runMeshApprovalsCommand(context, args.slice(1));
       return;
     }
 

@@ -27,9 +27,23 @@ export function renderScoutMessageList(messages: ScoutBrokerMessageRecord[]): st
   return messages.map(renderScoutMessage).join("\n");
 }
 
-export function renderScoutAgentList(entries: ScoutWhoEntry[]): string {
+export function renderScoutAgentList(entries: ScoutWhoEntry[], options: { groupByMachine?: boolean } = {}): string {
   if (entries.length === 0) {
-    return "No agents are known to the broker yet.";
+    return options.groupByMachine ? "No agents match the selected machines in this broker snapshot." : "No agents are known to the broker yet.";
+  }
+
+  if (options.groupByMachine) {
+    const groups = new Map<string | null, ScoutWhoEntry[]>();
+    for (const entry of entries) {
+      const group = groups.get(entry.nodeId) ?? [];
+      group.push(entry);
+      groups.set(entry.nodeId, group);
+    }
+    return [...groups].map(([nodeId, group]) => {
+      const name = group[0]?.nodeName;
+      const label = name ? `${name} (${nodeId})` : nodeId ?? "unknown machine";
+      return `${label}:\n${renderScoutAgentList(group)}`;
+    }).join("\n\n");
   }
 
   return entries
@@ -43,6 +57,8 @@ export function renderScoutAgentList(entries: ScoutWhoEntry[]): string {
         entry.registrationKind === "discovered" ? "auto-discovered" : null;
       const primary = [
         entry.agentId,
+        `machine ${entry.nodeName ? `${entry.nodeName} (${entry.nodeId})` : entry.nodeId ?? "unknown"}`,
+        `project ${entry.projectRoot ?? "unknown"}`,
         entry.state,
         messageLabel,
         lastSeenLabel,

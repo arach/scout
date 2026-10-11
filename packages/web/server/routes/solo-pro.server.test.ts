@@ -203,7 +203,7 @@ describe("/api/solo-pro", () => {
   });
 });
 
-describe("createOpenScoutWebServer: Solo Pro routes", () => {
+describe("createOpenScoutWebServer: Scout Pro routes", () => {
   test("GET /api/solo-pro is mounted ahead of the /api catch-all and starts unchecked", async () => {
     const home = useIsolatedOpenScoutHome();
     process.env.OPENSCOUT_HOME = `${home}/.openscout`;

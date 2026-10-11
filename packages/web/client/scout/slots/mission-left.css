@@ -60,7 +60,7 @@
 
 .ml-chips--primary .ml-chip--active {
   background: var(--accent);
-  color: var(--bg);
+  color: var(--on-accent, var(--bg));
   border-color: var(--accent);
 }
 
@@ -196,7 +196,7 @@
 
 .ml-selection-btn--primary {
   background: var(--accent);
-  color: var(--bg);
+  color: var(--on-accent, var(--bg));
   border-color: var(--accent);
 }
 
@@ -257,7 +257,7 @@
 .ml-detail-btn--primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: var(--bg);
+  color: var(--on-accent, var(--bg));
 }
 
 .ml-detail-btn--primary:hover {

@@ -213,6 +213,48 @@ afterEach(() => {
 });
 
 describe("listScoutAgents", () => {
+  test("adds authoritative machine/project fields and filters by machine, not cwd or agent name", async () => {
+    const home = useIsolatedOpenScoutHome();
+    await writeOpenScoutSettings({ discovery: { workspaceRoots: [], includeCurrentRepo: false } });
+    await writeRelayAgentOverrides({
+      "configured.main": { agentId: "configured.main", projectRoot: "/configured/project" },
+    });
+    const mini = { id: "node-mini", name: "arts-mini", hostName: "arts-mini.local" };
+    const remote = { id: "node-archie", name: "archie", hostName: "archie.local" };
+    const otherMini = { id: "node-other-mini", name: "arts-mini", hostName: "arts-mini.local" };
+    globalThis.fetch = (async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const path = new URL(request.url).pathname;
+      if (path === "/health") return jsonResponse({ ok: true, nodeId: mini.id });
+      if (path === "/v1/node") return jsonResponse(mini);
+      if (path === "/v1/aliases") return jsonResponse({ bindings: [] });
+      if (path === "/v1/snapshot") return jsonResponse({
+        nodes: { [mini.id]: mini, [remote.id]: remote, [otherMini.id]: otherMini },
+        agents: {
+          "remote-agent": { id: "remote-agent", homeNodeId: remote.id, metadata: { projectRoot: "/remote/project" } },
+          "other-mini-agent": { id: "other-mini-agent", homeNodeId: otherMini.id },
+        },
+        endpoints: {
+          "remote-ep": { id: "remote-ep", agentId: "remote-agent", nodeId: mini.id, state: "active", projectRoot: "/wrong/project" },
+          "local-ep": { id: "local-ep", agentId: "local-agent", nodeId: mini.id, state: "idle", projectRoot: "/local/project", cwd: "/pane/cwd" },
+        },
+        messages: { orphan: { id: "orphan", actorId: "unlocated-agent", createdAt: 1_800_000_000_000 } },
+      });
+      return jsonResponse({}, 404);
+    }) as typeof fetch;
+    const all = await listScoutAgents({ currentDirectory: home });
+    expect(all.find((entry) => entry.agentId === "remote-agent")).toMatchObject({ nodeId: remote.id, nodeName: "archie", projectRoot: "/remote/project" });
+    expect(all.find((entry) => entry.agentId === "local-agent")).toMatchObject({ nodeId: mini.id, nodeName: "arts-mini", projectRoot: "/local/project" });
+    const configured = all.find((entry) => entry.registrationKind === "configured");
+    expect(configured).toMatchObject({ nodeId: mini.id, projectRoot: "/configured/project" });
+    expect(all.find((entry) => entry.agentId === "unlocated-agent")).toMatchObject({ nodeId: null, nodeName: null, projectRoot: null });
+    const local = await listScoutAgents({ currentDirectory: home, machine: "mini" });
+    expect(local.map((entry) => entry.agentId).sort()).toEqual([configured!.agentId, "local-agent", "other-mini-agent"].sort());
+    expect((await listScoutAgents({ currentDirectory: home, machine: mini.id })).map((entry) => entry.agentId).sort()).toEqual([configured!.agentId, "local-agent"].sort());
+    expect((await listScoutAgents({ currentDirectory: home, machine: "archie.local" })).map((entry) => entry.agentId)).toEqual(["remote-agent"]);
+    await expect(listScoutAgents({ currentDirectory: home, machine: "missing" })).rejects.toThrow("Unknown machine");
+  });
+
   test("hides stale broker registrations and includes discovered local projects", async () => {
     const home = useIsolatedOpenScoutHome();
     const workspaceRoot = join(home, "dev");
@@ -278,6 +320,7 @@ describe("listScoutAgents", () => {
       && entry.registrationKind === "discovered"
       && entry.state === "discovered"
     ))).toBe(true);
+    expect(entries.find((entry) => entry.registrationKind === "discovered")).toMatchObject({ nodeId: "node-1", projectRoot: talkieRoot });
   });
 });
 

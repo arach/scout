@@ -408,7 +408,7 @@ export function createHostedChatApi(): ChatApi & HostedInvitationApi {
       const selected = spaces.find((space) => space.slug === asked)
         ?? spaces.find((space) => space.id === asked)
         ?? spaces[0]!;
-      const detail = await raw<{ channels: HostedChannel[]; isOwner?: boolean }>(
+      const detail = await raw<{ channels: HostedChannel[]; isOwner?: boolean; lastMessages?: ChatBootstrap["lastMessages"] }>(
         `/api/chat/spaces/${encodeURIComponent(selected.id)}`,
       );
       const channels = (detail.channels ?? []).map((channel) =>
@@ -416,6 +416,7 @@ export function createHostedChatApi(): ChatApi & HostedInvitationApi {
       return {
         viewer: { ...viewer, isOperator: detail.isOwner ?? true },
         channels,
+        ...(detail.lastMessages ? { lastMessages: detail.lastMessages } : {}),
         space: selected.slug,
         spaces: spaces.map((space) =>
           toSpaceView(space, space.id === selected.id ? channels.length : undefined)),

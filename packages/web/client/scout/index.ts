@@ -1,3 +1,4 @@
+import { projectPaletteNavCommands } from "./nav-destinations.ts";
 import { createElement, type ReactNode } from "react";
 import type { HudsonApp, AppIntent } from "@hudsonkit";
 import { ScoutProvider } from "./Provider.tsx";
@@ -21,10 +22,12 @@ import {
 } from "../lib/theme.ts";
 import { ThemeProvider } from "hudsonkit/theme";
 
+const paletteTitles = new Map(projectPaletteNavCommands().map(({ id, label }) => [id, label]));
+
 const intents: AppIntent[] = [
   {
     commandId: "nav:home",
-    title: "Go to Home",
+    title: paletteTitles.get("nav:home")!,
     description: "Navigate to the home overview showing queue, threads, signal, and activity",
     category: "navigation",
     keywords: ["home", "inbox", "dashboard"],
@@ -32,15 +35,15 @@ const intents: AppIntent[] = [
   },
   {
     commandId: "nav:agents",
-    title: "Go to Agents",
-    description: "Navigate to the agents roster showing all registered agents",
+    title: paletteTitles.get("nav:agents")!,
+    description: "Navigate to the Projects list with agent, repo, and code sub-pages",
     category: "navigation",
-    keywords: ["agents", "roster", "list"],
+    keywords: ["projects", "agents", "roster", "list"],
     shortcut: "Cmd+2",
   },
   {
     commandId: "nav:messages",
-    title: "Go to Chat",
+    title: paletteTitles.get("nav:messages")!,
     description:
       "Navigate to the unified chat surface backed by the normalized conversations service",
     category: "navigation",
@@ -60,7 +63,7 @@ const intents: AppIntent[] = [
   },
   {
     commandId: "nav:sessions",
-    title: "Open Sessions",
+    title: paletteTitles.get("nav:sessions")!,
     description:
       "Navigate to the sessions list showing all active conversations",
     category: "navigation",
@@ -68,7 +71,7 @@ const intents: AppIntent[] = [
   },
   {
     commandId: "nav:search",
-    title: "Go to Search",
+    title: paletteTitles.get("nav:search")!,
     description:
       "Navigate to the session knowledge search surface for extraction, search, and raw-log drilldown planning",
     category: "navigation",
@@ -77,42 +80,42 @@ const intents: AppIntent[] = [
   },
   {
     commandId: "nav:activity",
-    title: "Open Activity",
+    title: paletteTitles.get("nav:activity")!,
     description: "Navigate to the activity feed showing recent events",
     category: "navigation",
     keywords: ["activity", "feed", "events", "log"],
   },
   {
     commandId: "nav:mesh",
-    title: "Open Network",
+    title: paletteTitles.get("nav:mesh")!,
     description: "Navigate to the mesh network view showing nodes and topology",
     category: "navigation",
     keywords: ["mesh", "network", "nodes", "peers", "topology"],
   },
   {
     commandId: "nav:dispatch",
-    title: "Open Dispatch",
+    title: paletteTitles.get("nav:dispatch")!,
     description: "Navigate to the dispatch ledger for routing, delivery attempts, and failed queries",
     category: "navigation",
     keywords: ["dispatch", "broker", "routing", "delivery", "messages"],
   },
   {
     commandId: "nav:repos",
-    title: "Open Repositories",
+    title: paletteTitles.get("nav:repos")!,
     description: "Navigate to the repos view for branches, diffs, and working-tree state",
     category: "navigation",
     keywords: ["repos", "repositories", "git", "branches", "diffs"],
   },
   {
     commandId: "nav:harnesses",
-    title: "Open Providers",
+    title: paletteTitles.get("nav:harnesses")!,
     description: "Open the central view for providers, harnesses, observed topology, and budget feeds",
     category: "navigation",
     keywords: ["provider", "providers", "harness", "harnesses", "claude", "codex", "budget", "usage", "topology"],
   },
   {
     commandId: "nav:ops",
-    title: "Go to Ops",
+    title: paletteTitles.get("nav:ops")!,
     description: "Navigate to the operator workspace for dispatch, mesh, tail, runtime, alerts, and agent operations",
     category: "navigation",
     keywords: ["ops", "operator", "control", "tail", "runtime", "services", "atop", "dispatch", "mesh"],
@@ -120,7 +123,7 @@ const intents: AppIntent[] = [
   },
   {
     commandId: "nav:ops-atop",
-    title: "Open Runtime",
+    title: paletteTitles.get("nav:ops-atop")!,
     description: "Open the live agent/process view with observed harness families",
     category: "navigation",
     keywords: ["runtime", "services", "atop", "process", "session", "agent", "topology"],
@@ -136,7 +139,7 @@ const intents: AppIntent[] = [
   },
   {
     commandId: "nav:agent-config",
-    title: "Open Agent Configuration",
+    title: paletteTitles.get("nav:agent-config")!,
     description:
       "Open the unified agent configuration surface for runtimes, agents, tools, delivery, and broker state",
     category: "settings",

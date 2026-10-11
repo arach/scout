@@ -1,3 +1,4 @@
+import { getDestination } from "../../scout/nav-destinations.ts";
 // Reuse the web area rather than maintaining a second native implementation.
 import { HomeContent } from "./content.tsx";
 import { defineSurface, type EmbedScreenProps } from "../../surfaces/types.ts";
@@ -9,7 +10,7 @@ export function NativeAreaScreen({ navigate }: EmbedScreenProps) {
 
 export const scoutSurface = defineSurface({
   id: "home",
-  label: "Home",
+  label: getDestination("home").label,
   route: { view: "inbox" },
   webPath: "/",
   screen: "NativeAreaScreen",

@@ -854,27 +854,6 @@ export function resolveAskReplyContext(input: {
 
 // The originating ask in this conversation that is now waiting on the operator
 // (operator-initiated ask the agent bounced back). Feeds the pinned-ask band.
-export function selectOperatorPendingAsk(
-  asks: FleetAsk[],
-  conversationId: string,
-  agentId: string | null,
-): FleetAsk | null {
-  return (
-    asks.find(
-      (ask) =>
-        ask.status === "needs_attention" &&
-        ask.conversationId === conversationId,
-    ) ??
-    asks.find(
-      (ask) =>
-        ask.status === "needs_attention" &&
-        !ask.conversationId &&
-        !!agentId &&
-        ask.agentId === agentId,
-    ) ?? null
-  );
-}
-
 export function turnActivityText(item: FleetActivity): string | null {
   const summary = item.summary?.trim();
   if (summary) return summary;

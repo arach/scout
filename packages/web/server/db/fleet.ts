@@ -96,7 +96,6 @@ type FleetAskRow = {
   work_state: string | null;
   next_move_owner_id: string | null;
   work_updated_at: number | string | null;
-  record_dismissed_at: number | string | null;
 };
 
 type FleetAttentionRow = {
@@ -303,14 +302,7 @@ export function queryFleetAskRows(requesterIds: string[], limit: number): FleetA
        cr.kind AS record_kind,
        cr.state AS work_state,
        cr.next_move_owner_id,
-       cr.updated_at AS work_updated_at,
-       (
-         SELECT MAX(dismissed.created_at)
-         FROM collaboration_events dismissed
-         WHERE dismissed.record_id = cr.id
-           AND dismissed.kind = 'dismissed'
-           AND dismissed.actor_id IN (${requesterClause})
-       ) AS record_dismissed_at
+       cr.updated_at AS work_updated_at
      FROM invocations inv
      LEFT JOIN actors ac ON ac.id = inv.target_agent_id
      LEFT JOIN activity_items latest_ai ON latest_ai.id = (
@@ -344,7 +336,7 @@ export function queryFleetAskRows(requesterIds: string[], limit: number): FleetA
        )
      ORDER BY COALESCE(inv.completed_at, inv.started_at, inv.created_at) DESC
      LIMIT ?`,
-  ).all(...requesterIds, ...requesterIds, limit) as Array<FleetAskRow>;
+  ).all(...requesterIds, limit) as Array<FleetAskRow>;
 }
 
 function isRecoverableDeliveryFailure(row: FleetAskRow): boolean {
@@ -364,7 +356,7 @@ function deliveryBlockedSummary(reason: string | null): string {
   return "The agent could not receive this request.";
 }
 
-function projectFleetAsk(row: FleetAskRow, requesterIdSet: Set<string>): WebFleetAsk {
+function projectFleetAsk(row: FleetAskRow): WebFleetAsk {
   const hasFlight = typeof row.flight_id === "string" && row.flight_id.length > 0;
   const replied = row.status_kind === "ask_replied";
   const failed = row.flight_state === "failed" || row.status_kind === "ask_failed";
@@ -390,29 +382,11 @@ function projectFleetAsk(row: FleetAskRow, requesterIdSet: Set<string>): WebFlee
     && !failed
     && !staleActiveFlight
     && !requesterStoppedWaiting;
-  // Collaboration state is authoritative. Reading a conversation or starting
-  // unrelated work cannot silently resolve a handback; only an explicit record
-  // transition or next-move reassignment can do that.
-  const attentionEligibleState =
-    (row.record_kind === "work_item"
-      && row.work_state !== null
-      && ["open", "working", "waiting", "review"].includes(row.work_state))
-    || (row.record_kind === "question"
-      && row.work_state !== null
-      && ["open", "answered"].includes(row.work_state));
-  // A standing operator dismissal (nothing on the record has moved since)
-  // resolves the handback here exactly as it does in the attention band —
-  // otherwise a dismissed record's ask re-surfaces as a request forever.
-  const recordDismissedAt = normalizeTimestampMs(row.record_dismissed_at);
-  const recordUpdatedAt = normalizeTimestampMs(row.work_updated_at);
-  const recordDismissed = recordDismissedAt !== null
-    && recordDismissedAt >= (recordUpdatedAt ?? 0);
-  const awaitingOperator = attentionEligibleState
-    && !recordDismissed
-    && Boolean(
-      row.next_move_owner_id
-      && requesterIdSet.has(row.next_move_owner_id),
-    );
+  // Every row here is an ask the OPERATOR sent. The operator is the asker, so
+  // the agent's reply (and the broker's automatic `review` handback that
+  // follows it) ends the ask — it never turns it into the agent asking the
+  // operator. Asks addressed to the operator exist only when declared
+  // (operator needs, approvals, session questions); see operator-attention.
 
   const updatedAt = normalizeTimestampMs(
     row.status_ts ?? row.completed_at ?? row.started_at ?? row.work_updated_at ?? row.created_at,
@@ -438,8 +412,6 @@ function projectFleetAsk(row: FleetAskRow, requesterIdSet: Set<string>): WebFlee
     // A failed dispatch produced nothing to review; it must never present as
     // "Asking for input" just because its work record was born pending.
     status = "failed";
-  } else if (awaitingOperator) {
-    status = "needs_attention";
   } else {
     status = "completed";
   }
@@ -467,10 +439,8 @@ function projectFleetAsk(row: FleetAskRow, requesterIdSet: Set<string>): WebFlee
     acknowledgedAt: status === "working" && replied
       ? normalizeTimestampMs(row.status_ts)
       : null,
-    attention: status === "needs_attention"
+    attention: status === "failed" && queuedUntilOnline
       ? "badge"
-      : status === "failed" && queuedUntilOnline
-        ? "badge"
       : status === "failed" && !failedDismissed && !recoveredDeliveryFailure
         ? noteworthyFailure
           ? "badge"
@@ -515,6 +485,14 @@ export function queryFleetAttentionRows(requesterIds: string[], limit: number): 
            OR (cr.kind = 'question' AND cr.state IN ('open', 'answered'))
          )
          AND cr.next_move_owner_id IN (${requesterClause})
+         -- A record the operator requested (a work item they dispatched, a
+         -- question they asked) coming back to them is the operator's own
+         -- ask ending, not an agent asking. Only agent-declared records count.
+         AND COALESCE(
+           json_extract(cr.detail_json, '$.requestedById'),
+           json_extract(cr.detail_json, '$.askedById'),
+           cr.created_by_id
+         ) NOT IN (${requesterClause})
          AND cr.updated_at >= ?
          AND NOT EXISTS (
            SELECT 1
@@ -541,7 +519,7 @@ export function queryFleetAttentionRows(requesterIds: string[], limit: number): 
      WHERE cr.duplicate_rank = 1
      ORDER BY cr.updated_at DESC
      LIMIT ?`,
-  ).all(...requesterIds, staleBefore, ...requesterIds, limit) as Array<FleetAttentionRow>;
+  ).all(...requesterIds, ...requesterIds, staleBefore, ...requesterIds, limit) as Array<FleetAttentionRow>;
 }
 
 /**
@@ -570,8 +548,7 @@ export function queryFleet(opts?: {
   const limit = opts?.limit ?? 12;
   const activityLimit = opts?.activityLimit ?? 80;
   const requesterIds = fleetRequesterIds();
-  const requesterIdSet = new Set(requesterIds);
-  const asks = queryFleetAskRows(requesterIds, Math.max(limit * 3, 24)).map((row) => projectFleetAsk(row, requesterIdSet));
+  const asks = queryFleetAskRows(requesterIds, Math.max(limit * 3, 24)).map(projectFleetAsk);
   const activeAsks = asks
     .filter((ask) =>
       ask.status === "queued" || ask.status === "working" || ask.status === "needs_attention")

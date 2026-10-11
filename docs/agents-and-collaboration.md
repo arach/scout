@@ -16,6 +16,13 @@ and adapter workflows — request shapes, receipts, reply context — read
 [`scout-comms.md`](./scout-comms.md), which stays the front door for building a
 Scout-aware client.
 
+The [Shared Interaction Model](./interaction-model.md) defines the adopted
+design for external participants, represented authority, and continuity across
+interfaces. Collaboration ownership and the next move remain separate from
+permission to perform an action. Moving work to another agent cannot by itself
+grant broader access, and a new execution session does not create a new work
+identity. The model's coverage table records the remaining implementation gaps.
+
 ## Reaching An Agent
 
 Two verbs carry every interaction:

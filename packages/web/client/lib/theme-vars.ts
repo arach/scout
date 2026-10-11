@@ -9,8 +9,15 @@
  */
 
 import type { CSSProperties } from "react";
+import type { ScoutTheme } from "./theme.ts";
 
 export type ThemeVars = CSSProperties & Record<`--${string}`, string>;
+
+// App type is the platform's own: system-ui (SF Pro) and SF Mono, both set at
+// weight 300 by app.css. These inline values win over app.css's :root, so the
+// two must name the same stacks.
+const SCOUT_FONT_SANS = "system-ui, -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif";
+const SCOUT_FONT_MONO = "ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace";
 
 // Exported for the design-sync lightweight preview provider (client/_ds/) — it
 // reuses these vars so cards render on the real dark theme. No behavior change.
@@ -62,10 +69,10 @@ export const DARK_THEME_VARS: ThemeVars = {
   "--scout-chrome-active": "color-mix(in srgb, var(--hud-ink) 9%, transparent)",
   "--scout-chrome-border-soft": "color-mix(in srgb, var(--hud-ink) 8%, transparent)",
   "--scout-chrome-avatar-ink": "#111111",
-  "--hud-font-sans": "'Inter', ui-sans-serif, system-ui, sans-serif",
-  "--hud-font-mono": "'JetBrains Mono', ui-monospace, Menlo, monospace",
+  "--hud-font-sans": SCOUT_FONT_SANS,
+  "--hud-font-mono": SCOUT_FONT_MONO,
   "--hud-font-serif": "'Spectral', 'Cormorant Garamond', Georgia, serif",
-  "--hud-font-accent-title": "'Inter Tight', var(--hud-font-sans)",
+  "--hud-font-accent-title": "var(--hud-font-sans)",
 };
 
 export const LIGHT_THEME_VARS: ThemeVars = {
@@ -110,8 +117,46 @@ export const LIGHT_THEME_VARS: ThemeVars = {
   "--scout-chrome-active": "color-mix(in srgb, var(--hud-ink) 8%, transparent)",
   "--scout-chrome-border-soft": "color-mix(in srgb, var(--hud-border) 80%, transparent)",
   "--scout-chrome-avatar-ink": "#ffffff",
-  "--hud-font-sans": "'Inter', ui-sans-serif, system-ui, sans-serif",
-  "--hud-font-mono": "'JetBrains Mono', ui-monospace, Menlo, monospace",
+  "--hud-font-sans": SCOUT_FONT_SANS,
+  "--hud-font-mono": SCOUT_FONT_MONO,
   "--hud-font-serif": "'Spectral', 'Cormorant Garamond', Georgia, serif",
-  "--hud-font-accent-title": "'Inter Tight', var(--hud-font-sans)",
+  "--hud-font-accent-title": "var(--hud-font-sans)",
 };
+
+const HUDSON_MANAGED_THEME_VARS = new Set([
+  // Raw palette inputs must come from appearance.css too. Inline fallback
+  // values would override the chosen palette before Hudson resolves it.
+  "--background",
+  "--foreground",
+  "--card",
+  "--card-foreground",
+  "--popover",
+  "--popover-foreground",
+  "--muted-foreground",
+  "--hud-bg",
+  "--hud-surface",
+  "--hud-ink",
+  "--hud-muted",
+  "--hud-dim",
+  "--hud-border",
+  "--hud-accent",
+  "--hud-accent-soft",
+  "--hud-shadow-soft",
+  "--hud-chrome-border",
+  "--hud-shadow-panel",
+  "--hud-shadow-panel-hover",
+  "--hud-shadow-bar",
+  "--hud-shadow-nav",
+  "--hud-shadow-minimap",
+  "--hud-status-ok",
+  "--hud-status-warn",
+  "--hud-status-error",
+]);
+
+/** The Scout palette minus what HudsonKit resolves from appearance.css. */
+export function scoutThemeAugmentVars(theme: ScoutTheme): ThemeVars {
+  const source = theme === "light" ? LIGHT_THEME_VARS : DARK_THEME_VARS;
+  return Object.fromEntries(
+    Object.entries(source).filter(([key]) => !HUDSON_MANAGED_THEME_VARS.has(key)),
+  ) as ThemeVars;
+}

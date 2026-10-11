@@ -30,6 +30,7 @@ import {
   updateScoutPairingSupervisorIntent,
 } from "@openscout/runtime/pairing-supervisor";
 import { loadLocalConfig } from "@openscout/runtime/local-config";
+import { openPairingLocalChannel } from "@openscout/runtime/pairing-local-socket";
 import { resolveBunExecutable as resolveResolvedBunExecutable } from "@openscout/runtime/tool-resolution";
 
 import { coalesce } from "./server-core.ts";
@@ -247,13 +248,10 @@ export function resolveScoutPairingPaths(): ScoutPairingPaths {
   };
 }
 
-function createScoutPairingBridgeUrl(port: number): string {
-  return `ws://127.0.0.1:${port}?events=0`;
-}
-
-export async function createScoutPairingBridgeClient(port: number): Promise<ScoutPairingBridgeClient> {
-  const url = createScoutPairingBridgeUrl(port);
-  const socket = new WebSocket(url);
+export async function createScoutPairingBridgeClient(
+  port: number,
+  options: { expectedMode?: "secure" | "plaintext" } = {},
+): Promise<ScoutPairingBridgeClient> {
   let nextRequestId = 1;
   const pending = new Map<number, {
     resolve: (value: unknown) => void;
@@ -267,40 +265,7 @@ export async function createScoutPairingBridgeClient(port: number): Promise<Scou
     pending.clear();
   };
 
-  await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      cleanup();
-      socket.close();
-      reject(new Error(`Timed out connecting to Scout pairing bridge at ${url}.`));
-    }, SCOUT_PAIRING_BRIDGE_CONNECT_TIMEOUT_MS);
-
-    const handleOpen = () => {
-      cleanup();
-      resolve();
-    };
-    const handleError = () => {
-      cleanup();
-      socket.close();
-      reject(new Error(`Unable to connect to Scout pairing bridge at ${url}.`));
-    };
-    const handleClosed = () => {
-      cleanup();
-      reject(new Error(`Scout pairing bridge closed before connecting at ${url}.`));
-    };
-    const cleanup = () => {
-      clearTimeout(timeout);
-      socket.removeEventListener("open", handleOpen);
-      socket.removeEventListener("error", handleError);
-      socket.removeEventListener("close", handleClosed);
-    };
-
-    socket.addEventListener("open", handleOpen);
-    socket.addEventListener("error", handleError);
-    socket.addEventListener("close", handleClosed);
-  });
-
-  const handleMessage = (event: MessageEvent) => {
-    const raw = typeof event.data === "string" ? event.data : String(event.data);
+  const handleMessage = (raw: string) => {
     let payload: ScoutPairingTrpcResponse<unknown>;
     try {
       payload = JSON.parse(raw) as ScoutPairingTrpcResponse<unknown>;
@@ -332,24 +297,21 @@ export async function createScoutPairingBridgeClient(port: number): Promise<Scou
     request.resolve(result.data);
   };
 
-  const handleClose = () => {
-    rejectPending(new Error("Scout pairing bridge connection closed."));
-  };
-
-  const handleRuntimeError = () => {
-    rejectPending(new Error("Scout pairing bridge transport error."));
-  };
-
-  socket.addEventListener("message", handleMessage);
-  socket.addEventListener("close", handleClose);
-  socket.addEventListener("error", handleRuntimeError);
+  const channel = await openPairingLocalChannel(port, {
+    onMessage: handleMessage,
+    onClose: () => rejectPending(new Error("Scout pairing bridge connection closed.")),
+  }, {
+    timeoutMs: SCOUT_PAIRING_BRIDGE_CONNECT_TIMEOUT_MS,
+    subscribeEvents: false,
+    expectedMode: options.expectedMode,
+  });
 
   function call<T>(
     method: "query" | "mutation",
     path: string,
     input?: Record<string, unknown>,
   ): Promise<T> {
-    if (socket.readyState !== WebSocket.OPEN) {
+    if (!channel.isOpen()) {
       return Promise.reject(new Error("Scout pairing bridge is not connected."));
     }
 
@@ -380,7 +342,7 @@ export async function createScoutPairingBridgeClient(port: number): Promise<Scou
           reject(error);
         },
       });
-      socket.send(JSON.stringify(requestPayload));
+      channel.send(JSON.stringify(requestPayload));
     });
   }
 
@@ -392,12 +354,7 @@ export async function createScoutPairingBridgeClient(port: number): Promise<Scou
       return call<T>("mutation", path, input);
     },
     close() {
-      if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
-        socket.close();
-      }
-      socket.removeEventListener("message", handleMessage);
-      socket.removeEventListener("close", handleClose);
-      socket.removeEventListener("error", handleRuntimeError);
+      channel.close();
       rejectPending(new Error("Scout pairing bridge client closed."));
     },
   };
@@ -415,16 +372,24 @@ async function withScoutPairingBridgeClient<T>(
   }
 }
 
-const pendingSessionSnapshots = new Map<number, Promise<SessionState[]>>();
+/**
+ * Attention, inbox, and pairing-state reads all poll this, often several per
+ * second across UI surfaces. Share one bridge round-trip per window instead of
+ * opening a fresh socket for each caller. Failures are not cached.
+ */
+const SESSION_SNAPSHOT_TTL_MS = 5_000;
+const sessionSnapshotCache = new Map<number, { promise: Promise<SessionState[]>; expiresAt: number }>();
 
 export function loadScoutPairingSessionSnapshots(port: number): Promise<SessionState[]> {
-  const existing = pendingSessionSnapshots.get(port);
-  if (existing) return existing;
-  const pending = readScoutPairingSessionSnapshots(port).finally(() => {
-    if (pendingSessionSnapshots.get(port) === pending) pendingSessionSnapshots.delete(port);
-  });
-  pendingSessionSnapshots.set(port, pending);
-  return pending;
+  const cached = sessionSnapshotCache.get(port);
+  if (cached && Date.now() < cached.expiresAt) return cached.promise;
+  const entry = { promise: readScoutPairingSessionSnapshots(port), expiresAt: Number.POSITIVE_INFINITY };
+  sessionSnapshotCache.set(port, entry);
+  entry.promise.then(
+    () => { entry.expiresAt = Date.now() + SESSION_SNAPSHOT_TTL_MS; },
+    () => { if (sessionSnapshotCache.get(port) === entry) sessionSnapshotCache.delete(port); },
+  );
+  return entry.promise;
 }
 
 async function readScoutPairingSessionSnapshots(port: number): Promise<SessionState[]> {
@@ -1072,6 +1037,7 @@ function coalescedPairingStateReader(currentDirectory?: string): () => Promise<S
 
 function invalidateScoutWebPairingStateCache(): void {
   coalescedPairingStateReads.clear();
+  sessionSnapshotCache.clear();
 }
 
 export async function getScoutWebPairingState(currentDirectory?: string): Promise<ScoutPairingState> {

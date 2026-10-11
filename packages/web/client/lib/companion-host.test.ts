@@ -29,6 +29,11 @@ import {
   onCompanionFigureDrag,
   parseCompanionFigures,
   parseCompanionFigureDefaults,
+  COMPANION_LEAVE_EVENT,
+  onCompanionLeave,
+  parseCompanionAnchors,
+  parseCompanionFigureAnchor,
+  reportCompanionLeft,
   sendCompanionFiguresHome,
   setCompanionFigure,
   setCompanionFigureDefaults,
@@ -103,7 +108,8 @@ describe("parseCompanionHostState", () => {
         { workId: "work-1", size: null, motion: null, hidden: false, placement: { kind: "home" }, anchor: null, label: "Home row" },
         { workId: "work-2", size: null, motion: null, hidden: false, placement: { kind: "home" }, anchor: null, label: "Home row" },
       ],
-      figureDefaults: { size: 24, motion: "full" },
+      figureDefaults: { size: 24, motion: "full", hold: "edge" },
+      scoutbot: { workId: "scoutbot", size: null, motion: null, hidden: false, placement: { kind: "home" }, anchor: null, label: "Home row" },
     });
   });
 
@@ -214,7 +220,8 @@ describe("bridge calls", () => {
       edgeAnchor: "right",
       edge: null,
       figures: [{ workId: "work-9", size: null, motion: null, hidden: false, placement: { kind: "home" }, anchor: null, label: "Home row" }],
-      figureDefaults: { size: 24, motion: "full" },
+      figureDefaults: { size: 24, motion: "full", hold: "edge" },
+      scoutbot: { workId: "scoutbot", size: null, motion: null, hidden: false, placement: { kind: "home" }, anchor: null, label: "Home row" },
     }]);
   });
 
@@ -389,8 +396,10 @@ describe("figures you place", () => {
     expect(parseCompanionFigures([{ workId: "work-1", placement: { kind: "edge", edge: "middle", t: 0.5 } }], pins)[0]!.placement).toEqual({ kind: "home" });
     expect(parseCompanionFigures([{ workId: "work-1", placement: { kind: "edge", edge: "left", t: 0.5 }, anchor: { x: 0, y: 10, down: "sideways" } }], pins)[0])
       .toMatchObject({ placement: { kind: "edge", edge: "left", t: 0.5 }, anchor: { x: 0, y: 10, down: null, covered: false, away: false } });
-    expect(parseCompanionFigureDefaults({ size: 99, motion: "still" })).toEqual({ size: 24, motion: "still" });
-    expect(parseCompanionFigureDefaults(null)).toEqual({ size: 24, motion: "full" });
+    expect(parseCompanionFigureDefaults({ size: 99, motion: "still" })).toEqual({ size: 24, motion: "still", hold: "edge" });
+    expect(parseCompanionFigureDefaults({ hold: "latch" })).toEqual({ size: 24, motion: "full", hold: "latch" });
+    expect(parseCompanionFigureDefaults({ hold: "hex" })).toEqual({ size: 24, motion: "full", hold: "edge" });
+    expect(parseCompanionFigureDefaults(null)).toEqual({ size: 24, motion: "full", hold: "edge" });
   });
 
   test("figure calls post only valid values", async () => {
@@ -447,5 +456,57 @@ describe("figures you place", () => {
       anchors: { "work-1": { anchor: { x: 5, y: 6, down: "top", covered: false, away: true }, label: "Away with the Safari window" } },
       falling: ["work-1"],
     }]);
+  });
+});
+
+describe("window chase wire", () => {
+  test("anchors carry the perch frame and the pending flag", () => {
+    expect(parseCompanionFigureAnchor({ x: 1, y: 2, down: "bottom", pending: true, frame: { x: 10, y: 20, w: 300, h: 200 } }))
+      .toEqual({ x: 1, y: 2, down: "bottom", covered: false, away: false, pending: true, frame: { x: 10, y: 20, w: 300, h: 200 } });
+    expect(parseCompanionFigureAnchor({ x: 1, y: 2, frame: { x: 10, y: 20, w: -1, h: 200 } })?.frame).toBeNull();
+    expect(parseCompanionFigureAnchor({ x: 1, y: 2, pending: "yes" })).toEqual({ x: 1, y: 2, down: null, covered: false, away: false });
+  });
+
+  test("landing names only falling figures, window or edge", () => {
+    const update = parseCompanionAnchors({
+      figures: [],
+      falling: ["work-1", "work-2"],
+      landing: { "work-1": "window", "work-2": "floor", "work-3": "edge", "<x>": "edge" },
+    })!;
+    expect(update.falling).toEqual(["work-1", "work-2"]);
+    expect(Object.fromEntries(update.landing)).toEqual({ "work-1": "window" });
+    expect(parseCompanionAnchors({ figures: [], falling: ["work-1"] })!.landing.size).toBe(0);
+  });
+
+  test("leave event and the left reply", async () => {
+    const target = installHost();
+    const seen: number[] = [];
+    const stop = onCompanionLeave((ms) => seen.push(ms));
+    target.dispatchEvent(new CustomEvent(COMPANION_LEAVE_EVENT, { detail: { ms: 700 } }));
+    target.dispatchEvent(new CustomEvent(COMPANION_LEAVE_EVENT, { detail: { ms: "soon" } }));
+    stop();
+    target.dispatchEvent(new CustomEvent(COMPANION_LEAVE_EVENT, { detail: { ms: 10 } }));
+    expect(seen).toEqual([700, 700]);
+    reply = () => null;
+    reportCompanionLeft();
+    await Promise.resolve();
+    expect(posted.map((message) => message.method)).toEqual(["left"]);
+  });
+});
+
+describe("Edge hold bridge", () => {
+  test("accepts Edge, saves a per-pin legacy hold and explicit window-top attachment", () => {
+    expect(parseCompanionFigureDefaults({ hold: "edge" }).hold).toBe("edge");
+    const [fig] = parseCompanionFigures([{workId:"w",hold:"latch",windowTop:"hang",placement:{kind:"window",side:"top",t:.5},anchor:{x:200,y:28,down:"top",attachment:"hang"}}],[{workId:"w",machineId:null}]);
+    expect(fig!.hold).toBe("latch"); expect(fig!.windowTop).toBe("hang"); expect(fig!.anchor!.attachment).toBe("hang");
+    const [bad] = parseCompanionFigures([{workId:"w",hold:"bogus",windowTop:"bogus",placement:{kind:"window",side:"top",t:.5},anchor:{x:200,y:28,down:"top",attachment:"bogus"}}],[{workId:"w",machineId:null}]);
+    expect(bad!.hold).toBeUndefined(); expect(bad!.windowTop).toBeUndefined(); expect(bad!.anchor!.attachment).toBeUndefined();
+  });
+  test("figure request validates Edge hold and window-top fields", async () => {
+    installHost(); reply = () => ({pins:[]});
+    await setCompanionFigure("work-1",{hold:"edge",windowTop:"hang"});
+    await setCompanionFigure("work-1",{hold:"default",windowTop:"sit"});
+    expect(posted.slice(-2).map(m=>m.params)).toEqual([{workId:"work-1",hold:"edge",windowTop:"hang"},{workId:"work-1",hold:"default",windowTop:"sit"}]);
+    await expect(setCompanionFigure("work-1",{hold:"bogus" as never})).rejects.toThrow("Nothing to change.");
   });
 });

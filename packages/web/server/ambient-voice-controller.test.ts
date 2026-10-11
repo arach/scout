@@ -88,6 +88,33 @@ describe("always-on voice controller", () => {
     expect(h.controller.claimPageActions("ambient-unknown")).toBe(false);
   });
 
+  test("a routed page command skips Scoutbot, goes to open pages, and says nothing", async () => {
+    const seen: Array<{ excerpt: string; pages: string[] }> = [];
+    const h = harness({
+      routePageCommand: (excerpt, pages) => {
+        seen.push({ excerpt, pages: [...pages] });
+        return pages.has("world") ? [{ type: "world.command", text: excerpt, reason: "voice" }] : null;
+      },
+    });
+    const batches: Array<{ actions: unknown[] }> = [];
+    h.controller.subscribePageActions((batch) => batches.push(batch));
+    const release = h.controller.markPageOpen("world");
+    h.controller.setEnabled(true);
+    h.say("go to wednesday afternoon. Okay Scout, do it.");
+    await h.settle();
+    expect(seen).toEqual([{ excerpt: "go to wednesday afternoon.", pages: ["world"] }]);
+    expect(batches[0]?.actions).toEqual([{ type: "world.command", text: "go to wednesday afternoon.", reason: "voice" }]);
+    expect(h.log.prompts).toEqual([]);
+    expect(h.log.spoken).toEqual([]);
+
+    // the page closed: the same words go to Scoutbot
+    release();
+    h.say("go to wednesday afternoon. Okay Scout, do it.", 60_000);
+    await h.settle();
+    expect(seen[1]?.pages).toEqual([]);
+    expect(h.log.prompts).toHaveLength(1);
+  });
+
   test("an agent ask in the reply is sent through the broker and not spoken", async () => {
     const h = harness();
     h.state.reply = "Asking the web agent.\n```scout-ui\n{\"type\":\"ask-agent\",\"targetLabel\":\"web\",\"body\":\"fix the flaky test\"}\n```";

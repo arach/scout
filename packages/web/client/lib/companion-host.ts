@@ -42,8 +42,13 @@
  *                                                    settings; size 16–96 or "default", motion
  *                                                    full|calm|still or "default", home: true only)
  *   figureNudge { workId, dx, dy }          → CompanionHostState  (arrow keys, |d| ≤ 100pt, page +y down)
- *   figureDefaults { size?, motion? }       → CompanionHostState
+ *   figureDefaults { size?, motion?, hold? } → CompanionHostState  (hold edge|iso|latch)
  *   figuresHome                             → CompanionHostState  ("Send all home")
+ *   talk       { threadId }                 → { thread, control, listening }  (companion only: open this
+ *                                                    Codex thread in the ChatGPT app and press its own
+ *                                                    "Start voice chat"; refuses unless that thread shows)
+ *   left                                    → null   (companion only: the put-away dash that a
+ *                                                    `scout:companion-leave` asked for is done)
  *
  * Surfacing grants are operator choices. They let matching broker work
  * appear in the companion's Surfaced list with a badge; they never show the
@@ -57,9 +62,17 @@
  *   — during a figure drag `{ workId, x, y, mod, guide }` (page points, feet
  *   at the pointer; mod "alt" | "shift" | null; guide where that modifier
  *   would put it), then `{ workId: null, dropped, fall }` when it ends.
- *   window.dispatchEvent(new CustomEvent("scout:companion-anchors", { detail: { figures, falling } }))
+ *   window.dispatchEvent(new CustomEvent("scout:companion-anchors", { detail: { figures, falling, landing } }))
  *   — placed figures moved with their windows, hid, ghosted or fell; up to
- *   15 times a second while one rides on a window.
+ *   15 times a second while one rides on a window. Each anchor may carry
+ *   `frame` (its window's page rect, so the page can tell a move from a
+ *   resize) and `pending` (the window just left the screen; the host has not
+ *   decided yet whether it closed). `landing` { workId: "window" | "edge" }
+ *   marks the falling figures whose window closed or minimized, and what
+ *   they fell onto; a shift-drop fall is in `falling` alone.
+ *   window.dispatchEvent(new CustomEvent("scout:companion-leave", { detail: { ms } }))
+ *   — the panel is about to hide: dash the placed figures off, then call
+ *   `left`. The host hides after `ms` anyway.
  *
  * The host validates every field again; this module only keeps honest pages
  * from sending junk.
@@ -106,6 +119,8 @@ export type CompanionRect = { x: number; y: number; width: number; height: numbe
 
 export type CompanionSide = "bottom" | "top" | "left" | "right";
 export type CompanionFigureMotion = "full" | "calm" | "still";
+/** How figures attach: authored edge poses, or the original upright platform/latch. */
+export type CompanionFigureHold = "edge" | "iso" | "latch";
 
 /** Where the operator put a pinned figure. Fractions are of the visible frame. */
 export type CompanionFigurePlacement =
@@ -115,15 +130,33 @@ export type CompanionFigurePlacement =
   | { kind: "window"; side: CompanionSide; t: number };
 
 /**
- * Where the host resolved a placed figure's feet, in page points. `down` is
+ * Where the host resolved a placed figure's contact, in page points. `down` is
  * the side its feet point to (null: upright, placed freely); `covered`: a
  * window in front hides its spot, so it ghosts; `away`: its window is on
  * another Space, hidden until it returns.
  */
-export type CompanionFigureAnchor = { x: number; y: number; down: CompanionSide | null; covered: boolean; away: boolean };
+export type CompanionFigureAnchor = {
+  x: number;
+  y: number;
+  down: CompanionSide | null;
+  covered: boolean;
+  away: boolean;
+  /** Explicit contact mode from the host; legacy hosts can omit it. */
+  attachment?: "hang" | "sit" | "grip" | "stand";
+  /** The window just left the screen; still drawn while the host waits to see if it closed. */
+  pending?: boolean;
+  /** The perch window's page rect, when the figure rides on one. */
+  frame?: CompanionPageRect | null;
+};
+
+export type CompanionPageRect = { x: number; y: number; w: number; h: number };
 
 export type CompanionFigure = {
   workId: string;
+  /** Saved hold; omitted/null follows the current default. */
+  hold?: CompanionFigureHold | null;
+  /** Window top: explicit underside hang or above-edge seat. */
+  windowTop?: "hang" | "sit" | null;
   /** null follows the companion default. */
   size: number | null;
   motion: CompanionFigureMotion | null;
@@ -135,11 +168,11 @@ export type CompanionFigure = {
   label: string;
 };
 
-export type CompanionFigureDefaults = { size: number; motion: CompanionFigureMotion };
+export type CompanionFigureDefaults = { size: number; motion: CompanionFigureMotion; hold: CompanionFigureHold };
 
 export const FIGURE_SIZE_MIN = 16;
 export const FIGURE_SIZE_MAX = 96;
-export const DEFAULT_FIGURE_DEFAULTS: CompanionFigureDefaults = { size: 24, motion: "full" };
+export const DEFAULT_FIGURE_DEFAULTS: CompanionFigureDefaults = { size: 24, motion: "full", hold: "edge" };
 
 export type CompanionHitRegion = { id: string; x: number; y: number; width: number; height: number };
 
@@ -162,15 +195,19 @@ export type CompanionHostState = {
   edge: CompanionEdgeGeometry | null;
   /** One per pin, in pin order. */
   figures: CompanionFigure[];
+  /** Scoutbot's figure: no pin, always there, placed by the same rules. */
+  scoutbot?: CompanionFigure;
   figureDefaults: CompanionFigureDefaults;
 };
 
 export const COMPANION_MAX_PINS = 200;
+/** Same id as `ScoutCompanionState.scoutbotId`: Scoutbot's figure, which has no pin. */
+export const SCOUTBOT_FIGURE_ID = "scoutbot";
 /** Room for every figure (200 pins + surfaced), every origin pin, the
  *  controls and the popover, with headroom. The host enforces the same cap. */
 export const COMPANION_MAX_REGIONS = 512;
 /** Regions that must survive any trim: what the operator is reading or using. */
-const PRIORITY_REGIONS = new Set(["popover", "home"]);
+const PRIORITY_REGIONS = new Set(["popover", "home", "scoutbot", "scoutbot-card", "scoutbot-drag", "figure-menu"]);
 export const DEFAULT_RESTING_OPACITY = 0.55;
 export const RESTING_OPACITY_MIN = 0.25;
 
@@ -190,6 +227,7 @@ export const COMPANION_EVENT = "scout:companion";
 export const COMPANION_POINTER_EVENT = "scout:companion-pointer";
 export const COMPANION_FIGURE_DRAG_EVENT = "scout:companion-figure-drag";
 export const COMPANION_ANCHORS_EVENT = "scout:companion-anchors";
+export const COMPANION_LEAVE_EVENT = "scout:companion-leave";
 const SIDES: readonly CompanionSide[] = ["bottom", "top", "left", "right"];
 const MOTIONS: readonly CompanionFigureMotion[] = ["full", "calm", "still"];
 const DOCK_EDGES: readonly CompanionDockEdge[] = ["bottom", "left", "right", "hidden"];
@@ -224,6 +262,12 @@ function isMotion(value: unknown): value is CompanionFigureMotion {
   return MOTIONS.includes(value as CompanionFigureMotion);
 }
 
+export const FIGURE_HOLDS: readonly CompanionFigureHold[] = ["edge", "iso", "latch"];
+
+function isHold(value: unknown): value is CompanionFigureHold {
+  return FIGURE_HOLDS.includes(value as CompanionFigureHold);
+}
+
 function isSide(value: unknown): value is CompanionSide {
   return SIDES.includes(value as CompanionSide);
 }
@@ -245,7 +289,21 @@ export function parseCompanionFigureAnchor(value: unknown): CompanionFigureAncho
   const x = finite(raw.x, -20_000, 20_000);
   const y = finite(raw.y, -20_000, 20_000);
   if (x === null || y === null) return null;
-  return { x, y, down: isSide(raw.down) ? raw.down : null, covered: raw.covered === true, away: raw.away === true };
+  const anchor: CompanionFigureAnchor = { x, y, down: isSide(raw.down) ? raw.down : null, covered: raw.covered === true, away: raw.away === true };
+  if (["hang", "sit", "grip", "stand"].includes(raw.attachment as string)) anchor.attachment = raw.attachment as NonNullable<CompanionFigureAnchor["attachment"]>;
+  if (raw.pending === true) anchor.pending = true;
+  if ("frame" in raw) anchor.frame = parsePageRect(raw.frame);
+  return anchor;
+}
+
+function parsePageRect(value: unknown): CompanionPageRect | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  const x = finite(raw.x, -20_000, 20_000);
+  const y = finite(raw.y, -20_000, 20_000);
+  const w = finite(raw.w, 0, 40_000);
+  const h = finite(raw.h, 0, 40_000);
+  return x === null || y === null || w === null || h === null ? null : { x, y, w, h };
 }
 
 function cleanLabel(value: unknown, fallback: string): string {
@@ -265,6 +323,8 @@ export function parseCompanionFigures(value: unknown, pins: readonly CompanionPi
     const placement = parseCompanionFigurePlacement(raw.placement);
     return {
       workId,
+      ...(isHold(raw.hold) ? { hold: raw.hold } : {}),
+      ...(raw.windowTop === "hang" || raw.windowTop === "sit" ? { windowTop: raw.windowTop } : {}),
       size: isFigureSize(raw.size) ? raw.size : null,
       motion: isMotion(raw.motion) ? raw.motion : null,
       hidden: raw.hidden === true,
@@ -280,6 +340,7 @@ export function parseCompanionFigureDefaults(value: unknown): CompanionFigureDef
   return {
     size: isFigureSize(raw.size) ? raw.size : DEFAULT_FIGURE_DEFAULTS.size,
     motion: isMotion(raw.motion) ? raw.motion : DEFAULT_FIGURE_DEFAULTS.motion,
+    hold: isHold(raw.hold) ? raw.hold : DEFAULT_FIGURE_DEFAULTS.hold,
   };
 }
 
@@ -384,6 +445,7 @@ export function parseCompanionHostState(value: unknown): CompanionHostState | nu
     edgeAnchor: raw.edgeAnchor === "left" ? "left" : "right",
     edge: raw.mode === "edge" ? parseCompanionEdgeGeometry(raw.edge) : null,
     figures: parseCompanionFigures(raw.figures, pins),
+    scoutbot: parseCompanionFigures(raw.figures, [{ workId: SCOUTBOT_FIGURE_ID }])[0],
     figureDefaults: parseCompanionFigureDefaults(raw.figureDefaults),
   };
 }
@@ -562,6 +624,43 @@ export function openFromCompanion(
   return call("open", params);
 }
 
+export type CompanionTalk = { thread: string; control: string | null; listening: boolean };
+
+/** A figure's Talk: Codex's own voice chat, in the ChatGPT app, in this thread. */
+export function talkInCodex(threadId: string): Promise<CompanionTalk> {
+  if (!isCompanionId(threadId)) return Promise.reject(new Error("That thread cannot be talked to."));
+  return call<CompanionTalk>("talk", { threadId });
+}
+
+/** Codex voice in the ChatGPT app: on at all, which of the asked threads has
+ *  it, and its microphone and speakers (absent when the app shows no toggle). */
+export type CompanionVoiceState = { active: boolean; thread: string | null; micMuted?: boolean; speakersMuted?: boolean };
+export type CompanionVoiceControl = "microphone" | "speakers" | "stop";
+
+const voiceListeners = new Set<(state: CompanionVoiceState) => void>();
+
+/** Every voice reading, polled or after a press. Returns the unsubscribe function. */
+export function onCodexVoiceState(listener: (state: CompanionVoiceState) => void): () => void {
+  voiceListeners.add(listener);
+  return () => voiceListeners.delete(listener);
+}
+
+function announceVoice(state: CompanionVoiceState): CompanionVoiceState {
+  for (const listener of [...voiceListeners]) listener(state);
+  return state;
+}
+
+export function codexVoiceState(threadIds: readonly string[]): Promise<CompanionVoiceState> {
+  const ids = threadIds.filter(isCompanionId);
+  return call<CompanionVoiceState>("voiceState", { threadIds: ids }).then(announceVoice);
+}
+
+/** Press the running voice chat's own control. `muted` is the state wanted. */
+export function pressCodexVoice(control: CompanionVoiceControl, options: { muted?: boolean; threadIds?: readonly string[] } = {}): Promise<CompanionVoiceState> {
+  const threadIds = (options.threadIds ?? []).filter(isCompanionId);
+  return call<CompanionVoiceState>("voicePress", { control, threadIds, ...(options.muted === undefined ? {} : { muted: options.muted }) }).then(announceVoice);
+}
+
 /** Subscribe to host-pushed state. Returns the unsubscribe function. */
 export function onCompanionState(listener: (state: CompanionHostState) => void): () => void {
   if (typeof window === "undefined") return () => {};
@@ -582,6 +681,8 @@ export function beginFigureDrag(workId: string): void {
 }
 
 export type CompanionFigurePatch = {
+  hold?: CompanionFigureHold | "default";
+  windowTop?: "hang" | "sit";
   size?: number | "default";
   motion?: CompanionFigureMotion | "default";
   hidden?: boolean;
@@ -591,6 +692,8 @@ export type CompanionFigurePatch = {
 export function setCompanionFigure(workId: string, patch: CompanionFigurePatch): Promise<CompanionHostState> {
   if (!isCompanionId(workId)) return Promise.reject(new Error("That figure cannot be changed."));
   const params: Record<string, unknown> = { workId };
+  if (patch.hold === "default" || isHold(patch.hold)) params.hold = patch.hold;
+  if (patch.windowTop === "hang" || patch.windowTop === "sit") params.windowTop = patch.windowTop;
   if (patch.size === "default" || isFigureSize(patch.size)) params.size = patch.size;
   if (patch.motion === "default" || isMotion(patch.motion)) params.motion = patch.motion;
   if (typeof patch.hidden === "boolean") params.hidden = patch.hidden;
@@ -611,12 +714,29 @@ export function setCompanionFigureDefaults(patch: Partial<CompanionFigureDefault
   const params: Record<string, unknown> = {};
   if (isFigureSize(patch.size)) params.size = patch.size;
   if (isMotion(patch.motion)) params.motion = patch.motion;
+  if (isHold(patch.hold)) params.hold = patch.hold;
   if (!Object.keys(params).length) return Promise.reject(new Error("Nothing to change."));
   return callState("figureDefaults", params);
 }
 
 export function sendCompanionFiguresHome(): Promise<CompanionHostState> {
   return callState("figuresHome");
+}
+
+/** The leave dash is done: the host may hide the panel now. */
+export function reportCompanionLeft(): void {
+  void call("left").catch(() => {});
+}
+
+/** The panel is about to hide (`ms`: how long the host waits). Returns the unsubscribe function. */
+export function onCompanionLeave(listener: (ms: number) => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  const onEvent = (event: Event) => {
+    const detail = (event as CustomEvent).detail as Record<string, unknown> | null;
+    listener(finite(detail?.ms, 0, 5_000) ?? 700);
+  };
+  window.addEventListener(COMPANION_LEAVE_EVENT, onEvent);
+  return () => window.removeEventListener(COMPANION_LEAVE_EVENT, onEvent);
 }
 
 type PagePoint = { x: number; y: number };
@@ -671,20 +791,28 @@ export function onCompanionFigureDrag(listener: (drag: CompanionFigureDrag) => v
 export type CompanionAnchorUpdate = {
   anchors: Map<string, { anchor: CompanionFigureAnchor | null; label: string | null }>;
   falling: string[];
+  /** Falling because the window closed or minimized: what each landed on. */
+  landing: Map<string, "window" | "edge">;
 };
 
 export function parseCompanionAnchors(value: unknown): CompanionAnchorUpdate | null {
   if (!value || typeof value !== "object") return null;
   const raw = value as Record<string, unknown>;
   const anchors: CompanionAnchorUpdate["anchors"] = new Map();
-  for (const entry of Array.isArray(raw.figures) ? raw.figures.slice(0, COMPANION_MAX_PINS) : []) {
+  for (const entry of Array.isArray(raw.figures) ? raw.figures.slice(0, COMPANION_MAX_PINS + 1) : []) {
     if (!entry || typeof entry !== "object") continue;
     const f = entry as Record<string, unknown>;
     if (!isCompanionId(f.workId)) continue;
     anchors.set(f.workId, { anchor: parseCompanionFigureAnchor(f.anchor), label: typeof f.label === "string" ? cleanLabel(f.label, "") || null : null });
   }
   const falling = (Array.isArray(raw.falling) ? raw.falling : []).filter(isCompanionId);
-  return { anchors, falling };
+  const landing: CompanionAnchorUpdate["landing"] = new Map();
+  if (raw.landing && typeof raw.landing === "object") {
+    for (const [workId, kind] of Object.entries(raw.landing as Record<string, unknown>)) {
+      if (falling.includes(workId) && (kind === "window" || kind === "edge")) landing.set(workId, kind);
+    }
+  }
+  return { anchors, falling, landing };
 }
 
 /** Placed figures riding on windows. Returns the unsubscribe function. */

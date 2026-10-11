@@ -18,6 +18,7 @@ export function OpsLeft() {
       return <OpsAdvisorLeft />;
     case "lanes":
     case "world":
+    case "week":
       return <OpsLanesLeft />;
     default:
       return <OpsDefaultLeft />;

@@ -121,3 +121,24 @@ describe("first-run project and selected-agent guidance", () => {
     expect(html).not.toContain("Sign in to this agent in Terminal");
   });
 });
+
+describe("welcome step", () => {
+  test("opens on a to-do list and what's already installed, never on what's missing", () => {
+    state = {
+      ...base, hasLocalConfig: false, hasOperatorName: false,
+      harnesses: [
+        { id: "claude", label: "Claude Code", state: "ready", ready: true, detail: "" },
+        { id: "codex", label: "Codex", state: "installed", ready: false, detail: "" },
+        { id: "pi", label: "Pi", state: "missing", ready: false, detail: "" },
+      ],
+    };
+    const html = render();
+    expect(html).toContain("Welcome to Scout");
+    expect(html).toContain("Set up this Mac");
+    expect(html).toContain("Add your name");
+    expect(html).toContain("Choose your projects");
+    expect(html).toContain("Claude Code · Codex");
+    expect(html).not.toContain("Pi</span>");
+    expect(html).not.toMatch(/missing|stays limited|of 4/i);
+  });
+});

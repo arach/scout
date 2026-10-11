@@ -76,3 +76,4 @@ export * from "./integrations.js";
 export * from "./slack-manifest.js";
 
 export * from "./room-listening.js";
+export * from "./mcp-events.js";

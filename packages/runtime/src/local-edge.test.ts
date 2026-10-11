@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  buildOpenScoutLocalEdgeMdnsCommands,
   renderOpenScoutCaddyfile,
   resolveOpenScoutLocalEdgeConfig,
   resolveOpenScoutLocalEdgeDiscoveryHosts,
@@ -17,6 +18,20 @@ describe("OpenScout local edge", () => {
     expect(resolveOpenScoutLocalEdgeDiscoveryHosts({
       portalHost: " TEAM.LOCAL. ", nodeHost: "chat.team.local",
     })).toEqual(["team.local", "chat.team.local"]);
+  });
+
+  test("advertises through dns-sd on macOS and Avahi on Linux", () => {
+    const input = { name: "Scout Local HTTP", host: "scout.local", port: 80, scheme: "http" as const };
+    expect(buildOpenScoutLocalEdgeMdnsCommands(input, "darwin")).toEqual([{
+      command: "/usr/bin/dns-sd",
+      args: ["-P", "Scout Local HTTP", "_http._tcp", "local", "80", "scout.local", "127.0.0.1", "path=/"],
+    }]);
+    expect(buildOpenScoutLocalEdgeMdnsCommands(input, "linux")).toEqual([
+      { command: "avahi-publish", args: ["-a", "-R", "scout.local", "127.0.0.1"] },
+      { command: "avahi-publish", args: ["-a", "-R", "scout.local", "::1"] },
+      { command: "avahi-publish", args: ["-s", "-H", "scout.local", "Scout Local HTTP", "_http._tcp", "80", "path=/"] },
+    ]);
+    expect(buildOpenScoutLocalEdgeMdnsCommands(input, "win32")).toEqual([]);
   });
 
   test("preserves optional operator-owned site imports outside generated routes", () => {

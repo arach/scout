@@ -111,11 +111,11 @@ const t = initTRPC.context<BridgeContext>().create();
 
 const logged = t.middleware(async ({ path, type, next }) => {
   const start = Date.now();
-  log.info("rpc:req", `-> ${type} ${path}`);
+  log.debug("rpc:req", `-> ${type} ${path}`);
   const result = await next();
   const elapsed = Date.now() - start;
   if (result.ok) {
-    log.info("rpc:res", `✓ ${path} (${elapsed}ms)`);
+    log.debug("rpc:res", `✓ ${path} (${elapsed}ms)`);
   } else {
     log.error("rpc:res", `✗ ${path} (${elapsed}ms)`);
   }

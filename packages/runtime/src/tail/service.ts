@@ -1823,6 +1823,8 @@ export async function readTailEventsForSession(
     discovery?: DiscoverySnapshot;
     limit?: number;
     forceDiscovery?: boolean;
+    /** Exact Tail history also supports Claude/Codex; Observe keeps its own adapters. */
+    includeAllSources?: boolean;
   },
 ): Promise<{ transcript: DiscoveredTranscript; events: TailEvent[] } | null> {
   const normalizedRef = normalizeTailSessionRef(sessionRef);
@@ -1831,7 +1833,7 @@ export async function readTailEventsForSession(
   const discovery = options?.discovery
     ?? await getTailDiscovery(options?.forceDiscovery ?? false);
   const transcript = discovery.transcripts.find(
-    (candidate) => NATIVE_TAIL_SOURCES.has(candidate.source)
+    (candidate) => (options?.includeAllSources || NATIVE_TAIL_SOURCES.has(candidate.source))
       && transcriptMatchesSessionRef(candidate, normalizedRef),
   );
   if (!transcript) return null;

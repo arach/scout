@@ -30,6 +30,7 @@ import {
   terminalHostSupportsControl,
 } from "../terminal-hosts/index.ts";
 import { queryTerminalSessions } from "../db-queries.ts";
+import { readTerminalContext } from "../terminal-context.ts";
 import { readScoutBrokerNodeId } from "../core/broker/service.ts";
 import {
   execSystemFile,
@@ -653,6 +654,17 @@ export function mountTerminalRoutes(app: Hono, deps: TerminalRouteDeps) {
       { ok: created.created, created: created.created, hostId: adapter.id, sessionName, ...(created.reason ? { detail: created.reason } : {}) },
       created.created ? 201 : 502,
     );
+  });
+
+  // Where a terminal is: host, shell, git state of the directory and the
+  // agents live in the same checkout. Emptyish tiles show it under the prompt.
+  app.get("/api/terminal-context", async (c) => {
+    const context = await readTerminalContext(
+      c.req.query("cwd"),
+      terminalSessionInventoryForHop,
+      (session) => readHerdrTopology(session),
+    );
+    return c.json({ ok: true, context });
   });
 
   app.get("/api/terminal-sessions", async (c) => {

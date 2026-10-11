@@ -284,7 +284,7 @@
 }
 
 .s-host-share-seg-label {
-  color: var(--bg);
+  color: var(--on-accent, var(--bg));
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;

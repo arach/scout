@@ -28,6 +28,13 @@ describe("pendingOperatorNeeds", () => {
     }]);
   });
 
+  test("carries a declared permission request kind", () => {
+    const messages = [need("m1", "c1", NOW - 5_000, { requestKind: "permission" }), need("m2", "c2", NOW - 4_000)];
+    const needs = pendingOperatorNeeds({ messages, operatorIds: ["operator"], now: NOW });
+    expect(needs.find((n) => n.messageId === "m1")?.permission).toBe(true);
+    expect(needs.find((n) => n.messageId === "m2")?.permission).toBeUndefined();
+  });
+
   test("an operator message before the need does not answer it, whatever the input order", () => {
     const messages = [reply("c1", NOW - 1_000), need("m1", "c1", NOW - 500), reply("c1", NOW - 2_000)];
     expect(pendingOperatorNeeds({ messages, operatorIds: ["operator"], now: NOW }).map((n) => n.messageId)).toEqual(["m1"]);

@@ -3,9 +3,22 @@ import { describe, expect, test } from "bun:test";
 import { renderScoutActivityList, renderScoutAgentList, renderScoutMessagePostResult } from "./broker.ts";
 
 describe("renderScoutAgentList", () => {
+  test("groups machine-filtered results by node id even when names collide", () => {
+    const entries = ["mini-local-openscout", "mini-openscout"].map((nodeId) => ({
+      agentId: `agent-${nodeId}`, nodeId, nodeName: "mini", projectRoot: "/work",
+      state: "active" as const, messages: 0, lastSeen: null, registrationKind: "broker" as const,
+    }));
+    const rendered = renderScoutAgentList(entries, { groupByMachine: true });
+    for (const entry of entries) expect(rendered).toContain(`mini (${entry.nodeId}):\n${entry.agentId}`);
+    expect(renderScoutAgentList([], { groupByMachine: true })).toContain("No agents match");
+  });
+
   test("renders agent and exact-session route aliases as secondary pointers, not roster rows", () => {
     const rendered = renderScoutAgentList([{
       agentId: "agent-reviewer",
+      nodeId: "node-1",
+      nodeName: "mini",
+      projectRoot: "/work/alpha",
       state: "active",
       messages: 0,
       lastSeen: null,
@@ -42,6 +55,8 @@ describe("renderScoutAgentList", () => {
     }]);
 
     expect(rendered.match(/agent-reviewer/g)?.length).toBe(2);
+    expect(rendered).toContain("machine mini (node-1)");
+    expect(rendered).toContain("project /work/alpha");
     expect(rendered).toContain("Aliases: review → agent-reviewer (r2), patch → session:session-exact (r1)");
   });
 });

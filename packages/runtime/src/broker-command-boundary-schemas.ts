@@ -106,6 +106,7 @@ const scoutRouteTargetSchema: z.ZodType<ScoutRouteTarget> = z.discriminatedUnion
   z.object({
     kind: z.literal("project_path"),
     projectPath: nonEmptyString,
+    host: nonEmptyString.optional(),
     ...routeTargetValueSchema,
   }).passthrough(),
   z.object({
@@ -205,6 +206,7 @@ export function brokerInvocationRequestSchemaFor(
 ): z.ZodType<InvocationRequest & BrokerRouteTargetInput> {
   return z.object({
   id: nonEmptyString,
+  requestId: nonEmptyString.max(256).optional(),
   requesterId: nonEmptyString,
   requesterNodeId: nonEmptyString,
   targetAgentId: nonEmptyString,

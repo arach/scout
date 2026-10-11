@@ -97,6 +97,8 @@ export type ScoutDeliverRejectReason =
   | "missing_target";
 
 export interface ScoutDeliverRequest {
+  /** Caller-supplied, requester-scoped idempotency key. */
+  requestId?: string;
   id?: ScoutId;
   caller?: ScoutCallerContext;
   requesterId?: ScoutId;

@@ -1,4 +1,5 @@
-// Machine inventory — turn four independent observers into one fleet.
+// Machine inventory — turn four independent observers, plus the operator's
+// SSH config, into one fleet.
 //
 // Nothing here decides *what a machine is*; that is `@openscout/protocol`'s
 // `machines.ts`, which is pure and network-free. This module's job is the
@@ -30,6 +31,7 @@ import {
 
 import { herdrSessionsProbe, isHerdrAvailable } from "./system-probes/herdr.js";
 import { lanScanProbe, type LanScanSnapshot } from "./system-probes/lan-scan.js";
+import { readSshConfig, sshConfigEvidence, type SshConfigSnapshot } from "./system-probes/ssh-config.js";
 import { tailscaleStatusProbe, type TailscaleStatusSummary } from "./system-probes/tailscale-status.js";
 import { tmuxSessionsProbe, zellijSessionsProbe } from "./system-probes/tmux.js";
 
@@ -49,6 +51,8 @@ export type MachineEvidenceSources = {
   lan?: LanScanSnapshot | null;
   /** Terminal hosts, already attributed to a machine by the caller. */
   terminalHosts?: readonly HostMachineEvidence[];
+  /** The operator's SSH config: machines they already reach, seen or not. */
+  ssh?: SshConfigSnapshot | null;
   observedAt?: number;
 };
 
@@ -169,6 +173,7 @@ export function buildMachineEvidence(sources: MachineEvidenceSources): MachineEv
     ...tailnetEvidence(sources.tailscale, observedAt),
     ...lanEvidence(sources.lan, observedAt),
     ...(sources.terminalHosts ?? []).map((host) => ({ ...host })),
+    ...sshConfigEvidence(sources.ssh ?? null, observedAt),
   ];
 }
 
@@ -332,6 +337,8 @@ export type CollectMachineEvidenceOptions = {
   /** Force a fresh scan rather than accepting whatever the probes have cached. */
   refresh?: boolean;
   includeTerminalHosts?: boolean;
+  /** Read ~/.ssh/config into the fleet. On by default. */
+  includeSshConfig?: boolean;
 };
 
 /**
@@ -344,7 +351,7 @@ export async function collectMachineEvidence(
   const observedAt = Date.now();
   if (options.refresh) lanScanProbe.invalidate("machines.scan");
 
-  const [tailscale, lan, terminalHosts] = await Promise.all([
+  const [tailscale, lan, terminalHosts, ssh] = await Promise.all([
     // `fresh` without options honours the probe's own TTL, so a non-refresh
     // pass is still cheap. `read` would have returned null on a cold cache and
     // silently dropped the entire tailnet from the first pass after boot.
@@ -361,6 +368,9 @@ export async function collectMachineEvidence(
         nodeId: options.localNodeId ?? null,
         observedAt,
       }),
+    options.includeSshConfig === false
+      ? Promise.resolve(null)
+      : readSshConfig().catch(() => null),
   ]);
 
   return buildMachineEvidence({
@@ -369,6 +379,7 @@ export async function collectMachineEvidence(
     tailscale,
     lan,
     terminalHosts,
+    ssh,
     observedAt,
   });
 }

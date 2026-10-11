@@ -5,6 +5,8 @@ import { join } from "node:path";
 
 import {
   MeshRelayServerTransport,
+  shouldUseModernMcpRoute,
+  startScoutMeshMcpBridge,
   meshBridgeTokenFilePath,
   parseBridgeBoundEnvelope,
   readKeychainSecret,
@@ -216,4 +218,51 @@ test("darwin keychain lookup keeps the security command and ignores the token fi
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("modern bridge routing is gated and legacy or unversioned clients stay legacy", () => {
+  for (const protocol of ["2026-07-28", "2026-10-01", "2027-01-01"]) {
+    expect(shouldUseModernMcpRoute(protocol, false)).toBe(false);
+    expect(shouldUseModernMcpRoute(protocol, true)).toBe(true);
+  }
+  for (const protocol of [undefined, "", "2024-11-05", "2025-03-26"]) {
+    expect(shouldUseModernMcpRoute(protocol, false)).toBe(false);
+    expect(shouldUseModernMcpRoute(protocol, true)).toBe(false);
+  }
+});
+
+test("newer protocol requests use the legacy server when Events is disabled", async () => {
+  let finish!: (value: McpWorkerBoundEnvelope) => void;
+  const response = new Promise<McpWorkerBoundEnvelope>((resolve) => { finish = resolve; });
+  const relay = Bun.serve({
+    port: 0,
+    fetch(request, server) {
+      if (new URL(request.url).pathname === "/v1/mcp/bridge" && server.upgrade(request)) return;
+      return new Response(null, { status: 404 });
+    },
+    websocket: {
+      open(ws) {
+        ws.send(JSON.stringify({
+          v: 1, kind: "mcp_request", id: "modern-disabled",
+          headers: { "mcp-protocol-version": "2026-10-01" },
+          payload: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize",
+            params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "test", version: "1" } } }),
+        }));
+      },
+      message(_ws, data) {
+        const envelope = JSON.parse(String(data));
+        if (envelope.id === "modern-disabled") finish(envelope);
+      },
+    },
+  });
+  const bridge = await startScoutMeshMcpBridge({
+    relayUrl: `http://127.0.0.1:${relay.port}/v1/mcp`, token: "test", senderId: "agent:test",
+    currentDirectory: process.cwd(), toolNames: [],
+    env: { OPENSCOUT_MCP_EVENTS: "0", OPENSCOUT_BROKER_URL: `http://127.0.0.1:${relay.port}` },
+  });
+  try {
+    const result = await response;
+    expect(result.kind).toBe("mcp_response");
+    expect(JSON.parse(result.payload!).result.serverInfo).toBeDefined();
+  } finally { await bridge.close(); relay.stop(true); }
 });

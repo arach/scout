@@ -15,7 +15,7 @@
   border-radius: 12px;
   background: var(--s-bg, oklch(0.118 0.004 260));
   color: var(--s-ink, oklch(0.975 0.006 260));
-  font-family: var(--s-font-sans, Inter, ui-sans-serif, system-ui, sans-serif);
+  font-family: var(--s-font-sans, var(--font-sans));
   font-size: 13px;
 }
 
@@ -55,7 +55,7 @@
 }
 .replay-outpost__hud-dot[data-failed] { background: var(--color-status-error-fg); }
 .replay-outpost__hud-who {
-  font-family: var(--s-font-mono, "JetBrains Mono", ui-monospace, monospace);
+  font-family: var(--s-font-mono, var(--font-mono));
   font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase;
 }
 .replay-outpost__hud-step {

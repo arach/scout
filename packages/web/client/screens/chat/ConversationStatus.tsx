@@ -2,61 +2,51 @@ import { useEffect, useCallback } from "react";
 import { AlertTriangle, Check, CornerDownLeft, ShieldAlert, Sparkles, X } from "lucide-react";
 import { compactAgentId } from "../../lib/agent-labels.ts";
 import { AgentAvatar } from "../../components/AgentAvatar.tsx";
-import type { Agent, FleetAsk, Flight } from "../../lib/types.ts";
+import type { Agent, Flight, OperatorAttentionItem } from "../../lib/types.ts";
+import { isDeclaredApproval } from "../../lib/declared-requests.ts";
 import { type ConversationPresence } from "./conversation-model.ts";
 
-// One breath of the dispatch for the "Re:" context line — never the wall.
-function firstLineExcerpt(text: string): string {
-  const line = text
-    .split(/\r?\n/)
-    .map((part) => part.trim())
-    .find(Boolean) ?? "";
-  const max = 110;
-  return line.length > max ? `${line.slice(0, max - 1).trimEnd()}\u2026` : line;
-}
-
 export function PinnedAskCard({
-  pinnedAsk,
+  request,
   onAnswer,
   onApprove,
   onReject,
   onSteer,
   enableKeyboard = true,
 }: {
-  pinnedAsk: FleetAsk;
+  /** A DECLARED request addressed to the operator (need, question, approval). */
+  request: OperatorAttentionItem;
   onAnswer: () => void;
   onApprove?: () => void;
   onReject?: () => void;
   onSteer?: () => void;
   enableKeyboard?: boolean;
 }) {
-  // The headline is the agent's own word — their question, blocker, or
-  // failure note (`summary`). `task` is the operator's outbound dispatch:
-  // context, never the headline. Echoing the full dispatch back under
-  // "@agent -> You" reads as the agent asking you your own prompt.
-  const askBody = pinnedAsk.summary?.trim() || null;
-  const taskLine = firstLineExcerpt(pinnedAsk.task);
-  const headline = askBody && askBody !== pinnedAsk.task.trim() ? askBody : taskLine;
-  const showTaskContext = headline !== taskLine && taskLine.length > 0;
-  const isApproval = /\b(?:approve|approval|permission|allow|proceed|confirm|gate)\b/i.test(
-    headline,
-  );
+  // The headline is the agent's own declared question. Context (a blocked
+  // reason) sits under it. Approval vs ask comes from the declaration — its
+  // kind or declared permission source — never from the wording.
+  const headline = request.title.trim();
+  const context = request.summary?.trim() || null;
+  const isApproval = isDeclaredApproval(request);
+  // "Approve" only when a real approval decision is wired; otherwise the
+  // primary action is answering in the thread.
+  const canApprove = isApproval && Boolean(onApprove);
+  const agentId = request.agentId ?? request.id;
   const agentDisplayName =
-    pinnedAsk.agentName ?? compactAgentId(pinnedAsk.agentId) ?? pinnedAsk.agentId;
+    request.agentName ?? (request.agentId ? compactAgentId(request.agentId) : null) ?? "Agent";
   // The eyebrow names who is asking and what kind of answer they want. It is
-  // the only place the card says either, so the chips that used to repeat the
-  // name and the kind are gone with it.
+  // the only place the card says either.
   const eyebrow = isApproval
-    ? `${agentDisplayName} needs approval`
+    ? `${agentDisplayName} · Permission request`
     : `${agentDisplayName} asks`;
 
   const handleApproveOrAnswer = useCallback(() => {
-    if (onApprove) {
+    if (canApprove && onApprove) {
       onApprove();
     } else {
       onAnswer();
     }
-  }, [onApprove, onAnswer]);
+  }, [canApprove, onApprove, onAnswer]);
 
   const handleSteer = useCallback(() => {
     if (onSteer) {
@@ -108,9 +98,8 @@ export function PinnedAskCard({
           keeps quiet: no beacon, no "Operator Attention Required". */}
       <AgentAvatar
         agent={{
-          id: pinnedAsk.agentId,
+          id: agentId,
           name: agentDisplayName,
-          harness: pinnedAsk.harness,
           state: "needs",
         }}
         size={44}
@@ -123,8 +112,8 @@ export function PinnedAskCard({
       <div className="s-thread-pinned-ask-body">
         <span className="s-thread-pinned-ask-eyebrow">{eyebrow}</span>
         <p className="s-thread-pinned-ask-text">{headline}</p>
-        {showTaskContext && (
-          <p className="s-thread-pinned-ask-context">Re: {taskLine}</p>
+        {context && (
+          <p className="s-thread-pinned-ask-context">{context}</p>
         )}
       </div>
 
@@ -133,11 +122,11 @@ export function PinnedAskCard({
           type="button"
           className="btn btn--primary s-thread-pinned-ask-btn"
           onClick={handleApproveOrAnswer}
-          title={isApproval ? "Approve this gate [Y]" : "Answer this question [Y]"}
+          title={canApprove ? "Approve this request [Y]" : "Answer this question [Y]"}
         >
           <kbd className="s-kbd">[Y]</kbd>
-          {isApproval ? <Check size={13} strokeWidth={2.2} /> : <CornerDownLeft size={13} />}
-          <span>{isApproval ? "Approve" : "Answer"}</span>
+          {canApprove ? <Check size={13} strokeWidth={2.2} /> : <CornerDownLeft size={13} />}
+          <span>{canApprove ? "Approve" : "Answer"}</span>
         </button>
 
         <button

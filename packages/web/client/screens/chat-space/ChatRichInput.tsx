@@ -9,6 +9,8 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 
+import { type ComposerFormat, FORMATS } from "./composer-formats.tsx";
+
 import {
   deleteCharsBeforeCaret,
   htmlToMarkdown,
@@ -22,13 +24,14 @@ export type ChatRichInputHandle = {
   textBeforeCaret: () => string;
   insertText: (text: string) => void;
   replaceMention: (fromAt: number, label: string) => void;
-  applyFormat: (command: "bold" | "italic" | "code" | "list") => void;
+  applyFormat: (command: ComposerFormat) => void;
 };
 
 export const ChatRichInput = forwardRef<ChatRichInputHandle, {
   value: string;
   placeholder: string;
   disabled?: boolean;
+  onFormatsChange?: (formats: ComposerFormat[]) => void;
   onChange: (markdown: string) => void;
   onKeyDown?: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
   onPaste?: (event: ClipboardEvent<HTMLDivElement>) => void;
@@ -40,6 +43,7 @@ export const ChatRichInput = forwardRef<ChatRichInputHandle, {
   placeholder,
   disabled = false,
   onChange,
+  onFormatsChange,
   onKeyDown,
   onPaste,
   onDragOver,
@@ -72,6 +76,30 @@ export const ChatRichInput = forwardRef<ChatRichInputHandle, {
     paint(value);
   }, [paint, value]);
 
+  const reportFormats = useCallback(() => {
+    const root = rootRef.current;
+    const selection = root?.ownerDocument.getSelection();
+    if (!root || !selection || !root.contains(selection.anchorNode)) return;
+    const node = selection.anchorNode;
+    const element = node instanceof Element ? node : node?.parentElement;
+    const tags: Record<ComposerFormat, string> = { bold: 'b,strong', italic: 'i,em', underline: 'u', strike: 's,strike,del', link: 'a', ol: 'ol', ul: 'ul', quote: 'blockquote', code: 'code', block: 'pre' };
+    const commands: Partial<Record<ComposerFormat, string>> = { bold: 'bold', italic: 'italic', underline: 'underline', strike: 'strikeThrough', ol: 'insertOrderedList', ul: 'insertUnorderedList' };
+    onFormatsChange?.(FORMATS.filter(({ id }) => Boolean(element?.closest(tags[id])) || Boolean(commands[id] && root.ownerDocument.queryCommandState?.(commands[id]!))).map(({ id }) => id));
+  }, [onFormatsChange]);
+  useEffect(() => {
+    document.addEventListener('selectionchange', reportFormats);
+    return () => document.removeEventListener('selectionchange', reportFormats);
+  }, [reportFormats]);
+
+  useEffect(() => {
+    const root = rootRef.current;
+    const pane = root?.closest('.chat-channel, .chat-thread, .chat-side-panel');
+    if (!root || !pane || typeof ResizeObserver === 'undefined') return;
+    const resize = () => root.style.setProperty('--chat-composer-max-height', `${Math.max(42, pane.clientHeight * .5)}px`);
+    const observer = new ResizeObserver(resize); observer.observe(pane); resize();
+    return () => observer.disconnect();
+  }, []);
+
   useImperativeHandle(ref, () => ({
     focus: () => rootRef.current?.focus(),
     textBeforeCaret: () => {
@@ -82,6 +110,16 @@ export const ChatRichInput = forwardRef<ChatRichInputHandle, {
       const root = rootRef.current;
       if (!root) return;
       root.focus();
+      // A popover (emoji, menu) may have taken the selection with it; only a
+      // caret inside the field is honoured, otherwise the text goes at the end.
+      const selection = root.ownerDocument.getSelection();
+      if (selection && (selection.rangeCount === 0 || !root.contains(selection.anchorNode))) {
+        const range = root.ownerDocument.createRange();
+        range.selectNodeContents(root);
+        range.collapse(false);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
       insertTextAtCaret(root, text);
       emit();
     },
@@ -100,24 +138,25 @@ export const ChatRichInput = forwardRef<ChatRichInputHandle, {
       if (!root) return;
       root.focus();
       const doc = root.ownerDocument;
-      if (command === "bold") doc.execCommand("bold");
-      else if (command === "italic") doc.execCommand("italic");
-      else if (command === "list") doc.execCommand("insertUnorderedList");
-      else if (command === "code") {
+      const native: Partial<Record<ComposerFormat, string>> = { bold: 'bold', italic: 'italic', underline: 'underline', strike: 'strikeThrough', ul: 'insertUnorderedList', ol: 'insertOrderedList' };
+      if (native[command]) doc.execCommand(native[command]!);
+      else if (command === 'quote' || command === 'block') doc.execCommand('formatBlock', false, command === 'quote' ? 'blockquote' : 'pre');
+      else if (command === 'link') {
+        const href = doc.defaultView?.prompt('Link URL (https:// or mailto:)');
+        if (href && /^(https?:\/\/|mailto:)/i.test(href)) doc.execCommand('createLink', false, href);
+      } else if (command === 'code') {
         const selection = doc.getSelection();
-        if (!selection || selection.rangeCount === 0) return;
+        if (!selection || !selection.rangeCount) return;
         const range = selection.getRangeAt(0);
-        if (range.collapsed) {
-          insertTextAtCaret(root, "`code`");
-        } else {
-          const wrapped = `\`${selection.toString()}\``;
-          range.deleteContents();
-          insertTextAtCaret(root, wrapped);
-        }
+        const code = doc.createElement('code');
+        code.textContent = selection.toString() || 'code';
+        range.deleteContents(); range.insertNode(code);
+        range.selectNodeContents(code); selection.removeAllRanges(); selection.addRange(range);
       }
+      reportFormats();
       emit();
     },
-  }), [emit]);
+  }), [emit, reportFormats]);
 
   return (
     <div

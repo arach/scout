@@ -7,8 +7,8 @@ OpenScout connects to Grok in **three complementary ways**. This page is the map
 | Path | What it is | When to use it |
 | --- | --- | --- |
 | **Hosted MCP connector** | Grok Bot → `https://mcp.oscout.net` → your online bridge → local broker | Talking to Scout **from** Grok Bot over the internet |
-| **Local host package** ([grok-scout](https://github.com/oscout/grok-scout)) | Installer that writes `scout` into `~/.cursor/mcp.json` so the host runs `scout mcp` locally | Cursor using a Grok model on the Scout machine |
-| **Execution harness** (`--harness grok`) | Scout starts a Grok CLI / ACP session as a worker | Handing work **to** Grok from Scout, Claude, Codex, etc. |
+| **Local host package** ([grok-scout](https://github.com/arach/grok-scout)) | Installer that writes `scout` into `~/.cursor/mcp.json` so the host runs `scout mcp` locally | Cursor using a Grok model on the Scout machine |
+| **Execution harness** (`--harness grok-acp`) | Scout starts a Grok CLI / ACP session as a worker | Handing work **to** Grok from Scout, Claude, Codex, etc. |
 
 They share one broker contract: messages, asks, flights, and durable handles. They are not substitutes for each other.
 
@@ -89,12 +89,12 @@ When Cursor hosting Grok agents runs on the **same machine** as Scout, you can p
 
 | | |
 | --- | --- |
-| Repository | [github.com/oscout/grok-scout](https://github.com/oscout/grok-scout) |
-| Package page | [oscout.github.io/grok-scout](https://oscout.github.io/grok-scout/) |
+| Repository | [github.com/arach/grok-scout](https://github.com/arach/grok-scout) |
+| Package page | [arach.github.io/grok-scout](https://arach.github.io/grok-scout/) |
 | What it installs | A `scout` entry in `~/.cursor/mcp.json` (or project `.cursor/mcp.json`) that launches `scout mcp` |
 
 ```bash
-git clone https://github.com/oscout/grok-scout
+git clone https://github.com/arach/grok-scout
 cd grok-scout
 bun run install:global   # or: bun run install:project
 scout doctor
@@ -112,10 +112,10 @@ Scout can also **launch** Grok as a worker:
 
 ```bash
 scout runtimes --json
-scout ask --project /path/to/repo --harness grok --notify "Review the auth change"
+scout ask --project /path/to/repo --harness grok-acp --notify "Review the auth change"
 ```
 
-Requires a ready Grok runtime. Use `scout runtimes --json` to discover supported harness/model/effort combinations and follow the selected runtime's authentication instructions. Check the returned invocation's execution resolution before claiming a particular model ran.
+The current catalog lists `grok-acp` for Grok CLI over ACP. This requires a ready Grok runtime. Use `scout runtimes --json` to discover supported harness/model/effort combinations and follow the selected runtime's authentication instructions. Check the returned invocation's execution resolution before claiming a particular model ran.
 
 Use this when another agent (or you) wants Grok to **do** the work inside Scout's flight model. Use the hosted connector or grok-scout when Grok Bot should **call** Scout.
 
@@ -141,8 +141,9 @@ Prefer project-path + optional harness over guessing names like `claude.main`. F
 
 ## Related
 
+- [Connect Claude Code and Grok for research and code review](https://openscout.app/blog/claude-code-grok-collaboration) — a complete brief, implementation handoff, and review workflow
 - [Host integrations directory](./integrations.md) — full companion map
 - [Quickstart](./quickstart.md) — healthy local Scout
 - [Agent integration contract](./agent-integration-contract.md) — plugging runtimes into Scout
 - [Learn 11 · The broker contract](./learn-11-the-broker-contract.md) — records and MCP surface
-- [grok-scout](https://github.com/oscout/grok-scout) · [cursor-scout](https://github.com/oscout/cursor-scout) — local MCP packaging twins
+- [grok-scout](https://github.com/arach/grok-scout) · [cursor-scout](https://github.com/oscout/cursor-scout) — local MCP packaging twins

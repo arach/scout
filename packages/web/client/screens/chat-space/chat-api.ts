@@ -10,6 +10,7 @@ import type { NormalizedApprovalRequest } from "@openscout/agent-sessions/client
  */
 
 import { refreshSessionAuth } from "../../lib/api.ts";
+import type { ChatChannelLastMessage } from "../../../shared/chat-last-message.ts";
 
 import type {
   ChatReadState,
@@ -45,6 +46,8 @@ export type ChatMessage = Pick<
   actorName?: string;
 };
 
+export type { ChatChannelLastMessage };
+
 export interface ChatViewer {
   actorId: string;
   displayName: string;
@@ -77,6 +80,11 @@ export interface ChatBootstrap {
    */
   space?: string;
   spaces?: ChatSpaceView[];
+  /**
+   * Each room's last spoken root message, keyed by channel id. Absent from
+   * servers that predate it; a room missing from the map has none to show.
+   */
+  lastMessages?: Record<string, ChatChannelLastMessage>;
 }
 
 /**

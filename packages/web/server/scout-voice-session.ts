@@ -661,13 +661,7 @@ export async function synthesizeScoutVoiceSpeech(input: {
   };
   sessions.set(sessionId, session);
   const playback: ScoutVoiceSpeechPlayback = input.playback ?? "browser";
-  if (playback === "browser" && !input.modelId) {
-    throw new ScoutVoiceSessionError(
-      "speech_model_required",
-      "Browser playback needs a resolved speech model.",
-      500,
-    );
-  }
+  // No model named: Scout Menu synthesizes with Settings › Voice.
   queueHostCommand(host.hostId, {
     type: "speech.synthesize",
     sessionId,

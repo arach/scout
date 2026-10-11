@@ -732,7 +732,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: var(--tracking-md);
-  color: var(--bg);
+  color: var(--on-accent, var(--bg));
   background: var(--accent);
   border: none;
   border-radius: var(--radius-sm);

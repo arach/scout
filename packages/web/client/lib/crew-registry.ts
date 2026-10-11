@@ -8,6 +8,7 @@
  *   - Lights: DOING (live status ring & eye expression module)
  */
 
+import edgeAnchors from "./crew-edge-anchors.json";
 import { makeRng } from "./agent-identity.ts";
 
 export const CREW_PACK_BASE_URL = "/crew";
@@ -219,7 +220,18 @@ export const SHEET_FRAMES = [
  * stands. Only Sprout has a set today; Wrench took the same five cleanly, so a
  * new member's poses are an art order, not a code change.
  */
-export type PoseName = "turn-left" | "turn-right" | "wave" | "run-a" | "run-b";
+export const EDGE_POSE_NAMES = ["hang-from-top", "cling-left", "cling-right", "sit-on-ledge"] as const;
+export type EdgePoseName = typeof EDGE_POSE_NAMES[number];
+export type PoseName = "turn-left" | "turn-right" | "wave" | "run-a" | "run-b" | EdgePoseName;
+/** Master-canvas contact coordinates, separate from the image box and baseline. */
+export type EdgePoseArt = { w: number; h: number; contact: readonly [number, number] };
+export const CREW_EDGE_POSES = edgeAnchors as unknown as Record<string, Partial<Record<EdgePoseName | "rest", EdgePoseArt>>>;
+export function edgePoseArt(slug: string | undefined | null, pose: EdgePoseName | "rest"): EdgePoseArt | undefined {
+  return slug ? CREW_EDGE_POSES[slug.toLowerCase()]?.[pose] : undefined;
+}
+export function hasEdgePoses(slug: string | undefined | null): boolean {
+  return EDGE_POSE_NAMES.every(pose => Boolean(edgePoseArt(slug, pose)));
+}
 
 export const POSE_NAMES: readonly PoseName[] = ["turn-left", "turn-right", "wave", "run-a", "run-b"];
 
@@ -229,6 +241,7 @@ export const CREW_POSES: Record<string, { dir: string; poses: readonly PoseName[
 
 export function hasPose(slug: string | undefined | null, pose: PoseName): boolean {
   if (!slug) return false;
+  if ((EDGE_POSE_NAMES as readonly string[]).includes(pose)) return Boolean(edgePoseArt(slug, pose as EdgePoseName));
   return CREW_POSES[slug.toLowerCase()]?.poses.includes(pose) ?? false;
 }
 
@@ -240,6 +253,7 @@ export function hasPose(slug: string | undefined | null, pose: PoseName): boolea
 export function poseAsset(slug: string, pose?: PoseName | "rest" | null): string {
   const key = slug.toLowerCase();
   if (pose && pose !== "rest" && hasPose(key, pose)) {
+    if ((EDGE_POSE_NAMES as readonly string[]).includes(pose)) return `edge-poses-v1/${key}/${pose}.webp`;
     return `${CREW_POSES[key]!.dir}/${pose}.webp`;
   }
   return `${key}-bust.webp`;

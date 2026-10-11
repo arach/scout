@@ -12,7 +12,10 @@ import {
   type PairingSession,
 } from "./pairing-session-agents.js";
 import type { RuntimeSnapshot } from "./scout-dispatcher.js";
+import type { LiveTerminalSession } from "./live-terminal-session.js";
 import {
+  buildLiveTerminalEndpointBinding,
+  buildLiveTerminalSessionAgent,
   buildManagedLocalSessionAgent,
   buildManagedLocalSessionPairingEndpointBinding,
   buildManagedPairingAgent,
@@ -26,6 +29,7 @@ import {
   pairingExternalSessionId,
   resolveManagedSessionAttachTarget,
   sameSerializedRecord,
+  suggestedLiveTerminalSelector,
   suggestedManagedLocalSessionSelector,
   uniqueManagedAgentSelector,
   updateManagedSessionAgent,
@@ -65,12 +69,14 @@ export type ManagedPairingDetachInput = {
 
 export type ManagedLocalSessionAttachInput = {
   externalSessionId: string;
-  transport: ManagedLocalSessionTransport;
+  transport: ManagedLocalSessionTransport | "tmux" | "ghostty";
   cwd: string;
   projectRoot?: string;
   agentId?: string;
   alias?: string;
   displayName?: string;
+  /** Required with transport "tmux" / "ghostty": the operator's own live harness. */
+  liveTerminal?: LiveTerminalSession;
 };
 
 export type ManagedLocalSessionDetachInput = {
@@ -308,6 +314,10 @@ export class BrokerManagedSessionService {
   async attachManagedLocalSession(
     input: ManagedLocalSessionAttachInput,
   ): Promise<{ agentId: string; selector: string | null; endpointId: string; sessionId: string }> {
+    if (input.transport === "tmux" || input.transport === "ghostty") {
+      return this.attachLiveTerminalSession(input);
+    }
+
     const externalSessionId = input.externalSessionId.trim();
     if (!externalSessionId) {
       throw new Error("externalSessionId is required");
@@ -408,6 +418,80 @@ export class BrokerManagedSessionService {
       selector: agent.selector ?? agent.defaultSelector ?? null,
       endpointId: endpoint.id,
       sessionId: endpoint.sessionId ?? session.id,
+    };
+  }
+
+  /**
+   * Bind an agent to a harness the operator is running in their own terminal.
+   * Delivery types into that surface; nothing is spawned beside it.
+   */
+  private async attachLiveTerminalSession(
+    input: ManagedLocalSessionAttachInput,
+  ): Promise<{ agentId: string; selector: string | null; endpointId: string; sessionId: string }> {
+    const live = input.liveTerminal;
+    const surface = live?.surface;
+    const surfaceOk = surface?.backend === "tmux"
+      ? Boolean(surface.pane?.trim() && surface.session?.trim())
+      : surface?.backend === "ghostty" && Boolean(surface.terminalId?.trim());
+    if (!live || !surfaceOk || surface?.backend !== input.transport || !Number.isInteger(live.pid) || !live.tty?.trim()) {
+      throw new Error(`${input.transport} attach needs liveTerminal { harness, pid, tty, surface } for that backend`);
+    }
+
+    const cwd = resolve(input.cwd.trim() || process.cwd());
+    const projectRoot = resolve(input.projectRoot?.trim() || cwd);
+    const requestedSelector = input.alias?.trim()
+      ? normalizeManagedAgentSelector(input.alias)
+      : undefined;
+    const snapshot = this.options.runtime.snapshot();
+    const selectorOptions = this.selectorOptions();
+    const existingAgent = resolveManagedSessionAttachTarget(snapshot, {
+      agentId: input.agentId,
+      selector: requestedSelector,
+    }, selectorOptions);
+    const suggested = suggestedLiveTerminalSelector({ harness: live.harness, cwd, projectRoot });
+
+    const agent = existingAgent
+      ? updateManagedSessionAgent(existingAgent, {
+        selector: requestedSelector ?? existingAgent.selector ?? undefined,
+        displayName: input.displayName,
+      })
+      : buildLiveTerminalSessionAgent({
+        live,
+        selector: uniqueManagedAgentSelector(snapshot, requestedSelector ?? suggested, selectorOptions),
+        cwd,
+        projectRoot,
+        displayName: input.displayName,
+        nodeId: this.options.nodeId,
+        createId: this.options.createId,
+      });
+
+    const existingEndpoint = managedLocalSessionEndpointForAgent(snapshot, agent.id, this.options.nodeId);
+    const endpoint = buildLiveTerminalEndpointBinding({
+      agentId: agent.id,
+      live,
+      cwd,
+      projectRoot,
+      existingEndpoint: existingEndpoint?.transport === live.surface.backend ? existingEndpoint : null,
+      selector: agent.selector ?? agent.defaultSelector ?? null,
+      definitionId: agent.handle ?? agent.displayName,
+      nodeId: this.options.nodeId,
+    });
+
+    if (existingEndpoint && existingEndpoint.id !== endpoint.id) {
+      if (existingEndpoint.metadata?.attachedLive === true) {
+        await this.options.persistEndpoint({ ...existingEndpoint, state: "offline" });
+      } else {
+        await this.options.shutdownLocalSessionEndpoint(existingEndpoint).catch(() => undefined);
+      }
+    }
+    await this.options.upsertAgent(agent);
+    await this.options.persistEndpoint(endpoint);
+
+    return {
+      agentId: agent.id,
+      selector: agent.selector ?? agent.defaultSelector ?? null,
+      endpointId: endpoint.id,
+      sessionId: live.nativeSessionId ?? endpoint.sessionId ?? endpoint.id,
     };
   }
 

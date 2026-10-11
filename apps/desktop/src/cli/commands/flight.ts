@@ -21,6 +21,7 @@ type ScoutFlightCommandOptions =
 
 type ScoutFlightLinks = {
   follow: string | null;
+  work: string | null;
   tail: string | null;
   session: string | null;
   agent: string | null;
@@ -211,7 +212,7 @@ export function renderFlightCommandResult(result: ScoutFlightCommandResult): str
   if (result.summary) lines.push(`Summary: ${result.summary}`);
   if (result.output) lines.push(`Output:\n${result.output}`);
   if (result.error) lines.push(`Error: ${result.error}`);
-  if (result.follow.links.follow) lines.push(`Follow: ${result.follow.links.follow}`);
+  if (result.follow.links.follow) lines.push(`Follow the task: ${result.follow.links.follow}`);
   if (result.nextAction) lines.push(`Next: ${result.nextAction}`);
 
   return lines.join("\n");
@@ -254,15 +255,14 @@ function buildFlightFollowHandles(
     ?? metadataDispatchAckStringValue(flight.metadata, "sessionId");
   const bindingRef = metadataStringValue(flight.metadata, "bindingRef")
     ?? flight.id.slice(-8);
-  const origin = resolveScoutWebOrigin(env);
-  const links = buildFlightLinks(origin, {
+  const links = buildFlightLinks({
     flightId: flight.id,
     invocationId: flight.invocationId,
     conversationId,
     workId,
     sessionId,
     targetAgentId: flight.targetAgentId,
-  });
+  }, env);
 
   return {
     invocationId: flight.invocationId,
@@ -277,47 +277,43 @@ function buildFlightFollowHandles(
   };
 }
 
-function buildFlightLinks(
-  origin: string,
+export function buildFlightLinks(
   ids: {
-    flightId: string;
-    invocationId: string;
-    conversationId: string | null;
-    workId: string | null;
-    sessionId: string | null;
-    targetAgentId: string;
+    flightId?: string | null;
+    invocationId?: string | null;
+    conversationId?: string | null;
+    workId?: string | null;
+    sessionId?: string | null;
+    targetAgentId?: string | null;
   },
+  env: NodeJS.ProcessEnv,
 ): ScoutFlightLinks {
+  const origin = resolveScoutWebOrigin(env);
   const tailPath = buildFollowPath(ids, "tail");
   const sessionPath = buildFollowPath(ids, "session");
+  const work = ids.workId ? buildScoutPath(origin, `/work/${encodeURIComponent(ids.workId)}`) : null;
   return {
-    follow: tailPath ? buildScoutPath(origin, tailPath) : null,
+    follow: work ?? (sessionPath ? buildScoutPath(origin, sessionPath) : null),
+    work,
     tail: tailPath ? buildScoutPath(origin, tailPath) : null,
     session: sessionPath ? buildScoutPath(origin, sessionPath) : null,
-    agent: buildScoutPath(origin, `/agents/${encodeURIComponent(ids.targetAgentId)}?tab=message`),
+    agent: ids.targetAgentId ? buildScoutPath(origin, `/agents/${encodeURIComponent(ids.targetAgentId)}?tab=message`) : null,
   };
 }
 
 function buildFollowPath(
-  ids: {
-    flightId: string;
-    invocationId: string;
-    conversationId: string | null;
-    workId: string | null;
-    sessionId: string | null;
-    targetAgentId: string;
-  },
+  ids: Parameters<typeof buildFlightLinks>[0],
   preferredView: "tail" | "session",
-): string {
+): string | null {
   const params = new URLSearchParams();
   params.set("view", preferredView);
-  params.set("flightId", ids.flightId);
-  params.set("invocationId", ids.invocationId);
+  if (ids.flightId) params.set("flightId", ids.flightId);
+  if (ids.invocationId) params.set("invocationId", ids.invocationId);
   if (ids.conversationId) params.set("conversationId", ids.conversationId);
   if (ids.workId) params.set("workId", ids.workId);
   if (ids.sessionId) params.set("sessionId", ids.sessionId);
-  params.set("targetAgentId", ids.targetAgentId);
-  return `/follow?${params.toString()}`;
+  if (ids.targetAgentId) params.set("targetAgentId", ids.targetAgentId);
+  return params.size > 1 ? `/follow?${params.toString()}` : null;
 }
 
 function buildScoutPath(origin: string, path: string): string {

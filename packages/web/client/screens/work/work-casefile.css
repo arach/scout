@@ -74,7 +74,7 @@
 .s-wc-icon-btn:hover { color: var(--ink); }
 .s-wc-btn-strong {
   display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; box-sizing: border-box;
-  border-radius: 3px; background: var(--ink); color: var(--bg);
+  border-radius: 3px; background: var(--ink); color: var(--on-accent, var(--bg));
   font: 600 12px/1 var(--font-sans); text-decoration: none; white-space: nowrap;
 }
 .s-wc-btn-strong:hover { background: color-mix(in srgb, var(--ink) 88%, var(--bg)); }

@@ -1,7 +1,14 @@
+import { createHash } from "node:crypto";
+import { BrokerRequestReceipts } from "./broker-request-receipts.js";
+import { hasRetiredEndpointRegistration } from "./broker-endpoint-selection.js";
 import { handleBrokerAccessRoute, type BrokerAccessHttpDeps } from "./broker-access-http-routes.js";
+import { handleBrokerMcpEvents } from "./broker-mcp-event-routes.js";
+import type { BrokerMcpEvents } from "./broker-mcp-events.js";
+import { handleBrokerMeshApprovalsRoute, type MeshApprovalsHttpDeps } from "./mesh-approvals.js";
 import type { IntegrationSlackEvents } from "./integration-slack-events.js";
 import type { IntegrationSlackDeliveryService } from "./integration-slack-delivery.js";
 import { BrokerIntegrationSetupService, IntegrationSetupError } from "./broker-integration-setup.js";
+import { deckLanes } from "./deck-lanes.js";
 import { isAllowedHostWebRequest, type HostWebRequest, type HostWebResponse } from "./host-web-request.js";
 import { ChatQuestionError } from "./chat-question-transition.js";
 import { ChatMessageCorrectionError } from "@openscout/protocol";
@@ -28,6 +35,7 @@ import type {
   MessageRecord,
   ScoutRendezvousRequest,
   ScoutDeliverRequest,
+  ScoutDeliverResponse,
   ScoutDispatchRecord,
   NodeDefinition,
   RouteAliasListRequest,
@@ -138,7 +146,7 @@ import { normalizeConversationTitle } from "./conversation-title.js";
 export type BrokerHttpRuntime = {
   /** Metadata-only peek: endpoint readers must not detach/message-scan the registry. */
   peek?: () => { endpoints: Record<string, AgentEndpoint> };
-  snapshot: () => { nodes: Record<string, NodeDefinition>; conversations: Record<string, ConversationDefinition> };
+  snapshot: () => { nodes: Record<string, NodeDefinition>; conversations: Record<string, ConversationDefinition>; messages?: Record<string, MessageRecord>; invocations?: Record<string, InvocationRequest> };
   recentEvents: (limit: number) => unknown;
   collaborationRecord: (recordId: string) => CollaborationRecord | undefined;
   flightForInvocation: (invocationId: string) => FlightRecord | undefined;
@@ -183,6 +191,10 @@ export type BrokerHttpRouterDeps = {
   meshId: string;
   operatorActorId: string;
   runtime: BrokerHttpRuntime;
+  requestReceipts?: BrokerRequestReceipts;
+  mcpEvents?: BrokerMcpEvents;
+  /** Cross-machine approvals: share this machine's with chosen peers, watch theirs. */
+  meshApprovals?: MeshApprovalsHttpDeps;
   journal: BrokerHttpJournal;
   knownInvocations: Map<string, InvocationRequest>;
   brokerService: ActiveScoutBrokerService;
@@ -460,6 +472,8 @@ export function createBrokerHttpRouter(
     guest,
   } = deps;
 
+  const requestReceipts = deps.requestReceipts ?? new BrokerRequestReceipts();
+
   return async function routeRequest(request: RuntimeHttpRequestLike, response: RuntimeHttpResponseLike): Promise<void> {
   const method = request.method ?? "GET";
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? `${host}:${port}`}`);
@@ -483,6 +497,12 @@ export function createBrokerHttpRouter(
     json(response, 503, { error: "access_unavailable" }); return;
   }
   if (request.transportContext?.scoped) { json(response, 403, { error: "access_denied" }); return; }
+  if (method === "POST" && url.pathname === "/v1/mcp-events") {
+    await handleBrokerMcpEvents(request, response, deps.mcpEvents); return;
+  }
+  if (url.pathname.startsWith("/v1/mesh/approvals/") || url.pathname.startsWith("/v1/approvals/remote")) {
+    if (await handleBrokerMeshApprovalsRoute(request, response, url, method, deps.meshApprovals ?? {})) return;
+  }
   if (guest && await handleBrokerGuestRoute(request, response, url, method, guest)) return;
   const denyRemoteMutation = (): boolean => {
     if (request.transportContext?.transport !== "remote") return false;
@@ -536,6 +556,21 @@ export function createBrokerHttpRouter(
     json(response, forwarded.status, forwarded.body);
     return true;
   };
+
+  if (method === "POST" && url.pathname === "/v1/surfaces/deck") {
+    if (denyRemoteMutation()) return;
+    try {
+      const body = await readRequestBody(request) as { action?: string; agentId?: string; text?: string; connect?: boolean };
+      if (!body || typeof body.agentId !== "string" || !body.agentId.trim()) return badRequest(response, "agentId is required");
+      const id = body.agentId;
+      if (body.action === "snapshot") return json(response, 200, await deckLanes.snapshot(id, body.connect === true));
+      if (body.action === "interrupt") return json(response, 200, await deckLanes.interrupt(id));
+      if ((body.action === "start" || body.action === "steer") && typeof body.text === "string" && body.text.trim() && body.text.length <= 65536) {
+        return json(response, 200, await deckLanes[body.action](id, body.text));
+      }
+      return badRequest(response, "Invalid Deck action or text");
+    } catch (error) { return badRequest(response, error instanceof Error ? error.message : String(error)); }
+  }
 
   if (method === "POST" && (url.pathname === "/v1/external-sessions/ack" || url.pathname === "/v1/external-sessions/poll" || url.pathname === "/v1/external-sessions/attach" || url.pathname === "/v1/external-sessions/get" || url.pathname === "/v1/external-sessions/reply")) {
     if (!deps.externalSessionService) { json(response, 503, { error: "external_sessions_unavailable" }); return; }
@@ -1827,7 +1862,10 @@ export function createBrokerHttpRouter(
       notFound(response);
       return;
     }
-    json(response, 200, await brokerService.readMeshNodeState());
+    json(response, 200, await brokerService.readMeshNodeState({
+      ...(url.searchParams.get("projectRoot") ? { projectRoot: url.searchParams.get("projectRoot")! } : {}),
+      ...(url.searchParams.get("agentId") ? { agentId: url.searchParams.get("agentId")! } : {}),
+    }));
     return;
   }
 
@@ -2253,9 +2291,45 @@ export function createBrokerHttpRouter(
     return;
   }
 
+  if (method === "GET" && url.pathname.startsWith("/v1/request-receipts/")) {
+    const key = decodeURIComponent(url.pathname.slice("/v1/request-receipts/".length));
+    const requesterId = url.searchParams.get("requesterId") || "";
+    const operation = url.searchParams.get("operation") || "deliver";
+    let receipt = requestReceipts.get(requesterId, key, operation);
+    // The broker can die after committing canonical work but before saving its
+    // receipt. Recover only from positive evidence; absence never authorizes replacement.
+    if (receipt?.state === "unknown") {
+      const snapshot = runtime.snapshot();
+      if (operation === "deliver") {
+        const message = Object.values(snapshot.messages ?? {}).find(m => m.actorId === requesterId && m.metadata?.requestId === key);
+        const invocation = message && Object.values(snapshot.invocations ?? {}).find(i => i.messageId === message.id);
+        const flight = invocation && runtime.flightForInvocation(invocation.id);
+        const conversation = message && snapshot.conversations[message.conversationId];
+        if (message && conversation && (flight || message.metadata?.requestIntent === "tell")) {
+          receipt = requestReceipts.recover(requesterId, key, operation, {
+            kind: "delivery", accepted: true, conversation, message,
+            ...(flight ? { flight, targetAgentId: flight.targetAgentId } : {}),
+          });
+        }
+      } else if (operation === "invoke") {
+        const invocation = Object.values(snapshot.invocations ?? {}).find(i => i.requesterId === requesterId && i.requestId === key);
+        const flight = invocation && runtime.flightForInvocation(invocation.id);
+        if (invocation && flight) receipt = requestReceipts.recover(requesterId, key, operation,
+          { accepted: true, invocationId: invocation.id, flightId: flight.id, targetAgentId: flight.targetAgentId, state: flight.state, flight });
+      }
+    }
+    json(response, 200, { receipt });
+    return;
+  }
+
   if (method === "POST" && url.pathname === "/v1/messages") {
     try {
-      const message = await readRequestBody<MessageRecord>(request);
+      let message = await readRequestBody<MessageRecord>(request);
+      if (message.requestId) {
+        if (!message.requestId.trim() || message.requestId.length > 256) throw new Error("invalid message requestId");
+        const id = `msg.request.${createHash("sha256").update(JSON.stringify([message.actorId, message.requestId])).digest("hex")}`;
+        message = { ...message, id, metadata: { ...message.metadata, clientMessageId: id } };
+      }
       const result = await brokerService.postConversationMessage?.(message);
       json(response, 200, result);
     } catch (error) {
@@ -2335,12 +2409,28 @@ export function createBrokerHttpRouter(
     try {
       const payload = await readValidatedRequestBody(request, brokerDeliverRequestSchema);
       if (
-        payload.target?.kind === "route_alias"
+        !payload.requestId && payload.target?.kind === "route_alias"
         && await forwardAliasIfRemote(payload.target.scope?.nodeId, url.pathname, "POST", payload)
       ) return;
-      const result = brokerService.deliver
-        ? await brokerService.deliver(payload, { signal })
-        : await deliveryAcceptanceService.accept(payload, { signal });
+      if (payload.requestId) {
+        if (typeof payload.requestId !== "string") throw new Error("invalid requestId");
+        payload.messageMetadata = { ...payload.messageMetadata, requestId: payload.requestId, requestIntent: payload.intent };
+        payload.invocationMetadata = { ...payload.invocationMetadata, requestId: payload.requestId };
+      }
+      const accept = async (): Promise<ScoutDeliverResponse> => {
+        if (payload.requestId && payload.target?.kind === "route_alias" && payload.target.scope?.nodeId && forwardRouteAliasRequest) {
+          const forwarded = await forwardRouteAliasRequest({ nodeSelector: payload.target.scope.nodeId, path: url.pathname, method: "POST", body: payload });
+          if (forwarded) {
+            if (forwarded.status >= 500) throw new Error("forwarded request outcome unknown");
+            return forwarded.body as ScoutDeliverResponse;
+          }
+        }
+        return brokerService.deliver ? brokerService.deliver(payload, { signal }) : deliveryAcceptanceService.accept(payload, { signal });
+      };
+      const result = payload.requestId
+        ? await requestReceipts.run(payload.caller?.actorId || payload.requesterId || operatorActorId,
+            payload.requestId, "deliver", payload, accept)
+        : await accept();
       throwIfAborted(signal);
       json(
         response,
@@ -2365,16 +2455,56 @@ export function createBrokerHttpRouter(
         brokerInvocationRequestSchemaFor(runtimeCatalogSnapshot?.catalog),
       );
       if (
-        payload.target?.kind === "route_alias"
+        !payload.requestId && payload.target?.kind === "route_alias"
         && await forwardAliasIfRemote(payload.target.scope?.nodeId, url.pathname, "POST", payload)
       ) return;
-      const result = brokerService.invokeAgent
-        ? await brokerService.invokeAgent(payload)
-        : await handleInvocationRequest(payload);
+      const invoke = async () => {
+        if (payload.requestId && payload.target?.kind === "route_alias" && payload.target.scope?.nodeId && forwardRouteAliasRequest) {
+          const forwarded = await forwardRouteAliasRequest({ nodeSelector: payload.target.scope.nodeId, path: url.pathname, method: "POST", body: payload });
+          if (forwarded) {
+            if (forwarded.status >= 500) throw new Error("forwarded request outcome unknown");
+            return forwarded.body as Awaited<ReturnType<typeof handleInvocationRequest>>;
+          }
+        }
+        return brokerService.invokeAgent ? brokerService.invokeAgent(payload) : handleInvocationRequest(payload);
+      };
+      const result = payload.requestId
+        ? await requestReceipts.run(payload.requesterId, payload.requestId, "invoke", payload, invoke)
+        : await invoke();
       json(response, 202, result);
     } catch (error) {
       badRequest(response, error);
     }
+    return;
+  }
+
+  // Generic native-owner control only. Room policy/state/loop remains in scout-listening.
+  if (url.pathname === "/v1/native-session-attention" && method === "POST") {
+    if (request.transportContext?.transport === "remote" || request.headers["x-openscout-forwarded-node-id"]
+      || request.headers.origin) { json(response, 403, { error: "machine_local_only" }); return; }
+    try {
+      const input = await readRequestBody<any>(request, { maxBytes: 8192, requireJsonContentType: true });
+      const endpoint = typeof input?.endpointId === "string" ? runtime.peek?.().endpoints[input.endpointId] : undefined;
+      if (!endpoint || endpoint.nodeId !== nodeId) { json(response, 200, { state: "unknown" }); return; }
+      if (input.action !== undefined && (!["revive", "steer"].includes(input.action)
+        || typeof input.sessionId !== "string" || typeof input.token !== "string"
+        || typeof input.prompt !== "string" || !input.prompt.trim() || Buffer.byteLength(input.prompt) > 4096)) {
+        json(response, 400, { error: "invalid_native_input" }); return;
+      }
+      const { nativeSessionAttention } = await import("./native-session-attention.js");
+      json(response, 200, await nativeSessionAttention(endpoint, input.action === undefined ? undefined : input, () => {
+        const current = runtime.peek?.().endpoints[input.endpointId];
+        return !!current && current.nodeId === nodeId && current.agentId === endpoint.agentId
+          && current.sessionId === endpoint.sessionId && current.transport === endpoint.transport
+          && current.metadata?.agentName === endpoint.metadata?.agentName
+          && current.metadata?.runtimeInstanceId === endpoint.metadata?.runtimeInstanceId
+          && current.metadata?.runtimeSessionId === endpoint.metadata?.runtimeSessionId
+          && current.metadata?.definitionId === endpoint.metadata?.definitionId
+          && !current.pane && current.metadata?.placement === "background"
+          && !["stopped", "superseded"].includes(current.state)
+          && !hasRetiredEndpointRegistration(current);
+      }));
+    } catch { json(response, 503, { error: "native_submission_unknown" }); }
     return;
   }
 

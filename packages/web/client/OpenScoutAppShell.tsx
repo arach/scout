@@ -10,6 +10,7 @@ import { ScoutMark } from "./components/ScoutMark.tsx";
 import { DevFlagToggle } from "./components/DevFlagToggle.tsx";
 import { isScoutDevToolsAvailable } from "./lib/use-scout-dev-flags.ts";
 import { CommandPalette, TerminalDrawer } from "@hudsonkit/overlays";
+import { GlassAppFrame } from "./screens/glass/GlassAppFrame.tsx";
 
 import {
   CanvasMinimapProvider,
@@ -87,6 +88,8 @@ import { routeHasMeaningfulInspector } from "./scout/sidebar/inspector-visibilit
 import { nextRightPanelToggle } from "./scout/sidebar/right-panel-toggle.ts";
 
 interface OpenScoutAppShellProps {
+  /** Glass: every screen on the see-through window, no chrome (screens/glass/GlassAppFrame.tsx). */
+  glass?: boolean;
   app: HudsonApp;
 }
 
@@ -239,7 +242,7 @@ function ScoutNavigationBar({ title, center, actions, search }: ScoutNavigationB
   );
 }
 
-export function OpenScoutAppShell({ app }: OpenScoutAppShellProps) {
+export function OpenScoutAppShell({ app, glass = false }: OpenScoutAppShellProps) {
   return (
     <FeatureFlagsProvider
       registry={scoutFlags}
@@ -250,7 +253,7 @@ export function OpenScoutAppShell({ app }: OpenScoutAppShellProps) {
     >
       <app.Provider>
         <CanvasMinimapProvider>
-          <OpenScoutAppShellInner app={app} />
+          {glass ? <GlassAppFrame app={app} /> : <OpenScoutAppShellInner app={app} />}
         </CanvasMinimapProvider>
       </app.Provider>
     </FeatureFlagsProvider>
@@ -374,7 +377,25 @@ function OpenScoutAppShellInner({ app }: { app: HudsonApp }) {
   const [showActivityLog, setShowActivityLog] = useState(false);
 
   // Legacy left-panel key — kept during soak; sidebar uses its own key.
-  const [leftCollapsed, setLeftCollapsed] = usePersistentState(`appshell.${app.id}.left`, false);
+  const [storedLeftCollapsed, setStoredLeftCollapsed] = usePersistentState(`appshell.${app.id}.left`, false);
+  // The World (/ops/week) takes the full width: its context rail opens collapsed every
+  // visit. Opening it there is a route-scoped override and never rewrites the stored pref.
+  const worldRoute = route.view === "ops" && route.mode === "week";
+  const [worldLeftOpen, setWorldLeftOpen] = useState(false);
+  useEffect(() => {
+    if (!worldRoute) setWorldLeftOpen(false);
+  }, [worldRoute]);
+  const leftCollapsed = worldRoute ? !worldLeftOpen : storedLeftCollapsed;
+  const setLeftCollapsed = useCallback(
+    (next: boolean | ((collapsed: boolean) => boolean)) => {
+      if (!worldRoute) {
+        setStoredLeftCollapsed(next);
+        return;
+      }
+      setWorldLeftOpen((open) => !(typeof next === "function" ? next(!open) : next));
+    },
+    [worldRoute, setStoredLeftCollapsed],
+  );
   const [rightCollapsed, setRightCollapsed] = usePersistentState(`appshell.${app.id}.right`, false);
   const [rightOverlay, setRightOverlay] = usePersistentState(`appshell.${app.id}.rightOverlay`, false);
   const [leftWidth, setLeftWidth] = usePersistentState(`appshell.${app.id}.leftW`, 260);

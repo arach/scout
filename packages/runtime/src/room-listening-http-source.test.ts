@@ -121,3 +121,13 @@ test("room conflicts preserve only bounded known error codes through real HTTP",
     }
   } finally { await new Promise<void>(r => server.close(() => r())); }
 });
+
+test("terminal HTTP 401/403/410 is distinguished from recoverable source failures", async () => {
+  for (const status of [401, 403, 410, 429, 503]) {
+    const source = createRoomHttpSource(async () => ({ status, body: null }));
+    try {
+      await source.read({ origin: "http://127.0.0.1:1", channelId: "room", space: "space", actorId: "reader", token: "private" }, null, "agent");
+      throw Error("expected source rejection");
+    } catch (error) { expect((error as any).terminal).toBe([401, 403, 410].includes(status)); }
+  }
+});

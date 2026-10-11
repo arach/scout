@@ -1,3 +1,4 @@
+import { IROH_INGRESS_PREFIX, IROH_MESH_PATHS, irohDestinationKeyId } from "./iroh-peer-auth.js";
 import { verifyLocalAdminRequest, LOCAL_ADMIN_HEADER } from "./mesh-access-local-auth.js";
 import type { AccessProof } from "./mesh-access.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -443,6 +444,8 @@ export type MeshIngressGateDeps = {
    * and tests.
    */
   forceRemoteEnforce?: () => boolean;
+  /** Locally configured receiving endpoint; never inferred from caller headers. */
+  irohEndpointId?: () => string | undefined;
 };
 
 export type MeshIngressGate = {
@@ -557,7 +560,7 @@ export function createMeshIngressGate(deps: MeshIngressGateDeps): MeshIngressGat
 
   function requestTransport(request: IncomingMessage, remoteAddress = request.socket?.remoteAddress): RuntimeTransportKind {
     const physical = classifyMeshTransport(remoteAddress);
-    if (deps.localAdminKey) return "remote";
+    if (deps.localAdminKey || request.url?.startsWith(`${IROH_INGRESS_PREFIX}/`)) return "remote";
     return physical;
   }
 
@@ -574,6 +577,33 @@ export function createMeshIngressGate(deps: MeshIngressGateDeps): MeshIngressGat
       const method = request.method ?? "GET";
       const headers = peerAuthHeadersFrom(request.headers);
       const routeTier = meshRouteTierFor(method, url.pathname);
+      // This mount can ONLY reduce authority: it never uses local-admin proof or
+      // verify-warn. The Rust bridge cannot forward remote input to a local route.
+      if (url.pathname.startsWith(`${IROH_INGRESS_PREFIX}/`)) {
+        const innerPath = url.pathname.slice(IROH_INGRESS_PREFIX.length);
+        if (method !== "POST" || !Object.values(IROH_MESH_PATHS).some((path) => path === innerPath)) {
+          request.resume(); json(response, 403, { error: "forbidden" }); return;
+        }
+        let destinationKeyId: string;
+        try { destinationKeyId = irohDestinationKeyId(deps.irohEndpointId?.() ?? ""); }
+        catch { request.resume(); json(response, 503, { error: "iroh_ingress_unavailable" }); return; }
+        let body: Buffer;
+        try { body = await bufferRequestBody(request); }
+        catch { json(response, 413, { error: "payload_too_large" }); return; }
+        const requestTarget = innerPath + url.search;
+        const decision = applyMeshGateMode(evaluateMeshIngress({ transport: "remote", method,
+          pathname: innerPath, requestTarget, body, headers, destinationKeyId,
+          bootedAt: deps.bootedAt, lookupPeer: deps.lookupPeer, lookupGuest: deps.lookupGuest,
+          scopedAccess: deps.scopedAccess, keyConflict: deps.keyConflict, nonceClaim: deps.nonceClaim }),
+          { mode: "enforce", method, pathname: innerPath, keyId: headers.peer, logger, throttle: denialThrottle });
+        if (decision.action === "deny") {
+          json(response, decision.status, { error: "access_denied", detail: decision.reason }); return;
+        }
+        const forwarded = replayBufferedRequest(request, body, { transport: "remote",
+          ...(remoteAddress ? { remoteAddress } : {}), ...(decision.principal ? { peer: decision.principal } : {}) });
+        forwarded.url = requestTarget;
+        await next(forwarded); return;
+      }
       let adminBody: Buffer | undefined;
       if (deps.localAdminKey && classifyMeshTransport(remoteAddress) !== "remote" && request.headers[LOCAL_ADMIN_HEADER]) {
         if (typeof request.headers[LOCAL_ADMIN_HEADER] !== "string" || !/^[a-f0-9]{64}$/.test(request.headers[LOCAL_ADMIN_HEADER] as string)) {
@@ -740,7 +770,7 @@ export function createMeshIngressGate(deps: MeshIngressGateDeps): MeshIngressGat
     },
 
     gateUpgrade(request, socket) {
-      if (deps.localAdminKey) { socket.write("HTTP/1.1 403 Forbidden\r\nconnection: close\r\n\r\n"); socket.destroy(); return false; }
+      if (deps.localAdminKey || request.url?.startsWith(`${IROH_INGRESS_PREFIX}/`)) { socket.write("HTTP/1.1 403 Forbidden\r\nconnection: close\r\n\r\n"); socket.destroy(); return false; }
       const remoteAddress = (socket as { remoteAddress?: string }).remoteAddress;
       const transport = requestTransport(request, remoteAddress);
       const url = new URL(request.url ?? "/", "http://localhost");

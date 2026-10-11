@@ -1,0 +1,116 @@
+/* Glass: the window is the material (native blur + tint), so the page paints
+   nothing behind the content. Ink, sizes and the mode label follow the study
+   (design/studio/views/macos-glass-window.css). */
+
+html.glass-page,
+html.glass-page body,
+html.glass-page #root {
+  background: transparent !important;
+  height: 100%;
+  overflow: hidden;
+}
+
+.glass {
+  --glass-ink: #e6e8ea;
+  --glass-ink-2: rgba(230, 232, 234, 0.62);
+  --glass-ink-3: rgba(230, 232, 234, 0.4);
+  --glass-accent: oklch(0.72 0.15 160);
+  --glass-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  /* Message markup paints with the theme tokens; point them at the ink. */
+  --ink: var(--glass-ink);
+  --muted: var(--glass-ink-2);
+  --dim: var(--glass-ink-3);
+  position: relative;
+  height: 100vh;
+  display: flex;
+  color: var(--glass-ink);
+  font-family: -apple-system, "SF Pro Text", system-ui, sans-serif;
+  line-height: 1.5;
+  outline: none;
+  -webkit-font-smoothing: antialiased;
+}
+.glass.i-lacquer {
+  --glass-ink: #e8e0cc;
+  --glass-ink-2: rgba(232, 224, 204, 0.62);
+  --glass-ink-3: rgba(232, 224, 204, 0.4);
+  --glass-accent: #e6c384;
+}
+
+.glass-convo {
+  flex: 0 1 680px;
+  min-width: 0;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  /* Top clears the invisible drag strip the window keeps for itself. */
+  padding: 38px 32px 22px;
+}
+.glass-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 0 8px;
+  margin: 0 -8px;
+  scrollbar-width: none;
+}
+.glass-list::-webkit-scrollbar { display: none; }
+.glass-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 620px;
+  padding: 6px 8px;
+  margin: 0 -8px;
+  border-radius: 8px;
+  scroll-margin: 8px;
+  transition: background 120ms ease-out;
+}
+.glass-msg.is-sel { background: rgba(255, 255, 255, 0.06); box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.12); }
+.glass-msg.is-you { align-self: flex-end; }
+.glass-msg.is-you .glass-msg__body { padding: 6px 12px; border-radius: 12px; background: rgba(255, 255, 255, 0.08); }
+.glass-msg__name { font: 0.85em var(--glass-mono); color: var(--glass-ink-3); }
+.glass-msg__body { overflow-wrap: anywhere; }
+.glass-msg__body .s-message-markup { color: inherit; }
+.glass-msg__body p { margin: 0 0 8px; }
+.glass-msg__body p:last-child { margin-bottom: 0; }
+.glass-msg__body pre, .glass-msg__body code { font-family: var(--glass-mono); background: rgba(255, 255, 255, 0.06); }
+.glass-msg__body a { color: var(--glass-accent); }
+.glass-empty { margin: auto; color: var(--glass-ink-3); font: 0.85em var(--glass-mono); }
+
+/* The reply box and command bar come from reply-kit.css; the foot only
+   gives the bar something to float above. */
+.glass-foot { position: relative; font-size: 0.95em; }
+.glass {
+  --rk-ink: var(--glass-ink);
+  --rk-ink-2: var(--glass-ink-2);
+  --rk-ink-3: var(--glass-ink-3);
+  --rk-accent: var(--glass-accent);
+  --rk-mono: var(--glass-mono);
+}
+
+/* The one indicator: a tiny label, bottom left. Echoes command results. */
+.glass-mode {
+  position: absolute;
+  left: 12px;
+  bottom: 8px;
+  max-width: calc(100% - 24px);
+  white-space: pre;
+  overflow: hidden;
+  font: 9.5px/1.5 var(--glass-mono);
+  letter-spacing: 0.04em;
+  color: var(--glass-ink-3);
+}
+.glass-mode.is-echo {
+  padding: 4px 8px;
+  margin: -4px -8px;
+  border-radius: 6px;
+  color: var(--glass-ink-2);
+  background: rgba(10, 10, 12, 0.8);
+  backdrop-filter: blur(20px);
+}
+
+::highlight(glass-search) { background-color: color-mix(in srgb, var(--glass-accent) 38%, transparent); color: #fff; }

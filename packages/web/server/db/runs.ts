@@ -697,6 +697,16 @@ export function queryFollowTarget(opts: {
     harnessSessionId: null,
   };
 
+  // A ticket link can arrive before its flight/session exists. Resolve its
+  // latest invocation on every read rather than borrowing a chat's session.
+  if (target.workId && !target.flightId && !target.invocationId) {
+    const invocation = db().prepare(
+      `SELECT id FROM invocations WHERE collaboration_record_id = ?
+       ORDER BY ${sqlTimestampMsExpression("created_at")} DESC, id DESC LIMIT 1`,
+    ).get(target.workId) as { id: string } | null;
+    target.invocationId = invocation?.id ?? null;
+  }
+
   if (target.flightId || target.invocationId) {
     const where = target.flightId ? "inv.flight_id = ?" : "inv.id = ?";
     const param = target.flightId ?? target.invocationId ?? "";
@@ -707,18 +717,8 @@ export function queryFollowTarget(opts: {
          inv.conversation_id,
          inv.collaboration_record_id,
          inv.target_agent_id,
-         inv.flight_metadata_json,
-         ep.transport,
-         ep.session_id,
-         ep.metadata_json AS endpoint_metadata_json
+         inv.flight_metadata_json
        FROM invocations inv
-       LEFT JOIN agent_endpoints ep ON ep.id = (
-         SELECT ep2.id
-         FROM agent_endpoints ep2
-         WHERE ep2.agent_id = inv.target_agent_id
-         ORDER BY ${sqlTimestampMsCoalesceExpression("ep2.updated_at")} DESC
-         LIMIT 1
-       )
        WHERE ${where}
        LIMIT 1`,
     ).get(param) as {
@@ -728,20 +728,9 @@ export function queryFollowTarget(opts: {
       collaboration_record_id: string | null;
       target_agent_id: string | null;
       flight_metadata_json: string | null;
-      transport: string | null;
-      session_id: string | null;
-      endpoint_metadata_json: string | null;
     } | null;
 
     if (row) {
-      let endpointMeta: Record<string, unknown> = {};
-      try {
-        endpointMeta = row.endpoint_metadata_json
-          ? JSON.parse(row.endpoint_metadata_json)
-          : {};
-      } catch {
-        endpointMeta = {};
-      }
       target.flightId = target.flightId ?? row.flight_id;
       target.invocationId = target.invocationId ?? row.invocation_id;
       target.conversationId = target.conversationId ?? row.conversation_id;
@@ -750,15 +739,15 @@ export function queryFollowTarget(opts: {
       const lastTrace = flightSessionTrace(
         parseJson<Record<string, unknown>>(row.flight_metadata_json, {}),
       ).at(-1);
-      target.sessionId = target.sessionId
-        ?? lastTrace?.sessionId
-        ?? resolveHarnessSessionId(row.transport, row.session_id, endpointMeta);
-      // Use the endpoint the flight actually ran on. The agent's most
-      // recently updated endpoint is only a stand-in when the flight never
-      // recorded one; otherwise it can name a different session entirely.
+      target.sessionId = lastTrace?.sessionId
+        ?? target.sessionId;
+      // A queued task may not have a session yet. Never borrow the agent's
+      // latest endpoint: it can belong to entirely different work.
       target.harnessSessionId = lastTrace?.endpointId
         ? harnessSessionIdForEndpoint({ endpointId: lastTrace.endpointId })
-        : resolveHarnessSessionId(row.transport, row.session_id, endpointMeta);
+        : target.sessionId
+          ? harnessSessionIdForEndpoint({ sessionId: target.sessionId })
+          : null;
     }
   }
 
@@ -776,7 +765,8 @@ export function queryFollowTarget(opts: {
     );
   }
 
-  if (target.conversationId && (!target.sessionId || !target.targetAgentId)) {
+  if (target.conversationId && !target.flightId && !target.invocationId && !target.workId
+    && (!target.sessionId || !target.targetAgentId)) {
     // querySessionById now lives in db/sessions.ts (SCO-031 final extraction).
     // SCO-030 may fold this back into `Conversations` once opaque ids land.
     const session = querySessionById(target.conversationId);

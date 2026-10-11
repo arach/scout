@@ -12,8 +12,7 @@ describe("renderTellCommandHelp", () => {
     expect(help).toContain("body @mentions stay text");
     expect(help).toContain("no target + no channel             -> error");
     expect(help).toContain("multiple targets + no channel      -> error");
-    expect(help).toContain("use `scout ask` (or `scout send --tracked --to`)");
-    expect(help).toContain("explicit spelling of a plain `scout send`");
+    expect(help).toContain("use `scout ask` (`--notify` to return right away)");
     expect(help).toContain("--message-file <path>");
   });
 });
@@ -33,7 +32,7 @@ describe("parseTellCommandOptions", () => {
     for (const flag of ["--tracked", "--no-notifs", "--wait", "--timeout=30"]) {
       expect(() =>
         parseTellCommandOptions(["--to", "hudson", flag, "hello"], "/tmp"),
-      ).toThrow(/scout send/);
+      ).toThrow(/scout ask/);
     }
   });
 

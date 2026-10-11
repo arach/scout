@@ -345,14 +345,14 @@ export async function handleRPC(
   const context = normalizeBridgeRpcContext(rpcContext);
   const rpcStart = Date.now();
   const paramsSnippet = summarizeRPCParams(req.method, req.params);
-  log.info("rpc:req", `→ ${req.method}${paramsSnippet}`);
+  log.debug("rpc:req", `→ ${req.method}${paramsSnippet}`);
   const result = await handleRPCInner(bridge, req, context);
   const elapsed = Date.now() - rpcStart;
   if (result.error) {
     log.error("rpc:res", `✗ ${req.method} — ${result.error.message} (${elapsed}ms)`);
   } else {
     const size = summarizeRPCResult(req.method, result.result);
-    log.info("rpc:res", `✓ ${req.method}${size} (${elapsed}ms)`);
+    log.debug("rpc:res", `✓ ${req.method}${size} (${elapsed}ms)`);
   }
   return result;
 }

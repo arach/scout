@@ -29,6 +29,7 @@ import {
   callerContextForDelivery,
   executionWithRouteParams,
   normalizeScoutLabels,
+  projectHostRouteTarget,
   projectPathRouteTarget,
   remediationForDispatch,
   type InvocationResolution,
@@ -136,6 +137,8 @@ export type BrokerDeliveryAcceptanceServiceOptions = {
   ) => Promise<InvocationResolution>;
   createCardlessProjectSession?: (input: {
     projectPath: string;
+    /** Mesh machine named by `--on`; the session starts there or nowhere. */
+    host?: string;
     execution?: InvocationRequest["execution"];
     projectAgent?: ScoutDeliverRequest["projectAgent"];
     requesterId: string;
@@ -833,6 +836,7 @@ export class BrokerDeliveryAcceptanceService {
     }
 
     const projectPath = projectPathRouteTarget(payload);
+    const projectHost = projectHostRouteTarget(payload);
     const validRuntimeProfileRoute = payload.target?.kind !== "runtime_profile"
       || Boolean(executionForBrokerRuntimeProfile({
         profileId: payload.target.profile,
@@ -846,9 +850,16 @@ export class BrokerDeliveryAcceptanceService {
       && !requestedTargetSessionId
       && ((execution?.session ?? "new") === "new" || execution?.session === "fork")
       && Boolean(this.options.createCardlessProjectSession);
+    if (projectHost && !shouldCreateCardlessProjectSession) {
+      throw new Error(
+        `--on ${projectHost} starts a fresh session in ${projectPath}; it cannot continue or target an existing session or agent. `
+        + "Drop --to/--session to start fresh there, or address the existing session as sess.<token>@<host>.",
+      );
+    }
     const resolved = shouldCreateCardlessProjectSession
       ? await this.options.createCardlessProjectSession!({
           projectPath: projectPath!,
+          ...(projectHost ? { host: projectHost } : {}),
           execution,
           projectAgent: payload.projectAgent,
           requesterId,
@@ -1122,6 +1133,7 @@ export class BrokerDeliveryAcceptanceService {
     };
     const invocation: InvocationRequest = {
       id: this.options.createId("inv"),
+      ...(payload.requestId ? { requestId: payload.requestId } : {}),
       requesterId,
       requesterNodeId,
       targetAgentId: target.actorId,

@@ -1,10 +1,10 @@
 import type { Hono } from "hono";
 import { decideScoutWebPairingApproval } from "../pairing.ts";
 import { queryFlightRecordById } from "../db-queries.ts";
-import { loadScoutBrokerContext, upsertScoutConversation, upsertScoutFlight } from "../core/broker/service.ts";
+import { decideScoutRemoteApproval, loadScoutBrokerContext, upsertScoutConversation, upsertScoutFlight } from "../core/broker/service.ts";
 import type { OpenScoutWebShellState } from "../runtime-summary.ts";
 import { defaultCaptureTmuxPane } from "../tmux-pane-capture.ts";
-import { dismissCollaborationAttention, buildOperatorAttentionState } from "../core/attention/operator-attention-state.ts";
+import { dismissCollaborationAttention, buildOperatorAttentionState, parseRemoteApprovalSessionId } from "../core/attention/operator-attention-state.ts";
 import type { CreateOpenScoutWebServerOptions } from "../web-server-options.ts";
 import type { CachedSnapshot } from "../server-core.ts";
 import { approvalDecisionBody } from "../../shared/api/attention.ts";
@@ -88,6 +88,28 @@ export function mountAttentionRoutes(app: Hono, deps: AttentionRouteDeps) {
     if (!decision) {
       return c.json({ error: "decision must be approve or deny" }, 400);
     }
+    // An approval from another machine carries its origin in the sessionId and
+    // is answered there, through the broker.
+    const remote = parseRemoteApprovalSessionId(body.sessionId);
+    if (remote) {
+      const result = await decideScoutRemoteApproval({
+        nodeId: remote.nodeId,
+        sessionId: remote.sessionId,
+        turnId: body.turnId,
+        blockId: body.blockId,
+        version: body.version,
+        decision,
+        reason: body.reason ?? null,
+      });
+      if (!result.ok) {
+        return c.json({ error: remoteDecideMessage(result.error) }, 409);
+      }
+      shellStateCache.invalidate();
+      return c.json(await buildOperatorAttentionState(
+        currentDirectory,
+        options.captureTmuxPane ?? defaultCaptureTmuxPane,
+      ));
+    }
     await decideScoutWebPairingApproval(
       {
         sessionId: body.sessionId,
@@ -145,4 +167,19 @@ export function mountAttentionRoutes(app: Hono, deps: AttentionRouteDeps) {
       options.captureTmuxPane ?? defaultCaptureTmuxPane,
     ));
   });
+}
+
+function remoteDecideMessage(error: string): string {
+  switch (error) {
+    case "stale_version":
+    case "not_pending":
+    case "already_decided":
+      return "That request changed on its machine; it was already answered or moved on.";
+    case "not_live":
+      return "Lost the link to that machine; reconnecting. Try again in a moment.";
+    case "approvals_not_shared":
+      return "That machine stopped sharing approvals with this one.";
+    default:
+      return "Couldn't reach that machine to answer.";
+  }
 }

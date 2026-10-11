@@ -1,13 +1,25 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 
 import { buildHarnessResumeCommand, findHarnessEntry } from "@openscout/runtime/harness-catalog";
 import {
+  findGhosttyTerminalForTty,
+  findHarnessAncestor,
+  findHarnessOnTty,
+  normalizeTty,
+  parseProcessRows,
+  resolveLiveHarnessProcess,
+  sendGhosttyPrompt,
+  stopProcessGracefully,
+  type LiveHarnessProcess,
+} from "@openscout/runtime/live-terminal-session";
+import {
   SQLiteControlPlaneStore,
   endpointMatchesTargetSessionAddress,
+  resolveOpenScoutSupportPaths,
   runtimeSessionAddressEntries,
   type RuntimeSessionAddressEntry,
 } from "@openscout/runtime";
@@ -22,7 +34,13 @@ import { defaultScoutContextDirectory } from "../context.ts";
 import { ScoutCliError } from "../errors.ts";
 import { readCliInputFile } from "../input-file.ts";
 import { readScoutWebJson } from "../web-api.ts";
-import { readScoutBrokerSnapshotResult, resolveScoutSenderId } from "../../core/broker/service.ts";
+import {
+  attachScoutManagedLocalSession,
+  ensureScoutCodexChatWork,
+  readScoutBrokerSnapshotResult,
+  resolveScoutSenderId,
+} from "../../core/broker/service.ts";
+import { askScoutApp } from "../scout-app-socket.ts";
 
 const SESSION_HELP = `scout session — actions on a harness session
 
@@ -37,6 +55,10 @@ Usage:
   scout session fork <session-id> [prompt]   Fork a recorded session into a new one
   scout session fork --last [prompt]         Fork the most recent recorded session
   scout session touched <session-id>         Show files observed in a session
+  scout session transfer [<pid>] [--name <tmux>] [--alias @x] [--dry-run] [--no-reattach]
+                                            Move a live Claude/Grok TUI into tmux, same session
+  scout session pin [--session <codex-thread-id>] [--title <name>]
+                                            Pin a ChatGPT-app Codex chat as a desktop figure
 
 Options (intake):
   --harness <name>      Harness that owns the source session (claude, codex, pi)
@@ -60,9 +82,23 @@ Anyone can then reach that exact conversation with no agent card:
 Each row reports reachability: live, resumable (Scout will try the exact
 wake), or unavailable. An address never falls back to a fresh session.
 
+Pin turns a Codex chat from the ChatGPT app into Scout work and puts its
+figure on the desktop. Inside Codex the chat names itself (CODEX_THREAD_ID),
+so the /scout skill runs it with no arguments. Nothing is attached or resumed:
+the app stays the chat's only writer, and the figure's Talk starts Codex's own
+voice chat in that thread.
+
 Intake gives an existing harness session a Scout-owned terminal home. It creates
 or reuses a deterministic terminal backend session and starts the harness-native
 resume command inside it, so a web/native terminal can attach by session name.
+
+Transfer moves a live harness TUI (Claude or Grok) you started by hand into
+tmux without changing its conversation. It stops the process (SIGTERM, no
+kill), resumes the same session id in a new tmux session, gives that pane a
+Scout address that delivers into it, and types \`tmux attach\` into the
+Ghostty terminal it came from so it reappears where it was. With no <pid> it
+moves the harness this command runs under, finishing in the background.
+An in-flight turn is interrupted; transfer between turns.
 
 Fork branches a session's context into a fresh run and leaves the original
 untouched — hand the fork a prompt and it starts there with the full context
@@ -98,9 +134,16 @@ export async function runSessionCommand(context: ScoutCommandContext, args: stri
     case "touches":
       await runSessionTouchedAction(context, args.slice(1));
       return;
+    case "pin":
+      await runSessionPinAction(context, args.slice(1));
+      return;
+    case "transfer":
+    case "move":
+      await runSessionTransferAction(context, args.slice(1));
+      return;
     default:
       throw new ScoutCliError(
-        `unknown session action: ${action} (try: scout session intake|list|address|fork|touched <session-id>)`,
+        `unknown session action: ${action} (try: scout session intake|list|address|fork|touched|pin|transfer <session-id>)`,
       );
   }
 }
@@ -245,6 +288,109 @@ type SessionTouchedPayload = {
   counts: { files: number; changedFiles: number; readFiles: number };
   files: Array<{ path: string; state: string; touches: number }>;
 };
+
+type SessionPinPayload = {
+  ok: true;
+  action: "session_pin";
+  workId: string;
+  threadId: string;
+  title: string;
+  created: boolean;
+  pinned: boolean;
+  note?: string;
+};
+
+async function runSessionPinAction(context: ScoutCommandContext, args: string[]): Promise<void> {
+  if (args.includes("--help") || args.includes("-h")) {
+    context.output.writeText(SESSION_HELP);
+    return;
+  }
+  let threadId = "";
+  let title = "";
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index] ?? "";
+    if (arg === "--session" || arg.startsWith("--session=")) {
+      const parsed = readOptionValue(args, index, "--session");
+      threadId = parsed.value;
+      index = parsed.nextIndex;
+    } else if (arg === "--title" || arg.startsWith("--title=")) {
+      const parsed = readOptionValue(args, index, "--title");
+      title = parsed.value;
+      index = parsed.nextIndex;
+    } else if (!arg.startsWith("-") && !threadId) {
+      threadId = arg;
+    } else {
+      throw new ScoutCliError(`unknown option for session pin: ${arg}`);
+    }
+  }
+  threadId = threadId.trim() || context.env.CODEX_THREAD_ID?.trim() || "";
+  if (!threadId) {
+    throw new ScoutCliError("session pin needs a Codex thread: run it inside Codex (CODEX_THREAD_ID) or pass --session <id>");
+  }
+  const codexHome = operatorCodexHomeFor(context);
+  const known = codexThreadName(codexHome, threadId);
+  if (known === undefined) {
+    throw new ScoutCliError(`Codex thread ${threadId} isn't in ${codexHome}, so the ChatGPT app can't open it`);
+  }
+  const work = await ensureScoutCodexChatWork({
+    threadId,
+    title: title.trim() || known || "",
+    cwd: defaultScoutContextDirectory(context),
+  });
+  const reply = await askScoutApp({ op: "companion.pin", workId: work.workId }, { env: context.env });
+  const payload: SessionPinPayload = {
+    ok: true,
+    action: "session_pin",
+    workId: work.workId,
+    threadId,
+    title: work.title,
+    created: work.created,
+    pinned: reply.ok,
+    ...(reply.ok ? {} : { note: reply.message }),
+  };
+  context.output.writeValue(payload, (value) => value.pinned
+    ? `Pinned “${value.title}” to the desktop (${value.workId}).`
+    : `Saved “${value.title}” as ${value.workId}, but the figure isn't out: ${value.note}`);
+}
+
+/** The Codex store the ChatGPT app reads. */
+function operatorCodexHomeFor(context: ScoutCommandContext): string {
+  const explicit = context.env.CODEX_HOME?.trim();
+  return explicit ? resolve(explicit) : join(context.env.HOME?.trim() || homedir(), ".codex");
+}
+
+/**
+ * The thread's name from Codex's session index (the last line for an id
+ * wins); "" when the thread exists but has no name yet; undefined when this
+ * store has no such thread.
+ */
+function codexThreadName(codexHome: string, threadId: string): string | undefined {
+  let name: string | undefined;
+  try {
+    for (const line of readFileSync(join(codexHome, "session_index.jsonl"), "utf8").split("\n")) {
+      if (!line.includes(threadId)) continue;
+      try {
+        const entry = JSON.parse(line) as { id?: string; thread_name?: string };
+        if (entry.id === threadId) name = entry.thread_name?.trim() ?? "";
+      } catch {
+        // A line being written; skip it.
+      }
+    }
+  } catch {
+    // No index: fall through to the rollout files.
+  }
+  if (name !== undefined) return name;
+  return codexRolloutExists(join(codexHome, "sessions"), threadId) ? "" : undefined;
+}
+
+function codexRolloutExists(dir: string, threadId: string, depth = 0): boolean {
+  if (depth > 3 || !existsSync(dir)) return false;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isFile() && entry.name.endsWith(`-${threadId}.jsonl`)) return true;
+    if (entry.isDirectory() && codexRolloutExists(join(dir, entry.name), threadId, depth + 1)) return true;
+  }
+  return false;
+}
 
 async function runSessionTouchedAction(context: ScoutCommandContext, args: string[]): Promise<void> {
   const refId = args.find((arg) => arg !== "--help" && arg !== "-h");
@@ -791,7 +937,7 @@ function stripAnsi(value: string): string {
 
 function createTmuxSession(
   context: ScoutCommandContext,
-  input: { tmuxSession: string; cwd: string; resumeCommand: string },
+  input: { tmuxSession: string; cwd: string; resumeCommand: string; env?: Record<string, string> },
 ): void {
   const result = spawnSync("tmux", [
     "new-session",
@@ -800,6 +946,7 @@ function createTmuxSession(
     input.tmuxSession,
     "-c",
     input.cwd,
+    ...Object.entries(input.env ?? {}).flatMap(([key, value]) => ["-e", `${key}=${value}`]),
     input.resumeCommand,
   ], {
     env: context.env,
@@ -1041,6 +1188,236 @@ async function runSessionForkAction(context: ScoutCommandContext, args: string[]
   if (typeof result.status === "number" && result.status !== 0) {
     process.exitCode = result.status;
   }
+}
+
+type SessionTransferOptions = {
+  pid?: number;
+  terminalSession?: string;
+  alias?: string;
+  dryRun: boolean;
+  reattach: boolean;
+  detached: boolean;
+};
+
+type SessionTransferPayload = {
+  ok: true;
+  action: "session_transfer";
+  harness: string;
+  sessionId: string;
+  cwd: string;
+  fromPid: number;
+  fromTty: string;
+  ghosttyTerminalId: string | null;
+  tmuxSession: string;
+  resumeCommand: string;
+  dryRun: boolean;
+  pid?: number;
+  pane?: string;
+  selector?: string | null;
+  attachError?: string;
+  reattached?: boolean;
+  reattachError?: string;
+  attachCommand: string;
+};
+
+const TRANSFER_DETACHED_FLAG = "--internal-detached";
+
+function parseSessionTransferOptions(args: string[]): SessionTransferOptions {
+  const options: SessionTransferOptions = { dryRun: false, reattach: true, detached: false };
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]!;
+    if (arg === "--dry-run") options.dryRun = true;
+    else if (arg === "--no-reattach") options.reattach = false;
+    else if (arg === TRANSFER_DETACHED_FLAG) options.detached = true;
+    else if (arg === "--name" || arg.startsWith("--name=")) {
+      const { value, nextIndex } = readOptionValue(args, index, "--name");
+      options.terminalSession = value;
+      index = nextIndex;
+    } else if (arg === "--alias" || arg.startsWith("--alias=")) {
+      const { value, nextIndex } = readOptionValue(args, index, "--alias");
+      options.alias = value;
+      index = nextIndex;
+    } else if (/^\d+$/u.test(arg) && options.pid === undefined) {
+      options.pid = Number(arg);
+    } else {
+      throw new ScoutCliError(`unexpected argument for session transfer: ${arg}`);
+    }
+  }
+  return options;
+}
+
+function readProcessTable(): ReturnType<typeof parseProcessRows> {
+  const result = spawnSync("ps", ["-axo", "pid=,ppid=,tty=,command="], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 });
+  return parseProcessRows(result.stdout ?? "");
+}
+
+/** Absolute path of `command` on the caller's PATH, so tmux's own PATH doesn't matter. */
+function resolveExecutable(context: ScoutCommandContext, command: string): string {
+  for (const dir of (context.env.PATH ?? "").split(":")) {
+    if (dir && existsSync(join(dir, command))) return join(dir, command);
+  }
+  return command;
+}
+
+function readTmuxPaneOf(context: ScoutCommandContext, tmuxSession: string): { pane: string; tty: string } | null {
+  const result = spawnSync("tmux", ["display-message", "-p", "-t", tmuxSession, "#{pane_id}|#{pane_tty}"], {
+    env: context.env,
+    encoding: "utf8",
+  });
+  const [pane, tty] = (result.stdout ?? "").trim().split("|");
+  return pane && tty ? { pane, tty: normalizeTty(tty) } : null;
+}
+
+async function runSessionTransferAction(context: ScoutCommandContext, args: string[]): Promise<void> {
+  if (args.includes("--help") || args.includes("-h")) {
+    context.output.writeText(SESSION_HELP);
+    return;
+  }
+  const options = parseSessionTransferOptions(args);
+  const rows = readProcessTable();
+  const ownHarness = findHarnessAncestor(rows, process.pid);
+  const pid = options.pid ?? ownHarness?.pid;
+  if (!pid) {
+    throw new ScoutCliError("no harness above this command; pass the pid of the claude or grok to transfer");
+  }
+
+  const resolved = await resolveLiveHarnessProcess(pid, { env: context.env });
+  if (!resolved.ok) throw new ScoutCliError(`cannot transfer ${pid}: ${resolved.detail}`);
+  const live: LiveHarnessProcess = resolved.process;
+  const inTmux = spawnSync("tmux", ["list-panes", "-a", "-F", "#{pane_tty}"], { env: context.env, encoding: "utf8" })
+    .stdout?.split("\n").some((tty) => tty.trim() && normalizeTty(tty) === live.tty);
+  if (inTmux) throw new ScoutCliError(`${live.harness} (pid ${pid}) already runs in a tmux pane; attach it with /scout card instead`);
+
+  const entry = findHarnessEntry(live.harness);
+  const resumeCommand = entry ? buildHarnessResumeCommand(entry, live.sessionId, live.cwd) : null;
+  if (!entry?.resume || !resumeCommand) throw new ScoutCliError(`${live.harness} has no resume command`);
+  const absoluteResume = resumeCommand.replace(
+    /^\S+/u,
+    quoteForShell(resolveExecutable(context, entry.resume.command)),
+  );
+  const tmuxSession = options.terminalSession ?? defaultTerminalSessionName({
+    backend: "tmux",
+    harness: live.harness,
+    cwd: live.cwd,
+    sessionId: live.sessionId,
+  });
+  validateTerminalSessionName(tmuxSession);
+  if (!options.dryRun) {
+    assertTmuxAvailable(context);
+    if (tmuxSessionExists(context, tmuxSession)) throw new ScoutCliError(`tmux session ${tmuxSession} already exists`);
+  }
+
+  // Stopping our own harness would take this process down with it: finish in
+  // a detached copy and report where its log goes.
+  const selfTransfer = ownHarness?.pid === pid && !options.detached && !options.dryRun;
+  if (selfTransfer) {
+    const logPath = join(resolveOpenScoutSupportPaths().logsDirectory, `session-transfer-${pid}.log`);
+    mkdirSync(join(logPath, ".."), { recursive: true });
+    const log = openSync(logPath, "a");
+    const child = spawn(process.execPath, [...process.argv.slice(1).filter((arg) => arg !== TRANSFER_DETACHED_FLAG), ...(options.pid ? [] : [String(pid)]), TRANSFER_DETACHED_FLAG], {
+      cwd: context.cwd,
+      env: context.env,
+      detached: true,
+      stdio: ["ignore", log, log],
+    });
+    child.unref();
+    context.output.writeText(
+      `Transferring this ${live.harness} session to tmux ${tmuxSession}; this process stops in a moment and reappears there. Log: ${logPath}`,
+    );
+    return;
+  }
+  // Give the harness time to print the reply above before it is stopped.
+  if (options.detached) await new Promise((resolve) => setTimeout(resolve, 3_000));
+
+  const ghosttyTerminalId = options.reattach && context.env.TERM_PROGRAM !== "tmux"
+    ? await findGhosttyTerminalForTty(live.tty)
+    : null;
+  const payload: SessionTransferPayload = {
+    ok: true,
+    action: "session_transfer",
+    harness: live.harness,
+    sessionId: live.sessionId,
+    cwd: live.cwd,
+    fromPid: pid,
+    fromTty: live.tty,
+    ghosttyTerminalId,
+    tmuxSession,
+    resumeCommand: absoluteResume,
+    dryRun: options.dryRun,
+    attachCommand: `tmux attach -t ${quoteForShell(tmuxSession)}`,
+  };
+  if (options.dryRun) {
+    context.output.writeValue(payload, renderSessionTransfer);
+    return;
+  }
+
+  if (!(await stopProcessGracefully(pid))) {
+    throw new ScoutCliError(`${live.harness} (pid ${pid}) did not exit after SIGTERM; nothing was moved`);
+  }
+  // The pane inherits the tmux server's environment, not ours: carry over what
+  // decides where the harness finds its sessions.
+  const carriedEnv = Object.fromEntries(
+    ["HOME", "PATH", "CLAUDE_CONFIG_DIR", "GROK_HOME", "CODEX_HOME"]
+      .flatMap((key) => context.env[key] ? [[key, context.env[key]!]] : []),
+  );
+  createTmuxSession(context, { tmuxSession, cwd: live.cwd, resumeCommand: absoluteResume, env: carriedEnv });
+  const pane = readTmuxPaneOf(context, tmuxSession);
+  if (!pane) throw new ScoutCliError(`tmux session ${tmuxSession} started but its pane could not be read`);
+  payload.pane = pane.pane;
+
+  let newPid: number | null = null;
+  for (let attempt = 0; attempt < 100 && newPid === null; attempt += 1) {
+    newPid = await findHarnessOnTty(pane.tty, live.harness);
+    if (newPid === null) await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  if (newPid !== null) {
+    payload.pid = newPid;
+    try {
+      const attachment = await attachScoutManagedLocalSession({
+        externalSessionId: live.sessionId,
+        transport: "tmux",
+        currentDirectory: live.cwd,
+        ...(options.alias ? { alias: options.alias } : {}),
+        liveTerminal: {
+          harness: live.harness,
+          pid: newPid,
+          tty: pane.tty,
+          surface: { backend: "tmux", pane: pane.pane, session: tmuxSession },
+          nativeSessionId: live.sessionId,
+        },
+      });
+      payload.selector = attachment.selector;
+    } catch (error) {
+      payload.attachError = error instanceof Error ? error.message : String(error);
+    }
+  } else {
+    payload.attachError = `${live.harness} did not start in ${tmuxSession} within 20s; check the pane`;
+  }
+
+  if (ghosttyTerminalId) {
+    try {
+      await sendGhosttyPrompt(ghosttyTerminalId, payload.attachCommand);
+      payload.reattached = true;
+    } catch (error) {
+      payload.reattached = false;
+      payload.reattachError = error instanceof Error ? error.message : String(error);
+    }
+  }
+  context.output.writeValue(payload, renderSessionTransfer);
+}
+
+function renderSessionTransfer(payload: SessionTransferPayload): string {
+  const lines = [
+    `${payload.dryRun ? "Would move" : "Moved"} ${payload.harness} session ${payload.sessionId} (pid ${payload.fromPid}, ${payload.fromTty}) to tmux ${payload.tmuxSession}.`,
+    `Resume: ${payload.resumeCommand}`,
+  ];
+  if (payload.pane) lines.push(`Pane ${payload.pane}${payload.pid ? `, pid ${payload.pid}` : ""}.`);
+  if (payload.selector) lines.push(`Address: ${payload.selector} (asks are typed into the pane).`);
+  if (payload.attachError) lines.push(`Not addressed: ${payload.attachError}`);
+  if (payload.reattached) lines.push("Reattached in the original Ghostty terminal.");
+  else if (payload.reattachError) lines.push(`Could not reattach in Ghostty: ${payload.reattachError}`);
+  if (!payload.reattached) lines.push(`Attach: ${payload.attachCommand}`);
+  return lines.join("\n");
 }
 
 function quoteForLog(value: string): string {

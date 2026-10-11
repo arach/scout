@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { preflightLifecycle, QUICK_LINKS } from "./lifecycle-preflight.mjs";
+import { parseScoutArgv, preflightLifecycle, QUICK_LINKS } from "./lifecycle-preflight.mjs";
 
 const binDir = dirname(fileURLToPath(import.meta.url));
 const bunDistEntry = resolve(binDir, "../dist/main.mjs");
@@ -19,107 +19,136 @@ if (!process.env.SCOUT_APP_VERSION && packageVersion) {
   process.env.SCOUT_APP_VERSION = packageVersion;
 }
 
-const command = process.argv[2];
-try {
-  const help = preflightLifecycle(process.argv.slice(2));
-  if (help !== null) { console.log(help); process.exit(0); }
-} catch (error) {
-  console.error(error.message);
-  process.exit(1);
-}
-if (command === "--version" || command === "-v" || command === "version") {
-  process.stdout.write(`${packageVersion ?? "0.0.0"}\n`);
-  process.exit(0);
-}
+await main();
 
-// Chat is a standalone HTTP client: do not load broker/setup entrypoints.
-if (command === "chat") {
-  await import(pathToFileURL(resolve(binDir, "../dist/chat.mjs")).href);
-  process.exit(process.exitCode ?? 0);
-}
+// Persistent transports retain their natural lifecycle. Inspection commands
+// explicitly drain and exit even if a runtime import retained live handles.
+async function main() {
+  const command = process.argv[2];
+  try {
+    const help = preflightLifecycle(process.argv.slice(2));
+    if (help !== null) { console.log(help); return; }
+  } catch (error) {
+    console.error(error.message);
+    process.exit(1);
+  }
+  if (command === "--version" || command === "-v" || command === "version") {
+    process.stdout.write(`${packageVersion ?? "0.0.0"}\n`);
+    return;
+  }
 
-const wantsHelp = !command || command === "--help" || command === "-h" || command === "help";
-const wantsStatusline = command === "statusline" && process.argv[3] === "claude";
-const preferredHost = normalizeHost(process.env.OPENSCOUT_RUNTIME_HOST);
-const bunPath = preferredHost === "node" ? null : resolveBunExecutable();
-const shouldTryNode = preferredHost === "node" || !bunPath || wantsStatusline;
+  // Chat is a standalone HTTP client: do not load broker/setup entrypoints.
+  if (command === "chat") {
+    await import(pathToFileURL(resolve(binDir, "../dist/chat.mjs")).href);
+    return;
+  }
 
-if (shouldTryNode && preferredHost !== "bun") {
-  const nodeEntry = wantsStatusline && existsSync(bunStatuslineEntry)
-    ? bunStatuslineEntry
-    : wantsStatusline
-      ? nodeStatuslineEntry
-      : nodeDistEntry;
-  if (existsSync(nodeEntry)) {
-    try {
-      if (!bunPath) {
-        process.env.OPENSCOUT_RUNTIME_HOST ??= "node";
-      }
-      await import(pathToFileURL(nodeEntry).href);
-      process.exit(process.exitCode ?? 0);
-    } catch (error) {
-      if (preferredHost !== "node" && bunPath) {
-        // A dev checkout can have a stale or incomplete dist/node bundle. Prefer
-        // the known-good Bun CLI unless the caller explicitly requested Node.
-      } else {
-        if (wantsHelp) {
-          process.stdout.write(renderNodeFallbackHelp(packageVersion));
-          process.exit(0);
+  const wantsHelp = !command || command === "--help" || command === "-h" || command === "help";
+  const wantsStatusline = command === "statusline" && process.argv[3] === "claude";
+  const preferredHost = normalizeHost(process.env.OPENSCOUT_RUNTIME_HOST);
+  const bunPath = preferredHost === "node" ? null : resolveBunExecutable();
+  const shouldTryNode = preferredHost === "node" || !bunPath || wantsStatusline;
+
+  if (shouldTryNode && preferredHost !== "bun") {
+    const nodeEntry = wantsStatusline && existsSync(bunStatuslineEntry)
+      ? bunStatuslineEntry
+      : wantsStatusline
+        ? nodeStatuslineEntry
+        : nodeDistEntry;
+    if (existsSync(nodeEntry)) {
+      try {
+        if (!bunPath) {
+          process.env.OPENSCOUT_RUNTIME_HOST ??= "node";
         }
-        console.error(describeNodeEntrypointFailure(error));
-        process.exit(1);
+        await import(pathToFileURL(nodeEntry).href);
+        await finishInspectionOutput();
+        return;
+      } catch (error) {
+        if (preferredHost !== "node" && bunPath) {
+          // A dev checkout can have a stale or incomplete dist/node bundle. Prefer
+          // the known-good Bun CLI unless the caller explicitly requested Node.
+        } else {
+          if (wantsHelp) {
+            process.stdout.write(renderNodeFallbackHelp(packageVersion));
+            return;
+          }
+          console.error(describeNodeEntrypointFailure(error));
+          process.exit(1);
+        }
       }
+    } else if (preferredHost === "node" && wantsHelp) {
+      process.stdout.write(renderNodeFallbackHelp(packageVersion));
+      return;
     }
-  } else if (preferredHost === "node" && wantsHelp) {
+  }
+
+  if (bunPath) {
+    const bunEntry = wantsStatusline ? bunStatuslineEntry : bunDistEntry;
+    if (!existsSync(bunEntry)) {
+      console.error(`Scout ${wantsStatusline ? "statusline" : "CLI"} Bun entry is missing. Reinstall @openscout/scout or rebuild the package.`);
+      process.exit(1);
+    }
+
+    if (isCurrentRuntimeBun()) {
+      await import(pathToFileURL(bunEntry).href);
+      await finishInspectionOutput();
+      return;
+    }
+
+    // Inspection needs the same drain/exit boundary when Node delegates to Bun.
+    // Keep other command entrypoints and persistent transport lifecycles intact.
+    const childEntry = isInspectionCommand() ? fileURLToPath(import.meta.url) : bunEntry;
+    const result = spawnSync(bunPath, [childEntry, ...process.argv.slice(2)], {
+      env: process.env,
+      stdio: "inherit",
+    });
+    if (result.error) {
+      console.error(`Scout could not run Bun at ${bunPath}: ${result.error.message}`);
+      process.exit(1);
+    }
+    process.exit(result.status ?? (result.signal ? 1 : 0));
+  }
+
+  if (preferredHost === "bun") {
+    console.error(
+      "Scout was asked to use the Bun runtime, but Bun was not found.\n" +
+      "Install Bun: curl -fsSL https://bun.sh/install | bash\n" +
+      "Or unset OPENSCOUT_RUNTIME_HOST to allow the Node headless runtime when it is packaged.\n\n" + QUICK_LINKS,
+    );
+    process.exit(1);
+  }
+
+  if (wantsHelp) {
     process.stdout.write(renderNodeFallbackHelp(packageVersion));
-    process.exit(0);
-  }
-}
-
-if (bunPath) {
-  const bunEntry = wantsStatusline ? bunStatuslineEntry : bunDistEntry;
-  if (!existsSync(bunEntry)) {
-    console.error(`Scout ${wantsStatusline ? "statusline" : "CLI"} Bun entry is missing. Reinstall @openscout/scout or rebuild the package.`);
-    process.exit(1);
+    return;
   }
 
-  if (isCurrentRuntimeBun()) {
-    await import(pathToFileURL(bunEntry).href);
-    process.exit(process.exitCode ?? 0);
-  }
-
-  const result = spawnSync(bunPath, [bunEntry, ...process.argv.slice(2)], {
-    env: process.env,
-    stdio: "inherit",
-  });
-  if (result.error) {
-    console.error(`Scout could not run Bun at ${bunPath}: ${result.error.message}`);
-    process.exit(1);
-  }
-  process.exit(result.status ?? (result.signal ? 1 : 0));
-}
-
-if (preferredHost === "bun") {
   console.error(
-    "Scout was asked to use the Bun runtime, but Bun was not found.\n" +
+    "Scout could not find a runnable headless runtime.\n" +
+    "This package version still needs Bun for the full CLI because the Node headless entrypoint is not packaged yet.\n" +
     "Install Bun: curl -fsSL https://bun.sh/install | bash\n" +
-    "Or unset OPENSCOUT_RUNTIME_HOST to allow the Node headless runtime when it is packaged.\n\n" + QUICK_LINKS,
+    "Future @openscout/scout packages should run the headless broker through Node when Bun is unavailable.\n\n" + QUICK_LINKS,
   );
   process.exit(1);
+
 }
 
-if (wantsHelp) {
-  process.stdout.write(renderNodeFallbackHelp(packageVersion));
-  process.exit(0);
+function isInspectionCommand() {
+  const input = parseScoutArgv(process.argv.slice(2));
+  const command = input.command === "relay" ? input.args[0] : input.command;
+  return command === "who" || command === "check" || command === "recent" || command === "where" || command === "route";
 }
 
-console.error(
-  "Scout could not find a runnable headless runtime.\n" +
-  "This package version still needs Bun for the full CLI because the Node headless entrypoint is not packaged yet.\n" +
-  "Install Bun: curl -fsSL https://bun.sh/install | bash\n" +
-  "Future @openscout/scout packages should run the headless broker through Node when Bun is unavailable.\n\n" + QUICK_LINKS,
-);
-process.exit(1);
+async function finishInspectionOutput() {
+  if (!isInspectionCommand()) return;
+  // Import completion is not stdout completion: writes to pipes are async.
+  // Use the CLI context's drainable streams before forcing a one-shot exit.
+  // MCP/chat and main-dispatch's ask/send --tracked lifecycle stay unchanged.
+  await Promise.all([process.stdout, process.stderr].map((stream) => new Promise((resolve, reject) => {
+    stream.end((error) => error ? reject(error) : resolve());
+  })));
+  process.exit(process.exitCode ?? 0);
+}
 
 function readPackageVersion() {
   if (!existsSync(packageJsonPath)) return null;

@@ -20,6 +20,7 @@ export type WorkStatus = {
   summary: string;
   reason: string | null;
   answer?: string;
+  assignee?: { harness: string; model: string | null; cwd: string | null; pid: number | null; sessionId: string | null };
   nextActor: string | null;
   agentId: string | null;
   updatedAt: number | null;
@@ -108,12 +109,28 @@ export function buildWorkStatuses(snapshot: ScoutBrokerSnapshot): WorkStatus[] {
     const invocation = snapshot.invocations?.[flight.invocationId];
     const linked = invocation?.collaborationRecordId ? snapshot.collaborationRecords?.[invocation.collaborationRecordId] : undefined;
     const blocked = flight.state === "waiting";
+    const endpoints = Object.values(snapshot.endpoints ?? {}).filter(endpoint => endpoint.agentId === flight.targetAgentId);
+    const ack = flight.metadata?.dispatchAck as Record<string, unknown> | undefined;
+    const sessionId = text(ack?.sessionId) ?? invocation?.execution?.targetSessionId;
+    const endpointId = text(ack?.endpointId);
+    const endpoint = (endpointId ? endpoints.find(endpoint => endpoint.id === endpointId) : undefined)
+      ?? (sessionId ? endpoints.find(endpoint => endpoint.sessionId === sessionId) : undefined)
+      ?? (endpoints.length === 1 ? endpoints[0] : undefined);
+    const replyId = text(flight.metadata?.replyMessageId);
+    const answer = flight.output ?? (replyId ? snapshot.messages?.[replyId]?.body : undefined);
     rows.push({
       id: flight.id, kind: "flight", state: flight.state, blocked,
       summary: invocation?.task || flight.summary || flight.id,
       reason: flight.error || (blocked ? flight.summary || null : null),
       nextActor: text(flight.metadata?.nextMoveOwnerId) ?? (blocked ? linked?.nextMoveOwnerId ?? null : null),
       agentId: flight.targetAgentId,
+      ...(answer ? { answer } : {}),
+      ...(endpoint ? { assignee: {
+        harness: endpoint.harness, model: text(endpoint.metadata?.model),
+        cwd: endpoint.cwd ?? endpoint.projectRoot ?? null,
+        pid: typeof endpoint.metadata?.pid === "number" ? endpoint.metadata.pid : null,
+        sessionId: endpoint.sessionId ?? null,
+      } } : {}),
       updatedAt: flight.completedAt ?? flight.startedAt ?? invocation?.createdAt ?? null,
       conversationId: invocation?.conversationId ?? null,
       handles: [flight.id, flight.invocationId, invocation?.messageId, text(flight.metadata?.bindingRef), flight.id.slice(-8)].filter((v): v is string => Boolean(v)),
@@ -198,6 +215,8 @@ export async function runStatusCommand(context: ScoutCommandContext, args: strin
     ...(value.work.length ? value.work.map(row => [
       `${row.id} · ${row.kind} · ${row.blocked ? "blocked" : row.state} (${row.state})`,
       `  ${row.summary.replace(/\s+/g, " ")}`,
+      `  Assignee: ${row.agentId ?? "unknown"}`,
+      ...(row.assignee ? [`  Runtime: ${row.assignee.harness} · model: ${row.assignee.model ?? "unknown"} · cwd: ${row.assignee.cwd ?? "unknown"} · pid: ${row.assignee.pid ?? "unknown"}`] : []),
       `  Next actor: ${row.nextActor ?? "unknown"}`,
       ...(row.answer ? [`  Answer: ${row.answer.replace(/\s+/g, " ")}`] : []),
       ...(row.reason ? [`  Reason: ${row.reason.replace(/\s+/g, " ")}`] : []),

@@ -2,10 +2,10 @@
  * Sidebar primary-area model (SCO-083).
  *
  * Two explicit layers:
- * 1. PRIMARY_AREAS — 8 primary navigation destinations (area id, label, icon,
+ * 1. PRIMARY_AREAS — 9 primary navigation destinations (area id, label, icon,
  *    default route, visibility/default-route policy).
  * 2. ROUTE_AREA_BY_VIEW — exhaustive compile-time map of every Route["view"] to
- *    exactly one PrimaryAreaId. Sidebar active state is
+ *    exactly one NavigationEntryId (Requests is separate). Sidebar active state is
  *    primaryAreaForRoute(route) === area.id.
  *
  * Destination predicates in nav-destinations.ts continue to drive secondary
@@ -24,18 +24,12 @@ import {
   Send,
   Settings,
   Terminal,
+  PanelLeft,
 } from "lucide-react";
 import type { Route } from "../lib/types.ts";
-
-export type PrimaryAreaId =
-  | "home"
-  | "projects"
-  | "sessions"
-  | "chat"
-  | "dispatch"
-  | "search"
-  | "ops"
-  | "settings";
+import { getDestination } from "./nav-destinations.ts";
+import { ROUTE_AREA_BY_VIEW, type PrimaryAreaId, type NavigationEntryId } from "./route-areas.ts";
+export { ROUTE_AREA_BY_VIEW, type PrimaryAreaId, type NavigationEntryId } from "./route-areas.ts";
 
 export type PrimaryAreaSection = "navigate" | "system";
 
@@ -49,58 +43,63 @@ export type PrimaryArea = {
 };
 
 /**
- * Eight primary areas. Navigate section first (Home…Search), then System
+ * Nine primary areas. Navigate section first (Home…Search), then System
  * (Ops, Settings). Icons are for the sidebar icon rail; labels match product
  * nouns.
  */
 export const PRIMARY_AREAS: readonly PrimaryArea[] = [
   {
     id: "home",
-    label: "Home",
+    label: getDestination("home").label,
     icon: House,
     defaultRoute: { view: "inbox" },
     section: "navigate",
   },
   {
+    id: "sessions",
+    label: getDestination("sessions").label,
+    icon: PanelLeft,
+    defaultRoute: { view: "sessions" },
+    section: "navigate",
+  },
+  {
     id: "chat",
-    label: "Chat",
+    label: getDestination("chat").label,
     icon: MessageSquare,
     defaultRoute: { view: "messages" },
     section: "navigate",
   },
   {
     id: "projects",
-    label: "Agents",
+    label: getDestination("project-list").label,
     icon: FolderKanban,
-    defaultRoute: { view: "agents-v2" },
+    defaultRoute: { view: "agents-v2", indexView: "projects" },
     section: "navigate",
   },
   {
-    // Area id stays "sessions" (route classification key); the surface leads
-    // with Terminals, with session transcripts as its sibling sub-surface.
-    id: "sessions",
-    label: "Terminals",
+    id: "terminals",
+    label: getDestination("terminals").label,
     icon: Terminal,
     defaultRoute: { view: "terminal" },
     section: "navigate",
   },
   {
     id: "dispatch",
-    label: "Broker",
+    label: getDestination("dispatch").label,
     icon: Send,
     defaultRoute: { view: "broker" },
     section: "navigate",
   },
   {
     id: "search",
-    label: "Search",
+    label: getDestination("search").label,
     icon: Search,
     defaultRoute: { view: "search" },
     section: "navigate",
   },
   {
     id: "ops",
-    label: "Ops",
+    label: getDestination("ops").label,
     icon: Compass,
     // Catalog default is Mission Control; gate policy may redirect to Tail.
     defaultRoute: { view: "ops", mode: "mission" },
@@ -115,37 +114,6 @@ export const PRIMARY_AREAS: readonly PrimaryArea[] = [
   },
 ] as const;
 
-/**
- * Exhaustive view → primary area map. Proves every Route["view"] union member
- * is classified. Runtime tests assert 8 non-empty buckets and exactly 22 keys.
- *
- * Note: `follow` is a transient resolver; primaryAreaForRoute may prefer a
- * resolved target area from preferredView when present.
- */
-export const ROUTE_AREA_BY_VIEW = {
-  inbox: "home",
-  activity: "home",
-  briefings: "home",
-  "agents-v2": "projects",
-  "agent-info": "projects",
-  repos: "projects",
-  "repo-diff": "projects",
-  code: "projects",
-  sessions: "sessions",
-  terminal: "sessions",
-  messages: "chat",
-  conversation: "chat",
-  broker: "dispatch",
-  work: "dispatch",
-  follow: "dispatch",
-  search: "search",
-  ops: "ops",
-  mesh: "ops",
-  "mesh-ops": "ops",
-  harnesses: "ops",
-  settings: "settings",
-  voice: "settings",
-} as const satisfies Record<Route["view"], PrimaryAreaId>;
 
 const AREA_BY_ID: ReadonlyMap<PrimaryAreaId, PrimaryArea> = new Map(
   PRIMARY_AREAS.map((area) => [area.id, area]),
@@ -164,7 +132,7 @@ export function getPrimaryArea(id: PrimaryAreaId): PrimaryArea {
  * when preferredView is set, active area follows the resolved target; otherwise
  * the view falls back to Dispatch (ROUTE_AREA_BY_VIEW.follow).
  */
-export function primaryAreaForRoute(route: Route): PrimaryAreaId {
+export function primaryAreaForRoute(route: Route): NavigationEntryId {
   if (route.view === "follow" && route.preferredView) {
     switch (route.preferredView) {
       case "tail":
@@ -220,13 +188,14 @@ export function allRouteViews(): readonly Route["view"][] {
   return Object.keys(ROUTE_AREA_BY_VIEW) as Route["view"][];
 }
 
-/** Bucket every view under its primary area (for integrity tests). */
-export function routeViewsByArea(): Record<PrimaryAreaId, Route["view"][]> {
+/** Bucket every view under its navigation entry (Requests is not an area). */
+export function routeViewsByArea(): Record<NavigationEntryId, Route["view"][]> {
   const buckets = Object.fromEntries(
     PRIMARY_AREAS.map((area) => [area.id, [] as Route["view"][]]),
-  ) as Record<PrimaryAreaId, Route["view"][]>;
+  ) as Record<NavigationEntryId, Route["view"][]>;
+  buckets.requests = [];
   for (const [view, areaId] of Object.entries(ROUTE_AREA_BY_VIEW) as Array<
-    [Route["view"], PrimaryAreaId]
+    [Route["view"], NavigationEntryId]
   >) {
     buckets[areaId].push(view);
   }

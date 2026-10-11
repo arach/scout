@@ -10,6 +10,7 @@ import type {
 import { normalizeAgentSelectorSegment } from "@openscout/protocol";
 
 import { buildLocalAgentDirectInvocationPrompt } from "./local-agents.js";
+import { openPairingLocalChannel } from "./pairing-local-socket.js";
 
 const DEFAULT_PAIRING_PORT = 43_130;
 const PAIRING_CONNECT_TIMEOUT_MS = 1_500;
@@ -182,21 +183,6 @@ type PairingBridgeResponseEnvelope<T> =
       result?: never;
     };
 
-type PairingSocketMessageEvent = {
-  data: unknown;
-};
-
-type PairingSocket = {
-  readonly readyState: number;
-  send(data: string): void;
-  close(): void;
-  addEventListener(type: "open" | "close" | "error", listener: () => void): void;
-  addEventListener(type: "message", listener: (event: PairingSocketMessageEvent) => void): void;
-  removeEventListener(type: "open" | "close" | "error", listener: () => void): void;
-  removeEventListener(type: "message", listener: (event: PairingSocketMessageEvent) => void): void;
-};
-
-type PairingSocketConstructor = new (url: string) => PairingSocket;
 
 export type PairingBridgeClient = {
   query<T>(path: string, input?: Record<string, unknown>): Promise<T>;
@@ -297,17 +283,7 @@ function resolvePairingBridgePort(options: PairingSessionDiscoveryOptions = {}):
     : DEFAULT_PAIRING_PORT;
 }
 
-function resolvePairingSocketConstructor(): PairingSocketConstructor {
-  const ctor = (globalThis as { WebSocket?: PairingSocketConstructor }).WebSocket;
-  if (!ctor) {
-    throw new Error("Global WebSocket is unavailable in this runtime.");
-  }
-  return ctor;
-}
-
 async function createPairingBridgeClient(port: number): Promise<PairingBridgeClient> {
-  const PairingWebSocket = resolvePairingSocketConstructor();
-  const socket = new PairingWebSocket(`ws://127.0.0.1:${port}`);
   let nextRequestId = 1;
   const pending = new Map<number, {
     resolve: (value: unknown) => void;
@@ -321,32 +297,7 @@ async function createPairingBridgeClient(port: number): Promise<PairingBridgeCli
     pending.clear();
   };
 
-  await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      cleanup();
-      reject(new Error(`Timed out connecting to the pairing bridge on port ${port}.`));
-    }, PAIRING_CONNECT_TIMEOUT_MS);
-
-    const handleOpen = () => {
-      cleanup();
-      resolve();
-    };
-    const handleError = () => {
-      cleanup();
-      reject(new Error(`Unable to connect to the pairing bridge on port ${port}.`));
-    };
-    const cleanup = () => {
-      clearTimeout(timeout);
-      socket.removeEventListener("open", handleOpen);
-      socket.removeEventListener("error", handleError);
-    };
-
-    socket.addEventListener("open", handleOpen);
-    socket.addEventListener("error", handleError);
-  });
-
-  const handleMessage = (event: PairingSocketMessageEvent) => {
-    const raw = typeof event.data === "string" ? event.data : String(event.data ?? "");
+  const handleMessage = (raw: string) => {
     let payload: PairingBridgeResponseEnvelope<unknown>;
     try {
       payload = JSON.parse(raw) as PairingBridgeResponseEnvelope<unknown>;
@@ -378,24 +329,17 @@ async function createPairingBridgeClient(port: number): Promise<PairingBridgeCli
     request.resolve(result.data);
   };
 
-  const handleClose = () => {
-    rejectPending(new Error("Pairing bridge connection closed."));
-  };
-
-  const handleRuntimeError = () => {
-    rejectPending(new Error("Pairing bridge transport error."));
-  };
-
-  socket.addEventListener("message", handleMessage);
-  socket.addEventListener("close", handleClose);
-  socket.addEventListener("error", handleRuntimeError);
+  const channel = await openPairingLocalChannel(port, {
+    onMessage: handleMessage,
+    onClose: () => rejectPending(new Error("Pairing bridge connection closed.")),
+  }, { timeoutMs: PAIRING_CONNECT_TIMEOUT_MS });
 
   function call<T>(
     method: "query" | "mutation",
     path: string,
     input?: Record<string, unknown>,
   ): Promise<T> {
-    if (socket.readyState !== 1) {
+    if (!channel.isOpen()) {
       return Promise.reject(new Error("Pairing bridge is not connected."));
     }
 
@@ -427,7 +371,7 @@ async function createPairingBridgeClient(port: number): Promise<PairingBridgeCli
         },
       });
 
-      socket.send(JSON.stringify(requestPayload));
+      channel.send(JSON.stringify(requestPayload));
     });
   }
 
@@ -439,12 +383,7 @@ async function createPairingBridgeClient(port: number): Promise<PairingBridgeCli
       return call<T>("mutation", path, input);
     },
     close() {
-      if (socket.readyState === 0 || socket.readyState === 1) {
-        socket.close();
-      }
-      socket.removeEventListener("message", handleMessage);
-      socket.removeEventListener("close", handleClose);
-      socket.removeEventListener("error", handleRuntimeError);
+      channel.close();
       rejectPending(new Error("Pairing bridge client closed."));
     },
   };
@@ -647,6 +586,41 @@ export async function getPairingSessionSnapshot(
   } catch {
     return null;
   }
+}
+
+/** Every open session's snapshot, read over one bridge connection. */
+export async function listPairingSessionSnapshots(
+  options: PairingSessionDiscoveryOptions = {},
+): Promise<PairingSessionState[]> {
+  const port = resolvePairingBridgePort(options);
+  if (!port) {
+    return [];
+  }
+
+  return withPairingBridgeClient({ ...options, port }, async (client) => {
+    const sessions = await client.query<PairingSession[]>("session.list");
+    const snapshots = await Promise.all(sessions
+      .filter((session) => session.status !== "closed")
+      .map((session) => client
+        .query<PairingSessionState>("session.snapshot", { sessionId: session.id })
+        .catch(() => null)));
+    return snapshots.filter((snapshot): snapshot is PairingSessionState => snapshot !== null);
+  });
+}
+
+/** Answers one pending action approval through the bridge's own decide path. */
+export async function decidePairingApproval(
+  input: { sessionId: string; turnId: string; blockId: string; version: number; decision: "approve" | "deny"; reason?: string },
+  options: PairingSessionDiscoveryOptions = {},
+): Promise<void> {
+  await withPairingBridgeClient(options, (client) => client.mutation<{ ok: true }>("actionDecide", {
+    sessionId: input.sessionId,
+    turnId: input.turnId,
+    blockId: input.blockId,
+    version: input.version,
+    decision: input.decision,
+    ...(input.reason?.trim() ? { reason: input.reason.trim() } : {}),
+  }));
 }
 
 export async function findPairingSession(

@@ -35,6 +35,7 @@ import { useContextMenu } from "../../components/ContextMenu.tsx";
 import { ConnectionState, useConnectionTrace } from "../../components/ConnectionState.tsx";
 import { terminalLoadNotice, terminalRelayNotice, terminalRelayTraceError } from "./terminal-connection-state.ts";
 import { api } from "../../lib/api.ts";
+import { TerminalRestContext, useEmptyishTerminal } from "./TerminalRestContext.tsx";
 import { copyTextToClipboard } from "../../lib/clipboard.ts";
 import { actorColor } from "../../lib/colors.ts";
 import {
@@ -143,6 +144,7 @@ import {
   type TerminalWorkspaceResolution,
 } from "../../lib/terminal-workspaces.ts";
 import { useTerminalRelay, TerminalRelay } from "hudsonkit/terminal";
+import { TypographicTerminalRelay } from "./TypographicTerminalRelay.tsx";
 import { usePersistentState } from "@hudsonkit";
 import { queueTakeover } from "../../lib/terminal-takeover.ts";
 import { useHerdrTopology } from "../../lib/herdr-topology.ts";
@@ -298,29 +300,10 @@ const TERMINAL_FRESH_AGENT_OPTIONS: readonly { value: TerminalAgentKind; label: 
   { value: "pi", label: "Pi" },
 ];
 
-const DEFAULT_TERMINAL_FONT_FAMILY = "'JetBrainsMono Nerd Font', 'JetBrainsMonoNL Nerd Font', 'MesloLGS Nerd Font Mono', 'Hack Nerd Font Mono', 'JetBrains Mono', monospace";
 const ignoreReadOnlyTerminalInput = (_value: string) => {};
 const ignoreReadOnlyTerminalRestart = () => {};
 
-function terminalTypography(): { fontFamily: string; fontSize: number } {
-  if (typeof window === "undefined") {
-    return { fontFamily: DEFAULT_TERMINAL_FONT_FAMILY, fontSize: 13 };
-  }
-  const params = new URLSearchParams(window.location.search);
-  const configuredFamily = params.get("terminalFontFamily")?.trim();
-  const configuredSize = Number(params.get("terminalFontSize"));
-  return {
-    fontFamily: configuredFamily
-      ? `'${configuredFamily.replaceAll("'", "\\'")}', ${DEFAULT_TERMINAL_FONT_FAMILY}`
-      : DEFAULT_TERMINAL_FONT_FAMILY,
-    fontSize: Number.isFinite(configuredSize) && configuredSize >= 9 && configuredSize <= 32
-      ? configuredSize
-      : 13,
-  };
-}
-
 function ScoutTerminalRelay(props: ComponentProps<typeof TerminalRelay>) {
-  const typography = terminalTypography();
   const { apiConnection, reload } = useScout();
   const [attempted, setAttempted] = useState(false);
   useEffect(() => {
@@ -332,17 +315,13 @@ function ScoutTerminalRelay(props: ComponentProps<typeof TerminalRelay>) {
     `Terminal: ${props.relay.status}`,
     terminalRelayTraceError(props.relay.error),
   ].filter(Boolean).join(" · "));
-  // "auto" lets Hudson load @xterm/addon-webgl and fall back to the DOM
-  // renderer on context loss. Callers can still pin "dom" or "webgl".
   return (
     <div className="s-term-relay-surface">
       {/* Keep xterm mounted through reconnects so its scrollback survives. */}
       <div className="s-term-relay-canvas" aria-hidden={notice ? true : undefined} inert={notice ? true : undefined} style={notice ? { visibility: "hidden" } : undefined}>
-        <TerminalRelay
+        <TypographicTerminalRelay
           {...props}
-          renderer={props.renderer ?? "auto"}
-          fontFamily={typography.fontFamily}
-          fontSize={typography.fontSize}
+          search={typeof window === "undefined" ? "" : window.location.search}
         />
       </div>
       {notice && (
@@ -1521,6 +1500,11 @@ function TerminalHome({ navigate, compact = false }: { navigate: TerminalNavigat
     () => terminalItems.filter((item) => item.surface.state !== "exited"),
     [terminalItems],
   );
+  // Detached setups (a Herdr layout that isn't running) wait in the picker.
+  const runningTerminalItems = useMemo(
+    () => liveTerminalItems.filter((item) => item.surface.state === "live"),
+    [liveTerminalItems],
+  );
   const { managed: multiplexerItems } = useMemo(
     () => partitionTerminalListItems(liveTerminalItems),
     [liveTerminalItems],
@@ -1803,6 +1787,32 @@ function TerminalHome({ navigate, compact = false }: { navigate: TerminalNavigat
       .catch((error) => setWorkspaceSyncError(error instanceof Error ? error.message : String(error)));
     setWorkspaceView("workspace");
   }, [editingWorkspaceId, setDeck, setWorkspaceView, state.sessions, workspaceDraftCells, workspaceDraftLayout, workspaceDraftName, workspaceDraftPurpose]);
+
+  // A terminal already running on this host opens straight into a one-tile
+  // workspace, saved like any other, so the first visit never starts from a
+  // blank builder when the host is full of sessions.
+  const openFoundTerminal = useCallback((item: TerminalHomeListItem) => {
+    const definition: TerminalWorkspaceDefinition = {
+      id: createTerminalDeckId("workspace"),
+      name: item.title,
+      purpose: "",
+      columns: resolveTerminalWorkspaceColumns(TERMINAL_DEFAULT_DRAFT_LAYOUT, { tileCount: 1 }),
+      layout: TERMINAL_DEFAULT_DRAFT_LAYOUT,
+      tiles: [{
+        id: createTerminalDeckId("cell"),
+        kind: "registered",
+        terminalSessionId: item.session.id,
+        terminalSurfaceKey: surfaceKey(item.surface),
+      }],
+      updatedAt: Date.now(),
+    };
+    setDeck((current) => selectTerminalWorkspace(upsertTerminalWorkspace(current, definition), definition.id));
+    const input = terminalWorkspaceRecordInputFromLayout(definition, { sessions: state.sessions });
+    syncedWorkspacesRef.current.set(definition.id, JSON.stringify(input));
+    void saveTerminalWorkspace(input)
+      .catch((error) => setWorkspaceSyncError(error instanceof Error ? error.message : String(error)));
+    setWorkspaceView("workspace");
+  }, [setDeck, setWorkspaceView, state.sessions]);
 
   const deleteWorkspace = useCallback((workspaceId: string) => {
     setDeck((current) => closeTerminalWorkspace(current, workspaceId, { allowEmpty: true }));
@@ -2306,9 +2316,11 @@ function TerminalHome({ navigate, compact = false }: { navigate: TerminalNavigat
       <TerminalWorkspaceLibrary
         header={terminalHeader}
         workspaces={workspaceDefinitions}
+        found={runningTerminalItems}
         sessionsReady={state.state !== "loading"}
         connectionStatus={inventoryStatus}
         onOpen={enterWorkspace}
+        onOpenFound={openFoundTerminal}
         onCreate={() => startWorkspaceBuilder()}
         onEdit={startWorkspaceBuilder}
         onDelete={deleteWorkspace}
@@ -2677,21 +2689,29 @@ function TerminalHome({ navigate, compact = false }: { navigate: TerminalNavigat
   );
 }
 
+/** Found terminals listed on the empty library before the rest wait for the picker. */
+const FOUND_TERMINALS_SHOWN = 8;
+
 function TerminalWorkspaceLibrary({
   header,
   workspaces,
+  found,
   sessionsReady,
   connectionStatus,
   onOpen,
+  onOpenFound,
   onCreate,
   onEdit,
   onDelete,
 }: {
   header: ReactNode;
   workspaces: TerminalWorkspaceDefinition[];
+  /** Live terminals on this host, offered when there's no workspace yet. */
+  found: TerminalHomeListItem[];
   sessionsReady: boolean;
   connectionStatus?: ReactNode;
   onOpen: (workspace: TerminalWorkspaceDefinition) => void;
+  onOpenFound: (item: TerminalHomeListItem) => void;
   onCreate: () => void;
   onEdit: (workspace: TerminalWorkspaceDefinition) => void;
   onDelete: (workspaceId: string) => void;
@@ -2703,7 +2723,30 @@ function TerminalWorkspaceLibrary({
         <h1 className="s-term-visually-hidden">Terminal workspaces</h1>
         {connectionStatus}
 
-        {workspaces.length === 0 && connectionStatus ? null : workspaces.length === 0 ? (
+        {workspaces.length === 0 && connectionStatus ? null : workspaces.length === 0 && found.length > 0 ? (
+          <section className="s-term-workspace-library-found" aria-label="Terminals on this Mac">
+            <header>
+              <h2>{found.length} terminal{found.length === 1 ? "" : "s"} running here</h2>
+              <p>Open one to start a workspace. You can add the others from inside it.</p>
+            </header>
+            <ul>
+              {found.slice(0, FOUND_TERMINALS_SHOWN).map((item) => (
+                <li key={item.id}>
+                  <div>
+                    <strong>{item.title}</strong>
+                    <span>{item.detail || item.cwdLabel}</span>
+                  </div>
+                  <button type="button" className="s-term-workspace-action" onClick={() => onOpenFound(item)}>
+                    Open
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {found.length > FOUND_TERMINALS_SHOWN ? (
+              <p>{found.length - FOUND_TERMINALS_SHOWN} more appear in the picker once a workspace is open.</p>
+            ) : null}
+          </section>
+        ) : workspaces.length === 0 ? (
           <section className="s-term-workspace-library-empty">
             <Grid2X2 size={24} strokeWidth={1.5} />
             <h2>Create your first terminal workspace</h2>
@@ -3849,6 +3892,11 @@ function FreshTerminalWorkspaceTile({
     root?.querySelector<HTMLElement>(".xterm")?.focus();
   }, []);
   const terminalMenu = useTerminalSurfaceMenu({ focusTerminal, sendInput: relay.sendInput });
+  const rest = useEmptyishTerminal();
+  const handleReady = useCallback((terminal: unknown) => {
+    terminalMenu.handleTerminalReady(terminal);
+    rest.track(terminal);
+  }, [rest.track, terminalMenu.handleTerminalReady]);
 
   const openStandalone = useCallback(() => {
     if (route) openTerminalRouteExternally(route, navigate);
@@ -3907,7 +3955,7 @@ function FreshTerminalWorkspaceTile({
         >
           <ScoutTerminalRelay
             relay={relay}
-            onReady={terminalMenu.handleTerminalReady}
+            onReady={handleReady}
             quiet
             configItems={[
               { label: "backend", value: tile.backend },
@@ -3918,6 +3966,7 @@ function FreshTerminalWorkspaceTile({
               { label: "health", value: healthUrl },
             ]}
           />
+          <TerminalRestContext visible={rest.emptyish && relay.status === "connected"} />
         </div>
       </div>
     </section>

@@ -39,6 +39,9 @@ const MESH_ROUTE_MATRIX: Record<string, MeshRouteTier> = {
   "POST /v1/access/rpc": "scoped",
   "POST /v1/access/policy": "public",
   "POST /v1/access/admin": "local",
+  "POST /v1/mcp-events": "local",
+  "POST /v1/native-session-attention": "local",
+  "POST /v1/surfaces/deck": "local",
 
   // ── public: node card + enrollment handshake ────────────────────────────
   "GET /v1/node": "public",
@@ -75,6 +78,12 @@ const MESH_ROUTE_MATRIX: Record<string, MeshRouteTier> = {
   // project that exists here. Same trust as forwarding an invocation.
   "POST /v1/mesh/sessions/start": "control",
   "POST /v1/mesh/web-request": "control",
+  // Cross-machine approvals: control tier AND a per-peer share opt-in on this
+  // machine (mesh-approvals.ts) — the tier alone never exposes them.
+  "GET /v1/mesh/approvals/stream": "control",
+  "POST /v1/mesh/approvals/decide": "control",
+  "GET /v1/approvals/remote": "local",
+  "POST /v1/approvals/remote/decide": "local",
   "POST /v1/hosts/web-request": "local",
   [TRPC_UPGRADE_ROUTE]: "control",
 

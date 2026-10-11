@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../lib/api.ts';
 import type { WorldBrokerMessage } from '../../../shared/world-broker-messages.ts';
-export function useWorldMessages() {
+export function useWorldMessages(enabled = true) {
   const [messages, setMessages] = useState<WorldBrokerMessage[]>([]);
   useEffect(() => {
+    if (!enabled) return;
     let stopped = false;
     let timer: ReturnType<typeof setTimeout>;
     const refresh = async () => {
@@ -13,6 +14,6 @@ export function useWorldMessages() {
     };
     void refresh();
     return () => { stopped = true; clearTimeout(timer); };
-  }, []);
+  }, [enabled]);
   return messages;
 }

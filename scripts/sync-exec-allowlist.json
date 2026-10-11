@@ -775,5 +775,138 @@
     "category": "test",
     "reason": "Owned SQLite reader child verifies read-only startup contention with bounded termination and reaping.",
     "owner": "tests"
+  },
+  {
+    "path": "packages/runtime/src/broker-scoutbot-service.ts",
+    "symbol": "node:child_process",
+    "category": "process-lifecycle",
+    "reason": "owns the Scoutbot brain child process: spawned once, stopped with SIGTERM then SIGKILL",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/provider-telemetry-bootstrap.ts",
+    "symbol": "execFileSync",
+    "category": "boot",
+    "reason": "one `command -v` probe while checking the Claude statusline wrapper at web-server boot and in the throttled background heal; never per request. Debt: make it async",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/provider-telemetry-bootstrap.ts",
+    "symbol": "node:child_process",
+    "category": "boot",
+    "reason": "imports execFileSync for the boot-time statusline wrapper PATH probe above",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/routing/identity.ts",
+    "symbol": "execFileSync",
+    "category": "cli",
+    "reason": "git reads for the routing index refresh, which only `scout route` runs; not on a broker or server path",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/routing/identity.ts",
+    "symbol": "node:child_process",
+    "category": "cli",
+    "reason": "imports execFileSync for the CLI-only routing index refresh",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/routing/routing.test.ts",
+    "symbol": "execFileSync",
+    "category": "test",
+    "reason": "git fixture setup",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/routing/routing.test.ts",
+    "symbol": "node:child_process",
+    "category": "test",
+    "reason": "test subprocess fixture or git fixture setup",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/system-probes/ssh-config.ts",
+    "symbol": "node:child_process",
+    "category": "probe-exec",
+    "reason": "async `ssh -G` config read with a 3s timeout; no sync exec",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/web/server/harness-completion.ts",
+    "symbol": "node:child_process",
+    "category": "process-lifecycle",
+    "reason": "async harness CLI completion with piped stdio, killed on its timeout",
+    "owner": "web"
+  },
+  {
+    "path": "packages/web/server/pairing-bridge-client.test.ts",
+    "symbol": "Bun.spawn",
+    "category": "test",
+    "reason": "test subprocess fixture or git fixture setup",
+    "owner": "web"
+  },
+  {
+    "path": "packages/web/server/routes/world.ts",
+    "symbol": "node:child_process",
+    "category": "imperative",
+    "reason": "async /usr/bin/open for an operator's open or reveal action, 5s timeout",
+    "owner": "web"
+  },
+  {
+    "path": "packages/web/server/scoutbot/process/dispatch.test.ts",
+    "symbol": "node:child_process",
+    "category": "test",
+    "reason": "test subprocess fixture or git fixture setup",
+    "owner": "web"
+  },
+  {
+    "path": "packages/web/server/terminal-context.test.ts",
+    "symbol": "execFileSync",
+    "category": "test",
+    "reason": "git fixture setup",
+    "owner": "web"
+  },
+  {
+    "path": "packages/web/server/terminal-context.test.ts",
+    "symbol": "node:child_process",
+    "category": "test",
+    "reason": "test subprocess fixture or git fixture setup",
+    "owner": "web"
+  },
+  {
+    "path": "packages/web/server/terminal-context.ts",
+    "symbol": "node:child_process",
+    "category": "probe-exec",
+    "reason": "async bounded git execFile for a terminal's repo context; no sync exec",
+    "owner": "web"
+  },
+  {
+    "path": "packages/web/server/world-hosts.ts",
+    "symbol": "node:child_process",
+    "category": "probe-exec",
+    "reason": "async bounded execFile (timeout, SIGKILL) for World host readings; no sync exec",
+    "owner": "web"
+  },
+  {
+    "path": "packages/web/server/world-live.ts",
+    "symbol": "Bun.spawn",
+    "category": "process-lifecycle",
+    "reason": "owns the ssh tail child for World live events, SIGKILLed on its timer",
+    "owner": "web"
+  },
+  {
+    "path": "packages/web/server/world-team.ts",
+    "symbol": "Bun.spawn",
+    "category": "probe-exec",
+    "reason": "async ssh and gh reads for World team snapshots, each SIGKILLed on its timeout",
+    "owner": "web"
+  },
+  {
+    "path": "packages/web/server/world-week.ts",
+    "symbol": "node:child_process",
+    "category": "probe-exec",
+    "reason": "async git execFile with a 1.5s timeout and SIGKILL for Week history; no sync exec",
+    "owner": "web"
   }
 ]

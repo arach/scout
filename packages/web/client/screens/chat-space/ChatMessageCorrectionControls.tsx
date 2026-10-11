@@ -12,6 +12,8 @@ interface CorrectionProps {
   message: ChatMessage; canEdit: boolean; canDelete: boolean; onCorrect: CorrectChatMessage;
   /** The turn's other actions; Edit and Delete join them in one toolbar. */
   tools?: ReactNode;
+  /** Last control on the hover bar. Edit and Delete stay ahead of it. */
+  more?: ReactNode;
 }
 
 export function ChatMessageCorrectionControls(props: CorrectionProps) {
@@ -21,7 +23,7 @@ export function ChatMessageCorrectionControls(props: CorrectionProps) {
   return <CorrectionEditor key={key ?? props.message.id} {...props} store={store} />;
 }
 
-function CorrectionEditor({ message, canEdit, canDelete, onCorrect, tools, store }: CorrectionProps & {
+function CorrectionEditor({ message, canEdit, canDelete, onCorrect, tools, more, store }: CorrectionProps & {
   store: ReturnType<typeof createChatLocalStore<ChatCorrectionDraft | null>>;
 }) {
   const [restored] = useState(() => canEdit ? store.read() : null);
@@ -44,8 +46,8 @@ function CorrectionEditor({ message, canEdit, canDelete, onCorrect, tools, store
   const currentRevision = correction?.revision ?? 0;
   const changed = mode !== null && revision !== currentRevision;
   const deleted = correction?.deletedAt != null;
-  const toolbar = (triggers: ReactNode) => tools || triggers
-    ? <div className="chat-turn-tools" role="toolbar" aria-label="Message actions">{tools}{triggers}</div>
+  const toolbar = (triggers: ReactNode) => tools || triggers || more
+    ? <div className="chat-turn-tools" role="toolbar" aria-label="Message actions">{tools}{triggers}{more}</div>
     : null;
   if (deleted && !mode) return toolbar(null);
   const start = (next: "edit" | "delete") => {

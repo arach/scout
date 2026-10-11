@@ -49,6 +49,13 @@ import {
   type ScoutbotBriefReference,
   type ScoutbotCodexAssistantInvoker,
 } from "../scoutbot-assistant.ts";
+import {
+  createScoutbotAssistantFileStore,
+  type ScoutbotAssistantSessionStore,
+} from "../scoutbot-assistant-store.ts";
+import { createScoutbotBrain, type ScoutbotBrain } from "../scoutbot-brain.ts";
+import { createScoutbotFileLookup } from "../scoutbot-file-lookup.ts";
+import { createScoutbotPostingHandle, isScoutbotProcessManaged } from "../scoutbot/process/web-handle.ts";
 import { SESSION_RECAP_SYSTEM_PROMPT, buildSessionRecap } from "../session-recap.ts";
 import { loadSessionRefObservePayload } from "../core/observe/service.ts";
 import {
@@ -105,6 +112,10 @@ export type ScoutbotServicesOptions = {
   invokeCodex?: ScoutbotCodexAssistantInvoker;
   /** Injectable for tests; defaults to the cached codex-executable probe. */
   agentAvailable?: () => boolean;
+  /** Where Scoutbot's conversations persist; null keeps them in memory (tests). */
+  assistantStore?: ScoutbotAssistantSessionStore | null;
+  /** Pi Durable brain for typed chat; null turns it off. OPENSCOUT_SCOUTBOT_BRAIN=0 does too. */
+  brain?: ScoutbotBrain | null;
   scoutbot?: {
     enabled?: boolean;
     brokerBaseUrl?: string;
@@ -856,6 +867,15 @@ export async function createScoutbotWebServices(
   // invoker (tests, embedded hosts) vouches for the agent path itself.
   const agentAvailable = options.agentAvailable
     ?? (options.invokeCodex ? () => true : createScoutbotAgentAvailabilityProbe());
+  const brain = options.brain !== undefined
+    ? options.brain ?? undefined
+    : process.env.OPENSCOUT_SCOUTBOT_BRAIN?.trim() === "0"
+      ? undefined
+      : createScoutbotBrain({
+        currentDirectory,
+        resolveApiKey: resolveOpenAIApiKey,
+        findFiles: createScoutbotFileLookup(currentDirectory),
+      });
   const scoutbotAssistant = createScoutbotAssistantService({
     currentDirectory,
     usage,
@@ -870,6 +890,10 @@ export async function createScoutbotWebServices(
     invokeCodex: options.invokeCodex
       ?? createDefaultScoutbotCodexInvoker(currentDirectory),
     agentAvailable,
+    brain,
+    store: options.assistantStore === undefined
+      ? createScoutbotAssistantFileStore()
+      : options.assistantStore ?? undefined,
   });
   let scoutbotRunner: ScoutbotRunnerHandle | null = null;
   let scoutbotRunnerStart: Promise<ScoutbotRunnerHandle | null> | null = null;
@@ -880,6 +904,13 @@ export async function createScoutbotWebServices(
     }
     if (scoutbotRunner) return Promise.resolve(scoutbotRunner);
     if (scoutbotRunnerStart) return scoutbotRunnerStart;
+    if (isScoutbotProcessManaged()) {
+      scoutbotRunner = createScoutbotPostingHandle({
+        brokerBaseUrl: options.scoutbot.brokerBaseUrl,
+        currentDirectory,
+      });
+      return Promise.resolve(scoutbotRunner);
+    }
 
     // Runner discovery and registration can inspect every saved agent and
     // project. Keep it fully lazy so merely starting the HTTP server never
@@ -954,7 +985,11 @@ export async function createScoutbotWebServices(
   return {
     assistant: scoutbotAssistant,
     usage,
-    closeUsage: () => { usageStore?.close(); usageStore = undefined; },
+    closeUsage: () => {
+      usageStore?.close();
+      usageStore = undefined;
+      void brain?.close().catch(() => undefined);
+    },
     reminders: scoutbotReminders,
     credentials: scoutbotCredentials,
     resolveOpenAIApiKey,

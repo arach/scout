@@ -133,6 +133,8 @@ function describeEvidence(evidence: MachineEvidence, now: number): string {
     }
     case "host":
       return `host     ${evidence.host} — ${evidence.sessionCount} session${evidence.sessionCount === 1 ? "" : "s"}, ${seen}`;
+    case "ssh":
+      return `ssh      ${evidence.aliases.join(", ")} — ${evidence.configPath}, read ${seen}`;
   }
 }
 
@@ -155,6 +157,16 @@ export function renderMachineDetail(machine: MachineRecord): string {
   if (machine.hostNames.length > 0) lines.push(`  Host names: ${machine.hostNames.join(", ")}`);
   if (machine.macAddresses.length > 0) lines.push(`  MAC: ${machine.macAddresses.join(", ")}`);
   lines.push(`  Capabilities: ${machine.capabilities.length > 0 ? machine.capabilities.join(", ") : "none observed"}`);
+
+  if (machine.sshTargets?.length) {
+    lines.push("");
+    lines.push("SSH (from your config):");
+    for (const target of machine.sshTargets) {
+      const login = `${target.user ? `${target.user}@` : ""}${target.hostName}${target.port ? `:${target.port}` : ""}`;
+      const also = target.aliases.length > 1 ? ` (also ${target.aliases.slice(1).join(", ")})` : "";
+      lines.push(`  ssh ${target.alias}${also} → ${login}${target.identityFile ? ` · ${target.identityFile}` : ""}`);
+    }
+  }
 
   if (machine.routes.length > 0) {
     lines.push("");

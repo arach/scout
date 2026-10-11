@@ -1,3 +1,4 @@
+import { getDestination } from "../nav-destinations.ts";
 /**
  * Per-area content for the minimized (collapsed) left context rail.
  * Chat keeps a dedicated strip; other areas get lightweight chips for jump-in.
@@ -274,7 +275,7 @@ function OpsCollapsedStrip({ onExpand }: { onExpand?: () => void }) {
   const items = [
     { id: "mission" as const, title: "Mission", glyph: <ListTodo size={13} strokeWidth={1.7} aria-hidden /> },
     { id: "agents" as const, title: "Agents", glyph: <Users size={13} strokeWidth={1.7} aria-hidden /> },
-    { id: "lanes" as const, title: "Agent Lanes", glyph: <LayoutGrid size={13} strokeWidth={1.7} aria-hidden /> },
+    { id: "lanes" as const, title: getDestination("lanes").label, glyph: <LayoutGrid size={13} strokeWidth={1.7} aria-hidden /> },
     { id: "advisor" as const, title: "Host Advisor", glyph: <Activity size={13} strokeWidth={1.7} aria-hidden /> },
   ];
 

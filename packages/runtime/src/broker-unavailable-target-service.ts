@@ -1,5 +1,6 @@
 import type {
   AgentDefinition,
+  AgentEndpoint,
   NodeDefinition,
   ScoutDispatchEnvelope,
   ScoutDispatchUnavailableTarget,
@@ -9,14 +10,15 @@ import { brokerTargetProjectRoot } from "./broker-conversation-helpers.js";
 import {
   staleLocalAgentReason,
 } from "./broker-local-invocation-helpers.js";
-import { isManagedLocalSessionMetadata } from "./broker-managed-session-helpers.js";
 import {
-  classifyEndpoint,
+  evaluateBrokerAvailability,
+  endpointMatchesTargetSession,
+  type BrokerAvailability,
+  type VerifiedLaunchRoute,
   endpointCandidateState,
   homeEndpointForAgent,
   latestEndpointForAgent,
 } from "./broker-endpoint-selection.js";
-import { isDirectLocalAgentTransport } from "./local-agent-transports.js";
 import type { RuntimeRegistrySnapshot } from "./registry.js";
 
 type BrokerUnavailableTargetServiceDeps = {
@@ -26,6 +28,12 @@ type BrokerUnavailableTargetServiceDeps = {
     authorityNode: NodeDefinition | undefined,
   ) => ScoutDispatchUnavailableTarget | null;
   now?: () => number;
+  isEndpointAlive?: (endpoint: AgentEndpoint) => boolean;
+  supportsQueue?: (endpoint: AgentEndpoint) => boolean;
+  /** Must verify compatible launcher AND project mapping on this authority. */
+  verifiedLaunchRoute?: (
+    agent: AgentDefinition, endpoint: AgentEndpoint | null,
+  ) => VerifiedLaunchRoute | null;
 };
 
 export class BrokerUnavailableTargetService {
@@ -40,72 +48,59 @@ export class BrokerUnavailableTargetService {
     agent: AgentDefinition,
     targetSessionId?: string,
   ): ScoutDispatchUnavailableTarget | null {
-    const supersededReason = targetSessionId
-      ? staleLocalAgentReason(snapshot, agent)
-      : agent.metadata?.staleLocalRegistration === true
-      ? staleLocalAgentReason(snapshot, agent)
-      : null;
-    if (supersededReason) {
-      const endpoint = latestEndpointForAgent(snapshot, agent.id);
-      return {
-        agentId: agent.id,
-        displayName: agent.displayName ?? agent.id,
-        reason: targetSessionId ? "session_reference_not_attachable" : "superseded_registration",
-        detail: supersededReason,
-        wakePolicy: agent.wakePolicy,
-        endpointState: endpointCandidateState(endpoint?.state),
-        transport: endpoint?.transport ?? null,
-        projectRoot: brokerTargetProjectRoot(agent, endpoint),
-      };
-    }
-
-    const endpoint = homeEndpointForAgent(snapshot, agent.id);
-    const endpointClassification = classifyEndpoint(endpoint, { agent });
+    const availability = this.evaluate(snapshot, agent, targetSessionId);
+    if (availability.state !== "gone") return null;
+    const endpoint = latestEndpointForAgent(snapshot, agent.id);
     const projectRoot = brokerTargetProjectRoot(agent, endpoint);
-
-    if (agent.metadata?.retiredFromFleet === true) {
-      return {
-        agentId: agent.id,
-        displayName: agent.displayName ?? agent.id,
-        reason: "retired",
-        detail: `${agent.displayName ?? agent.id} is retired from the fleet and cannot receive new broker deliveries.`,
-        wakePolicy: agent.wakePolicy,
-        endpointState: endpoint?.state === "offline" ? "offline" : "unknown",
-        transport: endpoint?.transport ?? null,
-        projectRoot,
-      };
-    }
-
-    if (agent.authorityNodeId && agent.authorityNodeId !== this.#deps.nodeId) {
-      return this.#deps.describeRemoteAuthorityIssue(agent, snapshot.nodes[agent.authorityNodeId]);
-    }
-
-    if (agent.wakePolicy !== "manual" && (endpointClassification.wakeable || endpointClassification.runnable)) {
-      return null;
-    }
-
-    if (endpointClassification.reachable) {
-      return null;
-    }
-
-    if (
-      endpoint
-      && isManagedLocalSessionMetadata(endpoint.metadata)
-      && isDirectLocalAgentTransport(endpoint.transport)
-    ) {
-      return null;
-    }
-
+    const remoteIssue = agent.authorityNodeId !== this.#deps.nodeId
+      ? this.#deps.describeRemoteAuthorityIssue(agent, snapshot.nodes[agent.authorityNodeId])
+      : null;
+    const staleReason = staleLocalAgentReason(snapshot, agent);
+    const harness = endpoint?.harness
+      ?? (typeof agent.metadata?.harness === "string" ? agent.metadata.harness : "codex");
+    const remediation = `Start fresh explicitly: scout ask --project ${JSON.stringify(projectRoot ?? "/path/to/project")} --harness ${harness} "your request".`;
     return {
       agentId: agent.id,
       displayName: agent.displayName ?? agent.id,
-      reason: "manual_wake_required",
-      detail: `${agent.displayName ?? agent.id} is currently offline with a manual wake policy, so the broker cannot bring it online without operator help.`,
+      reason: targetSessionId ? "session_reference_not_attachable"
+        : availability.reason === "retired" ? "retired"
+        : availability.reason === "stale_registration" ? "superseded_registration"
+        : agent.wakePolicy === "manual" ? "manual_wake_required" : "unknown",
+      detail: `${agent.displayName ?? agent.id} is Gone: ${availability.reason}. ${remoteIssue?.detail ?? staleReason ?? ""} ${remediation}`,
       wakePolicy: agent.wakePolicy,
       endpointState: endpointCandidateState(endpoint?.state),
       transport: endpoint?.transport ?? null,
       projectRoot,
     };
+  }
+
+  evaluate(
+    snapshot: RuntimeRegistrySnapshot,
+    agent: AgentDefinition,
+    targetSessionId?: string,
+  ): BrokerAvailability {
+    const endpoint = targetSessionId
+      ? Object.values(snapshot.endpoints).find((candidate) =>
+          candidate.agentId === agent.id && endpointMatchesTargetSession(candidate, targetSessionId)) ?? null
+      : homeEndpointForAgent(snapshot, agent.id) ?? latestEndpointForAgent(snapshot, agent.id);
+    const remote = agent.authorityNodeId !== this.#deps.nodeId;
+    const authorityAvailable = !remote || !this.#deps.describeRemoteAuthorityIssue(
+      agent, snapshot.nodes[agent.authorityNodeId],
+    );
+    const checkedAt = this.#deps.now?.() ?? Date.now();
+    const lastSeenAt = endpoint?.metadata?.lastSeenAt;
+    // Remote state alone is not fresh receive evidence. Use the existing
+    // endpoint refresh timestamp; no heartbeat, card mutation or new lease.
+    const freshRemoteEndpoint = typeof lastSeenAt === "number"
+      && lastSeenAt <= checkedAt && checkedAt - lastSeenAt <= 90_000;
+    return evaluateBrokerAvailability({
+      agent, endpoint, authority: agent.authorityNodeId,
+      authorityAvailable, checkedAt,
+      targetSessionId,
+      alive: endpoint ? (remote ? freshRemoteEndpoint : this.#deps.isEndpointAlive?.(endpoint)) : false,
+      queueSupported: endpoint ? this.#deps.supportsQueue?.(endpoint) === true : false,
+      launchRoute: this.#deps.verifiedLaunchRoute?.(agent, endpoint) ?? null,
+    });
   }
 
   buildEnvelope(

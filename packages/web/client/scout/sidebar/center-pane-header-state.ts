@@ -31,6 +31,7 @@ export function secondaryNavKindForRoute(
  */
 export function hasSecondaryNavRow(route: Route): boolean {
   return (
+    route.view === "requests" ||
     Boolean(areaSubNavForRoute(route)) ||
     secondaryNavKindForRoute(route) !== null
   );

@@ -226,7 +226,7 @@ function renderedAskTarget(target: ScoutRouteTarget): string {
     case "binding_ref":
       return `ref:${target.ref}`;
     case "project_path":
-      return target.projectPath;
+      return target.host ? `${target.projectPath} on ${target.host}` : target.projectPath;
     case "channel":
       return `channel:${target.channel}`;
     case "broadcast":
@@ -293,6 +293,7 @@ export function buildScoutAskRoute(input: {
   currentDirectory: string;
   reasoningEffort?: string;
   aliasScope?: import("@openscout/protocol").RouteAliasScope;
+  host?: string;
 }): ScoutRouteTarget | null {
   if (input.runtimeProfile) {
     const target = {
@@ -313,9 +314,11 @@ export function buildScoutAskRoute(input: {
     return target;
   }
   if (input.projectPath) {
+    const host = input.host?.trim();
     const target = {
       kind: "project_path" as const,
       projectPath: input.projectPath,
+      ...(host ? { host } : {}),
     };
     return target;
   }
@@ -331,10 +334,37 @@ export function buildScoutAskRoute(input: {
 
 export const scoutAskHandler: ScoutAskHandler = async (command) => {
   const currentDirectory = command.currentDirectory ?? process.cwd();
-  const commandProjectPath = resolveAskProjectPath(
-    command.projectPath,
-    currentDirectory,
-  );
+  const host = command.host?.trim() || undefined;
+  if (host && !command.projectPath?.trim()) {
+    return {
+      ok: false,
+      state: "failed",
+      ids: {},
+      error: {
+        code: "invalid_request",
+        message: `--on ${host} needs --project <path on ${host}>, the folder the new session should start in.`,
+      },
+    };
+  }
+  if (host && (command.to?.trim() || command.existingHandle?.trim() || command.runtimeProfile?.trim())) {
+    return {
+      ok: false,
+      state: "failed",
+      ids: {},
+      error: {
+        code: "invalid_request",
+        message: `--on ${host} starts a fresh session from --project; it does not combine with --to, a handle, or --profile.`,
+      },
+    };
+  }
+  // A path on another machine is that machine's to resolve: `~` and relative
+  // segments mean nothing here, so it travels exactly as typed.
+  const commandProjectPath = host
+    ? command.projectPath!.trim()
+    : resolveAskProjectPath(
+      command.projectPath,
+      currentDirectory,
+    );
   const requestedTo = command.to?.trim() || "";
   const requestedRuntimeProfile = command.runtimeProfile?.trim() || "";
   const requestedExistingHandle = command.existingHandle?.trim() || "";
@@ -350,7 +380,7 @@ export const scoutAskHandler: ScoutAskHandler = async (command) => {
   const projectAgent =
     targetProjectPath
     && !requestedTo
-    && (inferredProjectPath || command.session === "new")
+    && (inferredProjectPath || command.session === "new" || host)
       ? { persistence: "one_time" as const }
       : requestedRuntimeProfile
       ? { persistence: "one_time" as const }
@@ -389,6 +419,7 @@ export const scoutAskHandler: ScoutAskHandler = async (command) => {
     currentDirectory,
     reasoningEffort: command.reasoningEffort,
     aliasScope: command.aliasScope,
+    host,
   });
   if (!target) {
     return {
@@ -413,6 +444,7 @@ export const scoutAskHandler: ScoutAskHandler = async (command) => {
       currentDirectory,
     });
   const result = await deliverScoutAsk({
+    requestId: command.requestId,
     senderId: command.senderId,
     target: resolvedTarget.target,
     targetLabel: resolvedTarget.display,
@@ -428,7 +460,7 @@ export const scoutAskHandler: ScoutAskHandler = async (command) => {
     executionReasoningEffort: command.reasoningEffort,
     executionPlacement: command.placement,
     executionSource: command.executionSource,
-    executionSession: executionSessionForAsk(command.session),
+    executionSession: executionSessionForAsk(host ? command.session ?? "new" : command.session),
     workspace: command.workspace,
     senderContext,
     projectAgent,

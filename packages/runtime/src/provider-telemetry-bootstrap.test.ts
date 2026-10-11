@@ -138,6 +138,25 @@ describe("provider telemetry bootstrap", () => {
     expect(readFileSync(wrapperPath, "utf8")).not.toContain("/nonexistent/old-prefix/scout");
   });
 
+  test("reinstalls a wrapper whose bare scout command is not on PATH", async () => {
+    const home = useTempHome("openscout-provider-telemetry-bare-missing");
+    process.env.OPENSCOUT_SCOUT_COMMAND = `'${process.execPath}'`;
+    const settingsPath = join(home, ".claude", "settings.json");
+    const wrapperPath = resolveClaudeStatuslineWrapperPath();
+    mkdirSync(join(home, ".claude"), { recursive: true });
+    mkdirSync(dirname(wrapperPath), { recursive: true });
+    // What an install without a resolvable CLI used to write: exits 127 on every prompt.
+    writeFileSync(wrapperPath, "#!/bin/sh\nset -eu\nexec scout-not-installed-anywhere statusline claude --delegate \"$@\"\n", "utf8");
+    writeFileSync(settingsPath, JSON.stringify({
+      statusLine: { type: "command", command: `'${wrapperPath}'`, padding: 0 },
+    }, null, 2), "utf8");
+
+    const report = await ensureProviderTelemetryBootstrap();
+
+    expect(report.claude.status).toBe("installed");
+    expect(readFileSync(wrapperPath, "utf8")).toContain(`exec '${process.execPath}' statusline claude --delegate`);
+  });
+
   test("self-heals a broken wiring when capture is stale, then throttles", async () => {
     const home = useTempHome("openscout-provider-telemetry-heal");
     const settingsPath = join(home, ".claude", "settings.json");

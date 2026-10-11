@@ -77,11 +77,10 @@ describe("basic route policy", () => {
     expect(route).toMatchObject({ mode: "tail" });
   });
 
-  test("sessions open a filtered Tail", () => {
+  test("sessions retain the shared slot route and its deep link", () => {
     expect(basicRoute({ view: "sessions", sessionId: "sess-1" } as Route)).toEqual({
-      view: "ops",
-      mode: "tail",
-      tailQuery: "sess-1",
+      view: "sessions",
+      sessionId: "sess-1",
     });
   });
 
@@ -185,7 +184,7 @@ describe("basic DM restriction", () => {
 
 describe("basic embeds", () => {
   test("carries the Mac panes basic has a screen for", () => {
-    expect([...BASIC_EMBED_PATHS].sort()).toEqual(["/embed/home", "/embed/session", "/embed/settings", "/embed/thread"]);
+    expect([...BASIC_EMBED_PATHS].sort()).toEqual(["/embed/home", "/embed/requests", "/embed/session", "/embed/settings", "/embed/thread"]);
   });
 
   test("every native embed path is an embed, carried or not", () => {

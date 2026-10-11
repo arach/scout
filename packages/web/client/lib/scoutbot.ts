@@ -26,6 +26,7 @@ const OPS_MODES = new Set([
   "atop",
   "lanes",
   "world",
+  "week",
 ]);
 
 const ONLINE_SCOUTBOT_STATES = new Set([
@@ -66,7 +67,9 @@ export type ScoutbotUiAction =
       delayMinutes?: number;
       reason?: string;
     }
-  | { type: "select-project"; root: string | null; reason?: string };
+  | { type: "select-project"; root: string | null; reason?: string }
+  /** The World · Week HUD (/ops/week): words to resolve there, or literal ":" lines to run. */
+  | { type: "world.command"; text?: string; commands?: string[]; reason?: string };
 
 type ScoutNativeUiActionHost = {
   webkit?: {
@@ -326,6 +329,22 @@ export function normalizeScoutbotUiAction(raw: unknown): ScoutbotUiAction | null
     };
   }
 
+  if (type === "world.command" || type === "world-command" || type === "world_command") {
+    const text = firstString(record.text, record.utterance, record.words);
+    const commands = Array.isArray(record.commands)
+      ? record.commands.filter((entry): entry is string => typeof entry === "string" && Boolean(entry.trim())).map((entry) => entry.trim())
+      : [];
+    if (!text?.trim() && commands.length === 0) {
+      return null;
+    }
+    return {
+      type: "world.command",
+      ...(text?.trim() ? { text: text.trim() } : {}),
+      ...(commands.length ? { commands } : {}),
+      ...(reason ? { reason } : {}),
+    };
+  }
+
   if (type !== "navigate" && type !== "open") {
     return null;
   }
@@ -536,6 +555,7 @@ function normalizeOpsMode(mode: string): OpsMode | undefined {
     case "atop":
     case "lanes":
     case "world":
+    case "week":
       return mode;
     default:
       return undefined;

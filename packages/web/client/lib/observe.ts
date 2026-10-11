@@ -31,8 +31,15 @@ export function useObservePolling(agents: Agent[], options?: {
     ? (options?.activeIntervalMs ?? ACTIVE_POLL_INTERVAL_MS)
     : (options?.idleIntervalMs ?? IDLE_POLL_INTERVAL_MS);
 
+  // Callers often pass a freshly filtered array every render (Home: every
+  // second). Key the poll on the ids, not the array, or each render tears the
+  // interval down and fetches again at once.
+  const agentsRef = useRef(agents);
+  agentsRef.current = agents;
+
   const fetchAll = useCallback(async () => {
     if (!enabled) return;
+    const agents = agentsRef.current;
     if (agents.length === 0) {
       setCache({});
       return;
@@ -74,11 +81,11 @@ export function useObservePolling(agents: Agent[], options?: {
         void fetchAll();
       }
     }
-  }, [agentIds, agents, enabled, pauseWhenHidden]);
+  }, [agentIds, enabled, pauseWhenHidden]);
 
   useEffect(() => {
     mountedRef.current = true;
-    if (!enabled || agents.length === 0) {
+    if (!enabled || !agentIds) {
       setCache({});
       return () => {
         mountedRef.current = false;
@@ -94,7 +101,7 @@ export function useObservePolling(agents: Agent[], options?: {
       clearInterval(timer);
       stopActivationListener?.();
     };
-  }, [agents.length, enabled, fetchAll, pauseWhenHidden, pollIntervalMs]);
+  }, [agentIds, enabled, fetchAll, pauseWhenHidden, pollIntervalMs]);
   return cache;
 }
 

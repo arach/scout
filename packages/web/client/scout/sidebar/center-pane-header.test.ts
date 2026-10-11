@@ -13,12 +13,18 @@ import {
  * for a sample of routes without mounting React chrome.
  */
 describe("center-pane header seam projections (SCO-085 / SCO-086)", () => {
+  test("Requests has an Open-only seam outside the areas", () => {
+    expect(primaryAreaForRoute({ view: "requests" })).toBe("requests");
+    expect(hasSecondaryNavRow({ view: "requests" })).toBe(true);
+    expect(secondaryNavKindForRoute({ view: "requests" })).toBeNull();
+  });
+
   test("breadcrumb renders for sample detail routes", () => {
-    expect(routeBreadcrumbForRoute({ view: "sessions" })).toBe("Sessions");
-    expect(routeBreadcrumbForRoute({ view: "repos" })).toBe("Repositories");
-    expect(routeBreadcrumbForRoute({ view: "code" })).toBe("Code Browser");
-    expect(routeBreadcrumbForRoute({ view: "ops", mode: "lanes" })).toBe("Agent Lanes");
-    expect(routeBreadcrumbForRoute({ view: "ops", mode: "world" })).toBe("World");
+    expect(routeBreadcrumbForRoute({ view: "sessions" })).toBeNull();
+    expect(routeBreadcrumbForRoute({ view: "repos" })).toBe("Repos");
+    expect(routeBreadcrumbForRoute({ view: "code" })).toBe("Code");
+    expect(routeBreadcrumbForRoute({ view: "ops", mode: "lanes" })).toBe("Lanes");
+    expect(routeBreadcrumbForRoute({ view: "ops", mode: "world" })).toBe("Fleet");
   });
 
   test("breadcrumb is null on top-level area landings that need no crumb", () => {
@@ -33,17 +39,14 @@ describe("center-pane header seam projections (SCO-085 / SCO-086)", () => {
   test("area sub-nav strip is present for projects/sessions mouse paths", () => {
     const projects = areaSubNavForRoute({ view: "agents-v2" });
     expect(projects?.items.map((i) => i.label)).toEqual([
-      "Agents",
       "Projects",
-      "Repositories",
-      "Code Browser",
+      "Agents",
+      "Repos",
+      "Code",
     ]);
 
-    const terminals = areaSubNavForRoute({ view: "terminal" });
-    expect(terminals?.items.map((i) => i.id)).toEqual(["sessions", "terminals"]);
-    expect(terminals?.items.find((i) => i.id === "terminals")?.active({ view: "terminal" })).toBe(
-      true,
-    );
+    expect(areaSubNavForRoute({ view: "terminal" })).toBeNull();
+    expect(areaSubNavForRoute({ view: "sessions" })).toBeNull();
   });
 
   test("header seam has content when either breadcrumb or sub-nav applies", () => {
@@ -64,7 +67,7 @@ describe("center-pane header seam projections (SCO-085 / SCO-086)", () => {
       if (route.view === "inbox") expect(hasSeam).toBe(false);
       if (route.view === "agents-v2") expect(hasSeam).toBe(true); // sub-nav
       if (route.view === "code") expect(hasSeam).toBe(true); // crumb + sub-nav
-      if (route.view === "terminal") expect(hasSeam).toBe(true);
+      if (route.view === "terminal") expect(hasSeam).toBe(false);
       if (route.view === "ops") expect(hasSeam).toBe(true); // crumb + ops secondary
       // Broker is a flush top-level tab now: no crumb, no sub-nav.
       if (route.view === "broker") expect(hasSeam).toBe(false);
@@ -77,7 +80,7 @@ describe("center-pane header seam projections (SCO-085 / SCO-086)", () => {
     >) {
       const route = { view } as Parameters<typeof areaSubNavForRoute>[0];
       const sub = areaSubNavForRoute(route);
-      if (areaId === "projects" || areaId === "sessions") {
+      if (areaId === "projects") {
         expect(sub?.areaId).toBe(areaId);
         expect(primaryAreaForRoute(route)).toBe(areaId);
       } else {
@@ -109,7 +112,7 @@ describe("center-pane header seam projections (SCO-085 / SCO-086)", () => {
     // Projects / Sessions area sub-nav (no Ops kind, still an inline cluster).
     expect(secondaryNavKindForRoute({ view: "agents-v2" })).toBeNull();
     expect(hasSecondaryNavRow({ view: "agents-v2" })).toBe(true);
-    expect(hasSecondaryNavRow({ view: "terminal" })).toBe(true);
+    expect(hasSecondaryNavRow({ view: "terminal" })).toBe(false);
     expect(hasSecondaryNavRow({ view: "code" })).toBe(true);
   });
 

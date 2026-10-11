@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { BrokerRequestReceipts } from "./broker-request-receipts.js";
 import { BrokerIntegrationSetupService } from "./broker-integration-setup.js";
 import { ChatQuestionError } from "./chat-question-transition.js";
 import { clearOperatorTitle, markOperatorTitled } from "./conversation-title.js";
@@ -264,6 +268,44 @@ async function requestRouter(
 }
 
 describe("createBrokerHttpRouter", () => {
+  test("node-state forwards optional projectRoot/agentId filters and preserves unfiltered GET", async () => {
+    const harness = createHarness();
+    const queries: unknown[] = [];
+    harness.deps.brokerService.readMeshNodeState = (query) => {
+      queries.push(query);
+      return { kind: "mesh-node-state" };
+    };
+    const scoped = await requestRouter(harness, "GET", "/v1/mesh/node-state?projectRoot=%2Fwork%2Fmy%20project&agentId=agent-2");
+    expect(scoped.response.status).toBe(200);
+    expect(queries[0]).toEqual({ projectRoot: "/work/my project", agentId: "agent-2" });
+    const unscoped = await requestRouter(harness, "GET", "/v1/mesh/node-state");
+    expect(unscoped.response.status).toBe(200);
+    expect(queries[1]).toEqual({});
+  });
+
+  test("requestId dedupes ask/send acceptance at the broker and exposes the original receipt", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "broker-keyed-deliver-"));
+    const harness = createHarness({ requestReceipts: new BrokerRequestReceipts(directory) });
+    const payload = { requestId: "scoutbot-key", caller: { actorId: "scoutbot", nodeId: "node-1" }, body: "build", intent: "consult" };
+    try {
+      const first = await requestRouter(harness, "POST", "/v1/deliver", { body: payload });
+      const again = await requestRouter(harness, "POST", "/v1/deliver", { body: payload });
+      expect(first.response.status).toBe(202);
+      expect(again.body).toEqual(first.body);
+      expect(harness.deliverCalls).toHaveLength(1);
+      expect(harness.deliverCalls[0]!.payload).toMatchObject({ caller: { actorId: "scoutbot" }, messageMetadata: { requestId: "scoutbot-key" }, invocationMetadata: { requestId: "scoutbot-key" } });
+      const receipt = await requestRouter(harness, "GET", "/v1/request-receipts/scoutbot-key?requesterId=scoutbot&operation=deliver");
+      expect(receipt.body).toMatchObject({ receipt: { state: "done", requesterId: "scoutbot", result: first.body } });
+      const conflict = await requestRouter(harness, "POST", "/v1/deliver", { body: { ...payload, body: "other task" } });
+      expect(conflict.response.status).toBe(400);
+      expect(harness.deliverCalls).toHaveLength(1);
+      const reopen = createHarness({ requestReceipts: new BrokerRequestReceipts(directory) });
+      expect((await requestRouter(reopen, "POST", "/v1/deliver", { body: payload })).body).toEqual(first.body);
+      expect(reopen.deliverCalls).toHaveLength(0);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  });
+
+
   test("question response route preserves version conflicts and rejects malformed identity", async () => {
     const calls: unknown[] = [];
     const harness = createHarness({ respondToChatQuestion: async (...args) => {
@@ -1320,4 +1362,17 @@ test("endpoint inventory uses metadata-only peek, supports exact selection and n
   expect((await requestRouter(h, "GET", "/v1/endpoints?endpointId=missing")).body).toEqual({ endpoints: [] });
   delete h.deps.runtime.peek;
   expect((await requestRouter(h, "GET", "/v1/endpoints")).response.status).toBe(503);
+});
+
+test("native owner control is local-only, refuses invalid input and never invokes or discovers a replacement", async () => {
+  const h = createHarness();
+  const endpoint = { id: "owner", agentId: "not-owned", nodeId: "node-1", sessionId: "no-session", state: "idle",
+    harness: "claude", transport: "claude_stream_json", metadata: { placement: "background" } } as any;
+  h.deps.runtime.peek = () => ({ endpoints: { owner: endpoint } });
+  const observe = await requestRouter(h, "POST", "/v1/native-session-attention", { body: { endpointId: "owner" } });
+  expect(observe.body).toEqual({ state: "unknown" });
+  const invalid = await requestRouter(h, "POST", "/v1/native-session-attention", { body: { endpointId: "owner", action: "spawn" } });
+  expect(invalid.response.status).toBe(400);
+  const remote = await requestRouter(h, "POST", "/v1/native-session-attention", { body: { endpointId: "owner" }, transportContext: { transport: "remote", remoteAddress: "192.168.1.9" } });
+  expect(remote.response.status).toBe(403); expect(h.invocationCalls).toHaveLength(0); expect(h.deliverCalls).toHaveLength(0);
 });

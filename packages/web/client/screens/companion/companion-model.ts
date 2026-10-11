@@ -14,6 +14,7 @@
  */
 
 import type { AgentObservePayload, TailEvent, WorkDetail, WorkItem } from "../../lib/types.ts";
+import { isSeenAsk, type SeenAsks } from "./companion-seen.ts";
 
 export const QUIET_AFTER_MS = 8 * 60_000;
 export const MAX_VISIBLE_CARDS = 3;
@@ -79,6 +80,8 @@ export type CompanionCard = {
   reportedAt: number;
   ageLabel: string;
   conversationId: string | null;
+  /** The harness that runs it: the roster's word, else what the flight saw or asked for. */
+  harness: string | null;
 };
 
 export type CompanionCardContext = {
@@ -310,7 +313,17 @@ export function buildCompanionCard(detail: WorkDetail, context: CompanionCardCon
     reportedAt,
     ageLabel: fresh ? "now" : ageLabel(lastActivityAt, context.now),
     conversationId: detail.conversationId ?? detail.primaryInvocation?.conversationId ?? null,
+    harness: harness?.trim() || null,
   };
+}
+
+/**
+ * The exact words for work that is on the operator: a review request reads
+ * as one, not as a question. Null for every other state.
+ */
+export function askStatus(workState: string | null | undefined, state: CompanionCardState | undefined): string | null {
+  if (state !== "question") return null;
+  return workState === "review" ? "Ready for review" : "Asks you";
 }
 
 /** States that hold their slot: a bring-in never evicts a card that needs the operator. */
@@ -438,6 +451,10 @@ export type SurfacedItem = {
   state: CompanionCardState;
   /** Question, review for the operator, or blocker: earns the badge. */
   needsOperator: boolean;
+  /** "Ready for review" or "Asks you" when it is on the operator, else null. */
+  status: string | null;
+  /** The operator dismissed this ask; it reads as resting until it moves. */
+  seen?: boolean;
   /** Why it is here: the grant that let it in, in words. */
   origin: string;
   owner: string | null;
@@ -523,6 +540,8 @@ export function selectSurfaced(
     operatorIds?: ReadonlySet<string>;
     /** Work ids in the order the list last showed them. */
     previousOrder?: readonly string[];
+    /** Dismissed asks rank and age as resting work, before the cap. */
+    seenAsks?: SeenAsks;
   },
 ): SurfacedItem[] {
   if (options.scopes.length === 0) return [];
@@ -533,9 +552,11 @@ export function selectSurfaced(
     seen.add(row.id);
     const scope = admittingScope(row, options.scopes, options.agents);
     if (!scope) continue;
-    const state = summaryState(row, options.now, options.operatorIds);
-    const needsOperator = state === "question" || state === "blocked";
+    const factState = summaryState(row, options.now, options.operatorIds);
     const last = Math.max(row.updatedAt, row.lastMeaningfulAt ?? 0);
+    const dismissed = options.seenAsks ? isSeenAsk(options.seenAsks, row.id, factState, last) : false;
+    const state: CompanionCardState = dismissed ? "waiting" : factState;
+    const needsOperator = state === "question" || state === "blocked";
     const age = options.now - last;
     if (needsOperator ? age > SURFACE_ATTENTION_WINDOW_MS : age > SURFACE_PROGRESS_WINDOW_MS) continue;
     out.push({
@@ -543,6 +564,9 @@ export function selectSurfaced(
       title: row.title,
       state,
       needsOperator,
+      // A dismissed item keeps its own words ("Blocked"), not the resting ones.
+      status: askStatus(row.state, factState) ?? (dismissed ? groupLabel(factState) : null),
+      ...(dismissed ? { seen: true } : {}),
       origin: originLabel(scope),
       owner: row.ownerName ?? row.ownerId,
       ownerId: row.ownerId ?? null,

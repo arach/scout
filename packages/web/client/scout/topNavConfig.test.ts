@@ -8,10 +8,11 @@ import {
 } from "./topNavConfig.ts";
 
 describe("top nav config", () => {
-  test("is a flat single row: Home · Chat · Agents · Terminals · Broker · Search · Ops", () => {
+  test("is a flat single row: Home · Sessions · Chats · Projects · Terminals · Dispatch · Search · Ops", () => {
     expect(topNavItems()).toBe(TOP_NAV_ITEMS);
     expect(TOP_NAV_ITEMS.map((item) => item.key)).toEqual([
       "home",
+      "sessions",
       "chat",
       "agents",
       "terminals",
@@ -21,17 +22,19 @@ describe("top nav config", () => {
     ]);
     expect(TOP_NAV_ITEMS.map((item) => item.label)).toEqual([
       "Home",
-      "Chat",
-      "Agents",
+      "Sessions",
+      "Chats",
+      "Projects",
       "Terminals",
-      "Broker",
+      "Dispatch",
       "Search",
       "Ops",
     ]);
     expect(TOP_NAV_ITEMS.map((item) => item.route)).toEqual([
       { view: "inbox" },
+      { view: "sessions" },
       { view: "messages" },
-      { view: "agents-v2" },
+      { view: "agents-v2", indexView: "projects" },
       { view: "terminal" },
       { view: "broker" },
       { view: "search" },
@@ -55,9 +58,9 @@ describe("top nav config", () => {
     expect(topNavKeyForRoute({ view: "messages", conversationId: "chan-1" })).toBe("chat");
   });
 
-  test("terminals tab owns terminal and session-transcript surfaces", () => {
+  test("sessions and terminals have separate tabs", () => {
     expect(topNavKeyForRoute({ view: "terminal" })).toBe("terminals");
-    expect(topNavKeyForRoute({ view: "sessions" })).toBe("terminals");
+    expect(topNavKeyForRoute({ view: "sessions" })).toBe("sessions");
   });
 
   test("broker tab owns dispatch/work/follow surfaces", () => {
@@ -88,8 +91,13 @@ describe("top nav config", () => {
     expect(topNavBreadcrumbForRoute({ view: "inbox" })).toBeNull();
     expect(topNavBreadcrumbForRoute({ view: "broker" })).toBeNull();
     expect(topNavBreadcrumbForRoute({ view: "conversation", conversationId: "c1" })).toBe("Conversation");
-    expect(topNavBreadcrumbForRoute({ view: "settings", section: "agents" })).toBe("Configuration");
+    expect(topNavBreadcrumbForRoute({ view: "settings", section: "agents" })).toBe("Agent Configuration");
     expect(TOP_NAV_VIEW_LABELS.ops).toBe("Ops");
-    expect(TOP_NAV_VIEW_LABELS.broker).toBe("Broker");
+    expect(TOP_NAV_VIEW_LABELS.broker).toBe("Dispatch");
   });
+});
+
+
+test("Requests never false-highlights one of the seven areas", () => {
+  expect(topNavKeyForRoute({ view: "requests" })).toBe("requests");
 });

@@ -72,6 +72,8 @@ export function useSidebarCollapse(
   appId: string,
   viewportWidth: number,
   collapsedWidth: number = RAIL_COLLAPSED_WIDTH,
+  /** The expanded width before anyone resizes, and what reset returns to. */
+  defaultExpandedWidth: number = SIDEBAR_EXPANDED_WIDTH,
 ) {
   const storageKey = `appshell.${appId}.sidebar.manualCollapsed`;
   const widthKey = `appshell.${appId}.sidebar.width`;
@@ -80,7 +82,7 @@ export function useSidebarCollapse(
   const [manualCollapsed, setManualCollapsed] = usePersistentState(storageKey, true);
   const [persistedExpandedWidth, setPersistedExpandedWidth] = usePersistentState(
     widthKey,
-    SIDEBAR_EXPANDED_WIDTH,
+    defaultExpandedWidth,
   );
   const autoCollapsed = viewportWidth <= SIDEBAR_AUTO_COLLAPSE_MAX_WIDTH;
   const [forceExpanded, setForceExpanded] = useState(false);
@@ -169,9 +171,9 @@ export function useSidebarCollapse(
   );
 
   const resetExpandedWidth = useCallback(() => {
-    setPersistedExpandedWidth(SIDEBAR_EXPANDED_WIDTH);
+    setPersistedExpandedWidth(defaultExpandedWidth);
     setDragWidth(null);
-  }, [setPersistedExpandedWidth]);
+  }, [defaultExpandedWidth, setPersistedExpandedWidth]);
 
   /**
    * Start a live drag session (SCO-088b). `startWidth` is the RAW width at grab

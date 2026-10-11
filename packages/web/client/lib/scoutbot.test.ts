@@ -308,6 +308,11 @@ describe("resolveScoutbotAgentId", () => {
 });
 
 describe("normalizeScoutbotUiAction", () => {
+  test("reads a world.command with words or literal lines, and drops an empty one", () => {
+    expect(normalizeScoutbotUiAction({ type: "world.command", text: " wednesday afternoon " })).toEqual({ type: "world.command", text: "wednesday afternoon" });
+    expect(normalizeScoutbotUiAction({ type: "world_command", commands: ["goto wed 15:00", "", 3] })).toEqual({ type: "world.command", commands: ["goto wed 15:00"] });
+    expect(normalizeScoutbotUiAction({ type: "world.command" })).toBeNull();
+  });
   test("normalizes select-project actions", () => {
     expect(normalizeScoutbotUiAction({
       type: "select-project",

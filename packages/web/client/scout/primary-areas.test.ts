@@ -10,19 +10,20 @@ import {
   primaryAreaForRoute,
   routeViewsByArea,
   systemPrimaryAreas,
-  type PrimaryAreaId,
+  type NavigationEntryId,
 } from "./primary-areas.ts";
 
 describe("primary areas (SCO-083 IA model)", () => {
-  test("defines exactly eight primary areas with unique ids", () => {
-    expect(PRIMARY_AREAS).toHaveLength(8);
+  test("defines exactly nine primary areas with unique ids", () => {
+    expect(PRIMARY_AREAS).toHaveLength(9);
     const ids = PRIMARY_AREAS.map((area) => area.id);
-    expect(new Set(ids).size).toBe(8);
+    expect(new Set(ids).size).toBe(9);
     expect(ids).toEqual([
       "home",
+      "sessions",
       "chat",
       "projects",
-      "sessions",
+      "terminals",
       "dispatch",
       "search",
       "ops",
@@ -30,27 +31,28 @@ describe("primary areas (SCO-083 IA model)", () => {
     ]);
   });
 
-  test("Navigate and System sections partition the eight areas", () => {
+  test("Navigate and System sections partition the nine areas", () => {
     expect(navigatePrimaryAreas().map((a) => a.id)).toEqual([
       "home",
+      "sessions",
       "chat",
       "projects",
-      "sessions",
+      "terminals",
       "dispatch",
       "search",
     ]);
     expect(systemPrimaryAreas().map((a) => a.id)).toEqual(["ops", "settings"]);
-    expect(getPrimaryArea("projects").label).toBe("Agents");
+    expect(getPrimaryArea("projects").label).toBe("Projects");
   });
 
-  test("ROUTE_AREA_BY_VIEW has exactly 22 keys and 8 non-empty buckets", () => {
+  test("ROUTE_AREA_BY_VIEW has exactly 23 keys and 10 non-empty buckets", () => {
     const views = allRouteViews();
-    expect(views).toHaveLength(22);
-    expect(new Set(views).size).toBe(22);
+    expect(views).toHaveLength(23);
+    expect(new Set(views).size).toBe(23);
 
     const buckets = routeViewsByArea();
-    const areaIds = Object.keys(buckets) as PrimaryAreaId[];
-    expect(areaIds).toHaveLength(8);
+    const areaIds = Object.keys(buckets) as NavigationEntryId[];
+    expect(areaIds).toHaveLength(10);
     for (const id of areaIds) {
       expect(buckets[id].length).toBeGreaterThan(0);
     }
@@ -61,10 +63,12 @@ describe("primary areas (SCO-083 IA model)", () => {
     expect(sortedViews(buckets.projects)).toEqual(
       sortedViews(["agent-info", "agents-v2", "code", "repo-diff", "repos"]),
     );
-    expect(sortedViews(buckets.sessions)).toEqual(sortedViews(["sessions", "terminal"]));
+    expect(buckets.sessions).toEqual(["sessions"]);
+    expect(buckets.terminals).toEqual(["terminal"]);
     // Route unification: channels are conversations, not their own view.
     expect(sortedViews(buckets.chat)).toEqual(sortedViews(["conversation", "messages"]));
     expect(sortedViews(buckets.dispatch)).toEqual(sortedViews(["broker", "follow", "work"]));
+    expect(buckets.requests).toEqual(["requests"]);
     expect(buckets.search).toEqual(["search"] satisfies Route["view"][]);
     expect(sortedViews(buckets.ops)).toEqual(sortedViews(["harnesses", "mesh", "mesh-ops", "ops"]));
     expect(sortedViews(buckets.settings)).toEqual(sortedViews(["settings", "voice"]));
@@ -75,7 +79,8 @@ describe("primary areas (SCO-083 IA model)", () => {
       const route = { view } as Route;
       const areaId = primaryAreaForRoute(route);
       expect(ROUTE_AREA_BY_VIEW[view]).toBe(areaId);
-      expect(getPrimaryArea(areaId).id).toBe(areaId);
+      if (areaId !== "requests") expect(getPrimaryArea(areaId).id).toBe(areaId);
+      else expect(PRIMARY_AREAS.some((area) => area.id as string === "requests")).toBe(false);
     }
   });
 
@@ -99,6 +104,11 @@ describe("primary areas (SCO-083 IA model)", () => {
     // Other areas ignore the ops gate.
     expect(defaultRouteForArea("home", { opsControlEnabled: false })).toEqual({ view: "inbox" });
     expect(defaultRouteForArea("dispatch")).toEqual({ view: "broker" });
+    expect(defaultRouteForArea("projects")).toEqual({ view: "agents-v2", indexView: "projects" });
+    expect(getPrimaryArea("dispatch").label).toBe("Dispatch");
+    expect(PRIMARY_AREAS.map((area) => area.label)).toEqual([
+      "Home", "Sessions", "Chats", "Projects", "Terminals", "Dispatch", "Search", "Ops", "Settings",
+    ]);
   });
 
   test("each area default route activates that area", () => {

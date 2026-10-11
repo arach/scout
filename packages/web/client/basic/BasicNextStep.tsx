@@ -22,19 +22,19 @@ const GAP_LABEL: Record<SoloSetupGap, string> = {
  * `no_access` is an answer, not a step.
  */
 const PRO_LINE: Partial<Record<SoloProPhase, string>> = {
-  finish_setup: "This account has Solo Pro. Finish installing it.",
-  not_ready: "Solo Pro is installed but this server isn't serving it yet.",
+  finish_setup: "This account has Scout Pro. Finish installing it.",
+  not_ready: "Scout Pro is installed but this server isn't serving it yet.",
 };
 
 /**
  * Home's next step for the basic web client, read from the same records the
- * takeover and Settings use: unfinished Solo setup first, then a first task,
- * plus one line when a Solo Pro setup is part way done. Renders nothing once there's nothing to do.
+ * takeover and Settings use: unfinished setup first, then a first task,
+ * plus one line when a Scout Pro setup is part way done. Renders nothing once there's nothing to do.
  */
 export function BasicNextStep() {
   const { onboarding, onboardingSkipped, resumeOnboarding, navigate } = useScout();
   const resumable = onboardingResumable(onboarding, onboardingSkipped);
-  // The server stamps completedAt once every Solo fact holds.
+  // The server stamps completedAt once every setup fact holds.
   const setupDone = Boolean(onboarding?.completedAt);
   const pro = useSoloProPhase();
   const { sessions, loading, loadError } = useConversationList();
@@ -76,7 +76,7 @@ export function BasicNextStep() {
             <strong>Give an agent its first task</strong>
             <span>Start a DM with an agent and say what you need. Its work shows up here and in Tail.</span>
           </div>
-          <button type="button" className="btn btn--primary" onClick={() => navigate({ view: "messages" })}>
+          <button type="button" className="btn" onClick={() => navigate({ view: "messages" })}>
             New DM
           </button>
         </div>
@@ -87,7 +87,7 @@ export function BasicNextStep() {
             <span>{proLine}</span>
           </div>
           <button type="button" className="btn" onClick={() => navigate({ view: "settings", section: "pro" })}>
-            Solo Pro
+            Scout Pro
           </button>
         </div>
       ) : null}

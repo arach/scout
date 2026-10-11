@@ -57,6 +57,7 @@ export function resolveSidebarContext(
       return { body: null, footer: null };
 
     // ── Sessions ───────────────────────────────────────────────────────
+    case "requests":
     case "sessions":
       return { body: null, footer: null };
     case "terminal":

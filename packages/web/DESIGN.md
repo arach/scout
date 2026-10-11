@@ -28,28 +28,28 @@ colors:
   accent-light: "oklch(0.72 0.16 125)"
 typography:
   display:
-    fontFamily: "'Inter Tight', 'Inter', ui-sans-serif, system-ui, sans-serif"
+    fontFamily: "system-ui, -apple-system, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif"
     fontSize: "clamp(34px, calc(28px + 2vw), 52px)"
     fontWeight: 600
     lineHeight: 1.12
     letterSpacing: "0"
   title:
-    fontFamily: "'Inter', ui-sans-serif, system-ui, sans-serif"
+    fontFamily: "system-ui, -apple-system, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif"
     fontSize: "16px"
     fontWeight: 600
     lineHeight: 1.35
   body:
-    fontFamily: "'Inter', ui-sans-serif, system-ui, sans-serif"
+    fontFamily: "system-ui, -apple-system, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif"
     fontSize: "13px"
-    fontWeight: 400
+    fontWeight: 300
     lineHeight: 1.45
   body-compact:
-    fontFamily: "'Inter', ui-sans-serif, system-ui, sans-serif"
+    fontFamily: "system-ui, -apple-system, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif"
     fontSize: "12px"
-    fontWeight: 400
+    fontWeight: 300
     lineHeight: 1.35
   label:
-    fontFamily: "'JetBrains Mono', ui-monospace, Menlo, monospace"
+    fontFamily: "ui-monospace, 'SF Mono', SFMono-Regular, Menlo, monospace"
     fontSize: "11px"
     fontWeight: 600
     lineHeight: 1
@@ -234,24 +234,27 @@ flattens two distinct vocabularies into one. This has been tried; don't repeat i
 
 ## Typography
 
-**Display Font:** Inter Tight (falls back to Inter)
-**Body Font:** Inter (with `ui-sans-serif, system-ui`)
-**Label/Mono Font:** JetBrains Mono (with `ui-monospace, Menlo`)
+**Sans:** system-ui — SF Pro on Apple platforms (Text/Display optical sizes
+switch automatically), Segoe UI / Roboto elsewhere. Display and title sizes use
+the same family.
+**Mono:** SF Mono (`ui-monospace, 'SF Mono', SFMono-Regular`), falling back to
+Menlo / Consolas.
 **Editorial:** Spectral (with Cormorant Garamond, Georgia) — reserved, rarely used
 
-**Character:** Inter and JetBrains Mono at small sizes, doing sharply divided
-jobs. Inter carries everything a person wrote; JetBrains Mono carries everything
-the machine knows — ids, paths, counts, harness names, statuses, section headers.
-Inter Tight appears only at display sizes, where Inter's default width starts to
-feel loose.
+**Character:** the platform's own faces, set light. Unweighted text inherits
+`--font-weight-body` (300), so prose reads as SF Pro Light and inherited mono as
+SF Mono Light; explicit 500–700 role weights carry titles, labels, and state.
+The sans carries everything a person wrote; the mono carries everything the
+machine knows — ids, paths, counts, harness names, statuses, section headers.
+Neither face is downloaded: no web font request, no SF font redistribution.
 
 ### Hierarchy
 
 - **Display** (600, `clamp(34px → 52px)`, 1.12): empty states and onboarding only.
   Three fluid steps exist (`xs` 24→28, `sm` 28→34, `md` 34→52).
 - **Title** (600, 16–20px, 1.35): screen and panel titles.
-- **Body** (400, 13px, 1.45): the reading default — matches `--hud-text-base`.
-- **Body-compact** (400, 12px, 1.35): list rows and dense detail.
+- **Body** (300, 13px, 1.45): the reading default — matches `--hud-text-base`.
+- **Body-compact** (300, 12px, 1.35): list rows and dense detail.
 - **Label** (mono, 600, uppercase, 9–11px): four tiers — `xs` 9px/0.18em,
   `sm` 10px/0.08em, `md` 11px/0.12em, `lg` 11px/0.18em.
 
@@ -359,7 +362,7 @@ code composes them rather than re-rolling.
 - **Danger:** red text with a 30% red border; hover fills to 8%.
 - **Sizes:** `sm` (`4px 10px`, 11px), default, `lg` (`8px 16px`), `icon` (`4px`,
   no gap).
-- **Mono:** uppercase JetBrains Mono at 0.08em tracking, for nav and fleet actions.
+- **Mono:** uppercase SF Mono at 0.08em tracking, for nav and fleet actions.
 - **Focus:** inherits the global `:focus-visible` ring
   (`0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent)`). Never stripped.
 - **Disabled:** 40% opacity, `not-allowed`.
@@ -370,7 +373,7 @@ code composes them rather than re-rolling.
 - **Tones:** neutral, working, success, warning, danger, info — each derived from
   one color at ~12% background and ~18–22% border alpha.
 - **Modifiers:** `pill` (999px), `sm` (9px, tighter padding), `ghost` (no border or
-  background), `mono` (JetBrains Mono, weight 500), `caps` (uppercase, 0.04em).
+  background), `mono` (SF Mono, weight 500), `caps` (uppercase, 0.04em).
 
 ### Dots
 
@@ -432,3 +435,44 @@ chip, and the equal-fill fleet segmented control.
 - **Don't** put a left accent bar on a rounded well — that treatment belongs to
   flat rows and bands.
 - **Don't** ship a resting shadow on a card.
+
+
+## Fleet garden map
+
+The terrain presentation is a sculpted meadow island in neutral black space.
+Sparse white and cool stars remain crisp at device density and answer the camera
+without a galactic haze or green ambient tint. The meadow, teal water, and plants
+retain their natural material colors. Map controls, workspace captions and agent
+nameplates use neutral charcoal fills and clear pale ink.
+
+Keep the ivory agent terraces quiet: fine paving joints, a pale stone kerb and
+an open center. Smooth inlet contours share their water, wet-bank and pale-sand
+outline in world coordinates, so camera travel and chunk boundaries cannot
+create seams. Existing landmarks remain upright at their ground contact.
+Painted shoreline and perimeter plants add scale without covering actor targets.
+
+The floating foundation has stratified stone, a lit left face, a darker right
+face and a tapering darker base. It extrudes vertically in screen space only in
+Iso; Flat remains a plan. Fit includes the exposed foundation. Real workspace
+and crew coordinates drive the composition, including larger and moved groups;
+never flatten the interactive Fleet to a mockup or invent its live roster.
+
+Material detail follows the camera's screen scale. Meadow samples a shared
+pre-shrunk texture pyramid and two world-anchored periods, so pulling back does
+not turn repeated flowers into a bright lattice. Water uses broad restrained
+caustics over a depth gradient and a soft shallow shelf. Terrace joints are
+drawn once over quiet unjointed limestone. Shaded grass at banks, kerbs and the
+island lip gives those material transitions thickness.
+
+Each exposed cliff face carries continuous strata along its isometric edge,
+with its own depth shade and a lightly chipped, rounded root. Never restart
+the same texture for every ledge or crop a square image into a shorter repeat.
+Workspace captions retain a readable screen size as the camera pulls back;
+tiny crew become inspectable status points, then captions simplify to counts
+before the island hands over to neutral workspace beacons.
+
+Fleet admission keeps sparse genuine session replies separate from the globally
+bounded detail buffer. A busy sibling must not evict a quieter session's roster
+evidence inside the chosen horizon. The tail feed refreshes the broker's bounded
+one-assistant-reply-per-session view alongside discovery, and combines it with
+live and replay detail without inventing work from file mtimes or registrations.

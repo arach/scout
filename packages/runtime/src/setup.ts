@@ -2214,7 +2214,7 @@ export async function installScoutSkillToHarnesses(): Promise<ScoutSkillInstallR
 export type ClaudeStatuslineInstallReport = {
   status: "installed" | "skipped" | "error";
   /** Why a skipped install left Claude's settings alone. */
-  reason?: "owned-by-other-install" | "isolated-support-directory";
+  reason?: "owned-by-other-install" | "isolated-support-directory" | "scout-cli-not-found";
   settingsPath: string;
   wrapperPath: string;
   delegatePath: string;
@@ -2231,7 +2231,12 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-function resolveScoutStatuslineInvocation(): string {
+/**
+ * How the statusline wrapper reaches the Scout CLI, or null when nothing runnable
+ * is found. A bare `scout` that isn't on PATH would wire Claude Code to a command
+ * that exits 127 on every prompt: no statusline, and no quota capture.
+ */
+function resolveScoutStatuslineInvocation(): string | null {
   const explicit = normalizeOptionalString(process.env.OPENSCOUT_SCOUT_COMMAND);
   if (explicit) return explicit;
 
@@ -2250,7 +2255,33 @@ function resolveScoutStatuslineInvocation(): string {
     return `${shellQuote(process.execPath)} ${shellQuote(argvEntry)}`;
   }
 
-  return "scout";
+  // A source checkout where the broker or bridge runs from the repo and no CLI
+  // is installed: run the CLI's source entry with Bun.
+  const sourceEntry = resolveScoutCliSourceEntry();
+  const bun = sourceEntry ? resolveBunExecutable() : null;
+  if (sourceEntry && bun) return `${shellQuote(bun)} ${shellQuote(sourceEntry)}`;
+
+  return null;
+}
+
+/** packages/cli/src/main.ts beside this runtime, from either src/ or a built dist/. */
+function resolveScoutCliSourceEntry(): string | null {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const entry = resolve(here, "..", "..", "cli", "src", "main.ts");
+  return existsSync(entry) ? entry : null;
+}
+
+function resolveBunExecutable(): string | null {
+  if (process.versions.bun && isAbsolute(process.execPath)) return process.execPath;
+  try {
+    const found = execFileSync("sh", ["-lc", "command -v bun"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return found || null;
+  } catch {
+    return null;
+  }
 }
 
 export async function installClaudeStatuslineTool(): Promise<ClaudeStatuslineInstallReport> {
@@ -2272,8 +2303,20 @@ export async function installClaudeStatuslineTool(): Promise<ClaudeStatuslineIns
     };
   }
 
+  const scoutInvocation = resolveScoutStatuslineInvocation();
+  // Leave Claude's statusline alone rather than point it at a CLI that can't run.
+  if (!scoutInvocation) {
+    return {
+      status: "skipped",
+      reason: "scout-cli-not-found",
+      settingsPath,
+      wrapperPath,
+      delegatePath,
+      command,
+    };
+  }
+
   try {
-    const scoutInvocation = resolveScoutStatuslineInvocation();
     await mkdir(dirname(wrapperPath), { recursive: true });
     await writeFile(
       wrapperPath,

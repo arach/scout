@@ -1,3 +1,4 @@
+import { getDestination } from "../../scout/nav-destinations.ts";
 // Reuse the web area rather than maintaining a second native implementation.
 import { nativeOpsOwnsInternalRoute } from "../../surfaces/embed-navigation.ts";
 import { useOptionalFlag } from "hudsonkit/flags";
@@ -18,7 +19,7 @@ export function NativeAreaScreen({ navigate }: EmbedScreenProps) {
 
 export const scoutSurface = defineSurface({
   id: "ops",
-  label: "Ops",
+  label: getDestination("ops").label,
   route: { view: "ops" },
   webPath: "/ops",
   screen: "NativeAreaScreen",

@@ -23,7 +23,7 @@
   /* The writing field is prose, not chrome: it always sets in the platform's
      text face (SF on macOS/WebKit) at a reading size, and never inherits a
      surface's --font-sans override (Scope rebinds that to mono). */
-  --compose-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, "Segoe UI", Roboto, sans-serif;
+  --compose-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
   --compose-size: 14px;
   --compose-leading: 1.5;
   box-sizing: border-box;
@@ -114,7 +114,7 @@
   padding: 0;
   font-family: var(--compose-font);
   font-size: var(--compose-size);
-  font-weight: 400;
+  font-weight: var(--font-weight-body, 300);
   font-feature-settings: normal;
   font-variant-numeric: normal;
   letter-spacing: normal;
@@ -565,7 +565,7 @@
   border-radius: 50%;
   border: none;
   background: var(--ink);
-  color: var(--bg);
+  color: var(--on-accent, var(--bg));
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -720,7 +720,7 @@
 
 .s-msg-compose-attachment-remove:hover {
   background: var(--ink);
-  color: var(--bg);
+  color: var(--on-accent, var(--bg));
 }
 
 .s-msg-compose-attach-note {

@@ -165,7 +165,16 @@ export type FleetSnapshot<T> = {
   hosts: readonly HostOutcome<T>[];
 };
 
+export type DeckLaneCapabilities = {
+  send: boolean; steer: boolean; queue: boolean; interrupt: boolean;
+  attachments: boolean; approvals: boolean; history: boolean;
+  steerMode: "native" | "follow_up" | "unsupported";
+};
+
 export type SurfaceAgent = {
+  capabilities?: DeckLaneCapabilities;
+  phase?: "idle" | "working" | "awaiting_approval" | "offline";
+  pendingApproval?: { id: string; title: string; detail: string } | null;
   id: string;
   name: string;
   handle: string | null;
@@ -233,7 +242,10 @@ export type CodexDeckSessionState = {
 };
 
 export type CodexDeckThreadSnapshot = {
-  adapter: "codex_app_server";
+  adapter: string;
+  phase?: "idle" | "working" | "awaiting_approval" | "offline";
+  pendingApproval?: { id: string; title: string; detail: string } | null;
+  completion?: { turnId: string; status: string; endedAt: number | null; text: string } | null;
   agentId: string;
   threadId: string | null;
   turnId: string | null;

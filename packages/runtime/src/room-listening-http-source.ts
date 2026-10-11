@@ -51,8 +51,8 @@ export const getRoomHttp: RoomHttpGet = async (member, resource, query = {}) => 
   });
 };
 function requirePage(result: RoomHttpResponse): any {
-  if (result.status !== 200) throw new ChatListeningError([401, 403].includes(result.status) ? "membership_denied"
-    : result.status === 409 ? conflictBody(result.body)?.error ?? "source_history_gap" : result.status === 429 ? "source_rate_limited" : "source_unavailable");
+  if (result.status !== 200) throw new ChatListeningError([401, 403, 410].includes(result.status) ? "membership_denied"
+    : result.status === 409 ? conflictBody(result.body)?.error ?? "source_history_gap" : result.status === 429 ? "source_rate_limited" : "source_unavailable", [401, 403, 410].includes(result.status));
   const page = result.body;
   if (!page || !Array.isArray(page.messages) || page.messages.length > 100 || typeof page.nextCursor !== "string" || page.nextCursor.length > 16384) throw new ChatListeningError("source_invalid_response");
   return page;

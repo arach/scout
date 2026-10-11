@@ -14,16 +14,19 @@ import {
   resolveScoutStartupTemplate,
 } from "./lib/theme.ts";
 import { DevErrorOverlay } from "./dev/DevErrorOverlay.tsx";
+import { installGlassKeys } from "./lib/glass-keys.ts";
 import "./styles/tokens.css";
 import "./styles/primitives.css";
 import "./arc-tailwind.css";
 import "./app.css";
+import "./styles/glass.css";
 
 const el = document.getElementById("root");
 if (!el) {
   throw new Error("missing #root");
 }
 const rootElement = el;
+installGlassKeys();
 
 const initialTheme = resolveScoutStartupTheme();
 applyScoutThemeToDocument(
@@ -39,6 +42,15 @@ const observeEmbedMatch = pathname.match(/^\/embed\/observe\/([^/]+)$/);
 const isRepoDiffEmbed = pathname === "/embed/repo-diff";
 const isSessionEmbed = pathname === "/embed/session";
 const isTerminalEmbed = pathname === "/embed/terminal";
+/* Glass: the Mac app's see-through window injects __SCOUT_GLASS__ before any
+   script runs, so it holds across in-app navigation. /glass opens the whole
+   app there; /glass/conversation is the one-conversation page. */
+const isGlassConversation = pathname === "/glass/conversation";
+const isGlassApp = !isGlassConversation
+  && (pathname === "/glass" || pathname === "/glass/" || "__SCOUT_GLASS__" in window);
+if (isGlassApp && pathname.startsWith("/glass")) {
+  window.history.replaceState(window.history.state, "", `/${window.location.search}`);
+}
 const isScoutDeck = pathname === "/deck" || pathname === "/deck/";
 /* Scout Chat's two standalone surfaces. Both mount without the operator shell:
    a teammate holding a channel credential cannot make the shell's API calls,
@@ -121,6 +133,13 @@ async function renderShell() {
           <RepoDiffEmbedScreen />
         </scoutApp.Provider>
       );
+    } else if (isGlassConversation) {
+      const { GlassSurface } = await import("./screens/glass/GlassSurface.tsx");
+      content = (
+        <scoutApp.Provider>
+          <GlassSurface />
+        </scoutApp.Provider>
+      );
     } else if (isSessionEmbed) {
       const { SessionEmbedScreen } = await import("./screens/sessions/SessionEmbedScreen.tsx");
       content = (
@@ -134,7 +153,7 @@ async function renderShell() {
         import("./scope/index.ts"),
       ]);
       wireScopeOntoScout(scoutApp);
-      content = <OpenScoutAppShell app={scoutApp} />;
+      content = <OpenScoutAppShell app={scoutApp} glass={isGlassApp} />;
     }
   }
 

@@ -23,6 +23,7 @@ import type {
 
 import type {
   ChannelMemberView,
+  ChatChannelLastMessage,
   InviteReachabilityNote,
   TrackedRequest,
   ChatMessage,
@@ -66,7 +67,23 @@ export function dayLabel(at: number, nowMs: number): string {
   const day = startOfLocalDay(at);
   if (day === today) return "Today";
   if (day === today - DAY) return "Yesterday";
-  return new Date(at).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  // "Wednesday, September 30th", with the year only when it isn't this one.
+  const date = new Date(at);
+  const weekday = date.toLocaleDateString("en-US", { weekday: "long" });
+  const month = date.toLocaleDateString("en-US", { month: "long" });
+  const label = `${weekday}, ${month} ${ordinal(date.getDate())}`;
+  return date.getFullYear() === new Date(nowMs).getFullYear() ? label : `${label}, ${date.getFullYear()}`;
+}
+
+function ordinal(n: number): string {
+  const teen = n % 100;
+  if (teen >= 11 && teen <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1: return `${n}st`;
+    case 2: return `${n}nd`;
+    case 3: return `${n}rd`;
+    default: return `${n}th`;
+  }
 }
 
 /**
@@ -86,6 +103,44 @@ export function expiryLabel(expiresAt: number | null, nowMs: number): string {
   }
   const days = Math.round(delta / DAY);
   return `expires in ${days} ${days === 1 ? "day" : "days"}`;
+}
+
+/**
+ * The time on a sidebar row: the clock today, the weekday this week, the date
+ * before that. Short enough to sit in a mono column without pushing the name.
+ */
+export function listTime(at: number, nowMs: number): string {
+  const today = startOfLocalDay(nowMs);
+  const day = startOfLocalDay(at);
+  if (day === today) return clockTime(at);
+  if (today - day < 6 * DAY) return new Date(at).toLocaleDateString("en-US", { weekday: "short" });
+  return new Date(at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+/** A sidebar row's second line: who spoke last, what they said, and when. */
+export interface RowPreview { who: string; text: string; at: number }
+
+/**
+ * The fresher of two readings of a room's last message: the feed this client
+ * read when the room was open, and the server's bootstrap summary. Either may
+ * be absent (an old server sends no summary; an unopened room has no feed).
+ * A tie goes to the feed, which carries the client's own correction state.
+ */
+export function freshestRowPreview(
+  seen: RowPreview | undefined,
+  served: ChatChannelLastMessage | undefined,
+  viewerActorId: string | null,
+): RowPreview | undefined {
+  const fromServer = served
+    ? {
+        who: served.fromViewer || served.actorId === viewerActorId ? "You" : served.authorName,
+        text: served.text,
+        at: served.createdAt,
+      }
+    : undefined;
+  if (!seen) return fromServer;
+  if (!fromServer) return seen;
+  return fromServer.at > seen.at ? fromServer : seen;
 }
 
 export function calendarDate(at: number): string {
@@ -501,8 +556,23 @@ export function projectFeed(input: {
   const repliesByRoot = new Map<string, ChatMessage[]>();
   const roots: ChatMessage[] = [];
 
+  // A reply to a reply belongs to the thread its chain starts from; filing
+  // it under the reply it answers would leave it in a bucket nothing shows.
+  const byId = new Map(sorted.map((message) => [message.id, message]));
+  const threadRootOf = (message: ChatMessage): string | null => {
+    let rootId = message.replyToMessageId ?? null;
+    const seen = new Set<string>();
+    while (rootId && !seen.has(rootId)) {
+      seen.add(rootId);
+      const parent = byId.get(rootId)?.replyToMessageId;
+      if (!parent) break;
+      rootId = parent;
+    }
+    return rootId;
+  };
+
   for (const message of sorted) {
-    const rootId = message.replyToMessageId;
+    const rootId = threadRootOf(message);
     if (rootId) {
       const bucket = repliesByRoot.get(rootId);
       if (bucket) bucket.push(message);

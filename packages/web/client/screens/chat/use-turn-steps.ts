@@ -23,8 +23,14 @@ import {
 export function useTurnSteps(input: {
   sessionIds: string[];
   active: boolean;
+  /**
+   * Backfill each session from its own history (`sessionId=`) instead of the
+   * shared recent window, where a busy neighbour can crowd a quiet session
+   * out. Ids must be exact harness session ids for this to find anything.
+   */
+  perSession?: boolean;
 }): TurnStep[] {
-  const { sessionIds, active } = input;
+  const { sessionIds, active, perSession = false } = input;
   const scopeKey = sessionIds.join("|");
   const enabled = active && sessionIds.length > 0;
   const [events, setEvents] = useState<TailEvent[]>([]);
@@ -37,14 +43,21 @@ export function useTurnSteps(input: {
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
-    const params = new URLSearchParams({
-      limit: String(TURN_STEP_LIMIT * 3),
-      transcripts: "true",
-    });
-    api<{ events: TailEvent[] }>(`/api/tail/recent?${params.toString()}`)
-      .then((result) => {
+    const read = (sessionId?: string) => {
+      const params = new URLSearchParams({
+        limit: String(sessionId ? TURN_STEP_LIMIT : TURN_STEP_LIMIT * 3),
+        transcripts: "true",
+      });
+      if (sessionId) params.set("sessionId", sessionId);
+      return api<{ events: TailEvent[] }>(`/api/tail/recent?${params.toString()}`)
+        .then((result) => result.events ?? [])
+        .catch(() => [] as TailEvent[]);
+    };
+    const reads = perSession ? sessionIds.slice(0, 4).map((id) => read(id)) : [read()];
+    Promise.all(reads)
+      .then((batches) => {
         if (cancelled) return;
-        const matched = (result.events ?? []).filter((event) =>
+        const matched = batches.flat().filter((event) =>
           tailEventMatchesTurn(event, sessionIds),
         );
         if (matched.length === 0) return;
@@ -54,7 +67,7 @@ export function useTurnSteps(input: {
     return () => {
       cancelled = true;
     };
-  }, [enabled, scopeKey]);
+  }, [enabled, scopeKey, perSession]);
 
   useTailEvents(
     (event) => {

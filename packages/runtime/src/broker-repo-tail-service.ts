@@ -8,12 +8,15 @@ import type {
 import type { ServerTimingMetric } from "./broker-http-helpers.js";
 import {
   filterTailEventsForDisplay,
+  readTailEventsForSession,
   type DiscoverySnapshot,
   type TailEvent,
   type TailEventKind,
 } from "./tail/index.js";
 
 export type BrokerRepoWatchReadOptions = {
+  progressive?: boolean;
+  scanId?: string;
   force?: boolean;
   includeTail?: boolean;
   includeDiff?: boolean;
@@ -58,6 +61,7 @@ export type BrokerRepoTailServiceOptions<TBrokerSnapshot> = {
       since?: number;
     },
   ) => Promise<TailEvent[]>;
+  readTailEventsForSession?: typeof readTailEventsForSession;
   repoWatchServeCacheTtlMs: number;
   repoWatchRehydrateAfterMs: number;
   /**
@@ -186,6 +190,8 @@ export class BrokerRepoTailService<TBrokerSnapshot> {
       ? this.options.repoWatchHintsFromTailDiscovery(await this.options.getTailDiscovery(false))
       : [];
     return this.options.getRepoWatchSnapshot({
+      progressive: options.progressive,
+      scanId: options.scanId,
       force: options.force,
       includeDiff: options.includeDiff,
       includeLastCommit: options.includeLastCommit,
@@ -226,6 +232,7 @@ export class BrokerRepoTailService<TBrokerSnapshot> {
   }
 
   async readRepoWatchSnapshotForUrl(url: URL): Promise<RepoWatchSnapshot> {
+    const progressive = booleanQuery(url, "progressive");
     const force = booleanQuery(url, "force");
     const includeTail = booleanQuery(url, "includeTail");
     const includeDiff = booleanQuery(url, "includeDiff");
@@ -240,6 +247,8 @@ export class BrokerRepoTailService<TBrokerSnapshot> {
     const scanBudgetMs = parsePositiveIntParam(url, "scanBudgetMs", 30_000);
     const cacheTtlMs = force ? undefined : this.options.repoWatchServeCacheTtlMs;
     const snapshot = await this.readRepoWatchSnapshot({
+      progressive,
+      scanId: progressive ? url.searchParams.get("scanId") ?? undefined : undefined,
       force,
       includeDiff,
       includeLastCommit,
@@ -253,7 +262,8 @@ export class BrokerRepoTailService<TBrokerSnapshot> {
     });
 
     if (
-      !force
+      !progressive
+      && !force
       && Number.isFinite(this.options.repoWatchRehydrateAfterMs)
       && this.options.repoWatchRehydrateAfterMs > 0
       && this.now() - snapshot.generatedAt > this.options.repoWatchRehydrateAfterMs
@@ -276,7 +286,7 @@ export class BrokerRepoTailService<TBrokerSnapshot> {
   async readTailRecentPayloadWithTiming(url: URL): Promise<TimedTailRecentPayload> {
     const cacheTtlMs = this.options.tailRecentServeCacheTtlMs ?? 0;
     const cacheKey = `${parseTailLimit(url)}:${url.searchParams.get("transcripts") === "true"
-      || url.searchParams.get("transcripts") === "1"}:${isAssistantRepliesMode(url) ? TAIL_RECENT_ASSISTANT_REPLIES_MODE : "all"}:${parsePositiveIntParam(url, "windowMs", MAX_TAIL_RECENT_WINDOW_MS) ?? "all"}`;
+      || url.searchParams.get("transcripts") === "1"}:${isAssistantRepliesMode(url) ? TAIL_RECENT_ASSISTANT_REPLIES_MODE : "all"}:${parsePositiveIntParam(url, "windowMs", MAX_TAIL_RECENT_WINDOW_MS) ?? "all"}:${JSON.stringify(url.searchParams.get("sessionId")?.trim() || null)}`;
     const now = this.now();
     if (cacheTtlMs > 0 && this.tailRecentCache?.key === cacheKey && this.tailRecentCache.expiresAtMs > now) {
       const cached = this.tailRecentCache;
@@ -333,6 +343,22 @@ export class BrokerRepoTailService<TBrokerSnapshot> {
       || url.searchParams.get("transcripts") === "1";
     const windowMs = parsePositiveIntParam(url, "windowMs", MAX_TAIL_RECENT_WINDOW_MS);
     const since = windowMs === undefined ? undefined : this.now() - windowMs;
+    const sessionId = url.searchParams.get("sessionId")?.trim();
+    if (sessionId) {
+      // Read the named session before applying the limit. Filtering the global
+      // recent buffer afterward loses quiet tasks behind busy siblings.
+      const session = await measure("tail-session", () =>
+        (this.options.readTailEventsForSession ?? readTailEventsForSession)(sessionId, { limit, includeAllSources: true }));
+      const scoped = filterTailEventsForDisplay(session?.events ?? [])
+        .filter((event) => event.sessionId === sessionId && (since === undefined || event.ts >= since));
+      const events = (assistantRepliesOnly ? latestAssistantReplies(scoped) : scoped)
+        .sort((left, right) => left.ts - right.ts || left.id.localeCompare(right.id))
+        .slice(-limit);
+      return {
+        payload: { generatedAt: this.now(), limit, cursor: events.at(-1)?.id ?? null, events },
+        timings,
+      };
+    }
     const eventsById = new Map<string, TailEvent>();
     let transcriptEvents: TailEvent[] = [];
 

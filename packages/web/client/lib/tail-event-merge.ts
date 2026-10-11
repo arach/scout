@@ -72,3 +72,24 @@ export function mergeHydratedTailEvents(
 ): TailEvent[] {
   return capByRecency(dedupeTailEvents([...hydrated, ...previous]), limit);
 }
+
+/** Roster evidence has its own bounded, one-reply-per-session snapshot. A busy
+ * sibling may evict detailed history, but must not evict another session's
+ * genuine reply from the selected activity horizon. Never use file mtimes or
+ * registrations to invent work. */
+export function mergeTailSessionPresence(
+  events: TailEvent[],
+  presence: TailEvent[],
+  now: number,
+  windowMs: number,
+): TailEvent[] {
+  const latest = new Map<string, TailEvent>();
+  for (const event of presence) {
+    if (event.kind !== "assistant" || !event.sessionId || !Number.isFinite(event.ts)
+      || event.ts > now || event.ts < now - windowMs) continue;
+    const key = `${event.source}\0${event.sessionId}`;
+    const previous = latest.get(key);
+    if (!previous || event.ts > previous.ts) latest.set(key, event);
+  }
+  return dedupeTailEvents([...latest.values(), ...events]).sort((a, b) => a.ts - b.ts);
+}
