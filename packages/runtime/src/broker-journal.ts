@@ -1,5 +1,8 @@
+import type { ControlPlaneHistoryReader, HistoricalRecord, HistoricalPublication } from "./control-plane-history-store.js";
 import type { BrokerMessageHistory } from "./broker-message-history.js";
-import { readableCanonicalMessage, readableJournalKinds } from "./broker-journal-record-contract.js";
+import { journalEntryProblem, readableCanonicalMessage, readableJournalKinds } from "./broker-journal-record-contract.js";
+import { isUtf8 } from "node:buffer";
+import { BrokerQuarantine, type QuarantineListOptions } from "./broker-quarantine.js";
 import { shareLoadedRecordStrings } from "./broker-record-strings.js";
 import { captureMessageRecords, asyncMessageRecordView } from "./broker-message-records.js";
 import type { BrokerMemoryMaintenance } from "./broker-memory-maintenance.js";
@@ -7,11 +10,10 @@ import { applyHistoryRotationEviction, emptyHistoryRotationPlan, planHistoryRota
 import { setImmediate as yieldReadTurn } from "node:timers/promises";
 import { readableDelivery, readableDeliveryStatus, readableMetadata, type BrokerRecordRead } from "./broker-record-reader.js";
 import { BrokerMessageBodyCache, BrokerMessageBodyCacheUnavailable, type MessageBodyCacheOptions } from "./broker-message-body-cache.js";
-import { once } from "node:events";
-import { createReadStream, createWriteStream } from "node:fs";
+import { createReadStream } from "node:fs";
 import { appendFile, mkdir, open, readdir, rename, stat, truncate, unlink } from "node:fs/promises";
 import { basename, dirname } from "node:path";
-import { createInterface } from "node:readline";
+import { decodeJournalLine, encodeJournalEntries, journalLines, JournalFrameLimitError, UnsupportedJournalFrameError } from "./broker-journal-framing.js";
 
 import type {
   ControlEvent,
@@ -43,7 +45,7 @@ import {
   type RuntimeAgentDefinition,
   type RuntimeRegistrySnapshot,
 } from "./registry.js";
-import type { BrokerInvocationDispatchJob } from "./broker-dispatch-job.js";
+import { invocationDispatchJobId, type BrokerInvocationDispatchJob } from "./broker-dispatch-job.js";
 
 export type BrokerJournalEntry =
   | { kind: "node.upsert"; node: NodeDefinition }
@@ -90,6 +92,8 @@ export type BrokerJournalEntry =
       kind: "history.rotate";
       cutoff: number;
       rotatedAt: number;
+      /** Durable publication receipts; replay completes SQL cleanup after a crash. */
+      publications?: HistoricalPublication[];
       /**
        * The ids the writer verified as persisted in durable SQLite before
        * journaling this marker. Apply removes exactly these records and
@@ -109,6 +113,10 @@ export type BrokerJournalEntry =
          * attempts were doomed — an empty set must evict nothing.
          */
         deliveryAttemptIds?: string[];
+        /** Full canonical job records published to indexed historical partitions. */
+        dispatchJobIds?: string[];
+        /** Exact unchanged event rows durably published to indexed history. */
+        controlEventIds?: string[];
       };
     };
 
@@ -145,7 +153,36 @@ export type BrokerJournalLoadReport = {
   countsByKind: Partial<Record<BrokerJournalEntry["kind"], number>>;
 };
 
+/** Only the candidate records needed to verify one historical relocation. */
+export type BrokerJournalVerificationRecords = {
+  messages: MessageRecord[];
+  invocations: InvocationRequest[];
+  flights: FlightRecord[];
+  deliveries: DeliveryIntent[];
+  deliveryAttempts: DeliveryAttempt[];
+  collaborationEvents: CollaborationEvent[];
+};
+
 export type BrokerJournalCompactionReason = "bytes" | "ratio" | "high_water";
+
+export type BrokerJournalLiveCompactionOptions = {
+  signal?: AbortSignal;
+  historicalCleanupApplied?: boolean;
+  historicalCleanupBoundary?: BrokerJournalReplayBoundary;
+  minimumBytes?: number;
+  minimumIntervalMs?: number;
+  maxEntries?: number;
+  maxTrackedKeys?: number;
+  maxDurationMs?: number;
+};
+export type BrokerJournalLiveCompactionReport = {
+  state: "compacted" | "skipped" | "budget";
+  reason: string;
+  sourceBytes: number;
+  resultingBytes: number;
+  estimatedReclaimBytes: number;
+  durationMs: number;
+};
 
 export type BrokerJournalCompactionPolicy = {
   minimumReclaimBytes: number;
@@ -156,6 +193,7 @@ export type BrokerJournalCompactionPolicy = {
 
 export type FileBackedBrokerJournalOptions = {
   messageHistory?: BrokerMessageHistory;
+  dispatchJobHistory?: Pick<ControlPlaneHistoryReader, "read" | "readLocation" | "page">;
   progressiveStartup?: boolean;
   shareLoadedStrings?: boolean;
   compactionPolicy?: Partial<BrokerJournalCompactionPolicy>;
@@ -197,13 +235,15 @@ type JournalVisitReport = {
 
 type AppliedHistoryRotation = HistoryRotationPlan & {
   cutoff: number;
+  dispatchJobIds?: Set<string>;
+  controlEventIds?: Set<string>;
 };
 
 /** The `evicted` wire shape on a `history.rotate` marker, as id Sets. */
 function historyRotationPlanFromMarker(
   evicted: NonNullable<Extract<BrokerJournalEntry, { kind: "history.rotate" }>["evicted"]>,
-): HistoryRotationPlan {
-  const plan = emptyHistoryRotationPlan();
+): HistoryRotationPlan & { dispatchJobIds: Set<string>; controlEventIds: Set<string> } {
+  const plan = { ...emptyHistoryRotationPlan(), dispatchJobIds: new Set(evicted.dispatchJobIds ?? []), controlEventIds: new Set(evicted.controlEventIds ?? []) };
   for (const id of evicted.messageIds) plan.messageIds.add(id);
   for (const id of evicted.invocationIds) plan.invocationIds.add(id);
   for (const id of evicted.flightIds) plan.flightIds.add(id);
@@ -224,6 +264,10 @@ function historyRotationDropsEntry(
 ): "all" | "partial" | "none" {
   if (rotations.length === 0) return "none";
   switch (entry.kind) {
+    case "control.event.record":
+      return rotations.some(r => r.controlEventIds?.has(entry.event.id)) ? "all" : "none";
+    case "invocation.dispatch_job.record":
+      return rotations.some((r) => r.dispatchJobIds?.has(entry.job.id)) ? "all" : "none";
     case "message.record":
       return rotations.some((r) => r.messageIds.has(entry.message.id)) ? "all" : "none";
     case "flight.record":
@@ -249,6 +293,8 @@ function historyRotationDropsEntry(
 export type BrokerJournalReplayBoundary = {
   endByteExclusive: number;
   barrier?: BrokerJournalReplayBarrier;
+  /** Byte offsets may only be reused while this opened-file identity matches. */
+  fileIdentity?: string;
 };
 
 /**
@@ -270,6 +316,8 @@ export type BrokerJournalReplayReport = {
 };
 
 export type BrokerJournalReplayOptions = {
+  /** Internal tail cursor, valid only with a matching boundary fileIdentity. */
+  startByteInclusive?: number;
   afterBarrier?: Pick<
     BrokerJournalReplayBarrier,
     "id" | "projectionId" | "projectionVersion"
@@ -313,19 +361,6 @@ function mergeMetadata(
     ...(current ?? {}),
     ...patch,
   };
-}
-
-function parseEntry(rawLine: string): BrokerJournalEntry | null {
-  const line = rawLine.trim();
-  if (!line) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(line) as BrokerJournalEntry;
-  } catch {
-    return null;
-  }
 }
 
 function normalizeComparableValue(value: unknown): unknown {
@@ -440,10 +475,40 @@ function errorCode(error: unknown): string | null {
   return typeof code === "string" ? code : null;
 }
 
+class JournalCompactionCapacityError extends Error {
+  constructor(readonly operation: string, readonly code: "ENOSPC" | "EDQUOT", cause: unknown) {
+    super(`Journal compaction ${operation}: ${String(cause)}`, { cause });
+  }
+}
+
+async function writeCompactionOutput<T>(operation: string, work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    const code = errorCode(error);
+    if (code === "ENOSPC" || code === "EDQUOT") {
+      throw new JournalCompactionCapacityError(operation, code, error);
+    }
+    throw error;
+  }
+}
+
 export class FileBackedBrokerJournal {
   private readonly filePath: string;
+  private readonly quarantine: BrokerQuarantine;
+  private readonly warnedQuarantine = new Set<string>();
+
+  quarantineStatus() { return this.quarantine.status(); }
+  listQuarantine(options: QuarantineListOptions = {}) { return this.quarantine.list(options); }
+  readQuarantine(id: string) { return this.quarantine.read(id); }
+  acknowledgeQuarantine(id: string) { return this.quarantine.acknowledge(id); }
+  quarantineRecord(entry: BrokerJournalEntry, reason: string) {
+    return this.quarantine.preserve({ kind: entry.kind, reason, bytes: Buffer.from(JSON.stringify(entry)),
+      source: { path: this.filePath }, entries: [entry] });
+  }
 
   private readonly messageHistory?: BrokerMessageHistory;
+  private readonly dispatchJobHistory?: FileBackedBrokerJournalOptions["dispatchJobHistory"];
   private readonly messageBodyCache?: BrokerMessageBodyCache;
   private readonly shareLoadedStrings: boolean;
   private readonly memoryMaintenance?: BrokerMemoryMaintenance;
@@ -467,6 +532,14 @@ export class FileBackedBrokerJournal {
    * drops a record line when ANY rotation after the line doomed it — later
    * markers alone cannot describe what earlier ones evicted. */
   private appliedRotations: AppliedHistoryRotation[] = [];
+  private readonly pendingResultFlights = new Map<string, FlightRecord>();
+  private readonly dispatchJobIdsByInvocation = new Map<string, Set<string>>();
+  private readonly dispatchJobIdsByFlight = new Map<string, Set<string>>();
+  private readonly recoverableDispatchJobs = new Map<string, BrokerInvocationDispatchJob>();
+  private readonly archivableDispatchJobs = new Map<string, BrokerInvocationDispatchJob>();
+  private readonly pendingPeerMirrors = new Map<string, DeliveryIntent>();
+  private readonly pendingPeerForwards = new Map<string, DeliveryIntent>();
+  private readonly peerMirrorDeliveryIdsByFlight = new Map<string, Set<string>>();
 
   // Serializes journal writes. Every link must settle fulfilled: one failed
   // append (a full disk) would otherwise reject every later write forever.
@@ -485,17 +558,104 @@ export class FileBackedBrokerJournal {
   private startupWork: Promise<void> | undefined;
   private startupPhase: "journal" | "maintenance" | "history" | "complete" | "failed" = "journal";
   private startupCompactionMs = 0;
+  private startupCompactionDeferral: { code: "ENOSPC" | "EDQUOT"; operation: string; error: string } | null = null;
   private startupError: string | null = null;
   private replayedEntries = 0;
   private replayedBytes = 0;
   private startupSourceBytes: number | null = null;
+  private liveCompactionWork: Promise<BrokerJournalLiveCompactionReport> | null = null;
+  private lastLiveCompactionAt = 0;
+  private latestLiveCompaction: BrokerJournalLiveCompactionReport | null = null;
 
   startupStatus() { return { phase: this.startupPhase, entries: this.replayedEntries,
     messageCount: this.startupPhase === "complete" ? this.messageHistory?.status().count ?? Object.keys(this.state.snapshot.messages).length : null,
-    bytes: this.replayedBytes, totalBytes: this.startupSourceBytes, compactionMs: this.startupCompactionMs, error: this.startupError }; }
+    bytes: this.replayedBytes, totalBytes: this.startupSourceBytes, compactionMs: this.startupCompactionMs,
+    compactionDeferral: this.startupCompactionDeferral ? { ...this.startupCompactionDeferral } : null, error: this.startupError }; }
 
   writeStatus(): BrokerJournalWriteStatus {
     return this.writeFailure ? { ...this.writeFailure } : { state: "ok" };
+  }
+
+  liveCompactionStatus(): BrokerJournalLiveCompactionReport | null {
+    return this.latestLiveCompaction ? { ...this.latestLiveCompaction } : null;
+  }
+
+  /** Scan a fixed prefix cooperatively, then preserve every accepted suffix
+   * byte under the append queue before fsync + atomic rename. No accepted
+   * history becomes eligible merely because it is old or projected. */
+  compactIfNeeded(options: BrokerJournalLiveCompactionOptions = {}): Promise<BrokerJournalLiveCompactionReport> {
+    if (this.liveCompactionWork) return this.liveCompactionWork;
+    const work = this.compactLivePrefix(options);
+    this.liveCompactionWork = work.finally(() => { this.liveCompactionWork = null; });
+    return this.liveCompactionWork;
+  }
+
+  private async compactLivePrefix(options: BrokerJournalLiveCompactionOptions): Promise<BrokerJournalLiveCompactionReport> {
+    const start = Date.now();
+    const finite = (value: number | undefined, fallback: number) => value !== undefined && Number.isFinite(value) && value >= 0 ? value : fallback;
+    const minimumInterval = finite(options.minimumIntervalMs, 5 * 60_000);
+    const report = (state: BrokerJournalLiveCompactionReport["state"], reason: string, sourceBytes = 0, resultingBytes = sourceBytes, estimatedReclaimBytes = 0) => {
+      const value = { state, reason, sourceBytes, resultingBytes, estimatedReclaimBytes, durationMs: Date.now() - start };
+      this.latestLiveCompaction = value; return value;
+    };
+    if (!this.loaded || this.startupPhase !== "complete") return report("skipped", "startup_pending");
+    if (start - this.lastLiveCompactionAt < minimumInterval) return report("skipped", "interval");
+    const boundary = await this.captureReplayBoundary();
+    if (boundary.endByteExclusive < finite(options.minimumBytes, 64 * 1024 * 1024)) return report("skipped", "below_threshold", boundary.endByteExclusive);
+    this.lastLiveCompactionAt = start;
+    const maximumEntries = finite(options.maxEntries, 1_000_000);
+    const maximumKeys = finite(options.maxTrackedKeys, 100_000);
+    const maximumMs = finite(options.maxDurationMs, 30_000);
+    const budgetError = new Error("journal_compaction_budget");
+    const checkBudget = () => { options.signal?.throwIfAborted(); if (Date.now() - start > maximumMs) throw budgetError; };
+    const latest = new Map<string, number>(), encodedBytes = new Map<string, number>();
+    const rotations: AppliedHistoryRotation[] = [];
+    let estimatedReclaimBytes = 0, trackedRotationIds = 0;
+    let cleanupThroughIndex = -1;
+    const cleanupBoundary = options.historicalCleanupApplied ? options.historicalCleanupBoundary : undefined;
+    const legacyRotations = [...this.appliedRotations];
+    try {
+      await this.visitEntries(async (entry, index, bytes, physicalEndByte) => {
+        if (cleanupBoundary?.fileIdentity && cleanupBoundary.fileIdentity === boundary.fileIdentity && physicalEndByte <= cleanupBoundary.endByteExclusive) cleanupThroughIndex = index;
+        checkBudget();
+        if (index >= maximumEntries) throw budgetError;
+        if (index % 128 === 0) await yieldReadTurn();
+        const key = dedupeKey(entry);
+        if (key) {
+          estimatedReclaimBytes += encodedBytes.get(key) ?? 0;
+          latest.set(key, index); encodedBytes.set(key, bytes);
+          if (latest.size + trackedRotationIds > maximumKeys) throw budgetError;
+        }
+        if (entry.kind === "history.rotate") {
+          const rotation = entry.evicted ? { cutoff: entry.cutoff, ...historyRotationPlanFromMarker(entry.evicted) }
+            : legacyRotations.find(value => value.cutoff === entry.cutoff);
+          if (!rotation) throw new Error("journal_compaction_rotation_coverage_unavailable");
+          rotations.push(rotation);
+          for (const [key, value] of Object.entries(rotation)) if (key !== "cutoff" && value instanceof Set) trackedRotationIds += value.size;
+          if (latest.size + trackedRotationIds > maximumKeys) throw budgetError;
+        }
+      }, boundary);
+      const lastRotation = latest.get("history.rotate");
+      if (lastRotation !== undefined) {
+        const remaining = [...rotations];
+        await this.visitEntries(async (entry, index, bytes) => {
+          checkBudget(); if (index % 128 === 0) await yieldReadTurn();
+          if (index >= lastRotation) return;
+          if (entry.kind === "history.rotate") { remaining.shift(); return; }
+          if (historyRotationDropsEntry(remaining, entry) === "all") estimatedReclaimBytes += bytes;
+        }, boundary);
+      }
+      const reason = journalCompactionReason(boundary.endByteExclusive, estimatedReclaimBytes, this.compactionPolicy);
+      if (!reason) return report("skipped", "insufficient_reclaim", boundary.endByteExclusive, boundary.endByteExclusive, estimatedReclaimBytes);
+      await this.rewriteCompactedEntries(latest, boundary.endByteExclusive, { boundary, rotations, dedupeFlights: false, checkBudget, cleanupThroughIndex });
+      // Generation refresh notices the inode change. Existing captures keep
+      // their prior generation alive until their readers release it.
+      await this.messageHistory?.refresh();
+      return report("compacted", reason, boundary.endByteExclusive, (await stat(this.filePath)).size, estimatedReclaimBytes);
+    } catch (error) {
+      if (error === budgetError) return report("budget", "scan_budget", boundary.endByteExclusive, boundary.endByteExclusive, estimatedReclaimBytes);
+      throw error;
+    }
   }
 
   /**
@@ -525,6 +685,10 @@ export class FileBackedBrokerJournal {
       }
       try {
         await appendFile(this.filePath, (this.appendPrefix ?? "") + payload, "utf8");
+        const durable = await open(this.filePath, "r+");
+        try { await durable.sync(); } finally { await durable.close(); }
+        // Persist a newly created journal's directory entry before acknowledging.
+        if (before === 0) await this.syncDirectory();
         this.appendPrefix = "";
       } catch (error) {
         this.pendingRollbackBytes = before;
@@ -555,7 +719,17 @@ export class FileBackedBrokerJournal {
       // An append can fail before creating a previously absent journal.
       if (boundary !== 0 || errorCode(error) !== "ENOENT") throw error;
     });
+    const file = await open(this.filePath, "r+").catch(error => {
+      if (boundary === 0 && errorCode(error) === "ENOENT") return null;
+      throw error;
+    });
+    if (file) try { await file.sync(); } finally { await file.close(); }
     this.pendingRollbackBytes = null;
+  }
+
+  private async syncDirectory(): Promise<void> {
+    const directory = await open(dirname(this.filePath), "r");
+    try { await directory.sync(); } finally { await directory.close(); }
   }
 
   finishStartup(): Promise<void> {
@@ -575,8 +749,10 @@ export class FileBackedBrokerJournal {
 
   constructor(filePath: string, options: FileBackedBrokerJournalOptions = {}) {
     this.filePath = filePath;
+    this.quarantine = new BrokerQuarantine(`${filePath}.quarantine.sqlite`);
     this.progressiveStartup = options.progressiveStartup ?? false;
     this.messageHistory = options.messageHistory;
+    this.dispatchJobHistory = options.dispatchJobHistory;
     if(this.messageHistory)this.state.snapshot.messages=this.messageHistory.records;
     this.shareLoadedStrings = options.shareLoadedStrings ?? false;
     this.memoryMaintenance = options.memoryMaintenance;
@@ -663,8 +839,9 @@ export class FileBackedBrokerJournal {
     let compactionMs = 0;
     if (compactionRequired && !this.progressiveStartup) {
       const compactionStartedAt = Date.now();
-      await this.rewriteCompactedEntries(latestIndexByKey);
+      await this.compactStartupJournal(latestIndexByKey);
       compactionMs = Date.now() - compactionStartedAt;
+      this.startupCompactionMs = compactionMs;
     }
 
     if (!this.progressiveStartup) await this.messageHistory?.accepted();
@@ -673,7 +850,7 @@ export class FileBackedBrokerJournal {
     this.finishStartupWork = !this.progressiveStartup ? undefined : async () => {
       if (compactionRequired && this.progressiveStartup) {
         const start = Date.now();
-        await this.rewriteCompactedEntries(latestIndexByKey, sourceBytes);
+        await this.compactStartupJournal(latestIndexByKey, sourceBytes);
         this.startupCompactionMs = Date.now() - start;
         // The load report was published before this deferred compaction ran —
         // fold the real numbers back in so consumers do not read `compaction
@@ -767,6 +944,7 @@ export class FileBackedBrokerJournal {
    * per-message hot-path index. Callers receive explicit source coverage.
    */
   async readCanonicalMessage(messageId: string): Promise<BrokerRecordRead<MessageRecord>> {
+    if (this.quarantine.hasRecord(messageId)) return { kind: "unavailable", reason: "record_quarantined", retryable: false };
     return this.readCanonicalRecord("message", (entry, current) => {
       if (entry.kind !== "message.record") return { value: current, valid: true };
       const message = entry.message;
@@ -776,6 +954,7 @@ export class FileBackedBrokerJournal {
   }
 
   async readCanonicalDelivery(deliveryId: string): Promise<BrokerRecordRead<DeliveryIntent>> {
+    if (this.quarantine.hasRecord(deliveryId)) return { kind: "unavailable", reason: "record_quarantined", retryable: false };
     return this.readCanonicalRecord("delivery", (entry, current) => {
       if (entry.kind === "deliveries.record") {
         if (!Array.isArray(entry.deliveries) || !entry.deliveries.every(readableDelivery)) return { value: current, valid: false };
@@ -825,7 +1004,7 @@ export class FileBackedBrokerJournal {
       if (before.dev !== after.dev || before.ino !== after.ino || after.size < boundary.endByteExclusive) {
         return { kind: "unavailable", reason: "journal_changed_during_read", retryable: true };
       }
-      if (unsupported || report.invalidLines > 0) {
+      if (unsupported || report.invalidLines > 0 || this.quarantine.hasUnknownJournalFrame()) {
         return { kind: "unavailable", reason: `journal_${recordKind}_coverage_incomplete`, retryable: false };
       }
       const coverage = { source: "broker_journal" as const, fileIdentity: `${before.dev}:${before.ino}`, endByteExclusive: boundary.endByteExclusive };
@@ -840,7 +1019,7 @@ export class FileBackedBrokerJournal {
   }
 
 
-  close(): Promise<void> { this.messageBodyCache?.close(); return this.messageHistory?.close() ?? Promise.resolve(); }
+  close(): Promise<void> { this.messageBodyCache?.close(); this.quarantine.close(); return this.messageHistory?.close() ?? Promise.resolve(); }
 
   private deliveryValues(activeOnly = false): IterableIterator<DeliveryIntent> {
     const values = this.state.deliveries.values();
@@ -892,16 +1071,16 @@ export class FileBackedBrokerJournal {
         // diverging between capture and ordinary append.
         this.apply(entry);
       }
-      boundary = {
-        endByteExclusive: await stat(this.filePath)
-          .then((value) => value.size)
-          .catch((error) => {
+      const source = await stat(this.filePath).catch((error) => {
             const code = error && typeof error === "object" && "code" in error
               ? (error as { code?: unknown }).code
               : undefined;
-            if (code === "ENOENT") return 0;
+            if (code === "ENOENT") return null;
             throw error;
-          }),
+          });
+      boundary = {
+        endByteExclusive: source?.size ?? 0,
+        ...(source ? { fileIdentity: `${source.dev}:${source.ino}` } : {}),
         ...(options.barrier ? { barrier: options.barrier } : {}),
       };
     });
@@ -936,13 +1115,33 @@ export class FileBackedBrokerJournal {
         await visitor(entry);
         visitedEntries += 1;
       },
-      boundary ? { endByteExclusive: boundary.endByteExclusive } : {},
+      { ...boundary, startByteInclusive: options.startByteInclusive },
     );
     return { afterBarrierFound, visitedEntries };
   }
 
   snapshot(): RuntimeRegistrySnapshot {
     return cloneSnapshot(this.state.snapshot);
+  }
+
+  verificationRecords(plan: HistoryRotationPlan): BrokerJournalVerificationRecords {
+    const snapshot = this.state.snapshot;
+    const flights = [...plan.flightIds].flatMap(id => snapshot.flights[id] ? [snapshot.flights[id]!] : []);
+    const invocationIds = new Set([...plan.invocationIds, ...flights.map(flight => flight.invocationId)]);
+    const attempts: DeliveryAttempt[] = [];
+    for (const group of this.state.deliveryAttempts.values()) {
+      for (const attempt of group) if (plan.deliveryAttemptIds.has(attempt.id)) attempts.push(attempt);
+    }
+    return {
+      // Disk history owns these records when enabled; verification must not
+      // materialize that historical map into the broker's working set.
+      messages: this.messageHistory ? [] : [...plan.messageIds].flatMap(id => snapshot.messages[id] ? [snapshot.messages[id]!] : []),
+      invocations: [...invocationIds].flatMap(id => snapshot.invocations[id] ? [snapshot.invocations[id]!] : []),
+      flights,
+      deliveries: [...plan.deliveryIds].flatMap(id => this.state.deliveries.has(id) ? [this.state.deliveries.get(id)!] : []),
+      deliveryAttempts: attempts,
+      collaborationEvents: this.state.collaborationEvents.filter(event => plan.collaborationEventIds.has(event.id)),
+    };
   }
 
   /**
@@ -980,7 +1179,7 @@ export class FileBackedBrokerJournal {
         preparationError = error;
         return;
       }
-      const payload = retained.map((entry) => JSON.stringify(entry)).join("\n") + "\n";
+      const payload = encodeJournalEntries(retained);
       if (this.memoryMaintenance) acceptedEncodedBytes = Buffer.byteLength(payload, "utf8");
       await this.appendLines(payload);
       for (const entry of prepared) {
@@ -1074,6 +1273,10 @@ export class FileBackedBrokerJournal {
   listDeliveries(options: {
     transport?: DeliveryIntent["transport"];
     status?: DeliveryIntent["status"];
+    targetId?: string;
+    invocationId?: string;
+    statuses?: DeliveryIntent["status"][];
+    reasons?: DeliveryIntent["reason"][];
     limit?: number;
   } = {}): DeliveryIntent[] {
     const limit = options.limit ?? 200;
@@ -1083,8 +1286,12 @@ export class FileBackedBrokerJournal {
     if (end === 0 || end === -Infinity) return [];
     const deliveries: DeliveryIntent[] = [];
     for (const delivery of this.deliveryValues()) {
+      if (options.invocationId !== undefined && delivery.invocationId !== options.invocationId) continue;
       if (options.transport && delivery.transport !== options.transport) continue;
       if (options.status && delivery.status !== options.status) continue;
+      if (options.targetId !== undefined && delivery.targetId !== options.targetId) continue;
+      if (options.statuses && !options.statuses.includes(delivery.status)) continue;
+      if (options.reasons && !options.reasons.includes(delivery.reason)) continue;
       deliveries.push(delivery);
       if (end > 0 && deliveries.length >= end) break;
     }
@@ -1142,16 +1349,199 @@ export class FileBackedBrokerJournal {
   }
 
   getInvocationDispatchJob(jobId: string): BrokerInvocationDispatchJob | null {
-    return this.state.invocationDispatchJobs.get(jobId) ?? null;
+    return this.state.invocationDispatchJobs.get(jobId)
+      ?? this.dispatchJobHistory?.read<BrokerInvocationDispatchJob>("dispatch_job", jobId) ?? null;
   }
 
   getInvocationDispatchJobForInvocation(invocationId: string): BrokerInvocationDispatchJob | null {
-    for (const job of this.state.invocationDispatchJobs.values()) {
-      if (job.invocationId === invocationId) {
-        return job;
+    const deterministic = this.getInvocationDispatchJob(invocationDispatchJobId(invocationId));
+    if (deterministic?.invocationId === invocationId) return deterministic;
+    for (const id of this.dispatchJobIdsByInvocation.get(invocationId) ?? []) {
+      const job = this.state.invocationDispatchJobs.get(id);
+      if (job) return job;
+    }
+    const historical = this.dispatchJobHistory?.page({ kind: "dispatch_job", invocationId, limit: 1 })[0];
+    return historical ? this.dispatchJobHistory!.readLocation<BrokerInvocationDispatchJob>(historical) : null;
+  }
+
+  pendingInvocationResultFlights(): IterableIterator<FlightRecord> {
+    return this.pendingResultFlights.values();
+  }
+
+  /** Bounded, fair observation recovery, independent of completed peer history. */
+  listPendingPeerMirrorDeliveries(options: { limit?: number } = {}): DeliveryIntent[] {
+    const limit = Math.max(0, Math.min(5000, Math.floor(options.limit ?? 500)));
+    const count = Math.min(limit, this.pendingPeerMirrors.size);
+    const iterator = this.pendingPeerMirrors.values();
+    const deliveries: DeliveryIntent[] = [];
+    for (let index = 0; index < count; index++) {
+      const delivery = iterator.next().value;
+      if (!delivery) break;
+      deliveries.push(delivery);
+      this.pendingPeerMirrors.delete(delivery.id);
+      this.pendingPeerMirrors.set(delivery.id, delivery);
+    }
+    return deliveries;
+  }
+
+  /** Rotate leased/backed-off candidates too, so they cannot hide later work. */
+  listPendingPeerForwardDeliveries(options: { limit?: number } = {}): DeliveryIntent[] {
+    const count = Math.min(Math.max(0, Math.min(5000, Math.floor(options.limit ?? 500))), this.pendingPeerForwards.size);
+    const iterator = this.pendingPeerForwards.values();
+    const deliveries: DeliveryIntent[] = [];
+    for (let index = 0; index < count; index++) {
+      const delivery = iterator.next().value;
+      if (!delivery) break;
+      deliveries.push(delivery);
+      this.pendingPeerForwards.delete(delivery.id);
+      this.pendingPeerForwards.set(delivery.id, delivery);
+    }
+    return deliveries;
+  }
+
+  private indexPeerMirrorDelivery(delivery: DeliveryIntent, previous?: DeliveryIntent): void {
+    if (delivery.transport === "peer_broker" && (delivery.status === "accepted" || delivery.status === "deferred")) {
+      this.pendingPeerForwards.set(delivery.id, delivery);
+    } else this.pendingPeerForwards.delete(delivery.id);
+    const previousFlightId = previous?.metadata?.peerFlightId;
+    const flightId = delivery.metadata?.peerFlightId;
+    if (typeof previousFlightId === "string" && previousFlightId !== flightId) {
+      const ids = this.peerMirrorDeliveryIdsByFlight.get(previousFlightId);
+      ids?.delete(delivery.id);
+      if (!ids?.size) this.peerMirrorDeliveryIdsByFlight.delete(previousFlightId);
+    }
+    const flight = typeof flightId === "string" ? this.state.snapshot.flights[flightId] : undefined;
+    const invocation = delivery.invocationId ? this.state.snapshot.invocations[delivery.invocationId] : undefined;
+    const terminal = flight && flight.invocationId === delivery.invocationId
+      && flight.targetAgentId === delivery.targetId
+      && (!invocation || flight.requesterId === invocation.requesterId)
+      && (flight.state === "completed" || flight.state === "failed" || flight.state === "cancelled");
+    if (delivery.transport === "peer_broker" && delivery.status === "peer_acked" && delivery.invocationId && !terminal) {
+      this.pendingPeerMirrors.set(delivery.id, delivery);
+      if (typeof flightId === "string") {
+        const ids = this.peerMirrorDeliveryIdsByFlight.get(flightId) ?? new Set<string>();
+        ids.add(delivery.id);
+        this.peerMirrorDeliveryIdsByFlight.set(flightId, ids);
+      }
+    } else {
+      this.pendingPeerMirrors.delete(delivery.id);
+      if (typeof flightId === "string") {
+        const ids = this.peerMirrorDeliveryIdsByFlight.get(flightId);
+        ids?.delete(delivery.id);
+        if (!ids?.size) this.peerMirrorDeliveryIdsByFlight.delete(flightId);
       }
     }
-    return null;
+  }
+
+  private updatePeerMirrorsForFlight(flightId: string): void {
+    for (const id of this.peerMirrorDeliveryIdsByFlight.get(flightId) ?? []) {
+      const delivery = this.state.deliveries.get(id);
+      if (delivery) this.indexPeerMirrorDelivery(delivery);
+    }
+  }
+
+  /**
+   * Scheduler working set, independent of lifetime completed-job history.
+   * Rotate visited entries so an unclaimable prefix cannot starve later work.
+   * The recovery service still checks lease/deferral evidence before dispatch.
+   */
+  listRecoverableInvocationDispatchJobs(options: { limit?: number } = {}): BrokerInvocationDispatchJob[] {
+    const limit = Math.max(0, Math.min(5000, Math.floor(options.limit ?? 1000)));
+    const count = Math.min(limit, this.recoverableDispatchJobs.size);
+    const iterator = this.recoverableDispatchJobs.values();
+    const jobs: BrokerInvocationDispatchJob[] = [];
+    for (let index = 0; index < count; index++) {
+      const job = iterator.next().value;
+      if (!job) break;
+      jobs.push(job);
+      this.recoverableDispatchJobs.delete(job.id);
+      this.recoverableDispatchJobs.set(job.id, job);
+    }
+    return jobs;
+  }
+
+  /** Bounded round-robin candidates. Publication happens outside the write queue. */
+  captureArchivableInvocationDispatchJobs(options: { cutoff: number; limit?: number; maxBytes?: number }): BrokerInvocationDispatchJob[] {
+    const limit = Math.max(0, Math.min(1000, Math.floor(options.limit ?? 250)));
+    const maxBytes = Math.max(0, Math.min(1024 * 1024, options.maxBytes ?? 512 * 1024));
+    const count = Math.min(limit, this.archivableDispatchJobs.size);
+    const iterator = this.archivableDispatchJobs.values();
+    const records: BrokerInvocationDispatchJob[] = [];
+    let bytes = 0;
+    for (let index = 0; index < count; index++) {
+      const job = iterator.next().value;
+      if (!job) break;
+      this.archivableDispatchJobs.delete(job.id); this.archivableDispatchJobs.set(job.id, job);
+      if ((job.completedAt ?? job.updatedAt) >= options.cutoff) continue;
+      const json = JSON.stringify(job);
+      const size = Buffer.byteLength(json);
+      if (bytes + size > maxBytes) continue;
+      bytes += size; records.push(JSON.parse(json) as BrokerInvocationDispatchJob);
+    }
+    return records;
+  }
+
+  /** Call inside the broker write boundary immediately before the rotation marker. */
+  revalidateArchivedInvocationDispatchJobs(jobs: readonly BrokerInvocationDispatchJob[], cutoff: number): string[] {
+    return jobs.filter(job => {
+      const current = this.archivableDispatchJobs.get(job.id);
+      return current && (current.completedAt ?? current.updatedAt) < cutoff && sameValue(current, job);
+    }).map(job => job.id);
+  }
+
+  dispatchJobHistoricalRecords(jobs: readonly BrokerInvocationDispatchJob[]): HistoricalRecord[] {
+    return jobs.map(job => ({ kind: "dispatch_job", id: job.id, record: job,
+      // Jobs belong to an invocation; this indexed grouping keeps legacy IDs discoverable.
+      invocationId: job.invocationId, timestamp: job.createdAt }));
+  }
+
+  private removeDispatchJob(jobId: string): void {
+    const job = this.state.invocationDispatchJobs.get(jobId);
+    if (!job) return;
+    for (const [index, key] of [[this.dispatchJobIdsByInvocation, job.invocationId], [this.dispatchJobIdsByFlight, job.flightId]] as const) {
+      const ids = index.get(key); ids?.delete(jobId); if (!ids?.size) index.delete(key);
+    }
+    this.state.invocationDispatchJobs.delete(jobId);
+    this.recoverableDispatchJobs.delete(jobId); this.archivableDispatchJobs.delete(jobId);
+  }
+
+  private indexDispatchJob(job: BrokerInvocationDispatchJob): void {
+    const previous = this.state.invocationDispatchJobs.get(job.id);
+    const update = (index: Map<string, Set<string>>, key: string, previousKey: string | undefined) => {
+      if (previousKey && previousKey !== key) {
+        const old = index.get(previousKey);
+        old?.delete(job.id);
+        if (old?.size === 0) index.delete(previousKey);
+      }
+      const ids = index.get(key) ?? new Set<string>();
+      ids.add(job.id);
+      index.set(key, ids);
+    };
+    update(this.dispatchJobIdsByInvocation, job.invocationId, previous?.invocationId);
+    update(this.dispatchJobIdsByFlight, job.flightId, previous?.flightId);
+    this.state.invocationDispatchJobs.set(job.id, job);
+    this.updateRecoverableDispatchJob(job);
+  }
+
+  private updateRecoverableDispatchJob(job: BrokerInvocationDispatchJob): void {
+    const flight = this.state.snapshot.flights[job.flightId];
+    const terminal = flight && (flight.state === "completed" || flight.state === "failed" || flight.state === "cancelled");
+    const active = !terminal && (job.state === "pending" || job.state === "running"
+      || (job.state === "completed" && (flight?.state === "queued" || flight?.state === "waking")));
+    if (active) this.recoverableDispatchJobs.set(job.id, job);
+    else this.recoverableDispatchJobs.delete(job.id);
+    const reply = flight?.metadata?.resultReply;
+    const pendingReply = Boolean(reply && typeof reply === "object" && (reply as { status?: unknown }).status === "pending");
+    const finalized = job.state === "completed" || job.state === "failed" || job.state === "cancelled";
+    if (finalized && (!flight || terminal) && !pendingReply) this.archivableDispatchJobs.set(job.id, job);
+    else this.archivableDispatchJobs.delete(job.id);
+  }
+
+  private updateDispatchJobsForFlight(flightId: string): void {
+    for (const jobId of this.dispatchJobIdsByFlight.get(flightId) ?? []) {
+      const job = this.state.invocationDispatchJobs.get(jobId);
+      if (job) this.updateRecoverableDispatchJob(job);
+    }
   }
 
   listInvocationDispatchJobs(options: {
@@ -1170,8 +1560,9 @@ export class FileBackedBrokerJournal {
       entry: BrokerJournalEntry,
       index: number,
       encodedLineBytes: number,
+      physicalEndByte: number,
     ) => void | Promise<void>,
-    options: { endByteExclusive?: number } = {},
+    options: { endByteExclusive?: number; startByteInclusive?: number; fileIdentity?: string } = {},
   ): Promise<JournalVisitReport> {
     const endByteExclusive = options.endByteExclusive;
     if (endByteExclusive !== undefined && endByteExclusive <= 0) {
@@ -1183,11 +1574,7 @@ export class FileBackedBrokerJournal {
       };
     }
     const maintenance = this.memoryMaintenance?.beginReplay();
-    const input = createReadStream(this.filePath, {
-      encoding: "utf8",
-      ...(endByteExclusive === undefined ? {} : { end: endByteExclusive - 1 }),
-    });
-    const lines = createInterface({ input, crlfDelay: Infinity });
+    let file: Awaited<ReturnType<typeof open>> | undefined;
     let index = 0;
     const report: JournalVisitReport = {
       rawLines: 0,
@@ -1196,26 +1583,79 @@ export class FileBackedBrokerJournal {
       blankLines: 0,
     };
     try {
-      for await (const rawLine of lines) {
+      const start = options.startByteInclusive ?? 0;
+      if (!Number.isSafeInteger(start) || start < 0 || (start > 0 && !options.fileIdentity)) throw new Error("invalid_journal_tail_cursor");
+      file = await open(this.filePath, "r");
+      const source = await file.stat();
+      if ((options.fileIdentity && `${source.dev}:${source.ino}` !== options.fileIdentity)
+        || (endByteExclusive !== undefined && source.size < endByteExclusive)) throw new Error("journal_replay_boundary_changed");
+      if (endByteExclusive !== undefined && start >= endByteExclusive) return report;
+      const end = endByteExclusive ?? source.size;
+      let physicalEndByte = start;
+      async function* chunks() {
+        let position = start;
+        while (position < end) {
+          const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, end - position));
+          const { bytesRead } = await file!.read(chunk, 0, chunk.length, position);
+          if (bytesRead === 0) throw new Error("journal_replay_truncated");
+          position += bytesRead;
+          yield chunk.subarray(0, bytesRead);
+        }
+      }
+      for await (const { raw, bytes: encodedLineBytes } of journalLines(chunks())) {
+        physicalEndByte += encodedLineBytes;
+        const rawLine = raw.toString("utf8");
         report.rawLines += 1;
         // Broker journal appends always use one-byte LF terminators. Reuse the
         // bytes already read instead of serializing every parsed entry again on
         // the startup scan's hot path.
-        const encodedLineBytes = Buffer.byteLength(rawLine, "utf8") + 1;
         if (!rawLine.trim()) {
           report.blankLines += 1;
           maintenance?.add(encodedLineBytes);
           continue;
         }
-        const entry = parseEntry(rawLine);
-        if (!entry) {
+        let entries: BrokerJournalEntry[];
+        const preserve = (reason: string, entries?: BrokerJournalEntry[]) => {
+          // Copy exact physical bytes before a replay skip or compaction can
+          // remove the unusable source. A failed copy aborts this boundary.
+          const bytes = encodedLineBytes > raw.length ? Buffer.concat([raw, Buffer.from("\n")]) : raw;
+          const evidence = this.quarantine.preserve({ kind: entries ? "journal.semantic_frame" : "journal.invalid_frame", reason, bytes,
+            source: { path: this.filePath, startByte: physicalEndByte - encodedLineBytes,
+              endByte: physicalEndByte, fileIdentity: `${source.dev}:${source.ino}` }, entries });
+          if (evidence.status === "open" && this.warnedQuarantine.size < 8 && !this.warnedQuarantine.has(evidence.id)) {
+            this.warnedQuarantine.add(evidence.id);
+            console.warn(`[broker] quarantined journal record ${evidence.id}: ${evidence.reason}`);
+          }
+        };
+        try {
+          if (!isUtf8(raw)) throw new Error("invalid_journal_utf8");
+          entries = decodeJournalLine(rawLine);
+        } catch (error) {
+          if (error instanceof JournalFrameLimitError || error instanceof UnsupportedJournalFrameError) throw error;
+          preserve(error instanceof Error ? error.message : String(error));
           report.invalidLines += 1;
           maintenance?.add(encodedLineBytes);
           continue;
         }
-        await visitor(entry, index, encodedLineBytes);
-        index += 1;
-        report.validEntries += 1;
+        const problems = entries.map(journalEntryProblem);
+        const problem = problems.find(problem => problem?.structural) ?? problems.find(problem => problem !== null);
+        if (problem) {
+          // Keep the entire physical transaction indivisible. In particular,
+          // never expose its invocation/job when its accepted message is bad.
+          if (problem.structural) throw new UnsupportedJournalFrameError(problem.reason);
+          preserve(`${problem.reason}; its whole physical frame is isolated.`, entries);
+          report.invalidLines += 1;
+          maintenance?.add(encodedLineBytes);
+          continue;
+        }
+        // Logical counters/checkpoints keep their old meaning. Apportion frame
+        // overhead for compaction estimates without charging its bytes N times.
+        const perEntryBytes = Math.floor(encodedLineBytes / entries.length);
+        for (let ordinal = 0; ordinal < entries.length; ordinal++) {
+          await visitor(entries[ordinal]!, index, perEntryBytes + (ordinal === 0 ? encodedLineBytes % entries.length : 0), physicalEndByte);
+          index += 1;
+          report.validEntries += 1;
+        }
         maintenance?.add(encodedLineBytes);
       }
     } catch (error) {
@@ -1226,27 +1666,55 @@ export class FileBackedBrokerJournal {
         throw error;
       }
     } finally {
-      lines.close();
-      input.destroy();
+      await file?.close();
       maintenance?.finish();
     }
     return report;
   }
 
-  private async rewriteCompactedEntries(latestIndexByKey: Map<string, number>, prefixBytes?: number): Promise<void> {
+  private async compactStartupJournal(latestIndexByKey: Map<string, number>, prefixBytes?: number): Promise<void> {
+    try {
+      await this.rewriteCompactedEntries(latestIndexByKey, prefixBytes);
+    } catch (error) {
+      // Capacity failure while writing the disposable replacement cannot
+      // invalidate the original journal we already replayed. Preserve it and
+      // continue required history coverage; never swallow source/rollback errors.
+      if (!(error instanceof JournalCompactionCapacityError)) throw error;
+      this.startupCompactionDeferral = { code: error.code, operation: error.operation,
+        error: error.message.slice(0, 512) };
+      console.warn(`[openscout-runtime] optional journal compaction deferred (${error.code}, ${error.operation}); original journal retained`);
+    }
+  }
+
+  private async rewriteCompactedEntries(latestIndexByKey: Map<string, number>, prefixBytes?: number, live?: {
+    boundary: BrokerJournalReplayBoundary; rotations: AppliedHistoryRotation[]; dedupeFlights: boolean; checkBudget: () => void; cleanupThroughIndex: number;
+  }): Promise<void> {
     await mkdir(dirname(this.filePath), { recursive: true });
     const temporaryPath = `${this.filePath}.${process.pid}.${Date.now()}.tmp`;
-    const output = createWriteStream(temporaryPath, { encoding: "utf8", flags: "wx" });
+    // Observe open/write failures through awaited operations. A WriteStream can
+    // emit its error before replay reaches a drain/finish listener, leaving
+    // startup waiting forever after ENOSPC (even once free space recovers).
+    const output = await writeCompactionOutput("open", () => open(temporaryPath, "wx"));
+    let outputClosed = false;
+    let pendingLines: string[] = [];
+    let pendingBytes = 0;
+    const flushOutput = async () => {
+      if (pendingLines.length === 0) return;
+      await writeCompactionOutput("write", () => output.writeFile(pendingLines.join(""), "utf8"));
+      pendingLines = [];
+      pendingBytes = 0;
+    };
     const lastFlightById = new Map<string, FlightRecord>();
     // Every history.rotate marker applied during the scan kept its eviction
     // sets in `appliedRotations`. A record line is dropped when ANY rotation
     // after it doomed the record — the marker itself survives via the shared
     // "history.rotate" dedupe key, so only the newest one is written.
     const rotationIndex = latestIndexByKey.get("history.rotate");
-    const remainingRotations = rotationIndex !== undefined ? [...this.appliedRotations] : [];
+    const remainingRotations = rotationIndex !== undefined ? [...(live?.rotations ?? this.appliedRotations)] : [];
 
     try {
       await this.visitEntries(async (entry, index) => {
+        if (live) { live.checkBudget(); if (index % 128 === 0) await yieldReadTurn(); }
         if (entry.kind === "history.rotate") {
           remainingRotations.shift();
         }
@@ -1272,7 +1740,7 @@ export class FileBackedBrokerJournal {
           }
         }
 
-        if (entry.kind === "flight.record") {
+        if (entry.kind === "flight.record" && live?.dedupeFlights !== false) {
           const previous = lastFlightById.get(entry.flight.id);
           lastFlightById.set(entry.flight.id, entry.flight);
           if (previous && sameValue(previous, entry.flight)) {
@@ -1280,7 +1748,9 @@ export class FileBackedBrokerJournal {
           }
         } else {
           const key = dedupeKey(entry);
-          if (key && latestIndexByKey.get(key) !== index) {
+          const protectedReceipt = entry.kind === "history.rotate" && ((entry.publications?.length ?? 0) > 0 || (entry.evicted?.controlEventIds?.length ?? 0) > 0)
+            && index > (live?.cleanupThroughIndex ?? -1);
+          if (key && latestIndexByKey.get(key) !== index && !protectedReceipt) {
             return;
           }
           // A latest-entry delete is KEPT as a tombstone. SQLite recovery
@@ -1289,14 +1759,21 @@ export class FileBackedBrokerJournal {
           // the deleted row (and its references) in the store permanently.
         }
 
-        if (!output.write(`${JSON.stringify(writeEntry)}\n`, "utf8")) {
-          await once(output, "drain");
-        }
-      }, prefixBytes === undefined ? {} : { endByteExclusive: prefixBytes });
+        const line = `${JSON.stringify(writeEntry)}\n`;
+        pendingLines.push(line);
+        pendingBytes += Buffer.byteLength(line, "utf8");
+        if (pendingBytes >= 64 * 1024) await flushOutput();
+      }, live?.boundary ?? (prefixBytes === undefined ? {} : { endByteExclusive: prefixBytes }));
+      await flushOutput();
       const publish = async () => {
+        live?.checkBudget();
         // The saved rollback offset belongs to the current file. Repair before
         // copying its suffix or replacing it with a differently sized prefix.
         await this.repairFailedAppend();
+        if (live?.boundary.fileIdentity) {
+          const current = await stat(this.filePath);
+          if (`${current.dev}:${current.ino}` !== live.boundary.fileIdentity) throw new Error("journal_compaction_source_changed");
+        }
         if (prefixBytes !== undefined) {
           // The prefix rewrite runs cooperatively while control registrations
           // append. Capture/copy its accepted suffix under the canonical writer
@@ -1304,12 +1781,15 @@ export class FileBackedBrokerJournal {
           const end = (await stat(this.filePath)).size;
           if (end > prefixBytes) {
             const suffix = createReadStream(this.filePath, { start: prefixBytes, end: end - 1 });
-            for await (const bytes of suffix) if (!output.write(bytes)) await once(output, "drain");
+            for await (const bytes of suffix) await writeCompactionOutput("write suffix", () => output.writeFile(bytes));
           }
         }
-        output.end();
-        await once(output, "finish");
-        await rename(temporaryPath, this.filePath);
+        await writeCompactionOutput("sync", () => output.sync());
+        await writeCompactionOutput("close", () => output.close());
+        outputClosed = true;
+        live?.checkBudget();
+        await writeCompactionOutput("rename", () => rename(temporaryPath, this.filePath));
+        await this.syncDirectory();
         this.appendPrefix = "";
       };
       if (prefixBytes === undefined) await publish();
@@ -1318,10 +1798,8 @@ export class FileBackedBrokerJournal {
         this.writeQueue = committed.catch(() => {});
         await committed;
       }
-    } catch (error) {
-      output.destroy();
-      throw error;
     } finally {
+      if (!outputClosed) await output.close().catch(() => undefined);
       // After publish() the path no longer exists (it was renamed away); on any
       // failure the half-written temp must not survive to the next boot.
       await unlink(temporaryPath).catch(() => undefined);
@@ -1396,9 +1874,10 @@ export class FileBackedBrokerJournal {
       case "binding.upsert":
         return !sameValue(snapshot.bindings[entry.binding.id], entry.binding);
       case "history.rotate":
-        // A same-cutoff repeat changes nothing — the daemon also checks, but
-        // the journal must not accumulate duplicate markers.
-        return this.appliedRotations.at(-1)?.cutoff !== entry.cutoff;
+        // A newly completed dependency component may become eligible within
+        // the same week. Explicit verified id sets are separate relocations.
+        return (entry.evicted && Object.values(entry.evicted).some(ids => ids.length > 0))
+          || this.appliedRotations.at(-1)?.cutoff !== entry.cutoff;
       default:
         return true;
     }
@@ -1531,10 +2010,17 @@ export class FileBackedBrokerJournal {
         this.state.snapshot.invocations[entry.invocation.id] = entry.invocation;
         return;
       case "invocation.dispatch_job.record":
-        this.state.invocationDispatchJobs.set(entry.job.id, entry.job);
+        this.indexDispatchJob(entry.job);
         return;
       case "flight.record":
         this.state.snapshot.flights[entry.flight.id] = entry.flight;
+        this.updateDispatchJobsForFlight(entry.flight.id);
+        this.updatePeerMirrorsForFlight(entry.flight.id);
+        if ((entry.flight.metadata?.resultReply as { status?: unknown } | undefined)?.status === "pending") {
+          this.pendingResultFlights.set(entry.flight.invocationId, entry.flight);
+        } else {
+          this.pendingResultFlights.delete(entry.flight.invocationId);
+        }
         return;
       case "collaboration.record":
         this.state.snapshot.collaborationRecords[entry.record.id] = entry.record;
@@ -1544,6 +2030,7 @@ export class FileBackedBrokerJournal {
         return;
       case "deliveries.record":
         for (const delivery of entry.deliveries) {
+          this.indexPeerMirrorDelivery(delivery, this.state.deliveries.get(delivery.id));
           this.state.deliveries.set(delivery.id, delivery);
         }
         return;
@@ -1566,6 +2053,7 @@ export class FileBackedBrokerJournal {
           leaseExpiresAt: entry.leaseExpiresAt ?? undefined,
           metadata: mergeMetadata(current.metadata, entry.metadata),
         };
+        this.indexPeerMirrorDelivery(next, current);
         this.state.deliveries.set(entry.deliveryId, next);
         return;
       }
@@ -1654,8 +2142,18 @@ export class FileBackedBrokerJournal {
       ? historyRotationPlanFromMarker(entry.evicted)
       : planHistoryRotation(this.state.snapshot, entry.cutoff, this.historyRotationContext());
     applyHistoryRotationEviction(this.state.snapshot, evicted);
+    for (const jobId of entry.evicted?.dispatchJobIds ?? []) this.removeDispatchJob(jobId);
+    for (const flightId of evicted.flightIds) this.updateDispatchJobsForFlight(flightId);
 
     for (const deliveryId of evicted.deliveryIds) {
+      const flightId = this.state.deliveries.get(deliveryId)?.metadata?.peerFlightId;
+      if (typeof flightId === "string") {
+        const ids = this.peerMirrorDeliveryIdsByFlight.get(flightId);
+        ids?.delete(deliveryId);
+        if (!ids?.size) this.peerMirrorDeliveryIdsByFlight.delete(flightId);
+      }
+      this.pendingPeerMirrors.delete(deliveryId);
+      this.pendingPeerForwards.delete(deliveryId);
       this.state.deliveries.delete(deliveryId);
     }
     for (const [deliveryId, attempts] of this.state.deliveryAttempts) {
@@ -1670,7 +2168,7 @@ export class FileBackedBrokerJournal {
       (event) => !evicted.collaborationEventIds.has(event.id),
     );
 
-    this.appliedRotations.push({ cutoff: entry.cutoff, ...evicted });
+    this.appliedRotations.push({ cutoff: entry.cutoff, ...evicted, dispatchJobIds: new Set(entry.evicted?.dispatchJobIds ?? []), controlEventIds: new Set(entry.evicted?.controlEventIds ?? []) });
   }
 
   /** Cutoff of the newest applied `history.rotate` marker, if any. */
@@ -1678,9 +2176,10 @@ export class FileBackedBrokerJournal {
     return this.appliedRotations.at(-1)?.cutoff ?? null;
   }
 
-  listScoutDispatches(options: { limit?: number; askedLabel?: string } = {}): ScoutDispatchRecord[] {
+  listScoutDispatches(options: { limit?: number; askedLabel?: string; invocationId?: string } = {}): ScoutDispatchRecord[] {
     const limit = options.limit ?? 200;
     return [...this.state.scoutDispatches]
+      .filter(record => options.invocationId === undefined || record.invocationId === options.invocationId)
       .filter((record) => !options.askedLabel || record.askedLabel === options.askedLabel)
       .sort((left, right) => right.dispatchedAt - left.dispatchedAt)
       .slice(0, limit);

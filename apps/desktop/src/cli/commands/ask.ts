@@ -1,4 +1,5 @@
 import { flightSessionTrace } from "@openscout/protocol";
+import { randomUUID } from "node:crypto";
 import { buildFlightLinks } from "./flight.ts";
 import type { ScoutCommandContext } from "../context.ts";
 import { defaultScoutContextDirectory } from "../context.ts";
@@ -92,6 +93,7 @@ export function renderAskCommandHelp(): string {
     "  --label <label>                   -> attach a durable work label; repeatable",
     "  --notify                          -> asynchronous ask; return now and surface completion later",
     "  --reply-mode <mode>                -> inline (default), notify, or none",
+    "  --request-id <id>                  -> reuse a command ID after an uncertain receipt; content must match",
     "  --placement <placement>           -> background (default), foreground, or attached (Codex: use the running Codex app-server daemon)",
     "  --foreground                      -> alias for --placement foreground",
     "",
@@ -412,8 +414,12 @@ export async function runAskWithOptions(
       ? { projectPath: options.projectPath }
       : { to: to ?? "" };
   const replyMode = options.replyMode ?? "inline";
+  const requestId = options.requestId ?? `ask-${randomUUID()}`;
+  context.stderr(`request ${requestId} (reuse with --request-id after an uncertain receipt)`);
   const receipt = await scoutAskHandler({
+    requestId,
     senderId,
+    senderResolution: options.agentName?.trim() && options.agentName.trim() !== "operator" ? "legacy" : "exact",
     ...target,
     body,
     channel: options.channel,
@@ -458,12 +464,15 @@ export async function runAskWithOptions(
   );
 
   if (replyMode !== "inline") {
-    const flight = receipt.ids.flightId
+    // Notify returns the canonical durable receipt. Native startup and its
+    // first status transition are observed through the returned handle.
+    const flight = replyMode !== "notify" && receipt.ids.flightId
       ? await loadInitialScoutAskFlight(resolveScoutBrokerUrl(), receipt.ids.flightId)
         .catch(() => null)
       : null;
     context.output.writeValue(
       {
+        requestId,
         senderId,
         conversationId: receipt.ids.conversationId ?? null,
         messageId: receipt.ids.messageId ?? null,

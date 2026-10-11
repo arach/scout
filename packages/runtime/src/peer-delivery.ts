@@ -22,6 +22,8 @@ import type {
   InvocationRequest,
   NodeDefinition,
 } from "@openscout/protocol";
+import { createHash } from "node:crypto";
+import { MAX_SSE_FRAME_BYTES } from "./broker-control-stream-service.js";
 
 import type { FileBackedBrokerJournal } from "./broker-journal.js";
 import {
@@ -47,6 +49,10 @@ export interface PeerDeliveryConfig {
   tickIntervalMs: number;
   /** How long a worker holds an exclusive lease on a delivery while forwarding. Default 30_000 ms. */
   leaseMs: number;
+  /** Bounded concurrent authority observation subscriptions. */
+  maxStatusMirrors: number;
+  /** Rotate observation slots without interrupting remote execution. */
+  statusMirrorLeaseMs: number;
 }
 
 export const DEFAULT_PEER_DELIVERY_CONFIG: PeerDeliveryConfig = {
@@ -55,12 +61,14 @@ export const DEFAULT_PEER_DELIVERY_CONFIG: PeerDeliveryConfig = {
   retryWindowMs: 30 * 60_000,
   tickIntervalMs: 1_000,
   leaseMs: 30_000,
+  maxStatusMirrors: 64,
+  statusMirrorLeaseMs: 30_000,
 };
 
 /* ── Dependencies (injected so the worker is testable) ── */
 
 export interface PeerDeliveryDeps {
-  journal: Pick<FileBackedBrokerJournal, "listDeliveries" | "listDeliveryAttempts">;
+  journal: Pick<FileBackedBrokerJournal, "getDelivery" | "findDelivery" | "listDeliveryAttempts" | "listPendingPeerMirrorDeliveries" | "listPendingPeerForwardDeliveries">;
   /** Returns the current registry snapshot (for bundle building). */
   snapshot: () => Readonly<RuntimeRegistrySnapshot>;
   /** Returns the local node definition (origin of the envelope). */
@@ -73,6 +81,7 @@ export interface PeerDeliveryDeps {
   agentFor: (agentId: string) => AgentDefinition | undefined;
   /** Looks up the in-flight invocation by id (used by enqueue + dispatcher). */
   invocationFor: (invocationId: string) => InvocationRequest | undefined;
+  flightForInvocation?: (invocationId: string) => FlightRecord | undefined;
 
   /** Persist a `deliveries.record` journal entry. */
   recordDelivery: (delivery: DeliveryIntent) => Promise<void>;
@@ -205,78 +214,118 @@ function parseSseFrame(frame: string): { event: string; data: string } | undefin
   return { event, data: dataLines.join("\n") };
 }
 
-function isTerminalFlightEvent(event: ControlEvent): boolean {
-  if (event.kind !== "flight.updated") return false;
-  const state = (event.payload as { flight?: { state?: string } })?.flight?.state;
-  return typeof state === "string" && TERMINAL_FLIGHT_STATES.has(state);
-}
-
 function startStatusMirror(args: {
   peerUrl: string;
-  invocationId: string;
-  emit: (event: ControlEvent) => void;
+  invocation: InvocationRequest;
+  expectedFlightId?: string;
+  emit?: (event: ControlEvent) => void;
+  recordFlight: (flight: FlightRecord) => Promise<void>;
+  currentFlight?: () => FlightRecord | undefined;
   peerFetch: MeshPeerFetch;
+  durationMs: number;
   onClose?: () => void;
 }): StatusMirrorHandle {
   const controller = new AbortController();
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  const onAbort = () => { void reader?.cancel().catch(() => undefined); };
+  controller.signal.addEventListener("abort", onAbort, { once: true });
+  // Observation leases rotate fairly. This never cancels the authority's work.
+  const timer = setTimeout(() => controller.abort(), args.durationMs);
+  timer.unref?.();
   const baseUrl = args.peerUrl.replace(/\/$/, "");
   const streamPath = (prefix: string) =>
-    `${prefix}/invocations/${encodeURIComponent(args.invocationId)}/stream`;
+    `${prefix}/invocations/${encodeURIComponent(args.invocation.id)}/stream`;
+
+  const matchingFlight = (value: unknown): value is FlightRecord => {
+    if (!value || typeof value !== "object") return false;
+    const flight = value as FlightRecord;
+    return typeof flight.id === "string" && (!args.expectedFlightId || flight.id === args.expectedFlightId)
+      && flight.invocationId === args.invocation.id
+      && flight.targetAgentId === args.invocation.targetAgentId
+      && flight.requesterId === args.invocation.requesterId
+      && ["queued", "waking", "running", "waiting", "completed", "failed", "cancelled"].includes(flight.state)
+      && typeof flight.startedAt === "number" && Number.isFinite(flight.startedAt);
+  };
+  const mirrorFlight = async (flight: FlightRecord, event?: Extract<ControlEvent, { kind: "flight.updated" }>) => {
+    const before = args.currentFlight?.();
+    if (matchingFlight(before) && TERMINAL_FLIGHT_STATES.has(before.state)) return true;
+    await args.recordFlight(flight);
+    const current = args.currentFlight?.();
+    const recorded = matchingFlight(current) ? current : flight;
+    args.emit?.(event ? { ...event, payload: { ...event.payload, flight: recorded } } : {
+      id: createId("evt"), kind: "flight.updated", ts: Date.now(), actorId: "system", payload: { flight: recorded },
+    });
+    return TERMINAL_FLIGHT_STATES.has(recorded.state);
+  };
 
   void (async () => {
     try {
-      // Remote-tier status stream (mesh trust cone §4): the local-tier route
-      // is unreachable to peers in enforce mode. Pre-trust-cone peers lack
-      // the /v1/mesh equivalent — fall back to the legacy path on 404.
       let response = await args.peerFetch(baseUrl, streamPath("/v1/mesh"), {
-        headers: { accept: "text/event-stream" },
-        signal: controller.signal,
+        headers: { accept: "text/event-stream" }, signal: controller.signal,
       });
       if (response.status === 404) {
+        await response.body?.cancel();
         response = await args.peerFetch(baseUrl, streamPath("/v1"), {
-          headers: { accept: "text/event-stream" },
-          signal: controller.signal,
+          headers: { accept: "text/event-stream" }, signal: controller.signal,
         });
       }
-      if (!response.ok || !response.body) return;
-
-      const reader = response.body.getReader();
+      if (!response.ok || !response.body || controller.signal.aborted) {
+        await response.body?.cancel();
+        return;
+      }
+      reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-
-      while (true) {
+      let bufferedBytes = 0;
+      while (!controller.signal.aborted) {
         const { value, done } = await reader.read();
         if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
+        const decoded = decoder.decode(value, { stream: true });
+        buffer += decoded;
+        bufferedBytes += Buffer.byteLength(decoded);
         let idx = buffer.indexOf("\n\n");
-        while (idx !== -1) {
+        while (idx !== -1 && !controller.signal.aborted) {
           const frame = buffer.slice(0, idx);
           buffer = buffer.slice(idx + 2);
+          const frameBytes = Buffer.byteLength(frame) + 2;
+          bufferedBytes -= frameBytes;
+          if (frameBytes > MAX_SSE_FRAME_BYTES) throw new Error("Peer status frame exceeds the observation buffer");
           const parsed = parseSseFrame(frame);
-          if (parsed && MIRRORED_EVENT_KINDS.has(parsed.event)) {
-            try {
-              const data = JSON.parse(parsed.data) as ControlEvent;
-              args.emit(data);
-              if (isTerminalFlightEvent(data)) {
-                controller.abort();
-                break;
-              }
-            } catch {
-              // Malformed frame — skip and keep streaming.
+          let data: unknown;
+          try { data = parsed ? JSON.parse(parsed.data) : undefined; } catch { data = undefined; }
+          if (parsed?.event === "snapshot") {
+            const snapshot = data as { invocationId?: string; flight?: unknown } | undefined;
+            if (snapshot?.invocationId === args.invocation.id && matchingFlight(snapshot.flight)) {
+              if (await mirrorFlight(snapshot.flight)) return;
+            }
+          } else if (parsed && MIRRORED_EVENT_KINDS.has(parsed.event) && data && typeof data === "object") {
+            const event = data as ControlEvent;
+            if (event.kind === "flight.updated" && parsed.event === event.kind) {
+              const flight = (event.payload as { flight?: unknown } | undefined)?.flight;
+              if (matchingFlight(flight) && await mirrorFlight(flight, event)) return;
+            } else if (event.kind === "delivery.state.changed" && parsed.event === event.kind) {
+              const delivery = (event.payload as { delivery?: DeliveryIntent } | undefined)?.delivery;
+              if (delivery?.invocationId === args.invocation.id && delivery.targetId === args.invocation.targetAgentId) args.emit?.(event);
             }
           }
           idx = buffer.indexOf("\n\n");
         }
+        // Match the sender's legal singleton budget, including UTF-8 bytes.
+        // Several complete frames in one network chunk are checked separately.
+        if (bufferedBytes > MAX_SSE_FRAME_BYTES) throw new Error("Peer status frame exceeds the observation buffer");
       }
     } catch {
-      // Aborted or network blip — the origin's outbox state is authoritative
-      // either way; the mirror is best-effort observability.
+      // Network/storage failures leave the durable acknowledgement pending for
+      // observation recovery. Never resubmit an acknowledged invocation.
     } finally {
+      clearTimeout(timer);
+      controller.signal.removeEventListener("abort", onAbort);
+      controller.abort();
+      await reader?.cancel().catch(() => undefined);
+      reader?.releaseLock();
       args.onClose?.();
     }
   })();
-
   return { stop: () => controller.abort() };
 }
 
@@ -318,27 +367,65 @@ export function createPeerDeliveryWorker(
   // this same process so a fast tick doesn't pile up.
   const inFlight = new Set<string>();
   const statusMirrors = new Map<string, StatusMirrorHandle>();
+  const mirrorRetries = new Map<string, { attempts: number; nextAt: number }>();
+  const pendingEnqueues = new Map<string, Promise<DeliveryIntent>>();
+  const onlinePeerHints = new Set<string>();
+  let stopped = false;
   let timer: ReturnType<typeof setInterval> | undefined;
   let ticking: Promise<void> | undefined;
 
-  function ensureStatusMirror(deliveryId: string, peerUrl: string, invocationId: string): void {
-    if (!deps.emit) return;
+  function ensureStatusMirror(delivery: DeliveryIntent, peerUrl: string, invocation: InvocationRequest): void {
+    const deliveryId = delivery.id;
+    if (stopped || statusMirrors.size >= cfg.maxStatusMirrors) return;
     if (statusMirrors.has(deliveryId)) return;
+    if ((mirrorRetries.get(deliveryId)?.nextAt ?? 0) > now()) return;
+    const expectedFlightId = readString(delivery.metadata, "peerFlightId");
+    const flight = deps.flightForInvocation?.(invocation.id);
+    if (flight && flight.id === expectedFlightId && flight.invocationId === invocation.id
+      && flight.targetAgentId === invocation.targetAgentId && flight.requesterId === invocation.requesterId
+      && TERMINAL_FLIGHT_STATES.has(flight.state)) return;
     const handle = startStatusMirror({
       peerUrl,
-      invocationId,
+      invocation,
+      expectedFlightId,
       emit: deps.emit,
+      recordFlight: deps.recordFlight,
+      currentFlight: () => deps.flightForInvocation?.(invocation.id),
       peerFetch,
+      durationMs: cfg.statusMirrorLeaseMs,
       onClose: () => {
+        if (statusMirrors.get(deliveryId) !== handle) return;
         statusMirrors.delete(deliveryId);
+        const attempts = (mirrorRetries.get(deliveryId)?.attempts ?? 0) + 1;
+        mirrorRetries.delete(deliveryId);
+        mirrorRetries.set(deliveryId, { attempts, nextAt: now() + nextBackoffMs(attempts, cfg) });
+        // This is a scheduling cache only; acknowledged work stays durable.
+        if (mirrorRetries.size > 1024) mirrorRetries.delete(mirrorRetries.keys().next().value!);
       },
     });
     statusMirrors.set(deliveryId, handle);
   }
 
   async function enqueue(invocation: InvocationRequest, peer: NodeDefinition): Promise<DeliveryIntent> {
+    const id = `dlv-peer-${createHash("sha256").update(JSON.stringify([invocation.id, peer.id])).digest("hex")}`;
+    const pending = pendingEnqueues.get(id);
+    if (pending) return pending;
+    const work = enqueueOnce(id, invocation, peer);
+    pendingEnqueues.set(id, work);
+    try { return await work; } finally { if (pendingEnqueues.get(id) === work) pendingEnqueues.delete(id); }
+  }
+
+  function existingPeerDelivery(invocationId: string, peerId: string): DeliveryIntent | undefined {
+    const id = `dlv-peer-${createHash("sha256").update(JSON.stringify([invocationId, peerId])).digest("hex")}`;
+    return deps.journal.getDelivery(id) ?? deps.journal.findDelivery(delivery => delivery.transport === "peer_broker"
+      && delivery.invocationId === invocationId && delivery.targetNodeId === peerId);
+  }
+
+  async function enqueueOnce(id: string, invocation: InvocationRequest, peer: NodeDefinition): Promise<DeliveryIntent> {
+    const existing = existingPeerDelivery(invocation.id, peer.id);
+    if (existing) { void tick(); return existing; }
     const delivery: DeliveryIntent = {
-      id: createId("dlv-peer"),
+      id,
       invocationId: invocation.id,
       targetId: invocation.targetAgentId,
       targetNodeId: peer.id,
@@ -418,6 +505,25 @@ export function createPeerDeliveryWorker(
         return;
       }
 
+      const closeIfTerminal = async (): Promise<boolean> => {
+        const flight = deps.flightForInvocation?.(invocation.id);
+        if (!flight || flight.invocationId !== invocation.id || flight.targetAgentId !== invocation.targetAgentId
+          || flight.requesterId !== invocation.requesterId || !TERMINAL_FLIGHT_STATES.has(flight.state)) return false;
+        await transition(delivery, {
+          status: flight.state === "cancelled" ? "cancelled" : flight.state === "failed" ? "failed" : "completed",
+          metadata: { phase: "flight_closed", closedAt: now() }, leaseOwner: null, leaseExpiresAt: null,
+        });
+        return true;
+      };
+      if (await closeIfTerminal()) return;
+      if (delivery.targetNodeId) {
+        const canonical = existingPeerDelivery(invocation.id, delivery.targetNodeId);
+        if (canonical && canonical.id !== delivery.id) {
+          await transition(delivery, { status: "cancelled", metadata: { supersededPeerDeliveryId: canonical.id }, leaseOwner: null, leaseExpiresAt: null });
+          return;
+        }
+      }
+
       if (!delivery.targetNodeId) {
         await transition(delivery, {
           status: "failed",
@@ -465,6 +571,15 @@ export function createPeerDeliveryWorker(
         leaseExpiresAt: startedAt + cfg.leaseMs,
       });
 
+      if (stopped) return;
+      // No await may sit between this final check and the external submission.
+      const beforeForward = deps.flightForInvocation?.(invocation.id);
+      if (beforeForward?.invocationId === invocation.id && beforeForward.targetAgentId === invocation.targetAgentId
+        && beforeForward.requesterId === invocation.requesterId && TERMINAL_FLIGHT_STATES.has(beforeForward.state)) {
+        await closeIfTerminal();
+        return;
+      }
+
       try {
         const bundle = buildMeshInvocationBundle(deps.snapshot(), deps.localNode(), invocation);
         const result = await forward(peerTarget, bundle);
@@ -498,7 +613,7 @@ export function createPeerDeliveryWorker(
           await deps.recordFlight(result.flight);
         }
         if (peerUrl) {
-          ensureStatusMirror(delivery.id, peerUrl, invocation.id);
+          ensureStatusMirror({ ...delivery, metadata: { ...delivery.metadata, peerFlightId: result.flight.id } }, peerUrl, invocation);
         }
       } catch (error) {
         const reason = pickFailureReason(error);
@@ -575,39 +690,60 @@ export function createPeerDeliveryWorker(
     }
   }
 
-  async function tickInternal(filterPeerNodeId?: string, force = false): Promise<void> {
+  async function tickInternal(): Promise<void> {
+    if (stopped) return;
     const currentTime = now();
+    const forcePeers = new Set(onlinePeerHints);
+    onlinePeerHints.clear();
+    for (const delivery of deps.journal.listPendingPeerMirrorDeliveries({ limit: 500 })) {
+      if (statusMirrors.size >= cfg.maxStatusMirrors) break;
+      const invocation = delivery.invocationId ? deps.invocationFor(delivery.invocationId) : undefined;
+      if (!invocation || invocation.targetAgentId !== delivery.targetId) continue;
+      const peer = delivery.targetNodeId ? deps.nodeFor(delivery.targetNodeId) : undefined;
+      const peerUrl = peer?.brokerUrl ?? readString(delivery.metadata, "peerBrokerUrl");
+      if (peerUrl) ensureStatusMirror(delivery, peerUrl, invocation);
+    }
     const candidates = deps.journal
-      .listDeliveries({ transport: "peer_broker", limit: 500 })
+      .listPendingPeerForwardDeliveries({ limit: 500 })
       .filter((delivery) => delivery.status === "accepted" || delivery.status === "deferred")
-      .filter((delivery) => !filterPeerNodeId || delivery.targetNodeId === filterPeerNodeId)
-      .filter((delivery) => force || shouldAttempt(delivery, currentTime))
+      .filter((delivery) => (delivery.targetNodeId && forcePeers.has(delivery.targetNodeId)) || shouldAttempt(delivery, currentTime))
       .filter((delivery) => !isLeaseHeldByOther(delivery, currentTime));
 
-    // Run forwards in parallel — each is bounded by HTTP timeout and we don't
-    // want a slow peer to head-of-line block delivery to a fast one.
-    await Promise.all(candidates.map((delivery) => attemptDelivery(delivery).catch((error) => {
-      console.error(`[openscout-runtime] peer-delivery: unhandled error on delivery ${delivery.id}:`, error);
-    })));
+    // Keep network fanout bounded. A pool allows a fast peer to proceed while
+    // another worker waits for a slow peer; the candidate index rotates fairly.
+    let cursor = 0;
+    await Promise.all(Array.from({ length: Math.min(16, candidates.length) }, async () => {
+      while (!stopped && cursor < candidates.length) {
+        const delivery = candidates[cursor++]!;
+        await attemptDelivery(delivery).catch((error) => {
+          console.error(`[openscout-runtime] peer-delivery: unhandled error on delivery ${delivery.id}:`, error);
+        });
+      }
+    }));
   }
 
   async function tick(): Promise<void> {
     if (ticking) return ticking;
     ticking = tickInternal().finally(() => {
       ticking = undefined;
+      if (!stopped && onlinePeerHints.size) void tick();
     });
     return ticking;
   }
 
   function notifyPeerOnline(nodeId: string): void {
     // Bypass nextAttemptAt — heartbeat says the peer is back, no point waiting.
-    void tickInternal(nodeId, true).catch((error) => {
+    if (stopped) return;
+    onlinePeerHints.add(nodeId);
+    void tick().catch((error) => {
       console.error(`[openscout-runtime] peer-delivery: flush for ${nodeId} failed:`, error);
     });
   }
 
   function start(): void {
     if (timer) return;
+    stopped = false;
+    void tick();
     timer = setInterval(() => {
       void tick();
     }, cfg.tickIntervalMs);
@@ -615,6 +751,7 @@ export function createPeerDeliveryWorker(
   }
 
   function stop(): void {
+    stopped = true;
     if (timer) {
       clearInterval(timer);
       timer = undefined;
@@ -627,6 +764,8 @@ export function createPeerDeliveryWorker(
       }
     }
     statusMirrors.clear();
+    mirrorRetries.clear();
+    onlinePeerHints.clear();
   }
 
   return { enqueue, tick, notifyPeerOnline, start, stop };

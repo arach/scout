@@ -5,6 +5,7 @@ export type ScoutCommandHandler = (context: ScoutCommandContext, args: string[])
 export type ScoutCommandName =
   | "app"
   | "status"
+  | "quarantine"
   | "notify"
   | "operator"
   | "ask"
@@ -69,6 +70,8 @@ export async function loadScoutCommandHandler(name: ScoutCommandName): Promise<S
       return (await import("./integration.ts")).runIntegrationCommand;
     case "app":
       return (await import("./app.ts")).runAppCommand;
+    case "quarantine":
+      return (await import("./quarantine.ts")).runQuarantineCommand;
     case "status":
       return (await import("./status.ts")).runStatusCommand;
     case "notify":

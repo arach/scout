@@ -12,7 +12,7 @@ import {
 } from "@openscout/protocol";
 
 import type { BrokerJournalEntry } from "./broker-journal.js";
-import type { BrokerInvocationDispatchJob } from "./broker-dispatch-job.js";
+import { createInvocationDispatchJob, type BrokerInvocationDispatchJob } from "./broker-dispatch-job.js";
 import {
   BrokerInvocationDispatchService,
   type BrokerInvocationDispatchServiceDeps,
@@ -112,6 +112,8 @@ function createHarness(input: {
   endpoints?: Record<string, AgentEndpoint>;
   flights?: Record<string, FlightRecord>;
   invocations?: Record<string, InvocationRequest>;
+  jobs?: Record<string, BrokerInvocationDispatchJob>;
+  enqueuePeerInvocation?: BrokerInvocationDispatchServiceDeps["enqueuePeerInvocation"];
   resolution?: InvocationResolution;
   describeRemoteAuthorityIssue?: BrokerInvocationDispatchServiceDeps["describeRemoteAuthorityIssue"];
   describeUnavailableInvocationTarget?: BrokerInvocationDispatchServiceDeps["describeUnavailableInvocationTarget"];
@@ -124,6 +126,7 @@ function createHarness(input: {
   const endpoints = input.endpoints ?? {};
   const flights = input.flights ?? {};
   const invocations = input.invocations ?? {};
+  const jobs = input.jobs ?? {};
   const recordInvocationCalls: Array<{
     invocation: InvocationRequest;
     options?: {
@@ -194,6 +197,7 @@ function createHarness(input: {
         targetAgentId: nextInvocation.targetAgentId,
       });
       const dispatchJob = options?.createDispatchJob?.(nextFlight);
+      if (dispatchJob) jobs[dispatchJob.id] = dispatchJob;
       flights[nextInvocation.id] = nextFlight;
       const entries: BrokerJournalEntry[] = [
         { kind: "invocation.record", invocation: nextInvocation },
@@ -206,6 +210,13 @@ function createHarness(input: {
       };
     },
     async recordInvocationDispatchJob(job) {
+      jobs[job.id] = job;
+      recordedDispatchJobs.push(job);
+      return [{ kind: "invocation.dispatch_job.record", job }];
+    },
+    async recordInvocationDispatchJobIf(job, eligible) {
+      if (!eligible(jobs[job.id] ?? null)) return null;
+      jobs[job.id] = job;
       recordedDispatchJobs.push(job);
       return [{ kind: "invocation.dispatch_job.record", job }];
     },
@@ -232,6 +243,7 @@ function createHarness(input: {
     }),
     async enqueuePeerInvocation(nextInvocation, authorityNode) {
       peerEnqueues.push({ invocation: nextInvocation, authorityNode });
+      await input.enqueuePeerInvocation?.(nextInvocation, authorityNode);
     },
     launchLocalInvocation(nextInvocation) {
       launched.push({ invocation: nextInvocation });
@@ -247,6 +259,7 @@ function createHarness(input: {
     dispatches,
     errors,
     flights,
+    jobs,
     launched,
     logs,
     peerEnqueues,
@@ -261,6 +274,76 @@ function createHarness(input: {
 }
 
 describe("BrokerInvocationDispatchService", () => {
+  test("terminal flights never submit locally or remotely, even if their target disappeared", async () => {
+    for (const state of ["completed", "cancelled", "failed"] as const) {
+      for (const authority of ["node-local", "node-peer", "missing"]) {
+        const target = agent({ authorityNodeId: authority });
+        const request = invocation();
+        const terminal = flight({ state, output: "preserved result", completedAt: 150 });
+        const harness = createHarness({
+          agents: authority === "missing" ? {} : { [target.id]: target },
+          nodes: { "node-peer": node() }, flights: { [request.id]: terminal },
+        });
+        await harness.service.dispatchAcceptedInvocation(request);
+        expect(harness.launched).toHaveLength(0);
+        expect(harness.peerEnqueues).toHaveLength(0);
+        expect(harness.recordedFlights).toHaveLength(0);
+        expect(harness.flights[request.id]).toEqual(terminal);
+      }
+    }
+  });
+
+  test("concurrent and stale dispatch job claims submit only once", async () => {
+    const request = invocation();
+    const initialFlight = flight();
+    const job = createInvocationDispatchJob(request, initialFlight, 100);
+    const harness = createHarness({
+      flights: { [request.id]: initialFlight }, invocations: { [request.id]: request },
+      jobs: { [job.id]: job },
+    });
+    await Promise.all([harness.service.runDispatchJob(job), harness.service.runDispatchJob(job)]);
+    await harness.service.runDispatchJob(job);
+    expect(harness.launched).toHaveLength(1);
+    expect(harness.jobs[job.id]?.attempts).toBe(1);
+    expect(harness.jobs[job.id]?.state).toBe("completed");
+  });
+
+  test("an expired running lease does not authorize replay of an unknown submission", async () => {
+    const request = invocation();
+    const initialFlight = flight();
+    const job: BrokerInvocationDispatchJob = {
+      ...createInvocationDispatchJob(request, initialFlight, 100),
+      state: "running", attempts: 1, leaseExpiresAt: 150, leaseOwner: "old-broker",
+    };
+    const harness = createHarness({
+      flights: { [request.id]: initialFlight }, invocations: { [request.id]: request },
+      jobs: { [job.id]: job },
+    });
+    await harness.service.runDispatchJob(job);
+    expect(harness.launched).toHaveLength(0);
+    expect(harness.jobs[job.id]).toEqual(job);
+  });
+
+  test("stale job completion cannot overwrite a newer ownership generation", async () => {
+    const request = invocation();
+    const initialFlight = flight();
+    const job = createInvocationDispatchJob(request, initialFlight, 100);
+    const jobs = { [job.id]: job };
+    const harness = createHarness({
+      agents: { "agent-1": agent({ authorityNodeId: "node-peer" }) },
+      nodes: { "node-peer": node() }, jobs,
+      flights: { [request.id]: initialFlight }, invocations: { [request.id]: request },
+      enqueuePeerInvocation: async () => {
+        jobs[job.id] = { ...jobs[job.id]!, attempts: 2, updatedAt: 250, leaseOwner: "new-broker" };
+      },
+    });
+    await harness.service.runDispatchJob(job);
+    expect(harness.peerEnqueues).toHaveLength(1);
+    expect(jobs[job.id]?.state).toBe("running");
+    expect(jobs[job.id]?.attempts).toBe(2);
+    expect(jobs[job.id]?.leaseOwner).toBe("new-broker");
+  });
+
   test("replays a stable invocation id without launching the worker twice", async () => {
     const harness = createHarness();
     const request = invocation({ id: "inv-client-stable" });

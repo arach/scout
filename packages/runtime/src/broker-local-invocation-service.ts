@@ -1,3 +1,5 @@
+import { redactSecrets } from "@openscout/agent-sessions/secret-redaction";
+import { isCodexAppServerControlError } from "@openscout/agent-sessions/local";
 import { readRuntimeMessage } from "./broker-message-records.js";
 import {
   buildScoutReturnAddress,
@@ -29,6 +31,7 @@ import {
 import {
   clearedTransientStatusMetadata,
   dispatchAckStrategyForEndpoint,
+  endpointMatchesTargetSession,
   invocationTargetSessionId,
   isTerminalFlightState,
   shouldNotifyInvocationRequester,
@@ -43,6 +46,7 @@ import { isRequesterWaitTimeoutError } from "./requester-timeout.js";
 import { isDispatchStalledError } from "./dispatch-stalled.js";
 import { isCodexAppServerExitError, isCodexThreadHeldExternallyError } from "./codex-app-server.js";
 import { sessionAliasAckSummary } from "./session-alias.js";
+import { createInvocationResultReplyIntent, invocationResultMessageId } from "./broker-invocation-result-delivery-service.js";
 
 // How long a thread_held_externally park waits before the recovery sweep may
 // retry the resume. Bounds the resume-attempt cadence while an external app
@@ -170,7 +174,6 @@ export type BrokerLocalInvocationServiceOptions = {
   runtime: LocalInvocationRuntime;
   endpointResolver: LocalInvocationEndpointResolver;
   activeInvocationTasks: Map<string, Promise<void>>;
-  createId: (prefix: string) => string;
   /**
    * Applies a status patch to the invocation's current flight and funnels it
    * through the durable write path (recordFlight), so terminal-state hooks
@@ -191,7 +194,7 @@ export type BrokerLocalInvocationServiceOptions = {
     invocation: InvocationRequest,
     flight: { id?: string; summary?: string; error?: string },
   ) => Promise<void>;
-  postConversationMessage: (message: MessageRecord) => Promise<unknown>;
+  deliverInvocationResult: (invocationId: string) => Promise<unknown>;
   existingBrokerReplyForInvocation: (
     invocation: InvocationRequest,
     agentId: string,
@@ -222,7 +225,7 @@ export type BrokerLocalInvocationServiceOptions = {
 };
 
 export class BrokerLocalInvocationService {
-  readonly #activeRouteTasks = new Map<string, Promise<void>>();
+  readonly #activeEndpointTasks = new Map<string, Promise<void>>();
 
   constructor(private readonly options: BrokerLocalInvocationServiceOptions) {}
 
@@ -235,25 +238,19 @@ export class BrokerLocalInvocationService {
       return;
     }
 
-    const routeKey = localInvocationRouteKey(invocation);
-    const previousRouteTask = this.#activeRouteTasks.get(routeKey);
-    const task = (previousRouteTask ?? Promise.resolve())
-      .catch(() => undefined)
+    const task = Promise.resolve()
       .then(() => this.execute(invocation))
       .catch((error) => {
         this.options.error?.(`[openscout-runtime] local invocation ${invocation.id} crashed:`, error);
       })
       .finally(() => {
         this.options.activeInvocationTasks.delete(invocation.id);
-        if (this.#activeRouteTasks.get(routeKey) === task) {
-          this.#activeRouteTasks.delete(routeKey);
-        }
       });
     this.options.activeInvocationTasks.set(invocation.id, task);
-    this.#activeRouteTasks.set(routeKey, task);
   }
 
   async execute(invocation: InvocationRequest): Promise<void> {
+    if (this.currentFlightIsTerminal(invocation.id)) return;
     const agent = this.options.runtime.agent(invocation.targetAgentId);
     const actor = this.options.runtime.actor(invocation.targetAgentId) ?? agent;
     const target = localInvocationTargetIdentity(invocation.targetAgentId, agent, actor);
@@ -266,43 +263,111 @@ export class BrokerLocalInvocationService {
 
     try {
       endpoint = await this.options.endpointResolver.resolveLocalEndpointForInvocation(invocation);
+    } catch (error) {
+      await this.handlePreparationError(invocation, target, error);
+      return;
+    }
+    if (this.currentFlightIsTerminal(invocation.id)) return;
+
+    if (!endpoint) {
+      await this.executeOnEndpoint(invocation, endpoint, previousEndpoint);
+      return;
+    }
+
+    // Resolve aliases before scheduling. The endpoint is the stable execution
+    // owner even when preparation promotes its provider session identity.
+    // Fresh isolated endpoints get independent lanes for the same agent.
+    const ownerKey = [endpoint.nodeId, endpoint.harness, endpoint.id].join("\u0000");
+    const previousTask = this.#activeEndpointTasks.get(ownerKey);
+    const task = (previousTask ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(() => this.executeOnEndpoint(invocation, endpoint, previousEndpoint));
+    this.#activeEndpointTasks.set(ownerKey, task);
+    try {
+      await task;
+    } finally {
+      if (this.#activeEndpointTasks.get(ownerKey) === task) {
+        this.#activeEndpointTasks.delete(ownerKey);
+      }
+    }
+  }
+
+  private async handlePreparationError(
+    invocation: InvocationRequest,
+    target: LocalInvocationTargetIdentity,
+    error: unknown,
+  ): Promise<void> {
+    if (this.currentFlightIsTerminal(invocation.id)) return;
+    if (isCodexThreadHeldExternallyError(error)) {
+      // Wake found the session's thread open in another app (single-writer
+      // rule). Park the delivery instead of failing it — the retry sweep
+      // redispatches once the deferral elapses.
+      const checkedAt = this.now();
+      await this.options.transitionInvocation(invocation.id, {
+        state: "queued",
+        summary: `${target.displayName}'s Codex thread is open in another app. Message stored; will deliver when the thread is released.`,
+        metadata: {
+          dispatchOutcome: {
+            status: "queued_until_online",
+            reason: "thread_held_externally",
+            checkedAt,
+          },
+          heldThreadId: error.threadId,
+        },
+      });
+      this.options.deferInvocationRetry?.(invocation.id, checkedAt + HELD_THREAD_RETRY_DELAY_MS);
+      return;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    const failedFlight = await this.options.transitionInvocation(invocation.id, {
+      state: "failed",
+      summary: `${target.displayName} could not be prepared.`,
+      error: `Endpoint resolution failed before execution: ${message}`,
+      completedAt: this.now(),
+      metadata: {
+        failureStage: "endpoint_resolution",
+      },
+    });
+    if (failedFlight.state === "failed") {
+      await this.options.postInvocationStatusMessage(invocation, failedFlight);
+    }
+  }
+
+  private async executeOnEndpoint(
+    invocation: InvocationRequest,
+    resolvedEndpoint: AgentEndpoint | undefined,
+    previousEndpoint: AgentEndpoint | undefined,
+  ): Promise<void> {
+    // A queued task may have been cancelled or completed while its owner was
+    // busy. Do not even prepare an executor after that terminal decision.
+    if (this.currentFlightIsTerminal(invocation.id)) return;
+    const agent = this.options.runtime.agent(invocation.targetAgentId);
+    const actor = this.options.runtime.actor(invocation.targetAgentId) ?? agent;
+    const target = localInvocationTargetIdentity(invocation.targetAgentId, agent, actor);
+    let endpoint = resolvedEndpoint;
+    try {
       if (actor && endpoint) {
+        // Resolution can precede another turn on this lane. Use its latest
+        // provider metadata, but never follow an endpoint into another session.
+        const latest = this.options.runtime.snapshot().endpoints[endpoint.id];
+        if (latest) {
+          if (latest.nodeId !== endpoint.nodeId || latest.harness !== endpoint.harness
+            || latest.agentId !== endpoint.agentId || latest.sessionId !== endpoint.sessionId) {
+            throw new Error(`Execution owner changed while invocation ${invocation.id} waited for endpoint ${endpoint.id}.`);
+          }
+          endpoint = latest;
+        }
+        const targetSessionId = invocationTargetSessionId(invocation);
+        if (targetSessionId && !endpointMatchesTargetSession(endpoint, targetSessionId)) {
+          throw new Error(`Session ${targetSessionId} no longer belongs to endpoint ${endpoint.id}.`);
+        }
         endpoint = await this.options.endpointResolver.prepareLocalEndpointForInvocation(endpoint);
       }
     } catch (error) {
-      if (isCodexThreadHeldExternallyError(error)) {
-        // Wake found the session's thread open in another app (single-writer
-        // rule). Park the delivery instead of failing it — the retry sweep
-        // redispatches once the deferral elapses.
-        const checkedAt = this.now();
-        await this.options.transitionInvocation(invocation.id, {
-          state: "queued",
-          summary: `${target.displayName}'s Codex thread is open in another app. Message stored; will deliver when the thread is released.`,
-          metadata: {
-            dispatchOutcome: {
-              status: "queued_until_online",
-              reason: "thread_held_externally",
-              checkedAt,
-            },
-            heldThreadId: error.threadId,
-          },
-        });
-        this.options.deferInvocationRetry?.(invocation.id, checkedAt + HELD_THREAD_RETRY_DELAY_MS);
-        return;
-      }
-      const message = error instanceof Error ? error.message : String(error);
-      const failedFlight = await this.options.transitionInvocation(invocation.id, {
-        state: "failed",
-        summary: `${target.displayName} could not be prepared.`,
-        error: `Endpoint resolution failed before execution: ${message}`,
-        completedAt: this.now(),
-        metadata: {
-          failureStage: "endpoint_resolution",
-        },
-      });
-      await this.options.postInvocationStatusMessage(invocation, failedFlight);
+      await this.handlePreparationError(invocation, target, error);
       return;
     }
+    if (this.currentFlightIsTerminal(invocation.id)) return;
 
     if (!actor || !endpoint) {
       const targetSessionId = invocationTargetSessionId(invocation);
@@ -363,6 +428,14 @@ export class BrokerLocalInvocationService {
       },
     };
     await this.options.persistEndpoint(runningEndpoint);
+    const restoreUnsubmittedEndpoint = () => this.options.persistEndpoint({
+      ...runningEndpoint,
+      state: endpoint.state,
+    });
+    if (this.currentFlightIsTerminal(invocation.id)) {
+      await restoreUnsubmittedEndpoint();
+      return;
+    }
 
     const dispatchAck = {
       strategy: dispatchAckStrategyForEndpoint({
@@ -406,14 +479,25 @@ export class BrokerLocalInvocationService {
         dispatchAck,
       },
     });
+    if (isTerminalFlightState(runningFlight.state) || this.currentFlightIsTerminal(invocation.id)) {
+      await restoreUnsubmittedEndpoint();
+      return;
+    }
 
     // Carries harness identity observed mid-turn, so every later persist of
     // this endpoint (completion, empty reply, failure) keeps it.
     let liveEndpoint = runningEndpoint;
     try {
+      const invocationWithAttachments = await invocationWithOriginatingMessageAttachments(invocation, this.options.runtime);
+      // This is the last await before external submission. Cancellation can
+      // arrive during attachment reads or any of the preceding durable writes.
+      if (this.currentFlightIsTerminal(invocation.id)) {
+        await restoreUnsubmittedEndpoint();
+        return;
+      }
       const result = await this.invokeEndpoint(
         runningEndpoint,
-        await invocationWithOriginatingMessageAttachments(invocation, this.options.runtime),
+        invocationWithAttachments,
         {
           onSessionObserved: async (metadata) => {
             liveEndpoint = promoteLocalEndpointProviderSession(liveEndpoint, { metadata });
@@ -441,25 +525,23 @@ export class BrokerLocalInvocationService {
         ),
       };
 
-      if (invocation.action === "wake") {
-        await this.options.persistEndpointWithoutRecovery(completedEndpoint);
-        await this.options.transitionInvocation(invocation.id, {
-          state: "completed",
-          summary: `${target.displayName} received the message.`,
-          output: result.output,
-          completedAt: this.now(),
-          metadata: { dispatchAck: completedDispatchAck },
-        });
-
-        await this.options.persistEndpoint({
-          ...completedEndpoint,
-          state: "idle",
-        });
+      if (this.currentFlightIsTerminal(invocation.id)) {
+        await this.options.persistEndpoint({ ...completedEndpoint, state: "idle" });
         return;
       }
 
-      const currentFlight = this.options.runtime.flightForInvocation(invocation.id);
-      if (currentFlight && isTerminalFlightState(currentFlight.state)) {
+      if (invocation.action === "wake") {
+        await this.options.persistEndpointWithoutRecovery(completedEndpoint);
+        if (!this.currentFlightIsTerminal(invocation.id)) {
+          await this.options.transitionInvocation(invocation.id, {
+            state: "completed",
+            summary: `${target.displayName} received the message.`,
+            output: result.output,
+            completedAt: this.now(),
+            metadata: { dispatchAck: completedDispatchAck },
+          });
+        }
+
         await this.options.persistEndpoint({
           ...completedEndpoint,
           state: "idle",
@@ -472,7 +554,11 @@ export class BrokerLocalInvocationService {
         target.id,
         runningFlight.startedAt ?? this.now(),
       );
-      const output = postedReply?.body || result.output;
+      if (this.currentFlightIsTerminal(invocation.id)) {
+        await this.options.persistEndpoint({ ...completedEndpoint, state: "idle" });
+        return;
+      }
+      const output = redactSecrets(postedReply?.body || result.output);
       if (!output.trim()) {
         const failedFlight = await this.options.transitionInvocation(invocation.id, {
           state: "failed",
@@ -502,65 +588,75 @@ export class BrokerLocalInvocationService {
       // Make provider identity visible with completion, without waking queued
       // work until the existing post-completion idle transition below.
       await this.options.persistEndpointWithoutRecovery(completedEndpoint);
+      if (this.currentFlightIsTerminal(invocation.id)) {
+        await this.options.persistEndpoint({ ...completedEndpoint, state: "idle" });
+        return;
+      }
+      const completedAt = this.now();
+      const conversation = invocation.conversationId && !postedReply
+        ? this.options.runtime.conversation(invocation.conversationId) : undefined;
+      const resultReply = conversation && invocation.conversationId
+        ? createInvocationResultReplyIntent(invocation.id, {
+          id: invocationResultMessageId(invocation.id),
+          conversationId: invocation.conversationId,
+          actorId: target.id,
+          originNodeId: this.options.nodeId,
+          class: "agent",
+          body: output,
+          replyToMessageId: invocation.messageId,
+          ...(shouldNotifyInvocationRequester(invocation)
+            ? { audience: { notify: [invocation.requesterId] } }
+            : { audience: { delivery: "none" } }),
+          visibility: this.options.messageVisibilityForConversation(conversation),
+          policy: "durable",
+          createdAt: completedAt,
+          metadata: {
+            invocationId: invocation.id,
+            flightId: runningFlight.id,
+            source: "broker",
+            ...this.options.scoutbotReplyProvenanceMetadata(invocation),
+            returnAddress: buildScoutReturnAddress({
+              actorId: target.id,
+              handle: target.handle?.trim() || target.definitionId || target.id,
+              displayName: target.displayName,
+              selector: target.selector,
+              defaultSelector: target.defaultSelector,
+              conversationId: invocation.conversationId,
+              replyToMessageId: invocation.messageId,
+              nodeId: completedEndpoint.nodeId,
+              projectRoot: completedEndpoint.projectRoot ?? completedEndpoint.cwd,
+              sessionId: completedEndpoint.sessionId,
+            }),
+            requestedReturnAddress: invocation.metadata?.["returnAddress"],
+            responderHarness: completedEndpoint.harness,
+            responderTransport: completedEndpoint.transport,
+            responderSessionId: completedEndpoint.sessionId ?? "",
+            responderCwd: completedEndpoint.cwd ?? "",
+            responderProjectRoot: completedEndpoint.projectRoot ?? "",
+            responderAgentName: String(completedEndpoint.metadata?.agentName ?? target.handle ?? target.id),
+            responderStartedAt: String(completedEndpoint.metadata?.startedAt ?? ""),
+            responderNodeId: completedEndpoint.nodeId,
+          },
+        }) : undefined;
       const completedFlight = await this.options.transitionInvocation(invocation.id, {
         state: "completed",
         summary: `${target.displayName} replied.`,
         output,
-        completedAt: this.now(),
-        metadata: { dispatchAck: completedDispatchAck },
+        completedAt,
+        metadata: { dispatchAck: completedDispatchAck, ...(resultReply ? { resultReply } : {}) },
       });
 
-      await this.options.persistEndpoint({
-        ...completedEndpoint,
-        state: "idle",
-      });
-
-      if (invocation.conversationId && !postedReply) {
-        const conversation = this.options.runtime.conversation(invocation.conversationId);
-        if (conversation) {
-          await this.options.postConversationMessage({
-            id: this.options.createId("msg"),
-            conversationId: invocation.conversationId,
-            actorId: target.id,
-            originNodeId: this.options.nodeId,
-            class: "agent",
-            body: output,
-            replyToMessageId: invocation.messageId,
-            ...(shouldNotifyInvocationRequester(invocation)
-              ? { audience: { notify: [invocation.requesterId] } }
-              : { audience: { delivery: "none" } }),
-            visibility: this.options.messageVisibilityForConversation(conversation),
-            policy: "durable",
-            createdAt: this.now(),
-            metadata: {
-              invocationId: invocation.id,
-              flightId: completedFlight.id,
-              source: "broker",
-              ...this.options.scoutbotReplyProvenanceMetadata(invocation),
-              returnAddress: buildScoutReturnAddress({
-                actorId: target.id,
-                handle: target.handle?.trim() || target.definitionId || target.id,
-                displayName: target.displayName,
-                selector: target.selector,
-                defaultSelector: target.defaultSelector,
-                conversationId: invocation.conversationId,
-                replyToMessageId: invocation.messageId,
-                nodeId: completedEndpoint.nodeId,
-                projectRoot: completedEndpoint.projectRoot ?? completedEndpoint.cwd,
-                sessionId: completedEndpoint.sessionId,
-              }),
-              requestedReturnAddress: invocation.metadata?.["returnAddress"],
-              responderHarness: completedEndpoint.harness,
-              responderTransport: completedEndpoint.transport,
-              responderSessionId: completedEndpoint.sessionId ?? "",
-              responderCwd: completedEndpoint.cwd ?? "",
-              responderProjectRoot: completedEndpoint.projectRoot ?? "",
-              responderAgentName: String(completedEndpoint.metadata?.agentName ?? target.handle ?? target.id),
-              responderStartedAt: String(completedEndpoint.metadata?.startedAt ?? ""),
-              responderNodeId: completedEndpoint.nodeId,
-            },
-          });
-        }
+      await this.options.persistEndpoint({ ...completedEndpoint, state: "idle" });
+      if (completedFlight.state !== "completed" || !resultReply) return;
+      // Output and the exact reply are durable before posting. Release this
+      // execution lane without waiting for a slow conversation authority.
+      // Delivery errors remain pending and never become executor attempts.
+      try {
+        void this.options.deliverInvocationResult(invocation.id).catch((error) => {
+          this.options.error?.(`[openscout-runtime] result reply ${invocation.id} remains pending:`, error);
+        });
+      } catch (error) {
+        this.options.error?.(`[openscout-runtime] result reply ${invocation.id} remains pending:`, error);
       }
     } catch (error) {
       await this.handleExecutionError({
@@ -625,6 +721,22 @@ export class BrokerLocalInvocationService {
       priorEndpointState,
     } = input;
     const message = error instanceof Error ? error.message : String(error);
+    if (isCodexAppServerControlError(error) && error.submissionUnknown) {
+      // The prompt may already have been accepted. Keep that uncertainty
+      // durable and never turn a missing control reply into a replay decision.
+      if (!this.currentFlightIsTerminal(invocation.id)) {
+        await this.options.transitionInvocation(invocation.id, {
+          state: "waiting",
+          summary: `${target.displayName}'s submission is awaiting provider confirmation.`,
+          error: message,
+          completedAt: undefined,
+          metadata: {
+            dispatchOutcome: { status: "submission_unknown", reason: error.code, method: error.method, checkedAt: this.now() },
+          },
+        });
+      }
+      return;
+    }
     if (isRequesterWaitTimeoutError(error)) {
       const currentFlight = this.options.runtime.flightForInvocation(invocation.id);
       if (currentFlight && isTerminalFlightState(currentFlight.state)) {
@@ -635,6 +747,7 @@ export class BrokerLocalInvocationService {
         target.id,
         runningFlight.startedAt ?? this.now(),
       );
+      if (this.currentFlightIsTerminal(invocation.id)) return;
       if (postedReply && await this.options.completeInvocationForBrokerReply(invocation, postedReply)) {
         return;
       }
@@ -808,14 +921,6 @@ export class BrokerLocalInvocationService {
   private now(): number {
     return (this.options.now ?? Date.now)();
   }
-}
-
-function localInvocationRouteKey(invocation: InvocationRequest): string {
-  return [
-    invocation.targetAgentId,
-    invocation.execution?.harness ?? "*",
-    invocationTargetSessionId(invocation) ?? "*",
-  ].join("\u0000");
 }
 
 function localInvocationTargetIdentity(

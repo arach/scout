@@ -145,6 +145,13 @@ export class BrokerExternalSessionService {
     });
   }
   private async deliver(endpoint: AgentEndpoint, id: string, body: string, fields: Partial<DeliveryIntent>) {
+    const canSubmit = () => {
+      if (fields.metadata?.resultNotification === true) return true;
+      if (!fields.invocationId) return true;
+      const flight = this.deps.flight(fields.invocationId);
+      return Boolean(flight && !["completed", "failed", "cancelled"].includes(flight.state));
+    };
+    if (!canSubmit()) return;
     const connection = endpoint.transport === "mcp_poll" ? undefined : this.connection(String(endpoint.metadata?.connectionId), String(endpoint.metadata?.ownerId));
     const intent: DeliveryIntent = { id, targetId: endpoint.agentId, targetNodeId: this.deps.nodeId, targetKind: "agent", transport: endpoint.transport,
       reason: "invocation", policy: "durable", status: endpoint.transport === "mcp_poll" ? "accepted" : "sent", ...fields,
@@ -158,11 +165,17 @@ export class BrokerExternalSessionService {
           if (d.metadata?.endpointId === endpoint.id && this.isOutstanding(d)) pending++;
         });
         if (pending >= 1000) throw new Error("external_session_mailbox_full");
+        if (!canSubmit()) return;
         await this.deps.recordDelivery(intent);
+        if (!canSubmit()) await this.deps.mutateDelivery(id, current => ({ ...current, status: "cancelled" }));
       });
       return;
     }
     await this.deps.recordDelivery(intent);
+    if (!canSubmit()) {
+      await this.deps.mutateDelivery(id, current => ({ ...current, status: "cancelled", metadata: { ...current.metadata, phase: "not_submitted" } }));
+      return;
+    }
     try {
       const result = await this.deps.transport(connection).send(String(endpoint.metadata?.nativeSessionId), body);
       // A very fast reply may already have completed this receipt while POST was in flight.

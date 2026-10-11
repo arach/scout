@@ -16,6 +16,7 @@ import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stageScoutd } from "./stage-scoutd.mjs";
+import { bundleRuntimeEntrypoints } from "./runtime-entrypoints.mjs";
 
 import {
   buildControlPlaneClientAndCopy,
@@ -174,48 +175,7 @@ if (!bundleScoutWebServerBun(repoRoot, webServerOutput)) {
   process.exit(1);
 }
 
-function bundleRuntimeEntrypoint(label, entryFile, outputFile) {
-  const result = spawnSync(
-    "bun",
-    ["build", entryFile, "--target=bun", "--format=esm", "--outfile", outputFile, REFLECT_METADATA_BANNER],
-    { cwd: repoRoot, stdio: "inherit" },
-  );
-
-  if ((result.status ?? 1) !== 0) {
-    return false;
-  }
-
-  if (!verifyBundleStaticChecks(outputFile)) {
-    return false;
-  }
-
-  console.log(`  bundled runtime ${label} -> ${outputFile}`);
-  return true;
-}
-
-function bundleRuntimeEntrypoints() {
-  rmSync(runtimeOutputDirectory, { recursive: true, force: true });
-  mkdirSync(runtimeOutputDirectory, { recursive: true });
-
-  const entries = [
-    ["base", "base-daemon.ts", "base-daemon.mjs"],
-    ["broker", "broker-daemon.ts", "broker-daemon.mjs"],
-    ["service", "broker-process-manager.ts", "broker-process-manager.mjs"],
-    ["discover", "mesh-discover.ts", "mesh-discover.mjs"],
-  ];
-
-  for (const [label, source, output] of entries) {
-    const entryFile = resolve(repoRoot, "packages", "runtime", "src", source);
-    const outputFile = resolve(runtimeOutputDirectory, output);
-    if (!bundleRuntimeEntrypoint(label, entryFile, outputFile)) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-if (!bundleRuntimeEntrypoints()) {
+if (!bundleRuntimeEntrypoints(repoRoot, runtimeOutputDirectory)) {
   process.exit(1);
 }
 

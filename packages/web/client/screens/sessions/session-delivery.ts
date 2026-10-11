@@ -1,11 +1,14 @@
-import { parseSessionRouteRef } from "../../../shared/session-route-ref.ts";
+import { formatSessionRouteRef, parseSessionRouteRef } from "../../../shared/session-route-ref.ts";
 import type { SessionRefObservePayload } from "./SessionRefScreen.tsx";
 import type { Agent, SessionEntry } from "../../lib/types.ts";
 import { isAgentInTurn } from "../../lib/agent-state.ts";
-import { invokeSession, resumableHarnessFromAdapterType, resumeAgentSession } from "../../lib/session-start.ts";
+import { api } from "../../lib/api.ts";
+import type { SessionSteerAvailability, SessionSteerReceipt } from "../../../shared/api/session-steer.ts";
 
 export type SessionDeliveryTarget = {
   sessionId: string;
+  sessionRef?: string | null;
+  machineId?: string | null;
   blockedReason?: string | null;
   interruptLocal?: boolean;
   agentId?: string | null;
@@ -13,29 +16,32 @@ export type SessionDeliveryTarget = {
   harness?: string | null;
   model?: string | null;
 };
-export type SessionDeliveryMode = "live" | "scout";
-export function sessionDeliveryAvailability(target: SessionDeliveryTarget) {
-  const resumable = Boolean(!target.blockedReason && target.sessionId && (target.agentId || target.projectPath && resumableHarnessFromAdapterType(target.harness)));
-  return {
-    // The pairing bridge exposes prompt/send, but it is not a browser API.
-    // /sessions/reply may fall back to a traced ask. Deck's route is agent-only.
-    // Neither satisfies an untraced, session-addressed promise for a pinned tab.
-    live: { available: false, reason: "No session-addressed direct web transport is exposed. Use the live harness; Scout will not fall back to an ask." },
-    scout: { available: resumable, reason: target.blockedReason || (resumable ? null : "This session has no registered owner or resumable harness and project.") },
-  };
+export function sessionSteerPath(target: SessionDeliveryTarget): string {
+  return `/api/session-ref/${encodeURIComponent(target.sessionRef ?? "")}/steer?machine=${encodeURIComponent(target.machineId ?? "")}`;
 }
-export async function sendSessionDraft(mode: SessionDeliveryMode, target: SessionDeliveryTarget, body: string): Promise<void> {
-  const availability = sessionDeliveryAvailability(target)[mode];
-  if (!availability.available) throw new Error(availability.reason ?? "This delivery mode is unavailable.");
-  if (!body.trim()) return;
-  // One explicit mode, one exact session. Errors remain errors, not retries on
-  // /send or /sessions/reply (whose delivery contracts are different).
-  if (target.agentId) {
-    await resumeAgentSession({ agentId: target.agentId, sessionId: target.sessionId, instructions: body });
-  } else {
-    await invokeSession({ projectPath: target.projectPath!, sessionId: target.sessionId,
-      harness: resumableHarnessFromAdapterType(target.harness), model: target.model ?? undefined, instructions: body });
-  }
+export function sessionDeliveryAvailability(target: SessionDeliveryTarget, live?: SessionSteerAvailability | null) {
+  const reason = target.blockedReason || (!target.sessionRef || !target.sessionId ? "Waiting for a resolved session identity." : !target.machineId ? "The session's machine is not verified." : null);
+  return reason ? { available: false, reason } : live ?? { available: false, reason: "Checking the live session…" };
+}
+export async function sendSessionDraft(target: SessionDeliveryTarget, body: string): Promise<SessionSteerReceipt> {
+  if (target.blockedReason || !target.sessionRef || !target.machineId || !target.sessionId) throw new Error(sessionDeliveryAvailability(target).reason);
+  // Exactly one input request. Never /sessions (start/resume), /send, or ask.
+  return api<SessionSteerReceipt>(sessionSteerPath(target), { method: "POST", body: JSON.stringify({ text: body }) });
+}
+
+/** One read at a time; stop makes late responses from a previous slot inert. */
+export function sessionSteerPoll<T>(read: () => Promise<T>, receive: (value: T) => void, failed: () => void) {
+  let stopped = false, reading = false;
+  return {
+    async refresh() {
+      if (stopped || reading) return;
+      reading = true;
+      try { const value = await read(); if (!stopped) receive(value); }
+      catch { if (!stopped) failed(); }
+      finally { reading = false; }
+    },
+    stop() { stopped = true; },
+  };
 }
 /** The existing interrupt endpoint addresses the active agent, not history.
  * Never offer it on a pinned older session or an unbound observed process. */
@@ -59,6 +65,7 @@ export function sessionTargetFromObserve(observe: SessionRefObservePayload | nul
     : machineId && observedNode !== machineId ? "The selected machine is not verified by this Observe source. Open the session on that machine; this slot is read-only."
     : (machineId || observedNode) && (machineId || observedNode) !== localNodeId && !agentId ? "Machine-scoped history has no exact registered owner for this web delivery path."
     : null;
-  return { sessionId, agentId, blockedReason, interruptLocal: !machineId || machineId === localNodeId, projectPath: meta?.cwd ?? conversation?.workspaceRoot,
+  return { sessionId, sessionRef: formatSessionRouteRef(meta?.adapterType ?? conversation?.harness, sessionId), machineId: machineId || observedNode || localNodeId,
+    agentId, blockedReason, interruptLocal: !machineId || machineId === localNodeId, projectPath: meta?.cwd ?? conversation?.workspaceRoot,
     harness: meta?.adapterType ?? conversation?.harness, model: meta?.model ?? conversation?.model };
 }

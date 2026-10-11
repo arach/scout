@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { appendFile, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { buildScoutMcpCodexLaunchArgs } from "../../codex-launch-config.js";
 import { resolveCodexExecutable } from "../../codex-executable.js";
 import { redactSecrets } from "../../secret-redaction.js";
+import { CodexWireLog } from "./codex-wire-log.js";
 import {
   connectCodexAppServerSocket,
   defaultCodexAppServerControlSocketPath,
@@ -116,6 +117,10 @@ export type CodexAppServerSessionOptions = {
   onDelta?: (delta: string) => void;
   /** Optional owner lifetime; checked before launching or starting a turn. */
   signal?: AbortSignal;
+  /** Bounds startup/handshake only; never limits a running inference turn. */
+  startupTimeoutMs?: number;
+  /** Bounds each control response (including submission acknowledgement). */
+  controlRequestTimeoutMs?: number;
   /**
    * Which app-server to talk to. Default `{ mode: "spawn" }`: Scout launches
    * and owns a private `codex app-server`. `{ mode: "attach" }` connects to an
@@ -190,16 +195,6 @@ export function buildCodexAppServerIdentity(input: {
     capabilityGaps: input.connection.mode === "attached" ? [...CODEX_ATTACHED_CAPABILITY_GAPS] : [],
     connectedAt: input.now ?? Date.now(),
   };
-}
-
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`Timed out after ${timeoutMs}ms waiting for ${label}.`)), timeoutMs);
-  });
-  return Promise.race([promise, timeout]).finally(() => {
-    if (timer) clearTimeout(timer);
-  });
 }
 
 export type CodexAppServerInvocationOptions = CodexAppServerSessionOptions & {
@@ -300,6 +295,45 @@ export class CodexAppServerRequesterTimeoutError extends Error {
     this.label = input.label;
     this.timeoutMs = input.timeoutMs;
   }
+}
+
+export class CodexAppServerControlError extends Error {
+  readonly code: "CODEX_APP_SERVER_CONTROL_TIMEOUT" | "CODEX_APP_SERVER_CONTROL_ABORTED";
+  readonly method: string;
+  readonly timeoutMs?: number;
+  readonly submissionUnknown: boolean;
+
+  constructor(input: { method: string; timeoutMs?: number; submissionUnknown?: boolean; aborted?: boolean }) {
+    super(input.aborted
+      ? `Aborted while waiting for Codex app-server ${input.method}.`
+      : `Timed out after ${input.timeoutMs}ms waiting for Codex app-server ${input.method}.`);
+    this.name = "CodexAppServerControlError";
+    this.code = input.aborted ? "CODEX_APP_SERVER_CONTROL_ABORTED" : "CODEX_APP_SERVER_CONTROL_TIMEOUT";
+    this.method = input.method;
+    this.timeoutMs = input.timeoutMs;
+    this.submissionUnknown = input.submissionUnknown === true;
+  }
+}
+
+export function isCodexAppServerControlError(error: unknown): error is CodexAppServerControlError {
+  return error instanceof CodexAppServerControlError || Boolean(error && typeof error === "object"
+    && ((error as { code?: unknown }).code === "CODEX_APP_SERVER_CONTROL_TIMEOUT"
+      || (error as { code?: unknown }).code === "CODEX_APP_SERVER_CONTROL_ABORTED"));
+}
+
+function controlDeadlineMs(value: number | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 30_000;
+}
+
+function waitForStartup<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => { cleanup(); reject(signal.reason); };
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    signal.addEventListener("abort", onAbort, { once: true });
+    // Always observe the operation, including a late rejection after abort.
+    void operation.then((value) => { cleanup(); resolve(value); }, (error) => { cleanup(); reject(error); });
+    if (signal.aborted) onAbort();
+  });
 }
 
 export class CodexThreadHeldExternallyError extends Error {
@@ -896,6 +930,7 @@ export class CodexAppServerTransport {
   private readonly statePath: string;
   private readonly stdoutLogPath: string;
   private readonly stderrLogPath: string;
+  private readonly wireLog: CodexWireLog;
 
   private connection: CodexAppServerConnection | null = null;
   connectionGeneration = 0;
@@ -908,6 +943,7 @@ export class CodexAppServerTransport {
   }>();
 
   private starting: Promise<void> | null = null;
+  private startupSignal: AbortSignal | undefined;
   private threadPersistence: Promise<void> = Promise.resolve();
   private threadId: string | null = null;
   private threadPath: string | null = null;
@@ -922,6 +958,10 @@ export class CodexAppServerTransport {
     this.statePath = join(options.runtimeDirectory, "state.json");
     this.stdoutLogPath = join(options.logsDirectory, "stdout.log");
     this.stderrLogPath = join(options.logsDirectory, "stderr.log");
+    this.wireLog = new CodexWireLog({
+      setPaused: (paused) => this.connection?.setReadingPaused(paused),
+      onError: (error) => console.warn(`[openscout] Codex wire-log persistence failed; input paused: ${error.message}`),
+    });
     this.lastConfigSignature = this.configSignature(options);
   }
 
@@ -962,7 +1002,16 @@ export class CodexAppServerTransport {
   }
 
   matches(options: CodexAppServerSessionOptions): boolean {
-    return this.lastConfigSignature === this.configSignature(options);
+    if (this.lastConfigSignature === this.configSignature(options)) return true;
+    // A generated provider ID promoted onto the broker endpoint names this
+    // same live session. Only normalize identity; runtime/launch settings
+    // remain strict so an actual requested change still replaces the client.
+    if (!this.isAlive() || !this.threadId
+      || (this.options.threadId && this.options.threadId !== this.threadId)
+      || (options.threadId && options.threadId !== this.threadId)) return false;
+    const liveIdentity = { threadId: this.threadId, requireExistingThread: true };
+    return this.configSignature({ ...this.options, ...liveIdentity })
+      === this.configSignature({ ...options, ...liveIdentity });
   }
 
   update(options: CodexAppServerSessionOptions): void {
@@ -1075,6 +1124,8 @@ export class CodexAppServerTransport {
     // Spawned: Scout owns the child and terminates it. Attached: close only
     // disconnects; the shared server keeps running.
     await connection?.close();
+    connection?.detach();
+    await this.wireLog.flush();
     await this.threadPersistence;
 
 
@@ -1112,12 +1163,12 @@ export class CodexAppServerTransport {
     if (!connection || connection.mode !== "attached" || !connection.isOpen() || !this.threadId) return;
     const threadId = this.threadId;
     try {
-      await withTimeout(this.request("thread/unsubscribe", { threadId }), 2_000, "thread/unsubscribe");
+      await this.request("thread/unsubscribe", { threadId }, 2_000);
     } catch (error) {
-      await appendFile(
+      this.writeLog(
         this.stderrLogPath,
         `[openscout] failed to unsubscribe attached Codex thread ${threadId}: ${errorMessage(error)}\n`,
-      ).catch(() => undefined);
+      );
     }
   }
 
@@ -1157,36 +1208,55 @@ export class CodexAppServerTransport {
       return this.starting;
     }
 
-    this.starting = this.startSession();
-    try {
-      await this.starting;
-    } catch (error) {
-      // A failed start must not leave our child alive. Attached servers
-      // remain owned by their host and are only disconnected.
-      await this.connection?.close();
-      this.connection?.detach();
-      this.connection = null;
-      throw error;
-    } finally {
-      this.starting = null;
-    }
+    const controller = new AbortController();
+    const ownerSignal = this.options.signal;
+    const onAbort = () => controller.abort(new CodexAppServerControlError({ method: "startup", aborted: true }));
+    ownerSignal?.addEventListener("abort", onAbort, { once: true });
+    const timeoutMs = controlDeadlineMs(this.options.startupTimeoutMs);
+    const timer = setTimeout(() => controller.abort(new CodexAppServerControlError({ method: "startup", timeoutMs })), timeoutMs);
+    this.startupSignal = controller.signal;
+    let startup!: Promise<void>;
+    startup = (async () => {
+      try {
+        await waitForStartup(this.startSession(controller.signal), controller.signal);
+      } catch (error) {
+        // Share cleanup with every startup waiter. Never let an old failure
+        // detach the connection created by a later startup attempt.
+        const failedConnection = this.connection;
+        this.connection = null;
+        failedConnection?.detach();
+        await failedConnection?.close();
+        throw error;
+      } finally {
+        clearTimeout(timer);
+        ownerSignal?.removeEventListener("abort", onAbort);
+        if (this.startupSignal === controller.signal) this.startupSignal = undefined;
+        if (this.starting === startup) this.starting = null;
+      }
+    })();
+    this.starting = startup;
+    await startup;
   }
 
-  private async startSession(): Promise<void> {
+  private async startSession(signal: AbortSignal): Promise<void> {
     await mkdir(this.options.runtimeDirectory, { recursive: true });
+    signal.throwIfAborted();
     await mkdir(this.options.logsDirectory, { recursive: true });
+    signal.throwIfAborted();
+    await this.wireLog.flush();
+    signal.throwIfAborted();
     await writeFile(join(this.options.runtimeDirectory, "prompt.txt"), this.options.systemPrompt);
     this.proactiveShutdown = null;
     try {
       await assertCodexWorkingDirectory(this.options.cwd, this.options.agentName);
     } catch (error) {
       const failure = error instanceof Error ? error : new Error(errorMessage(error));
-      await appendFile(this.stderrLogPath, `[openscout] ${failure.message}\n`).catch(() => undefined);
+      this.writeLog(this.stderrLogPath, `[openscout] ${failure.message}\n`);
       await this.persistState().catch(() => undefined);
       throw failure;
     }
 
-    this.options.signal?.throwIfAborted();
+    signal.throwIfAborted();
     const env = this.options.processEnv ?? mergeEnvironmentOverrides(process.env, this.options.env);
     const connectionConfig = this.connectionConfig;
     let connection: CodexAppServerConnection | undefined;
@@ -1208,11 +1278,17 @@ export class CodexAppServerTransport {
       connection = await connectCodexAppServerSocket({
         socketPath: connectionConfig.socketPath,
         handlers,
+        signal,
       });
-      await appendFile(
+      this.writeLog(
         this.stderrLogPath,
         `[openscout] attached to running Codex app-server at ${connectionConfig.socketPath}; Scout will not stop or restart it\n`,
-      ).catch(() => undefined);
+      );
+      if (signal.aborted) {
+        await connection.close();
+        connection.detach();
+        signal.throwIfAborted();
+      }
     } else {
       const launchArgs = normalizeCodexAppServerLaunchArgs(this.options.launchArgs);
       connection = spawnCodexAppServerStdioConnection({
@@ -1233,6 +1309,7 @@ export class CodexAppServerTransport {
 
     this.connectionGeneration++;
     this.connection = connection;
+    connection.setReadingPaused(this.wireLog.isPaused);
     this.serverIdentity = null;
 
     const clientInfo = this.options.clientInfo ?? {
@@ -1254,13 +1331,17 @@ export class CodexAppServerTransport {
       daemon: daemonVersion ? await daemonVersion : null,
     });
 
-    await this.resumeOrStartThread();
+    signal.throwIfAborted();
+    await this.resumeOrStartThread(signal);
+    signal.throwIfAborted();
     await this.persistState();
+    signal.throwIfAborted();
   }
 
-  private async resumeOrStartThread(): Promise<void> {
+  private async resumeOrStartThread(signal: AbortSignal): Promise<void> {
     const requestedThreadId = this.options.threadId?.trim() || null;
     const storedThreadId = requestedThreadId ?? await readOptionalFile(this.threadIdPath);
+    signal.throwIfAborted();
     if (storedThreadId) {
       const threadOrigin = requestedThreadId ? "requested" : "stored";
       try {
@@ -1278,10 +1359,13 @@ export class CodexAppServerTransport {
         await this.persistThreadId({ confirmed: true });
         return;
       } catch (error) {
-        await appendFile(
+        // A missing control response is not evidence that the old thread is
+        // absent. Never turn a resume timeout/abort into a fresh thread/start.
+        if (isCodexAppServerControlError(error)) throw error;
+        this.writeLog(
           this.stderrLogPath,
           `[openscout] failed to resume ${threadOrigin} Codex thread ${storedThreadId}: ${errorMessage(error)}\n`,
-        ).catch(() => undefined);
+        );
         if (!requestedThreadId && isMissingCodexRolloutError(error)) {
           await rm(this.threadIdPath, { force: true }).catch(() => undefined);
           await closeCodexSessionCatalog(this.options.runtimeDirectory, storedThreadId);
@@ -1327,6 +1411,7 @@ export class CodexAppServerTransport {
       this.durableThreadId = null;
     }
     await this.persistThreadId();
+    signal.throwIfAborted();
     await this.nameStartedThread(started.thread.id);
   }
 
@@ -1336,10 +1421,10 @@ export class CodexAppServerTransport {
     try {
       await this.request("thread/name/set", { threadId, name });
     } catch (error) {
-      await appendFile(
+      this.writeLog(
         this.stderrLogPath,
         `[openscout] failed to name Codex thread ${threadId}: ${errorMessage(error)}\n`,
-      ).catch(() => undefined);
+      );
     }
   }
 
@@ -1365,7 +1450,7 @@ export class CodexAppServerTransport {
     return {
       onMessage: (text) => this.handleMessageText(text),
       onStderr: (chunk) => {
-        void appendFile(this.stderrLogPath, redactSecrets(chunk)).catch(() => undefined);
+        this.writeLog(this.stderrLogPath, chunk);
       },
       onClose: (close) => this.handleConnectionClose(current(), close),
     };
@@ -1404,7 +1489,7 @@ export class CodexAppServerTransport {
   private handleMessageText(line: string): void {
     const message = parseJsonLine(line);
     if (!message) {
-      void appendFile(this.stderrLogPath, `[openscout] unparsable app-server output: ${redactSecrets(line)}\n`).catch(() => undefined);
+      this.writeLog(this.stderrLogPath, `[openscout] unparsable app-server output: ${line}\n`);
       return;
     }
 
@@ -1414,7 +1499,7 @@ export class CodexAppServerTransport {
     const privateCapabilityResponse = isResponse(message)
       && typeof message.id === "string" && message.id.startsWith("scout-capability-");
     if (!privateCapabilityResponse) {
-      void appendFile(this.stdoutLogPath, `${redactSecrets(line)}\n`).catch(() => undefined);
+      this.writeLog(this.stdoutLogPath, `${line}\n`);
     }
 
     if (isResponse(message)) {
@@ -1494,14 +1579,13 @@ export class CodexAppServerTransport {
   private failSession(error: Error): void {
     this.connection?.detach();
     this.connection = null;
-    this.starting = null;
 
     for (const pending of this.pendingRequests.values()) {
       pending.reject(error);
     }
     this.pendingRequests.clear();
 
-    void appendFile(this.stderrLogPath, `[openscout] ${error.message}\n`).catch(() => undefined);
+    this.writeLog(this.stderrLogPath, `[openscout] ${error.message}\n`);
     void this.persistState().catch(() => undefined);
     this.emitError(error);
   }
@@ -1523,13 +1607,17 @@ export class CodexAppServerTransport {
       signal,
     ].filter(Boolean).join(", ");
     const detail = exitDetail ? ` (${exitDetail})` : "";
-    void appendFile(
+    this.writeLog(
       this.stderrLogPath,
       connection?.mode === "attached"
         ? `[openscout] detached from shared Codex app-server for ${this.options.agentName}: ${shutdown.reason}\n`
         : `[openscout] Codex app-server stopped for ${this.options.agentName}: ${shutdown.reason}${detail}\n`,
-    ).catch(() => undefined);
+    );
     void this.persistState();
+  }
+
+  private writeLog(path: string, text: string): void {
+    this.wireLog.append(path, redactSecrets(text));
   }
 
   private persistThreadId(options: { confirmed?: boolean } = {}): Promise<void> {
@@ -1598,26 +1686,55 @@ export class CodexAppServerTransport {
     );
   }
 
-  private async request<T>(method: string, params: unknown): Promise<T> {
+  private async request<T>(method: string, params: unknown, timeoutOverrideMs?: number): Promise<T> {
     const sequence = this.nextRequestId++;
     const id = method === "model/list" || method === "config/read"
       ? `scout-capability-${sequence}` : String(sequence);
 
     return new Promise<T>((resolve, reject) => {
+      const signals = [...new Set([this.options.signal, this.startupSignal].filter((signal): signal is AbortSignal => Boolean(signal)))];
+      const timeoutMs = controlDeadlineMs(timeoutOverrideMs ?? this.options.controlRequestTimeoutMs);
+      let sent = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const cleanup = () => {
+        if (timer) clearTimeout(timer);
+        for (const signal of signals) signal.removeEventListener("abort", onAbort);
+        this.pendingRequests.delete(id);
+      };
+      const fail = (error: Error) => {
+        if (isCodexAppServerControlError(error) && error.submissionUnknown) this.nativeControlBlocked = true;
+        cleanup();
+        reject(error);
+      };
+      const onAbort = () => {
+        const timedOut = signals.find((signal) => signal.aborted
+          && isCodexAppServerControlError(signal.reason) && signal.reason.code === "CODEX_APP_SERVER_CONTROL_TIMEOUT");
+        fail(new CodexAppServerControlError({
+          method,
+          aborted: !timedOut,
+          ...(timedOut ? { timeoutMs: timedOut.reason.timeoutMs } : {}),
+          submissionUnknown: sent && (method === "turn/start" || method === "turn/steer"),
+        }));
+      };
+      if (signals.some((signal) => signal.aborted)) { onAbort(); return; }
       this.pendingRequests.set(id, {
-        resolve: (value) => resolve(value as T),
-        reject,
+        resolve: (value) => { cleanup(); resolve(value as T); },
+        reject: fail,
       });
+      for (const signal of signals) signal.addEventListener("abort", onAbort, { once: true });
+      timer = setTimeout(() => fail(new CodexAppServerControlError({
+        method, timeoutMs, submissionUnknown: sent && (method === "turn/start" || method === "turn/steer"),
+      })), timeoutMs);
 
       try {
+        sent = true;
         this.writeMessage({
           id,
           method,
           params,
         });
       } catch (error) {
-        this.pendingRequests.delete(id);
-        reject(error instanceof Error ? error : new Error(errorMessage(error)));
+        fail(error instanceof Error ? error : new Error(errorMessage(error)));
       }
     });
   }
@@ -1727,7 +1844,12 @@ export class CodexAppServerClient {
       const response = await this.transport.submitExisting(prompt);
       turn.turnId = response.turn.id;
       return { accepted: true, evidence: "codex_turn_start_accepted" };
-    } catch (error) { this.clearActiveTurn(turn); this.attentionUnsafe = true; turn.reject(error instanceof Error ? error : new Error(String(error))); throw error; }
+    } catch (error) {
+      if (!isCodexAppServerControlError(error) || !error.submissionUnknown) this.clearActiveTurn(turn);
+      this.attentionUnsafe = true;
+      turn.reject(error instanceof Error ? error : new Error(String(error)));
+      throw error;
+    }
   }
 
   ensureOnline(): Promise<CodexAppServerThreadResult> {
@@ -1745,16 +1867,14 @@ export class CodexAppServerClient {
         throw new Error(`Codex app-server session for ${this.options.agentName} has no active thread.`);
       }
 
-      const outputPromise = new Promise<string>(async (resolve, reject) => {
+      const outputPromise = new Promise<string>((resolve, reject) => {
         const turn = this.createActiveTurn(resolve, reject, onDelta);
-
-        try {
-          const response = await this.transport.startTurn(prompt);
+        void this.transport.startTurn(prompt).then((response) => {
           turn.turnId = response.turn.id;
-        } catch (error) {
-          this.clearActiveTurn(turn);
+        }, (error: unknown) => {
+          if (!isCodexAppServerControlError(error) || !error.submissionUnknown) this.clearActiveTurn(turn);
           reject(error instanceof Error ? error : new Error(errorMessage(error)));
-        }
+        });
       });
       const output = await waitForRequesterResult(outputPromise, timeoutMs, this.options.agentName);
 
@@ -1801,7 +1921,7 @@ export class CodexAppServerClient {
           turnId: response.turn.id,
         };
       } catch (error) {
-        this.clearActiveTurn(turn);
+        if (!isCodexAppServerControlError(error) || !error.submissionUnknown) this.clearActiveTurn(turn);
         turn.reject(error instanceof Error ? error : new Error(errorMessage(error)));
         throw error;
       }
@@ -1826,14 +1946,12 @@ export class CodexAppServerClient {
       return this.invoke(prompt, timeoutMs);
     }
 
-    const output = await new Promise<string>(async (resolve, reject) => {
+    const output = await new Promise<string>((resolve, reject) => {
       const watcher = this.addTurnWatcher(activeTurn, resolve, reject, timeoutMs);
-      try {
-        await this.transport.steerTurn(prompt, activeTurn.turnId);
-      } catch (error) {
+      void this.transport.steerTurn(prompt, activeTurn.turnId).catch((error: unknown) => {
         this.removeTurnWatcher(activeTurn, watcher);
         reject(error instanceof Error ? error : new Error(errorMessage(error)));
-      }
+      });
     });
 
     return {

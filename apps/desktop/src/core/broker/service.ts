@@ -85,11 +85,10 @@ import {
   resolveBrokerSocketPathForBaseUrl,
 } from "@openscout/runtime/broker-process-manager";
 import {
-  inferLocalAgentBinding,
   SUPPORTED_LOCAL_AGENT_HARNESSES,
   SUPPORTED_SCOUT_HARNESSES,
-  type LocalAgentBinding,
-} from "@openscout/runtime/local-agents";
+} from "@openscout/runtime/local-agent-harnesses";
+import type { inferLocalAgentBinding, LocalAgentBinding } from "@openscout/runtime/local-agents";
 import {
   createRuntimeRegistrySnapshot,
   type RuntimeRegistrySnapshot,
@@ -2418,6 +2417,7 @@ export async function registerScoutLocalAgentBinding(input: {
 }): Promise<ScoutLocalAgentBindingSyncResult | null> {
   const broker = input.broker ?? (await loadScoutBrokerContext());
   const nodeId = broker?.node.id ?? process.env.OPENSCOUT_NODE_ID ?? "local";
+  const { inferLocalAgentBinding } = await import("@openscout/runtime/local-agents");
   const binding = await inferLocalAgentBinding(input.agentId, nodeId);
   if (!binding) {
     return null;
@@ -2506,6 +2506,7 @@ async function resolveConversationActorId(
     return normalized;
   }
 
+  const { inferLocalAgentBinding } = await import("@openscout/runtime/local-agents");
   const binding = await inferLocalAgentBinding(configured.agentId, nodeId);
   if (binding) {
     await syncBrokerBinding(baseUrl, snapshot, binding);
@@ -2555,6 +2556,7 @@ async function ensureTargetRelayAgentRegistered(
     return false;
   }
 
+  const { inferLocalAgentBinding } = await import("@openscout/runtime/local-agents");
   const binding = await inferLocalAgentBinding(configured.agentId, nodeId);
   if (!binding) {
     await syncBrokerAgentRegistration(
@@ -4211,6 +4213,7 @@ function defaultAskExecutionSession(
 export async function deliverScoutAsk(input: {
   requestId?: string;
   senderId: string;
+  senderResolution?: "exact" | "legacy";
   target: ScoutRouteTarget;
   targetLabel?: string;
   body: string;
@@ -4235,39 +4238,26 @@ export async function deliverScoutAsk(input: {
   source?: string;
 }): Promise<ScoutAskResult> {
   const renderedTarget = input.targetLabel?.trim() || renderedScoutAskTarget(input.target);
-  // Every ask route is a complete broker command: the broker owns target
-  // resolution, so cloning conversation history as a "preflight" buys
-  // nothing. The identity scope (nodes/actors/agents) is still required on
-  // all of them — sender resolution must see the real registered actor; a
-  // snapshot without actors would synthesize an upsert that replaces its
-  // labels/metadata.
-  const contextResult = await loadScoutBrokerContextResult(undefined, {
-    scope: "identity",
-  });
-  if (!contextResult.ok) {
-    return {
-      usedBroker: false,
-      unresolvedTarget: renderedTarget,
-      preflightFailure: {
-        reason: contextResult.reason,
-        detail: contextResult.detail,
-      },
-    };
-  }
-  const brokerBaseUrl = contextResult.context.baseUrl;
-  const brokerNodeId = contextResult.context.node.id;
-  const brokerSnapshot = contextResult.context.snapshot;
-
+  const brokerBaseUrl = resolveScoutBrokerUrl();
+  let brokerNodeId: string | undefined;
+  let senderId = input.senderId.trim() || OPERATOR_ID;
   const currentDirectory = input.currentDirectory ?? process.cwd();
   const createdAtMs = input.createdAtMs ?? Date.now();
   const source = input.source?.trim() || "scout-ask";
-  const senderId = await resolveConversationActorId(
-    brokerBaseUrl,
-    brokerSnapshot,
-    brokerNodeId,
-    input.senderId,
-    currentDirectory,
-  );
+  // Normal asks carry an exact caller ID. The broker owns the default local
+  // node and ensures missing actors without replacing existing metadata.
+  // Explicit --as names retain the previous local registration resolution.
+  if (input.senderResolution === "legacy") {
+    const contextResult = await loadScoutBrokerContextResult(brokerBaseUrl, { scope: "identity" });
+    if (!contextResult.ok) {
+      return { usedBroker: false, unresolvedTarget: renderedTarget,
+        preflightFailure: { reason: contextResult.reason, detail: contextResult.detail } };
+    }
+    brokerNodeId = contextResult.context.node.id;
+    senderId = await resolveConversationActorId(brokerBaseUrl, contextResult.context.snapshot,
+      brokerNodeId, senderId, currentDirectory);
+  }
+
   const targetAgentId = directAgentIdForAskTarget(input.target);
   if (!renderedTarget) {
     return { usedBroker: true, unresolvedTarget: renderedTarget };
@@ -4275,7 +4265,13 @@ export async function deliverScoutAsk(input: {
   const labels = normalizeWorkItemLabels(input.labels);
   const targetSessionId =
     directSessionIdForAskTarget(input.target) ?? input.targetSessionId?.trim();
-  const workRecordId = input.workItem ? buildScoutEntityId("work", createdAtMs) : undefined;
+  // The receipt fingerprint includes this ID and its metadata copies. A retry
+  // of one caller command must not acquire a new random work identity.
+  const workRecordId = input.workItem
+    ? input.requestId
+      ? `work-request-${createHash("sha256").update(JSON.stringify([senderId, input.requestId])).digest("hex")}`
+      : buildScoutEntityId("work", createdAtMs)
+    : undefined;
   const deliveryWorkItem = input.workItem && workRecordId
     ? { id: workRecordId, ...input.workItem }
     : undefined;
@@ -4297,7 +4293,7 @@ export async function deliverScoutAsk(input: {
     ...(input.requestId ? { requestId: input.requestId } : {}),
     caller: {
       actorId: senderId,
-      nodeId: brokerNodeId,
+      ...(brokerNodeId ? { nodeId: brokerNodeId } : {}),
       currentDirectory,
       metadata: { source },
     },

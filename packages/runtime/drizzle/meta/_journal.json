@@ -176,6 +176,13 @@
       "when": 1790836679807,
       "tag": "0024_integration_slack_events",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1791740000000,
+      "tag": "0026_routing_inbox_index",
+      "breakpoints": true
     }
   ]
 }

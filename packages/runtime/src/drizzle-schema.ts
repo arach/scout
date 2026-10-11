@@ -399,6 +399,13 @@ export const conversationReadCursorsTable = sqliteTable("conversation_read_curso
   index("idx_read_cursors_reader_node_id").on(table.readerNodeId),
 ]);
 
+// Full payloads at these locations are canonical after hot payload relocation.
+export const brokerHistoryAnchorsTable = sqliteTable("broker_history_anchors", {
+  kind: text("kind").notNull(),
+  id: text("id").notNull(),
+  locationJson: text("location_json").notNull(),
+}, table => [primaryKey({ columns: [table.kind, table.id] })]);
+
 // -- broker_journal_projection_checkpoints ---------------------------------
 // Opaque journal barrier retained after a complete SQLite projection replay.
 // It is recovery metadata, not broker domain state.
@@ -642,6 +649,7 @@ export const deliveriesTable = sqliteTable("deliveries", {
 }, (table) => [
   index("idx_deliveries_status_transport").on(table.status, table.transport),
   index("idx_deliveries_created_at").on(desc(table.createdAt)),
+  index("idx_deliveries_target_status_created_id").on(table.targetId, table.status, table.createdAt, table.id),
   index("idx_deliveries_target_node_id").on(table.targetNodeId),
 ]);
 
@@ -1182,6 +1190,7 @@ export const controlPlaneDrizzleSchema = {
   messageReactions: messageReactionsTable,
   messageAttachments: messageAttachmentsTable,
   conversationReadCursors: conversationReadCursorsTable,
+  brokerHistoryAnchors: brokerHistoryAnchorsTable,
   brokerJournalProjectionCheckpoints: brokerJournalProjectionCheckpointsTable,
   conversationProjectionMeta: conversationProjectionMetaTable,
   conversationProjectionItems: conversationProjectionItemsTable,

@@ -13,7 +13,8 @@ export type ScoutHostIntegrationId =
   | "cursor"
   | "pi"
   | "hermes"
-  | "herdr";
+  | "herdr"
+  | "orca";
 
 export interface ScoutHostIntegration {
   id: ScoutHostIntegrationId;
@@ -87,6 +88,15 @@ export const SCOUT_HOST_INTEGRATIONS: readonly ScoutHostIntegration[] = [
     repositoryUrl: "https://github.com/ogulcancelik/herdr",
     installHint: "Install the Herdr integrations for the agent hosts you use, such as Claude, Codex, Hermes, or Cursor.",
     summary: "Herdr is a terminal host and agent-state surface for sessions Scout can observe or drive; it is not a Scout harness.",
+  },
+  {
+    id: "orca",
+    label: "Orca",
+    roles: ["terminal_host", "agent_state_surface"],
+    homepage: "https://onorca.dev",
+    repositoryUrl: "https://github.com/stablyai/orca",
+    installHint: "Install Orca (brew install --cask stablyai/orca/orca); its agent hooks report state for the sessions it runs.",
+    summary: "Orca runs agent CLIs in terminals inside git worktrees; Scout reads its agent state and types into its terminals. It is not a Scout harness.",
   },
 ] as const;
 

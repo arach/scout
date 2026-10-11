@@ -52,6 +52,7 @@ export type ScoutSetupCommandOptions = {
 
 export type ScoutAskCommandOptions = ContextRootOptions & {
   agentName: string | null;
+  requestId?: string;
   targetLabel?: string;
   existingTargetHandle?: string;
   runtimeProfile?: string;
@@ -872,6 +873,7 @@ export function parseAskCommandOptions(
 ): ScoutAskCommandOptions {
   const parsed = parseContextRootPrefix(args, defaultCurrentDirectory);
   let agentName: string | null = null;
+  let requestId: string | undefined;
   let targetLabel: string | null = null;
   let existingTargetHandle: string | undefined;
   let runtimeProfile: string | undefined;
@@ -902,6 +904,13 @@ export function parseAskCommandOptions(
 
   for (let index = 0; index < parsed.args.length; index += 1) {
     const current = parsed.args[index] ?? "";
+    if (current === "--request-id" || current.startsWith("--request-id=")) {
+      const value = parseFlagValue(parsed.args, index, "--request-id");
+      requestId = value.value.trim();
+      if (!requestId || requestId.length > 256) throw new ScoutCliError("--request-id must contain 1 to 256 characters");
+      index = value.nextIndex;
+      continue;
+    }
     if (current === "--as" || current.startsWith("--as=")) {
       const value = parseFlagValue(parsed.args, index, "--as");
       agentName = value.value;
@@ -1163,6 +1172,7 @@ export function parseAskCommandOptions(
     args: parsed.args,
     agentName,
     ...(targetLabel ? { targetLabel } : {}),
+    ...(requestId ? { requestId } : {}),
     ...(existingTargetHandle ? { existingTargetHandle } : {}),
     ...(runtimeProfile ? { runtimeProfile } : {}),
     ...(runtimeLiteral ? { runtimeLiteral } : {}),

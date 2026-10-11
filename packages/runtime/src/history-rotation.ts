@@ -50,6 +50,11 @@ function flightRotationTimestamp(flight: { completedAt?: number; startedAt?: num
   return flight.completedAt ?? flight.startedAt ?? 0;
 }
 
+function hasPendingResultReply(flight: FlightRecord): boolean {
+  const reply = flight.metadata?.resultReply;
+  return Boolean(reply && typeof reply === "object" && (reply as { status?: unknown }).status === "pending");
+}
+
 const TERMINAL_DELIVERY_STATUSES = new Set<DeliveryStatus>([
   "completed",
   "failed",
@@ -166,8 +171,13 @@ export function planHistoryRotation(
     const list = flightsByInvocation.get(flight.invocationId) ?? [];
     list.push(flight);
     flightsByInvocation.set(flight.invocationId, list);
-    if (!isTerminalFlightState(flight.state)) {
+    if (!isTerminalFlightState(flight.state) || hasPendingResultReply(flight)) {
       protectedInvocationIds.add(flight.invocationId);
+    }
+    if (hasPendingResultReply(flight)) {
+      const message = (flight.metadata!.resultReply as { message?: { id?: string; replyToMessageId?: string } }).message;
+      if (message?.id) protectedMessageIds.add(message.id);
+      if (message?.replyToMessageId) protectedMessageIds.add(message.replyToMessageId);
     }
   }
   // Read cursors survive rotation but still reference their anchor
@@ -211,6 +221,7 @@ export function planHistoryRotation(
 
   for (const flight of Object.values(snapshot.flights)) {
     if (!isTerminalFlightState(flight.state)) continue;
+    if (hasPendingResultReply(flight)) continue;
     if (flightRotationTimestamp(flight) >= cutoff) continue;
     // A terminal flight is evictable only when its invocation is leaving
     // too (or is already gone). Keeping it while the invocation survives

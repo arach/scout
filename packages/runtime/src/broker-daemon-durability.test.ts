@@ -1,3 +1,4 @@
+import { decodeJournalLine } from "./broker-journal-framing.js";
 import { describe, expect, test } from "bun:test";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -59,7 +60,7 @@ describe("broker daemon durability routes", () => {
       )
         .trim()
         .split("\n")
-        .map((line) => JSON.parse(line) as {
+        .flatMap(decodeJournalLine).map((entry) => entry as {
           kind?: string;
           node?: typeof liveNode;
         })
@@ -434,7 +435,7 @@ describe("broker daemon durability routes", () => {
       .trim()
       .split("\n")
       .filter(Boolean)
-      .map((line) => JSON.parse(line) as { kind: string; actor?: { id?: string }; agent?: { id?: string } });
+      .flatMap(decodeJournalLine).map((entry) => entry as { kind: string; actor?: { id?: string }; agent?: { id?: string } });
 
     expect(lines.filter((entry) => entry.kind === "actor.upsert" && entry.actor?.id === agent.id)).toHaveLength(1);
     expect(lines.filter((entry) => entry.kind === "agent.upsert" && entry.agent?.id === agent.id)).toHaveLength(1);

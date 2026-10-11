@@ -1,0 +1,50 @@
+import type { QuarantineEvidence, QuarantineListOptions, QuarantineMetadata, QuarantineSummary } from "./broker-quarantine.js";
+import type { RuntimeHttpRequestLike, RuntimeHttpResponseLike } from "./portable-types.js";
+
+type MaybePromise<T> = T | Promise<T>;
+export type BrokerQuarantineQueries = {
+  status: () => MaybePromise<QuarantineSummary>;
+  list: (options: QuarantineListOptions) => MaybePromise<QuarantineMetadata[]>;
+  read: (id: string) => MaybePromise<QuarantineEvidence | null>;
+  acknowledge: (id: string) => MaybePromise<QuarantineMetadata | null>;
+};
+
+/** Acknowledgement hides a warning. It never deletes evidence or retries work. */
+export async function handleBrokerQuarantineRoute(request: RuntimeHttpRequestLike, response: RuntimeHttpResponseLike,
+  url: URL, queries: BrokerQuarantineQueries | undefined,
+  json: (response: RuntimeHttpResponseLike, status: number, value: unknown) => void): Promise<boolean> {
+  if (url.pathname !== "/v1/quarantine" && !url.pathname.startsWith("/v1/quarantine/")) return false;
+  if (request.transportContext?.transport === "remote") {
+    json(response, 403, { error: "forbidden", detail: "Quarantine evidence is machine-local." }); return true;
+  }
+  const method = request.method ?? "GET";
+  const exact = url.pathname.match(/^\/v1\/quarantine\/([^/]+)(\/acknowledge)?$/);
+  const list = url.pathname === "/v1/quarantine";
+  if (!list && !exact) { json(response, 404, { error: "quarantine_route_not_found" }); return true; }
+  if (method !== (exact?.[2] ? "POST" : "GET")) { json(response, 405, { error: "method_not_allowed" }); return true; }
+  if (!queries) { json(response, 503, { error: "quarantine_unavailable" }); return true; }
+  try {
+    if (list) {
+      const limit = Number(url.searchParams.get("limit") ?? 50);
+      const status = url.searchParams.get("status") ?? "open";
+      const sessionId = url.searchParams.get("sessionId") ?? undefined;
+      if (!Number.isInteger(limit) || limit < 1 || limit > 100 || (status !== "open" && status !== "acknowledged")
+        || (sessionId !== undefined && (!sessionId.trim() || sessionId.length > 4096))) {
+        json(response, 400, { error: "invalid_quarantine_query" }); return true;
+      }
+      const records = await queries.list({ limit, status, ...(sessionId ? { sessionId } : {}) });
+      json(response, 200, { status: await queries.status(), records });
+    } else {
+      const id = decodeURIComponent(exact![1]!);
+      if (!/^quarantine-[a-f0-9]{64}$/.test(id)) { json(response, 400, { error: "invalid_quarantine_identity" }); return true; }
+      const record = exact![2] ? await queries.acknowledge(id) : await queries.read(id);
+      json(response, record ? 200 : 404, record ? { record } : { error: "quarantine_record_not_found" });
+    }
+  } catch (error) {
+    json(response, error instanceof URIError ? 400 : 503, {
+      error: error instanceof URIError ? "invalid_quarantine_identity" : "quarantine_unavailable",
+      detail: error instanceof Error ? error.message : String(error),
+    });
+  }
+  return true;
+}

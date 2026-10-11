@@ -84,8 +84,14 @@ export type BrokerFlightLifecycleServiceOptions = {
 };
 
 export function shouldIgnoreFlightUpdate(previous: FlightRecord, next: FlightRecord): boolean {
-  if (isTerminalFlightState(previous.state) && !isTerminalFlightState(next.state)) {
-    return true;
+  if (isTerminalFlightState(previous.state)) {
+    // An invocation has one terminal outcome. Late adapter failures, stale
+    // reconciliation and cancellation cannot replace captured work. Metadata
+    // enrichment may retain that outcome, but must not erase its payload/time.
+    return next.state !== previous.state
+      || next.output !== previous.output
+      || next.error !== previous.error
+      || next.completedAt !== previous.completedAt;
   }
 
   if (
@@ -264,7 +270,7 @@ export class BrokerFlightLifecycleService {
       ?? this.options.runtime.snapshot().invocations[flight.invocationId];
     // Single chokepoint before journal/sqlite persistence, work-item promotion,
     // and mesh forwarding: scrub registered credentials from free-text fields.
-    const flightToRecord = redactFlightRecordSecrets(
+    let flightToRecord = redactFlightRecordSecrets(
       normalizeRecordedFlight(flight, invocation, this.now()),
     );
     let didRecordFlight = false;
@@ -272,6 +278,14 @@ export class BrokerFlightLifecycleService {
     await this.options.durableStore.runWrite(async () => {
       const previous = this.options.runtime.snapshot().flights[flightToRecord.id];
       previousFlight = previous;
+      if (previous && isTerminalFlightState(previous.state)) {
+        // Terminal enrichment must not erase/reopen a durable reply intent.
+        // Only the result outbox's compare-and-write marks it delivered.
+        flightToRecord = { ...flightToRecord, metadata: {
+          ...previous.metadata, ...flightToRecord.metadata,
+          ...(previous.metadata?.resultReply ? { resultReply: previous.metadata.resultReply } : {}),
+        } };
+      }
       if (previous && isDuplicateFlightUpdate(previous, flightToRecord)) {
         return;
       }

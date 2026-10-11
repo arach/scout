@@ -11,6 +11,7 @@ import {
 } from "./history-rotation.js";
 
 export type BrokerJournalWriter = {
+  /** Resolves only after one logical batch is recoverable in full and synced. */
   appendEntries(entries: BrokerJournalEntry[]): Promise<BrokerJournalEntry[]>;
 };
 
@@ -40,6 +41,9 @@ export type BrokerPersistenceVerification = {
 
 export type BrokerProjectionWriter = {
   applyEntries(entries: BrokerJournalEntry[]): Promise<ThreadEventEnvelope[]>;
+  /** Worker-backed projections catch up from the canonical journal, without retaining payloads. */
+  notifyCommitted?(): void;
+  setThreadEventPublisher?(publisher: BrokerThreadEventPublisher): void;
   /** Drain the projection's own internal queue, if it serializes work itself. */
   flush?(): Promise<void>;
   /** Health probe consulted by the persistence boundary. */
@@ -59,8 +63,8 @@ export type BrokerThreadEventPublisher = {
  * A recoverable external publisher fed from the canonical commit path.
  *
  * Deliberately hooked here rather than onto the projection queue: that queue is
- * abandoned on every clean shutdown by design, because SQLite projections are
- * rebuildable. An event transport is not, so it is handed the entries the
+ * abandoned on every clean shutdown by design, because unapplied projection
+ * work remains in the journal. An event transport is not, so it is handed the entries the
  * journal has just durably accepted. The call must not block — it registers
  * intent, and the publisher's own journal rescan is what makes it recoverable.
  */
@@ -101,7 +105,11 @@ export class BrokerDurableStore {
   /** Failure evidence acknowledged by the last successful persistence boundary. */
   private lastBoundaryFailureCount = 0;
 
-  constructor(private readonly options: BrokerDurableStoreOptions) {}
+  constructor(private readonly options: BrokerDurableStoreOptions) {
+    options.projection.setThreadEventPublisher?.({ publish: events => {
+      if (!this.projectionWritesAbandoned) options.threadEvents.publish(events);
+    } });
+  }
 
   readonly runWrite = <T>(work: () => Promise<T>): Promise<T> => {
     const next = this.durableWriteQueue.then(work, work);
@@ -143,7 +151,15 @@ export class BrokerDurableStore {
       return;
     }
 
-    // Projection and native artifacts are rebuildable delivery caches. Keep
+    if (this.options.projection.notifyCommitted) {
+      // A scalar dirty watermark is enough: the worker owns no accepted facts,
+      // and reads its next bounded suffix directly from the canonical journal.
+      this.options.projection.notifyCommitted();
+      this.options.memoryMaintenance?.projected(entries);
+      return;
+    }
+
+    // Queued projection work and native artifacts are recoverable. Keep
     // their ordering, but never put SQLite replay/aggregation on the durable
     // journal + in-memory acknowledgement path used by UI mutations.
     const next = this.projectionWriteQueue
@@ -158,8 +174,8 @@ export class BrokerDurableStore {
    * Stop and detach replaceable projection work during process shutdown.
    *
    * Every accepted mutation is already durable in the journal before it can
-   * reach this queue. SQLite projections and native artifacts can therefore be
-   * rebuilt after restart; an in-progress startup replay must not turn SIGTERM
+   * reach this queue. Pending projection work can therefore be replayed against
+   * the existing historical database; startup replay must not turn SIGTERM
    * into an unbounded drain. Resetting the tracked queue does not cancel the
    * underlying promise, but it makes the terminal shutdown boundary immediate
    * and prevents late projection events from being published.
@@ -171,6 +187,7 @@ export class BrokerDurableStore {
 
   readonly flushProjectedEntries = async (): Promise<void> => {
     await this.projectionWriteQueue.catch(() => {});
+    if (!this.projectionWritesAbandoned && this.options.projection.notifyCommitted) await this.options.projection.flush?.();
   };
 
   /**

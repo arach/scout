@@ -124,6 +124,25 @@ function snapshot(input: {
 }
 
 describe("rotateHistoryInSnapshot dependency closure", () => {
+  test("an undelivered result protects terminal output and original context until its reply is durably posted", () => {
+    const resultFlight = flight("f", "i", { metadata: { resultReply: {
+      version: 1, status: "pending", message: { id: "reply", replyToMessageId: "m" },
+    } } });
+    const state = snapshot({
+      messages: [message("m"), message("reply")],
+      invocations: [invocation("i", { messageId: "m" })], flights: [resultFlight],
+    });
+    const protectedPlan = planHistoryRotation(state, CUTOFF);
+    expect(protectedPlan.flightIds.size).toBe(0);
+    expect(protectedPlan.invocationIds.size).toBe(0);
+    expect(protectedPlan.messageIds.size).toBe(0);
+    resultFlight.metadata!.resultReply = { version: 1, status: "delivered" };
+    state.flights[resultFlight.id] = resultFlight;
+    const moved = planHistoryRotation(state, CUTOFF);
+    expect([...moved.flightIds]).toEqual(["f"]);
+    expect([...moved.invocationIds]).toEqual(["i"]);
+    expect([...moved.messageIds]).toEqual(["m", "reply"]);
+  });
   test("a pending delivery protects its message and invocation referents", () => {
     const state = snapshot({
       messages: [message("m")],

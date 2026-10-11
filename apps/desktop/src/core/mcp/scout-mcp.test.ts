@@ -121,6 +121,7 @@ describe("createScoutMcpServer", () => {
       "sessions_inventory",
       "sessions_search",
       "herdr_workspaces",
+      "session_send",
       "attachments_read",
       "integrations_setup",
       "integrations_get",

@@ -29,7 +29,7 @@ import type {
   ThreadWatchRenewResponse,
 } from "@openscout/protocol";
 
-import type { RuntimeRegistrySnapshot, RuntimeRegistrySnapshotQuery } from "./registry.js";
+import type { RuntimeRegistrySnapshot, RuntimeRegistrySnapshotQuery, RuntimeNotificationRoutingSnapshot } from "./registry.js";
 import type { BrokerRouteTargetInput } from "./scout-dispatcher.js";
 import type { InvocationLifecycleSummary } from "./invocation-lifecycle-read-model.js";
 import type { BrokerRuntimeCatalogSnapshot } from "./broker-runtime-catalog-service.js";
@@ -199,6 +199,7 @@ export type ActiveScoutBrokerService = {
   readMeshNodeState?: (query?: import("./mesh-node-state.js").MeshNodeStateQuery) => Promise<unknown> | unknown;
   readNode: () => Promise<NodeDefinition>;
   readSnapshot: (query?: RuntimeRegistrySnapshotQuery) => Promise<RuntimeRegistrySnapshot>;
+  readNotificationRouting?: () => Promise<RuntimeNotificationRoutingSnapshot>;
   withSnapshot?: <T>(query:RuntimeRegistrySnapshotQuery,consume:(snapshot:RuntimeRegistrySnapshot)=>Promise<T>,options?:{signal?:AbortSignal})=>Promise<T>;
   readConversationProjection?: (
     query: ScoutBrokerConversationProjectionQuery,
@@ -694,6 +695,11 @@ export async function maybeReadJsonFromActiveScoutBrokerService<T>(
         ? requestedScope
         : undefined,
     }) as T);
+  }
+
+  if (url.pathname === "/v1/notification-routing") {
+    if (!service.readNotificationRouting) return unhandled();
+    return handled(await service.readNotificationRouting() as T);
   }
 
   if (url.pathname === "/v1/conversation-projection") {

@@ -276,6 +276,178 @@ The intentional split is:
 
 If a surface needs raw harness detail, it should prefer the original harness material through an adapter, cursor, or link. If a workflow needs durable coordination, it should create a Scout-owned message, invocation, flight, delivery, or work item.
 
+### Canonical journal commit and replay contract
+
+`FileBackedBrokerJournal.appendEntries` accepts one logical commit. Multi-record
+commits use one JSONL `journal.batch` envelope with `version: 1`, `count`,
+`sha256`, and `payload`. The payload is the exact JSON serialization of the
+ordered entry array; the checksum covers its UTF-8 bytes. Readers validate the
+version, checksum, count, and all entry kinds before exposing any entry. A torn
+or corrupt frame exposes no partial invocation, dispatch job, or flight. Existing
+single-entry lines, including complete legacy records without a final LF, remain
+readable. A complete envelope without LF is also a complete logical batch.
+
+Acceptance waits for the journal file's `fsync`, and a new journal also syncs its
+parent directory. Failed writes or syncs restore and sync the previous file
+length before another append can proceed. Runtime state, event publication, and
+projection enqueue follow this durability boundary. A crash after persistence
+but before a caller receives its response remains ambiguous to that caller;
+idempotent request identifiers are required for retry. `fsync` is the explicit
+OS durability contract, not a claim about hardware that ignores flushes.
+
+Each physical line is limited to 16 MiB and a new batch to 4,096 entries. The
+writer rejects excess work before its canonical append; streaming readers stop
+with a visible error at the byte bound or an unsupported frame version rather
+than silently certifying missing history. Legacy oversized records require a
+deliberate reader/migration decision. Compaction preserves logical ordering and
+replay barriers, syncs its replacement file, renames it, and syncs the directory.
+It can emit ordinary singleton lines because publication replaces the whole
+file atomically.
+
+The live SQLite projection runs in a worker. A canonical commit signals a scalar
+dirty revision; it does not retain the accepted payload in a promise queue.
+The worker captures a committed journal boundary and replays its suffix in
+transactions bounded by 128 work units and 1 MiB of encoded records. One legal
+record above that byte budget runs alone. A completed cursor is reused only
+while the journal's device/inode identity matches; atomic replacement causes a
+barrier-based rescan. Flush captures one revision, so continuous new traffic
+cannot prevent that boundary from completing. Worker requests and waiting reads
+have fixed admission limits. SQLite and artifact CPU work, historical
+publication, and event compression stay off the broker's command loop.
+The default worker request deadline is 30 seconds. Advancing replay progress
+extends that deadline; an unchanged heartbeat does not. A stalled worker rejects
+its waiters and restarts against the same database. Canonical event replay writes
+SQLite inside its replay transaction before advancing the checkpoint.
+
+Historical SQLite may contain the sole surviving copy of records moved out of
+the journal. Worker failure therefore closes and reopens the existing database;
+recovery must not delete it or replace it with a journal-only reconstruction.
+Historical relocation first publishes and verifies complete records in indexed
+immutable partitions, then revalidates the current working version before
+removing it. Exact identity and subject lookups use the historical index on
+demand. Persistence verification sends bounded pages of canonical record
+digests, preserving the same field normalization as SQLite without copying
+large payloads across the worker channel.
+
+Live journal compaction defaults to a 64 MiB threshold and a five-minute minimum
+interval. Each cooperative scan is limited to one million entries, 100,000
+tracked keys/rotation IDs, and 30 seconds; reaching a limit preserves the
+original journal and reports the budget result. It deduplicates replaceable
+registry state and removes only records explicitly named by durable verified
+rotation markers. It retains replay barriers, unrotated event history, and all
+new bytes accepted during the prefix rewrite. Event rotation first publishes the
+compatible gzip export and indexed historical record, then returns verified IDs
+while keeping the SQLite source. A canonical rotation marker authorizes replay
+to remove only an unchanged row with the same indexed historical payload. This
+keeps publication repeatable after a crash before the marker. Cleanup markers
+survive startup compaction; live compaction removes them only within a captured
+byte boundary whose projection cleanup completed on the same journal inode.
+Failed publication or verification keeps the working copy.
+
+Broker replay, the disk message history index, and `scoutd` native projections
+understand this format. History indexes reference a physical byte range plus
+its entry ordinal, so repeated IDs in one frame retain their exact versions and
+captured reads remain stable. Deploy the runtime and native reader together.
+Older readers do not understand batch envelopes; directly downgrading to an
+older writer/reader after accepting framed commits is unsupported. Derived
+indexes remain disposable; the canonical journal and verified historical
+SQLite records do not.
+
+### Working data and historical data
+
+The default working window is two weeks (`OPENSCOUT_RETENTION_WEEKS`); control
+flow events use four weeks (`OPENSCOUT_ARCHIVE_WEEKS`). Zero disables the
+corresponding rotation. These policies move records between storage tiers;
+they do not delete historical context. Active flights, pending result replies,
+nonterminal deliveries and dispatch jobs, and their required records stay live.
+
+One maintenance page selects at most 250 records and scans at most 1,000
+candidate records before yielding its selection cursor. It follows dependency
+order across pages: attempts before deliveries, deliveries before their
+invocations and messages, and invocations before flights. A long conversation
+can therefore drain over several pages without fitting in one batch.
+It publishes all selected payloads through bounded worker pages, verifies their
+persisted values, and rechecks versions and live dependencies immediately before
+the durable rotation marker. That marker authorizes ordered, conditional SQLite
+cleanup during replay. A crash before the marker leaves the working records;
+a crash after it resumes cleanup from the marker. Compaction retains unapplied
+cleanup markers and all later writes. A changed record remains in working storage.
+An oversized individual payload or unverified record remains live and appears
+in the rotation-pressure report; a batch limit never authorizes partial data loss.
+The eligibility pass still inspects the working graph; indexed historical data
+does not participate in that pass.
+
+One serialized maintenance loop starts after broker startup and drains pending
+pages while yielding between them. A turn stops after four pages or after its
+next page boundary observes 250 ms of elapsed work, then yields before
+continuing a remaining backlog. Idle checks run
+every minute; failures report the retained working data and retry after five
+seconds. Shutdown cancels future pages and fences publication of new rotation
+markers. These limits bound each turn without imposing a deletion policy on
+accepted history.
+
+Immutable SQLite partitions hold complete typed records plus their original SQL
+rows and dependent data. Ordinary partitions have an 8 MiB payload bound; a
+single large canonical record and its SQL bundle may use an isolated partition
+up to 64 MiB. Message and invocation identity anchors remain in the working
+database to preserve foreign keys and allow replies to old work. Exact reads
+hydrate their historical bodies and context; a later mutation restores the
+complete record before applying its change. Payload bytes leave the working
+set while small identity/index metadata and total retained history can grow.
+Free SQLite pages are reused. Online maintenance does not run whole-file VACUUM.
+
+`GET /v1/invocations/:id` and invocation streams retain their existing handles
+across rotation. Explicit local historical reads use
+`GET /v1/history/records/:kind/:id`; indexed pages use
+`GET /v1/history/records?kind=message&conversationId=...&limit=100` with the
+returned cursor. Historical storage failure is reported as unavailable, rather
+than a successful empty result. The current invocation path uses working state
+without waiting for historical storage.
+
+The memory/status diagnostic includes storage file sizes, free-space pressure,
+acceptance capacity, maintenance progress, compaction budgets, and rotation
+blockers. Acceptance allows at most 256 pending commands and 32 MiB of pending
+request payloads. Disk space below the 256 MiB reserve or a full acceptance queue
+returns a retryable `broker_busy` response before reserving a new request ID.
+Previously accepted work and repeated completed receipts retain their identities.
+Callers retry an uncertain ask with the same `--request-id`; they do not create a
+new command to infer whether the old one ran. `--notify` returns the persisted
+acceptance receipt without waiting for native session startup.
+
+Request receipts use asynchronous filesystem reads, writes, and flushes, with
+at most 256 pending operations and 32 MiB of retained request/receipt payloads.
+An in-flight key is reserved before the first asynchronous step, so identical
+concurrent retries share one operation and conflicting content is rejected.
+Execution starts only after the reservation is durable; success returns only
+after the completed receipt is durable.
+
+### Scoped fault containment
+
+A malformed record does not authorize a machine-wide reset or deletion. The
+journal and SQLite projection preserve recoverable malformed input in a
+machine-local quarantine ledger before skipping it. The ledger stores exact
+source bytes, a verified digest, the reason, source location, and available
+record/session/invocation handles. An invalid atomic frame is quarantined as a
+whole. Other valid records and sessions can continue; compaction may remove
+the original malformed bytes only after their quarantine copy is verified.
+Failure to preserve evidence stops advancement past that record. Unsupported
+journal versions, unbounded frames, filesystem failure, and invalid historical
+cleanup proofs remain storage failures because their effects cannot safely be
+limited to one session.
+
+`scout quarantine` lists open warnings. `scout quarantine show <id>` reads the
+complete evidence; `scout quarantine acknowledge <id>` hides that warning while
+retaining its bytes and preventing automatic replay. `--session <id>` narrows
+the list. The corresponding local routes are `GET /v1/quarantine`,
+`GET /v1/quarantine/:id`, and `POST /v1/quarantine/:id/acknowledge`.
+Health diagnostics expose bounded warning samples and counts. Acknowledgement
+is not a repair, deletion, or permission to retry uncertain native submission.
+The storage monitor also reports quarantine database and WAL sizes; evidence
+accumulates in long-term storage without entering the active routing registry.
+Result-reply quarantine writes run in the storage worker, with one bounded
+large record allowed at a time. An unchanged, already-preserved result does
+not enqueue another write on every recovery sweep.
+
 ### Design Rules
 
 1. Do not make Scout the canonical store for external harness transcripts.

@@ -146,7 +146,8 @@ test("force refresh coalesces inside TTL and persists a conditional304 check", a
   finish();
   const results = await Promise.all(reads);
   expect(requests).toBe(1);
-  expect(results.every((entry) => entry.checkedAt === now)).toBe(true);
+  expect(results.slice(0, 2).every((entry) => entry.checkedAt === now)).toBe(true);
+  expect(results[2]!.checkedAt).toBe(now - 1_000);
   expect(JSON.parse(persisted).checkedAt).toBe(now);
   const restarted = await new BrokerRuntimeCatalogService(options).read();
   expect(restarted.checkedAt).toBe(now);
@@ -278,4 +279,52 @@ test("explicit refresh promotes a cold read awaiting fresh saved data to one net
   expect(results.every((snapshot) => snapshot.checkedAt === 2_000)).toBe(true);
   await service.read();
   expect(requests).toBe(1);
+});
+
+test("expired and concurrent routing reads return validated data while one refresh is stalled", async () => {
+  let now = 1_000;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let requests = 0;
+  const service = new BrokerRuntimeCatalogService({
+    now: () => now,
+    env: { OPENSCOUT_RUNTIME_CATALOG_REFRESH_MS: "10" },
+    readTextFile: async () => JSON.stringify({ schemaVersion: "openscout.runtime-catalog-cache.v1",
+      catalog: SCOUT_RUNTIME_CATALOG, checkedAt: now, url: DEFAULT_RUNTIME_CATALOG_URL }),
+    writeTextFile: async () => {}, ensureDirectory: async () => {},
+    fetch: async () => { requests++; await gate; return Response.json({ ...SCOUT_RUNTIME_CATALOG, revision: "2099-01-01.1" }); },
+  });
+  const saved = await service.read();
+  now += 11;
+  expect(await service.read()).toBe(saved);
+  expect(await service.read()).toBe(saved);
+  let refreshed = false;
+  const forced = service.read({ force: true }).then((value) => { refreshed = true; return value; });
+  await Promise.resolve();
+  expect(refreshed).toBe(false);
+  expect(requests).toBe(1);
+  release();
+  const updated = await forced;
+  expect(updated.catalog.revision).toBe("2099-01-01.1");
+  expect(await service.read()).toBe(updated);
+});
+
+test("startup publishes its validated local fallback before the first remote check completes", async () => {
+  let fetched!: () => void;
+  const started = new Promise<void>((resolve) => { fetched = resolve; });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const service = new BrokerRuntimeCatalogService({
+    now: () => 1_000,
+    readTextFile: async () => { throw new Error("missing"); },
+    writeTextFile: async () => {}, ensureDirectory: async () => {},
+    fetch: async () => { fetched(); await gate; throw new Error("offline"); },
+  });
+  const initial = service.read();
+  await started;
+  const available = await service.read();
+  expect(available.source).toBe("bundled");
+  expect(available.catalog).toBe(SCOUT_RUNTIME_CATALOG);
+  release();
+  expect((await initial).warnings[0]).toContain("offline");
 });

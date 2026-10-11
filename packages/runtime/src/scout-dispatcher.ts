@@ -30,7 +30,8 @@ import {
   endpointAvailabilityScore,
   endpointLifecycleAt,
   endpointCandidateState,
-  endpointMatchesTargetSession,
+  endpointsForAgent,
+  endpointsForSession,
   homeEndpointForAgent,
   isStaleLocalEndpoint,
   localEndpointPreferenceRank,
@@ -40,6 +41,7 @@ import {
   resolveBrokerRuntimeProfile,
 } from "./broker-runtime-profiles.js";
 import { sessionHostForNodeId, sessionHostNodeIds } from "./runtime-session-address.js";
+import { routingRegistryVersion, routingRegistryView } from "./registry.js";
 
 export type RuntimeSnapshot = ReturnType<ReturnType<typeof createInMemoryControlRuntime>["snapshot"]>;
 
@@ -162,20 +164,6 @@ function endpointMatchesSessionRouteScope(
   return !options.harness || endpoint.harness === options.harness;
 }
 
-function sessionActorHandleAliases(
-  snapshot: RuntimeSnapshot,
-  actorId: string,
-): string[] {
-  const actor = snapshot.actors[actorId];
-  const endpoint = homeEndpointForAgent(snapshot, actorId);
-  return [
-    actor?.handle,
-    metadataStringValue(actor?.metadata, "handle"),
-    metadataStringValue(endpoint?.metadata, "handle"),
-    actorId,
-  ].filter((value): value is string => Boolean(value));
-}
-
 function isReservedProductIdentity(definitionId: string): boolean {
   return isScoutReservedAgentName(definitionId);
 }
@@ -194,9 +182,39 @@ export function buildAgentLabelCandidates(
   helpers: Pick<DispatcherHelpers, "isStale">,
   options: { includeStale?: boolean } = {},
 ): BrokerAgentCandidate[] {
-  return Object.values(snapshot.agents)
-    .filter((agent) => options.includeStale || !helpers.isStale(agent))
-    .map((agent) => buildAgentLabelCandidate(snapshot, agent));
+  return agentCandidateIndex(routingRegistryView(snapshot)).all
+    .filter((candidate) => options.includeStale || !helpers.isStale(candidate.agent));
+}
+
+type AgentCandidateIndex = {
+  all: BrokerAgentCandidate[];
+  byName: Map<string, BrokerAgentCandidate[]>;
+};
+const agentCandidateIndexes = new WeakMap<object, AgentCandidateIndex>();
+
+function agentCandidateIndex(snapshot: RuntimeSnapshot): AgentCandidateIndex {
+  const version = routingRegistryVersion(snapshot)!;
+  const cached = agentCandidateIndexes.get(version);
+  if (cached) return cached;
+  const all = Object.values(snapshot.agents).map((agent) => buildAgentLabelCandidate(snapshot, agent));
+  const byName = new Map<string, BrokerAgentCandidate[]>();
+  for (const candidate of all) {
+    // This is a superset index. The protocol diagnosis still owns alias
+    // precedence, qualifiers, model aliases, and ambiguity rules.
+    const names = new Set([
+      normalizeAgentSelectorSegment(candidate.definitionId || candidate.agentId),
+      ...(candidate.aliases ?? []).map(normalizeAgentSelectorSegment),
+    ]);
+    if (names.has("openscout")) names.add("scout");
+    for (const name of names) {
+      const matches = byName.get(name) ?? [];
+      matches.push(candidate);
+      byName.set(name, matches);
+    }
+  }
+  const index = { all, byName };
+  agentCandidateIndexes.set(version, index);
+  return index;
 }
 
 function projectRootForAgent(
@@ -335,6 +353,40 @@ function unknownModelQualifiedResolution(
   };
 }
 
+type SessionHandleMatch = { actor: RuntimeSnapshot["actors"][string]; endpoint: AgentEndpoint };
+type SessionHandleIndex = {
+  byLabel: Map<string, SessionHandleMatch[]>;
+  byHandle: Map<string, SessionHandleMatch[]>;
+};
+const sessionHandleIndexes = new WeakMap<object, SessionHandleIndex>();
+
+function sessionHandleIndex(snapshot: RuntimeSnapshot): SessionHandleIndex {
+  const version = routingRegistryVersion(snapshot)!;
+  const cached = sessionHandleIndexes.get(version);
+  if (cached) return cached;
+  const index: SessionHandleIndex = { byLabel: new Map(), byHandle: new Map() };
+  for (const actor of Object.values(snapshot.actors)) {
+    if (actor.kind !== "session") continue;
+    const endpoint = endpointsForAgent(snapshot, actor.id)
+      .filter((candidate) => !isStaleLocalEndpoint(snapshot, candidate))
+      .sort((left, right) => localEndpointPreferenceRank(left) - localEndpointPreferenceRank(right))[0];
+    if (!endpoint) continue;
+    const home = homeEndpointForAgent(snapshot, actor.id);
+    const handles = [actor.handle, metadataStringValue(actor.metadata, "handle"), metadataStringValue(home?.metadata, "handle")]
+      .filter((value): value is string => Boolean(value));
+    const match = { actor, endpoint };
+    for (const [map, values] of [[index.byHandle, handles], [index.byLabel, [...handles, actor.id]]] as const) {
+      for (const alias of new Set(values.map(normalizeAgentSelectorSegment))) {
+        const matches = map.get(alias) ?? [];
+        matches.push(match);
+        map.set(alias, matches);
+      }
+    }
+  }
+  sessionHandleIndexes.set(version, index);
+  return index;
+}
+
 function resolveSessionHandleLabel(
   snapshot: RuntimeSnapshot,
   identity: AgentIdentity,
@@ -358,21 +410,7 @@ function resolveSessionHandleLabel(
     return null;
   }
 
-  const matches = Object.values(snapshot.actors)
-    .filter((actor) => actor.kind === "session")
-    .filter((actor) => (
-      sessionActorHandleAliases(snapshot, actor.id)
-        .map((alias) => normalizeAgentSelectorSegment(alias))
-        .includes(handle)
-    ))
-    .map((actor) => {
-      const endpoint = Object.values(snapshot.endpoints)
-        .filter((candidate) => candidate.agentId === actor.id)
-        .filter((candidate) => !isStaleLocalEndpoint(snapshot, candidate))
-        .sort((left, right) => localEndpointPreferenceRank(left) - localEndpointPreferenceRank(right))[0];
-      return endpoint ? { actor, endpoint } : null;
-    })
-    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+  const matches = sessionHandleIndex(snapshot).byLabel.get(handle) ?? [];
 
   if (matches.length === 0) {
     return null;
@@ -422,33 +460,14 @@ function resolveExistingHandle(
   // Existing-handle routing is deliberately narrower than agent-label routing.
   // Only explicit handles/selectors are eligible: definition IDs, agent IDs,
   // project heuristics, and local-node preferences must not influence a match.
-  const agentMatches = buildAgentLabelCandidates(snapshot, options.helpers)
+  const agentMatches = (agentCandidateIndex(snapshot).byName.get(normalized) ?? [])
+    .filter((candidate) => !options.helpers.isStale(candidate.agent))
     .filter((candidate) => candidate.aliases?.some(
       (alias) => normalizeAgentSelectorSegment(alias.replace(/^@+/, "")) === normalized,
     ))
     .sort((left, right) => left.agent.id.localeCompare(right.agent.id));
 
-  const sessionMatches = Object.values(snapshot.actors)
-    .filter((actor) => actor.kind === "session")
-    .filter((actor) => {
-      const endpoint = homeEndpointForAgent(snapshot, actor.id);
-      const aliases = [
-        actor.handle,
-        metadataStringValue(actor.metadata, "handle"),
-        metadataStringValue(endpoint?.metadata, "handle"),
-      ].filter((value): value is string => Boolean(value));
-      return aliases.some(
-        (alias) => normalizeAgentSelectorSegment(alias.replace(/^@+/, "")) === normalized,
-      );
-    })
-    .map((actor) => {
-      const endpoint = Object.values(snapshot.endpoints)
-        .filter((candidate) => candidate.agentId === actor.id)
-        .filter((candidate) => !isStaleLocalEndpoint(snapshot, candidate))
-        .sort((left, right) => localEndpointPreferenceRank(left) - localEndpointPreferenceRank(right))[0];
-      return endpoint ? { actor, endpoint } : null;
-    })
-    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+  const sessionMatches = [...(sessionHandleIndex(snapshot).byHandle.get(normalized) ?? [])]
     .sort((left, right) => left.actor.id.localeCompare(right.actor.id));
 
   const matchCount = agentMatches.length + sessionMatches.length;
@@ -531,6 +550,7 @@ export function resolveAgentLabel(
   label: string,
   options: { preferLocalNodeId?: string; helpers: Pick<DispatcherHelpers, "isStale"> },
 ): BrokerLabelResolution {
+  snapshot = routingRegistryView(snapshot);
   const trimmed = label.trim();
   if (!trimmed) {
     return { kind: "unparseable", label };
@@ -544,7 +564,8 @@ export function resolveAgentLabel(
     return { kind: "unknown", label: identity.label };
   }
 
-  const candidates = buildAgentLabelCandidates(snapshot, options.helpers);
+  const candidates = (agentCandidateIndex(snapshot).byName.get(identity.definitionId) ?? [])
+    .filter((candidate) => !options.helpers.isStale(candidate.agent));
   const diagnosis = diagnoseAgentIdentity(identity, candidates);
   const harnessAgnosticIdentity = stripHarnessQualifier(identity);
 
@@ -723,8 +744,7 @@ function resolveSessionTarget(
   },
 ): BrokerLabelResolution {
   const label = sessionRouteLabel(sessionId, options.harness, options.host);
-  const anyHost = Object.values(snapshot.endpoints)
-    .filter((endpoint) => endpointMatchesTargetSession(endpoint, sessionId))
+  const anyHost = endpointsForSession(snapshot, sessionId)
     .filter((endpoint) => endpointMatchesSessionRouteScope(endpoint, options));
   const hostScope = options.host ? sessionHostScope(snapshot, options.host, options.preferLocalNodeId) : null;
   const matching = hostScope
@@ -887,6 +907,7 @@ export function resolveBrokerRouteTarget(
   input: BrokerRouteTargetInput,
   options: { preferLocalNodeId?: string; helpers: Pick<DispatcherHelpers, "isStale"> },
 ): BrokerLabelResolution {
+  snapshot = routingRegistryView(snapshot);
   const policy = input.routePolicy;
   const routeTarget = input.target;
   const preferLocalNodeId = policy?.preferLocalNodeId?.trim() || options.preferLocalNodeId;

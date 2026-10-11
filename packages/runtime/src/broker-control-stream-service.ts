@@ -21,7 +21,7 @@ export const DEFAULT_INBOX_STATUSES = new Set<DeliveryStatus>([
 export type BrokerControlStreamServiceDeps = {
   enqueueEvent: (event: ControlEvent) => void;
   findDeliveryById: (deliveryId: string) => DeliveryIntent | undefined;
-  listDeliveries: (options: { limit: number }) => Promise<DeliveryIntent[]> | DeliveryIntent[];
+  listDeliveries: (options: { limit: number; targetId?: string; statuses?: DeliveryStatus[]; reasons?: DeliveryReason[] }) => Promise<DeliveryIntent[]> | DeliveryIntent[];
   messageById: (messageId: string) => MessageRecord | undefined | Promise<MessageRecord | undefined>;
   invocationById: (invocationId: string) => InvocationRequest | undefined;
   /**
@@ -55,8 +55,48 @@ export function parseInboxReasons(url: URL): Set<DeliveryReason> | undefined {
   return values.length > 0 ? new Set(values as DeliveryReason[]) : undefined;
 }
 
-export function writeSseFrame(response: RuntimeHttpResponseLike, eventName: string, payload: unknown): void {
-  response.write(`event: ${eventName}\ndata: ${JSON.stringify(payload)}\n\n`);
+/** Legal journal records may be 16 MiB; snapshots can contain several of them. */
+export const MAX_SSE_FRAME_BYTES = 64 * 1024 * 1024;
+const closedStreamClients = new WeakSet<RuntimeHttpResponseLike>();
+type SseWriteLimits = { maxFrameBytes?: number; drainTimeoutMs?: number };
+
+function drainAcceptedFrame(response: RuntimeHttpResponseLike, timeoutMs: number): void {
+  // write(false) accepted this frame into Node's bounded socket buffer. Stop
+  // all later fan-out but let that one complete frame reach a healthy reader.
+  closedStreamClients.add(response);
+  const clear = () => {
+    clearTimeout(timer);
+    response.off?.("finish", clear);
+    response.off?.("close", clear);
+  };
+  const timer = setTimeout(() => {
+    clear();
+    response.destroy?.();
+  }, timeoutMs);
+  timer.unref();
+  response.on?.("finish", clear);
+  response.on?.("close", clear);
+  try { response.end(); } catch { clear(); response.destroy?.(); }
+}
+
+function writeSsePayload(response: RuntimeHttpResponseLike, payload: string, limits: SseWriteLimits = {}): boolean {
+  if (closedStreamClients.has(response) || response.destroyed || response.writableEnded) return false;
+  try {
+    if (Buffer.byteLength(payload) <= Math.min(limits.maxFrameBytes ?? MAX_SSE_FRAME_BYTES, MAX_SSE_FRAME_BYTES)) {
+      if (response.write(payload) !== false) return true;
+      drainAcceptedFrame(response, Math.min(limits.drainTimeoutMs ?? 30_000, 30_000));
+      return false;
+    }
+  } catch { /* Disconnect a failed consumer without interrupting canonical delivery. */ }
+  // Invalid/oversized frames never enter the socket buffer. Canonical history
+  // stays queryable, and no further events accumulate for this subscriber.
+  closedStreamClients.add(response);
+  if (response.destroy) response.destroy(); else response.end();
+  return false;
+}
+
+export function writeSseFrame(response: RuntimeHttpResponseLike, eventName: string, payload: unknown, limits: SseWriteLimits = {}): boolean {
+  return writeSsePayload(response, `event: ${eventName}\ndata: ${JSON.stringify(payload)}\n\n`, limits);
 }
 
 export function invocationIdsForEvent(
@@ -105,6 +145,7 @@ export class BrokerControlStreamService {
   private readonly inboxStreamClients = new Map<string, Set<RuntimeHttpResponseLike>>();
 
   private readonly inboxPublications = new Map<string, Promise<void>>();
+  private readonly inboxPublicationBacklog = new Map<string, { count: number; bytes: number }>();
 
   constructor(private readonly deps: BrokerControlStreamServiceDeps) {}
 
@@ -150,7 +191,10 @@ export class BrokerControlStreamService {
   }): Promise<InboxItem[]> {
     const statuses = options.statuses ?? DEFAULT_INBOX_STATUSES;
     const limit = Math.min(Math.max(options.limit ?? 100, 1), 500);
-    const deliveries = await this.deps.listDeliveries({ limit: 5000 });
+    const deliveries = await this.deps.listDeliveries({
+      limit, targetId: options.targetId, statuses: [...statuses],
+      ...(options.reasons ? { reasons: [...options.reasons] } : {}),
+    });
     const selected = deliveries
       .filter((delivery) => delivery.targetId === options.targetId)
       .filter((delivery) => statuses.has(delivery.status))
@@ -172,7 +216,7 @@ export class BrokerControlStreamService {
       "cache-control": "no-cache, no-transform",
       connection: "keep-alive",
     });
-    writeSseFrame(options.response, "snapshot", options.snapshot);
+    if (!writeSseFrame(options.response, "snapshot", options.snapshot)) return;
 
     const subscribers = this.inboxStreamClients.get(options.targetId) ?? new Set<RuntimeHttpResponseLike>();
     subscribers.add(options.response);
@@ -198,7 +242,7 @@ export class BrokerControlStreamService {
       "cache-control": "no-cache, no-transform",
       connection: "keep-alive",
     });
-    writeSseFrame(options.response, "snapshot", options.snapshot);
+    if (!writeSseFrame(options.response, "snapshot", options.snapshot)) return;
 
     let subscribers = this.invocationStreamClients.get(options.invocationId);
     if (!subscribers) {
@@ -226,13 +270,13 @@ export class BrokerControlStreamService {
       "cache-control": "no-cache, no-transform",
       connection: "keep-alive",
     });
-    writeSseFrame(options.response, "hello", options.hello);
+    if (!writeSseFrame(options.response, "hello", options.hello)) return;
     // Current value before live fan-out, in the same frame shape a live event
     // uses, so a client has exactly one code path for both. Ephemeral by
     // construction — nothing here was read from disk, and a cold broker replays
     // nothing because it knows nothing.
     for (const event of this.deps.presenceSnapshot?.() ?? []) {
-      writeSseFrame(options.response, event.kind, event);
+      if (!writeSseFrame(options.response, event.kind, event)) return;
     }
     this.eventClients.add(options.response);
     options.request.on("close", () => {
@@ -253,7 +297,7 @@ export class BrokerControlStreamService {
     this.deps.enqueueEvent(event);
     const payload = `event: ${event.kind}\ndata: ${JSON.stringify(event)}\n\n`;
     for (const client of this.eventClients) {
-      client.write(payload);
+      this.writeClient(client, payload);
     }
     for (const invocationId of invocationIdsForEvent(event, {
       findDeliveryById: this.deps.findDeliveryById,
@@ -261,7 +305,7 @@ export class BrokerControlStreamService {
       const subscribers = this.invocationStreamClients.get(invocationId);
       if (!subscribers) continue;
       for (const client of subscribers) {
-        client.write(payload);
+        this.writeClient(client, payload);
       }
     }
     if (inboxTargetsForEvent(event).length > 0) {
@@ -281,17 +325,17 @@ export class BrokerControlStreamService {
   streamEphemeralEvent(event: ControlEvent): void {
     const payload = `event: ${event.kind}\ndata: ${JSON.stringify(event)}\n\n`;
     for (const client of this.eventClients) {
-      client.write(payload);
+      this.writeClient(client, payload);
     }
   }
 
   streamKeepAlive(): void {
     for (const client of this.eventClients) {
-      client.write(": keepalive\n\n");
+      this.writeClient(client, ": keepalive\n\n");
     }
     for (const subscribers of this.invocationStreamClients.values()) {
       for (const client of subscribers) {
-        client.write(": keepalive\n\n");
+        this.writeClient(client, ": keepalive\n\n");
       }
     }
   }
@@ -320,22 +364,52 @@ export class BrokerControlStreamService {
     if (!subscribers || subscribers.size === 0) {
       return;
     }
+    const bytes = Buffer.byteLength(JSON.stringify(delivery));
+    const backlog = this.inboxPublicationBacklog.get(delivery.targetId) ?? { count: 0, bytes: 0 };
+    if (backlog.count >= 64 || backlog.bytes + bytes > 256 * 1024) {
+      for (const client of subscribers) this.closeClient(client);
+      return;
+    }
+    backlog.count += 1;
+    backlog.bytes += bytes;
+    this.inboxPublicationBacklog.set(delivery.targetId, backlog);
     // Preserve accepted event order across asynchronous history reads. Queued
     // work retains the delivery reference, never a captured history generation.
     const previous = this.inboxPublications.get(delivery.targetId) ?? Promise.resolve();
     const pending = previous.then(async () => {
       if (subscribers.size === 0) return;
       const item = await this.inboxItemForDelivery(delivery);
-      for (const client of subscribers) writeSseFrame(client, eventName, item);
+      const payload = `event: ${eventName}\ndata: ${JSON.stringify(item)}\n\n`;
+      for (const client of subscribers) this.writeClient(client, payload);
     }).catch((error) => {
       console.error("[broker] Inbox history read failed; reconnect required", error);
-      for (const client of subscribers) client.end();
-      subscribers.clear();
+      for (const client of subscribers) this.closeClient(client);
     }).finally(() => {
+      backlog.count -= 1;
+      backlog.bytes -= bytes;
+      if (backlog.count === 0) this.inboxPublicationBacklog.delete(delivery.targetId);
       if (this.inboxPublications.get(delivery.targetId) === pending) {
         this.inboxPublications.delete(delivery.targetId);
       }
     });
     this.inboxPublications.set(delivery.targetId, pending);
+  }
+
+  private writeClient(client: RuntimeHttpResponseLike, payload: string): void {
+    if (!writeSsePayload(client, payload)) this.closeClient(client);
+  }
+
+  private closeClient(client: RuntimeHttpResponseLike): void {
+    this.eventClients.delete(client);
+    for (const groups of [this.invocationStreamClients, this.inboxStreamClients]) {
+      for (const [key, subscribers] of groups) {
+        subscribers.delete(client);
+        if (subscribers.size === 0) groups.delete(key);
+      }
+    }
+    if (!closedStreamClients.has(client)) {
+      closedStreamClients.add(client);
+      if (client.destroy) client.destroy(); else client.end();
+    }
   }
 }

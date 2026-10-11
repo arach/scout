@@ -113,13 +113,21 @@ export class BrokerRuntimeCatalogService {
   constructor(private readonly options: BrokerRuntimeCatalogServiceOptions = {}) {}
 
   async read(options: { force?: boolean } = {}): Promise<BrokerRuntimeCatalogSnapshot> {
+    // Routing uses the last validated catalog while maintenance refreshes it.
+    // Only an explicit refresh (or the initial load) joins network I/O.
+    const available = this.snapshot;
+    if (!options.force && available) {
+      if (!this.loadPromise && this.now() >= available.nextCheckAt) {
+        void this.read({ force: true }).catch(() => {});
+      }
+      return available;
+    }
     if (this.loadPromise) {
       if (options.force) this.forceRequested = true;
       return this.loadPromise;
     }
     const now = this.now();
     const refreshMs = resolveRuntimeCatalogRefreshMs(this.options.env);
-    if (!options.force && this.snapshot && now < this.snapshot.nextCheckAt) return this.snapshot;
     this.forceRequested = options.force === true;
     this.loadPromise = this.readOrRefresh(now, refreshMs)
       .finally(() => { this.loadPromise = null; this.forceRequested = false; });
@@ -135,6 +143,9 @@ export class BrokerRuntimeCatalogService {
     if (persisted && !this.forceRequested && now < persisted.nextCheckAt) {
       return this.remember({ ...fallback, checkedAt: persisted.checkedAt, nextCheckAt: persisted.nextCheckAt });
     }
+    // Publish the validated local fallback before starting remote discovery.
+    // Concurrent routing reads can proceed even during the initial refresh.
+    this.remember(fallback);
     return this.refresh(now, refreshMs, fallback);
   }
 

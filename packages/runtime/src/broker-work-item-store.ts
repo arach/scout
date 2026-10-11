@@ -32,6 +32,7 @@ type WorkItemRuntime = {
 export type DeliveryWorkItemResolution = {
   record: CollaborationRecord | null;
   collaborationRecordId?: string;
+  pendingCreation?: { record: CollaborationRecord; event: CollaborationEvent };
 };
 
 export type BrokerWorkItemStoreOptions = {
@@ -156,7 +157,7 @@ function deliveryWorkItemFingerprint(record: CollaborationRecord): string {
     .digest("hex");
 }
 
-function existingDeliveryWorkItemMatches(
+export function existingDeliveryWorkItemMatches(
   existing: CollaborationRecord,
   proposed: CollaborationRecord,
 ): boolean {
@@ -198,6 +199,19 @@ function invocationCollaborationRecordId(invocation: InvocationRequest): string 
 
 export class BrokerWorkItemStore {
   constructor(private readonly options: BrokerWorkItemStoreOptions) {}
+
+  /** Prepare canonical data; the acceptance writer rechecks and commits it with the ask. */
+  readonly prepareDeliveryWorkItemIfNeeded = async (input: RecordDeliveryWorkItemInput): Promise<DeliveryWorkItemResolution> => {
+    const record = this.buildDeliveryWorkItem(input);
+    if (!record) return this.deliveryWorkItemResolutionForTell(input.payload);
+    const existing = this.options.runtime.collaborationRecord(record.id);
+    if (existing) return existingDeliveryWorkItemMatches(existing, record)
+      ? { record: existing, collaborationRecordId: existing.id } : { record: null };
+    const event = this.buildDeliveryWorkItemCreatedEvent(record, input);
+    assertValidCollaborationRecord(record);
+    assertValidCollaborationEvent(event, record);
+    return { record, collaborationRecordId: record.id, pendingCreation: { record, event } };
+  };
 
   readonly recordDeliveryWorkItemIfNeeded = async (
     input: RecordDeliveryWorkItemInput,

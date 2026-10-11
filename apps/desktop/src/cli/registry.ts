@@ -15,6 +15,7 @@ export const SCOUT_COMMANDS: ScoutCommandRegistration[] = [
   { name: "report", summary: "Upload diagnostics with a private local fallback" },
   { name: "feedback", summary: "Send a note, optionally with diagnostics" },
   { name: "doctor", summary: "Show broker health and project inventory" },
+  { name: "quarantine", summary: "Inspect preserved failures and acknowledge reviewed evidence" },
   { name: "status", summary: "Inspect work by handle or filter all blocked/failed work" },
   { name: "operator", summary: "Reach your operator: a message, or --question when blocked" },
   { name: "notify", summary: "Send your operator a message and optional image" },

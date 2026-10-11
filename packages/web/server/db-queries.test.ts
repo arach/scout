@@ -331,10 +331,20 @@ describe("web db query flights", () => {
     }
   });
 
-  test("durable overlay reads return the newest 200 rows, ordered ascending", () => {
+  test("durable overlay reads return the newest 200 rows, filtering the target before the limit", () => {
     const store = createSeededStore();
 
     try {
+      store.upsertActor({ id: "agent-2", kind: "agent", displayName: "Agent Two" });
+      store.recordInvocation({
+        id: "inv-older-target", requesterId: "operator", requesterNodeId: "node-1",
+        targetAgentId: "agent-2", action: "consult", task: "Other participant",
+        conversationId: "c.conv-1", createdAt: 500,
+      });
+      store.recordFlight({
+        id: "flight-older-target", invocationId: "inv-older-target", requesterId: "operator",
+        targetAgentId: "agent-2", state: "completed", startedAt: 500, completedAt: 501,
+      });
       for (let index = 1; index <= 210; index += 1) {
         store.recordInvocation({
           id: `inv-page-${index}`,
@@ -371,6 +381,10 @@ describe("web db query flights", () => {
       expect(flights.map((flight) => flight.id)).toEqual(
         Array.from({ length: 200 }, (_, index) => `flight-page-${index + 11}`),
       );
+      expect(queryInvocations({ conversationId: "c.conv-1", targetAgentId: "agent-2" }).map(record => record.id))
+        .toEqual(["inv-older-target"]);
+      expect(queryFlightRecords({ conversationId: "c.conv-1", targetAgentId: "agent-2" }).map(record => record.id))
+        .toEqual(["flight-older-target"]);
     } finally {
       store.close();
     }
@@ -4666,6 +4680,7 @@ describe("web db query work items", () => {
           activeFlightCount: 1,
           lastMeaningfulAt: 110,
           lastMeaningfulSummary: "Claimed for implementation",
+          codexThreadId: null,
         },
         {
           id: "work-1-child",
@@ -4689,6 +4704,7 @@ describe("web db query work items", () => {
           activeFlightCount: 0,
           lastMeaningfulAt: 95,
           lastMeaningfulSummary: "Child work",
+          codexThreadId: null,
         },
       ]);
     } finally {

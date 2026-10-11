@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
@@ -23,6 +24,9 @@ pub const MAX_THREAD_MESSAGE_LIMIT: usize = 64;
 const MAX_FEED_ARTIFACT_BYTES: u64 = 256 * 1024;
 const MAX_THREAD_ARTIFACT_BYTES: u64 = 256 * 1024;
 const MAX_THREAD_ARTIFACTS: usize = 32;
+// Shared wire limits: packages/runtime/src/broker-journal-framing.ts.
+const MAX_JOURNAL_FRAME_BYTES: usize = 16 * 1024 * 1024;
+const MAX_JOURNAL_BATCH_ENTRIES: usize = 4096;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -907,9 +911,42 @@ struct JournalProjection {
 
 impl JournalProjection {
     fn apply_line(&mut self, line: &str) -> bool {
+        if line.trim_end_matches('\n').len() > MAX_JOURNAL_FRAME_BYTES { return false; }
         let Ok(value) = serde_json::from_str::<Value>(line) else {
             return false;
         };
+        if value.get("kind").and_then(Value::as_str) == Some("journal.batch") {
+            let Some(payload) = value.get("payload").and_then(Value::as_str) else { return false; };
+            let checksum = format!("{:x}", Sha256::digest(payload.as_bytes()));
+            if value.get("version").and_then(Value::as_u64) != Some(1)
+                || value.get("sha256").and_then(Value::as_str) != Some(checksum.as_str()) {
+                return false;
+            }
+            // Unknown payload fields can contain JavaScript lone surrogates.
+            // Parse only the kind before reducing the native subset; a message
+            // body must not make an unrelated agent in this batch disappear.
+            #[derive(Deserialize)]
+            struct EntryKind { kind: String }
+            let Ok(entries) = serde_json::from_str::<Vec<&serde_json::value::RawValue>>(payload) else { return false; };
+            if entries.is_empty() || entries.len() > MAX_JOURNAL_BATCH_ENTRIES
+                || value.get("count").and_then(Value::as_u64) != Some(entries.len() as u64)
+                || !entries.iter().all(|entry| serde_json::from_str::<EntryKind>(entry.get())
+                    .is_ok_and(|entry| entry.kind != "journal.batch")) {
+                return false;
+            }
+            // Decode/validate the whole frame before changing this projection.
+            let mut changed = false;
+            for entry in entries {
+                if let Ok(value) = serde_json::from_str::<Value>(entry.get()) {
+                    changed |= self.apply_value(value);
+                }
+            }
+            return changed;
+        }
+        self.apply_value(value)
+    }
+
+    fn apply_value(&mut self, value: Value) -> bool {
         match value.get("kind").and_then(Value::as_str) {
             Some("agent.upsert") => {
                 if let Some(agent) = value
@@ -1341,7 +1378,7 @@ fn refresh_thread_artifacts(
 struct JournalCursor {
     inode: Option<u64>,
     offset: u64,
-    pending: String,
+    pending: Vec<u8>,
 }
 
 impl JournalCursor {
@@ -1369,22 +1406,26 @@ impl JournalCursor {
         let mut file = File::open(path).map_err(|error| error.to_string())?;
         file.seek(SeekFrom::Start(self.offset))
             .map_err(|error| error.to_string())?;
-        let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes)
-            .map_err(|error| error.to_string())?;
-        self.offset = self.offset.saturating_add(bytes.len() as u64);
-        self.pending.push_str(&String::from_utf8_lossy(&bytes));
-        let Some(last_newline) = self.pending.rfind('\n') else {
-            return Ok(None);
-        };
-        let complete = self.pending[..last_newline].to_string();
-        self.pending = self.pending[last_newline + 1..].to_string();
+        let mut bytes = [0_u8; 64 * 1024];
         let mut material_change = false;
-        for line in BufReader::new(complete.as_bytes())
-            .lines()
-            .map_while(Result::ok)
-        {
-            material_change |= projection.apply_line(&line);
+        // Bound both allocations and this poll to the captured file length.
+        while self.offset < metadata.len() {
+            let limit = usize::try_from((metadata.len() - self.offset).min(bytes.len() as u64)).unwrap();
+            let read = file.read(&mut bytes[..limit]).map_err(|error| error.to_string())?;
+            if read == 0 { break; }
+            for chunk in bytes[..read].split_inclusive(|byte| *byte == b'\n') {
+                if self.pending.len() + chunk.len() > MAX_JOURNAL_FRAME_BYTES + 1 {
+                    return Err("journal_frame_byte_limit".to_string());
+                }
+                self.pending.extend_from_slice(chunk);
+                self.offset += chunk.len() as u64;
+                if chunk.last() == Some(&b'\n') {
+                    if let Ok(line) = std::str::from_utf8(&self.pending) {
+                        material_change |= projection.apply_line(line);
+                    }
+                    self.pending.clear();
+                }
+            }
         }
         Ok(material_change
             .then(|| system_time_ms(metadata.modified().unwrap_or_else(|_| SystemTime::now()))))
@@ -1410,6 +1451,60 @@ fn epoch_ms() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn batch(payload: &str, count: usize) -> String {
+        serde_json::json!({"kind":"journal.batch", "version":1, "count":count,
+            "sha256":format!("{:x}", Sha256::digest(payload.as_bytes())), "payload":payload}).to_string()
+    }
+
+    #[test]
+    fn journal_batch_validates_every_entry_before_applying_any() {
+        let payload = r#"[{"kind":"agent.upsert","agent":{"id":"one"}},{"kind":"node.upsert","node":{"id":"node"}}]"#;
+        let frame = batch(payload, 2);
+        for end in 0..frame.len() {
+            let mut projection = JournalProjection::default();
+            assert!(!projection.apply_line(&frame[..end]));
+            assert!(projection.agents.is_empty());
+        }
+        let mut projection = JournalProjection::default();
+        assert!(!projection.apply_line(&batch(payload, 3)));
+        assert!(!projection.apply_line(&frame.replace("one", "two")));
+        assert!(projection.agents.is_empty());
+        assert!(projection.apply_line(&frame));
+        assert!(projection.agents.contains_key("one"));
+        assert!(projection.nodes.contains_key("node"));
+        assert!(projection.apply_line(r#"{"kind":"agent.upsert","agent":{"id":"legacy"}}"#));
+        assert!(projection.agents.contains_key("legacy"));
+    }
+
+    #[test]
+    fn journal_batch_preserves_native_records_beside_javascript_payloads() {
+        let payload = r#"[{"kind":"message.record","message":{"body":"\ud800"}},{"kind":"agent.upsert","agent":{"id":"one"}}]"#;
+        let mut projection = JournalProjection::default();
+        assert!(projection.apply_line(&batch(payload, 2)));
+        assert!(projection.agents.contains_key("one"));
+    }
+
+    #[test]
+    fn journal_cursor_waits_for_complete_frame_and_keeps_utf8_across_polls() {
+        use std::io::Write;
+        let path = std::env::temp_dir().join(format!("scout-native-frame-{}-{}", std::process::id(), epoch_ms()));
+        let frame = batch(r#"[{"kind":"agent.upsert","agent":{"id":"雪"}},{"kind":"agent.upsert","agent":{"id":"two"}}]"#, 2) + "\n";
+        let split = frame.find('雪').unwrap() + 1;
+        fs::write(&path, &frame.as_bytes()[..split]).unwrap();
+        let mut cursor = JournalCursor::default();
+        let mut projection = JournalProjection::default();
+        assert!(cursor.read_updates(&path, &mut projection).unwrap().is_none());
+        assert!(projection.agents.is_empty());
+        let mut file = fs::OpenOptions::new().append(true).open(&path).unwrap();
+        file.write_all(&frame.as_bytes()[split..]).unwrap();
+        assert!(cursor.read_updates(&path, &mut projection).unwrap().is_some());
+        assert!(projection.agents.contains_key("雪"));
+        assert!(projection.agents.contains_key("two"));
+        assert!(cursor.pending.is_empty());
+        assert_eq!(cursor.offset, frame.len() as u64);
+        fs::remove_file(path).unwrap();
+    }
 
     fn line(value: Value) -> String {
         serde_json::to_string(&value).unwrap()

@@ -13,9 +13,26 @@ import type {
 import {
   createRuntimeRegistrySnapshot,
   queryRuntimeRegistrySnapshot,
+  queryRuntimeNotificationRouting,
 } from "./registry.js";
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
+
+test("notification routing retains idle participants and active invocation routing without payloads", () => {
+  const snapshot = createRuntimeRegistrySnapshot({
+    conversations: { old: conversation("old", ["builder", "operator"], 1000) },
+    invocations: {
+      active: { ...invocation("active", "builder", 1000), conversationId: "old", task: "private prompt", metadata: { replyMode: "notify", private: "secret" } },
+      done: invocation("done", "builder", 1000),
+    },
+    flights: { active: flight("active", "active", "builder", "running"), done: flight("done", "done", "builder", "completed") },
+  });
+  Object.defineProperty(snapshot, "messages", { get: () => { throw new Error("must not read message history"); } });
+  expect(queryRuntimeNotificationRouting(snapshot)).toEqual({
+    conversations: { old: { id: "old", title: "old", participantIds: ["builder", "operator"] } },
+    invocations: { active: { id: "active", requesterId: "operator", conversationId: "old", metadata: { replyMode: "notify" } } },
+  });
+});
 
 function actor(id: string): ActorIdentity {
   return { id, kind: "person", displayName: id };

@@ -224,7 +224,17 @@ CREATE INDEX IF NOT EXISTS idx_machines_scout_node_id
 // drizzle-schema-parity.test.ts fails the moment it drifts from the model
 // or from the checked-in migration chain, so the mirror step cannot be
 // skipped or fudged.
+export const CONTROL_PLANE_HISTORY_ANCHORS_SQLITE_SCHEMA = `
+CREATE TABLE IF NOT EXISTS broker_history_anchors (
+  kind TEXT NOT NULL,
+  id TEXT NOT NULL,
+  location_json TEXT NOT NULL,
+  PRIMARY KEY(kind, id)
+);
+`;
+
 export const CONTROL_PLANE_SQLITE_SCHEMA = `
+${CONTROL_PLANE_HISTORY_ANCHORS_SQLITE_SCHEMA}
 ${INTEGRATION_SETUP_SQLITE_SCHEMA}
 ${INTEGRATION_WORKER_SQLITE_SCHEMA}
 ${INTEGRATION_SLACK_DELIVERY_SCHEMA}
@@ -995,6 +1005,8 @@ CREATE INDEX IF NOT EXISTS idx_deliveries_status_transport
   ON deliveries (status, transport);
 CREATE INDEX IF NOT EXISTS idx_deliveries_created_at
   ON deliveries (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_deliveries_target_status_created_id
+  ON deliveries (target_id, status, created_at, id);
 CREATE INDEX IF NOT EXISTS idx_deliveries_target_node_id
   ON deliveries (target_node_id);
 CREATE INDEX IF NOT EXISTS idx_delivery_attempts_created_at

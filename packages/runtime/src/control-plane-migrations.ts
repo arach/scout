@@ -12,6 +12,7 @@ import { readMigrationFiles } from "drizzle-orm/migrator";
 
 import {
   CONTROL_PLANE_RUNTIME_SESSION_SQLITE_SCHEMA,
+  CONTROL_PLANE_HISTORY_ANCHORS_SQLITE_SCHEMA,
   CONTROL_PLANE_SCHEMA_VERSION,
   CONTROL_PLANE_SQLITE_SCHEMA,
   MACHINES_SQLITE_SCHEMA,
@@ -84,6 +85,17 @@ function repairSessionActorTargets(database: ControlPlaneSqliteDatabase): void {
 }
 
 export const CONTROL_PLANE_SCHEMA_MIGRATIONS: ControlPlaneSchemaMigration[] = [
+  { id: "broker-history-anchors", description: "Preserves exact canonical history locations and foreign-key identity anchors after payload relocation.",
+    apply(database) { database.exec(CONTROL_PLANE_HISTORY_ANCHORS_SQLITE_SCHEMA); } },
+  {
+    id: "routing-inbox-target-status-index",
+    description: "Bounds inbox reads by recipient and state before applying page limits.",
+    apply(database) {
+      if (hasColumn(database, "deliveries", "target_id")) {
+        database.exec("CREATE INDEX IF NOT EXISTS idx_deliveries_target_status_created_id ON deliveries (target_id, status, created_at, id)");
+      }
+    },
+  },
   {
     id: "integration-setup-operations",
     description: "Adds broker-owned resumable integration setup and idempotency records.",
@@ -293,6 +305,10 @@ CREATE INDEX IF NOT EXISTS idx_conversations_authority_node_id
       // same ordering its invocation-shadow guard enforces. The IS NOT clauses
       // make the no-divergence boot a pure read. Invocations with no flights at
       // all are left alone.
+      // Archived invocation anchors retain their canonical latest flight ID;
+      // the corresponding full flight may now live only in historical storage.
+      const retainArchivedShadow = hasTable(database, "broker_history_anchors")
+        ? "AND NOT EXISTS (SELECT 1 FROM broker_history_anchors h WHERE h.kind='invocation' AND h.id=inv.id)" : "";
       database.exec(`
 UPDATE invocations AS inv
 SET
@@ -313,6 +329,7 @@ FROM (
   FROM flights
 ) AS latest
 WHERE latest.invocation_id = inv.id
+  ${retainArchivedShadow}
   AND latest.rn = 1
   AND (
     inv.flight_id IS NOT latest.id

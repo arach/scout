@@ -20,6 +20,7 @@ import {
 } from "./broker-http-router.js";
 import { migrateControlPlaneDatabaseSchema } from "./control-plane-migrations.js";
 import { nodeFingerprint, nodeKeyId } from "./node-identity.js";
+import { createRuntimeRegistrySnapshot, queryRuntimeNotificationRouting } from "./registry.js";
 import {
   TrustEndpointRateLimiter,
   TrustEnrollmentService,
@@ -306,6 +307,17 @@ describe("createBrokerHttpRouter", () => {
   });
 
 
+  test("receipt observation capacity returns retryable pressure without a reservation", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "broker-receipt-read-capacity-"));
+    try {
+      const harness = createHarness({ requestReceipts: new BrokerRequestReceipts(directory, { maxOperations: 0 }) });
+      const result = await requestRouter(harness, "GET", "/v1/request-receipts/key?requesterId=operator");
+      expect(result.response.status).toBe(503);
+      expect(result.body).toMatchObject({ error: "broker_busy", retryable: true });
+      expect(harness.deliverCalls).toHaveLength(0);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  });
+
   test("question response route preserves version conflicts and rejects malformed identity", async () => {
     const calls: unknown[] = [];
     const harness = createHarness({ respondToChatQuestion: async (...args) => {
@@ -486,6 +498,26 @@ describe("createBrokerHttpRouter", () => {
       { since: null, scope: "agents" },
       { since: null, scope: "agents" },
     ]);
+  });
+
+  test("notification routing is metadata-only, machine-local, and absent on older services", async () => {
+    const snapshot = createRuntimeRegistrySnapshot({ conversations: { old: {
+      id: "old", title: "Old operator thread", kind: "direct", participantIds: ["builder", "operator"], authorityNodeId: "node-1",
+      visibility: "private", shareMode: "local", metadata: { createdAt: 1000, updatedAt: 1000 },
+    } } });
+    Object.defineProperty(snapshot, "messages", { get: () => { throw new Error("must not read history"); } });
+    const harness = createHarness({ brokerService: {
+      ...createHarness().deps.brokerService,
+      readSnapshot: async () => { throw new Error("must not fall back to snapshot"); },
+      readNotificationRouting: async () => queryRuntimeNotificationRouting(snapshot),
+    } });
+    const local = await requestRouter(harness, "GET", "/v1/notification-routing");
+    expect(local.response.status).toBe(200);
+    expect(local.body).toEqual({ conversations: { old: { id: "old", title: "Old operator thread", participantIds: ["builder", "operator"] } }, invocations: {} });
+    const remote = await requestRouter(harness, "GET", "/v1/notification-routing", { transportContext: { transport: "remote" } as never });
+    expect(remote.response.status).toBe(403);
+    const older = await requestRouter(createHarness(), "GET", "/v1/notification-routing");
+    expect(older.response.status).toBe(404);
   });
 
   test("serves the bounded conversation projection without reading the registry snapshot", async () => {
@@ -1375,4 +1407,85 @@ test("native owner control is local-only, refuses invalid input and never invoke
   expect(invalid.response.status).toBe(400);
   const remote = await requestRouter(h, "POST", "/v1/native-session-attention", { body: { endpointId: "owner" }, transportContext: { transport: "remote", remoteAddress: "192.168.1.9" } });
   expect(remote.response.status).toBe(403); expect(h.invocationCalls).toHaveLength(0); expect(h.deliverCalls).toHaveLength(0);
+});
+
+describe("invocation working and historical reads", () => {
+  test("stream snapshot captures terminal progress that arrives during a deferred historical read", async () => {
+    let release!: (value: any) => void;
+    let entered!: () => void;
+    const reading = new Promise<void>(resolve => { entered = resolve; });
+    const stored = new Promise<any>(resolve => { release = resolve; });
+    const oldFlight = { id: "flight-race", invocationId: "inv-race", state: "running" } as any;
+    const terminal = { ...oldFlight, state: "completed", completedAt: 30, output: "terminal while loading" };
+    const invocation = { id: "inv-race", context: { preserved: true } } as any;
+    let current = oldFlight;
+    let delivery = { id: "delivery-race", invocationId: "inv-race", status: "peer_acked" } as any;
+    let subscribed: any;
+    const harness = createHarness({ readHistoricalInvocationSnapshot: async () => { entered(); return stored; } });
+    harness.deps.runtime.flightForInvocation = () => current;
+    harness.deps.journal.listDeliveries = () => [delivery];
+    harness.deps.controlStreams.addInvocationStream = input => { subscribed = input.snapshot; };
+    const pending = requestRouter(harness, "GET", "/v1/invocations/inv-race/stream");
+    await reading;
+    expect(subscribed).toBeUndefined();
+    current = terminal;
+    delivery = { ...delivery, status: "completed" };
+    harness.deps.knownInvocations.set(invocation.id, invocation);
+    release({ invocation, flight: oldFlight, deliveries: [] });
+    await pending;
+    expect(subscribed.flight).toEqual(terminal);
+    expect(subscribed.invocation).toEqual(invocation);
+    expect(subscribed.deliveries).toEqual([delivery]);
+  });
+
+  test("hot stream refresh closes the microtask gap before registering", async () => {
+    const invocation = { id: "inv-hot-race" } as any;
+    const running = { id: "flight-hot-race", invocationId: invocation.id, state: "running" } as any;
+    const terminal = { ...running, state: "completed", output: "completed during await" };
+    let current = running;
+    let reads = 0;
+    let subscribed: any;
+    const harness = createHarness({ knownInvocations: new Map([[invocation.id, invocation]]),
+      readHistoricalInvocationSnapshot: async () => { throw new Error("hot handle must not read storage"); } });
+    harness.deps.runtime.flightForInvocation = () => {
+      if (++reads === 1) queueMicrotask(() => { current = terminal; });
+      return current;
+    };
+    harness.deps.controlStreams.addInvocationStream = input => { subscribed = input.snapshot; };
+    await requestRouter(harness, "GET", `/v1/invocations/${invocation.id}/stream`);
+    expect(subscribed.flight).toEqual(terminal);
+  });
+
+  test("hot handles filter before limiting without waiting on historical storage", async () => {
+    const invocation = { id: "inv-hot", messageId: "m" } as never;
+    const flight = { id: "flight-hot", invocationId: "inv-hot", state: "running" } as never;
+    const harness = createHarness({ knownInvocations: new Map([["inv-hot", invocation]]),
+      readHistoricalInvocationSnapshot: async () => { throw new Error("must not read worker"); } });
+    harness.deps.runtime.flightForInvocation = () => flight;
+    const filters: unknown[] = [];
+    harness.deps.journal.listDeliveries = options => { filters.push(options); return []; };
+    harness.deps.journal.listScoutDispatches = options => { filters.push(options); return []; };
+    const result = await requestRouter(harness, "GET", "/v1/invocations/inv-hot");
+    expect(result.response.status).toBe(200);
+    expect(result.body.flight).toEqual(flight);
+    expect(filters).toEqual([{ invocationId: "inv-hot", limit: 500 }, { invocationId: "inv-hot", limit: 50 }]);
+  });
+  test("old handle and stream recover original context from historical storage", async () => {
+    const stored = { invocation: { id: "inv-old", context: { nested: ["original"] } },
+      flight: { id: "flight-old", invocationId: "inv-old", state: "completed", output: "original result" }, deliveries: [] };
+    const harness = createHarness({ readHistoricalInvocationSnapshot: async id => {
+      expect(id).toBe("inv-old"); return stored as never;
+    } });
+    const result = await requestRouter(harness, "GET", "/v1/invocations/inv-old");
+    expect(result.body).toEqual({ invocationId: "inv-old", ...stored, dispatches: [] });
+    let snapshot: unknown;
+    harness.deps.controlStreams.addInvocationStream = input => { snapshot = input.snapshot; };
+    await requestRouter(harness, "GET", "/v1/invocations/inv-old/stream");
+    expect(snapshot).toEqual(result.body);
+  });
+  test("unavailable historical storage returns retryable failure rather than empty success", async () => {
+    const harness = createHarness({ readHistoricalInvocationSnapshot: async () => { throw new Error("worker unavailable"); } });
+    const result = await requestRouter(harness, "GET", "/v1/invocations/inv-old");
+    expect(result.response.status).toBe(503); expect(result.body.retryable).toBe(true);
+  });
 });

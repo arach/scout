@@ -130,6 +130,19 @@ describe("SQLiteControlPlaneStore", () => {
     }
   });
 
+  test("canonical events commit or roll back with the replay transaction before timers", () => {
+    const store = createStore();
+    try {
+      store.runReplayTransaction(() => store.recordEventDurably(testControlEvent("evt-durable", 1)));
+      expect(store.recentEvents(10).map(event => event.id)).toEqual(["evt-durable"]);
+      expect(() => store.runReplayTransaction(() => {
+        store.recordEventDurably(testControlEvent("evt-rollback", 2));
+        throw new Error("rollback canonical event");
+      })).toThrow("rollback canonical event");
+      expect(store.recentEvents(10).map(event => event.id)).toEqual(["evt-durable"]);
+    } finally { store.close(); }
+  });
+
   test("retries busy pending-event batches without losing order", async () => {
     const store = createStore();
     const internals = store as unknown as {
@@ -1710,6 +1723,21 @@ describe("SQLiteControlPlaneStore", () => {
     } finally {
       store.close();
     }
+  });
+
+  test("inbox filters run before the database page limit", () => {
+    const store = createStore();
+    try {
+      store.recordDeliveries(Array.from({ length: 5_001 }, (_, index) => ({
+        id: `old-${index}`, targetId: index % 2 ? "other" : "wanted", targetKind: "agent" as const,
+        transport: "local_socket" as const, reason: "direct_message" as const,
+        policy: "durable" as const, status: "completed" as const,
+      })));
+      store.recordDeliveries([{ id: "pending-inbox", targetId: "wanted", targetKind: "agent", transport: "local_socket",
+        reason: "invocation", policy: "durable", status: "accepted" }]);
+      expect(store.listDeliveries({ targetId: "wanted", statuses: ["accepted"], reasons: ["invocation"], limit: 1 }).map(item => item.id)).toEqual(["pending-inbox"]);
+      expect(store.listDeliveries({ targetId: "wanted", statuses: [], limit: 1 })).toEqual([]);
+    } finally { store.close(); }
   });
 
   test("enforces durable action idempotency, leases, attempts, and first-write-wins facts", () => {

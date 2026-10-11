@@ -1,6 +1,6 @@
 {
   "name": "@openscout/runtime",
-  "version": "0.3.6-dev.3",
+  "version": "0.3.6-dev.4",
   "description": "Local runtime foundation for the OpenScout control plane",
   "type": "module",
   "bin": {
@@ -37,11 +37,23 @@
       "import": "./dist/onboarding.js",
       "default": "./dist/onboarding.js"
     },
+    "./local-agent-harnesses": {
+      "bun": "./src/local-agent-harnesses.ts",
+      "types": "./dist/local-agent-harnesses.d.ts",
+      "import": "./dist/local-agent-harnesses.js",
+      "default": "./dist/local-agent-harnesses.js"
+    },
     "./local-agents": {
       "bun": "./src/local-agents.ts",
       "types": "./dist/local-agents.d.ts",
       "import": "./dist/local-agents.js",
       "default": "./dist/local-agents.js"
+    },
+    "./in-place": {
+      "bun": "./src/in-place/index.ts",
+      "types": "./dist/in-place/index.d.ts",
+      "import": "./dist/in-place/index.js",
+      "default": "./dist/in-place/index.js"
     },
     "./live-terminal-session": {
       "bun": "./src/live-terminal-session.ts",

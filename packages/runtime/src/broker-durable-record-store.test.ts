@@ -1,3 +1,4 @@
+import { deliveryRequestMessageId, deliveryRequestInvocationId, recoverAcceptedInvocation, recoverAcceptedDelivery } from "./broker-delivery-receipt-recovery.js";
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -12,6 +13,7 @@ import type {
   MessageRecord,
   NodeDefinition,
 } from "@openscout/protocol";
+import { createInvocationDispatchJob, type BrokerInvocationDispatchJob } from "./broker-dispatch-job.js";
 
 import { createInMemoryControlRuntime } from "./broker.js";
 import { BrokerChannelInviteService } from "./broker-channel-invite-service.js";
@@ -40,11 +42,13 @@ function createTestRecordStore(options: {
   const runtime = createInMemoryControlRuntime({}, { localNodeId: "node-1" });
   const appended: BrokerJournalEntry[][] = [];
   const projected: BrokerJournalEntry[][] = [];
+  const jobs = new Map<string, BrokerInvocationDispatchJob>();
   const durableStore = new BrokerDurableStore({
     journal: {
       async appendEntries(entries) {
         await options.beforeAppend?.();
         appended.push(entries);
+        for (const entry of entries) if (entry.kind === "invocation.dispatch_job.record") jobs.set(entry.job.id, entry.job);
         return entries;
       },
     },
@@ -64,6 +68,7 @@ function createTestRecordStore(options: {
     runtime,
     durableStore,
     knownInvocations,
+    invocationDispatchJobFor: (id) => jobs.get(id) ?? null,
     memberConversationIds: options.memberConversationIds,
   });
 
@@ -318,6 +323,120 @@ describe("canonical conversation title mutation", () => {
 });
 
 describe("BrokerDurableRecordStore", () => {
+  test("canonical acceptance frame contains a complete recoverable receipt before sidecar save", async () => {
+    const h = createTestRecordStore();
+    await h.runtime.upsertNode(testNode());
+    await h.runtime.upsertAgent(testAgent());
+    await h.runtime.upsertConversation(testConversation());
+    const request = testInvocation();
+    const message = testMessage();
+    request.id = deliveryRequestInvocationId(request.requesterId, "retry-key");
+    request.conversationId = message.conversationId;
+    message.id = deliveryRequestMessageId(request.requesterId, "retry-key");
+    request.messageId = message.id;
+    message.metadata = { scoutAcceptance: {
+      version: 1, requesterId: request.requesterId, requestId: "retry-key",
+      response: { kind: "delivery", accepted: true, routeKind: "direct", conversation: { id: message.conversationId }, targetAgentId: request.targetAgentId },
+      receiptInput: { requestId: "retry-key", requesterId: request.requesterId, requesterNodeId: "node-1", routeKind: "direct", conversationId: message.conversationId, messageId: message.id, targetAgentId: request.targetAgentId, targetLabel: "Agent" },
+    } };
+    const accepted = await h.records.recordInvocation(request, { message, createDispatchJob: flight => createInvocationDispatchJob(request, flight, 100) });
+    expect(h.appended).toHaveLength(1);
+    const stored = h.appended[0].find(entry => entry.kind === "message.record");
+    expect(stored?.kind).toBe("message.record");
+    const recovered = recoverAcceptedDelivery(stored?.kind === "message.record" ? stored.message : undefined, request.requesterId, "retry-key");
+    expect(recovered?.flight?.id).toBe(accepted.flight.id);
+    expect(recovered?.receipt.flightId).toBe(accepted.flight.id);
+    expect(recovered?.message.id).toBe(message.id);
+    expect(recovered?.message.metadata?.scoutAcceptance).toBeUndefined();
+    expect(recoverAcceptedDelivery(stored?.kind === "message.record" ? stored.message : undefined, "someone-else", "retry-key")).toBeNull();
+    expect((accepted.flight.metadata?.dispatchOutcome as { checkedAt: number }).checkedAt).toBeGreaterThanOrEqual(accepted.dispatchJob!.createdAt);
+    const remoteMessage = structuredClone(message);
+    remoteMessage.id = deliveryRequestMessageId(request.requesterId, "remote-retry-key");
+    const remoteEnvelope = remoteMessage.metadata!.scoutAcceptance as any;
+    remoteEnvelope.requestId = remoteEnvelope.receiptInput.requestId = "remote-retry-key";
+    remoteEnvelope.receiptInput.messageId = remoteMessage.id;
+    const remoteRequest = { ...request, messageId: remoteMessage.id, id: deliveryRequestInvocationId(request.requesterId, "remote-retry-key") };
+    const remote = await h.records.recordInvocation(remoteRequest, { receiptMessage: remoteMessage,
+      createDispatchJob: flight => createInvocationDispatchJob(remoteRequest, flight, 999_999) });
+    expect(h.appended[1].some(entry => entry.kind === "message.record")).toBe(false);
+    const remoteStored = h.appended[1].find(entry => entry.kind === "invocation.record");
+    expect(recoverAcceptedInvocation(remoteStored?.kind === "invocation.record" ? remoteStored.invocation : undefined,
+      request.requesterId, "remote-retry-key")?.flight?.id).toBe(remote.flight.id);
+    expect((remote.flight.metadata?.dispatchOutcome as { checkedAt: number }).checkedAt).toBeGreaterThanOrEqual(999_999);
+  });
+
+  test("reused legacy message recovers through local invocation without rewriting the message authority", async () => {
+    const h = createTestRecordStore();
+    await h.runtime.upsertNode(testNode());
+    await h.runtime.upsertAgent(testAgent());
+    await h.runtime.upsertConversation(testConversation());
+    const original = { ...testMessage(), metadata: { clientMessageId: "old-client-id", original: "preserve" } };
+    await h.records.recordMessage(original);
+    const before = structuredClone(h.runtime.peek().messages[original.id]);
+    const request = testInvocation({ id: deliveryRequestInvocationId("operator", "new-request"),
+      messageId: original.id, conversationId: original.conversationId });
+    const acceptedMessage = { ...original, metadata: { ...original.metadata, scoutAcceptance: {
+      version: 1, requesterId: "operator", requestId: "new-request",
+      response: { kind: "delivery", accepted: true, routeKind: "dm", conversation: testConversation(), targetAgentId: request.targetAgentId },
+      receiptInput: { requestId: "new-request", requesterId: "operator", requesterNodeId: "node-1", routeKind: "dm",
+        conversationId: original.conversationId, messageId: original.id, targetAgentId: request.targetAgentId, targetLabel: "Agent" },
+    } } };
+    const accepted = await h.records.recordInvocation(request, { message: acceptedMessage });
+    expect(accepted.entries.some(entry => entry.kind === "message.record")).toBe(false);
+    expect(h.runtime.peek().messages[original.id]).toEqual(before);
+    const recovered = recoverAcceptedInvocation(h.runtime.peek().invocations[request.id], "operator", "new-request");
+    expect(recovered?.message.id).toBe(original.id);
+    expect(recovered?.flight?.id).toBe(accepted.flight.id);
+    expect(recovered?.conversation.authorityNodeId).toBe("node-1");
+    const receiptBefore = structuredClone(h.runtime.peek().invocations[request.id]!.metadata!.acceptedDeliveryReceipt);
+    const retry = await h.records.recordInvocation(request, { message: { ...acceptedMessage, body: "must not replace original receipt" } });
+    expect(retry.entries).toEqual([]);
+    expect(h.runtime.peek().invocations[request.id]!.metadata!.acceptedDeliveryReceipt).toEqual(receiptBefore);
+  });
+
+  test("message, invocation, flight and scheduler job form one commit and concurrent retries reuse it", async () => {
+    const { runtime, records, appended, knownInvocations } = createTestRecordStore();
+    await runtime.upsertNode(testNode());
+    await runtime.upsertAgent(testAgent());
+    await runtime.upsertConversation(testConversation());
+    const message = testMessage();
+    const request = testInvocation({ messageId: message.id, conversationId: message.conversationId });
+    const options = { message, createDispatchJob: (flight: FlightRecord) => createInvocationDispatchJob(request, flight, 1) };
+    const [first, second] = await Promise.all([records.recordInvocation(request, options), records.recordInvocation(request, options)]);
+    expect(first.flight.id).toBe(second.flight.id);
+    expect(first.dispatchJob).toEqual(second.dispatchJob);
+    expect(appended).toHaveLength(1);
+    expect(appended[0]?.map(entry => entry.kind)).toEqual([
+      "message.record", "deliveries.record", "invocation.record", "invocation.dispatch_job.record", "flight.record",
+    ]);
+    expect(runtime.peek().messages[message.id]?.body).toBe(message.body);
+    expect(knownInvocations.get(request.id)?.messageId).toBe(message.id);
+  });
+
+  test("failed acceptance exposes neither message nor invocation cache entries", async () => {
+    const { runtime, records, knownInvocations } = createTestRecordStore({ beforeAppend: async () => { throw new Error("disk write failed"); } });
+    await runtime.upsertNode(testNode());
+    await runtime.upsertAgent(testAgent());
+    await runtime.upsertConversation(testConversation());
+    const message = testMessage();
+    const request = testInvocation({ messageId: message.id, conversationId: message.conversationId });
+    await expect(records.recordInvocation(request, { message })).rejects.toThrow("disk write failed");
+    expect(runtime.peek().messages[message.id]).toBeUndefined();
+    expect(runtime.flightForInvocation(request.id)).toBeUndefined();
+    expect(knownInvocations.has(request.id)).toBe(false);
+  });
+
+  test("dispatch job eligibility is checked inside the writer against the latest committed version", async () => {
+    const { records, appended } = createTestRecordStore();
+    const job = createInvocationDispatchJob(testInvocation(), { id: "flight-1" } as FlightRecord, 1);
+    await records.recordInvocationDispatchJob(job);
+    const claims = await Promise.all([1, 2].map(attempts => records.recordInvocationDispatchJobIf(
+      { ...job, state: "running", attempts }, current => current?.state === "pending",
+    )));
+    expect(claims.filter(Boolean)).toHaveLength(1);
+    expect(appended).toHaveLength(2);
+  });
+
   test("can defer projection only for explicit bootstrap node and actor writes", async () => {
     const { appended, projected, records, runtime } = createTestRecordStore();
     const actor = testAgent();

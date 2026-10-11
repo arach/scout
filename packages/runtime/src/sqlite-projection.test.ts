@@ -36,6 +36,7 @@ function createProjectionOptions(overrides: {
   disabled?: boolean;
   replayEntries?: BrokerJournalEntry[];
   replayYieldEvery?: number;
+  replayBatchBytes?: number;
   conversationFeedPublishDelayMs?: number;
   conversationThreadPublishDelayMs?: number;
   publishThreadSnapshots?: boolean;
@@ -335,6 +336,7 @@ function createProjectionOptions(overrides: {
         busyRetryDelayMs: 0,
         sleep: async () => {},
         replayYieldEvery: overrides.replayYieldEvery,
+        replayBatchBytes: overrides.replayBatchBytes,
         conversationFeedPublishDelayMs: overrides.conversationFeedPublishDelayMs ?? 0,
         conversationThreadPublishDelayMs: overrides.conversationThreadPublishDelayMs ?? 0,
         conversationThreadArtifactDirectory: threadArtifactDirectory,
@@ -628,6 +630,30 @@ describe("RecoverableSQLiteProjection", () => {
       Array.from({ length: 10 }, (_, index) => `endpoint:endpoint-${index + 1}`),
     );
     expect(stats.replayTimerYieldObserved).toBe(true);
+  });
+
+  test("replay byte budget isolates large accepted records instead of retaining a count-sized payload batch", async () => {
+    const entries = Array.from({ length: 4 }, (_, index) => ({
+      ...sampleMessageEntry(), message: { ...sampleMessageEntry().message, id: `large-${index}`, body: "x".repeat(index === 2 ? 8000 : 1000) },
+    }));
+    const { projection, stats } = createProjectionOptions({ replayEntries: entries, replayYieldEvery: 128, replayBatchBytes: 2000 });
+    await projection.warm(); await projection.flush();
+    expect(stats.transactionBatches.filter(batch => batch.some(value => value.startsWith("message:")))).toEqual([
+      ["message:large-0"], ["message:large-1"], ["message:large-2"], ["message:large-3"],
+    ]);
+    expect(stats.replayTimerYieldObserved).toBe(true);
+  });
+
+  test("replay splits a delivery batch by bytes as well as record count", async () => {
+    const deliveries = Array.from({ length: 3 }, (_, index) => ({
+      id: `bytes-${index}`, targetId: "agent-1", targetNodeId: "node-1", targetKind: "agent" as const,
+      transport: "local_socket" as const, reason: "message" as const, policy: "best_effort" as const,
+      status: "accepted" as const, metadata: { payload: "x".repeat(1800) },
+    }));
+    const { projection, stats } = createProjectionOptions({ replayEntries: [{ kind: "deliveries.record", deliveries }], replayYieldEvery: 128, replayBatchBytes: 2500 });
+    await projection.warm(); await projection.flush();
+    expect(stats.deliveryBatchSizes).toEqual([1, 1, 1]);
+    expect(stats.transactionWorkSizes.filter(size => size > 0).every(size => size <= 1)).toBe(true);
   });
 
   test("splits one oversized delivery entry into bounded replay transactions", async () => {
@@ -961,7 +987,7 @@ describe("RecoverableSQLiteProjection", () => {
           conversationId: "conversation-rich",
           actorId: "actor-rich",
           originNodeId: "node-rich",
-          class: "human",
+          class: "agent",
           body: "Suffix reference",
           visibility: "private",
           policy: "durable",

@@ -13,6 +13,7 @@ import {
   isoWeekLabel,
   VACUUM_FREELIST_THRESHOLD_BYTES,
 } from "./control-plane-archive.js";
+import { ControlPlaneHistoryStore } from "./control-plane-history-store.js";
 
 const roots = new Set<string>();
 
@@ -108,6 +109,69 @@ describe("isoWeekLabel", () => {
 });
 
 describe("archiveEvents", () => {
+  test("indexed publication returns only unchanged deleted event IDs and preserves full context", async () => {
+    const root = mkdtempSync(join(tmpdir(), "archive-indexed-")); roots.add(root);
+    const db = createDb(); insertEvent(db, "stable", T0 - WEEK); insertEvent(db, "changed", T0 - WEEK + 1);
+    db.query("UPDATE events SET payload_json=? WHERE id=?").run(JSON.stringify({ conversationId: "subject", invocationId: "work", context: ["prior"] }), "stable");
+    const history = new ControlPlaneHistoryStore(join(root, "history"));
+    try {
+      const result = await archiveEvents(db, { cutoff: T0, archiveDir: root, historyStore: history, writePage: async (path, lines) => {
+        const bytes = gzipSync(lines.join("")); writeFileSync(path, bytes);
+        db.query("UPDATE events SET payload_json=? WHERE id=?").run('{"newContext":true}', "changed");
+        return bytes.length;
+      } });
+      expect(result.rows).toBe(1); expect(result.verifiedEventIds).toEqual(["stable"]);
+      expect(history.read("control_event", "stable")).toEqual({ id: "stable", kind: "agent.endpoint.upserted", actorId: "actor-1", nodeId: "node-1", ts: T0 - WEEK,
+        payload: { conversationId: "subject", invocationId: "work", context: ["prior"] } });
+      expect(history.page({ kind: "control_event", conversationId: "subject" }).map(row => row.id)).toEqual(["stable"]);
+      expect(db.query<{ n: number }>("SELECT count(*) AS n FROM events WHERE id='changed'").get()?.n).toBe(1);
+    } finally { history.close(); db.close(); }
+  });
+
+  test("failed indexed history publication keeps SQLite even after gzip publication succeeds", async () => {
+    const root = mkdtempSync(join(tmpdir(), "archive-index-failure-")); roots.add(root);
+    const db = createDb(); insertEvent(db, "event", T0 - WEEK);
+    try {
+      await expect(archiveEvents(db, { cutoff: T0, archiveDir: root, historyStore: { publishPage: () => { throw new Error("index unavailable"); } } })).rejects.toThrow("index unavailable");
+      expect(db.query<{ n: number }>("SELECT count(*) AS n FROM events").get()?.n).toBe(1);
+      expect(publishedFiles(join(root, "events"))).toHaveLength(1);
+    } finally { db.close(); }
+  });
+
+  test("archive byte budget loads one large payload at a time", async () => {
+    const root = mkdtempSync(join(tmpdir(), "archive-byte-budget-")); roots.add(root);
+    const db = createDb();
+    for (let i = 0; i < 3; i++) { insertEvent(db, `event-${i}`, T0 - WEEK + i); db.query("UPDATE events SET payload_json=? WHERE id=?").run(JSON.stringify({ body: "x".repeat(3000) }), `event-${i}`); }
+    try {
+      const result = await archiveEvents(db, { cutoff: T0, archiveDir: root, pageSize: 1000, pageBytes: 1000, maxPages: 1 });
+      expect(result.rows).toBe(1);
+      expect(db.query<{ n: number }>("SELECT count(*) AS n FROM events").get()?.n).toBe(2);
+    } finally { db.close(); }
+  });
+
+  test("changed rows remain live while their old version is safely archived", async () => {
+    const root = mkdtempSync(join(tmpdir(), "archive-cas-")); roots.add(root);
+    const db = createDb(); insertEvent(db, "event", T0 - WEEK);
+    const result = await archiveEvents(db, { cutoff: T0, archiveDir: root, writePage: async (path, lines) => {
+      const bytes = gzipSync(lines.join("")); writeFileSync(path, bytes);
+      db.query("UPDATE events SET payload_json = ? WHERE id = ?").run('{"newContext":true}', "event");
+      return bytes.length;
+    } });
+    expect(result.rows).toBe(0);
+    expect(db.query<{ payload_json: string }>("SELECT payload_json FROM events").get()?.payload_json).toBe('{"newContext":true}');
+    expect(readGzipLines(join(root, "events", publishedFiles(join(root, "events"))[0]))[0].payload_json).toBe('{"id":"event"}');
+    db.close();
+  });
+
+  test("page budgets release maintenance without consuming every historical row", async () => {
+    const root = mkdtempSync(join(tmpdir(), "archive-budget-")); roots.add(root);
+    const db = createDb(); for (let i = 0; i < 7; i++) insertEvent(db, `event-${i}`, T0 - WEEK + i);
+    expect((await archiveEvents(db, { cutoff: T0, archiveDir: root, pageSize: 2, maxPages: 1 })).rows).toBe(2);
+    expect(db.query<{ n: number }>("SELECT count(*) AS n FROM events").get()?.n).toBe(5);
+    expect((await archiveEvents(db, { cutoff: T0, archiveDir: root, pageSize: 2 })).rows).toBe(5);
+    db.close();
+  });
+
   test("archives pre-cutoff rows into immutable per-week page files and prunes them", async () => {
     const root = mkdtempSync(join(tmpdir(), "openscout-archive-"));
     roots.add(root);

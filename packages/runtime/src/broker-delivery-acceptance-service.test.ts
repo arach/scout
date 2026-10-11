@@ -1,4 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { BrokerRequestReceipts } from "./broker-request-receipts.js";
+import { BrokerCommandAdmission } from "./broker-storage-pressure.js";
+import { messageWithAcceptedFlight } from "./broker-delivery-receipt-recovery.js";
 
 import {
   buildScoutReturnAddress,
@@ -118,6 +124,10 @@ function createHarness(input: {
   cardlessEndpointHarness?: AgentEndpoint["harness"];
   runtimeCatalog?: ScoutOwnedRuntimeCatalog;
   now?: number;
+  requestReceipts?: BrokerRequestReceipts;
+  commandAdmission?: BrokerCommandAdmission;
+  readAcceptedInvocation?: (id: string) => Promise<InvocationRequest | undefined>;
+  duringCommit?: () => void;
 } = {}) {
   const agent = testAgent();
   const endpoint = testEndpoint();
@@ -160,6 +170,9 @@ function createHarness(input: {
   let idCounter = 0;
 
   const service = new BrokerDeliveryAcceptanceService({
+    requestReceipts: input.requestReceipts,
+    commandAdmission: input.commandAdmission,
+    readAcceptedInvocation: input.readAcceptedInvocation,
     nodeId: "node-1",
     operatorActorId: "operator",
     runtimeSnapshot: () => snapshot,
@@ -243,7 +256,9 @@ function createHarness(input: {
       postedMessages.push(message);
       return { ok: true };
     },
-    async acceptInvocation(invocation) {
+    async acceptInvocation(invocation, message) {
+      input.duringCommit?.();
+      if (message) postedMessages.push(message);
       acceptedInvocations.push(invocation);
       const flight: FlightRecord = {
         id: "flight-1",
@@ -280,6 +295,90 @@ function createHarness(input: {
 }
 
 describe("BrokerDeliveryAcceptanceService", () => {
+  test("unknown sidecar recovers a reused message through historical invocation after restart", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "scout-reused-receipt-recovery-"));
+    try {
+      const oldMessage = testMessage({ id: "old-message", metadata: { clientMessageId: "stable-client" } });
+      const snapshot = testSnapshot({ messages: { [oldMessage.id]: oldMessage }, conversations: { "conversation-1": testConversation() } });
+      const initial = createHarness({ snapshot });
+      const payload: ScoutDeliverRequest = { requestId: "request-after-legacy-message", body: oldMessage.body,
+        intent: "consult", targetAgentId: "agent-1", caller: { actorId: "operator", nodeId: "node-1" },
+        messageMetadata: { clientMessageId: "stable-client" } };
+      const accepted = await initial.service.accept(payload);
+      if (accepted.kind !== "delivery" || !accepted.flight) throw new Error("expected accepted flight");
+      const canonicalInvocation = { ...initial.acceptedInvocations[0]!, metadata: {
+        acceptedDeliveryReceipt: messageWithAcceptedFlight(initial.postedMessages[0]!, accepted.flight),
+      } };
+      const ledger = new BrokerRequestReceipts(directory);
+      await expect(ledger.run("operator", payload.requestId!, "deliver", payload, async () => {
+        throw new Error("crash after canonical commit before receipt save");
+      })).rejects.toThrow("crash after canonical commit");
+      const readIds: string[] = [];
+      const restarted = createHarness({ requestReceipts: new BrokerRequestReceipts(directory),
+        readAcceptedInvocation: async id => { readIds.push(id); return id === canonicalInvocation.id ? canonicalInvocation : undefined; } });
+      const recovered = await restarted.service.accept(payload);
+      expect(recovered).toEqual(accepted);
+      expect(readIds).toEqual([canonicalInvocation.id]);
+      expect(restarted.acceptedInvocations).toEqual([]);
+      expect(restarted.dispatchedInvocations).toEqual([]);
+      expect((await ledger.get("operator", payload.requestId!, "deliver"))?.state).toBe("done");
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+
+  test("outer alias receipt admission rejects before reservation and releases exactly once", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "scout-outer-command-receipts-"));
+    try {
+      const ledger = new BrokerRequestReceipts(directory);
+      const admission = new BrokerCommandAdmission({ maxCommands: 1 });
+      const harness = createHarness({ requestReceipts: ledger, commandAdmission: admission });
+      const payload: ScoutDeliverRequest = { requestId: "outer-alias-request", body: "work", intent: "consult",
+        targetAgentId: "agent-1", caller: { actorId: "operator", nodeId: "node-1" } };
+      const run = () => ledger.run("operator", payload.requestId!, "deliver", payload,
+        () => harness.service.accept(payload, { receiptReserved: true, admissionReserved: true }),
+        () => harness.service.recoverReceipt("operator", payload.requestId!), () => harness.service.reserveCommand(payload));
+      const hold = admission.reserve({ existing: "command" });
+      await expect(run()).rejects.toThrow("admission paused");
+      expect(await ledger.get("operator", payload.requestId!, "deliver")).toBeNull();
+      hold();
+      expect((await run()).accepted).toBe(true);
+      expect(harness.acceptedInvocations).toHaveLength(1);
+      expect(admission.status().pendingCommands).toBe(0);
+      expect((await run()).accepted).toBe(true);
+      expect(harness.acceptedInvocations).toHaveLength(1);
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+
+  test("caller abort after the atomic commit starts cannot strand an accepted ask", async () => {
+    const abort = new AbortController();
+    const harness = createHarness({ duringCommit: () => abort.abort() });
+    const result = await harness.service.accept({
+      body: "keep the accepted work", intent: "consult", targetAgentId: "agent-1",
+      caller: { actorId: "operator", nodeId: "node-1" },
+    }, { signal: abort.signal });
+    expect(result.accepted).toBe(true);
+    expect(harness.postedMessages).toHaveLength(1);
+    expect(harness.acceptedInvocations).toHaveLength(1);
+    expect(harness.dispatchedInvocations).toHaveLength(1);
+  });
+
+  test("direct command retries share one durable receipt across service restarts", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "scout-command-receipts-"));
+    try {
+      const request: ScoutDeliverRequest = {
+        requestId: "stable-command", body: "preserve my context", intent: "consult", targetAgentId: "agent-1",
+        caller: { actorId: "operator", nodeId: "node-1" },
+      };
+      const first = createHarness({ requestReceipts: new BrokerRequestReceipts(directory) });
+      const [accepted, concurrent] = await Promise.all([first.service.accept(request), first.service.accept({ ...request })]);
+      expect(concurrent).toEqual(accepted);
+      expect(first.acceptedInvocations).toHaveLength(1);
+      const reopened = createHarness({ requestReceipts: new BrokerRequestReceipts(directory) });
+      expect(await reopened.service.accept(request)).toEqual(accepted);
+      expect(reopened.acceptedInvocations).toHaveLength(0);
+      await expect(reopened.service.accept({ ...request, body: "different work" })).rejects.toThrow("different content");
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+
   test("marks an unassigned product-Scout request as reply-required and origin-correlated", async () => {
     const harness = createHarness({
       isScoutTarget: () => true,
@@ -1010,7 +1109,7 @@ describe("BrokerDeliveryAcceptanceService", () => {
     }));
 
     expect(pointer).toEqual(expect.objectContaining({
-      id: "msg-2",
+      id: expect.stringMatching(/^msg-/),
       conversationId: "dm.operator.agent-1",
       actorId: "operator",
       class: "status",
@@ -1026,7 +1125,7 @@ describe("BrokerDeliveryAcceptanceService", () => {
         relayChannel: "dm",
         relayTarget: "agent-1",
         relayTargetIds: ["agent-1"],
-        relayMessageId: "msg-2",
+        relayMessageId: pointer!.id,
         channelPointer: expect.objectContaining({
           channel: "xterm-super-component",
           conversationId: "channel.xterm-super-component",

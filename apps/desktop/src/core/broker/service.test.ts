@@ -13,6 +13,7 @@ import {
   stableChannelId,
   systemChannelNaturalKey,
   type ScoutCapabilityMatrixSnapshot,
+  type ScoutDeliverRequest,
 } from "@openscout/protocol";
 import {
   registerActiveScoutBrokerService,
@@ -1162,7 +1163,6 @@ describe("scoutAskHandler", () => {
     }
     expect(captured.delivery?.caller).toMatchObject({
       actorId: "operator",
-      nodeId: "node-1",
       currentDirectory: workspaceRoot,
     });
     expect(captured.delivery?.target).toEqual(surface === "api"
@@ -1748,7 +1748,6 @@ describe("askScoutQuestion", () => {
     });
     expect(captured.delivery?.caller).toMatchObject({
       actorId: "operator",
-      nodeId: "node-1",
       currentDirectory: workspaceRoot,
     });
     expect(captured.delivery?.messageMetadata?.source).toBe("scout-cli");
@@ -4011,7 +4010,7 @@ describe("loadScoutBrokerContextResult", () => {
     }
   });
 
-  test("the ask path reads the agents-scoped snapshot, not the full registry", async () => {
+  test("the exact-sender ask path posts one command without preflight", async () => {
     useIsolatedOpenScoutHome();
     const requested: string[] = [];
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -4076,14 +4075,40 @@ describe("loadScoutBrokerContextResult", () => {
 
     expect(result.usedBroker).toBe(true);
     expect(result.flight?.id).toBe("flt-1");
-    // Every route reads the identity scope: sender resolution needs actors,
-    // and a snapshot without them would re-post the registered sender.
-    expect(requested).toContain("GET /v1/snapshot?scope=identity");
-    expect(requested).not.toContain("GET /v1/snapshot?scope=agents");
-    expect(requested).not.toContain("GET /v1/snapshot");
+    expect(requested).toEqual(["POST /v1/deliver"]);
   });
 
-  test("a profile ask reads only the identity snapshot scope — a broken full snapshot cannot fail it", async () => {
+  test("work asks preserve the complete command payload across retries with one request id", async () => {
+    useIsolatedOpenScoutHome();
+    const payloads: ScoutDeliverRequest[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      expect(`${request.method} ${new URL(request.url).pathname}`).toBe("POST /v1/deliver");
+      payloads.push(await request.json() as ScoutDeliverRequest);
+      return jsonResponse({ kind: "delivery", accepted: true,
+        conversation: { id: "dm.operator.agent-1" }, message: { id: "msg-stable" },
+        flight: { id: "flt-stable", state: "queued" } });
+    }) as typeof fetch;
+    const command = { requestId: "work-retry", senderId: "operator",
+      target: { kind: "agent_id" as const, agentId: "agent-1" }, body: "Do the work",
+      workItem: { title: "Keep this exact work" }, currentDirectory: "/tmp" };
+    await deliverScoutAsk({ ...command, createdAtMs: 1 });
+    await deliverScoutAsk({ ...command, createdAtMs: 2 });
+    expect(payloads[0]).toEqual(payloads[1]);
+    const id = payloads[0]!.workItem!.id;
+    expect(id).toMatch(/^work-request-[a-f0-9]{64}$/);
+    expect(payloads[0]!.messageMetadata?.collaborationRecordId).toBe(id);
+    expect(payloads[0]!.invocationMetadata?.workId).toBe(id);
+    await deliverScoutAsk({ ...command, senderId: "other-caller" });
+    await deliverScoutAsk({ ...command, requestId: "another-command" });
+    expect(payloads[2]!.workItem!.id).not.toBe(id);
+    expect(payloads[3]!.workItem!.id).not.toBe(id);
+    await deliverScoutAsk({ ...command, requestId: undefined, createdAtMs: 1 });
+    await deliverScoutAsk({ ...command, requestId: undefined, createdAtMs: 1 });
+    expect(payloads[4]!.workItem!.id).not.toBe(payloads[5]!.workItem!.id);
+  });
+
+  test("a profile ask posts one command without depending on snapshot health", async () => {
     useIsolatedOpenScoutHome();
     const requested: string[] = [];
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -4157,8 +4182,7 @@ describe("loadScoutBrokerContextResult", () => {
 
     expect(result.usedBroker).toBe(true);
     expect(result.flight?.id).toBe("flt-profile");
-    expect(requested).toContain("GET /v1/snapshot?scope=identity");
-    expect(requested).not.toContain("GET /v1/snapshot");
+    expect(requested).toEqual(["POST /v1/deliver"]);
   });
 
   test("a profile ask resolves the registered sender without re-posting the actor", async () => {
@@ -4232,12 +4256,14 @@ describe("loadScoutBrokerContextResult", () => {
 
     const result = await deliverScoutAsk({
       senderId: "operator",
+      senderResolution: "legacy",
       target: { kind: "runtime_profile", profile: "fable", projectPath: "/tmp" },
       body: "do the thing",
       currentDirectory: "/tmp",
     });
 
     expect(result.usedBroker).toBe(true);
+    expect(requested).toContain("GET /v1/snapshot?scope=identity");
     // The registered actor row satisfied sender resolution — no synthesized
     // upsert replaced its labels/metadata.
     expect(requested.some((entry) => entry === "POST /v1/actors")).toBe(false);
@@ -4264,6 +4290,7 @@ describe("scoutAskHandler preflight diagnostics", () => {
 
     const receipt = await scoutAskHandler({
       senderId: "operator",
+      senderResolution: "legacy",
       to: "agent-1",
       body: "hi",
       currentDirectory: "/tmp",
@@ -4275,19 +4302,17 @@ describe("scoutAskHandler preflight diagnostics", () => {
     expect(receipt.error?.message).toContain("safe to retry");
   });
 
-  test("a health failure still reports broker_unreachable", async () => {
+  test("a direct command transport failure remains uncertain instead of claiming preflight rejection", async () => {
     useIsolatedOpenScoutHome();
     globalThis.fetch = (async () => {
       throw new Error("connection refused");
     }) as unknown as typeof fetch;
 
-    const receipt = await scoutAskHandler({
+    await expect(scoutAskHandler({
       senderId: "operator",
       to: "agent-1",
       body: "hi",
       currentDirectory: "/tmp",
-    });
-
-    expect(receipt.error?.code).toBe("broker_unreachable");
+    })).rejects.toThrow("connection refused");
   });
 });
