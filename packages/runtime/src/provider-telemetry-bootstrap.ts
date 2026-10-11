@@ -1,5 +1,5 @@
 import type { RuntimeEnv } from "./portable-types.js";
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -106,19 +106,21 @@ async function wrapperExecTargetExists(wrapperPath: string): Promise<boolean> {
   if (paths.length > 0) return paths.every((path) => existsSync(path));
   // A bare command (`exec scout …`) only works if it resolves on PATH.
   const bare = execLine.split(/\s+/u)[0];
-  return bare ? commandOnPath(bare) : true;
+  return bare ? await commandOnPath(bare) : true;
 }
 
-function commandOnPath(command: string): boolean {
-  if (!/^[\w.+-]+$/u.test(command)) return true;
-  try {
-    return execFileSync("sh", ["-lc", `command -v ${command}`], {
+const COMMAND_PROBE_TIMEOUT_MS = 3_000;
+
+/** A login shell can stall on a slow profile, so the probe is async and bounded. */
+function commandOnPath(command: string): Promise<boolean> {
+  if (!/^[\w.+-]+$/u.test(command)) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    execFile("sh", ["-lc", `command -v ${command}`], {
       encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim().length > 0;
-  } catch {
-    return false;
-  }
+      timeout: COMMAND_PROBE_TIMEOUT_MS,
+      killSignal: "SIGKILL",
+    }, (error, stdout) => resolve(!error && stdout.trim().length > 0));
+  });
 }
 
 async function readClaudeStatuslineCommand(settingsPath: string): Promise<string | undefined> {

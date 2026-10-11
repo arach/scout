@@ -28,6 +28,7 @@ export const HARNESS_CHEAP_MODELS: Record<HarnessCompletionProvider, string> = {
 };
 
 const RUN_TIMEOUT_MS = 90_000;
+const RUN_KILL_GRACE_MS = 5_000;
 
 function findBinary(name: string): string | null {
   const dirs = [
@@ -54,19 +55,27 @@ function run(
     const child = spawn(command, args, { cwd, stdio: ["pipe", "pipe", "pipe"], env: process.env });
     let stdout = "";
     let stderr = "";
+    let timedOut = false;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    // On timeout: TERM, then KILL after a grace period, and settle only once the
+    // child has exited, so a fallback harness never runs beside this one.
     const timer = setTimeout(() => {
+      timedOut = true;
       child.kill("SIGTERM");
-      reject(new Error(`${command} timed out after ${RUN_TIMEOUT_MS / 1000}s`));
+      killTimer = setTimeout(() => child.kill("SIGKILL"), RUN_KILL_GRACE_MS);
     }, RUN_TIMEOUT_MS);
     child.stdout.on("data", (chunk) => { stdout += chunk; });
     child.stderr.on("data", (chunk) => { stderr += chunk; });
     child.on("error", (error) => {
       clearTimeout(timer);
+      clearTimeout(killTimer);
       reject(error);
     });
     child.on("close", (code) => {
       clearTimeout(timer);
-      resolve({ code, stdout, stderr });
+      clearTimeout(killTimer);
+      if (timedOut) reject(new Error(`${command} timed out after ${RUN_TIMEOUT_MS / 1000}s`));
+      else resolve({ code, stdout, stderr });
     });
     child.stdin.end(stdin);
   });
