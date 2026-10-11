@@ -4074,3 +4074,22 @@ a.s-term-topline-button {
   gap: var(--space-sm);
   white-space: nowrap;
 }
+
+/* Standalone browser workspaces give a single live terminal the available
+   viewport. The session picker opens explicitly from the shared toolbar. */
+.s-term--compact { padding: var(--space-lg); }
+.s-term--compact > .s-term-workspace { width: 100%; }
+.s-term--compact[data-terminal-tiles="1"][data-picker-open="false"] > .s-term-workspace {
+  flex: 1;
+  min-height: 360px;
+}
+.s-term--compact[data-terminal-tiles="1"][data-picker-open="false"] .s-term-workspace-grid {
+  flex: 1;
+  min-height: 0;
+  align-content: stretch;
+  grid-template-rows: minmax(0, 1fr);
+}
+.s-term--compact[data-terminal-tiles="1"][data-picker-open="false"] .s-term-workspace-tile:not(.s-term-workspace-tile--hosted) {
+  height: 100%;
+  min-height: 0;
+}

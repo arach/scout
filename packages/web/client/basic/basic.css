@@ -10,14 +10,18 @@ body,
 }
 
 .sb-shell {
-  --sb-header-height: 44px;
+  /* The full app's top row: 40px + hairline, level with the sidebar brand cell. */
+  --sb-header-height: 41px;
   display: flex;
   flex-direction: column;
   height: 100vh;
   height: 100dvh;
   min-height: 0;
+  /* The shared sidebar is fixed at the left edge; the page starts past it. */
+  padding-left: var(--sb-nav-width, 0px);
   background: var(--bg);
   color: var(--ink);
+  transition: padding-left 200ms linear;
 }
 
 /* ── Header ────────────────────────────────────────────────────────────── */
@@ -31,60 +35,6 @@ body,
   padding: 0 var(--space-lg);
   border-bottom: 1px solid var(--border);
   background: var(--bg);
-}
-
-.sb-brand {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-sm);
-  color: var(--ink);
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  letter-spacing: var(--tracking-md);
-  text-transform: uppercase;
-  text-decoration: none;
-}
-
-.sb-brand-mark {
-  width: 18px;
-  height: 18px;
-  color: var(--accent);
-}
-
-.sb-nav {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.sb-nav-item {
-  height: 28px;
-  padding: 0 var(--space-md);
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  letter-spacing: var(--tracking-md);
-  text-transform: uppercase;
-  cursor: pointer;
-}
-
-.sb-nav-item:hover {
-  color: var(--ink);
-  background: var(--sys-row-hover, color-mix(in srgb, var(--ink) 6%, transparent));
-}
-
-.sb-nav-item:focus-visible {
-  outline: 1px solid var(--accent);
-  outline-offset: 1px;
-}
-
-.sb-nav-item.is-active {
-  color: var(--ink);
-  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 .sb-status {
@@ -130,25 +80,53 @@ body,
   overflow: hidden;
 }
 
-/* Home scrolls as one page: What's moving, then Deliveries. */
-.sb-main--home {
+/* Home scrolls as one page: the cockpit, What's moving, then Deliveries. */
+.sb-main--home,
+.sb-main--dispatch {
   overflow-y: auto;
 }
 
-/* No hero above What's moving, so the page opens on it instead of on the hero's clearance. */
-.sb-main--home .s-fleet-home-inner {
-  padding-top: var(--space-3xl);
+.sb-dispatch {
+  min-height: 100%;
 }
 
-.sb-main--home .s-fleet-home-inner > .s-fleet-section:first-child,
-.sb-main--home .s-fleet-home-inner > .sys-banner + .s-fleet-section {
-  margin-top: 0;
+.sb-ops {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.sb-ops-nav {
+  display: flex;
+  gap: var(--space-sm);
+  flex: 0 0 auto;
+  padding: var(--space-sm) var(--space-lg);
+  border-bottom: 1px solid var(--border);
+}
+
+.sb-ops-nav [aria-current="page"] {
+  color: var(--ink);
+  background: var(--surface);
+  border-color: var(--accent);
+}
+
+.sb-ops-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .sb-deliveries .s-ops,
 .sb-deliveries .s-ops-body {
   display: block;
   height: auto;
+}
+
+/* On Home the ledger sits on the page's edges like every other section;
+   its rows carry the shared gutter. */
+.sb-deliveries .s-ops-body > .sys-broker-page.sys-surface-page {
+  padding: 0;
 }
 
 .sb-deliveries .dsp-view-note--lead {
@@ -158,7 +136,9 @@ body,
 /* Delivery detail spans the viewport under the header, not the ledger it
    was opened from (the ledger scrolls with Home). */
 .sb-deliveries .s-slide-backdrop,
-.sb-deliveries .s-slide {
+.sb-deliveries .s-slide,
+.sb-dispatch .s-slide-backdrop,
+.sb-dispatch .s-slide {
   position: fixed;
   top: var(--sb-header-height);
 }
@@ -297,7 +277,6 @@ body,
     padding: 0 var(--space-md);
   }
 
-  .sb-brand span,
   .sb-status-meta {
     display: none;
   }
@@ -379,15 +358,22 @@ body,
   display: flex;
   flex-direction: column;
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  margin-bottom: var(--space-2xl);
+  border-radius: var(--radius-xl);
+  background: color-mix(in srgb, var(--surface) 80%, var(--bg));
+  overflow: hidden;
+}
+
+/* Under the cockpit cards it reads as one more card in that group: the
+   same step as the cards' own gap, not the header's bottom margin. */
+.s-fleet-home-inner > .hd + .sb-next {
+  margin-top: calc(var(--space-md) - var(--space-xl));
 }
 
 .sb-next-row {
   display: flex;
   align-items: center;
   gap: var(--space-lg);
-  padding: var(--space-md) var(--space-lg);
+  padding: var(--space-md) var(--home-gutter, var(--space-lg));
 }
 
 .sb-next-row + .sb-next-row {
@@ -417,6 +403,24 @@ body,
   color: var(--red);
 }
 
-.sb-main--home .s-fleet-home-inner > .sb-next + .s-fleet-section {
-  margin-top: 0;
+/* The terminal's shared header slots keep its canvas below one control row. */
+.sb-terminal-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 2fr) auto;
+  align-items: center;
+  gap: var(--space-lg);
+  flex: none;
+  padding: var(--space-sm) var(--space-lg);
+  border-bottom: 1px solid var(--border);
+}
+
+.sb-terminal-toolbar > div { min-width: 0; }
+.sb-terminal-toolbar .s-term-desks { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.sb-terminal-toolbar .s-term-desk { max-width: 100%; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; }
+.sb-terminal-toolbar .s-term-topfind { width: 100%; }
+
+@media (max-width: 760px) {
+  .sb-terminal-toolbar { grid-template-columns: minmax(0, 1fr) auto; }
+  .sb-terminal-toolbar > :nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
+  .sb-terminal-toolbar > :nth-child(3) { grid-column: 2; grid-row: 1; }
 }

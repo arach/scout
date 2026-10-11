@@ -34,7 +34,7 @@ test("the full-app download keeps runtime portraits, eye patches, pose frames an
   }
 });
 
-test("basic client check passes a Home/DMs/Tail build and names each full-app leak", () => {
+test("basic client check passes a build with every area in the nav and names each full-app view leak", () => {
   const root = mkdtempSync(join(tmpdir(), "scout-basic-client-"));
   const write = (file, text) => {
     mkdirSync(dirname(join(root, file)), { recursive: true });
@@ -42,14 +42,15 @@ test("basic client check passes a Home/DMs/Tail build and names each full-app le
   };
   try {
     write("index.html", '<script type="module" src="/assets/index-abc.js"></script>');
-    write("assets/index-abc.js", "export const nav=['Home','DMs','Tail'];");
+    write("assets/index-abc.js", "export const nav=['Home','Chat','Terminals','Mission Control','Host Advisor'];");
+    write("assets/Terminal-abc.js", "import 'xterm';");
     write("crew/sprout-bust.webp", "img");
     assert.deepEqual(findBasicClientLeaks(root), []);
 
-    write("assets/ops-def.js", "const title='Mission Control';");
+    write("assets/ops-def.js", "const empty='No logs on the wire';");
     write("characters/sage/sage.glb", "glb");
     assert.deepEqual(findBasicClientLeaks(root).sort(), [
-      'assets/ops-def.js: "Mission Control"',
+      'assets/ops-def.js: "No logs on the wire"',
       "characters/: ops 3D studio assets",
     ]);
   } finally {

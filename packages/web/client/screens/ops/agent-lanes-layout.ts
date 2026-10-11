@@ -39,8 +39,9 @@ export function normalizeAgentLanesGridColumns(
 
 export function agentLanesLayoutOptions(
   embedded: boolean,
+  includeFloor = true,
 ): ReadonlyArray<{ key: AgentLanesLayoutMode; label: string }> {
-  return embedded
+  return embedded || !includeFloor
     ? AGENT_LANES_LAYOUT_OPTIONS.filter((option) => option.key !== "floor")
     : AGENT_LANES_LAYOUT_OPTIONS;
 }

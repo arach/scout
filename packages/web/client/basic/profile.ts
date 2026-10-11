@@ -7,18 +7,31 @@ import { normalizeTimestampMs } from "../lib/time.ts";
 /** Compile-time npm surface selection; the ordinary web build remains full. */
 export const BASIC_WEB = import.meta.env.VITE_SCOUT_WEB_PROFILE === "basic";
 
+/**
+ * The sidebar areas the basic build serves, in the full app's own order. It uses
+ * the same sidebar as the full web app and the Mac app; adding a surface to it
+ * is adding its area here.
+ */
+export const SOLO_SIDEBAR_AREAS = ["home", "chat", "sessions", "dispatch", "search", "ops", "settings"] as const;
+
+/** Where the basic build's areas open: Ops leads with Lanes, Tail one link away. */
+export const SOLO_AREA_ROUTES = { ops: { view: "ops", mode: "lanes" } } as const satisfies Partial<Record<(typeof SOLO_SIDEBAR_AREAS)[number], Route>>;
+
 /** The destinations the basic web client carries. */
-export type BasicArea = "home" | "dms" | "tail" | "settings";
+export type BasicArea = "home" | "dms" | "terminal" | "dispatch" | "search" | "ops" | "settings";
 
 /**
- * Folds any full-app route onto the basic surface. Home, DMs, Tail and
- * Settings keep their own state; agent routes become that agent's DM, session
- * and follow links become a filtered Tail, and everything else lands on Home.
+ * Folds any full-app route onto the basic surface. Home, DMs, Terminals,
+ * Dispatch, Search, Ops (Lanes and Tail) and Settings keep their own state;
+ * agent routes become that agent's DM and session links become a filtered
+ * Tail. Work and follow links retain their pages; other routes land on Home.
  */
 export function basicRoute(route: Route): Route {
   switch (route.view) {
     case "inbox":
       return { view: "inbox" };
+    case "work":
+      return route;
     case "broker":
       return {
         view: "broker",
@@ -38,8 +51,11 @@ export function basicRoute(route: Route): Route {
     case "agent-info":
       return { view: "conversation", conversationId: route.conversationId };
     case "agents-v2":
-    case "terminal":
       return basicAgentRoute(route.agentId);
+    case "terminal":
+      return route;
+    case "search":
+      return route;
     case "sessions":
       return {
         view: "ops",
@@ -48,21 +64,13 @@ export function basicRoute(route: Route): Route {
         ...(route.flightId ? { flightId: route.flightId } : {}),
       };
     case "follow":
-      return {
-        view: "ops",
-        mode: "tail",
-        ...(route.flightId ? { flightId: route.flightId } : {}),
-        ...(route.invocationId ? { invocationId: route.invocationId } : {}),
-        ...(route.conversationId ? { conversationId: route.conversationId } : {}),
-        ...(route.workId ? { workId: route.workId } : {}),
-        ...(route.sessionId ? { sessionId: route.sessionId } : {}),
-        ...(route.targetAgentId ? { targetAgentId: route.targetAgentId } : {}),
-      };
+      return route;
     case "settings":
       return basicSettingsRoute(route);
     case "ops":
-      // Tail is the only operator surface basic carries; the rest go Home.
-      return route.mode === "tail" ? { view: "ops", mode: "tail", ...pickFollow(route) } : { view: "inbox" };
+      // Ops is Lanes, with Tail beside it; the rest of Ops is the full app's.
+      if (route.mode === "tail") return { view: "ops", mode: "tail", ...pickFollow(route) };
+      return { view: "ops", mode: "lanes" };
     default:
       return { view: "inbox" };
   }
@@ -70,7 +78,7 @@ export function basicRoute(route: Route): Route {
 
 /**
  * Settings is the same page set the Mac app embeds from basic (`/embed/settings`),
- * so Operator, Devices and Solo Pro are reachable from the browser too. Agent
+ * so Operator, Devices and Scout Pro are reachable from the browser too. Agent
  * configuration and the legacy pairing page are full-app screens.
  */
 function basicSettingsRoute(route: Extract<Route, { view: "settings" }>): Route {
@@ -107,8 +115,14 @@ export function basicArea(route: Route): BasicArea {
     case "messages":
     case "conversation":
       return "dms";
+    case "terminal":
+      return "terminal";
+    case "broker":
+      return "dispatch";
+    case "search":
+      return "search";
     case "ops":
-      return "tail";
+      return "ops";
     case "settings":
       return "settings";
     default:

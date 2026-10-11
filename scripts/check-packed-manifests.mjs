@@ -195,7 +195,7 @@ export function findBasicPackedClientFailures(entries, readEntry) {
   for (const script of scripts) {
     const source = readEntry(script);
     if (source.includes("sb-shell")) hasBasicShell = true;
-    for (const marker of ["Mission Control", "Host Advisor", "Forward to new task", "WebGLRenderer", "xterm", "createScoutApp"]) {
+    for (const marker of ["No logs on the wire", "Nothing unattended", "Forward to new task", "WebGLRenderer", "createScoutApp"]) {
       if (source.includes(marker)) failures.push(`${script}: excluded full-app marker ${JSON.stringify(marker)}`);
     }
   }

@@ -1133,6 +1133,12 @@ test("packed basic client rejects full-app scripts, missing shell, and source en
   const files = new Map([[index, '<script src="/assets/basic.js"></script>'], [script, 'const shell = "sb-shell";']]);
   const audit = () => findBasicPackedClientFailures([...files.keys()], (entry) => files.get(entry));
   assert.deepEqual(audit(), []);
+  files.set(script, 'const shell = "sb-shell"; const nav = ["Mission Control", "Host Advisor"]; const terminal = "xterm";');
+  assert.deepEqual(audit(), []);
+  for (const marker of ["No logs on the wire", "Nothing unattended", "Forward to new task", "createScoutApp"]) {
+    files.set(script, `const shell = "sb-shell"; const view = ${JSON.stringify(marker)};`);
+    assert.match(audit().join("\n"), /excluded full-app marker/);
+  }
   files.set(script, 'const shell = "sb-shell"; const renderer = "WebGLRenderer";');
   assert.match(audit().join("\n"), /excluded full-app marker.*WebGLRenderer/);
   files.set(script, 'const fullApp = true;');

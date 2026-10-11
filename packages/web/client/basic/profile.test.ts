@@ -32,6 +32,14 @@ function session(overrides: Partial<SessionEntry> & { id: string }): SessionEntr
 }
 
 describe("basic route policy", () => {
+  test("shared work tickets and follow intent survive basic routing", () => {
+    const work: Route = { view: "work", workId: "work-1", machineId: "mini" };
+    const follow: Route = { view: "follow", workId: "work-1", flightId: "flt-1" };
+    expect(basicRoute(work)).toEqual(work);
+    expect(basicRoute(follow)).toEqual(follow);
+    expect(basicRoute({ ...follow, preferredView: "tail" })).toEqual({ ...follow, preferredView: "tail" });
+    expect(basicCanonicalHref("/work/work-1", "", "")).toBeNull();
+  });
   test("Home, DMs and Tail keep their own state", () => {
     expect(basicRoute({ view: "inbox" })).toEqual({ view: "inbox" });
     expect(basicRoute({ view: "broker", filter: "failed", attemptId: "att-1" } as Route)).toEqual({
@@ -57,10 +65,6 @@ describe("basic route policy", () => {
       view: "messages",
       agentId: "agent-a",
     });
-    expect(basicRoute({ view: "terminal", agentId: "agent-a" } as Route)).toEqual({
-      view: "messages",
-      agentId: "agent-a",
-    });
     expect(basicRoute({ view: "messages", conversationId: "dm-1" })).toEqual({
       view: "conversation",
       conversationId: "dm-1",
@@ -81,11 +85,19 @@ describe("basic route policy", () => {
     });
   });
 
+  test("Terminals, Search and Lanes are carried as they are", () => {
+    expect(basicRoute({ view: "terminal", agentId: "agent-a" } as Route)).toEqual({ view: "terminal", agentId: "agent-a" });
+    expect(basicRoute({ view: "search" })).toEqual({ view: "search" });
+    expect(basicRoute({ view: "ops", mode: "lanes" })).toEqual({ view: "ops", mode: "lanes" });
+  });
+
+  test("the rest of Ops opens Lanes", () => {
+    expect(basicRoute({ view: "ops", mode: "mission" })).toEqual({ view: "ops", mode: "lanes" });
+    expect(basicRoute({ view: "ops", mode: "advisor" })).toEqual({ view: "ops", mode: "lanes" });
+  });
+
   test("full-app-only surfaces fall back to Home", () => {
     for (const route of [
-      { view: "ops", mode: "advisor" },
-      { view: "ops", mode: "issues" },
-      { view: "search" },
       { view: "mesh" },
       { view: "briefings" },
     ] as Route[]) {
@@ -93,7 +105,7 @@ describe("basic route policy", () => {
     }
   });
 
-  test("Settings is carried, so Solo Pro and Operator are reachable from the browser", () => {
+  test("Settings is carried, so Scout Pro and Operator are reachable from the browser", () => {
     expect(basicRoute({ view: "settings" })).toEqual({ view: "settings" });
     expect(basicRoute({ view: "settings", section: "pro" })).toEqual({ view: "settings", section: "pro" });
     expect(basicRoute({ view: "settings", section: "operator" })).toEqual({ view: "settings", section: "operator" });
@@ -111,18 +123,22 @@ describe("basic route policy", () => {
 
   test("areas map to the nav destinations", () => {
     expect(basicArea({ view: "inbox" })).toBe("home");
-    expect(basicArea({ view: "broker" } as Route)).toBe("home");
+    expect(basicArea({ view: "broker" } as Route)).toBe("dispatch");
+    expect(basicArea({ view: "terminal" } as Route)).toBe("terminal");
+    expect(basicArea({ view: "search" })).toBe("search");
+    expect(basicArea({ view: "ops", mode: "lanes" })).toBe("ops");
     expect(basicArea({ view: "messages" })).toBe("dms");
     expect(basicArea({ view: "conversation", conversationId: "x" })).toBe("dms");
-    expect(basicArea({ view: "ops", mode: "tail" })).toBe("tail");
+    expect(basicArea({ view: "ops", mode: "tail" })).toBe("ops");
   });
 
   test("canonical hrefs rewrite excluded paths and keep basic ones", () => {
     expect(basicCanonicalHref("/", "", "")).toBeNull();
     expect(basicCanonicalHref(routePath({ view: "ops", mode: "tail" }), "", "")).toBeNull();
     expect(basicCanonicalHref(routePath({ view: "broker", filter: "failed" } as Route), "", "")).toBeNull();
-    expect(basicCanonicalHref(routePath({ view: "ops", mode: "advisor" }), "", "")).toBe("/");
-    expect(basicCanonicalHref(routePath({ view: "search" }), "", "x")).toBe("/#x");
+    expect(basicCanonicalHref(routePath({ view: "ops", mode: "advisor" }), "", "")).toBe("/ops/lanes");
+    expect(basicCanonicalHref(routePath({ view: "search" }), "", "x")).toBeNull();
+    expect(basicCanonicalHref(routePath({ view: "mesh" }), "", "x")).toBe("/#x");
     expect(basicCanonicalHref(routePath({ view: "messages", conversationId: "dm-1" }), "", "")).toBe(
       routePath({ view: "conversation", conversationId: "dm-1" }),
     );

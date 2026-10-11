@@ -1,6 +1,9 @@
 import "./agent-lanes.css";
+import { BASIC_WEB } from "../../basic/profile.ts";
 
 import {
+  lazy,
+  Suspense,
   useCallback,
   useContext,
   useEffect,
@@ -34,7 +37,6 @@ import type { TerminalSessionRecord } from "@openscout/protocol";
 import { AgentAvatar } from "../../components/AgentAvatar.tsx";
 import { SessionObserve } from "../sessions/SessionObserve.tsx";
 import { type AgentLaneSize, readAgentLaneSize } from "./agent-lane-size.ts";
-import { AgentFloorView } from "./AgentFloorView.tsx";
 import {
   AgentLanesLoadingSheet,
   AgentLanesPreflightDeck,
@@ -101,6 +103,9 @@ import {
   type AgentLanesLayoutMode,
 } from "./agent-lanes-layout.ts";
 import { shouldBlockLaneDeckStartup } from "./lanes-preflight.ts";
+
+// Keep the full floor and its 3D studio outside the basic npm client graph.
+const AgentFloorView = BASIC_WEB ? null : lazy(() => import("./AgentFloorView.tsx").then((module) => ({ default: module.AgentFloorView })));
 
 const LANE_HORIZON_STORAGE_KEY = "openscout:agent-lanes-horizon";
 const LANE_LAYOUT_STORAGE_KEY = "openscout:agent-lanes-layout";
@@ -1032,7 +1037,7 @@ export function AgentLanesView({
         </div>
         <div className="s-agent-lanes-bar-controls">
           <div className="s-agent-lanes-layouts" role="group" aria-label="Lane layout">
-            {agentLanesLayoutOptions(embedded).map((option) => (
+            {agentLanesLayoutOptions(embedded, !BASIC_WEB).map((option) => (
               <button
                 key={option.key}
                 type="button"
@@ -1215,8 +1220,10 @@ export function AgentLanesView({
             onRetry={() => void retryInitialLoad()}
           />
         )
-      ) : floorMode ? (
-        <AgentFloorView lanes={filteredLanes} now={now} onOpenTrace={openFloorTrace} railLedger operatorName={laneOperatorName} />
+      ) : floorMode && AgentFloorView ? (
+        <Suspense fallback={null}>
+          <AgentFloorView lanes={filteredLanes} now={now} onOpenTrace={openFloorTrace} railLedger operatorName={laneOperatorName} />
+        </Suspense>
       ) : gridMode ? (
         <div
           className="s-agent-lanes-grid"

@@ -26,7 +26,8 @@
  * - Top edge: full-height sidebar mode uses --scout-sidebar-top: 0 (brand at
  *   window top with titleBarInset padding). Legacy dual-chrome (if any) may
  *   still pass 48px. Brand is clickable (static logo — never a toggle).
- * - Bottom edge: bottom: 28px for StatusBar clearance (not inset-y-0 / h-svh).
+ * - Bottom edge: bottom: 28px for StatusBar clearance (not inset-y-0 / h-svh);
+ *   shells without a StatusBar pass --scout-sidebar-bottom: 0px.
  * - Shell owns leftInset / content push; no desktop gap spacer is rendered.
  * - During live resize, shell sets data-sidebar-resizing / data-scout-sidebar-resizing
  *   to suppress width transitions so the pane tracks the pointer.
@@ -193,7 +194,7 @@ function Sidebar({
         data-side={side}
         className={cn(
           "pointer-events-auto fixed z-40 flex w-(--sidebar-width) flex-col transition-[left,right,width] duration-200 ease-linear",
-          "top-[var(--scout-sidebar-top,0px)] bottom-[28px]",
+          "top-[var(--scout-sidebar-top,0px)] bottom-[var(--scout-sidebar-bottom,28px)]",
           "data-[side=left]:left-0 data-[side=right]:right-0",
           variant === "floating" || variant === "inset"
             ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+1rem)]"
