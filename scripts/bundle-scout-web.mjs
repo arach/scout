@@ -107,7 +107,7 @@ export function bundleScoutTerminalRelayNode(repoRoot, outfile) {
 
 /**
  * Run the basic Vite client build in packages/web and copy dist/basic-client →
- * targetClientDir. The npm package ships Home, DMs and Tail only; the repo's
+ * targetClientDir. The npm package ships the basic areas only; the repo's
  * own web server keeps serving the full dist/client.
  * @param {string} repoRoot
  * @param {string} targetClientDir e.g. packages/cli/dist/control-plane-client
@@ -146,13 +146,15 @@ export function buildControlPlaneClientAndCopy(repoRoot, targetClientDir) {
  * Strings only full-app surfaces carry. Each one is present in the full
  * dist/client and absent from dist/basic-client; finding one in the basic
  * artifact means the profile flag stopped pruning that graph.
+ *
+ * Markers come from inside the views, not their nav labels: the basic sidebar
+ * shares area metadata, so names like "Mission Control" legitimately ship. Terminals is a basic area, so xterm is allowed.
  */
 export const BASIC_CLIENT_FORBIDDEN_MARKERS = [
-  "Mission Control",
-  "Host Advisor",
+  "No logs on the wire", // Ops › Mission Control view
+  "Nothing unattended", // Ops › Host Advisor view
   "Forward to new task",
-  "WebGLRenderer",
-  "xterm",
+  "WebGLRenderer", // 3D character studio
   "createScoutApp",
 ];
 

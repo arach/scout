@@ -1,8 +1,9 @@
 /**
  * Entry for the basic web client that ships in the `@openscout/scout` npm
- * package: Home, DMs and Tail over the local broker. It shares the full app's
- * provider, theme and screens, but mounts none of the full shell — no Hudson
- * panel frame, pane resolver, terminal, voice or ops surfaces.
+ * package. Shared navigation opens Home, Chat, Terminals, Broker, Search,
+ * Ops (Lanes and Tail), and Settings over the local broker. It shares the
+ * provider, theme and screens without the full shell's pane orchestration,
+ * voice workspace, or 3D floor/studio.
  */
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";

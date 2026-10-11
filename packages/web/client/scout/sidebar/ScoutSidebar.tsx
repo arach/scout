@@ -77,6 +77,7 @@ function AreaMenuItems({
   route,
   navigate,
   opsControlEnabled,
+  subNav: showSubNav,
   presentation,
 }: {
   areas: readonly PrimaryArea[];
@@ -85,11 +86,12 @@ function AreaMenuItems({
   route: Route;
   navigate: (route: Route) => void;
   opsControlEnabled: boolean;
+  subNav: boolean;
   presentation: "scout" | "slack";
 }) {
   const { state } = useSidebar();
   const expanded = state === "expanded";
-  const subNav = sidebarSubNavForRoute(route, { opsControlEnabled });
+  const subNav = showSubNav ? sidebarSubNavForRoute(route, { opsControlEnabled }) : null;
 
   return (
     <SidebarMenu>
@@ -156,6 +158,10 @@ function AreaMenuItems({
 export function ScoutSidebar({
   brandLabel = "Scout",
   presentation = "scout",
+  areas,
+  areaRoutes,
+  subNav = true,
+  onNewTask,
 }: {
   /**
    * Fixed product brand (usually app.name / "Scout"). Scope's active section
@@ -163,17 +169,24 @@ export function ScoutSidebar({
    */
   brandLabel?: string;
   presentation?: "scout" | "slack";
+  /** Limit this shared sidebar to destinations carried by the current build. */
+  areas?: readonly PrimaryAreaId[];
+  /** Override an area entry route when a build serves a subset of its pages. */
+  areaRoutes?: Partial<Record<PrimaryAreaId, Route>>;
+  subNav?: boolean;
+  onNewTask?: () => void;
 }) {
   const { route, navigate, openSettings, openContextCapture } = useScout();
   const { titleBarInset, dragRegionProps, onInteractiveMouseDown } = usePlatform();
   const opsControlEnabled = useOptionalFlag("ops.control", true);
   const model = useSidebarModel(route);
   const activeAreaId = primaryAreaForRoute(route);
-  const navigateAreas = PRIMARY_AREAS.filter((a) => a.section === "navigate");
+  const served = (area: PrimaryArea) => !areas || areas.includes(area.id);
+  const navigateAreas = PRIMARY_AREAS.filter((a) => a.section === "navigate" && served(a));
   // SCO-088c §2: Settings is pinned at the sidebar bottom (see footer), so it is
   // removed from the SYSTEM nav list — it must live exactly once. SYSTEM keeps Ops.
   const systemAreas = PRIMARY_AREAS.filter(
-    (a) => a.section === "system" && a.id !== "settings",
+    (a) => a.section === "system" && a.id !== "settings" && served(a),
   );
   const settingsArea = getPrimaryArea("settings");
   const SettingsIcon = settingsArea.icon;
@@ -181,7 +194,7 @@ export function ScoutSidebar({
 
   const goHome = () =>
     navigate(presentation === "slack" ? { view: "messages" } : { view: "inbox" });
-  const startNewTask = () => openContextCapture();
+  const startNewTask = () => (onNewTask ? onNewTask() : openContextCapture());
   const goArea = (id: PrimaryAreaId) => {
     if (presentation === "slack" && id === "home") {
       if (activeAreaId === "chat") return;
@@ -195,7 +208,7 @@ export function ScoutSidebar({
     }
     // Stay put if already in the area (preserve deep links).
     if (primaryAreaForRoute(route) === id) return;
-    navigate(defaultRouteForArea(id, { opsControlEnabled }));
+    navigate(areaRoutes?.[id] ?? defaultRouteForArea(id, { opsControlEnabled }));
   };
 
   return (
@@ -334,6 +347,7 @@ export function ScoutSidebar({
                   route={route}
                   navigate={navigate}
                   opsControlEnabled={opsControlEnabled}
+                  subNav={subNav}
                   presentation={presentation}
                 />
               </SidebarGroupContent>
@@ -350,6 +364,7 @@ export function ScoutSidebar({
                   route={route}
                   navigate={navigate}
                   opsControlEnabled={opsControlEnabled}
+                  subNav={subNav}
                   presentation={presentation}
                 />
               </SidebarGroupContent>

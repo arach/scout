@@ -481,6 +481,18 @@ records local-signed artifacts, a blocked first-run preservation check, and
 `latest` held at 0.3.2. Do not relabel/promote those historical candidates.
 A new dev channel does not approve their onboarding or waive that blocker.
 
+### Shared navigation in 0.3.6-dev.2
+
+The basic npm client uses the shared sidebar for Home, Chat, Terminals, Broker,
+Search, Ops, and Settings. Ops includes Lanes and Tail; full-shell workspaces
+and the 3D floor/studio remain excluded. Work and follow links retain their
+routes. Terminal controls share one toolbar; a single shell fills the browser
+workspace and existing sessions are available through Add existing. The package
+audit checks full-view implementation markers rather than
+shared navigation labels, and allows the terminal client required by Terminals.
+Linux and macOS npm installs serve the same basic web bundle; a running server
+must be restarted after an upgrade to serve the new installed assets.
+
 ### Repeatable cut
 
 Use a clean public checkout after this workflow change has merged. Choose an

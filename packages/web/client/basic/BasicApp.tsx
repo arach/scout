@@ -1,16 +1,22 @@
-import { Component, lazy, Suspense, useEffect, useState, type ErrorInfo, type ReactNode } from "react";
+import { Component, lazy, Suspense, useEffect, useState, type CSSProperties, type ErrorInfo, type ReactNode } from "react";
 
-import { ScoutMark } from "../components/ScoutMark.tsx";
+import { RailToggle } from "../components/RailToggle.tsx";
+import { SidebarProvider } from "../components/ui/sidebar.tsx";
+import { SCOUT_TERMINAL_HEADER_SLOT_IDS } from "../screens/terminal/TerminalHeaderMount.tsx";
 import { api } from "../lib/api.ts";
-import type { Route } from "../lib/types.ts";
 import { useScout } from "../scout/Provider.tsx";
 import { OnboardingTakeover } from "../scout/takeover/OnboardingTakeover.tsx";
 import { onboardingTakeoverActive } from "../scout/takeover/onboarding-gate.ts";
+import { ScoutSidebar } from "../scout/sidebar/ScoutSidebar.tsx";
+import {
+  SIDEBAR_COLLAPSED_WIDTH,
+  useSidebarCollapse,
+} from "../scout/sidebar/useSidebarCollapse.ts";
 import { BasicDms } from "./BasicDms.tsx";
-import { BasicHome } from "./BasicHome.tsx";
+import { BasicDispatch, BasicHome } from "./BasicHome.tsx";
 import { BasicNextStep } from "./BasicNextStep.tsx";
 import { BasicTail } from "./BasicTail.tsx";
-import { basicArea, type BasicArea } from "./profile.ts";
+import { basicArea, SOLO_AREA_ROUTES, SOLO_SIDEBAR_AREAS } from "./profile.ts";
 
 /** The page set the Mac app embeds from basic; loaded only when opened. */
 const BasicSettings = lazy(async () => {
@@ -32,12 +38,18 @@ const BasicSettings = lazy(async () => {
   return { default: BasicSettings };
 });
 
-const NAV: Array<{ area: BasicArea; label: string; route: Route }> = [
-  { area: "home", label: "Home", route: { view: "inbox" } },
-  { area: "dms", label: "DMs", route: { view: "messages" } },
-  { area: "tail", label: "Tail", route: { view: "ops", mode: "tail" } },
-  { area: "settings", label: "Settings", route: { view: "settings" } },
-];
+const TerminalContent = lazy(() => import("../screens/terminal/Terminal.tsx").then((module) => ({ default: module.TerminalContent })));
+const SearchContent = lazy(() => import("../screens/search/content.tsx").then((module) => ({ default: module.SearchContent })));
+const BasicLanes = lazy(async () => {
+  const { AgentLanesView } = await import("../screens/ops/AgentLanesView.tsx");
+  function BasicLanes() {
+    const { agents, navigate } = useScout();
+    return <AgentLanesView navigate={navigate} agents={agents} />;
+  }
+  return { default: BasicLanes };
+});
+const WorkDetailScreen = lazy(() => import("../screens/work/WorkDetailScreen.tsx").then((module) => ({ default: module.WorkDetailScreen })));
+const FollowScreen = lazy(() => import("../screens/follow/FollowScreen.tsx").then((module) => ({ default: module.FollowScreen })));
 
 export function BasicApp() {
   const { route, navigate, onboarding, onboardingSkipped } = useScout();
@@ -45,46 +57,97 @@ export function BasicApp() {
   // Same gate as the full shell's takeover slot: first run owns the page
   // until it's finished or set aside ("Set up later" stays on every step).
   const takeover = onboardingTakeoverActive(onboarding, onboardingSkipped) === true;
+  const viewportWidth = useViewportWidth();
+  // The full app's sidebar, state and widths; the basic build just serves fewer areas.
+  const sidebar = useSidebarCollapse("scout-solo", viewportWidth, SIDEBAR_COLLAPSED_WIDTH);
+  const navWidth = takeover ? 0 : sidebar.width;
+  useSidebarChrome(!takeover);
 
   return (
-    <div className="sb-shell" data-scout-theme>
+    <div
+      className="sb-shell"
+      data-scout-theme
+      style={{ "--sb-nav-width": `${navWidth}px` } as CSSProperties}
+    >
+      {!takeover && (
+        <>
+          <SidebarProvider
+            open={!sidebar.effectiveCollapsed}
+            onOpenChange={(open) => sidebar.setCollapsed(!open)}
+            style={
+              {
+                "--sidebar-width": `${sidebar.expandedWidth}px`,
+                "--sidebar-width-icon": `${SIDEBAR_COLLAPSED_WIDTH}px`,
+                "--scout-sidebar-top": "0px",
+                "--scout-sidebar-bottom": "0px",
+              } as CSSProperties
+            }
+          >
+            <ScoutSidebar
+              areas={SOLO_SIDEBAR_AREAS}
+              areaRoutes={SOLO_AREA_ROUTES}
+              subNav={false}
+              onNewTask={() => navigate({ view: "messages" })}
+            />
+          </SidebarProvider>
+
+        </>
+      )}
       <header className="sb-header">
-        <a
-          className="sb-brand"
-          href="/"
-          onClick={(event) => {
-            if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
-            event.preventDefault();
-            navigate({ view: "inbox" });
-          }}
-        >
-          <ScoutMark className="sb-brand-mark" />
-          <span>Scout</span>
-        </a>
-        {!takeover && <nav className="sb-nav" aria-label="Scout">
-          {NAV.map((item) => (
-            <button
-              key={item.area}
-              type="button"
-              className={`sb-nav-item${area === item.area ? " is-active" : ""}`}
-              aria-current={area === item.area ? "page" : undefined}
-              onClick={() => navigate(item.route)}
-            >
-              {item.label}
-            </button>
-          ))}
-        </nav>}
+        {!takeover && (
+          <RailToggle
+            side="left"
+            collapsed={sidebar.effectiveCollapsed}
+            label="Sidebar"
+            onToggle={sidebar.toggleCollapsed}
+          />
+        )}
         <BrokerStatus />
       </header>
+      {!takeover && area === "terminal" && (
+        <div className="sb-terminal-toolbar" aria-label="Terminal controls">
+          <div id={SCOUT_TERMINAL_HEADER_SLOT_IDS.crumb} />
+          <div id={SCOUT_TERMINAL_HEADER_SLOT_IDS.search} />
+          <div id={SCOUT_TERMINAL_HEADER_SLOT_IDS.actions} />
+        </div>
+      )}
       {takeover ? (
         <main className="sb-main sb-main--setup" aria-label="First-run setup">
           <OnboardingTakeover />
         </main>
       ) : (
         <main className={`sb-main sb-main--${area}`}>
-          {area === "home" && <BasicHome lead={<BasicNextStep />} />}
+          {route.view === "work" ? <Suspense fallback={null}><WorkDetailScreen key={route.workId} workId={route.workId} navigate={navigate} /></Suspense>
+            : route.view === "follow" ? <Suspense fallback={null}><FollowScreen route={route} navigate={navigate} /></Suspense>
+            : area === "home" && <BasicHome lead={<BasicNextStep />} deliveries={false} />}
           {area === "dms" && <BasicDms />}
-          {area === "tail" && <BasicTail />}
+          {area === "terminal" && route.view === "terminal" && (
+            <Suspense fallback={null}><TerminalContent route={route} navigate={navigate} compact /></Suspense>
+          )}
+          {area === "dispatch" && <BasicDispatch />}
+          {area === "search" && <Suspense fallback={null}><SearchContent route={route} navigate={navigate} /></Suspense>}
+          {area === "ops" && (
+            <div className="sb-ops">
+              <nav className="sb-ops-nav" aria-label="Operations views">
+                {(["lanes", "tail"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    className="btn"
+                    aria-current={route.view === "ops" && route.mode === mode ? "page" : undefined}
+                    onClick={() => navigate({ view: "ops", mode })}
+                  >
+                    {mode === "lanes" ? "Lanes" : "Tail"}
+                  </button>
+                ))}
+              </nav>
+              <div className="sb-ops-body">
+                {route.view === "ops" && route.mode === "tail"
+                  ? <BasicTail />
+                  : <Suspense fallback={null}><BasicLanes /></Suspense>}
+              </div>
+            </div>
+          )}
           {area === "settings" && (
             <Suspense fallback={null}>
               <BasicSettings />
@@ -94,6 +157,25 @@ export function BasicApp() {
       )}
     </div>
   );
+}
+
+/** The full shell's sidebar chrome rules (brand band, rail cells) key off this. */
+function useSidebarChrome(active: boolean): void {
+  useEffect(() => {
+    if (!active) return;
+    document.documentElement.setAttribute("data-scout-sidebar-chrome", "");
+    return () => document.documentElement.removeAttribute("data-scout-sidebar-chrome");
+  }, [active]);
+}
+
+function useViewportWidth(): number {
+  const [width, setWidth] = useState(() => (typeof window !== "undefined" ? window.innerWidth : 1280));
+  useEffect(() => {
+    const onResize = () => setWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return width;
 }
 
 type BrokerHealth = { reachable: boolean; ok: boolean; error: string | null };

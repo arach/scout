@@ -18,6 +18,10 @@ describe("agent lanes layout", () => {
     expect(normalizeAgentLanesLayoutMode("unknown")).toBe("lanes");
   });
 
+  it("hides Floor when the build does not carry its route", () => {
+    expect(agentLanesLayoutOptions(false, false).map((option) => option.key)).toEqual(["lanes", "grid"]);
+  });
+
   it("normalizes grid column choices", () => {
     expect(normalizeAgentLanesGridColumns("4")).toBe("4");
     expect(normalizeAgentLanesGridColumns("5")).toBe("auto");

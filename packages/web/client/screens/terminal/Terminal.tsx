@@ -196,6 +196,8 @@ type ScoutTerminalRelayOptions = Omit<HudsonTerminalRelayOptions, "backend"> & {
 export type TerminalContentProps = {
   route: TerminalRoute;
   navigate: TerminalNavigate;
+  /** Fit standalone browser workspaces to the viewport, with an optional picker. */
+  compact?: boolean;
 };
 
 /** @deprecated Prefer {@link TerminalContent} with a terminal route. */
@@ -1364,7 +1366,7 @@ function openTerminalRouteExternally(route: TerminalRoute, navigate: TerminalNav
   window.open(absoluteRouteUrl(route), "_blank", "noopener,noreferrer");
 }
 
-function TerminalHome({ navigate }: { navigate: TerminalNavigate }) {
+function TerminalHome({ navigate, compact = false }: { navigate: TerminalNavigate; compact?: boolean }) {
   const { agents } = useScout();
   const showContextMenu = useContextMenu();
   const { hosts: terminalHosts } = useTerminalHosts();
@@ -1397,6 +1399,7 @@ function TerminalHome({ navigate }: { navigate: TerminalNavigate }) {
   const [state, setState] = useState<TerminalSessionsState>({ state: "loading", sessions: [] });
   const [workspaceReload, setWorkspaceReload] = useState(0);
   const [pickerQuery, setPickerQuery] = useState("");
+  const [pickerExpanded, setPickerExpanded] = useState(!compact);
   const [pickerTier, setPickerTier] = useState<TerminalPickerTier>("all");
   const pickerFindRef = useRef<HTMLInputElement | null>(null);
   const clearPickerQuery = useCallback(() => {
@@ -2263,6 +2266,20 @@ function TerminalHome({ navigate }: { navigate: TerminalNavigate }) {
             </>
           ) : (
             <>
+              {compact && (
+                <button
+                  type="button"
+                  className="s-term-topline-button"
+                  aria-expanded={pickerExpanded || pickerSearching || tiles.length === 0}
+                  aria-controls="terminal-workspace-picker"
+                  onClick={() => {
+                    clearPickerQuery();
+                    setPickerExpanded((open) => !open);
+                  }}
+                >
+                  Add existing
+                </button>
+              )}
               <button type="button" className="s-term-topline-button is-primary" onClick={showNewTerminalMenu}>
                 <Plus size={13} strokeWidth={1.9} />
                 <span>New</span>
@@ -2341,7 +2358,11 @@ function TerminalHome({ navigate }: { navigate: TerminalNavigate }) {
   }
 
   return (
-    <div className="s-term s-term--workspace">
+    <div
+      className={`s-term s-term--workspace${compact ? " s-term--compact" : ""}`}
+      data-terminal-tiles={tiles.length}
+      data-picker-open={pickerExpanded || pickerSearching || tiles.length === 0}
+    >
       {terminalHeader}
       <div className="s-term-workspace">
         <h1 className="s-term-visually-hidden">{activeWorkspace?.name ?? "Terminal workspace"}</h1>
@@ -2384,7 +2405,7 @@ function TerminalHome({ navigate }: { navigate: TerminalNavigate }) {
                 />
               </div>
             ))}
-            <button
+            {(pickerExpanded || tiles.length === 0) && <button
               type="button"
               className={`s-term-workspace-add-cell${pickerDropNewSlot ? " s-term-workspace-add-cell--target" : ""}`}
               onClick={() => pickerFindRef.current?.focus()}
@@ -2392,11 +2413,12 @@ function TerminalHome({ navigate }: { navigate: TerminalNavigate }) {
               <Plus size={20} strokeWidth={1.7} />
               <strong>New slot</strong>
               <span>{pickerDraggedTargetId ? "Drop to add" : "Drag a terminal here"}</span>
-            </button>
+            </button>}
           </div>
         )}
 
-        <section
+        {(pickerExpanded || pickerSearching || tiles.length === 0) && <section
+          id="terminal-workspace-picker"
           className={`s-term-picker${pickerSearching ? " s-term-picker--results" : ""}`}
           {...(pickerSearching
             ? { "aria-label": "Search results" }
@@ -2649,7 +2671,7 @@ function TerminalHome({ navigate }: { navigate: TerminalNavigate }) {
               )}
             </>
           )}
-        </section>
+        </section>}
       </div>
     </div>
   );
@@ -4519,7 +4541,7 @@ function ResolvingAgent({ navigate }: { navigate: TerminalNavigate }) {
   );
 }
 
-export function TerminalContent({ route, navigate }: TerminalContentProps) {
+export function TerminalContent({ route, navigate, compact = false }: TerminalContentProps) {
   const { agentId, mode, terminalSessionId, terminalSurfaceKey } = route;
   const { agents } = useScout();
 
@@ -4537,7 +4559,7 @@ export function TerminalContent({ route, navigate }: TerminalContentProps) {
 
   if (!agentId) {
     if (!terminalSessionId && !terminalSurfaceKey) {
-      return <TerminalHome navigate={navigate} />;
+      return <TerminalHome navigate={navigate} compact={compact} />;
     }
     return (
       <RegisteredTerminalSessions
