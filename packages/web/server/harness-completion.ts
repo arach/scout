@@ -29,6 +29,7 @@ export const HARNESS_CHEAP_MODELS: Record<HarnessCompletionProvider, string> = {
 
 const RUN_TIMEOUT_MS = 90_000;
 const RUN_KILL_GRACE_MS = 5_000;
+const RUN_SETTLE_GRACE_MS = 2_000;
 
 function findBinary(name: string): string | null {
   const dirs = [
@@ -52,31 +53,47 @@ function run(
   cwd: string,
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd, stdio: ["pipe", "pipe", "pipe"], env: process.env });
+    // Its own process group, so a timeout reaches the launcher's descendants too
+    // (an npm launcher's child inherits these pipes and would hold them open).
+    const ownGroup = process.platform !== "win32";
+    const child = spawn(command, args, { cwd, stdio: ["pipe", "pipe", "pipe"], env: process.env, detached: ownGroup });
     let stdout = "";
     let stderr = "";
+    let settled = false;
     let timedOut = false;
-    let killTimer: ReturnType<typeof setTimeout> | undefined;
-    // On timeout: TERM, then KILL after a grace period, and settle only once the
-    // child has exited, so a fallback harness never runs beside this one.
-    const timer = setTimeout(() => {
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const finish = (settle: () => void) => {
+      if (settled) return;
+      settled = true;
+      for (const timer of timers) clearTimeout(timer);
+      settle();
+    };
+    const signalTree = (signal: NodeJS.Signals) => {
+      try {
+        if (ownGroup && child.pid) process.kill(-child.pid, signal);
+        else child.kill(signal);
+      } catch { /* already gone */ }
+    };
+    const timeoutError = () => new Error(`${command} timed out after ${RUN_TIMEOUT_MS / 1000}s`);
+    // On timeout: TERM the tree, KILL it after a grace period, and settle once it
+    // has exited, so a fallback harness never runs beside this one. If the pipes
+    // still never close, tear them down and settle anyway.
+    timers.push(setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
-      killTimer = setTimeout(() => child.kill("SIGKILL"), RUN_KILL_GRACE_MS);
-    }, RUN_TIMEOUT_MS);
+      signalTree("SIGTERM");
+      timers.push(setTimeout(() => {
+        signalTree("SIGKILL");
+        timers.push(setTimeout(() => {
+          child.stdout.destroy();
+          child.stderr.destroy();
+          finish(() => reject(timeoutError()));
+        }, RUN_SETTLE_GRACE_MS));
+      }, RUN_KILL_GRACE_MS));
+    }, RUN_TIMEOUT_MS));
     child.stdout.on("data", (chunk) => { stdout += chunk; });
     child.stderr.on("data", (chunk) => { stderr += chunk; });
-    child.on("error", (error) => {
-      clearTimeout(timer);
-      clearTimeout(killTimer);
-      reject(error);
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      clearTimeout(killTimer);
-      if (timedOut) reject(new Error(`${command} timed out after ${RUN_TIMEOUT_MS / 1000}s`));
-      else resolve({ code, stdout, stderr });
-    });
+    child.on("error", (error) => finish(() => reject(error)));
+    child.on("close", (code) => finish(() => (timedOut ? reject(timeoutError()) : resolve({ code, stdout, stderr }))));
     child.stdin.end(stdin);
   });
 }
