@@ -225,3 +225,34 @@ describe("bridgeRouter mobile inbox", () => {
     expect(eventItem?.kind).toBe("question");
   });
 });
+
+describe("bridgeRouter terminal permission compatibility", () => {
+  test.each(["approve", "deny"] as const)("%s returns the canonical refusal for a non-terminal item without host access", async (decision) => {
+    const caller = createCaller(createBridgeStub().bridge);
+
+    const result = await caller.mobile.answerTerminalPermission({
+      itemId: "session-attention:synthetic",
+      version: 1,
+      decision,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      code: "not_found",
+      message: "That isn't a terminal permission prompt.",
+    });
+  });
+
+  test.each([
+    { version: 1.5, decision: "approve" },
+    { version: 1, decision: "allow" },
+  ])("rejects invalid permission input %j before invoking the helper", async (input) => {
+    const caller = createCaller(createBridgeStub().bridge);
+    // The non-terminal item also makes the fixture non-actuating if validation regresses.
+    const invalid = { itemId: "session-attention:synthetic", ...input };
+
+    await expect(caller.mobile.answerTerminalPermission(
+      invalid as Parameters<typeof caller.mobile.answerTerminalPermission>[0],
+    )).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+});
