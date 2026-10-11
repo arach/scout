@@ -55,6 +55,7 @@ import {
   createRuntimeRegistrySnapshot,
   queryRuntimeRegistrySnapshot,
   queryRuntimeRegistrySnapshotAsync,
+  queryRuntimeNotificationRouting,
   type RuntimeRegistrySnapshot,
 } from "./registry.js";
 import type { ActivityItem } from "./sqlite-store.js";
@@ -911,6 +912,7 @@ export function createBrokerCoreService(
     readNode: async () => deps.localNode,
     withSnapshot,
     readSnapshot: async(query)=>withSnapshot(query??{},async snapshot=>({...snapshot,messages:await materializeMessageRecords(snapshot.messages)})),
+    readNotificationRouting: async () => queryRuntimeNotificationRouting(deps.runtime.peek()),
     ...(readConversationProjection
       ? {
           readConversationProjection: async (query) =>

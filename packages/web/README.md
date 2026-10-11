@@ -25,6 +25,42 @@ The chat client requests the ten most recent conversations for the active machin
 
 Realtime Scoutbot voice is a high-trust pilot controlled from **Settings → Voice**. The persisted operator toggle controls both the client surface and the billable server route without a service restart; the operator still explicitly starts every call from the footer Voice control. An explicit `OPENSCOUT_REALTIME_VOICE_ENABLED=on|off` value remains a locked deployment override. Calls use the configured server-side OpenAI API key. The client checks the host setting before requesting microphone access, and turning the setting off ends active local clients and clears host admission leases. The selected durable Scoutbot chat preserves context when a call stops or the panel closes, and the voice surface can start or restore a recent chat. An explicit operator request to coordinate with an agent is sent immediately through the broker and its delivery result is reported; downstream harness permission and review gates still apply. Allowlisted, non-destructive app navigation can be applied directly during a call. Host-local SQLite leases default to one active call and four starts per minute; see [`docs/design/realtime-voice-design-pass.md`](../../docs/design/realtime-voice-design-pass.md) for the tuning variables and boundary details.
 
+## Session steering
+
+The Sessions composer types into an existing local harness process. It does not
+create Scout messages, asks, or sessions. The operator-authenticated routes are:
+
+- `GET /api/session-ref/:id/steer?machine=<node-id>` checks availability.
+- `POST` to the same URL submits `{ "text": "…" }` (1–32,000 UTF-16 code units).
+- `GET /api/session-ref/:id/steer/audit?machine=<node-id>&limit=20` reads attempts
+  newest first, with a maximum of 100 entries.
+
+`:id` must be a qualified `session:claude:<native-id>` or
+`session:codex:<native-id>`. The server requires one live process with matching
+session ownership, process birth, foreground terminal, and host evidence. It
+refuses remote machines, ambiguous or missing processes, its own terminal,
+native-app-only threads, and unverified hosts. There is no resume, fork, start,
+or Scout-ask fallback. The runtime's in-place dispatcher owns host input and
+`OPENSCOUT_IN_PLACE_ORDER`. An installation without that runtime refuses input.
+Ownership is checked again after the audit sync, immediately before dispatch.
+Host input is not an atomic compare-and-send: the process can exit or switch
+between that check and input. An atomic guarantee needs a runtime transport
+that validates the expected process birth and session at actuation time.
+
+The application audit is `$OPENSCOUT_CONTROL_HOME/session-steer-audit.jsonl`.
+It stores the configured operator identity, time, session, machine, process and
+host target, outcome, text length, and SHA-256 of the text. It does not store
+prompt bodies. A plain hash can reveal a short, guessable prompt by brute force;
+protect this file as operator data. The log is append-only with no automatic
+retention policy.
+
+The server syncs an intent before input and appends its outcome afterward. The
+reader folds these journal rows into one attempt. A missing outcome stays
+**Unconfirmed**, including after a crash. The first outcome wins; duplicates
+are flagged. The server does not retry input. **Steered** means the host accepted
+the input, not that the harness consumed it. Check the live session before
+retrying an unconfirmed attempt.
+
 ## Public Package
 
 The standalone npm release surface is `@openscout/scout`. It includes the `scout` CLI, the local broker/runtime, and this web application server/client. Keep this package modular internally, but avoid adding a separate public npm package unless there is a clear external integration story.

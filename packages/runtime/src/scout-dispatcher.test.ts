@@ -16,6 +16,8 @@ import {
   type RuntimeSnapshot,
 } from "./scout-dispatcher.js";
 import { runtimeSessionHandleForEndpoint } from "./runtime-session-handle.js";
+import { createInMemoryControlRuntime } from "./broker.js";
+import { isInactiveLocalAgent } from "./broker-endpoint-selection.js";
 
 function makeAgent(input: {
   id: string;
@@ -1472,5 +1474,56 @@ describe("buildDispatchEnvelope", () => {
     expect(envelope.kind).toBe("unparseable");
     expect(envelope.askedLabel).toBe("###");
     expect(envelope.detail).toContain("###");
+  });
+});
+
+describe("versioned routing indexes", () => {
+  test("renames and retirement invalidate exact-label matches without hiding ambiguity", async () => {
+    const runtime = createInMemoryControlRuntime();
+    const first = makeAgent({ id: "first", definitionId: "worker", handle: "xyz" });
+    await runtime.upsertAgent(first);
+    const options = { helpers: { isStale: isInactiveLocalAgent } };
+    const lookup = (label: string) => resolveAgentLabel(runtime.routingSnapshot(), label, options);
+    expect(lookup("xyz")).toEqual({ kind: "resolved", agent: first });
+    await runtime.upsertAgent(makeAgent({ id: "second", definitionId: "worker", handle: "xyz", authorityNodeId: "remote" }));
+    expect(lookup("xyz").kind).toBe("ambiguous");
+    await runtime.upsertAgent({ ...first, handle: "renamed" });
+    const previousName = lookup("xyz");
+    expect(previousName.kind === "resolved" && previousName.agent.id).toBe("second");
+    await runtime.upsertAgent({ ...runtime.agent("second")!, metadata: { retiredFromFleet: true } });
+    expect(lookup("xyz").kind).toBe("unknown");
+    expect(lookup("renamed").kind).toBe("resolved");
+    runtime.deleteAgent("first");
+    expect(lookup("renamed").kind).toBe("unknown");
+  });
+
+  test("endpoint refresh replaces model and exact-session aliases, including cardless actor handles", async () => {
+    const runtime = createInMemoryControlRuntime();
+    const agent = makeAgent({ id: "one", definitionId: "worker" });
+    await runtime.upsertAgent(agent);
+    const endpoint = makeEndpoint({ id: "endpoint", agentId: "one", harness: "codex", model: "gpt-first", sessionId: "session-old" });
+    await runtime.upsertEndpoint(endpoint);
+    const target = (sessionId: string) => resolveBrokerRouteTarget(runtime.routingSnapshot(), { target: { kind: "session_id", sessionId } }, { helpers });
+    expect(target("session-old").kind).toBe("resolved");
+    expect(resolveAgentLabel(runtime.routingSnapshot(), "worker#codex?gpt-first", { helpers }).kind).toBe("resolved");
+    runtime.refreshEndpointSilently({ ...endpoint, sessionId: "session-new", metadata: { model: "gpt-second" } });
+    expect(target("session-old").kind).toBe("unknown");
+    expect(target("session-new").kind).toBe("resolved");
+    expect(resolveAgentLabel(runtime.routingSnapshot(), "worker#codex?gpt-first", { helpers }).kind).toBe("unknown");
+    await runtime.upsertActor(makeSessionActor({ id: "cardless", handle: "solo" }));
+    await runtime.upsertEndpoint(makeEndpoint({ id: "cardless-endpoint", agentId: "cardless", harness: "codex" }));
+    expect(resolveAgentLabel(runtime.routingSnapshot(), "solo", { helpers }).kind).toBe("resolved_session");
+    await runtime.upsertActor(makeSessionActor({ id: "cardless", handle: "renamed-solo" }));
+    expect(resolveAgentLabel(runtime.routingSnapshot(), "solo", { helpers }).kind).toBe("unknown");
+    runtime.deleteEndpoint("cardless-endpoint");
+    expect(resolveAgentLabel(runtime.routingSnapshot(), "renamed-solo", { helpers }).kind).toBe("unknown");
+  });
+
+  test("mutable standalone snapshots do not retain cached results across calls", () => {
+    const snapshot = makeSnapshot([makeAgent({ id: "one", definitionId: "worker", handle: "xyz" })]);
+    expect(resolveAgentLabel(snapshot, "xyz", { helpers }).kind).toBe("resolved");
+    snapshot.agents.one = { ...snapshot.agents.one!, handle: "renamed" };
+    expect(resolveAgentLabel(snapshot, "xyz", { helpers }).kind).toBe("unknown");
+    expect(resolveAgentLabel(snapshot, "renamed", { helpers }).kind).toBe("resolved");
   });
 });

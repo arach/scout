@@ -5,7 +5,10 @@ import { open, stat } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import { setImmediate as yieldTurn } from 'node:timers/promises';
 import type { MessageRecord, DeliveryIntent } from '@openscout/protocol';
-import { readableCanonicalMessage, readableJournalKinds } from '../broker-journal-record-contract.js';
+import { journalEntryProblem, readableCanonicalMessage, readableJournalKinds } from '../broker-journal-record-contract.js';
+import { isUtf8 } from 'node:buffer';
+import { decodeJournalLine, JOURNAL_FRAME_LIMITS } from '../broker-journal-framing.js';
+import { BrokerQuarantine } from '../broker-quarantine.js';
 import type { BrokerRecordReadCoverage } from '../broker-record-reader.js';
 import { readableDelivery, readableDeliveryStatus, readableMetadata } from '../broker-record-reader.js';
 export type Entry = import('../broker-journal.ts').BrokerJournalEntry;
@@ -41,6 +44,7 @@ type Row = {
     seq: number;
     offset: number;
     length: number;
+    entry_index: number;
     sha: string;
     payload: string | null;
     value_sha: string;
@@ -57,6 +61,7 @@ const identity = (s: Awaited<ReturnType<typeof stat>>) => `${s.dev}:${s.ino}`;
 export const LIMITS = { pageRecords: 64, pageBytes: 256 * 1024, maxLineBytes: 1024 * 1024, hotRecords: 16, hotBytes: 64 * 1024, captures: 2, sqliteCacheKiB: 1024, scanChunkBytes: 64 * 1024, maxIndexKeyBytes: 1024, queuedOperations: 4 } as const;
 export class HistoryLeaf {
     private db: Database;
+    private quarantine: BrokerQuarantine | null = null;
     private file?: FileHandle;
     private ready = false;
     private reason = 'not_ready';
@@ -89,6 +94,9 @@ export class HistoryLeaf {
         this.db = new Database(indexPath, { create: true });
         this.db.exec(`PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; PRAGMA mmap_size=0; PRAGMA cache_size=-${LIMITS.sqliteCacheKiB}; PRAGMA temp_store=FILE;`);
         this.db.exec('CREATE TABLE IF NOT EXISTS message_fields(id TEXT,seq INTEGER,created_at REAL,conversation TEXT,actor TEXT,reply_to TEXT,client_key TEXT,PRIMARY KEY(id,seq)) WITHOUT ROWID; CREATE INDEX IF NOT EXISTS message_client ON message_fields(client_key,actor,id,seq); CREATE INDEX IF NOT EXISTS message_time ON message_fields(created_at DESC,id,seq); CREATE INDEX IF NOT EXISTS message_conversation ON message_fields(conversation,created_at DESC,id,seq); CREATE INDEX IF NOT EXISTS message_actor ON message_fields(actor,created_at DESC,id,seq); CREATE TABLE IF NOT EXISTS object_order(kind TEXT,id TEXT,group_id INTEGER,position INTEGER,first_seq INTEGER,PRIMARY KEY(kind,id)) WITHOUT ROWID; CREATE INDEX IF NOT EXISTS object_enumeration ON object_order(kind,group_id,position); CREATE TABLE IF NOT EXISTS framing(end_byte INTEGER PRIMARY KEY, sequence INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS versions(kind TEXT,id TEXT,seq INTEGER,offset INTEGER,length INTEGER,sha TEXT,payload TEXT,value_sha TEXT,client_key TEXT,conversation TEXT,actor TEXT,target TEXT,status TEXT,PRIMARY KEY(kind,id,seq)) WITHOUT ROWID; CREATE INDEX IF NOT EXISTS client_keys ON versions(kind,client_key,conversation,actor,id,seq); CREATE INDEX IF NOT EXISTS target_status ON versions(kind,target,status,id,seq);');
+        // Derived indexes from legacy journals have one entry per physical line.
+        const columns = this.db.query('PRAGMA table_info(versions)').all() as Array<{ name: string }>;
+        if (!columns.some(column => column.name === 'entry_index')) this.db.exec('ALTER TABLE versions ADD COLUMN entry_index INTEGER NOT NULL DEFAULT 0');
     }
     status() { return { ready: this.ready, reason: this.ready ? null : this.reason, sequence: this.sequence, endByte: this.endByte, rebuildSourceDigest: this.sourceDigest, hotRecords: this.hot.size + this.encodedHot.size, hotBytes: this.hotBytes, captures: this.captures.size, limits: LIMITS, historyKeysResident: 0, suffixRuns: this.suffixRuns, suffixBytes: this.suffixBytes, rebuilds: this.rebuilds, scanBytes: this.scanBytes, maxQueued: this.maxQueued, queued: this.queued }; }
     private unavailable(reason: string): {
@@ -141,7 +149,7 @@ export class HistoryLeaf {
                 throw Error('index_key_exceeds_prototype_limit');
         }
     }
-    private insert(kind: Kind, value: Value, offset: number, length: number, digest: string) {
+    private insert(kind: Kind, value: Value, offset: number, length: number, digest: string, entryIndex: number) {
         const json = JSON.stringify(value), m = kind === 'message' ? value as MessageRecord : null, d = kind === 'delivery' ? value as DeliveryIntent : null;
         if (!this.options.messageScope && Buffer.byteLength(json) > LIMITS.maxLineBytes)
             throw Error('reduced_record_exceeds_prototype_limit');
@@ -149,17 +157,17 @@ export class HistoryLeaf {
             this.db.query('INSERT OR REPLACE INTO message_fields VALUES(?,?,?,?,?,?,?)').run(indexKey(m.id), this.sequence, m.createdAt, indexKey(m.conversationId), indexKey(m.actorId), typeof m.replyToMessageId === 'string' ? indexKey(m.replyToMessageId) : null, typeof m.metadata?.clientMessageId === 'string' ? indexKey(m.metadata.clientMessageId.trim()) : null);
         const numeric = Number(value.id), arrayIndex = Number.isInteger(numeric) && numeric >= 0 && numeric < 4294967295 && String(numeric) === value.id;
         this.db.query('INSERT OR IGNORE INTO object_order VALUES(?,?,?,?,?)').run(kind, indexKey(value.id), arrayIndex ? 0 : 1, arrayIndex ? numeric : this.sequence, this.sequence);
-        this.db.query('INSERT OR REPLACE INTO versions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').run(kind, indexKey(value.id), this.sequence, offset, length, digest, m ? null : json, sha(json), typeof m?.metadata?.clientMessageId === 'string' ? indexKey(m.metadata.clientMessageId) : null, m ? indexKey(m.conversationId) : null, m ? indexKey(m.actorId) : null, d ? indexKey(d.targetId) : null, d?.status ?? null);
+        this.db.query('INSERT OR REPLACE INTO versions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(kind, indexKey(value.id), this.sequence, offset, length, digest, m ? null : json, sha(json), typeof m?.metadata?.clientMessageId === 'string' ? indexKey(m.metadata.clientMessageId) : null, m ? indexKey(m.conversationId) : null, m ? indexKey(m.actorId) : null, d ? indexKey(d.targetId) : null, d?.status ?? null, entryIndex);
     }
-    private apply(entry: Entry, offset: number, length: number, digest: string) {
+    private apply(entry: Entry, offset: number, length: number, digest: string, entryIndex = 0) {
         this.sequence++;
         if (this.options.messageScope && entry.kind !== 'message.record')
             return;
         if (entry.kind === 'message.record')
-            this.insert('message', entry.message, offset, length, digest);
+            this.insert('message', entry.message, offset, length, digest, entryIndex);
         else if (entry.kind === 'deliveries.record')
             for (const d of entry.deliveries)
-                this.insert('delivery', d, offset, length, digest);
+                this.insert('delivery', d, offset, length, digest, entryIndex);
         else if (entry.kind === 'delivery.status.update') {
             const row = this.db.query("SELECT payload,value_sha FROM versions WHERE kind='delivery' AND id=? ORDER BY seq DESC LIMIT 1").get(indexKey(entry.deliveryId)) as {
                 payload: string;
@@ -170,7 +178,7 @@ export class HistoryLeaf {
                 if (sha(row.payload) !== row.value_sha)
                     throw Error('index_payload_checksum');
                 const old = JSON.parse(row.payload) as DeliveryIntent;
-                this.insert('delivery', { ...old, status: entry.status, leaseOwner: entry.leaseOwner ?? undefined, leaseExpiresAt: entry.leaseExpiresAt ?? undefined, metadata: entry.metadata ? { ...old.metadata, ...entry.metadata } : old.metadata }, offset, length, digest);
+                this.insert('delivery', { ...old, status: entry.status, leaseOwner: entry.leaseOwner ?? undefined, leaseExpiresAt: entry.leaseExpiresAt ?? undefined, metadata: entry.metadata ? { ...old.metadata, ...entry.metadata } : old.metadata }, offset, length, digest, entryIndex);
             }
         }
     }
@@ -231,9 +239,28 @@ export class HistoryLeaf {
             length = 0;
             const text = raw.toString('utf8').trim();
             if (text) {
-                const entry = JSON.parse(text);
-                this.validate(entry);
-                this.apply(entry, lineOffset, raw.length, sha(raw));
+                if (!isUtf8(raw)) throw Error('invalid_journal_utf8');
+                const entries = decodeJournalLine(text);
+                const problems = this.options.messageScope ? entries.map(journalEntryProblem) : [];
+                const problem = problems.find(problem => problem?.structural) ?? problems.find(problem => problem !== null);
+                if (problem?.structural) throw Error(problem.reason);
+                const isolated = Boolean(problem);
+                if (isolated) {
+                    // Match broker replay: a malformed message isolates its
+                    // whole atomic frame; healthy subsequent messages remain
+                    // available without importing or discarding source bytes.
+                    (this.quarantine ??= new BrokerQuarantine(`${this.journalPath}.quarantine.sqlite`)).preserve({
+                        kind: 'journal.semantic_frame', reason: `${problem!.reason}; its whole physical frame is isolated.`,
+                        bytes: final ? raw : Buffer.concat([raw, Buffer.from('\n')]),
+                        source: { path: this.journalPath, startByte: lineOffset, endByte: lineOffset + raw.length + (final ? 0 : 1), fileIdentity: this.sourceIdentity }, entries,
+                    });
+                } else {
+                // Validate the full frame before mutating the index. The outer
+                // rebuild/catch-up transaction publishes its whole prefix.
+                for (const entry of entries) this.validate(entry);
+                const digest = sha(raw);
+                entries.forEach((entry, index) => this.apply(entry, lineOffset, raw.length, digest, index));
+                }
             }
             lineOffset += raw.length + (final ? 0 : 1);
             this.db.query('INSERT OR REPLACE INTO framing VALUES(?,?)').run(lineOffset, this.sequence);
@@ -253,7 +280,7 @@ export class HistoryLeaf {
                 const part = chunk.subarray(cursor, newline);
                 parts.push(part);
                 length += part.length;
-                if (!this.options.messageScope && length > LIMITS.maxLineBytes)
+                if (length > (this.options.messageScope ? JOURNAL_FRAME_LIMITS.bytes : LIMITS.maxLineBytes))
                     throw Error('record_exceeds_prototype_limit');
                 await consume(false);
                 cursor = newline + 1;
@@ -261,7 +288,7 @@ export class HistoryLeaf {
             if (cursor < bytesRead) {
                 parts.push(chunk.subarray(cursor, bytesRead));
                 length += bytesRead - cursor;
-                if (!this.options.messageScope && length > LIMITS.maxLineBytes)
+                if (length > (this.options.messageScope ? JOURNAL_FRAME_LIMITS.bytes : LIMITS.maxLineBytes))
                     throw Error('record_exceeds_prototype_limit');
             }
         }
@@ -360,7 +387,7 @@ export class HistoryLeaf {
             this.encodedHot.delete(key); this.encodedHot.set(key, known);
             return known.value;
         }
-        if (row.kind !== 'message' || !Number.isSafeInteger(row.length) || row.length < 1 ||
+        if (row.kind !== 'message' || !Number.isSafeInteger(row.length) || row.length < 1 || row.length > JOURNAL_FRAME_LIMITS.bytes ||
             !Number.isSafeInteger(row.offset) || row.offset < 0 || row.offset + row.length > this.endByte) {
             throw Error('invalid_index_reference');
         }
@@ -374,7 +401,8 @@ export class HistoryLeaf {
         }
         signal?.throwIfAborted();
         if (sha(bytes) !== row.sha) throw Error('canonical_record_checksum');
-        const entry = JSON.parse(bytes.toString('utf8').trim());
+        const entries = decodeJournalLine(bytes.toString('utf8'));
+        const entry = entries[row.entry_index];
         this.validate(entry);
         if (entry.kind !== 'message.record') throw Error('index_record_kind');
         const json = JSON.stringify(entry.message);
@@ -401,7 +429,7 @@ export class HistoryLeaf {
             this.hot.set(key, known);
             return structuredClone(known.value);
         }
-        if (!Number.isSafeInteger(row.length) || row.length < 1 || (!this.options.messageScope && row.length > LIMITS.maxLineBytes) || !Number.isSafeInteger(row.offset) || row.offset < 0 || row.offset + row.length > this.endByte)
+        if (!Number.isSafeInteger(row.length) || row.length < 1 || row.length > JOURNAL_FRAME_LIMITS.bytes || (!this.options.messageScope && row.length > LIMITS.maxLineBytes) || !Number.isSafeInteger(row.offset) || row.offset < 0 || row.offset + row.length > this.endByte)
             throw Error('invalid_index_reference');
         const bytes = Buffer.alloc(row.length);
         let n = 0;
@@ -415,7 +443,8 @@ export class HistoryLeaf {
         signal?.throwIfAborted();
         if (sha(bytes) !== row.sha)
             throw Error('canonical_record_checksum');
-        const entry = JSON.parse(bytes.toString('utf8').trim());
+        const entries = decodeJournalLine(bytes.toString('utf8'));
+        const entry = entries[row.entry_index];
         this.validate(entry);
         if (row.kind === 'delivery' && row.payload === null) {
             const stored = this.db.query('SELECT payload FROM versions WHERE kind=? AND id=? AND seq=?').get(row.kind, row.id, row.seq) as {
@@ -448,6 +477,7 @@ export class HistoryLeaf {
         return structuredClone(value);
     }
     async get<T extends Value>(kind: Kind, id: string, capture?: Capture, signal?: AbortSignal): Promise<Read<T>> { return this.serialRead<T>(async () => { try {
+        if (this.options.messageScope && (this.quarantine ??= new BrokerQuarantine(`${this.journalPath}.quarantine.sqlite`)).hasRecord(id)) return this.unavailable('record_quarantined');
         const coverage = await this.covered(capture);
         const row = this.db.query('SELECT * FROM versions WHERE kind=? AND id=? AND seq<=? ORDER BY seq DESC LIMIT 1').get(kind, indexKey(id), coverage.sequence) as Row | null;
         if (!row)
@@ -478,7 +508,7 @@ export class HistoryLeaf {
                     extra += ` AND v.status IN (${filter.statuses.map(() => '?').join(',')})`;
                     args.push(...filter.statuses);
                 }
-                const rows = this.db.query(`SELECT v.kind,v.id,v.seq,v.offset,v.length,v.sha,NULL AS payload,v.value_sha FROM versions v WHERE v.kind=? ${after === null ? '' : 'AND v.id>?'} AND v.seq<=? AND NOT EXISTS(SELECT 1 FROM versions n WHERE n.kind=v.kind AND n.id=v.id AND n.seq>v.seq AND n.seq<=?)${extra} ORDER BY v.id LIMIT ${LIMITS.pageRecords + 1}`).all(...args) as Row[];
+                const rows = this.db.query(`SELECT v.kind,v.id,v.seq,v.offset,v.length,v.entry_index,v.sha,NULL AS payload,v.value_sha FROM versions v WHERE v.kind=? ${after === null ? '' : 'AND v.id>?'} AND v.seq<=? AND NOT EXISTS(SELECT 1 FROM versions n WHERE n.kind=v.kind AND n.id=v.id AND n.seq>v.seq AND n.seq<=?)${extra} ORDER BY v.id LIMIT ${LIMITS.pageRecords + 1}`).all(...args) as Row[];
                 const records: Value[] = [];
                 let bytes = 0;
                 for (const row of rows) {
@@ -528,7 +558,7 @@ export class HistoryLeaf {
                     group = order.group_id;
                     position = order.position;
                 }
-                const rows = this.db.query(`SELECT v.kind,v.id,v.seq,v.offset,v.length,v.sha,NULL AS payload,v.value_sha FROM object_order o INDEXED BY object_enumeration JOIN versions v ON v.kind=o.kind AND v.id=o.id AND v.seq=(SELECT MAX(n.seq) FROM versions n WHERE n.kind=o.kind AND n.id=o.id AND n.seq<=?) WHERE o.kind='message' AND o.id!='__proto__' AND o.first_seq<=? AND (o.group_id,o.position)>(?,?) ORDER BY o.group_id,o.position LIMIT ${LIMITS.pageRecords + 1}`).all(capture.sequence, capture.sequence, group, position) as Row[];
+                const rows = this.db.query(`SELECT v.kind,v.id,v.seq,v.offset,v.length,v.entry_index,v.sha,NULL AS payload,v.value_sha FROM object_order o INDEXED BY object_enumeration JOIN versions v ON v.kind=o.kind AND v.id=o.id AND v.seq=(SELECT MAX(n.seq) FROM versions n WHERE n.kind=o.kind AND n.id=o.id AND n.seq<=?) WHERE o.kind='message' AND o.id!='__proto__' AND o.first_seq<=? AND (o.group_id,o.position)>(?,?) ORDER BY o.group_id,o.position LIMIT ${LIMITS.pageRecords + 1}`).all(capture.sequence, capture.sequence, group, position) as Row[];
                 const records: MessageRecord[] = [];
                 let bytes = 0;
                 for (const row of rows) {
@@ -574,7 +604,7 @@ export class HistoryLeaf {
                     group = order.group_id;
                     position = order.position;
                 }
-                const rows = this.db.query(`SELECT v.kind,v.id,v.seq,v.offset,v.length,v.sha,NULL AS payload,v.value_sha FROM object_order o INDEXED BY object_enumeration JOIN versions v ON v.kind=o.kind AND v.id=o.id AND v.seq=(SELECT MAX(n.seq) FROM versions n WHERE n.kind=o.kind AND n.id=o.id AND n.seq<=?) WHERE o.kind='message' AND o.id!='__proto__' AND o.first_seq<=? AND (o.group_id,o.position)>(?,?) ORDER BY o.group_id,o.position LIMIT ${LIMITS.pageRecords + 1}`).all(capture.sequence, capture.sequence, group, position) as Row[];
+                const rows = this.db.query(`SELECT v.kind,v.id,v.seq,v.offset,v.length,v.entry_index,v.sha,NULL AS payload,v.value_sha FROM object_order o INDEXED BY object_enumeration JOIN versions v ON v.kind=o.kind AND v.id=o.id AND v.seq=(SELECT MAX(n.seq) FROM versions n WHERE n.kind=o.kind AND n.id=o.id AND n.seq<=?) WHERE o.kind='message' AND o.id!='__proto__' AND o.first_seq<=? AND (o.group_id,o.position)>(?,?) ORDER BY o.group_id,o.position LIMIT ${LIMITS.pageRecords + 1}`).all(capture.sequence, capture.sequence, group, position) as Row[];
                 const records: Readonly<{id: string; json: string}>[] = [];
                 let bytes = 0;
                 for (const row of rows) {
@@ -694,6 +724,7 @@ export class HistoryLeaf {
     async getAtCanonicalCoverage(id: string, coverage: BrokerRecordReadCoverage): Promise<Read<MessageRecord>> {
         return this.serialRead<MessageRecord>(async () => {
             try {
+                if ((this.quarantine ??= new BrokerQuarantine(`${this.journalPath}.quarantine.sqlite`)).hasRecord(id)) return this.unavailable('record_quarantined');
                 if (!this.options.messageScope)
                     throw Error('message_scope_required');
                 if (!this.ready)
@@ -790,5 +821,5 @@ export class HistoryLeaf {
             }
         });
     }
-    async close() { await this.queue; this.ready = false; this.reason = 'closed'; this.captures.clear(); this.hot.clear(); this.encodedHot.clear(); this.hotBytes = 0; await this.file?.close(); this.file = undefined; this.db.close(); }
+    async close() { await this.queue; this.ready = false; this.reason = 'closed'; this.captures.clear(); this.hot.clear(); this.encodedHot.clear(); this.hotBytes = 0; await this.file?.close(); this.file = undefined; this.db.close(); this.quarantine?.close(); this.quarantine = null; }
 }

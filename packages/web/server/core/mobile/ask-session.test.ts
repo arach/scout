@@ -122,6 +122,8 @@ describe("deliverInPlace", () => {
     const prompted: string[] = [];
     const result = await deliverInPlace({ sessionId: SOURCE, harness: "codex", body: "hi" }, {
       findHerdrPane: async () => ({ session: "scout", paneId: "w1:p1", status: "idle" }),
+      self: [],
+      selfTty: async () => null,
       promptHerdr: async (pane, body) => { prompted.push(`${pane.paneId}:${body}`); },
       findClaudeRecord: async () => { throw new Error("not reached"); },
     });
@@ -133,6 +135,8 @@ describe("deliverInPlace", () => {
     const typed: string[] = [];
     const result = await deliverInPlace({ sessionId: SOURCE, harness: "codex", body: "hi" }, {
       findHerdrPane: async () => null,
+      self: [],
+      selfTty: async () => null,
       codexHeldByApp: async () => true,
       askScoutApp: async () => ({ ok: true, accessibility: "granted" }),
       typeIntoCodexApp: async (id, body) => { typed.push(`${id}:${body}`); },
@@ -143,7 +147,7 @@ describe("deliverInPlace", () => {
 
   test("without the Scout app's grant, nothing reaches the ChatGPT composer", async () => {
     const typeIntoCodexApp = async () => { throw new Error("must not open the link"); };
-    const base = { findHerdrPane: async () => null, codexHeldByApp: async () => true, typeIntoCodexApp };
+    const base = { findHerdrPane: async () => null, self: [], selfTty: async () => null, codexHeldByApp: async () => true, typeIntoCodexApp };
     expect(await deliverInPlace({ sessionId: SOURCE, harness: "codex", body: "hi" }, {
       ...base,
       askScoutApp: async () => ({ ok: true, accessibility: "not-granted" }),
@@ -157,6 +161,8 @@ describe("deliverInPlace", () => {
   test("a Herdr pane at a prompt is not typed into", async () => {
     const result = await deliverInPlace({ sessionId: SOURCE, body: "hi" }, {
       findHerdrPane: async () => ({ session: "scout", paneId: "w1:p1", status: "blocked" }),
+      self: [],
+      selfTty: async () => null,
       promptHerdr: async () => { throw new Error("must not type"); },
     });
     expect(result).toMatchObject({ ok: false, code: "session_blocked" });
@@ -166,6 +172,8 @@ describe("deliverInPlace", () => {
     const targets: string[] = [];
     const result = await deliverInPlace({ sessionId: SOURCE, harness: "claude", body: "hi" }, {
       findHerdrPane: async () => null,
+      self: [],
+      selfTty: async () => null,
       findClaudeRecord: async () => record({ tmux: { session: "work", window: "@1", pane: "%3" } }),
       promptTmux: async (target) => { targets.push(target); },
     });
@@ -177,6 +185,8 @@ describe("deliverInPlace", () => {
     const typed: string[] = [];
     const result = await deliverInPlace({ sessionId: SOURCE, harness: "claude", body: "hi" }, {
       findHerdrPane: async () => null,
+      self: [],
+      selfTty: async () => null,
       findClaudeRecord: async () => record({}),
       ttyForPid: async () => "ttys007",
       typeIntoTty: async (tty, body) => { typed.push(`${tty}:${body}`); },
@@ -188,6 +198,8 @@ describe("deliverInPlace", () => {
   test("Scout's own background copy is never a place to deliver", async () => {
     const result = await deliverInPlace({ sessionId: SOURCE, harness: "claude", body: "hi" }, {
       findHerdrPane: async () => null,
+      self: [],
+      selfTty: async () => null,
       findClaudeRecord: async () => record({ tmux: { session: `flat-claude-${SOURCE}`, window: null, pane: "%58" } }),
       promptTmux: async () => { throw new Error("must not type"); },
     });
@@ -197,6 +209,8 @@ describe("deliverInPlace", () => {
   test("a Codex session nothing holds has no live place", async () => {
     const result = await deliverInPlace({ sessionId: SOURCE, harness: "codex", body: "hi" }, {
       findHerdrPane: async () => null,
+      self: [],
+      selfTty: async () => null,
       codexHeldByApp: async () => false,
       findClaudeRecord: async () => { throw new Error("not reached"); },
     });

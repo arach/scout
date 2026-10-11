@@ -9,7 +9,7 @@ import type {
 
 import { isA2AHttpEndpoint } from "./a2a-http-endpoint.js";
 import { isBrokerRunnableLocalAgentTransport } from "./local-agent-transports.js";
-import type { RuntimeRegistrySnapshot } from "./registry.js";
+import { routingRegistryVersion, type RuntimeRegistrySnapshot } from "./registry.js";
 import { runtimeSessionHandleForEndpoint } from "./runtime-session-handle.js";
 
 export const ENDPOINT_SESSION_ALIAS_METADATA_KEYS = [
@@ -159,7 +159,7 @@ export function latestEndpointForAgent(
   snapshot: RuntimeRegistrySnapshot,
   agentId: string,
 ): AgentEndpoint | null {
-  const candidates = Object.values(snapshot.endpoints).filter((endpoint) => endpoint.agentId === agentId);
+  const candidates = endpointsForAgent(snapshot, agentId);
   return [...candidates].sort((left, right) => endpointLifecycleAt(right) - endpointLifecycleAt(left))[0] ?? null;
 }
 
@@ -236,10 +236,57 @@ export function homeEndpointForAgent(
   snapshot: RuntimeRegistrySnapshot,
   agentId: string,
 ): AgentEndpoint | null {
-  const candidates = Object.values(snapshot.endpoints).filter((endpoint) => (
-    endpoint.agentId === agentId && !isStaleLocalEndpoint(snapshot, endpoint)
-  ));
+  const index = routingEndpointIndex(snapshot);
+  if (index) return index.homeByAgentId.get(agentId) ?? null;
+  const candidates = endpointsForAgent(snapshot, agentId)
+    .filter((endpoint) => !isStaleLocalEndpoint(snapshot, endpoint));
   return [...candidates].sort(compareHomeEndpointPreference)[0] ?? null;
+}
+
+type RoutingEndpointIndex = {
+  byAgentId: Map<string, AgentEndpoint[]>;
+  bySessionAlias: Map<string, AgentEndpoint[]>;
+  homeByAgentId: Map<string, AgentEndpoint>;
+};
+const routingEndpointIndexes = new WeakMap<object, RoutingEndpointIndex>();
+
+function routingEndpointIndex(snapshot: RuntimeRegistrySnapshot): RoutingEndpointIndex | undefined {
+  const version = routingRegistryVersion(snapshot);
+  if (!version) return undefined;
+  const cached = routingEndpointIndexes.get(version);
+  if (cached) return cached;
+  const index: RoutingEndpointIndex = {
+    byAgentId: new Map(), bySessionAlias: new Map(), homeByAgentId: new Map(),
+  };
+  for (const endpoint of Object.values(snapshot.endpoints)) {
+    const siblings = index.byAgentId.get(endpoint.agentId) ?? [];
+    siblings.push(endpoint);
+    index.byAgentId.set(endpoint.agentId, siblings);
+    for (const alias of endpointSessionAliasValues(endpoint)) {
+      const matches = index.bySessionAlias.get(alias) ?? [];
+      matches.push(endpoint);
+      index.bySessionAlias.set(alias, matches);
+    }
+    if (!isStaleLocalEndpoint(snapshot, endpoint)) {
+      const previous = index.homeByAgentId.get(endpoint.agentId);
+      // Preserve insertion order when preference scores tie, like stable sort.
+      if (!previous || compareHomeEndpointPreference(endpoint, previous) < 0) {
+        index.homeByAgentId.set(endpoint.agentId, endpoint);
+      }
+    }
+  }
+  routingEndpointIndexes.set(version, index);
+  return index;
+}
+
+export function endpointsForAgent(snapshot: RuntimeRegistrySnapshot, agentId: string): readonly AgentEndpoint[] {
+  return routingEndpointIndex(snapshot)?.byAgentId.get(agentId)
+    ?? (routingRegistryVersion(snapshot) ? [] : Object.values(snapshot.endpoints).filter((endpoint) => endpoint.agentId === agentId));
+}
+
+export function endpointsForSession(snapshot: RuntimeRegistrySnapshot, sessionId: string): readonly AgentEndpoint[] {
+  return routingEndpointIndex(snapshot)?.bySessionAlias.get(sessionId.trim())
+    ?? (routingRegistryVersion(snapshot) ? [] : Object.values(snapshot.endpoints).filter((endpoint) => endpointMatchesTargetSession(endpoint, sessionId)));
 }
 
 export function endpointSessionAliasValues(endpoint: AgentEndpoint): string[] {

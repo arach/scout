@@ -1,7 +1,7 @@
 // Reply from the phone to a harness session Scout did not start (seen in the
 // transcript tail: session id, harness, cwd). A session open somewhere gets
-// the words where it runs — its Herdr pane, its tmux pane, or its terminal tab
-// (see deliver-in-place.ts). Only a session nothing holds is resumed, as an
+// the words where it runs — its Herdr pane, its Orca terminal, its tmux pane, or its terminal tab
+// (see @openscout/runtime/in-place). Only a session nothing holds is resumed, as an
 // exact-session ask. Replies never split off into a fork or a background copy.
 
 import type { AgentHarness } from "@openscout/protocol";
@@ -28,7 +28,7 @@ export type MobileAskSessionResult =
       mode: "resumed" | "forked";
       /** "in_place" when the words were typed into the live session. */
       delivery?: "in_place" | "resumed";
-      /** How it got in: herdr, tmux, lattices or scout-app. */
+      /** How it got in: herdr, orca, tmux, lattices or scout-app. */
       via?: InPlaceVia;
       /** Where, in the operator's words: "Herdr scout · w1:p1". */
       location?: string;
@@ -61,7 +61,7 @@ const REFUSAL_MESSAGES: Record<string, string> = {
   session_ambiguous: "This session is open in more than one place, so nothing was sent.",
   session_cwd_conflict: "This session belongs to a different folder than the one sent with the reply.",
   session_not_resumable: "This session can't be continued from Scout.",
-  session_live_unbound: "This session is open in a terminal Scout can't reach (not in Herdr, tmux or a terminal tab Lattices can type into), so nothing was sent.",
+  session_live_unbound: "This session is open in a terminal Scout can't reach (not in Herdr, Orca, tmux or a terminal tab Lattices can type into), so nothing was sent.",
   session_live_fork_unsupported: "This Codex session is open in another app. Close it there, then send again.",
   session_runtime_unobserved: "Scout couldn't check whether this session is still open, so nothing was sent.",
   session_wake_failed: "Scout couldn't start this session, so nothing was sent.",

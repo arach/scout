@@ -8,6 +8,7 @@ import { sessionTouchedResponse } from "../observe-payload.ts";
 import { SCOUTBOT_DEFAULT_THREAD_ID } from "../scoutbot/role.ts";
 import { parseSessionRouteRef, sessionHarnessMatches } from "../../shared/session-route-ref.ts";
 import type { ScoutbotWebServices } from "./scoutbot.ts";
+import { mountSessionSteerRoutes } from "./session-steer.ts";
 
 const LEGACY_SCOUTBOT_CONVERSATION_IDS = new Set([
   "dm.operator.scoutbot",
@@ -24,6 +25,7 @@ export type SessionRouteDeps = {
 
 export function mountSessionRoutes(app: Hono, deps: SessionRouteDeps) {
   const { scoutbot } = deps;
+  mountSessionSteerRoutes(app);
 
   const resolveSessionRequestConversationId = async (conversationId: string): Promise<string | null> => {
     if (isOpaqueChannelId(conversationId)) return conversationId;

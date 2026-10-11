@@ -4,19 +4,21 @@ import { BASIC_WEB } from "../../basic/profile.ts";
 import { sessionDraftStore } from "./session-drafts.ts";
 import { HarnessMark } from "../../components/HarnessMark.tsx";
 import { Button } from "../../components/ui/button.tsx";
-import { MessageComposer } from "../../components/MessageComposer/index.ts";
+import { MessageMarkup } from "../../lib/message-markup.tsx";
+import { SessionSteerComposer, SessionSteeredList, unobservedSteers, type PendingSessionSteer } from "./SessionSteer.tsx";
+import type { SessionSteerAvailability, SessionSteerAuditEntry } from "../../../shared/api/session-steer.ts";
 import { isAgentInTurn } from "../../lib/agent-state.ts";
 import { api } from "../../lib/api.ts";
 import { conversationSessionId } from "../../lib/conversation-kind.ts";
 import { useScout } from "../../scout/Provider.tsx";
 import { useTurnSteps } from "../chat/use-turn-steps.ts";
 import { useRequestActions } from "../requests/use-request-actions.ts";
-import type { ObserveFile, OperatorAttentionItem, Route } from "../../lib/types.ts";
-import { SessionObserveContextRail, SessionObserveEvents } from "./SessionObserve.tsx";
+import type { ObserveEvent, ObserveFile, OperatorAttentionItem, Route } from "../../lib/types.ts";
+import { SessionObserveContextRail } from "./SessionObserve.tsx";
 import { useSessionRefLookup } from "./SessionRefScreen.tsx";
 import { attentionForSession, sessionOrigin, type SessionBoardRow } from "./session-board-model.ts";
-import { observedSessionTurns, observedStepCount, observedTurnDuration } from "./session-turns.ts";
-import { sendSessionDraft, sessionDeliveryAvailability, sessionInterruptAgent, sessionTargetFromObserve, type SessionDeliveryMode, type SessionDeliveryTarget } from "./session-delivery.ts";
+import { observedSessionTurns, observedTurnDuration, sessionWorkLabel, observedFileEdits } from "./session-turns.ts";
+import { sendSessionDraft, sessionDeliveryAvailability, sessionInterruptAgent, sessionTargetFromObserve, sessionSteerPath, sessionSteerPoll, type SessionDeliveryTarget } from "./session-delivery.ts";
 import type { SessionDensity, SessionSelection } from "./slot-deck.ts";
 
 function InlineSessionRequest({ item, navigate }: { item: OperatorAttentionItem; navigate: (r: Route) => void }) {
@@ -28,7 +30,7 @@ function InlineSessionRequest({ item, navigate }: { item: OperatorAttentionItem;
     {item.detail && <pre>{item.detail}</pre>}
     <div className="s-session-actions">
       {item.approval && item.actions.filter((a) => a.kind === "approve" || a.kind === "deny").map((action) =>
-        <Button key={action.kind} size="sm" variant="outline" disabled={busy} onClick={() => void act(action)}>{action.label}</Button>)}
+        <Button key={action.kind} size="sm" variant="outline" disabled={busy} onClick={() => void act(action)}>{action.kind === "approve" ? "Yes, proceed" : "No"}</Button>)}
       {sent ? <span role="status">Answered: {sent}</span> : item.answer?.options.map((option) =>
         <Button key={option} size="sm" variant="outline" disabled={busy} onClick={() => void answer(option)}>{option}</Button>)}
       {!item.approval && !item.answer && item.actions.filter((a) => a.kind === "open" && a.route).map((action, i) =>
@@ -44,7 +46,8 @@ function InlineSessionRequest({ item, navigate }: { item: OperatorAttentionItem;
 }
 
 type Touched = { files: ObserveFile[]; worktreePath: string | null; counts: { changedFiles: number; readFiles: number } };
-function SessionChanges({ sessionRef, refreshKey, navigate }: { sessionRef: string; refreshKey: number; navigate: (r: Route) => void }) {
+function SessionChanges({ sessionRef, refreshKey, events, navigate }: { sessionRef: string; refreshKey: number; events: ObserveEvent[]; navigate: (r: Route) => void }) {
+  const edits = observedFileEdits(events);
   const [result, setResult] = useState<Touched | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
@@ -56,10 +59,10 @@ function SessionChanges({ sessionRef, refreshKey, navigate }: { sessionRef: stri
     return () => { cancelled = true; };
   }, [sessionRef, refreshKey, retry]);
   return <section className="s-session-changes" aria-label="Session changes">
-    <header><strong>Changes</strong>{result && <span>{result.counts.changedFiles} changed · {result.counts.readFiles} read</span>}</header>
+    <header><strong>{result ? `${result.counts.changedFiles} ${result.counts.changedFiles === 1 ? "file" : "files"} changed` : "Changes"}</strong></header>
     {error ? <p role="status">Touched files unavailable: {error} <Button size="xs" variant="outline" onClick={() => setRetry((v) => v + 1)}>Retry</Button></p>
       : !result ? <p role="status">Loading touched files…</p>
-      : <><ul>{result.files.filter((file) => file.state !== "read").map((file) => <li key={file.path}><code>{file.path}</code><span>{file.state}</span></li>)}</ul>
+      : <><ul>{result.files.filter((file) => file.state !== "read").map((file) => { const count = edits.get(file.path); return <li key={file.path}><code>{file.path}</code>{count ? <span title="Observed tool edits in this window, not a net worktree diff"><b className="s-session-add">+{count.add}</b> <b className="s-session-del">−{count.del}</b></span> : <span>{file.state}</span>}</li>; })}</ul>
         {result.counts.changedFiles === 0 && <p>No file changes recorded in this observed window.</p>}
         {!BASIC_WEB && result.worktreePath && result.counts.changedFiles > 0 && <Button size="sm" variant="outline" onClick={() => navigate({ view: "repo-diff", path: result.worktreePath!, sessionId: sessionRef, include: "changed" })}>Review changes</Button>}
         {BASIC_WEB && result.counts.changedFiles > 0 && <p>Full diff review is available in the full web client.</p>}
@@ -77,6 +80,7 @@ export function SessionSlot({ selection, density = "desk", inspector = false, ro
   navigate: (r: Route) => void;
 }) {
   const { agents, operatorName } = useScout();
+  const [auditRevision, setAuditRevision] = useState(0);
   const first = useSessionRefLookup(selection.sessionRef);
   const conversation = first.lookup?.session ?? row?.conversation ?? null;
   const backing = first.lookup?.kind === "conversation" ? formatSessionRouteRef(conversation?.harness, conversation?.harnessSessionId || conversationSessionId(conversation)) : null;
@@ -107,8 +111,7 @@ export function SessionSlot({ selection, density = "desk", inspector = false, ro
     <div className="s-session-thread">
       <header className="s-session-header">
         <HarnessMark harness={harness ?? "unknown"} size={18} />
-        <div><h2>{title}</h2><p>{project ?? "Project not recorded"}{branch ? ` · ${branch}` : ""}{model ? ` · ${model}` : ""}</p>
-          <p>{origin.kind !== "unknown" ? origin.label : row?.origin.label ?? origin.label} · <code>{sessionId}</code></p></div>
+        <div title={[project, branch, model, origin.label, sessionId].filter(Boolean).join(" · ")}><h2>{title}</h2></div>
         <span role="status">{attention.length ? "Needs input" : working ? "Working" : loading ? "Loading" : error ? "Unavailable" : "Idle"}</span>
       </header>
       <div className="s-session-transcript s-observe--conversation">
@@ -116,69 +119,87 @@ export function SessionSlot({ selection, density = "desk", inspector = false, ro
         {error && <p className="s-session-unavailable" role="status">This session can't be read right now ({error}). <Button size="xs" variant="outline" onClick={() => void (backing ? second.refresh() : first.refresh())}>Retry session</Button></p>}
         {!loading && !data && !error && <p>No observed transcript is attached to this reference.</p>}
         {turns.map((turn) => <section className="s-session-turn" key={turn.id}>
-          <SessionObserveEvents events={turn.prompt} sessionStartMs={meta?.sessionStart} operatorName="Requester" />
+          {turn.prompt.map((event) => <div className="s-session-user-message" key={event.id}><MessageMarkup text={event.text} /></div>)}
           {turn.steps.length > 0 && <details className="s-session-steps">
-            <summary>{turn.boundary === "window" ? "Observed window" : turn.working ? "Working" : observe?.fidelity === "timestamped" ? `Worked for ${observedTurnDuration(turn)}` : "Observed work"} · {observedStepCount(turn)} steps · {turn.fileCount} files</summary>
-            <SessionObserveEvents events={turn.steps} sessionStartMs={meta?.sessionStart} />
+            <summary>{turn.boundary === "window" ? "Observed work" : turn.working ? "Working" : observe?.fidelity === "timestamped" ? `Worked for ${observedTurnDuration(turn)}` : "Observed work"}</summary>
+            <div className="s-session-work-rows">{turn.steps.map((event) => <details key={event.id} className="s-session-work-row"><summary>{sessionWorkLabel(event)}</summary>
+              <pre>{event.detail || event.text}{event.diff ? `\n${event.diff.preview}` : ""}</pre></details>)}</div>
           </details>}
-          <SessionObserveEvents events={turn.messages} sessionStartMs={meta?.sessionStart} />
+          {turn.messages.map((event) => <div className="s-session-agent-message" key={event.id}><MessageMarkup text={event.kind === "ask" && event.to ? `Question: ${event.text}${event.answer ? `\n\nAnswer: ${event.answer}` : ""}` : event.text} /></div>)}
         </section>)}
-        {working && turnSteps.length > 0 && <details className="s-session-steps"><summary>Live step ledger · {turnSteps.length} recent steps</summary>
+        {working && turnSteps.length > 0 && <details className="s-session-steps"><summary>Working</summary>
           <p className="s-session-muted">Bounded Tail evidence, not a complete durable turn history.</p>
           <ol>{turnSteps.map((step) => <li key={step.id}><span>{step.phase}</span> {step.text}</li>)}</ol>
         </details>}
         {attention.map((item) => <InlineSessionRequest key={`${item.id}:${item.approval?.version ?? item.updatedAt}`} item={item} navigate={navigate} />)}
-        {data && <SessionChanges sessionRef={observe?.refId ?? selection.sessionRef} refreshKey={observe?.updatedAt ?? 0} navigate={navigate} />}
+        {data && <SessionChanges sessionRef={observe?.refId ?? selection.sessionRef} refreshKey={observe?.updatedAt ?? 0} events={data.events} navigate={navigate} />}
       </div>
-      <SessionSlotComposer key={sessionId} target={target} working={working} loaded={Boolean(resolved)} machineId={selection.machineId} />
+      <SessionSlotComposer key={`${target.machineId}:${target.sessionRef}`} target={target} working={working} loaded={Boolean(resolved)}
+        prompts={turns.flatMap((turn) => turn.prompt)} onAttempt={() => setAuditRevision((n) => n + 1)} />
     </div>
-    {inspector && data && <SessionObserveContextRail data={data} sessionId={sessionId} agentId={agentId ?? undefined} surface="context" observeSource={observe?.source} observeFidelity={observe?.fidelity} />}
+    {inspector && <aside className="s-session-inspector"><SessionSteerHistory key={`${target.machineId}:${target.sessionRef}`} target={target} revision={auditRevision} />
+      {data && <SessionObserveContextRail data={data} sessionId={sessionId} agentId={agentId ?? undefined} surface="context" observeSource={observe?.source} observeFidelity={observe?.fidelity} />}</aside>}
   </div>;
 }
 
-function SessionSlotComposer({ target, working, loaded, machineId }: { target: SessionDeliveryTarget; working: boolean; loaded: boolean; machineId?: string }) {
+function SessionSteerHistory({ target, revision }: { target: SessionDeliveryTarget; revision: number }) {
+  const [entries, setEntries] = useState<SessionSteerAuditEntry[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const path = sessionSteerPath(target).replace("/steer?", "/steer/audit?");
+  useEffect(() => {
+    const poll = sessionSteerPoll(() => api<{ entries: SessionSteerAuditEntry[] }>(path),
+      (value) => { setEntries(value.entries); setError(null); }, () => setError("Steering audit unavailable."));
+    void poll.refresh(); const timer = setInterval(() => void poll.refresh(), 10_000);
+    return () => { poll.stop(); clearInterval(timer); };
+  }, [path, revision]);
+  return <SessionSteeredList entries={entries} error={error} />;
+}
+
+function SessionSlotComposer({ target, working, loaded, prompts, onAttempt }: {
+  target: SessionDeliveryTarget; working: boolean; loaded: boolean; prompts: ObserveEvent[]; onAttempt: () => void;
+}) {
   const { agents, operatorName } = useScout();
-  const [mode, setMode] = useState<SessionDeliveryMode>("scout");
-  const store = sessionDraftStore(operatorName ?? "operator", machineId, target.sessionId);
+  const store = sessionDraftStore(operatorName ?? "operator", target.machineId ?? undefined, target.sessionRef ?? target.sessionId);
   const draft = useSyncExternalStore(store.subscribe, store.read, () => "");
-  const setDraft = store.write;
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null); const [status, setStatus] = useState<string | null>(null);
-  const ref = useRef<HTMLTextAreaElement>(null);
-  const availability = sessionDeliveryAvailability(target);
-  const canSend = loaded && availability[mode].available;
+  const inFlight = useRef(false);
+  const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+  const [pending, setPending] = useState<PendingSessionSteer[]>([]);
+  const [live, setLive] = useState<SessionSteerAvailability | null>(null);
+  const [revision, setRevision] = useState(0);
+  const path = sessionSteerPath(target);
+  useEffect(() => {
+    if (!loaded || target.blockedReason) return;
+    const poll = sessionSteerPoll(() => api<SessionSteerAvailability>(path), setLive,
+      () => setLive({ available: false, code: "unavailable", reason: "Live steering is unavailable. Checking again shortly…", target: null }));
+    void poll.refresh(); const timer = setInterval(() => void poll.refresh(), 10_000);
+    return () => { poll.stop(); clearInterval(timer); };
+  }, [path, loaded, target.blockedReason, revision]);
+  const availability = sessionDeliveryAvailability(target, live);
+  const canSend = loaded && availability.available;
   const interruptAgent = working ? sessionInterruptAgent(target, agents.find((a) => a.id === target.agentId)) : null;
   const submit = async () => {
-    if (busy || !canSend || !draft.trim()) return;
-    setBusy(true); setError(null); setStatus(null);
-    try { await sendSessionDraft(mode, target, draft); store.clearIfUnchanged(draft); setStatus("Ask accepted by Scout for this session."); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { setBusy(false); }
+    if (inFlight.current || !canSend || !draft.trim()) return;
+    inFlight.current = true; setBusy(true); setError(null); setStatus(null);
+    try {
+      const receipt = await sendSessionDraft(target, draft);
+      if (!receipt.ok) throw new Error(receipt.audit.reason);
+      store.clearIfUnchanged(draft);
+      setPending((items) => [...unobservedSteers(items, prompts), { id: receipt.audit.id, text: draft, duringTurn: working, observedIds: prompts.map((p) => p.id) }]);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); setLive(null); }
+    finally { inFlight.current = false; setBusy(false); setRevision((v) => v + 1); onAttempt(); }
   };
   const interrupt = async () => {
-    if (!interruptAgent || busy) return;
-    setBusy(true); setError(null); setStatus(null);
+    if (!interruptAgent || inFlight.current) return;
+    inFlight.current = true; setBusy(true); setError(null); setStatus(null);
     try {
       await api(`/api/agents/${encodeURIComponent(interruptAgent.id)}/interrupt`, { method: "POST", body: JSON.stringify({ expectedSessionId: target.sessionId }) });
       setStatus("Interrupt requested for the live session.");
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { setBusy(false); }
+    finally { inFlight.current = false; setBusy(false); }
   };
-  return <div className="s-session-composer">
-    <div className="s-session-delivery" role="radiogroup" aria-label="Delivery mode">
-      {(["live", "scout"] as const).map((m) => <button key={m} type="button" role="radio" aria-checked={mode === m} disabled={busy || !availability[m].available}
-        title={availability[m].available ? undefined : availability[m].reason ?? undefined} onClick={() => setMode(m)}>
-        {m === "live" ? "Types into the live session" : "Ask through Scout"}<em>{m === "live" ? "direct" : "traced"}</em>
-      </button>)}
-      {!availability[mode].available && <small>{availability[mode].reason}</small>}
-    </div>
-    <MessageComposer renderWhenEmbedded density="panel" value={draft} onChange={setDraft} onSend={() => void submit()}
-      textareaRef={ref} rows={2} disabled={!canSend || busy} sending={busy} canSend={canSend && !!draft.trim() && !busy}
-      placeholder={canSend ? working ? "Steer this session through Scout…" : "Ask this session through Scout…" : "No writable session target is attached"}
-      sendTitle="Ask this session through Scout" sendAriaLabel="Ask this session through Scout" tools={<>
-        {interruptAgent && <Button size="xs" variant="outline" disabled={busy} onClick={() => void interrupt()}>Interrupt</Button>}
-      </>} />
-    {error && <p role="alert">{error} Your draft has been kept. No alternate delivery was attempted.</p>}
-    {status && <p role="status">{status}</p>}
-  </div>;
+  return <SessionSteerComposer draft={draft} onChange={store.write} submit={() => void submit()}
+    interrupt={interruptAgent ? () => void interrupt() : null} working={working} busy={busy} available={canSend}
+    reason={availability.reason} pending={unobservedSteers(pending, prompts)} error={error} status={status} />;
 }

@@ -105,6 +105,10 @@ Implemented now:
 - Non-approval attention items provide `Open Session` and local `Dismiss`, following the no-dead-end UI rule in `docs/eng/no-dead-end-ui.md`.
 - The iOS tRPC route map includes `question/answer`, so timeline question blocks can use the existing answer-question bridge path.
 - Scout MCP `ask` supports `replyMode: "notify"` and emits `notifications/scout/reply`.
+- The optional [Linux Omarchy notification observer](linux-desktop.md) presents
+  live broker communication, declared operator needs, delivery failures,
+  operator-owned collaboration waits, and requested completion callbacks.
+  It has separate inbound/outbound, attention, scope, and preview controls.
 - Scout MCP exposes `notify_operator` and `consult_operator`; the latter
   requires a safe default. Both write operator messages without creating a
   flight, and the broker can fan out a generic APNs alert without putting agent
@@ -124,7 +128,8 @@ Not done yet:
 - Answering `question` items from the iOS Inbox.
 - Host-level capture beyond the managed Claude tmux permission-confirmation
   path, including Codex, non-tmux Claude, and MCP permission prompts.
-- Desktop/web notification sinks for operator attention.
+- General desktop/web notification sinks for session attention beyond the
+  optional Linux broker-event observer.
 - Cross-device read/dismiss/decision synchronization beyond the current inbox item refresh. Current non-approval dismiss is intentionally local-only.
 - Dedicated desktop/web signal presentation, coalescing, and per-agent signal
   policy beyond the existing push-relay rate limits.

@@ -1,3 +1,4 @@
+import { decodeJournalLine } from "./broker-journal-framing.js";
 import { describe, expect, test } from "bun:test";
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -86,7 +87,7 @@ describe("broker daemon Scout dispatch", () => {
       .trim()
       .split("\n")
       .filter(Boolean)
-      .map((line) => JSON.parse(line) as {
+      .flatMap(decodeJournalLine).map((entry) => entry as {
         kind: string;
         dispatch?: { id: string; kind: string; askedLabel: string };
         message?: { actorId: string; class: string; metadata?: { scoutDispatch?: { id: string } } };
@@ -132,7 +133,7 @@ describe("broker daemon Scout dispatch", () => {
       .trim()
       .split("\n")
       .filter(Boolean)
-      .map((line) => JSON.parse(line) as {
+      .flatMap(decodeJournalLine).map((entry) => entry as {
         kind: string;
         message?: { actorId: string };
       });

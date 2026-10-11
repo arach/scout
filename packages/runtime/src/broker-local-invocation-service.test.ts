@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { registerSecretValue } from "@openscout/agent-sessions/secret-redaction";
+import { CodexAppServerControlError } from "@openscout/agent-sessions/local";
 
 import {
   createScoutExecutionResolution,
@@ -19,6 +21,7 @@ import {
 import { sessionObservationMetadata, type LocalEndpointSessionObservation } from "./session-observation.js";
 import { applyInvocationStatusPatch } from "./broker-local-invocation-helpers.js";
 import { BrokerLocalInvocationService } from "./broker-local-invocation-service.js";
+import { BrokerInvocationResultDeliveryService, matchesPendingInvocationResultReply, invocationResultMessageId } from "./broker-invocation-result-delivery-service.js";
 import { DispatchStalledError } from "./dispatch-stalled.js";
 import { RequesterWaitTimeoutError } from "./requester-timeout.js";
 
@@ -152,6 +155,11 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 
 function createHarness(input: {
   endpoint?: AgentEndpoint;
+  resolveEndpoint?: (invocation: InvocationRequest) => Promise<AgentEndpoint | undefined>;
+  readMessage?: (messageId: string) => Promise<MessageRecord | undefined>;
+  afterPersistEndpoint?: (endpoint: AgentEndpoint) => Promise<void>;
+  afterTransition?: (flight: FlightRecord) => Promise<void>;
+  deliverInvocationResult?: (invocationId: string) => Promise<unknown>;
   resolveError?: Error;
   invokeResult?: { output: string; externalSessionId?: string; metadata?: Record<string, unknown> };
   invokeError?: Error;
@@ -214,8 +222,21 @@ function createHarness(input: {
       flightState: Object.values(flights).find((flight) =>
         flight.invocationId === nextEndpoint.metadata?.lastInvocationId)?.state,
     });
+    await input.afterPersistEndpoint?.(nextEndpoint);
   }
 
+  const resultDeliveryService = new BrokerInvocationResultDeliveryService({
+    flightForInvocation: (invocationId) => Object.values(flights).find((flight) => flight.invocationId === invocationId),
+    async postMessage(message) {
+      postedMessages.push(message);
+    },
+    async markDelivered(invocationId, expected) {
+      const current = Object.values(flights).find((flight) => flight.invocationId === invocationId);
+      if (!current || !matchesPendingInvocationResultReply(current, expected)) return false;
+      flights[current.id] = { ...current, metadata: { ...current.metadata, resultReply: { ...expected, status: "delivered", deliveredAt: input.now ?? 10_000 } } };
+      return true;
+    },
+  });
   const service = new BrokerLocalInvocationService({
     nodeId: "node-1",
     runtime: {
@@ -223,6 +244,7 @@ function createHarness(input: {
       agent: (agentId) => agents[agentId],
       conversation: (conversationId) => conversations[conversationId],
       message: (messageId) => messages[messageId],
+      ...(input.readMessage ? { readMessage: input.readMessage } : {}),
       flightForInvocation: (invocationId) =>
         Object.values(flights).find((flight) => flight.invocationId === invocationId),
       snapshot: () => ({
@@ -241,9 +263,14 @@ function createHarness(input: {
     },
     endpointResolver: {
       activeLocalEndpointForAgent: () => input.previousEndpoint ?? endpoint,
-      async resolveLocalEndpointForInvocation() {
+      async resolveLocalEndpointForInvocation(invocation) {
         if (input.resolveError) {
           throw input.resolveError;
+        }
+        if (input.resolveEndpoint) {
+          const resolved = await input.resolveEndpoint(invocation);
+          if (resolved) endpoints[resolved.id] = resolved;
+          return resolved;
         }
         return endpoint;
       },
@@ -261,7 +288,6 @@ function createHarness(input: {
       },
     },
     activeInvocationTasks,
-    createId: () => "msg-generated",
     // Mirrors the daemon's transitionInvocation: read the invocation's current
     // flight, apply the patch with the real merge helper, persist the result.
     async transitionInvocation(invocationId, patch) {
@@ -275,6 +301,7 @@ function createHarness(input: {
       if (next.state === "completed") {
         completionSnapshots.push(structuredClone({ flight: next, endpoints: Object.values(endpoints) }));
       }
+      await input.afterTransition?.(next);
       return next;
     },
     persistEndpoint: (nextEndpoint) => persistEndpoint(nextEndpoint, true),
@@ -286,10 +313,7 @@ function createHarness(input: {
     async postInvocationStatusMessage(invocation, flight) {
       statusMessages.push({ invocation, flight });
     },
-    async postConversationMessage(message) {
-      postedMessages.push(message);
-      return { ok: true };
-    },
+    deliverInvocationResult: input.deliverInvocationResult ?? ((invocationId) => resultDeliveryService.deliver(invocationId)),
     existingBrokerReplyForInvocation: () => null,
     completeInvocationForBrokerReply: async () => false,
     messageVisibilityForConversation: (conversationInput) => conversationInput?.visibility ?? "workspace",
@@ -326,6 +350,9 @@ function createHarness(input: {
     service,
     statusMessages,
     warnings,
+    resultDeliveryService,
+    flightForInvocation: (invocationId: string) => Object.values(flights)
+      .find((flight) => flight.invocationId === invocationId),
     // Dispatch persists the initial flight before launch; tests seed it the
     // same way so transitionInvocation has a current record to patch.
     seedFlight(flight: FlightRecord) {
@@ -441,7 +468,7 @@ describe("BrokerLocalInvocationService", () => {
     }));
     expect(harness.postedMessages).toHaveLength(1);
     expect(harness.postedMessages[0]).toEqual(expect.objectContaining({
-      id: "msg-generated",
+      id: invocationResultMessageId("invocation-1"),
       actorId: "agent-1",
       body: "done",
       replyToMessageId: "message-1",
@@ -1077,16 +1104,23 @@ describe("BrokerLocalInvocationService", () => {
     // through the key-wise metadata merge.
     const harness = createHarness({
       endpoint: testEndpoint(),
-      invokeResult: { output: "second attempt reply" },
+      async invokeEndpoint() {
+        const running = harness.flightForInvocation("invocation-1");
+        expect(running?.metadata?.dispatchOutcome).toBeUndefined();
+        expect(running?.metadata?.heldThreadId).toBeUndefined();
+        return { output: "second attempt reply" };
+      },
       now: 50_000,
     });
 
     harness.seedFlight(testFlight({
-      state: "failed",
+      state: "queued",
       error: "dispatch stalled",
       completedAt: 45_000,
       metadata: {
         failureStage: "dispatch_stalled",
+        dispatchOutcome: { status: "queued_until_online", reason: "thread_held_externally", checkedAt: 45_000 },
+        heldThreadId: "old-held-thread",
         dispatchStalledSession: "scout-tmux-1",
         dispatchStalledRetries: 2,
         dispatchStalledPaneTail: "…",
@@ -1151,6 +1185,231 @@ describe("BrokerLocalInvocationService", () => {
     expect(started).toEqual(["invocation-1", "invocation-2"]);
     expect(harness.persistedFlights.filter((flight) => flight.state === "running").map((flight) => flight.invocationId))
       .toEqual(["invocation-1", "invocation-2"]);
+  });
+
+  test("serializes aliases of one resolved endpoint before preparation", async () => {
+    const gate = deferred();
+    const prepared: string[] = [];
+    const started: string[] = [];
+    const endpoint = testEndpoint({ sessionId: "sess.canonical", metadata: { externalSessionId: "native-1" } });
+    const harness = createHarness({
+      endpoint,
+      async ensureEndpoint(current) {
+        prepared.push(String(current.metadata?.lastInvocationId ?? "first"));
+        return {};
+      },
+      async invokeEndpoint(_endpoint, invocation) {
+        started.push(invocation.id);
+        if (invocation.id === "invocation-1") await gate.promise;
+        return { output: invocation.id };
+      },
+    });
+    harness.seedFlight(testFlight());
+    harness.seedFlight(testFlight({ id: "flight-2", invocationId: "invocation-2" }));
+    harness.service.launch(testInvocation({ execution: { targetSessionId: "sess.canonical" } }));
+    harness.service.launch(testInvocation({ id: "invocation-2", execution: { harness: "codex", targetSessionId: "native-1" } }));
+    await waitFor(() => started.length === 1);
+    expect(prepared).toHaveLength(1);
+    expect(started).toEqual(["invocation-1"]);
+    gate.resolve();
+    await harness.activeInvocationTasks.get("invocation-2");
+    expect(started).toEqual(["invocation-1", "invocation-2"]);
+    expect(prepared).toEqual(["first", "invocation-1"]);
+  });
+
+  test("runs intentionally isolated endpoints for one agent independently", async () => {
+    const gate = deferred();
+    const started: string[] = [];
+    const harness = createHarness({
+      async resolveEndpoint(invocation) {
+        return testEndpoint({ id: `endpoint-${invocation.id}`, sessionId: `session-${invocation.id}` });
+      },
+      async invokeEndpoint(_endpoint, invocation) {
+        started.push(invocation.id);
+        await gate.promise;
+        return { output: invocation.id };
+      },
+    });
+    harness.seedFlight(testFlight());
+    harness.seedFlight(testFlight({ id: "flight-2", invocationId: "invocation-2" }));
+    harness.service.launch(testInvocation({ execution: { session: "new", harness: "codex" } }));
+    harness.service.launch(testInvocation({ id: "invocation-2", execution: { session: "new", harness: "codex" } }));
+    await waitFor(() => started.length === 2);
+    expect(started).toEqual(["invocation-1", "invocation-2"]);
+    gate.resolve();
+    await Promise.all(harness.activeInvocationTasks.values());
+  });
+
+  test("cancellation while queued prevents preparation and external submission", async () => {
+    const gate = deferred();
+    const started: string[] = [];
+    let preparations = 0;
+    const harness = createHarness({
+      endpoint: testEndpoint(),
+      async ensureEndpoint() { preparations += 1; return {}; },
+      async invokeEndpoint(_endpoint, invocation) {
+        started.push(invocation.id);
+        await gate.promise;
+        return { output: invocation.id };
+      },
+    });
+    harness.seedFlight(testFlight());
+    harness.seedFlight(testFlight({ id: "flight-2", invocationId: "invocation-2" }));
+    harness.service.launch(testInvocation());
+    harness.service.launch(testInvocation({ id: "invocation-2" }));
+    await waitFor(() => started.length === 1);
+    harness.seedFlight(testFlight({ id: "flight-2", invocationId: "invocation-2", state: "cancelled" }));
+    gate.resolve();
+    await harness.activeInvocationTasks.get("invocation-2");
+    expect(started).toEqual(["invocation-1"]);
+    expect(preparations).toBe(1);
+    expect(harness.flightForInvocation("invocation-2")?.state).toBe("cancelled");
+    expect(harness.persistedFlights.filter((flight) => flight.invocationId === "invocation-2")).toEqual([]);
+  });
+
+  for (const phase of ["resolution", "preparation", "endpoint_write", "running_write", "attachment_read"] as const) {
+    test(`cancellation during ${phase} prevents external submission`, async () => {
+      const entered = deferred();
+      const release = deferred();
+      const endpoint = testEndpoint();
+      let executorCalls = 0;
+      async function pause(at: typeof phase) {
+        if (at !== phase) return;
+        entered.resolve();
+        await release.promise;
+      }
+      const harness = createHarness({
+        endpoint,
+        async resolveEndpoint() { await pause("resolution"); return endpoint; },
+        async ensureEndpoint() { await pause("preparation"); return {}; },
+        async afterPersistEndpoint(current) { if (current.state === "active") await pause("endpoint_write"); },
+        async afterTransition(current) { if (current.state === "running") await pause("running_write"); },
+        async readMessage() { await pause("attachment_read"); return undefined; },
+        async invokeEndpoint() { executorCalls += 1; return { output: "must not execute" }; },
+      });
+      harness.seedFlight(testFlight());
+      const execution = harness.service.execute(testInvocation());
+      await entered.promise;
+      harness.seedFlight(testFlight({ state: "cancelled", summary: "Cancelled during preparation" }));
+      release.resolve();
+      await execution;
+      expect(executorCalls).toBe(0);
+      expect(harness.flightForInvocation("invocation-1")?.state).toBe("cancelled");
+      expect(harness.postedMessages).toEqual([]);
+      expect(harness.statusMessages).toEqual([]);
+      expect(harness.persistedEndpoints.at(-1)?.state).not.toBe("active");
+    });
+  }
+
+  for (const state of ["completed", "failed", "cancelled"] as const) {
+    test(`does not resolve or submit an already ${state} invocation`, async () => {
+      let resolutions = 0;
+      const harness = createHarness({ async resolveEndpoint() { resolutions += 1; return testEndpoint(); } });
+      harness.seedFlight(testFlight({ state }));
+      await harness.service.execute(testInvocation());
+      expect(resolutions).toBe(0);
+      expect(harness.persistedFlights).toEqual([]);
+      expect(harness.persistedEndpoints).toEqual([]);
+    });
+  }
+
+  test("late wake completion preserves cancellation", async () => {
+    const harness = createHarness({
+      endpoint: testEndpoint(),
+      async invokeEndpoint() {
+        harness.seedFlight(testFlight({ state: "cancelled" }));
+        return { output: "late receipt" };
+      },
+    });
+    harness.seedFlight(testFlight());
+    await harness.service.execute(testInvocation({ action: "wake" }));
+    expect(harness.flightForInvocation("invocation-1")?.state).toBe("cancelled");
+    expect(harness.persistedFlights.map((flight) => flight.state)).toEqual(["running"]);
+    expect(harness.postedMessages).toEqual([]);
+  });
+
+  test("an unacknowledged Codex submission stays waiting without safe-retry evidence", async () => {
+    const harness = createHarness({
+      endpoint: testEndpoint(),
+      invokeError: new CodexAppServerControlError({ method: "turn/start", timeoutMs: 30_000, submissionUnknown: true }),
+    });
+    harness.seedFlight(testFlight({ metadata: { dispatchOutcome: { status: "not_submitted", checkedAt: 1_000 } } }));
+    await harness.service.execute(testInvocation());
+    expect(harness.flightForInvocation("invocation-1")).toMatchObject({
+      state: "waiting",
+      metadata: { dispatchOutcome: { status: "submission_unknown", method: "turn/start" } },
+    });
+    expect(harness.postedMessages).toEqual([]);
+    expect(harness.statusMessages).toEqual([]);
+    expect(harness.persistedEndpoints.at(-1)?.state).toBe("active");
+  });
+
+  test("durable completion contains the reply intent before any delivery attempt", async () => {
+    let executorCalls = 0;
+    const harness = createHarness({
+      endpoint: testEndpoint(),
+      async invokeEndpoint() { executorCalls += 1; return { output: "saved result" }; },
+      async deliverInvocationResult() {
+        const current = harness.flightForInvocation("invocation-1")!;
+        expect(current.state).toBe("completed");
+        expect(current.metadata?.resultReply).toEqual(expect.objectContaining({
+          version: 1, status: "pending", message: expect.objectContaining({ body: "saved result", createdAt: current.completedAt }),
+        }));
+        throw new Error("delivery crashed after result commit");
+      },
+    });
+    harness.seedFlight(testFlight());
+    await harness.service.execute(testInvocation());
+    expect(harness.flightForInvocation("invocation-1")?.state).toBe("completed");
+    expect(harness.persistedEndpoints.at(-1)?.state).toBe("idle");
+    expect(harness.postedMessages).toEqual([]);
+    expect(await harness.resultDeliveryService.deliver("invocation-1")).toBe("delivered");
+    await harness.service.execute(testInvocation());
+    expect(executorCalls).toBe(1);
+    expect(harness.postedMessages.map((message) => message.body)).toEqual(["saved result"]);
+  });
+
+  test("reply intent and terminal output share the same secret redaction", async () => {
+    const secret = "fixture-local-result-intent-sensitive-value";
+    registerSecretValue(secret, "local-result-intent-test");
+    const harness = createHarness({ endpoint: testEndpoint(), invokeResult: { output: `answer ${secret}` } });
+    harness.seedFlight(testFlight());
+    await harness.service.execute(testInvocation());
+    const captured = harness.completionSnapshots[0]!.flight;
+    expect(captured.output).toBe("answer [redacted]");
+    expect(JSON.stringify(captured.metadata?.resultReply)).not.toContain(secret);
+    expect(harness.postedMessages[0]?.body).toBe(captured.output);
+  });
+
+  test("a concurrent cancellation at completion prevents posting the proposed reply", async () => {
+    const harness = createHarness({
+      endpoint: testEndpoint(),
+      async afterTransition(flight) {
+        if (flight.state === "completed") harness.seedFlight(testFlight({ state: "cancelled" }));
+      },
+    });
+    harness.seedFlight(testFlight());
+    await harness.service.execute(testInvocation());
+    expect(harness.flightForInvocation("invocation-1")?.state).toBe("cancelled");
+    expect(harness.postedMessages).toEqual([]);
+  });
+
+  test("slow reply delivery does not hold the endpoint execution lane", async () => {
+    const release = deferred();
+    const started: string[] = [];
+    const harness = createHarness({
+      endpoint: testEndpoint(),
+      async invokeEndpoint(_endpoint, invocation) { started.push(invocation.id); return { output: invocation.id }; },
+      async deliverInvocationResult() { await release.promise; },
+    });
+    harness.seedFlight(testFlight());
+    harness.seedFlight(testFlight({ id: "flight-2", invocationId: "invocation-2" }));
+    harness.service.launch(testInvocation());
+    harness.service.launch(testInvocation({ id: "invocation-2" }));
+    await waitFor(() => started.length === 2);
+    expect(started).toEqual(["invocation-1", "invocation-2"]);
+    release.resolve();
+    await Promise.all(harness.activeInvocationTasks.values());
   });
 });
 

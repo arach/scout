@@ -1,3 +1,6 @@
+import { BrokerCommandAdmission } from "./broker-storage-pressure.js";
+import { acceptedDeliveryResponse, deliveryRequestMessageId, deliveryRequestInvocationId, recoverAcceptedInvocation, recoverAcceptedDelivery, type DeliveryAcceptanceEnvelope } from "./broker-delivery-receipt-recovery.js";
+import { readMessageRecord } from "./broker-message-records.js";
 import { iterateMessageRecordsAsync } from "./broker-message-records.js";
 import {
   SCOUT_DISPATCHER_AGENT_ID,
@@ -45,6 +48,7 @@ import {
 } from "./scout-dispatcher.js";
 import { sessionActorAlias } from "./session-alias.js";
 import { runtimeSessionAddressForSessionId } from "./runtime-session-address.js";
+import type { BrokerRequestReceipts } from "./broker-request-receipts.js";
 
 type EnsureBrokerDeliveryConversationInput = {
   requesterId: string;
@@ -82,6 +86,10 @@ type ChannelAttentionPointerInput = {
 export type BrokerDeliveryAcceptanceServiceOptions = {
   nodeId: string;
   operatorActorId: string;
+  requestReceipts?: BrokerRequestReceipts;
+  commandAdmission?: BrokerCommandAdmission;
+  readAcceptedMessage?: (id: string) => Promise<MessageRecord | undefined>;
+  readAcceptedInvocation?: (id: string) => Promise<InvocationRequest | undefined>;
   runtimeSnapshot: () => RuntimeSnapshot;
   /**
    * Live runtime-catalog snapshot (BrokerRuntimeCatalogService.read). Tuple
@@ -170,8 +178,9 @@ export type BrokerDeliveryAcceptanceServiceOptions = {
     createdAt: number;
   }) => Promise<DeliveryWorkItemResolution>;
   deliveryWorkItemResolutionForTell: (payload: ScoutDeliverRequest) => DeliveryWorkItemResolution;
+  prepareDeliveryWorkItemIfNeeded?: BrokerDeliveryAcceptanceServiceOptions["recordDeliveryWorkItemIfNeeded"];
   postConversationMessage: (message: MessageRecord) => Promise<unknown>;
-  acceptInvocation: (invocation: InvocationRequest) => Promise<FlightRecord>;
+  acceptInvocation: (invocation: InvocationRequest, message?: MessageRecord, workItem?: DeliveryWorkItemResolution["pendingCreation"]) => Promise<FlightRecord>;
   dispatchAcceptedInvocation: (invocation: InvocationRequest) => Promise<void>;
   queueOperatorDeliveryIssue: (input: OperatorDeliveryIssueInput) => void;
   queueOperatorSignal: (input: {
@@ -223,6 +232,7 @@ function normalizeDeliveryAttachments(
 }
 
 export class BrokerDeliveryAcceptanceService {
+  private readonly defaultAdmission = new BrokerCommandAdmission();
   constructor(private readonly options: BrokerDeliveryAcceptanceServiceOptions) {}
 
   private channelAttentionPointerBody(input: {
@@ -315,10 +325,54 @@ export class BrokerDeliveryAcceptanceService {
 
   async accept(
     payload: ScoutDeliverRequest,
-    options: { signal?: AbortSignal } = {},
+    options: { signal?: AbortSignal; receiptReserved?: boolean; admissionReserved?: boolean } = {},
   ): Promise<ScoutDeliverResponse> {
     throwIfAborted(options.signal);
-    const requestId = payload.id?.trim() || this.options.createId("deliver");
+    const admission = this.options.commandAdmission ?? this.defaultAdmission;
+    if (options.receiptReserved) {
+      const release = options.admissionReserved ? undefined : admission.reserve(payload);
+      try { return await this.acceptCommand(payload); } finally { release?.(); }
+    }
+    if (payload.requestId && this.options.requestReceipts) {
+      const { requesterId } = callerContextForDelivery(payload, {
+        operatorActorId: this.options.operatorActorId, nodeId: this.options.nodeId,
+      });
+      // Both transport paths enter this boundary. Once reserved, caller abort
+      // stops waiting; it cannot interrupt the broker-owned durable command.
+      return this.options.requestReceipts.run(requesterId, payload.requestId, "deliver", payload,
+        () => this.acceptCommand(payload),
+        async () => this.recoverReceipt(requesterId, payload.requestId!), () => admission.reserve(payload));
+    }
+    const release = admission.reserve(payload);
+    try { return await this.acceptCommand(payload, options); } finally { release(); }
+  }
+
+  /** Router-owned receipts must reserve capacity before writing their unknown ledger entry. */
+  reserveCommand(payload: ScoutDeliverRequest): () => void {
+    return (this.options.commandAdmission ?? this.defaultAdmission).reserve(payload);
+  }
+
+  async recoverReceipt(requesterId: string, requestId: string): Promise<ScoutDeliverResponse | null> {
+    // The invocation witnesses reused message IDs and remote conversation
+    // authority. Consult its hot record before requiring a cold message read.
+    const invocationId = deliveryRequestInvocationId(requesterId, requestId);
+    const invocation = this.options.readAcceptedInvocation
+      ? await this.options.readAcceptedInvocation(invocationId)
+      : this.options.runtimeSnapshot().invocations[invocationId];
+    const recovered = recoverAcceptedInvocation(invocation, requesterId, requestId);
+    if (recovered) return recovered;
+    const id = deliveryRequestMessageId(requesterId, requestId);
+    const message = this.options.readAcceptedMessage
+      ? await this.options.readAcceptedMessage(id)
+      : await readMessageRecord(this.options.runtimeSnapshot().messages, id);
+    return recoverAcceptedDelivery(message, requesterId, requestId);
+  }
+
+  private async acceptCommand(
+    payload: ScoutDeliverRequest,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<ScoutDeliverResponse> {
+    const requestId = payload.requestId?.trim() || payload.id?.trim() || this.options.createId("deliver");
     const createdAt = typeof payload.createdAt === "number" && Number.isFinite(payload.createdAt)
       ? payload.createdAt
       : this.now();
@@ -977,7 +1031,7 @@ export class BrokerDeliveryAcceptanceService {
       channel: deliveryChannel,
     });
     const workResolution = payload.intent === "consult"
-      ? await this.options.recordDeliveryWorkItemIfNeeded({
+      ? await (this.options.prepareDeliveryWorkItemIfNeeded ?? this.options.recordDeliveryWorkItemIfNeeded)({
           payload: aliasResolution && payload.workItem
             ? {
                 ...payload,
@@ -1007,7 +1061,7 @@ export class BrokerDeliveryAcceptanceService {
     const reusableMessage = existingMessage?.conversationId === conversation.id
       ? existingMessage
       : undefined;
-    const messageId = reusableMessage?.id ?? this.options.createId("msg");
+    const messageId = reusableMessage?.id ?? (payload.requestId ? deliveryRequestMessageId(requesterId, payload.requestId) : this.options.createId("msg"));
     const targetLabel = target.label;
     const routeKind = this.options.brokerRouteKind(conversation);
     const message: MessageRecord = {
@@ -1033,6 +1087,7 @@ export class BrokerDeliveryAcceptanceService {
         ...(reusableMessage?.metadata ?? {}),
         ...(payload.messageMetadata ?? {}),
         deliveryRequestId: requestId,
+        ...(payload.requestId ? { requestId: payload.requestId, requestIntent: payload.intent } : {}),
         ...(labels.length ? { labels } : {}),
         ...(receiptSessionId ? { targetSessionId: receiptSessionId } : {}),
         ...(aliasResolution ? { aliasResolution } : {}),
@@ -1050,9 +1105,7 @@ export class BrokerDeliveryAcceptanceService {
         }),
       },
     };
-    await this.options.postConversationMessage(message);
-    throwIfAborted(options.signal);
-    if (deliveryChannel) {
+    const postAttentionPointer = async () => { if (deliveryChannel) {
       await this.postChannelAttentionPointerBestEffort({
         requesterId,
         requesterNodeId,
@@ -1066,8 +1119,7 @@ export class BrokerDeliveryAcceptanceService {
         replyToSessionId,
         collaborationRecordId,
       });
-      throwIfAborted(options.signal);
-    }
+    } };
 
     const shouldDispatchTargetTurn =
       payload.intent === "consult"
@@ -1076,6 +1128,9 @@ export class BrokerDeliveryAcceptanceService {
         && payload.ensureAwake !== false);
 
     if (!shouldDispatchTargetTurn) {
+      throwIfAborted(options.signal);
+      await this.options.postConversationMessage(message);
+      await postAttentionPointer();
       const receipt = buildDeliveryReceipt({
         requestId,
         routeKind,
@@ -1109,6 +1164,7 @@ export class BrokerDeliveryAcceptanceService {
         ? { source: payload.messageMetadata.source }
         : {}),
       ...(payload.invocationMetadata ?? {}),
+      ...(payload.requestId ? { requestId: payload.requestId } : {}),
       ...(receiptSessionId ? { targetSessionId: receiptSessionId } : {}),
       ...(aliasResolution ? { aliasResolution } : {}),
       ...(payload.intent === "tell" && payload.invocationMetadata?.sourceIntent === undefined
@@ -1132,7 +1188,7 @@ export class BrokerDeliveryAcceptanceService {
         : { session: "new" as const }),
     };
     const invocation: InvocationRequest = {
-      id: this.options.createId("inv"),
+      id: payload.requestId ? deliveryRequestInvocationId(requesterId, payload.requestId) : this.options.createId("inv"),
       ...(payload.requestId ? { requestId: payload.requestId } : {}),
       requesterId,
       requesterNodeId,
@@ -1165,44 +1221,33 @@ export class BrokerDeliveryAcceptanceService {
         }),
       },
     };
-    const flight = await this.options.acceptInvocation(invocation);
-    throwIfAborted(options.signal);
-    const bindingRef = flight.id.slice(-8);
     const sessionAlias = sessionActorAlias(snapshot, target.actorId) ?? undefined;
+    const acceptance: DeliveryAcceptanceEnvelope = {
+      version: 1, requesterId, requestId,
+      response: {
+        kind: "delivery", accepted: true, routeKind, conversation, targetAgentId: target.actorId,
+        ...(receiptSessionId ? { targetSessionId: receiptSessionId } : {}),
+        ...(aliasResolution ? { aliasResolution } : {}),
+        ...(sessionAlias ? { sessionAlias } : {}),
+        ...(workRecord?.kind === "work_item" ? { workItem: workRecord } : {}),
+      },
+      receiptInput: {
+        requestId, routeKind, requesterId, requesterNodeId, targetAgentId: target.actorId,
+        targetSessionId: receiptSessionId,
+        targetSessionAddress: runtimeSessionAddressForSessionId(this.options.runtimeSnapshot(), receiptSessionId) ?? undefined,
+        targetLabel, sessionAlias, conversationId: conversation.id, messageId, aliasResolution, executionResolution,
+      },
+    };
+    if (payload.requestId) message.metadata = { ...message.metadata, scoutAcceptance: acceptance };
+    // The original receipt and initial flight are recoverable from the same
+    // atomic journal frame, even if the process dies before receipt-file save.
+    throwIfAborted(options.signal);
+    const flight = await this.options.acceptInvocation(invocation, message, workResolution.pendingCreation);
     this.options.dispatchAcceptedInvocation(invocation).catch((error) => {
       this.options.warn?.(`[openscout-runtime] background dispatch failed for invocation ${invocation.id}:`, error);
     });
-    return {
-      kind: "delivery",
-      accepted: true,
-      routeKind,
-      receipt: buildDeliveryReceipt({
-        requestId,
-        routeKind,
-        requesterId,
-        requesterNodeId,
-        targetAgentId: target.actorId,
-        targetSessionId: receiptSessionId,
-        targetSessionAddress: runtimeSessionAddressForSessionId(this.options.runtimeSnapshot(), receiptSessionId) ?? undefined,
-        targetLabel,
-        sessionAlias,
-        bindingRef,
-        conversationId: conversation.id,
-        messageId,
-        flightId: flight.id,
-        aliasResolution,
-        executionResolution,
-      }),
-      conversation,
-      message,
-      targetAgentId: target.actorId,
-      ...(receiptSessionId ? { targetSessionId: receiptSessionId } : {}),
-      ...(aliasResolution ? { aliasResolution } : {}),
-      ...(sessionAlias ? { sessionAlias } : {}),
-      bindingRef,
-      flight,
-      ...(workRecord?.kind === "work_item" ? { workItem: workRecord } : {}),
-    };
+    void postAttentionPointer();
+    return acceptedDeliveryResponse(message, acceptance, flight);
   }
 
   private now(): number {

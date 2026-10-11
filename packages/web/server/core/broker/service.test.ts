@@ -3,6 +3,11 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { FlightRecord, InvocationRequest } from "@openscout/protocol";
+import { closeDb } from "../../db/internal/db.ts";
+import { SQLiteControlPlaneStore } from "../../../../runtime/src/sqlite-store.ts";
+import { ControlPlaneHistoryStore } from "../../../../runtime/src/control-plane-history-store.ts";
+import { emptyHistoryRotationPlan } from "../../../../runtime/src/history-rotation.ts";
 
 import {
   LOCAL_CONFIG_VERSION,
@@ -47,8 +52,11 @@ const originalSkipUserProjectHints = process.env.OPENSCOUT_SKIP_USER_PROJECT_HIN
 const originalFetch = globalThis.fetch;
 const originalDateNow = Date.now;
 const testDirectories = new Set<string>();
+const testCleanups: Array<() => void> = [];
 
 afterEach(() => {
+  closeDb();
+  for (const cleanup of testCleanups.splice(0).reverse()) cleanup();
   process.env.HOME = originalHome;
   if (originalOpenScoutHome === undefined) {
     delete process.env.OPENSCOUT_HOME;
@@ -1410,6 +1418,154 @@ describe("sendScoutConversationMessage", () => {
 });
 
 describe("sendScoutConversationSteer", () => {
+  for (const scenario of ["reply", "offline", "missing", "receipt", "durable", "relocated", "relocated_preferences", "unavailable", "unavailable_preferences", "unavailable_new", "unavailable_existing"] as const) {
+    test(`continues the conversation's worker instead of another endpoint (${scenario})`, async () => {
+      const home = useIsolatedOpenScoutHome();
+      const agentId = "project-darwin.master.mini";
+      const conversationId = "chn-darwin";
+      const unavailableHistory = scenario.startsWith("unavailable");
+      const requestedExecution: InvocationRequest["execution"] = scenario === "unavailable_new"
+        ? { session: "new", harness: "codex" }
+        : scenario === "unavailable_existing"
+          ? { session: "existing", targetSessionId: "requested-session" }
+          : scenario === "relocated_preferences" || scenario === "unavailable_preferences"
+            ? { harness: "codex", model: "requested-model" }
+            : undefined;
+      const invocations: any[] = [];
+      const invocation: InvocationRequest = {
+        id: "inv-this-chat", conversationId, targetAgentId: agentId, requesterId: "operator",
+        requesterNodeId: "node-1", action: "consult", task: "original", createdAt: 1000,
+        execution: { session: "new" }, ensureAwake: true, stream: false,
+      };
+      const flight: FlightRecord = {
+        id: "flt-this-chat", invocationId: invocation.id, targetAgentId: agentId, requesterId: "operator",
+        state: "completed", startedAt: 1000, completedAt: 2000,
+        metadata: { dispatchAck: { sessionId: "session-this-chat" } },
+      };
+      let historicalStore: SQLiteControlPlaneStore | undefined;
+      let historicalReads = 0;
+      if (scenario.startsWith("relocated") || unavailableHistory) {
+        mkdirSync(process.env.OPENSCOUT_CONTROL_HOME!, { recursive: true });
+        const store = new SQLiteControlPlaneStore(join(process.env.OPENSCOUT_CONTROL_HOME!, "control-plane.sqlite"));
+        testCleanups.push(() => store.close());
+        const historyDirectory = join(process.env.OPENSCOUT_CONTROL_HOME!, "history");
+        const history = new ControlPlaneHistoryStore(historyDirectory);
+        testCleanups.push(() => history.close());
+        store.configureHistory(historyDirectory);
+        store.upsertNode({ id: "node-1", meshId: "mesh-1", name: "Node", advertiseScope: "local", registeredAt: 1 });
+        store.upsertActor({ id: "operator", kind: "human", displayName: "Operator" });
+        store.upsertActor({ id: agentId, kind: "agent", displayName: "Darwin" });
+        store.upsertConversation({ id: conversationId, kind: "direct", title: "Darwin", visibility: "private", shareMode: "local", authorityNodeId: "node-1", participantIds: ["operator", agentId] });
+        store.recordInvocation(invocation);
+        store.recordFlight(flight);
+        const plan = emptyHistoryRotationPlan();
+        plan.invocationIds.add(invocation.id);
+        plan.flightIds.add(flight.id);
+        const prepared = store.publishHistoryRotation(plan, history);
+        const removed = store.removePublishedHistory(prepared.publication!, prepared.published, history);
+        expect(removed.blocked).toEqual([]);
+        expect(store.writerDb.query("SELECT flight_metadata_json FROM invocations WHERE id=?1").get(invocation.id)).toEqual({ flight_metadata_json: null });
+        expect(store.loadSnapshot().invocations[invocation.id]).toBeUndefined();
+        expect(store.loadSnapshot().flights[flight.id]).toBeUndefined();
+        historicalStore = store;
+      }
+      if (scenario === "durable") {
+        mkdirSync(process.env.OPENSCOUT_CONTROL_HOME!, { recursive: true });
+        const seed = new Database(join(process.env.OPENSCOUT_CONTROL_HOME!, "control-plane.sqlite"), { create: true });
+        seed.exec(`CREATE TABLE invocations (
+          id TEXT PRIMARY KEY, requester_id TEXT, requester_node_id TEXT, target_agent_id TEXT,
+          target_node_id TEXT, action TEXT, task TEXT, collaboration_record_id TEXT, conversation_id TEXT,
+          message_id TEXT, context_json TEXT, execution_json TEXT, execution_resolution_json TEXT,
+          ensure_awake INTEGER, stream INTEGER, timeout_ms INTEGER, labels_json TEXT, metadata_json TEXT,
+          created_at INTEGER, flight_id TEXT, state TEXT, summary TEXT, output TEXT, error TEXT,
+          started_at INTEGER, completed_at INTEGER, flight_metadata_json TEXT
+        )`);
+        seed.prepare(`INSERT INTO invocations
+          (id, requester_id, requester_node_id, target_agent_id, action, task, conversation_id,
+           created_at, flight_id, state, started_at, completed_at, flight_metadata_json)
+          VALUES (?, 'operator', 'node-1', ?, 'consult', 'original', ?, 1000, ?, 'completed', 1000, 2000, ?)`)
+          .run(invocation.id, agentId, conversationId, flight.id, JSON.stringify(flight.metadata));
+        seed.close();
+        (await import("../../db-queries.ts")).closeDb();
+      }
+      globalThis.fetch = (async (input, init) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        const url = new URL(request.url);
+        if (request.method === "GET" && url.pathname === "/health") {
+          return jsonResponse({ ok: true, nodeId: "node-1", meshId: "mesh-1" });
+        }
+        if (request.method === "GET" && url.pathname === "/v1/node") return jsonResponse({ id: "node-1" });
+        if (request.method === "GET" && url.pathname === "/v1/snapshot") {
+          const endpoint = (id: string, state: string, sessionId: string) => ({
+            id, agentId, nodeId: "node-1", harness: "codex", transport: "codex_app_server", state, sessionId,
+          });
+          return jsonResponse({
+            actors: { operator: { id: "operator", kind: "person" } },
+            agents: { [agentId]: { id: agentId, kind: "agent", displayName: "Project Darwin" } },
+            endpoints: {
+              launcher: endpoint("launcher", "waiting", "relay-darwin-codex"),
+              ...(scenario === "missing" ? {} : {
+                worker: endpoint("worker", scenario === "offline" ? "offline" : "idle", "session-this-chat"),
+              }),
+              other: endpoint("other", "active", "session-other-chat"),
+            },
+            conversations: { [conversationId]: {
+              id: conversationId, kind: "direct", title: "Darwin", visibility: "private",
+              authorityNodeId: "node-1", participantIds: ["operator", agentId],
+            } },
+            messages: {
+              ...(scenario === "receipt" || scenario === "durable" || historicalStore ? {} : { reply: {
+                id: "reply", conversationId, actorId: agentId, class: "agent", createdAt: 1000,
+                body: "Done", metadata: { source: "broker", responderSessionId: "session-this-chat" },
+              } }),
+              other: {
+                id: "other", conversationId: "another-chat", actorId: agentId, class: "agent", createdAt: 2000,
+                body: "Other work", metadata: { source: "broker", responderSessionId: "session-other-chat" },
+              },
+              correction: {
+                id: "correction", conversationId, actorId: "operator", class: "agent", createdAt: 3000,
+                body: "Wrong project", metadata: { returnAddress: { sessionId: "operator-session" } },
+              },
+            },
+            invocations: scenario === "receipt" ? { [invocation.id]: invocation } : {},
+            flights: scenario === "receipt" ? { [flight.id]: flight } : {},
+          });
+        }
+        if (request.method === "GET" && url.pathname === `/v1/invocations/${invocation.id}`) {
+          historicalReads += 1;
+          return unavailableHistory
+            ? jsonResponse({ error: "invocation_storage_unavailable" }, 503)
+            : jsonResponse(historicalStore!.readInvocationSnapshot(invocation.id));
+        }
+        if (request.method === "POST" && url.pathname === "/v1/messages") return jsonResponse({ ok: true });
+        if (request.method === "POST" && url.pathname === "/v1/invocations") {
+          const body = await request.json();
+          invocations.push(body);
+          return jsonResponse({ accepted: true, invocationId: body.id });
+        }
+        return jsonResponse({ error: "unexpected request" }, 404);
+      }) as typeof fetch;
+
+      const send = sendScoutConversationSteer({
+        conversationId, senderId: "operator", body: "Continue this conversation", intent: "invoke",
+        targetParticipantIds: [agentId], resolveMentionsFromBody: false, currentDirectory: home,
+        ...(requestedExecution ? { execution: requestedExecution } : {}),
+      });
+      if (scenario === "unavailable" || scenario === "unavailable_preferences") {
+        await expect(send).rejects.toThrow("Conversation session storage is unavailable.");
+        expect(invocations).toHaveLength(0);
+        expect(historicalReads).toBe(1);
+        return;
+      }
+      await send;
+      expect(invocations).toHaveLength(1);
+      expect(invocations[0].execution).toEqual(scenario === "unavailable_new" || scenario === "unavailable_existing"
+        ? requestedExecution
+        : { session: "existing", targetSessionId: "session-this-chat", ...requestedExecution });
+      expect(historicalReads).toBe(scenario.startsWith("relocated") ? 1 : 0);
+    });
+  }
+
   test("routes a conversation-local session by its visible runtime name", async () => {
     const home = useIsolatedOpenScoutHome();
     const requests: Array<{ method: string; path: string; body?: any }> = [];

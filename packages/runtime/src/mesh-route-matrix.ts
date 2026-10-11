@@ -136,6 +136,7 @@ const MESH_ROUTE_MATRIX: Record<string, MeshRouteTier> = {
   "GET /v1/roles/assignments": "local",
   "GET /v1/roles/catalog": "local",
   "GET /v1/snapshot": "local",
+  "GET /v1/notification-routing": "local",
   "GET /v1/tail/discover": "local",
   "GET /v1/tail/recent": "local",
   "GET /v1/thread-watches/:id/stream": "local",

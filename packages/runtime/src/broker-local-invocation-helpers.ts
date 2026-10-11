@@ -80,6 +80,11 @@ export function applyInvocationStatusPatch(
   current: FlightRecord,
   patch: InvocationStatusPatch,
 ): FlightRecord {
+  // A late attempt or reconciliation must not reopen or replace terminal
+  // truth. An explicit retry needs its own nonterminal flight first.
+  if (isTerminalFlightState(current.state) && patch.state && patch.state !== current.state) {
+    return current;
+  }
   const { metadata, ...status } = patch;
   let nextMetadata = "metadata" in patch
     ? { ...(current.metadata ?? {}), ...(metadata ?? {}) }
@@ -105,6 +110,8 @@ export function applyInvocationStatusPatch(
 // value overrides in the key-wise metadata merge and is dropped by the durable
 // JSON serialization).
 const TRANSIENT_STATUS_METADATA_KEYS = [
+  "dispatchOutcome",
+  "heldThreadId",
   "failureStage",
   "failureSeverity",
   "noteworthy",
@@ -207,7 +214,25 @@ export function endpointForFlight(snapshot: RuntimeSnapshot, flight: FlightRecor
     return null;
   }
 
-  return latestEndpointForAgent(snapshot, flight.targetAgentId);
+  // Agent identity can own many isolated sessions. Without dispatch evidence,
+  // its latest endpoint is not evidence about this flight's execution owner.
+  return null;
+}
+
+function flightsShareExecutionOwner(left: FlightRecord, right: FlightRecord): boolean {
+  const endpointId = flightDispatchEndpointId(left);
+  if (!endpointId || endpointId !== flightDispatchEndpointId(right)) return false;
+  const leftAck = left.metadata!.dispatchAck as Record<string, unknown>;
+  const rightAck = right.metadata!.dispatchAck as Record<string, unknown>;
+  for (const key of ["nodeId", "harness"] as const) {
+    if (leftAck[key] && rightAck[key] && leftAck[key] !== rightAck[key]) return false;
+  }
+  const leftSession = metadataStringValue(leftAck, "sessionId");
+  const rightSession = metadataStringValue(rightAck, "sessionId");
+  // Provider identity can refine the same pending endpoint's routing identity.
+  // A different, unlinked session on a reused endpoint is a different owner.
+  return !leftSession || !rightSession || leftSession === rightSession
+    || leftAck.refinesSessionId === rightSession || rightAck.refinesSessionId === leftSession;
 }
 
 export function flightDispatchEndpointUnavailableReason(
@@ -281,12 +306,18 @@ export function staleWorkingFlightReason(
   if (options.isInvocationActive(flight.invocationId)) {
     return null;
   }
+  const dispatchOutcome = flight.metadata?.dispatchOutcome;
+  if (dispatchOutcome && typeof dispatchOutcome === "object"
+    && (dispatchOutcome as Record<string, unknown>).status === "submission_unknown") {
+    return null;
+  }
 
   const startedAt = flightTimestamp(flight);
   const newerTerminalFlight = Object.values(snapshot.flights)
     .filter((candidate) => (
       candidate.targetAgentId === flight.targetAgentId
       && candidate.id !== flight.id
+      && flightsShareExecutionOwner(flight, candidate)
       && !isWorkingFlightState(candidate.state)
       && flightTimestamp(candidate) > startedAt
     ))
@@ -311,6 +342,10 @@ export function staleWorkingFlightReason(
 
   const endpoint = endpointForFlight(snapshot, flight);
   if (!endpoint) {
+    if (!flightDispatchEndpointId(flight)
+      && Object.values(snapshot.endpoints).some((candidate) => candidate.agentId === flight.targetAgentId)) {
+      return null;
+    }
     const now = options.now ?? Date.now();
     const ageMs = now - startedAt;
     if (startedAt > 0 && ageMs >= STALE_WORKING_FLIGHT_NO_ENDPOINT_GRACE_MS) {

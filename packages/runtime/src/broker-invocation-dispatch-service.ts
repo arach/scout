@@ -3,6 +3,7 @@ import {
   type AgentDefinition,
   type FlightRecord,
   type InvocationRequest,
+  type MessageRecord,
   type NodeDefinition,
   type ScoutDispatchEnvelope,
   type ScoutDispatchRecord,
@@ -12,6 +13,7 @@ import {
 import type { BrokerJournalEntry } from "./broker-journal.js";
 import {
   createInvocationDispatchJob,
+  isInvocationDispatchJobDue,
   isTerminalInvocationDispatchJobState,
   type BrokerInvocationDispatchJob,
 } from "./broker-dispatch-job.js";
@@ -27,9 +29,15 @@ import {
   homeEndpointForAgent,
 } from "./broker-endpoint-selection.js";
 import { isReachableMeshNode } from "./broker-mesh-forwarding-service.js";
+import { isTerminalFlightState } from "./broker-local-invocation-helpers.js";
+import { deferredDispatchCheckedAt } from "./broker-dispatch-recovery-service.js";
+import { isIdempotentInvocationRetry } from "./broker-invocation-idempotency.js";
+import type { DeliveryWorkItemResolution } from "./broker-work-item-store.js";
 
 export type BrokerInvocationDispatchRuntime = {
   snapshot(): RuntimeSnapshot;
+  /** Read-only view for synchronous lookups; do not retain it across awaits. */
+  routingSnapshot?(): RuntimeSnapshot;
   actor(actorId: string): ActorIdentity | undefined;
   agent(agentId: string): AgentDefinition | undefined;
   node(nodeId: string): NodeDefinition | undefined;
@@ -57,12 +65,20 @@ export type BrokerInvocationDispatchServiceDeps = {
     options?: {
       createDispatchJob?: (flight: FlightRecord) => BrokerInvocationDispatchJob;
       enqueueProjection?: boolean;
+      message?: MessageRecord;
+      receiptMessage?: MessageRecord;
+      workItem?: DeliveryWorkItemResolution["pendingCreation"];
     },
   ) => Promise<{ flight: FlightRecord; dispatchJob?: BrokerInvocationDispatchJob; entries: BrokerJournalEntry[] }>;
   recordInvocationDispatchJob: (
     job: BrokerInvocationDispatchJob,
     options?: { enqueueProjection?: boolean },
   ) => Promise<BrokerJournalEntry[]>;
+  recordInvocationDispatchJobIf: (
+    job: BrokerInvocationDispatchJob,
+    eligible: (current: BrokerInvocationDispatchJob | null) => boolean,
+    options?: { enqueueProjection?: boolean },
+  ) => Promise<BrokerJournalEntry[] | null>;
   applyProjectedEntries: (entries: BrokerJournalEntry | BrokerJournalEntry[]) => Promise<void>;
   recordFlight: (flight: FlightRecord) => Promise<void>;
   postInvocationStatusMessage: (invocation: InvocationRequest, flight: {
@@ -93,27 +109,15 @@ export type BrokerInvocationDispatchServiceDeps = {
 
 const DISPATCH_JOB_LEASE_MS = 30_000;
 
-function isIdempotentInvocationRetry(
-  existing: InvocationRequest,
-  incoming: InvocationRequest,
-): boolean {
-  return existing.requesterId === incoming.requesterId
-    && existing.targetAgentId === incoming.targetAgentId
-    && existing.action === incoming.action
-    && existing.task === incoming.task
-    && (existing.conversationId ?? null) === (incoming.conversationId ?? null)
-    && (existing.messageId ?? null) === (incoming.messageId ?? null)
-    && JSON.stringify(existing.context ?? null) === JSON.stringify(incoming.context ?? null)
-    && JSON.stringify(existing.execution ?? null) === JSON.stringify(incoming.execution ?? null)
-    && existing.ensureAwake === incoming.ensureAwake
-    && existing.stream === incoming.stream;
-}
-
 export class BrokerInvocationDispatchService {
+  private readonly activeDispatchJobs = new Set<string>();
   constructor(private readonly deps: BrokerInvocationDispatchServiceDeps) {}
 
   readonly acceptInvocation = async (
     invocation: InvocationRequest,
+    message?: MessageRecord,
+    workItem?: DeliveryWorkItemResolution["pendingCreation"],
+    receiptMessage?: MessageRecord,
   ): Promise<{ flight: FlightRecord; dispatchJob: BrokerInvocationDispatchJob }> => {
     const { flight, dispatchJob, entries } = await this.deps.recordInvocation(invocation, {
       createDispatchJob: (nextFlight) => createInvocationDispatchJob(
@@ -122,6 +126,9 @@ export class BrokerInvocationDispatchService {
         currentTime(this.deps),
       ),
       enqueueProjection: false,
+      message,
+      workItem,
+      receiptMessage,
     });
     await this.deps.applyProjectedEntries(entries);
     if (!dispatchJob) {
@@ -142,7 +149,7 @@ export class BrokerInvocationDispatchService {
     state: FlightRecord["state"];
     flight: FlightRecord;
   }> => {
-    const existingInvocation = this.deps.runtime.snapshot().invocations[invocation.id];
+    const existingInvocation = (this.deps.runtime.routingSnapshot?.() ?? this.deps.runtime.snapshot()).invocations[invocation.id];
     const existingFlight = this.deps.runtime.flightForInvocation(invocation.id);
     if (existingInvocation || existingFlight) {
       if (
@@ -204,7 +211,7 @@ export class BrokerInvocationDispatchService {
         resolved,
         askedLabelForRouteTarget(payload),
         this.deps.nodeId,
-        this.deps.runtime.snapshot(),
+        (this.deps.runtime.routingSnapshot?.() ?? this.deps.runtime.snapshot()),
         { homeEndpointFor: homeEndpointForAgent },
       );
       const { record } = await this.deps.recordScoutDispatch(envelope, {
@@ -241,7 +248,7 @@ export class BrokerInvocationDispatchService {
 
     const unavailable = resolved.kind === "resolved"
       ? this.deps.describeUnavailableInvocationTarget?.(
-          this.deps.runtime.snapshot(),
+          (this.deps.runtime.routingSnapshot?.() ?? this.deps.runtime.snapshot()),
           resolved.agent,
           targetSessionIdForInvocation(invocation),
         )
@@ -270,24 +277,38 @@ export class BrokerInvocationDispatchService {
     job: BrokerInvocationDispatchJob,
     invocation?: InvocationRequest,
   ): Promise<void> => {
-    if (isTerminalInvocationDispatchJobState(job.state)) {
+    if (isTerminalInvocationDispatchJobState(job.state) || this.activeDispatchJobs.has(job.id)) {
       return;
     }
 
-    const dispatchInvocation = invocation ?? this.deps.runtime.snapshot().invocations[job.invocationId];
+    this.activeDispatchJobs.add(job.id);
+    try {
+      await this.runClaimedDispatchJob(job, invocation);
+    } finally {
+      this.activeDispatchJobs.delete(job.id);
+    }
+  };
+
+  private async runClaimedDispatchJob(
+    job: BrokerInvocationDispatchJob,
+    invocation?: InvocationRequest,
+  ): Promise<void> {
+
+    const dispatchInvocation = invocation ?? (this.deps.runtime.routingSnapshot?.() ?? this.deps.runtime.snapshot()).invocations[job.invocationId];
     if (!dispatchInvocation) {
       const failedAt = currentTime(this.deps);
-      await this.recordDispatchJob({
+      await this.recordDispatchJobIf({
         ...job,
         state: "failed",
         updatedAt: failedAt,
         completedAt: failedAt,
         lastError: `missing invocation ${job.invocationId}`,
-      });
+      }, (current) => matchesDispatchJobVersion(current, job));
       return;
     }
 
     const startedAt = currentTime(this.deps);
+    const deferredAt = deferredDispatchCheckedAt(this.deps.runtime.flightForInvocation(job.invocationId));
     const runningJob: BrokerInvocationDispatchJob = {
       ...job,
       state: "running",
@@ -297,45 +318,71 @@ export class BrokerInvocationDispatchService {
       leaseExpiresAt: startedAt + DISPATCH_JOB_LEASE_MS,
       lastError: undefined,
       completedAt: undefined,
+      ...(job.state === "running" && deferredAt !== null ? { lastDeferredAt: deferredAt } : {}),
     };
-    await this.recordDispatchJob(runningJob);
+    const claimed = await this.recordDispatchJobIf(runningJob, (current) =>
+      matchesDispatchJobVersion(current, job)
+      && isInvocationDispatchJobDue(current!, currentTime(this.deps), { includeRunning: true })
+      && (current!.state === "pending" || hasUnconsumedDeferral(current!, this.deps.runtime.flightForInvocation(job.invocationId))));
+    if (!claimed) return;
 
     try {
       await this.dispatchAcceptedInvocation(dispatchInvocation);
       const completedAt = currentTime(this.deps);
-      await this.recordDispatchJob({
+      await this.recordDispatchJobIf({
         ...runningJob,
         state: "completed",
         updatedAt: completedAt,
         completedAt,
         leaseExpiresAt: undefined,
-      });
+      }, (current) => matchesDispatchJobVersion(current, runningJob));
     } catch (error) {
       const failedAt = currentTime(this.deps);
       const message = error instanceof Error ? error.message : String(error);
-      await this.recordDispatchJob({
+      await this.recordDispatchJobIf({
         ...runningJob,
         state: "failed",
         updatedAt: failedAt,
         completedAt: failedAt,
         leaseExpiresAt: undefined,
         lastError: message,
-      });
+      }, (current) => matchesDispatchJobVersion(current, runningJob));
       throw error;
     }
+  }
+
+  readonly requeueDispatchJob = async (
+    job: BrokerInvocationDispatchJob,
+    invocation: InvocationRequest,
+    flight: FlightRecord,
+  ): Promise<void> => {
+    const pending: BrokerInvocationDispatchJob = {
+      ...job, state: "pending", updatedAt: currentTime(this.deps),
+      completedAt: undefined, leaseOwner: undefined, leaseExpiresAt: undefined,
+      lastDeferredAt: deferredDispatchCheckedAt(flight) ?? undefined,
+    };
+    const requeued = await this.recordDispatchJobIf(pending, (current) => {
+      const latestFlight = this.deps.runtime.flightForInvocation(invocation.id);
+      return job.state === "completed" && matchesDispatchJobVersion(current, job)
+        && latestFlight?.id === flight.id && hasUnconsumedDeferral(current!, latestFlight)
+        && deferredDispatchCheckedAt(latestFlight) === pending.lastDeferredAt;
+    });
+    if (requeued) await this.runDispatchJob(pending, invocation);
   };
 
   readonly dispatchAcceptedInvocation = async (invocation: InvocationRequest): Promise<void> => {
+    const flight = this.deps.runtime.flightForInvocation(invocation.id);
+    if (!flight) {
+      this.deps.warn?.(`[openscout-runtime] dispatch skipped - flight missing for invocation ${invocation.id}`);
+      return;
+    }
+    // Fence before target validation as well as local/peer side effects. A
+    // deleted target cannot turn an already completed invocation into failure.
+    if (isTerminalFlightState(flight.state)) return;
     const targetAgent = this.deps.runtime.agent(invocation.targetAgentId);
     const targetActor = this.deps.runtime.actor(invocation.targetAgentId) ?? targetAgent;
     if (!targetActor) {
       await this.failAcceptedInvocation(invocation, `unknown target actor ${invocation.targetAgentId}`);
-      return;
-    }
-
-    const flight = this.deps.runtime.flightForInvocation(invocation.id);
-    if (!flight) {
-      this.deps.warn?.(`[openscout-runtime] dispatch skipped - flight missing for invocation ${invocation.id}`);
       return;
     }
 
@@ -354,7 +401,7 @@ export class BrokerInvocationDispatchService {
     // endpoint: one owned by another node (adopted from a mesh session wake)
     // forwards there instead of dead-ending in a local launch.
     if (!targetAgent) {
-      const homeEndpoint = homeEndpointForAgent(this.deps.runtime.snapshot(), invocation.targetAgentId);
+      const homeEndpoint = homeEndpointForAgent((this.deps.runtime.routingSnapshot?.() ?? this.deps.runtime.snapshot()), invocation.targetAgentId);
       if (homeEndpoint && homeEndpoint.nodeId !== this.deps.nodeId) {
         const ownerNode = this.deps.runtime.node(homeEndpoint.nodeId);
         if (!ownerNode || !isReachableMeshNode(ownerNode)) {
@@ -369,11 +416,7 @@ export class BrokerInvocationDispatchService {
       }
     }
 
-    if (flight.state === "failed") {
-      await this.deps.postInvocationStatusMessage(invocation, flight);
-    } else {
-      this.deps.launchLocalInvocation(invocation);
-    }
+    this.deps.launchLocalInvocation(invocation);
   };
 
   readonly failAcceptedInvocation = async (
@@ -382,6 +425,7 @@ export class BrokerInvocationDispatchService {
   ): Promise<void> => {
     const now = currentTime(this.deps);
     const existing = this.deps.runtime.flightForInvocation(invocation.id);
+    if (existing && isTerminalFlightState(existing.state)) return;
     const failed: FlightRecord = {
       id: existing?.id ?? this.deps.createId("flt"),
       invocationId: invocation.id,
@@ -398,12 +442,26 @@ export class BrokerInvocationDispatchService {
     await this.deps.postInvocationStatusMessage(invocation, failed);
   };
 
-  private async recordDispatchJob(job: BrokerInvocationDispatchJob): Promise<void> {
-    const entries = await this.deps.recordInvocationDispatchJob(job, {
-      enqueueProjection: false,
-    });
+  private async recordDispatchJobIf(
+    job: BrokerInvocationDispatchJob,
+    eligible: (current: BrokerInvocationDispatchJob | null) => boolean,
+  ): Promise<boolean> {
+    const entries = await this.deps.recordInvocationDispatchJobIf(job, eligible, { enqueueProjection: false });
+    if (!entries) return false;
     await this.deps.applyProjectedEntries(entries);
+    return true;
   }
+}
+
+function matchesDispatchJobVersion(current: BrokerInvocationDispatchJob | null, expected: BrokerInvocationDispatchJob): boolean {
+  return current !== null && current.id === expected.id && current.state === expected.state
+    && current.attempts === expected.attempts && current.updatedAt === expected.updatedAt
+    && current.leaseOwner === expected.leaseOwner && current.leaseExpiresAt === expected.leaseExpiresAt;
+}
+
+function hasUnconsumedDeferral(job: BrokerInvocationDispatchJob, flight: FlightRecord | undefined): boolean {
+  const checkedAt = deferredDispatchCheckedAt(flight);
+  return checkedAt !== null && checkedAt >= job.createdAt && checkedAt > (job.lastDeferredAt ?? 0);
 }
 
 function currentTime(deps: Pick<BrokerInvocationDispatchServiceDeps, "now">): number {

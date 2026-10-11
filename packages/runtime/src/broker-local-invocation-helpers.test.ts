@@ -140,7 +140,7 @@ describe("applyInvocationStatusPatch", () => {
 
   test("keys explicitly set to undefined clear the current value", () => {
     const current = testFlight({
-      state: "failed",
+      state: "queued",
       error: "boom",
       completedAt: 2_000,
     });
@@ -154,6 +154,21 @@ describe("applyInvocationStatusPatch", () => {
     expect(next.state).toBe("running");
     expect(next.error).toBeUndefined();
     expect(next.completedAt).toBeUndefined();
+  });
+
+  test("terminal truth cannot be reopened or replaced by stale status patches", () => {
+    for (const state of ["completed", "failed", "cancelled"] as const) {
+      const current = testFlight({ state, output: "retained result", completedAt: 2_000 });
+      for (const nextState of ["queued", "running", "completed", "failed", "cancelled"] as const) {
+        if (nextState === state) continue;
+        expect(applyInvocationStatusPatch(current, {
+          state: nextState,
+          summary: "stale reconciliation",
+          output: undefined,
+          completedAt: 3_000,
+        })).toBe(current);
+      }
+    }
   });
 
   test("omitted keys keep the current value", () => {
@@ -448,6 +463,7 @@ describe("broker local invocation helpers", () => {
           targetAgentId: "agent-1",
           state: "running",
           startedAt: 500,
+          metadata: { dispatchAck: { endpointId: "older-owner", sessionId: "older-session" } },
         }),
         newer: testFlight({
           id: "newer",
@@ -455,6 +471,7 @@ describe("broker local invocation helpers", () => {
           targetAgentId: "agent-1",
           state: "completed",
           completedAt: 700,
+          metadata: { dispatchAck: { endpointId: "older-owner", sessionId: "older-session" } },
         }),
         retired: testFlight({
           id: "retired",
@@ -479,6 +496,69 @@ describe("broker local invocation helpers", () => {
     expect(staleWorkingFlightReason(snapshot, snapshot.flights.working!, {
       isInvocationActive: () => false,
     })).toBe("endpoint replayed was replayed active for invocation invocation-1 without a live broker task");
+  });
+
+  test("newer work on another session cannot supersede a flight for the same agent", () => {
+    const active = testFlight({
+      state: "running",
+      metadata: { dispatchAck: { endpointId: "endpoint-1", sessionId: "native-1", nodeId: "node-1" } },
+    });
+    for (const dispatchAck of [
+      { endpointId: "endpoint-2", sessionId: "native-2", nodeId: "node-1" },
+      { endpointId: "endpoint-1", sessionId: "native-2", nodeId: "node-1" },
+      { endpointId: "endpoint-1", sessionId: "native-1", nodeId: "node-2" },
+      {},
+    ]) {
+      const snapshot = createInMemoryControlRuntime({
+        agents: { "agent-1": testAgent() },
+        endpoints: { "endpoint-1": testEndpoint({ state: "active" }) },
+        flights: {
+          active,
+          newer: testFlight({ id: "newer", invocationId: "newer", state: "completed", completedAt: 2_000, metadata: { dispatchAck } }),
+        },
+      }, { localNodeId: "node-1" }).snapshot();
+      expect(staleWorkingFlightReason(snapshot, active, { isInvocationActive: () => false, now: 2_000 })).toBeNull();
+    }
+  });
+
+  test("a provider identity refinement still identifies the same execution owner", () => {
+    const active = testFlight({ state: "running", metadata: { dispatchAck: { endpointId: "endpoint-1", sessionId: "pending-1" } } });
+    const snapshot = createInMemoryControlRuntime({
+      flights: {
+        active,
+        newer: testFlight({
+          id: "newer", invocationId: "newer", state: "completed", completedAt: 2_000,
+          metadata: { dispatchAck: { endpointId: "endpoint-1", sessionId: "native-1", refinesSessionId: "pending-1" } },
+        }),
+      },
+    }, { localNodeId: "node-1" }).snapshot();
+    expect(staleWorkingFlightReason(snapshot, active, { isInvocationActive: () => false }))
+      .toBe("superseded by newer completed flight newer");
+  });
+
+  test("unattributed flights do not inherit another session's endpoint lifecycle", () => {
+    const flight = testFlight({ state: "running" });
+    const snapshot = createInMemoryControlRuntime({
+      agents: { "agent-1": testAgent() },
+      endpoints: { other: testEndpoint({ id: "other", state: "offline", metadata: { lastFailedAt: 5_000 } }) },
+      flights: { flight },
+    }, { localNodeId: "node-1" }).snapshot();
+    expect(endpointForFlight(snapshot, flight)).toBeNull();
+    expect(staleWorkingFlightReason(snapshot, flight, { isInvocationActive: () => false, now: 500_000 })).toBeNull();
+  });
+
+  test("missing broker task or newer work cannot resolve an unknown native submission", () => {
+    const flight = testFlight({
+      state: "waiting",
+      metadata: { dispatchAck: { endpointId: "endpoint-1" }, dispatchOutcome: { status: "submission_unknown" } },
+    });
+    const snapshot = createInMemoryControlRuntime({
+      flights: {
+        flight,
+        newer: testFlight({ id: "newer", invocationId: "newer", state: "completed", completedAt: 2_000, metadata: { dispatchAck: { endpointId: "endpoint-1" } } }),
+      },
+    }, { localNodeId: "node-1" }).snapshot();
+    expect(staleWorkingFlightReason(snapshot, flight, { isInvocationActive: () => false, now: 500_000 })).toBeNull();
   });
 
   test("waits briefly for endpoint recovery before marking endpointless working flights stale", () => {

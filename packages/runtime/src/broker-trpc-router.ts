@@ -36,6 +36,8 @@ import {
   type HarnessTopologyEvent,
 } from "./harness-topology/index.js";
 
+import { boundedEventIterable } from "./bounded-event-iterable.js";
+
 const t = initTRPC.create();
 
 const CONTROL_BACKLOG_LIMIT = 500;
@@ -76,170 +78,22 @@ const topologyEventsInput = z
   })
   .optional();
 
-function controlEventIterable(
-  kinds: string[] | undefined,
-  signal?: AbortSignal,
-): AsyncIterable<ControlEvent> {
-  return {
-    [Symbol.asyncIterator]() {
-      const buffer: ControlEvent[] = [];
-      let resolve: (() => void) | null = null;
-      let done = false;
-
-      const filter = kinds && kinds.length > 0 ? new Set(kinds) : null;
-
-      const unsub = subscribeControlEvents((event: ControlEvent) => {
-        if (done) return;
-        if (filter && !filter.has(event.kind)) return;
-        buffer.push(event);
-        if (resolve) {
-          resolve();
-          resolve = null;
-        }
-      });
-
-      const cleanup = () => {
-        done = true;
-        unsub();
-        if (resolve) {
-          resolve();
-          resolve = null;
-        }
-      };
-
-      signal?.addEventListener("abort", cleanup, { once: true });
-
-      return {
-        async next(): Promise<IteratorResult<ControlEvent>> {
-          while (true) {
-            if (done) return { done: true, value: undefined };
-            if (buffer.length > 0) {
-              return { done: false, value: buffer.shift()! };
-            }
-            await new Promise<void>((r) => {
-              resolve = r;
-            });
-          }
-        },
-        async return(): Promise<IteratorResult<ControlEvent>> {
-          cleanup();
-          return { done: true, value: undefined };
-        },
-      };
-    },
-  };
+function controlEventIterable(kinds: string[] | undefined, signal?: AbortSignal): AsyncIterable<ControlEvent> {
+  const filter = kinds?.length ? new Set(kinds) : null;
+  return boundedEventIterable({ subscribe: subscribeControlEvents, signal,
+    accepts: event => !filter || filter.has(event.kind), id: event => event.id });
 }
 
-/**
- * Async iterable adapter over the singleton tail watcher. Each subscriber
- * registers its own listener; the underlying file watcher is shared.
- */
-function tailEventIterable(
-  sources: string[] | undefined,
-  signal?: AbortSignal,
-): AsyncIterable<TailEvent> {
-  return {
-    [Symbol.asyncIterator]() {
-      const buffer: TailEvent[] = [];
-      let resolve: (() => void) | null = null;
-      let done = false;
-
-      const filter = sources && sources.length > 0 ? new Set(sources) : null;
-
-      const unsub = subscribeTail((event: TailEvent) => {
-        if (done) return;
-        if (filter && !filter.has(event.source)) return;
-        buffer.push(event);
-        if (resolve) {
-          resolve();
-          resolve = null;
-        }
-      });
-
-      const cleanup = () => {
-        done = true;
-        unsub();
-        if (resolve) {
-          resolve();
-          resolve = null;
-        }
-      };
-
-      signal?.addEventListener("abort", cleanup, { once: true });
-
-      return {
-        async next(): Promise<IteratorResult<TailEvent>> {
-          while (true) {
-            if (done) return { done: true, value: undefined };
-            if (buffer.length > 0) {
-              return { done: false, value: buffer.shift()! };
-            }
-            await new Promise<void>((r) => {
-              resolve = r;
-            });
-          }
-        },
-        async return(): Promise<IteratorResult<TailEvent>> {
-          cleanup();
-          return { done: true, value: undefined };
-        },
-      };
-    },
-  };
+function tailEventIterable(sources: string[] | undefined, signal?: AbortSignal): AsyncIterable<TailEvent> {
+  const filter = sources?.length ? new Set(sources) : null;
+  return boundedEventIterable({ subscribe: subscribeTail, signal,
+    accepts: event => !filter || filter.has(event.source), id: event => event.id });
 }
 
-function topologyEventIterable(
-  sources: string[] | undefined,
-  signal?: AbortSignal,
-): AsyncIterable<HarnessTopologyEvent> {
-  return {
-    [Symbol.asyncIterator]() {
-      const buffer: HarnessTopologyEvent[] = [];
-      let resolve: (() => void) | null = null;
-      let done = false;
-
-      const filter = sources && sources.length > 0 ? new Set(sources) : null;
-
-      const unsub = subscribeHarnessTopology((event: HarnessTopologyEvent) => {
-        if (done) return;
-        if (filter && !filter.has(event.source)) return;
-        buffer.push(event);
-        if (resolve) {
-          resolve();
-          resolve = null;
-        }
-      });
-
-      const cleanup = () => {
-        done = true;
-        unsub();
-        if (resolve) {
-          resolve();
-          resolve = null;
-        }
-      };
-
-      signal?.addEventListener("abort", cleanup, { once: true });
-
-      return {
-        async next(): Promise<IteratorResult<HarnessTopologyEvent>> {
-          while (true) {
-            if (done) return { done: true, value: undefined };
-            if (buffer.length > 0) {
-              return { done: false, value: buffer.shift()! };
-            }
-            await new Promise<void>((r) => {
-              resolve = r;
-            });
-          }
-        },
-        async return(): Promise<IteratorResult<HarnessTopologyEvent>> {
-          cleanup();
-          return { done: true, value: undefined };
-        },
-      };
-    },
-  };
+function topologyEventIterable(sources: string[] | undefined, signal?: AbortSignal): AsyncIterable<HarnessTopologyEvent> {
+  const filter = sources?.length ? new Set(sources) : null;
+  return boundedEventIterable({ subscribe: subscribeHarnessTopology, signal,
+    accepts: event => !filter || filter.has(event.source), id: event => event.id });
 }
 
 function normalizedFilterSet(values: string[] | undefined): Set<string> | null {

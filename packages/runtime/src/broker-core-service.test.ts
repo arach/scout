@@ -5,6 +5,15 @@ import { createBrokerCoreService } from "./broker-core-service.js";
 import { createRuntimeRegistrySnapshot, type RuntimeRegistrySnapshot } from "./registry.js";
 import type { ActivityItem } from "./sqlite-store.js";
 
+test("notification routing uses metadata peek without creating a history snapshot", async () => {
+  const calls: string[] = [];
+  const snapshot = createRuntimeRegistrySnapshot();
+  Object.defineProperty(snapshot, "messages", { get: () => { throw new Error("must not capture history"); } });
+  const service = createReadOnlyBrokerCoreService(snapshot, undefined, undefined, calls);
+  expect(await service.readNotificationRouting!()).toEqual({ conversations: {}, invocations: {} });
+  expect(calls).toEqual(["peek"]);
+});
+
 function createReadOnlyBrokerCoreService(
   snapshot: RuntimeRegistrySnapshot,
   projectionStatus?: ScoutBrokerProjectionStatus,

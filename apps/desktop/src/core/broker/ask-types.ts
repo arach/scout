@@ -15,6 +15,8 @@ export type ScoutAskSenderContext = {
 type ScoutAskCommandBase = {
   requestId?: string;
   senderId: string;
+  /** Exact IDs are sent directly; legacy mode resolves explicit --as names locally. */
+  senderResolution?: "exact" | "legacy";
   body: string;
   harness?: AgentHarness;
   model?: string;

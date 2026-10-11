@@ -901,5 +901,12 @@
     "category": "probe-exec",
     "reason": "async git execFile with a 1.5s timeout and SIGKILL for Week history; no sync exec",
     "owner": "web"
+  },
+  {
+    "path": "packages/runtime/src/broker-journal-framing.test.ts",
+    "symbol": "Bun.spawn",
+    "category": "test",
+    "reason": "crash-recovery fixture runs a child that SIGKILLs itself mid-append",
+    "owner": "tests"
   }
 ]

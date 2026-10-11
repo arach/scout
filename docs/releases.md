@@ -481,6 +481,16 @@ records local-signed artifacts, a blocked first-run preservation check, and
 `latest` held at 0.3.2. Do not relabel/promote those historical candidates.
 A new dev channel does not approve their onboarding or waive that blocker.
 
+### Cross-host replies in 0.3.6-dev.4
+
+A `scout ask --on <host>` now completes on the asking machine when the remote
+agent replies. The remote broker records the reply against the forwarded
+invocation and returns it, so `scout wait` reports `completed` instead of
+staying `running`. An exact machine name wins over a prefix match, conflicting
+duplicate deliveries are refused, and forwarded bundles are checked against the
+persisted invocation before they apply. The broker bundle ships its SQLite
+projection worker.
+
 ### Cross-host asks in 0.3.6-dev.3
 
 `scout ask --on <host>` (MCP `on`) starts or reaches an agent on another of

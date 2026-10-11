@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 
@@ -90,6 +91,8 @@ import {
   queryFlightRecordById,
   queryInvocationById,
 } from "../../db-queries.ts";
+import { queryFlightRecords, queryInvocations } from "../../db/runs.ts";
+import { resolveDbPath } from "../../db/internal/db.ts";
 import { coalesce } from "../../server-core.ts";
 
 export type ScoutBrokerActorRecord = ActorIdentity;
@@ -842,14 +845,93 @@ function invocationTargetRoute(
   return undefined;
 }
 
-function invocationExecutionForSteer(
+async function invocationExecutionForSteer(
+  baseUrl: string,
   snapshot: ScoutBrokerSnapshot,
   actorId: string,
-): InvocationRequest["execution"] {
-  const sessionId = endpointSessionId(bestSteerAvailableEndpointForActor(snapshot, actorId));
+  conversationId: string,
+): Promise<InvocationRequest["execution"]> {
+  // A card can have a waiting launcher plus several isolated workers. Its
+  // highest-ranked endpoint is not necessarily the worker in this chat.
+  // Preserve the recorded session even if its endpoint disappeared: the
+  // broker must decide whether that exact continuation can be resumed.
+  const sessionId = await conversationTargetSessionId(baseUrl, snapshot, conversationId, actorId)
+    ?? endpointSessionId(bestSteerAvailableEndpointForActor(snapshot, actorId));
   return sessionId
     ? { session: "existing", targetSessionId: sessionId }
     : { session: "reuse" };
+}
+
+async function conversationTargetSessionId(
+  baseUrl: string,
+  snapshot: ScoutBrokerSnapshot,
+  conversationId: string,
+  actorId: string,
+): Promise<string | undefined> {
+  const evidence: Array<{ sessionId: string; at: number }> = [];
+  for (const message of Object.values(snapshot.messages)) {
+    if (message.conversationId !== conversationId || message.actorId !== actorId
+      || message.metadata?.source !== "broker") continue;
+    const sessionId = metadataString(message.metadata, "responderSessionId");
+    if (sessionId) evidence.push({ sessionId, at: epochMs(message.createdAt) ?? 0 });
+  }
+
+  // Completed flights rotate out of the hot snapshot. Use the same durable
+  // conversation records as the reader, overlaying current broker records.
+  const invocations = new Map<string, InvocationRequest>();
+  const flights = new Map<string, FlightRecord>();
+  try {
+    for (const invocation of queryInvocations({ conversationId, targetAgentId: actorId })) invocations.set(invocation.id, invocation);
+    for (const flight of queryFlightRecords({ conversationId, targetAgentId: actorId })) flights.set(flight.id, flight);
+  } catch (error) {
+    // A fresh installation may not have a local projection database yet.
+    // An unreadable existing database must not silently choose another session.
+    if (existsSync(resolveDbPath())) {
+      throw new Error("Conversation session storage is unavailable.", { cause: error });
+    }
+  }
+  for (const invocation of Object.values(snapshot.invocations ?? {})) {
+    if (invocation.conversationId === conversationId) invocations.set(invocation.id, invocation);
+  }
+  for (const flight of Object.values(snapshot.flights ?? {})) {
+    if (invocations.has(flight.invocationId)) flights.set(flight.id, flight);
+  }
+  let latest = evidence.sort((left, right) => right.at - left.at)[0];
+  const candidates = [...flights.values()].sort((left, right) =>
+    (epochMs(invocations.get(right.invocationId)?.createdAt) ?? 0)
+    - (epochMs(invocations.get(left.invocationId)?.createdAt) ?? 0));
+  for (let flight of candidates) {
+    const invocation = invocations.get(flight.invocationId);
+    if (!invocation || invocation.targetAgentId !== actorId || flight.targetAgentId !== actorId) continue;
+    const at = epochMs(invocation.createdAt) ?? 0;
+    if (latest && at <= latest.at) break;
+    // Relocation keeps indexed invocation/flight IDs but moves the session
+    // receipt out of the working row. Hydrate that exact invocation lazily;
+    // normal hot receipts require no additional broker request.
+    if (!flight.metadata?.dispatchAck && !snapshot.flights?.[flight.id]) {
+      try {
+        const historical = await brokerReadJson<{
+          invocation: InvocationRequest | null;
+          flight: FlightRecord | null;
+        }>(baseUrl, `/v1/invocations/${encodeURIComponent(invocation.id)}`);
+        if (historical.invocation?.id !== invocation.id
+          || historical.invocation.conversationId !== invocation.conversationId
+          || historical.invocation.targetAgentId !== actorId
+          || historical.flight?.invocationId !== invocation.id
+          || historical.flight.targetAgentId !== actorId) {
+          throw new Error("The recorded conversation invocation could not be resolved.");
+        }
+        flight = historical.flight;
+      } catch (error) {
+        throw new Error("Conversation session storage is unavailable.", { cause: error });
+      }
+    }
+    const ack = flight.metadata?.dispatchAck;
+    if (!ack || typeof ack !== "object" || Array.isArray(ack)) continue;
+    const sessionId = metadataString(ack as Record<string, unknown>, "sessionId");
+    if (sessionId) latest = { sessionId, at };
+  }
+  return latest?.sessionId;
 }
 
 type ScoutInvocationPostResponse = {
@@ -3011,6 +3093,15 @@ export async function sendScoutConversationSteer(input: {
     const steerContext = intent === "steer"
       ? input.steerContextByTargetAgentId?.[targetActorId]
       : undefined;
+    const requestedExecution = intent === "invoke" ? input.execution : undefined;
+    const hasExplicitSession = requestedExecution?.session === "new"
+      || (requestedExecution?.session === "existing" && Boolean(requestedExecution.targetSessionId?.trim()));
+    const execution = hasExplicitSession
+      ? requestedExecution
+      : {
+          ...await invocationExecutionForSteer(broker.baseUrl, broker.snapshot, targetActorId, conversation.id),
+          ...requestedExecution,
+        };
     const response = await brokerPostJson<ScoutInvocationPostResponse>(
       broker.baseUrl,
       scoutBrokerPaths.v1.invocations,
@@ -3024,10 +3115,7 @@ export async function sendScoutConversationSteer(input: {
         task: input.body.trim() || "Review the attached message.",
         conversationId: conversation.id,
         messageId,
-        execution: {
-          ...invocationExecutionForSteer(broker.snapshot, targetActorId),
-          ...(intent === "invoke" && input.execution ? input.execution : {}),
-        },
+        execution,
         ensureAwake: true,
         stream: false,
         labels: [intent],

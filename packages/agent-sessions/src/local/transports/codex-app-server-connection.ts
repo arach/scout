@@ -44,6 +44,8 @@ export interface CodexAppServerConnection {
   isOpen(): boolean;
   /** Send one serialized JSON-RPC message. */
   send(text: string): void;
+  /** Apply consumer backpressure without dropping received context. */
+  setReadingPaused(paused: boolean): void;
   /**
    * Spawned: SIGTERM, then SIGKILL after a grace period.
    * Attached: WebSocket close + socket end. Never signals the server.
@@ -123,6 +125,10 @@ export function spawnCodexAppServerStdioConnection(input: {
         throw new Error("Codex app-server process is not running.");
       }
       child.stdin.write(`${text}\n`);
+    },
+    setReadingPaused(paused: boolean) {
+      if (paused) { child.stdout.pause(); child.stderr.pause(); }
+      else { child.stdout.resume(); child.stderr.resume(); }
     },
     async close() {
       if (child.exitCode !== null || child.killed) return;
@@ -254,7 +260,9 @@ export async function connectCodexAppServerSocket(input: {
   socketPath: string;
   handlers: CodexAppServerConnectionHandlers;
   connectTimeoutMs?: number;
+  signal?: AbortSignal;
 }): Promise<CodexAppServerConnection> {
+  input.signal?.throwIfAborted();
   const socketPath = input.socketPath;
   let handlers: CodexAppServerConnectionHandlers | null = input.handlers;
   const decoder = new WebSocketFrameDecoder();
@@ -321,14 +329,21 @@ export async function connectCodexAppServerSocket(input: {
   await new Promise<void>((resolve, reject) => {
     const timeoutMs = input.connectTimeoutMs ?? 10_000;
     const timer = setTimeout(() => {
-      socket.destroy();
-      reject(new Error(`Timed out after ${timeoutMs}ms attaching to Codex app-server at ${socketPath}.`));
+      fail(new Error(`Timed out after ${timeoutMs}ms attaching to Codex app-server at ${socketPath}.`));
     }, timeoutMs);
-    const fail = (error: Error) => {
+    const cleanup = () => {
       clearTimeout(timer);
+      input.signal?.removeEventListener("abort", onAbort);
+    };
+    const fail = (error: Error) => {
+      cleanup();
       socket.destroy();
       reject(error);
     };
+    const onAbort = () => fail(input.signal?.reason instanceof Error
+      ? input.signal.reason : new Error("Codex app-server socket connection aborted."));
+    input.signal?.addEventListener("abort", onAbort, { once: true });
+    if (input.signal?.aborted) { onAbort(); return; }
 
     socket.once("connect", () => {
       socket.write(webSocketUpgradeRequest(randomBytes(16).toString("base64")));
@@ -349,7 +364,7 @@ export async function connectCodexAppServerSocket(input: {
       }
       upgraded = true;
       open = true;
-      clearTimeout(timer);
+      cleanup();
       const rest = handshake.subarray(headerEnd + 4);
       handshake = Buffer.alloc(0);
       resolve();
@@ -381,6 +396,10 @@ export async function connectCodexAppServerSocket(input: {
         throw new Error(`Codex app-server socket ${socketPath} is not connected.`);
       }
       writeFrame(WS_OP_TEXT, Buffer.from(text, "utf8"));
+    },
+    setReadingPaused(paused: boolean) {
+      if (paused) socket.pause();
+      else socket.resume();
     },
     async close() {
       if (socket.destroyed) return;

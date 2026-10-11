@@ -23,6 +23,7 @@ import {
   runtimeSessionAddressEntries,
   type RuntimeSessionAddressEntry,
 } from "@openscout/runtime";
+import { deliverInPlace, type InPlaceDelivery } from "@openscout/runtime/in-place";
 import type {
   TerminalBackend,
   TerminalSessionRecord,
@@ -55,6 +56,7 @@ Usage:
   scout session fork <session-id> [prompt]   Fork a recorded session into a new one
   scout session fork --last [prompt]         Fork the most recent recorded session
   scout session touched <session-id>         Show files observed in a session
+  scout session send <session-id> <text>      Type into a live session where it runs
   scout session transfer [<pid>] [--name <tmux>] [--alias @x] [--dry-run] [--no-reattach]
                                             Move a live Claude/Grok TUI into tmux, same session
   scout session pin [--session <codex-thread-id>] [--title <name>]
@@ -69,6 +71,10 @@ Options (intake):
   --name <name>         Explicit terminal session name (default: deterministic scout-* name)
   --dry-run             Print the intake plan without creating terminal state
   --attach              Attach to the terminal session after creating/reusing it
+
+Options (send):
+  --harness <name>      claude or codex, when the id alone is ambiguous
+  --prompt-file <path>  Read the text from a file
 
 Options (fork):
   --last                Fork the most recent session instead of naming an id
@@ -99,6 +105,11 @@ Scout address that delivers into it, and types \`tmux attach\` into the
 Ghostty terminal it came from so it reappears where it was. With no <pid> it
 moves the harness this command runs under, finishing in the background.
 An in-flight turn is interrupted; transfer between turns.
+
+Send types into the live session itself — its Herdr pane, Orca terminal,
+tmux pane, or terminal tab — and presses Enter. It never resumes, forks, or
+starts anything: a session that isn't open anywhere is reported and nothing
+is sent. To reach it through Scout instead, use scout ask --to <address>.
 
 Fork branches a session's context into a fresh run and leaves the original
 untouched — hand the fork a prompt and it starts there with the full context
@@ -134,6 +145,9 @@ export async function runSessionCommand(context: ScoutCommandContext, args: stri
     case "touches":
       await runSessionTouchedAction(context, args.slice(1));
       return;
+    case "send":
+      await runSessionSendAction(context, args.slice(1));
+      return;
     case "pin":
       await runSessionPinAction(context, args.slice(1));
       return;
@@ -143,7 +157,7 @@ export async function runSessionCommand(context: ScoutCommandContext, args: stri
       return;
     default:
       throw new ScoutCliError(
-        `unknown session action: ${action} (try: scout session intake|list|address|fork|touched|pin|transfer <session-id>)`,
+        `unknown session action: ${action} (try: scout session intake|list|address|fork|send|touched|pin|transfer <session-id>)`,
       );
   }
 }
@@ -1418,6 +1432,59 @@ function renderSessionTransfer(payload: SessionTransferPayload): string {
   else if (payload.reattachError) lines.push(`Could not reattach in Ghostty: ${payload.reattachError}`);
   if (!payload.reattached) lines.push(`Attach: ${payload.attachCommand}`);
   return lines.join("\n");
+}
+
+const IN_PLACE_REFUSALS: Record<string, string> = {
+  not_live: "isn't open in Herdr, Orca, tmux, or a terminal tab on this machine; nothing was sent",
+  session_blocked: "is waiting on a prompt in its terminal; answer that first, then send again",
+  in_place_failed: "is open, but Scout couldn't type into it",
+  scout_app_unavailable: "is open in the ChatGPT app; open the Scout app on this Mac to send into it",
+  scout_app_accessibility: "is open in the ChatGPT app; turn on Scout › Settings › System › Send replies into open apps",
+};
+
+export function renderInPlaceDelivery(sessionId: string, result: InPlaceDelivery): string {
+  if (result.ok) return `sent to ${sessionId} in ${result.location}`;
+  const reason = IN_PLACE_REFUSALS[result.code] ?? "couldn't be reached";
+  const where = "location" in result ? ` (${result.location})` : "";
+  const detail = result.code === "in_place_failed" ? `: ${result.detail}` : "";
+  return `session ${sessionId} ${reason}${where}${detail}`;
+}
+
+async function runSessionSendAction(context: ScoutCommandContext, args: string[]): Promise<void> {
+  let harness: string | undefined;
+  let promptFile: string | undefined;
+  const positionals: string[] = [];
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]!;
+    if (arg === "--harness" || arg === "--prompt-file") {
+      const value = args[index + 1];
+      index += 1;
+      if (!value) throw new ScoutCliError(`${arg} needs a value`);
+      if (arg === "--harness") harness = value; else promptFile = value;
+    } else if (arg === "--help" || arg === "-h") {
+      context.output.writeText(SESSION_HELP);
+      return;
+    } else if (arg.startsWith("--")) {
+      throw new ScoutCliError(`unknown option for session send: ${arg}`);
+    } else {
+      positionals.push(arg);
+    }
+  }
+
+  const sessionId = positionals.shift()?.trim();
+  if (!sessionId) {
+    throw new ScoutCliError("session send needs a <session-id> — e.g. scout session send <session-id> \"run the tests\"");
+  }
+  const body = (promptFile ? await readCliInputFile(promptFile, "prompt") : positionals.join(" ")).trim();
+  if (!body) throw new ScoutCliError("session send needs text to send (inline, or --prompt-file <path>)");
+
+  const own = process.env.CLAUDE_CODE_SESSION_ID?.trim() || process.env.CODEX_THREAD_ID?.trim();
+  if (sessionId === own) throw new ScoutCliError("that is the session you are running in; nothing was sent");
+
+  const result = await deliverInPlace({ sessionId, harness: harness ?? null, body });
+  context.output.writeValue({ sessionId, ...result }, () => renderInPlaceDelivery(sessionId, result));
+  if (!result.ok) process.exitCode = 1;
 }
 
 function quoteForLog(value: string): string {

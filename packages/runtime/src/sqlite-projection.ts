@@ -1,4 +1,5 @@
 import { ProjectionSkipLedger } from './projection-skip-ledger.js';
+import { BrokerQuarantine, QuarantinePersistenceError, type QuarantineListOptions, type QuarantineSummary } from "./broker-quarantine.js";
 import type {
   ConversationProjectionCursor,
   ConversationProjectionEvent,
@@ -7,6 +8,8 @@ import type {
   AgentDefinition,
   ConversationDefinition,
   ControlEvent,
+  MessageRecord,
+  InvocationRequest,
   DeliveryIntent,
   NodeDefinition,
   ThreadEventEnvelope,
@@ -20,6 +23,7 @@ import { dirname, join } from "node:path";
 import {
   FileBackedBrokerJournal,
   type BrokerJournalEntry,
+  type BrokerJournalVerificationRecords,
   type BrokerJournalReplayBarrier,
   type BrokerJournalReplayBoundary,
   type BrokerJournalReplayOptions,
@@ -30,7 +34,6 @@ import {
   ConversationProjectionStore,
   type ConversationProjectionEventPage,
 } from "./conversation-projection-store.js";
-import { asyncMessageRecordView } from "./broker-message-records.js";
 import type { ObservedSessionProjectionUpdate } from "./observed-session-reducer.js";
 import {
   ConversationFeedArtifactPublisher,
@@ -43,11 +46,16 @@ import {
 import type { ControlPlaneSqliteTransactionalDatabase } from "./sqlite-adapter.js";
 import type { BrokerPersistenceVerification, BrokerProjectionHealth } from "./broker-durable-store.js";
 import { emptyHistoryRotationPlan, type HistoryRotationPlan } from "./history-rotation.js";
+import { archiveEvents, type ArchiveEventsResult } from "./control-plane-archive.js";
+import { ControlPlaneHistoryReader, ControlPlaneHistoryStore, type HistoricalRecord, type HistoricalPublication, type HistoricalRecordLocation } from "./control-plane-history-store.js";
+import { projectionVerificationDigest, verificationPlanKeys, type ProjectionVerificationDigest } from "./sqlite-projection-verification.js";
 
 type ActivityQuery = Parameters<SQLiteControlPlaneStore["listActivityItems"]>[0];
 
-type RecoverableSQLiteProjectionOptions = {
+export type RecoverableSQLiteProjectionOptions = {
   disabled?: boolean;
+  historyDirectory?: string;
+  quarantinePath?: string;
   createStore?: (dbPath: string) => SQLiteControlPlaneStore;
   createConversationProjection?: (
     store: SQLiteControlPlaneStore,
@@ -66,6 +74,7 @@ type RecoverableSQLiteProjectionOptions = {
   conversationFeedPublishDelayMs?: number;
   conversationThreadPublishDelayMs?: number;
   replayYieldEvery?: number;
+  replayBatchBytes?: number;
   busyRetryAttempts?: number;
   busyRetryDelayMs?: number;
   sleep?: (milliseconds: number) => Promise<void>;
@@ -90,6 +99,7 @@ export type SQLiteProjectionStatusSnapshot = {
   state: "ready" | "warming" | "degraded" | "disabled";
   detail: string | null;
   skips?: ReturnType<ProjectionSkipLedger["snapshot"]>;
+  quarantine?: QuarantineSummary;
   hydration?: { phase: string; processedEntries: number; totalEntries: null; boundaryBytes: number };
 };
 
@@ -387,6 +397,7 @@ function applyReplayParentWrite(
 function applyJournalEntryToStore(
   store: SQLiteControlPlaneStore,
   entry: BrokerJournalEntry,
+  applyHistoricalCleanup?: (entry: Extract<BrokerJournalEntry, { kind: "history.rotate" }>) => void,
 ): ThreadEventEnvelope[] {
   switch (entry.kind) {
     case "node.upsert":
@@ -469,7 +480,10 @@ function applyJournalEntryToStore(
       });
       return [];
     case "control.event.record":
-      store.recordEvent(entry.event);
+      // A replay checkpoint may not overtake a timer-buffered event write.
+      // Injected legacy test stores may expose only recordEvent.
+      if (typeof store.recordEventDurably === "function") store.recordEventDurably(entry.event);
+      else store.recordEvent(entry.event);
       return [];
     case "journal.replay_barrier":
       return [];
@@ -477,7 +491,7 @@ function applyJournalEntryToStore(
       store.recordScoutDispatch(entry.dispatch);
       return [];
     case "history.rotate":
-      // Rotation prunes the hot set only — SQLite keeps full history.
+      applyHistoricalCleanup?.(entry);
       return [];
     default: {
       const exhaustive: never = entry;
@@ -497,13 +511,15 @@ function applyJournalEntriesToStore(
   store: SQLiteControlPlaneStore,
   entriesInput: BrokerJournalEntry | BrokerJournalEntry[],
   onSkip?: (entry: BrokerJournalEntry, error: unknown) => void,
+  applyHistoricalCleanup?: (entry: Extract<BrokerJournalEntry, { kind: "history.rotate" }>) => void,
 ): ThreadEventEnvelope[] {
   const threadEvents: ThreadEventEnvelope[] = [];
   for (const entry of normalizeEntries(entriesInput)) {
     try {
-      threadEvents.push(...applyJournalEntryToStore(store, entry));
+      threadEvents.push(...applyJournalEntryToStore(store, entry, applyHistoricalCleanup));
     } catch (error) {
-      if (isTransientStoreBusyError(error)) {
+      if (entry.kind === "history.rotate" && (entry.publications?.length || entry.evicted?.controlEventIds?.length)) throw error;
+      if (isTransientStoreBusyError(error) || isFatalStoreError(error)) {
         throw error;
       }
       onSkip?.(entry, error);
@@ -539,17 +555,33 @@ function isTransientStoreBusyError(error: unknown): boolean {
  * preserve the store.
  */
 function isFatalStoreError(error: unknown): boolean {
+  if (error instanceof QuarantinePersistenceError) return true;
   if (isTransientStoreBusyError(error)) return false;
   const msg = formatError(error).toLowerCase();
   if (msg.includes("disk i/o")) return true;
   if (msg.includes("database disk image is malformed")) return true;
   if (msg.includes("no such table")) return true;
   if (msg.includes("readonly database")) return true;
+  if (msg.includes("disk is full") || msg.includes("database or disk is full") || msg.includes("sqlite_full")) return true;
   return false;
 }
 
+export type SQLiteProjectionJournal = Pick<FileBackedBrokerJournal, "captureReplayBoundary" | "replay" | "listDeliveries" | "verificationRecords">;
+
 export class RecoverableSQLiteProjection {
   private readonly skipLedger = new ProjectionSkipLedger();
+  private quarantine: BrokerQuarantine | null = null;
+
+  private quarantineStore(): BrokerQuarantine {
+    return this.quarantine ??= new BrokerQuarantine(this.options.quarantinePath ?? `${this.dbPath}.quarantine.sqlite`);
+  }
+  quarantineRecord(entry: BrokerJournalEntry, reason: string) {
+    return this.quarantineStore().preserve({ kind: entry.kind, reason,
+      bytes: Buffer.from(JSON.stringify(entry)), source: { path: this.dbPath }, entries: [entry] });
+  }
+  listQuarantine(options: QuarantineListOptions = {}) { return this.quarantineStore().list(options); }
+  readQuarantine(id: string) { return this.quarantineStore().read(id); }
+  acknowledgeQuarantine(id: string) { return this.quarantineStore().acknowledge(id); }
 
   /**
    * Live-path write batches that exhausted busy retries or hit a fatal store
@@ -561,12 +593,14 @@ export class RecoverableSQLiteProjection {
 
   private readonly reportSkippedEntry = (entry: BrokerJournalEntry, error: unknown): void => {
     const reason = formatError(error).slice(0, 256);
+    const evidence = this.quarantineRecord(entry, reason);
     if (this.skipLedger.record(entry.kind, error)) {
-      console.warn(`[broker] sqlite projection skipped malformed ${entry.kind} entry: ${reason}`);
+      if (evidence.status === "open") console.warn(`[broker] sqlite projection quarantined ${entry.kind} entry ${evidence.id}: ${reason}`);
     }
   };
 
   private hydration: SQLiteProjectionStatusSnapshot["hydration"];
+  private replayProgress = 0;
   private store: SQLiteControlPlaneStore | null = null;
 
   private conversationProjection: Pick<
@@ -610,9 +644,41 @@ export class RecoverableSQLiteProjection {
 
   private deferredStartupEvents: ControlEvent[] = [];
 
+  private historicalStore: ControlPlaneHistoryStore | null = null;
+  private historicalReader: ControlPlaneHistoryReader | null = null;
+
+  private applyHistoricalCleanup(store: SQLiteControlPlaneStore, entry: Extract<BrokerJournalEntry, { kind: "history.rotate" }>): void {
+    if (!entry.publications?.length && !entry.evicted?.controlEventIds?.length) return;
+    if (!entry.evicted || !this.options.historyDirectory) throw new Error("Historical cleanup receipt cannot be resolved.");
+    this.historicalStore ??= new ControlPlaneHistoryStore(this.options.historyDirectory);
+    const allowed = emptyHistoryRotationPlan();
+    for (const key of Object.values(verificationPlanKeys)) for (const id of entry.evicted[key] ?? []) allowed[key].add(id);
+    if (entry.publications?.length) {
+      // Validate every page in the marker before any removal: deleting a
+      // flight may change activity rows also owned by a later invocation page.
+      const result = store.removePublishedHistory(entry.publications, allowed, this.historicalStore);
+      if (result.blocked.length) console.warn(`[broker] historical cleanup retained ${result.blocked.length} changed or referenced records`);
+    }
+    const readEvent = store.writerDb.query<{ id: string; kind: string; actor_id: string; node_id: string | null; ts: number; payload_json: string }>(
+      "SELECT id,kind,actor_id,node_id,ts,payload_json FROM events WHERE id=?1",
+    );
+    const deleteEvent = store.writerDb.query("DELETE FROM events WHERE id=?1");
+    let changed = 0;
+    for (const id of entry.evicted.controlEventIds ?? []) {
+      const historical = this.historicalStore.read("control_event", id);
+      if (!historical) throw new Error("Indexed event cleanup receipt is missing.");
+      const row = readEvent.get(id);
+      if (!row) continue;
+      const current = { id: row.id, kind: row.kind, actorId: row.actor_id, ...(row.node_id === null ? {} : { nodeId: row.node_id }), ts: row.ts, payload: JSON.parse(row.payload_json) };
+      if (!isDeepStrictEqual(historical, current)) { changed++; continue; }
+      deleteEvent.run(id);
+    }
+    if (changed) console.warn(`[broker] indexed event cleanup retained ${changed} changed records`);
+  }
+
   constructor(
     private readonly dbPath: string,
-    private readonly journal: FileBackedBrokerJournal,
+    private readonly journal: SQLiteProjectionJournal,
     private readonly options: RecoverableSQLiteProjectionOptions = {},
   ) {
     const configuredDelay = options.conversationFeedPublishDelayMs;
@@ -645,8 +711,14 @@ export class RecoverableSQLiteProjection {
 
   statusSnapshot(): SQLiteProjectionStatusSnapshot {
     const skips = this.skipLedger.snapshot();
-    return { ...this.readStatus(), ...(skips.total ? { skips } : {}), ...(this.warming && this.hydration ? { hydration: { ...this.hydration } } : {}) };
+    const quarantine = this.quarantineStore().status();
+    return { ...this.readStatus(), ...(skips.total ? { skips } : {}),
+      ...(quarantine.openCount || quarantine.acknowledgedCount ? { quarantine } : {}),
+      ...(this.warming && this.hydration ? { hydration: { ...this.hydration } } : {}) };
   }
+
+  /** Monotonic completed replay work, used by the worker watchdog. */
+  progressRevision(): number { return this.replayProgress; }
 
   private readStatus(): SQLiteProjectionStatusSnapshot {
     if (this.options.disabled) {
@@ -716,7 +788,7 @@ export class RecoverableSQLiteProjection {
     } });
   }
 
-  catchUpStartup(boundary: BrokerJournalReplayBoundary): Promise<void> {
+  catchUpStartup(boundary: BrokerJournalReplayBoundary, publishThreadEvents?: (events: ThreadEventEnvelope[]) => Promise<void>): Promise<void> {
     return this.enqueueResult(async () => {
       if (this.options.disabled) return;
       const store = this.store;
@@ -729,14 +801,16 @@ export class RecoverableSQLiteProjection {
       }, boundary, { afterBarrier });
       if (!scan.afterBarrierFound) throw new Error("Startup replay checkpoint disappeared.");
       await this.prepareReplayParents(store, parents);
-      const replay = await this.replayJournalInBatches(batch => {
+      const replay = await this.replayJournalInBatches(async batch => {
+        let threadEvents: ThreadEventEnvelope[] = [];
         store.runReplayTransaction(() => {
           const entries = [...batch];
-          applyJournalEntriesToStore(store, entries, (entry, error) => {
+          threadEvents = applyJournalEntriesToStore(store, entries, (entry, error) => {
             this.reportSkippedEntry(entry, error);
-          });
+          }, entry => this.applyHistoricalCleanup(store, entry));
           this.applyConversationProjectionBatch(store, entries);
         });
+        if (threadEvents.length) await publishThreadEvents?.(threadEvents);
       }, boundary, { afterBarrier });
       if (!replay.afterBarrierFound) throw new Error("Startup replay checkpoint disappeared.");
       const projection = this.ensureConversationProjection(store);
@@ -767,7 +841,7 @@ export class RecoverableSQLiteProjection {
         await this.withBusyRetry(() => {
           applyJournalEntriesToStore(store, entries, (entry, error) => {
             this.reportSkippedEntry(entry, error);
-          });
+          }, entry => this.applyHistoricalCleanup(store, entry));
           this.applyConversationProjectionBatch(store, entries);
         });
       } catch (error) {
@@ -837,9 +911,91 @@ export class RecoverableSQLiteProjection {
     }
   }
 
+  async readMessages(ids: readonly string[]): Promise<Map<string, MessageRecord>> {
+    if (ids.length > 128) throw new Error("historical_message_read_capacity");
+    if (this.closed || this.options.disabled) throw new Error("Historical message storage is unavailable.");
+    await this.flush();
+    const store = await this.ensureStore();
+    if (!store) throw new Error("Historical message storage is unavailable.");
+    return store.readMessages([...ids]);
+  }
+
+  async readInvocations(ids: readonly string[]): Promise<Map<string, InvocationRequest>> {
+    if (ids.length > 128) throw new Error("historical_invocation_read_capacity");
+    if (this.closed || this.options.disabled) throw new Error("Historical invocation storage is unavailable.");
+    await this.flush();
+    const store = await this.ensureStore();
+    if (!store) throw new Error("Historical invocation storage is unavailable.");
+    return store.readInvocations([...ids]);
+  }
+
+  async readInvocationSnapshot(id: string): Promise<ReturnType<SQLiteControlPlaneStore["readInvocationSnapshot"]>> {
+    if (this.closed || this.options.disabled) throw new Error("Historical invocation storage is unavailable.");
+    await this.flush();
+    const store = await this.ensureStore();
+    if (!store) throw new Error("Historical invocation storage is unavailable.");
+    return store.readInvocationSnapshot(id);
+  }
+
+  publishHistoricalPage(records: readonly HistoricalRecord[], options?: Parameters<ControlPlaneHistoryStore["publishPage"]>[1]): Promise<HistoricalPublication> {
+    if (this.closed || this.options.disabled) return Promise.reject(new Error("Historical storage is unavailable."));
+    return this.enqueueResult(async () => {
+      if (!this.options.historyDirectory) throw new Error("Historical storage is not configured.");
+      this.historicalStore ??= new ControlPlaneHistoryStore(this.options.historyDirectory);
+      return this.historicalStore.publishPage(records, options);
+    });
+  }
+
+  publishHistoryRotation(plan: HistoryRotationPlan): Promise<ReturnType<SQLiteControlPlaneStore["publishHistoryRotation"]>> {
+    if (this.closed || this.options.disabled) return Promise.reject(new Error("Historical storage is unavailable."));
+    return this.enqueueResult(async () => {
+      const store = await this.ensureStore();
+      if (!store || !this.options.historyDirectory) throw new Error("Historical storage is unavailable.");
+      this.historicalStore ??= new ControlPlaneHistoryStore(this.options.historyDirectory);
+      return store.publishHistoryRotation(plan, this.historicalStore);
+    });
+  }
+
+  removePublishedHistory(publication: HistoricalPublication, allowed: HistoryRotationPlan): Promise<ReturnType<SQLiteControlPlaneStore["removePublishedHistory"]>> {
+    if (this.closed || this.options.disabled) return Promise.reject(new Error("Historical storage is unavailable."));
+    return this.enqueueResult(async () => {
+      const store = await this.ensureStore();
+      if (!store || !this.options.historyDirectory) throw new Error("Historical storage is unavailable.");
+      this.historicalStore ??= new ControlPlaneHistoryStore(this.options.historyDirectory);
+      return store.removePublishedHistory(publication, allowed, this.historicalStore);
+    });
+  }
+
+  readHistoricalRecords(kind: string, ids: readonly string[]): Promise<Map<string, unknown>> {
+    if (ids.length > 128) return Promise.reject(new Error("historical_record_read_capacity"));
+    if (this.closed || this.options.disabled) return Promise.reject(new Error("Historical storage is unavailable."));
+    return this.enqueueResult(async () => {
+      const reader = this.historyReader();
+      const records = new Map<string, unknown>();
+      for (const id of ids) {
+        const record = reader.read(kind, id);
+        if (record !== undefined) records.set(id, record);
+      }
+      return records;
+    });
+  }
+
+  pageHistoricalRecords(options: Parameters<ControlPlaneHistoryReader["page"]>[0]): Promise<HistoricalRecordLocation[]> {
+    if (this.closed || this.options.disabled) return Promise.reject(new Error("Historical storage is unavailable."));
+    return this.enqueueResult(async () => this.historyReader().page(options));
+  }
+
+  private historyReader(): ControlPlaneHistoryReader {
+    if (!this.options.historyDirectory) throw new Error("Historical storage is not configured.");
+    return this.historicalStore ?? (this.historicalReader ??= new ControlPlaneHistoryReader(this.options.historyDirectory));
+  }
+
   async listDeliveries(options: {
     transport?: DeliveryIntent["transport"];
     status?: DeliveryIntent["status"];
+    targetId?: string;
+    statuses?: DeliveryIntent["status"][];
+    reasons?: DeliveryIntent["reason"][];
     limit?: number;
   } = {}): Promise<DeliveryIntent[]> {
     if (this.options.disabled || this.closed) {
@@ -867,6 +1023,17 @@ export class RecoverableSQLiteProjection {
     await this.queue.catch(() => {});
   }
 
+  /** One maintenance page per queued turn; never monopolize the projection worker. */
+  archiveEvents(options: { cutoff: number; archiveDir: string; pageSize?: number; maxPages?: number }): Promise<ArchiveEventsResult> {
+    return this.enqueueResult(async () => {
+      const store = await this.ensureStore();
+      if (!store || this.closed || this.options.disabled) throw new Error("SQLite projection is unavailable for archive verification.");
+      if (this.options.historyDirectory) this.historicalStore ??= new ControlPlaneHistoryStore(this.options.historyDirectory);
+      return archiveEvents(store.writerDb, { ...options, pageSize: Math.min(options.pageSize ?? 1000, 1000), pageBytes: 1024 * 1024,
+        maxPages: Math.min(options.maxPages ?? 1, 1), ...(this.historicalStore ? { historyStore: this.historicalStore, deferRemoval: true } : {}) });
+    });
+  }
+
   async applyEntries(entriesInput: BrokerJournalEntry | BrokerJournalEntry[]): Promise<ThreadEventEnvelope[]> {
     const entries = normalizeEntries(entriesInput);
     if (entries.length === 0 || this.options.disabled || this.closed) {
@@ -883,7 +1050,7 @@ export class RecoverableSQLiteProjection {
         return await this.withBusyRetry(() => {
           const threadEvents = applyJournalEntriesToStore(store, entries, (entry, error) => {
             this.reportSkippedEntry(entry, error);
-          });
+          }, entry => this.applyHistoricalCleanup(store, entry));
           this.applyConversationProjectionBatch(store, entries);
           return threadEvents;
         });
@@ -927,10 +1094,10 @@ export class RecoverableSQLiteProjection {
   }
 
   /**
-   * Positive per-record coverage proof for a rotation plan. Runs inside the
-   * durable writer (which has already drained the projection queue), so a
-   * row observed here is durably committed before the caller journals the
-   * rotation marker that dooms the journal line. Every id the plan names is
+   * Positive per-record coverage proof for a rotation plan. The caller verifies
+   * outside the durable writer, then revalidates the captured versions and
+   * dependency closure under that writer before appending the rotation marker.
+   * Every id the plan names is
    * answered individually — `present` only when the stored row reads back
    * EQUAL to the journaled record through the same row→record mapper
    * `loadSnapshot` uses (canonicalized identically on both sides), so a
@@ -942,7 +1109,44 @@ export class RecoverableSQLiteProjection {
    * empty `present` with every planned id `missing` — `present` and
    * `missing` always partition the plan, never overlap.
    */
-  async verifyPersisted(plan: HistoryRotationPlan): Promise<BrokerPersistenceVerification> {
+  async verifyPersistedDigests(records: readonly ProjectionVerificationDigest[]): Promise<BrokerPersistenceVerification> {
+    if (records.length > 128) throw new Error("projection_verification_page_capacity");
+    const present = emptyHistoryRotationPlan(), missing = emptyHistoryRotationPlan();
+    for (const record of records) missing[verificationPlanKeys[record.kind]].add(record.id);
+    if (this.options.disabled || this.closed) return { present, missing };
+    await this.flush();
+    const store = await this.ensureStore();
+    if (!store) return { present, missing };
+    try {
+      const readers = {
+        message: (ids: string[]) => store.readMessages(ids),
+        invocation: (ids: string[]) => store.readInvocations(ids),
+        flight: (ids: string[]) => store.readFlights(ids),
+        delivery: (ids: string[]) => store.readDeliveries(ids),
+        deliveryAttempt: (ids: string[]) => store.readDeliveryAttempts(ids),
+        collaborationEvent: (ids: string[]) => store.readCollaborationEvents(ids),
+      };
+      for (const kind of Object.keys(readers) as PersistedRotationRecordKind[]) {
+        const group = records.filter(record => record.kind === kind);
+        if (!group.length) continue;
+        const stored = readers[kind](group.map(record => record.id));
+        for (const record of group) {
+          const value = stored.get(record.id);
+          if (value !== undefined && projectionVerificationDigest(kind, value) === record.digest) {
+            const key = verificationPlanKeys[kind]; missing[key].delete(record.id); present[key].add(record.id);
+          }
+        }
+      }
+      return { present, missing };
+    } catch (error) {
+      if (!isTransientStoreBusyError(error)) this.invalidateStore(error);
+      const allMissing = emptyHistoryRotationPlan();
+      for (const record of records) allMissing[verificationPlanKeys[record.kind]].add(record.id);
+      return { present: emptyHistoryRotationPlan(), missing: allMissing };
+    }
+  }
+
+  async verifyPersisted(plan: HistoryRotationPlan, suppliedRecords?: BrokerJournalVerificationRecords): Promise<BrokerPersistenceVerification> {
     const allMissing = (): BrokerPersistenceVerification => ({
       present: emptyHistoryRotationPlan(),
       missing: {
@@ -965,7 +1169,13 @@ export class RecoverableSQLiteProjection {
     try {
       const present = emptyHistoryRotationPlan();
       const missing = emptyHistoryRotationPlan();
-      const snapshot = this.journal.snapshot();
+      const expectedRecords = suppliedRecords ?? this.journal.verificationRecords(plan);
+      const snapshot = {
+        messages: Object.fromEntries(expectedRecords.messages.map(value => [value.id, value])),
+        invocations: Object.fromEntries(expectedRecords.invocations.map(value => [value.id, value])),
+        flights: Object.fromEntries(expectedRecords.flights.map(value => [value.id, value])),
+      };
+      const journaledDeliveries = new Map(expectedRecords.deliveries.map(value => [value.id, value]));
       const matches = (
         kind: PersistedRotationRecordKind,
         stored: unknown,
@@ -982,9 +1192,7 @@ export class RecoverableSQLiteProjection {
 
       const storedMessages = store.readMessages([...plan.messageIds]);
       for (const id of plan.messageIds) {
-        const expected = asyncMessageRecordView(snapshot.messages)
-          ? undefined
-          : snapshot.messages[id];
+        const expected = snapshot.messages[id];
         (matches("message", storedMessages.get(id), expected)
           ? present : missing).messageIds.add(id);
       }
@@ -1009,17 +1217,17 @@ export class RecoverableSQLiteProjection {
       }
       const storedDeliveries = store.readDeliveries([...plan.deliveryIds]);
       for (const id of plan.deliveryIds) {
-        (matches("delivery", storedDeliveries.get(id), this.journal.getDelivery(id))
+        (matches("delivery", storedDeliveries.get(id), journaledDeliveries.get(id))
           ? present : missing).deliveryIds.add(id);
       }
       const storedAttempts = store.readDeliveryAttempts([...plan.deliveryAttemptIds]);
-      const journaledAttempts = this.journal.deliveryAttemptsById();
+      const journaledAttempts = new Map(expectedRecords.deliveryAttempts.map(value => [value.id, value]));
       for (const id of plan.deliveryAttemptIds) {
         (matches("deliveryAttempt", storedAttempts.get(id), journaledAttempts.get(id))
           ? present : missing).deliveryAttemptIds.add(id);
       }
       const storedEvents = store.readCollaborationEvents([...plan.collaborationEventIds]);
-      const journaledEvents = this.journal.collaborationEventsById();
+      const journaledEvents = new Map(expectedRecords.collaborationEvents.map(value => [value.id, value]));
       for (const id of plan.collaborationEventIds) {
         (matches("collaborationEvent", storedEvents.get(id), journaledEvents.get(id))
           ? present : missing).collaborationEventIds.add(id);
@@ -1241,6 +1449,9 @@ export class RecoverableSQLiteProjection {
     this.conversationFeedPublisher = null;
     this.conversationThreadPublisher = null;
     current?.close();
+    this.historicalReader?.close(); this.historicalReader = null;
+    this.historicalStore?.close(); this.historicalStore = null;
+    this.quarantine?.close(); this.quarantine = null;
   }
 
   private enqueue(task: () => Promise<void>): void {
@@ -1333,13 +1544,27 @@ export class RecoverableSQLiteProjection {
     this.hydration = { phase: this.hydration?.phase ?? "replay", processedEntries: 0, totalEntries: null, boundaryBytes: boundary.endByteExclusive };
     let batch: BrokerJournalEntry[] = [];
     let batchWork = 0;
+    let batchBytes = 0;
+    const configuredBytes = this.options.replayBatchBytes;
+    const byteBudget = configuredBytes !== undefined && Number.isFinite(configuredBytes) && configuredBytes > 0
+      ? Math.floor(configuredBytes) : 1024 * 1024;
     const flushForMoreWork = async (): Promise<void> => {
       await visitor(batch);
       batch = [];
       batchWork = 0;
+      batchBytes = 0;
       await this.yieldReplayTurn();
     };
+    const add = async (entry: BrokerJournalEntry, work: number): Promise<void> => {
+      const bytes = Buffer.byteLength(JSON.stringify(entry));
+      if (batchWork > 0 && (batchWork + work > batchSize || batchBytes + bytes > byteBudget)) await flushForMoreWork();
+      batch.push(entry); batchWork += work; batchBytes += bytes;
+      // A single legal frame can be larger than the batch budget. Process it
+      // alone, never reject or retain another payload beside it.
+      if (batchBytes >= byteBudget) await flushForMoreWork();
+    };
     const replayReport = await this.journal.replay(async (entry) => {
+      this.replayProgress++;
       if (this.hydration) this.hydration.processedEntries++;
       if (entry.kind !== "deliveries.record" || entry.deliveries.length === 0) {
         // Endpoint projection derives session aliases and budget observations,
@@ -1349,11 +1574,7 @@ export class RecoverableSQLiteProjection {
         const entryWork = entry.kind === "agent.endpoint.upsert"
           ? Math.min(REPLAY_ENDPOINT_UPSERT_WORK, batchSize)
           : 1;
-        if (batchWork > 0 && batchWork + entryWork > batchSize) {
-          await flushForMoreWork();
-        }
-        batch.push(entry);
-        batchWork += entryWork;
+        await add(entry, entryWork);
         return;
       }
 
@@ -1361,11 +1582,13 @@ export class RecoverableSQLiteProjection {
       while (offset < entry.deliveries.length) {
         if (batchWork === batchSize) await flushForMoreWork();
         const chunkSize = Math.min(batchSize - batchWork, entry.deliveries.length - offset);
-        batch.push({
+        const chunk = {
           kind: "deliveries.record",
           deliveries: entry.deliveries.slice(offset, offset + chunkSize),
-        });
-        batchWork += chunkSize;
+        } as const;
+        if (Buffer.byteLength(JSON.stringify(chunk)) > byteBudget && chunkSize > 1) {
+          for (const delivery of chunk.deliveries) await add({ kind: "deliveries.record", deliveries: [delivery] }, 1);
+        } else await add(chunk, chunkSize);
         offset += chunkSize;
       }
     }, boundary, options);
@@ -1386,6 +1609,7 @@ export class RecoverableSQLiteProjection {
       store.runReplayTransaction(() => {
         for (const write of batch) {
           applyReplayParentWrite(store, write);
+          this.replayProgress++;
         }
       });
     });
@@ -1400,8 +1624,9 @@ export class RecoverableSQLiteProjection {
       store.runReplayTransaction(() => {
         for (const entry of batch) {
           try {
-            applyJournalEntryToStore(store, entry);
+            applyJournalEntryToStore(store, entry, marker => this.applyHistoricalCleanup(store, marker));
           } catch (error) {
+            if (entry.kind === "history.rotate" && (entry.publications?.length || entry.evicted?.controlEventIds?.length)) throw error;
             if (isTransientStoreBusyError(error)) {
               throw error;
             }
@@ -1453,6 +1678,7 @@ export class RecoverableSQLiteProjection {
     for (let attempt = 1; attempt <= this.busyRetryAttempts; attempt += 1) {
       try {
         const store = createStore(this.dbPath);
+        if (this.options.historyDirectory) store.configureHistory(this.options.historyDirectory);
         this.store = store;
         const conversationProjection = this.ensureConversationProjection(store);
         // Make the last committed launch view readable immediately. Durable
@@ -1557,6 +1783,7 @@ export class RecoverableSQLiteProjection {
       this.conversationProjection = this.options.createConversationProjection?.(store)
         ?? new ConversationProjectionStore(
           store.writerDb as ControlPlaneSqliteTransactionalDatabase,
+          { readArchivedMessage: id => store.readArchivedMessage(id) },
         );
     }
     return this.conversationProjection;

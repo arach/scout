@@ -55,7 +55,7 @@ export class ThreadEventPlane {
     private readonly options: {
       nodeId: string;
       runtime: ConversationLookup;
-      projection: RecoverableSQLiteProjection;
+      projection: Pick<RecoverableSQLiteProjection, "oldestThreadSeq" | "latestThreadSeq" | "listThreadEvents" | "getThreadSnapshot">;
       defaultLeaseMs?: number;
       maxLeaseMs?: number;
       maxReplayLimit?: number;

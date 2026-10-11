@@ -446,6 +446,7 @@ export const scoutAskHandler: ScoutAskHandler = async (command) => {
   const result = await deliverScoutAsk({
     requestId: command.requestId,
     senderId: command.senderId,
+    senderResolution: command.senderResolution,
     target: resolvedTarget.target,
     targetLabel: resolvedTarget.display,
     body: command.body,

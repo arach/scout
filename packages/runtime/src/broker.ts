@@ -28,6 +28,7 @@ import { captureMessageRecords, asyncMessageRecordView, readMessageRecord } from
 import { applyHistoryRotationEviction } from "./history-rotation.js";
 import {
   createRuntimeRegistrySnapshot,
+  markRoutingRegistryVersion,
   type RuntimeActorIdentity,
   type RuntimeAgentDefinition,
   type RuntimeRegistrySnapshot,
@@ -176,6 +177,7 @@ export class InMemoryControlRuntime implements ControlRuntime {
     options: { localNodeId?: ScoutId; retiredActorIds?: Iterable<ScoutId> } = {},
   ) {
     this.registry = createRuntimeRegistrySnapshot(initial);
+    markRoutingRegistryVersion(this.registry);
     this.localNodeId = options.localNodeId;
     for (const actorId of options.retiredActorIds ?? []) {
       this.retiredActorIds.add(actorId);
@@ -203,6 +205,11 @@ export class InMemoryControlRuntime implements ControlRuntime {
       flights: { ...this.registry.flights },
       collaborationRecords: { ...this.registry.collaborationRecords },
     });
+  }
+
+  /** Read-only synchronous routing view; versions invalidate derived indexes. */
+  routingSnapshot(): RuntimeRegistrySnapshot {
+    return this.registry;
   }
 
   // Internal fast-path access for broker internals. Callers must treat this as read-only.
@@ -377,6 +384,7 @@ export class InMemoryControlRuntime implements ControlRuntime {
 
   async upsertNode(node: NodeDefinition): Promise<void> {
     this.registry.nodes[node.id] = node;
+    markRoutingRegistryVersion(this.registry);
     this.emit({
       id: createRuntimeId("evt"),
       kind: "node.upserted",
@@ -401,6 +409,7 @@ export class InMemoryControlRuntime implements ControlRuntime {
       // retention's last-resort age evidence.
       createdAt: actor.createdAt ?? this.registry.actors[actor.id]?.createdAt ?? Date.now(),
     };
+    markRoutingRegistryVersion(this.registry);
     this.emit({
       id: createRuntimeId("evt"),
       kind: "actor.registered",
@@ -426,6 +435,7 @@ export class InMemoryControlRuntime implements ControlRuntime {
       };
     }
     this.registry.agents[agent.id] = agent;
+    markRoutingRegistryVersion(this.registry);
     this.emit({
       id: createRuntimeId("evt"),
       kind: "agent.registered",
@@ -479,6 +489,7 @@ export class InMemoryControlRuntime implements ControlRuntime {
       metadata: input.metadata,
     };
     this.registry.agents[input.id] = partial;
+    markRoutingRegistryVersion(this.registry);
     this.emit({
       id: createRuntimeId("evt"),
       kind: "agent.registered",
@@ -495,6 +506,7 @@ export class InMemoryControlRuntime implements ControlRuntime {
       this.unindexEndpoint(previous);
     }
     this.registry.endpoints[endpoint.id] = endpoint;
+    markRoutingRegistryVersion(this.registry);
     this.indexEndpoint(endpoint);
     this.emit({
       id: createRuntimeId("evt"),
@@ -512,6 +524,7 @@ export class InMemoryControlRuntime implements ControlRuntime {
       this.unindexEndpoint(previous);
     }
     this.registry.endpoints[endpoint.id] = endpoint;
+    markRoutingRegistryVersion(this.registry);
     if (!previous || previous.agentId !== endpoint.agentId) {
       this.indexEndpoint(endpoint);
     }
@@ -522,6 +535,7 @@ export class InMemoryControlRuntime implements ControlRuntime {
     if (!endpoint) return;
     this.unindexEndpoint(endpoint);
     delete this.registry.endpoints[id];
+    markRoutingRegistryVersion(this.registry);
     this.emit({
       id: createRuntimeId("evt"),
       kind: "agent.endpoint.deleted",
@@ -543,6 +557,7 @@ export class InMemoryControlRuntime implements ControlRuntime {
     }
     if (!this.registry.agents[id]) return;
     delete this.registry.agents[id];
+    markRoutingRegistryVersion(this.registry);
     // No agent.deleted control-event kind exists; endpoint.deleted per endpoint
     // above is the only wire signal. Subscribers reconcile via snapshot diff.
   }
@@ -552,6 +567,7 @@ export class InMemoryControlRuntime implements ControlRuntime {
     this.retiredActorIds.add(id);
     if (!this.registry.actors[id]) return;
     delete this.registry.actors[id];
+    markRoutingRegistryVersion(this.registry);
   }
 
   /**

@@ -1,6 +1,9 @@
+import { messageWithAcceptedFlight } from "./broker-delivery-receipt-recovery.js";
 import { ChatQuestionError, transitionChatQuestion } from "./chat-question-transition.js";
 import { clearOperatorTitle, markOperatorTitled } from "./conversation-title.js";
 import { isIdempotentMessageRetry } from "./broker-message-idempotency.js";
+import { isIdempotentInvocationRetry } from "./broker-invocation-idempotency.js";
+import { existingDeliveryWorkItemMatches, type DeliveryWorkItemResolution } from "./broker-work-item-store.js";
 import { readMessageRecord } from "./broker-message-records.js";
 import {
   applyChatPinChange,
@@ -72,6 +75,7 @@ export type BrokerDurableRecordStoreOptions = {
   runtime: RuntimeRecordStore;
   durableStore: DurableStore;
   knownInvocations: Map<string, InvocationRequest>;
+  invocationDispatchJobFor?: (jobId: string) => BrokerInvocationDispatchJob | null;
   /**
    * Authoritative membership lookup (SQLite conversation_members), queried
    * before an agent/actor delete so the journaled entry carries the delete
@@ -674,21 +678,83 @@ export class BrokerDurableRecordStore {
       dispatchJob?: BrokerInvocationDispatchJob;
       createDispatchJob?: (flight: FlightRecord) => BrokerInvocationDispatchJob;
       enqueueProjection?: boolean;
+      message?: MessageRecord;
+      receiptMessage?: MessageRecord;
+      workItem?: DeliveryWorkItemResolution["pendingCreation"];
     } = {},
   ): Promise<{ flight: FlightRecord; dispatchJob?: BrokerInvocationDispatchJob; entries: BrokerJournalEntry[] }> => {
     return this.options.durableStore.runWrite(async () => {
-      const flight = options.flight ?? this.options.runtime.planInvocation(invocation);
-      this.options.knownInvocations.set(invocation.id, invocation);
+      const snapshot = this.options.runtime.peek();
+      const existing = snapshot.invocations[invocation.id];
+      if (existing) {
+        const existingFlight = Object.values(snapshot.flights).find(candidate => candidate.invocationId === invocation.id);
+        if (!existingFlight || !isIdempotentInvocationRetry(existing, invocation)) {
+          throw new Error(`invocation id ${invocation.id} is already assigned to a different record`);
+        }
+        const jobId = options.dispatchJob?.id ?? options.createDispatchJob?.(existingFlight).id;
+        const dispatchJob = jobId ? this.options.invocationDispatchJobFor?.(jobId) ?? undefined : undefined;
+        return { flight: existingFlight, dispatchJob, entries: [] };
+      }
+      const plannedFlight = options.flight ?? this.options.runtime.planInvocation(invocation);
+      let flight = options.flight ? plannedFlight : {
+        ...plannedFlight,
+        metadata: { ...plannedFlight.metadata, dispatchOutcome: { status: "not_submitted", checkedAt: plannedFlight.startedAt } },
+      };
       const dispatchJob = options.dispatchJob ?? options.createDispatchJob?.(flight);
+      if (!options.flight && dispatchJob) flight = {
+        ...flight, metadata: { ...flight.metadata, dispatchOutcome: {
+          status: "not_submitted", checkedAt: Math.max(flight.startedAt ?? invocation.createdAt, dispatchJob.createdAt),
+        } },
+      };
+      // A reused client message can predate this request and retain its original
+      // ID/metadata. The invocation is always the canonical acceptance witness,
+      // even when this writer also owns the message's conversation.
+      const receiptMessage = options.receiptMessage ?? options.message;
+      const recordedInvocation = receiptMessage ? {
+        ...invocation, metadata: { ...invocation.metadata,
+          acceptedDeliveryReceipt: messageWithAcceptedFlight(receiptMessage, flight) },
+      } : invocation;
+      const work = options.workItem;
+      const existingWork = work ? this.options.runtime.collaborationRecord(work.record.id) : undefined;
+      if (existingWork && !existingDeliveryWorkItemMatches(existingWork, work!.record)) {
+        throw new Error(`work item id ${work!.record.id} changed before command acceptance`);
+      }
+      if (work && !existingWork) {
+        assertValidCollaborationRecord(work.record);
+        assertValidCollaborationEvent(work.event, work.record);
+      }
+      const message = options.message ? messageWithAcceptedFlight(options.message, flight) : undefined;
+      const existingMessage = message ? await readMessageRecord(snapshot.messages, message.id) : undefined;
+      if (existingMessage && !isIdempotentMessageRetry(existingMessage, message!)) {
+        throw new Error(`message id ${message!.id} is already assigned to a different record`);
+      }
+      const deliveries = message && !existingMessage ? this.options.runtime.planMessage(message) : [];
       const entriesToCommit: BrokerJournalEntry[] = [
-        { kind: "invocation.record", invocation },
+        ...(work && !existingWork ? [
+          { kind: "collaboration.record" as const, record: work.record },
+          { kind: "collaboration.event.record" as const, event: work.event },
+        ] : []),
+        ...(message && !existingMessage ? [
+          { kind: "message.record" as const, message },
+          { kind: "deliveries.record" as const, deliveries },
+        ] : []),
+        { kind: "invocation.record", invocation: recordedInvocation },
         ...(dispatchJob ? [{ kind: "invocation.dispatch_job.record" as const, job: dispatchJob }] : []),
         { kind: "flight.record", flight },
       ];
       const entries = await this.options.durableStore.commitEntries(
         entriesToCommit,
-        async () => {
-          await this.options.runtime.commitInvocation(invocation, flight);
+        async (committed) => {
+          if (work && !existingWork) {
+            await this.options.runtime.upsertCollaboration(work.record);
+            await this.options.runtime.appendCollaborationEvent(work.event);
+          }
+          if (message && !existingMessage) {
+            const recorded = committed.find(entry => entry.kind === "message.record");
+            await this.options.runtime.commitMessage(recorded?.kind === "message.record" ? recorded.message : message, deliveries);
+          }
+          await this.options.runtime.commitInvocation(recordedInvocation, flight);
+          this.options.knownInvocations.set(invocation.id, recordedInvocation);
         },
         { enqueueProjection: options.enqueueProjection },
       );
@@ -701,6 +767,25 @@ export class BrokerDurableRecordStore {
     options: DurableCommitOptions = {},
   ): Promise<BrokerJournalEntry[]> => {
     return this.options.durableStore.runWrite(async () => {
+      return this.options.durableStore.commitEntries(
+        { kind: "invocation.dispatch_job.record", job },
+        async () => {},
+        options,
+      );
+    });
+  };
+
+  /** Compare and append under the canonical writer, never across an awaited effect. */
+  readonly recordInvocationDispatchJobIf = async (
+    job: BrokerInvocationDispatchJob,
+    eligible: (current: BrokerInvocationDispatchJob | null) => boolean,
+    options: DurableCommitOptions = {},
+  ): Promise<BrokerJournalEntry[] | null> => {
+    if (!this.options.invocationDispatchJobFor) {
+      throw new Error("dispatch job conditional writes require canonical job lookup");
+    }
+    return this.options.durableStore.runWrite(async () => {
+      if (!eligible(this.options.invocationDispatchJobFor!(job.id))) return null;
       return this.options.durableStore.commitEntries(
         { kind: "invocation.dispatch_job.record", job },
         async () => {},

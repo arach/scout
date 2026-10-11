@@ -7,6 +7,7 @@ import { Readable } from "node:stream";
 
 import type { ControlPlaneSqliteDatabase, ControlPlaneSqliteTransactionalDatabase } from "./sqlite-adapter.js";
 import { controlPlaneArchiveDirectory } from "./support-paths.js";
+import type { ControlPlaneHistoryStore } from "./control-plane-history-store.js";
 
 /**
  * Archive-then-prune for the control-plane `events` table. Rows older than
@@ -48,6 +49,14 @@ export type ArchiveEventsOptions = {
   cutoff: number;
   archiveDir?: string;
   pageSize?: number;
+  /** Bound each maintenance turn; omitted preserves the standalone full export. */
+  maxPages?: number;
+  /** Bound payload residency; one larger row is handled alone, never dropped. */
+  pageBytes?: number;
+  /** Worker path: exact indexed historical lookup must precede source removal. */
+  historyStore?: Pick<ControlPlaneHistoryStore, "publishPage">;
+  /** Worker path: journal a replayable cleanup marker before removing rows. */
+  deferRemoval?: boolean;
   /**
    * Injectable for tests; defaults to gzip JSONL write + fsync. Called with
    * the `*.tmp` path — the module owns rename and directory fsync, so a
@@ -69,6 +78,8 @@ export type ArchiveEventsResult = {
   bytesWritten: number;
   /** ISO week labels that received at least one row. */
   weeks: string[];
+  /** Indexed, unchanged rows; deferred mode retains them until marker replay. */
+  verifiedEventIds?: string[];
 };
 
 type EventRow = {
@@ -251,15 +262,28 @@ export async function archiveEvents(
   ensureDurableDirectory(eventsDir, fsx);
   reapStaleArchiveTemps(eventsDir, options.tempMaxAgeMs ?? ARCHIVE_TEMP_MAX_AGE_MS);
 
-  const result: ArchiveEventsResult = { rows: 0, bytesWritten: 0, weeks: [] };
+  const result: ArchiveEventsResult = { rows: 0, bytesWritten: 0, weeks: [], ...(options.historyStore ? { verifiedEventIds: [] } : {}) };
   const seenWeeks = new Set<string>();
   const selectPage = db.query<EventRow>(
     "SELECT id, kind, actor_id, node_id, ts, payload_json FROM events WHERE ts < ?1 ORDER BY ts, id LIMIT ?2",
   );
+  const currentRow = db.query<EventRow>("SELECT id, kind, actor_id, node_id, ts, payload_json FROM events WHERE id = ?1");
+  const sizedPage = options.pageBytes === undefined ? undefined : db.query<{ id: string; bytes: number }>(
+    "SELECT id, length(CAST(payload_json AS BLOB)) + length(CAST(id AS BLOB)) + length(CAST(actor_id AS BLOB)) + length(CAST(kind AS BLOB)) + coalesce(length(CAST(node_id AS BLOB)),0) + 128 AS bytes FROM events WHERE ts < ?1 ORDER BY ts,id LIMIT ?2",
+  );
   const deleteRow = db.query("DELETE FROM events WHERE id = ?1");
+  let pages = 0;
 
-  while (true) {
-    const page = selectPage.all(options.cutoff, pageSize);
+  while (pages < (options.maxPages ?? Number.POSITIVE_INFINITY)) {
+    let page: EventRow[];
+    if (sizedPage) {
+      page = []; let bytes = 0;
+      for (const sized of sizedPage.all(options.cutoff, pageSize)) {
+        if (page.length && bytes + sized.bytes > options.pageBytes!) break;
+        const row = currentRow.get(sized.id);
+        if (row) { page.push(row); bytes += sized.bytes; }
+      }
+    } else page = selectPage.all(options.cutoff, pageSize);
     if (page.length === 0) break;
 
     // Group the page into per-week row batches; every batch is published
@@ -308,27 +332,47 @@ export async function archiveEvents(
       seenWeeks.add(week);
     }
 
-    if (isTransactional(db)) {
-      db.transaction(() => {
-        for (const row of page) {
-          deleteRow.run(row.id);
-        }
-      })();
-    } else {
-      // The adapter is synchronous; without a transaction helper still keep
-      // the delete explicit and ordered.
-      db.exec("BEGIN IMMEDIATE;");
-      try {
-        for (const row of page) {
-          deleteRow.run(row.id);
-        }
-        db.exec("COMMIT;");
-      } catch (error) {
-        db.exec("ROLLBACK;");
-        throw error;
-      }
+    if (options.historyStore) {
+      options.historyStore.publishPage(page.map(row => {
+        const payload = JSON.parse(row.payload_json) as Record<string, unknown>;
+        return { kind: "control_event", id: row.id,
+          record: { id: row.id, kind: row.kind, actorId: row.actor_id, ...(row.node_id === null ? {} : { nodeId: row.node_id }), ts: row.ts, payload },
+          timestamp: row.ts,
+          ...(typeof payload?.conversationId === "string" ? { conversationId: payload.conversationId } : {}),
+          ...(typeof payload?.invocationId === "string" ? { invocationId: payload.invocationId } : {}),
+        };
+      }));
     }
-    result.rows += page.length;
+
+    // Publication does not hold the canonical command writer. Recheck every
+    // selected row in the deletion transaction, because it may have changed
+    // while gzip/fsync was running. Only the exact archived version may leave.
+    let deleted = 0;
+    const deletedIds: string[] = [];
+    const deleteUnchanged = () => {
+      for (const row of page) {
+        const current = currentRow.get(row.id);
+        if (!current || current.kind !== row.kind || current.actor_id !== row.actor_id
+          || current.node_id !== row.node_id || current.ts !== row.ts || current.payload_json !== row.payload_json) continue;
+        if (!options.deferRemoval) deleteRow.run(row.id);
+        deleted++;
+        deletedIds.push(row.id);
+      }
+    };
+    if (isTransactional(db)) db.transaction(deleteUnchanged)();
+    else {
+      db.exec("BEGIN IMMEDIATE;");
+      try { deleteUnchanged(); db.exec("COMMIT;"); }
+      catch (error) { db.exec("ROLLBACK;"); throw error; }
+    }
+    result.rows += deleted;
+    result.verifiedEventIds?.push(...deletedIds);
+    pages++;
+    // Deferred publication must wait for the canonical cleanup marker before
+    // selecting this same still-present source page again.
+    if (options.deferRemoval) break;
+    // Retry a changed page on a later turn, without spinning on a live writer.
+    if (deleted !== page.length) break;
 
     // A short final page ends the run; a full page may have more to do.
     if (page.length < pageSize) break;

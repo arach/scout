@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { getEventListeners } from "node:events";
 import { createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,7 +13,7 @@ import {
   resolveCodexAppServerConnectionConfig,
   defaultCodexAppServerControlSocketPath,
 } from "./codex-app-server-connection.ts";
-import { CodexAppServerClient } from "./codex-app-server.ts";
+import { CodexAppServerClient, CodexAppServerTransport, type CodexAppServerSessionOptions } from "./codex-app-server.ts";
 
 const cleanups: Array<() => Promise<void> | void> = [];
 afterEach(async () => {
@@ -76,6 +77,191 @@ async function startFakeAppServer(
   cleanups.push(() => connections.forEach((socket) => socket.destroy()));
   return { server, received, connections, maskedFrames };
 }
+
+function clientOptions(dir: string, extra: Partial<CodexAppServerSessionOptions> = {}): CodexAppServerSessionOptions {
+  return {
+    agentName: "deadline-test", sessionId: "deadline-test", cwd: dir, systemPrompt: "test",
+    runtimeDirectory: join(dir, "rt"), logsDirectory: join(dir, "logs"),
+    connection: { mode: "attach", socketPath: join(dir, "deadline.sock") },
+    startupTimeoutMs: 1_000, controlRequestTimeoutMs: 100,
+    ...extra,
+  };
+}
+
+test("in-flight control abort removes the RPC and its abort listener", async () => {
+  const dir = await tempDir();
+  await mkdir(join(dir, "logs"));
+  const controller = new AbortController();
+  const transport = new CodexAppServerTransport(clientOptions(dir, { signal: controller.signal }));
+  const sent: Array<{ id: string; method: string }> = [];
+  const seam = transport as unknown as {
+    connection: unknown;
+    request(method: string, params: unknown): Promise<unknown>;
+    pendingRequests: Map<string, unknown>;
+    handleMessageText(text: string): void;
+    wireLog: { flush(): Promise<void> };
+  };
+  seam.connection = { isOpen: () => true, send: (text: string) => sent.push(JSON.parse(text)), setReadingPaused: () => {} };
+  const pending = seam.request("initialize", {});
+  expect(seam.pendingRequests.size).toBe(1);
+  expect(getEventListeners(controller.signal, "abort")).toHaveLength(1);
+  controller.abort();
+  await expect(pending).rejects.toMatchObject({ code: "CODEX_APP_SERVER_CONTROL_ABORTED", method: "initialize", submissionUnknown: false });
+  expect(seam.pendingRequests.size).toBe(0);
+  expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+  seam.handleMessageText(JSON.stringify({ id: sent[0]!.id, result: {} }));
+  expect(seam.pendingRequests.size).toBe(0);
+  await seam.wireLog.flush();
+});
+
+test("a control deadline distinguishes an unacknowledged turn from pre-submission startup", async () => {
+  const dir = await tempDir();
+  for (const method of ["initialize", "turn/start", "turn/steer"]) {
+    const controller = new AbortController();
+    const transport = new CodexAppServerTransport(clientOptions(dir, { signal: controller.signal, controlRequestTimeoutMs: 10 }));
+    const seam = transport as unknown as { connection: unknown; request(method: string, params: unknown): Promise<unknown>; pendingRequests: Map<string, unknown> };
+    seam.connection = { isOpen: () => true, send: () => undefined };
+    await expect(seam.request(method, {})).rejects.toMatchObject({
+      code: "CODEX_APP_SERVER_CONTROL_TIMEOUT", method, timeoutMs: 10, submissionUnknown: method !== "initialize",
+    });
+    expect(seam.pendingRequests.size).toBe(0);
+    expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+    expect(transport.nativeControlBlocked).toBe(method !== "initialize");
+  }
+});
+
+test("startup deadline spans the whole handshake and releases queued client operations", async () => {
+  const dir = await tempDir();
+  const fake = await startFakeAppServer(join(dir, "deadline.sock"), (request, reply) => {
+    if (request.method === "initialize") reply({ id: request.id, result: {} });
+    // Neither thread/start nor turn/start is acknowledged.
+  });
+  const client = new CodexAppServerClient(clientOptions(dir, { startupTimeoutMs: 30, controlRequestTimeoutMs: 1_000 }));
+  const first = client.invoke("first");
+  const second = client.invoke("second");
+  const results = await Promise.allSettled([first, second]);
+  expect(results.map((result) => result.status)).toEqual(["rejected", "rejected"]);
+  for (const result of results) {
+    if (result.status === "rejected") expect(result.reason).toMatchObject({ code: "CODEX_APP_SERVER_CONTROL_TIMEOUT", submissionUnknown: false });
+  }
+  expect(fake.received.filter((request) => request.method === "initialize")).toHaveLength(2);
+  expect(fake.received.some((request) => request.method === "turn/start")).toBe(false);
+  expect(client.isAlive()).toBe(false);
+});
+
+test("owner abort during initialize prevents subsequent thread or turn creation", async () => {
+  const dir = await tempDir();
+  const controller = new AbortController();
+  const fake = await startFakeAppServer(join(dir, "deadline.sock"), (request) => {
+    if (request.method === "initialize") controller.abort();
+  });
+  const client = new CodexAppServerClient(clientOptions(dir, { signal: controller.signal }));
+  await expect(client.invoke("never submitted")).rejects.toMatchObject({ code: "CODEX_APP_SERVER_CONTROL_ABORTED", submissionUnknown: false });
+  expect(fake.received.map((request) => request.method)).toEqual(["initialize"]);
+  expect(client.isAlive()).toBe(false);
+  expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+});
+
+test("concurrent startup waiters share deadline cleanup before a fresh connection", async () => {
+  const dir = await tempDir();
+  let initializations = 0;
+  const fake = await startFakeAppServer(join(dir, "deadline.sock"), (request, reply) => {
+    if (request.method === "initialize") {
+      initializations += 1;
+      if (initializations > 1) reply({ id: request.id, result: {} });
+    }
+    if (request.method === "thread/start") reply({ id: request.id, result: { thread: { id: "recovered-thread" } } });
+    if (request.method === "thread/unsubscribe") reply({ id: request.id, result: {} });
+  });
+  const client = new CodexAppServerClient(clientOptions(dir, { controlRequestTimeoutMs: 20 }));
+  const outcomes = await Promise.allSettled([client.ensureOnline(), client.ensureOnline()]);
+  expect(outcomes.map((outcome) => outcome.status)).toEqual(["rejected", "rejected"]);
+  expect(initializations).toBe(1);
+  expect((await client.ensureOnline()).threadId).toBe("recovered-thread");
+  expect(initializations).toBe(2);
+  expect(fake.connections).toHaveLength(2);
+  expect(client.isAlive()).toBe(true);
+  await client.shutdown();
+});
+
+test("promoting a generated provider thread ID preserves the live transport while other launch dimensions stay strict", async () => {
+  const dir = await tempDir();
+  await startFakeAppServer(join(dir, "deadline.sock"), (request, reply) => {
+    if (request.method === "initialize") reply({ id: request.id, result: {} });
+    if (request.method === "thread/start") reply({ id: request.id, result: { thread: { id: "promoted-thread" } } });
+    if (request.method === "thread/unsubscribe") reply({ id: request.id, result: {} });
+  });
+  const options = clientOptions(dir);
+  const transport = new CodexAppServerTransport(options);
+  await transport.ensureOnline();
+  const promoted = { ...options, threadId: "promoted-thread", requireExistingThread: true };
+  expect(transport.matches(promoted)).toBe(true);
+  expect(transport.matches({ ...promoted, threadId: "different-thread" })).toBe(false);
+  expect(transport.matches({ ...promoted, cwd: join(dir, "other") })).toBe(false);
+  expect(transport.matches({ ...promoted, launchArgs: ["-c", "model=gpt-6.1-sol"] })).toBe(false);
+  transport.update(promoted);
+  expect(transport.matches(options)).toBe(true);
+  await transport.shutdown();
+  expect(transport.matches(options)).toBe(false);
+});
+
+test("a stored-thread resume timeout never falls back to a fresh thread", async () => {
+  const dir = await tempDir();
+  await mkdir(join(dir, "rt"));
+  await writeFile(join(dir, "rt", "codex-thread-id.txt"), "existing-thread");
+  const fake = await startFakeAppServer(join(dir, "deadline.sock"), (request, reply) => {
+    if (request.method === "initialize") reply({ id: request.id, result: {} });
+  });
+  const client = new CodexAppServerClient(clientOptions(dir, { controlRequestTimeoutMs: 20 }));
+  await expect(client.ensureOnline()).rejects.toMatchObject({ code: "CODEX_APP_SERVER_CONTROL_TIMEOUT", method: "thread/resume" });
+  expect(fake.received.some((request) => request.method === "thread/start")).toBe(false);
+  expect(await readFile(join(dir, "rt", "codex-thread-id.txt"), "utf8")).toBe("existing-thread");
+});
+
+test("turn acknowledgement timeout preserves unknown ownership and does not resend", async () => {
+  const dir = await tempDir();
+  const fake = await startFakeAppServer(join(dir, "deadline.sock"), (request, reply) => {
+    if (request.method === "initialize" || request.method === "thread/unsubscribe") reply({ id: request.id, result: {} });
+    if (request.method === "thread/start") reply({ id: request.id, result: { thread: { id: "thread-1" } } });
+  });
+  const client = new CodexAppServerClient(clientOptions(dir, { controlRequestTimeoutMs: 20 }));
+  await expect(client.invoke("may have been accepted")).rejects.toMatchObject({ code: "CODEX_APP_SERVER_CONTROL_TIMEOUT", method: "turn/start", submissionUnknown: true });
+  expect(client.hasActiveTurn()).toBe(true);
+  await expect(client.invoke("must not overwrite unknown turn")).rejects.toThrow("already has an active turn");
+  expect(fake.received.filter((request) => request.method === "turn/start")).toHaveLength(1);
+  await client.shutdown();
+});
+
+test("control deadlines do not impose a completion deadline on a long turn", async () => {
+  const dir = await tempDir();
+  await startFakeAppServer(join(dir, "deadline.sock"), (request, reply) => {
+    if (request.method === "initialize" || request.method === "thread/unsubscribe") reply({ id: request.id, result: {} });
+    if (request.method === "thread/start") reply({ id: request.id, result: { thread: { id: "thread-1" } } });
+    if (request.method === "turn/start") {
+      reply({ id: request.id, result: { turn: { id: "turn-1" } } });
+      setTimeout(() => {
+        reply({ method: "item/completed", params: { turnId: "turn-1", item: { type: "agentMessage", id: "answer", text: "late answer" } } });
+        reply({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed" } } });
+      }, 80);
+    }
+  });
+  const client = new CodexAppServerClient(clientOptions(dir, { controlRequestTimeoutMs: 20 }));
+  expect((await client.invoke("long work")).output).toBe("late answer");
+  await client.shutdown();
+});
+
+test("socket handshake abort closes the pending connection", async () => {
+  const dir = await tempDir();
+  const socketPath = join(dir, "blocked.sock");
+  const controller = new AbortController();
+  const connections: Socket[] = [];
+  const server = createServer((socket) => { connections.push(socket); controller.abort(new Error("owner ended")); });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+  cleanups.push(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  cleanups.push(() => connections.forEach((socket) => socket.destroy()));
+  await expect(connectCodexAppServerSocket({ socketPath, signal: controller.signal, handlers: { onMessage() {}, onClose() {} } })).rejects.toThrow("owner ended");
+  expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+});
 
 test("WebSocket frames round-trip across all three length encodings and split chunks", () => {
   for (const size of [0, 5, 125, 126, 300, 65_535, 65_536, 70_000]) {

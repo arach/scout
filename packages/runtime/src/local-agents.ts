@@ -1,3 +1,4 @@
+import { SUPPORTED_LOCAL_AGENT_HARNESSES } from "./local-agent-harnesses.js";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
@@ -25,7 +26,6 @@ import {
   epochMs,
   isScoutReservedAgentName,
   normalizeAgentSelectorSegment,
-  SCOUT_LAUNCHABLE_HARNESSES,
 } from "@openscout/protocol";
 
 import { DispatchStalledError } from "./dispatch-stalled.js";
@@ -506,8 +506,7 @@ function titleCaseLocalAgentName(value: string): string {
     .join(" ");
 }
 
-export const SUPPORTED_LOCAL_AGENT_HARNESSES: AgentHarness[] = ["claude", "codex", "grok", "grok-acp", "kimi", "pi", "cursor", "opencode", "devin"];
-export const SUPPORTED_SCOUT_HARNESSES: AgentHarness[] = [...SCOUT_LAUNCHABLE_HARNESSES];
+export { SUPPORTED_LOCAL_AGENT_HARNESSES, SUPPORTED_SCOUT_HARNESSES } from "./local-agent-harnesses.js";
 
 type LocalAgentSystemPromptTemplateContext = {
   agentId: string;

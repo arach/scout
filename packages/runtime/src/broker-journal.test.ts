@@ -1,3 +1,4 @@
+import { decodeJournalLine, encodeJournalEntries, JOURNAL_FRAME_LIMITS } from "./broker-journal-framing.js";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import * as fsPromises from "node:fs/promises";
@@ -269,7 +270,7 @@ describe("FileBackedBrokerJournal", () => {
       .trim()
       .split("\n")
       .filter(Boolean)
-      .map((line) => JSON.parse(line) as { kind: string });
+      .flatMap((line) => decodeJournalLine(line));
 
     expect(lines.filter((entry) => entry.kind === "actor.upsert")).toHaveLength(1);
     expect(lines.filter((entry) => entry.kind === "agent.upsert")).toHaveLength(1);
@@ -494,6 +495,21 @@ describe("FileBackedBrokerJournal", () => {
 
 
 describe("bounded delivery listing", () => {
+  test("target, status set and reason set are filtered before the page limit", async () => {
+    const { journal } = createJournal();
+    await journal.load();
+    const base = { targetKind: "agent" as const, transport: "local_socket" as const, policy: "best_effort" as const,
+      reason: "direct_message" as const, status: "pending" as const };
+    await journal.appendEntries({ kind: "deliveries.record", deliveries: [
+      ...Array.from({ length: 5_001 }, (_, i) => ({ ...base, id: `unrelated-${i}`, targetId: "elsewhere" })),
+      { ...base, id: "terminal", targetId: "wanted", status: "acknowledged" },
+      { ...base, id: "wanted", targetId: "wanted" },
+    ] });
+    expect(journal.listDeliveries({ targetId: "wanted", statuses: ["pending"], reasons: ["direct_message"], limit: 1 }).map(row => row.id)).toEqual(["wanted"]);
+    expect(journal.listDeliveries({ targetId: "wanted", statuses: [], limit: 1 })).toEqual([]);
+    expect(journal.listDeliveries({ reasons: [], limit: 1 })).toEqual([]);
+  });
+
   test("matches filtered insertion-order slice including unusual limits and replacements", async () => {
     const { journal } = createJournal();
     await journal.load();
@@ -522,6 +538,20 @@ describe("bounded delivery listing", () => {
       }
     }
   });
+});
+
+test("pending result index replaces flights and reconstructs only undelivered replies", async () => {
+  const { journal, journalPath } = createJournal();
+  await journal.load();
+  const pending = { ...sampleFlight(), state: "completed" as const, metadata: { resultReply: { status: "pending" } } };
+  await journal.appendEntries({ kind: "flight.record", flight: pending });
+  expect([...journal.pendingInvocationResultFlights()]).toEqual([pending]);
+  await journal.appendEntries({ kind: "flight.record", flight: { ...pending, metadata: { resultReply: { status: "delivered" } } } });
+  expect([...journal.pendingInvocationResultFlights()]).toEqual([]);
+  const next = { ...pending, id: "flight-other", invocationId: "invocation-other" };
+  await journal.appendEntries({ kind: "flight.record", flight: next });
+  const restored = new FileBackedBrokerJournal(journalPath); await restored.load();
+  expect([...restored.pendingInvocationResultFlights()]).toEqual([next]);
 });
 
 test("complete delivery traversal yields and excludes later appends without freezing replacements", async () => {
@@ -722,6 +752,221 @@ test("failed background compaction leaves the canonical prefix and accepted suff
   await recovered.load();
   expect(recovered.snapshot().actors[actor.id]?.displayName).toBe("accepted-during-failure");
   await journal.close(); await recovered.close();
+});
+
+describe("compaction output failures", () => {
+  const options = { progressiveStartup: true,
+    compactionPolicy: { minimumReclaimBytes: 1, minimumReclaimRatio: 0 } };
+
+  function seed(journalPath: string): string {
+    const actor = sampleActor();
+    const contents = [
+      { kind: "actor.upsert", actor },
+      ...Array.from({ length: 3 }, (_, index) => ({ kind: "message.record",
+        message: { ...sampleMessage(), id: `preserved-${index}`, body: `${index}:` + "x".repeat(80_000) } })),
+      { kind: "actor.upsert", actor: { ...actor, displayName: "latest" } },
+    ].map(entry => JSON.stringify(entry) + "\n").join("");
+    writeFileSync(journalPath, contents);
+    return contents;
+  }
+
+  async function settles(work: Promise<void>): Promise<unknown> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        work.then(() => "complete", error => error),
+        new Promise(resolve => { timer = setTimeout(() => resolve("compaction stayed pending"), 1_000); }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function expectRecovered(journalPath: string): Promise<void> {
+    const restarted = new FileBackedBrokerJournal(journalPath, options);
+    await restarted.load();
+    await restarted.finishStartup();
+    expect(restarted.startupStatus().phase).toBe("complete");
+    expect(restarted.snapshot().actors["agent-1"]?.displayName).toBe("accepted-after-failure");
+    for (let index = 0; index < 3; index++) {
+      expect(restarted.snapshot().messages[`preserved-${index}`]?.body)
+        .toBe(`${index}:` + "x".repeat(80_000));
+    }
+    await restarted.close();
+  }
+
+  const acceptedActor = () => ({ kind: "actor.upsert" as const,
+    actor: { ...sampleActor(), displayName: "accepted-after-failure" } });
+
+  test.each(["ENOSPC", "EDQUOT"] as const)("an asynchronous temporary-file open %s defers optional compaction without blocking startup", async (code) => {
+    const { journal, journalPath } = createJournal(options);
+    const original = seed(journalPath);
+    await journal.load();
+    const realOpen = fsPromises.open;
+    const failure = Object.assign(new Error(`${code}: temporary output open failed`), { code });
+    const openOutput = spyOn(fsPromises, "open").mockImplementation(async (...args) => {
+      if (String(args[0]).startsWith(`${journalPath}.`) && args[1] === "wx") {
+        await new Promise(resolve => setImmediate(resolve));
+        throw failure;
+      }
+      return realOpen(...args);
+    });
+    try {
+      expect(await settles(journal.finishStartup())).toBe("complete");
+      expect(journal.startupStatus()).toMatchObject({ phase: "complete", error: null,
+        compactionDeferral: { code, operation: "open" } });
+      expect(readFileSync(journalPath, "utf8")).toBe(original);
+      await journal.appendEntries(acceptedActor());
+      expect(readFileSync(journalPath, "utf8")).toBe(original + JSON.stringify(acceptedActor()) + "\n");
+      expect((await fsPromises.readdir(join(journalPath, ".."))).filter(name => name.endsWith(".tmp"))).toEqual([]);
+    } finally {
+      openOutput.mockRestore();
+      await journal.close();
+    }
+    await expectRecovered(journalPath);
+  });
+
+  test.each(["partial-write", "closed-handle"] as const)("a %s failure preserves the canonical prefix and concurrently accepted suffix", async (mode) => {
+    const { journal, journalPath } = createJournal(options);
+    seed(journalPath);
+    await journal.load();
+    let entered!: () => void, release!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const resume = new Promise<void>(resolve => { release = resolve; });
+    const realOpen = fsPromises.open;
+    let outputWrites = 0;
+    const openOutput = spyOn(fsPromises, "open").mockImplementation(async (...args) => {
+      const handle = await realOpen(...args);
+      if (String(args[0]).startsWith(`${journalPath}.`) && args[1] === "wx") {
+        const writeFile = handle.writeFile.bind(handle);
+        handle.writeFile = async (...writeArgs) => {
+          if (++outputWrites === 2) {
+            entered();
+            await resume;
+            if (mode === "closed-handle") {
+              await handle.close();
+              return writeFile(...writeArgs);
+            }
+            await writeFile(String(writeArgs[0]).slice(0, 17), "utf8");
+            throw Object.assign(new Error("ENOSPC: partial compaction output"), { code: "ENOSPC" });
+          }
+          return writeFile(...writeArgs);
+        };
+      }
+      return handle;
+    });
+    try {
+      const hydration = journal.finishStartup();
+      const outcome = settles(hydration);
+      await started;
+      await journal.appendEntries(acceptedActor());
+      const acceptedBytes = readFileSync(journalPath, "utf8");
+      release();
+      const result = await outcome;
+      if (mode === "partial-write") {
+        expect(result).toBe("complete");
+        expect(journal.startupStatus()).toMatchObject({ phase: "complete", error: null,
+          compactionDeferral: { code: "ENOSPC", operation: "write" } });
+      } else {
+        expect(result).toBeInstanceOf(Error);
+        expect(journal.startupStatus()).toMatchObject({ phase: "failed", compactionDeferral: null });
+      }
+      expect(outputWrites).toBe(2);
+      expect(readFileSync(journalPath, "utf8")).toBe(acceptedBytes);
+      expect((await fsPromises.readdir(join(journalPath, ".."))).filter(name => name.endsWith(".tmp"))).toEqual([]);
+    } finally {
+      release();
+      openOutput.mockRestore();
+      await journal.close();
+    }
+    await expectRecovered(journalPath);
+  });
+
+  test.each([
+    ["sync", "ENOSPC"], ["close", "ENOSPC"], ["sync", "EIO"], ["close", "EIO"],
+  ] as const)("an output %s %s preserves the source and releases queued appends", async (operation, code) => {
+    const { journal, journalPath } = createJournal(options);
+    const original = seed(journalPath);
+    await journal.load();
+    const realOpen = fsPromises.open;
+    const failure = Object.assign(new Error(`compaction ${operation} failed`), { code });
+    const openOutput = spyOn(fsPromises, "open").mockImplementation(async (...args) => {
+      const handle = await realOpen(...args);
+      if (String(args[0]).startsWith(`${journalPath}.`) && args[1] === "wx") {
+        const originalOperation = handle[operation].bind(handle);
+        let fail = true;
+        handle[operation] = async () => {
+          if (fail) { fail = false; throw failure; }
+          return originalOperation();
+        };
+      }
+      return handle;
+    });
+    try {
+      if (code === "ENOSPC") {
+        expect(await settles(journal.finishStartup())).toBe("complete");
+        expect(journal.startupStatus()).toMatchObject({ phase: "complete", error: null,
+          compactionDeferral: { code, operation } });
+      } else {
+        expect(await settles(journal.finishStartup())).toBe(failure);
+        expect(journal.startupStatus()).toMatchObject({ phase: "failed", compactionDeferral: null });
+      }
+      expect(readFileSync(journalPath, "utf8")).toBe(original);
+      await journal.appendEntries(acceptedActor());
+      expect(readFileSync(journalPath, "utf8")).toBe(original + JSON.stringify(acceptedActor()) + "\n");
+      expect((await fsPromises.readdir(join(journalPath, ".."))).filter(name => name.endsWith(".tmp"))).toEqual([]);
+    } finally {
+      openOutput.mockRestore();
+      await journal.close();
+    }
+    await expectRecovered(journalPath);
+  });
+
+  test("source/rollback capacity failures remain fatal instead of being mistaken for optional output failure", async () => {
+    for (const operation of ["visitEntries", "repairFailedAppend"] as const) {
+      const { journal, journalPath } = createJournal(options);
+      const original = seed(journalPath);
+      await journal.load();
+      const failure = Object.assign(new Error(`canonical ${operation} failed`), { code: "ENOSPC" });
+      const internal = journal as unknown as Record<typeof operation, (...args: any[]) => Promise<any>>;
+      const fail = spyOn(internal, operation).mockRejectedValueOnce(failure);
+      try {
+        expect(await settles(journal.finishStartup())).toBe(failure);
+        expect(journal.startupStatus()).toMatchObject({ phase: "failed", compactionDeferral: null });
+        expect(readFileSync(journalPath, "utf8")).toBe(original);
+        expect((await fsPromises.readdir(join(journalPath, ".."))).filter(name => name.endsWith(".tmp"))).toEqual([]);
+      } finally {
+        fail.mockRestore();
+        await journal.close();
+      }
+    }
+  });
+
+  test("required message coverage failure stays fatal after optional compaction deferral", async () => {
+    const historyFailure = new Error("required history unavailable");
+    const messageHistory = { records: {}, refresh: async () => { throw historyFailure; },
+      accepted: async () => {}, close: async () => {}, status: () => ({ count: 0 }) };
+    const { journal, journalPath } = createJournal({ ...options,
+      messageHistory: messageHistory as unknown as NonNullable<FileBackedBrokerJournalOptions["messageHistory"]> });
+    const original = seed(journalPath);
+    await journal.load();
+    const realOpen = fsPromises.open;
+    const openOutput = spyOn(fsPromises, "open").mockImplementation(async (...args) => {
+      if (String(args[0]).startsWith(`${journalPath}.`) && args[1] === "wx") {
+        throw Object.assign(new Error("capacity exhausted"), { code: "ENOSPC" });
+      }
+      return realOpen(...args);
+    });
+    try {
+      expect(await settles(journal.finishStartup())).toBe(historyFailure);
+      expect(journal.startupStatus()).toMatchObject({ phase: "failed", error: String(historyFailure),
+        compactionDeferral: { code: "ENOSPC", operation: "open" } });
+      expect(readFileSync(journalPath, "utf8")).toBe(original);
+    } finally {
+      openOutput.mockRestore();
+      await journal.close();
+    }
+  });
 });
 
 describe("delete entries", () => {

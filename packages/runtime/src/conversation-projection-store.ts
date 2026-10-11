@@ -140,6 +140,7 @@ type ProjectionEventRow = {
 };
 
 export type ConversationProjectionStoreOptions = {
+  readArchivedMessage?: (id: string) => MessageRecord | undefined;
   now?: () => number;
   createProjectionId?: () => string;
   operatorActorIds?: readonly string[];
@@ -555,6 +556,7 @@ function positiveInteger(value: number | undefined, fallback: number): number {
  * the same transaction, event log, identity map, and cursor lineage.
  */
 export class ConversationProjectionStore {
+  private readonly readArchivedMessage?: (id: string) => MessageRecord | undefined;
   private readonly now: () => number;
   private readonly createProjectionId: () => string;
   private readonly operatorActorIds: readonly string[];
@@ -567,6 +569,7 @@ export class ConversationProjectionStore {
     private readonly db: ControlPlaneSqliteTransactionalDatabase,
     options: ConversationProjectionStoreOptions = {},
   ) {
+    this.readArchivedMessage = options.readArchivedMessage;
     this.now = options.now ?? Date.now;
     this.createProjectionId = options.createProjectionId ?? randomUUID;
     this.eventRetentionMs = positiveInteger(
@@ -1828,6 +1831,11 @@ export class ConversationProjectionStore {
        ORDER BY stats.latest_message_at DESC, message.id DESC
        LIMIT 1`,
     ).get(...conversationIds);
+    const archived = latestMessage && this.readArchivedMessage?.(latestMessage.id);
+    if (latestMessage && archived) {
+      latestMessage.body = archived.body;
+      latestMessage.metadata_json = archived.metadata ? JSON.stringify(archived.metadata) : null;
+    }
     const lastMessageAt = epochMs(latestMessage?.created_at) ?? null;
     let lastReadAt: number | null = null;
     let unreadCount = 0;

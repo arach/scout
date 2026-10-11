@@ -38,6 +38,26 @@ export interface RuntimeRegistrySnapshot {
   collaborationRecords: Record<string, CollaborationRecord>;
 }
 
+// Cache tokens are process-local and never enter snapshots on the wire or disk.
+// The broker replaces its token at every routing identity/endpoint mutation.
+const routingVersions = new WeakMap<RuntimeRegistrySnapshot, object>();
+
+export function routingRegistryVersion(snapshot: RuntimeRegistrySnapshot): object | undefined {
+  return routingVersions.get(snapshot);
+}
+
+export function markRoutingRegistryVersion(snapshot: RuntimeRegistrySnapshot, version: object = {}): void {
+  routingVersions.set(snapshot, version);
+}
+
+/** A synchronous resolver may index an unversioned caller's view for one call. */
+export function routingRegistryView(snapshot: RuntimeRegistrySnapshot): RuntimeRegistrySnapshot {
+  if (routingVersions.has(snapshot)) return snapshot;
+  const view = { ...snapshot };
+  markRoutingRegistryVersion(view);
+  return view;
+}
+
 export interface RuntimeRegistrySnapshotQuery {
   since?: number | null;
   /**
@@ -70,6 +90,29 @@ export function createRuntimeRegistrySnapshot(
 }
 
 const ACTIVE_FLIGHT_STATES = new Set(["queued", "waking", "running", "waiting"]);
+
+/** Routing metadata for live notifications; never includes historical payloads. */
+export type RuntimeNotificationRoutingSnapshot = {
+  conversations: Record<string, Pick<ConversationDefinition, "id" | "participantIds" | "title">>;
+  invocations: Record<string, Pick<InvocationRequest, "id" | "requesterId" | "conversationId"> & { metadata?: { replyMode?: string } }>;
+};
+
+export function queryRuntimeNotificationRouting(
+  snapshot: Pick<RuntimeRegistrySnapshot, "conversations" | "invocations" | "flights">,
+): RuntimeNotificationRoutingSnapshot {
+  const activeInvocationIds = new Set(Object.values(snapshot.flights)
+    .filter(flight => ACTIVE_FLIGHT_STATES.has(flight.state)).map(flight => flight.invocationId));
+  return {
+    conversations: Object.fromEntries(Object.values(snapshot.conversations).map(({ id, participantIds, title }) =>
+      [id, { id, participantIds: [...participantIds], title }])),
+    invocations: Object.fromEntries(Object.values(snapshot.invocations)
+      .filter(invocation => activeInvocationIds.has(invocation.id))
+      .map(({ id, requesterId, conversationId, metadata }) => [id, {
+        id, requesterId, ...(conversationId !== undefined && { conversationId }),
+        ...(typeof metadata?.replyMode === "string" && { metadata: { replyMode: metadata.replyMode } }),
+      }])),
+  };
+}
 const TERMINAL_COLLABORATION_STATES = new Set(["done", "cancelled", "closed", "declined"]);
 const SNAPSHOT_TIMESTAMP_KEYS = [
   "createdAt",

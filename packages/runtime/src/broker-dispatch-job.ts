@@ -20,6 +20,8 @@ export type BrokerInvocationDispatchJob = {
   leaseExpiresAt?: number;
   lastError?: string;
   completedAt?: number;
+  /** Safe pre-submission park evidence already consumed by a previous retry. */
+  lastDeferredAt?: number;
 };
 
 const TERMINAL_DISPATCH_JOB_STATES = new Set<BrokerInvocationDispatchJobState>([

@@ -1,3 +1,6 @@
+import { BrokerBusyError } from "./broker-storage-pressure.js";
+import { handleBrokerHistoryRoute, type BrokerHistoryQueries } from "./broker-history-http-service.js";
+import { handleBrokerQuarantineRoute, type BrokerQuarantineQueries } from "./broker-quarantine-http-service.js";
 import { createHash } from "node:crypto";
 import { BrokerRequestReceipts } from "./broker-request-receipts.js";
 import { hasRetiredEndpointRegistration } from "./broker-endpoint-selection.js";
@@ -79,7 +82,7 @@ import type {
 } from "./broker-durable-action-http-service.js";
 import {
   a2aJson,
-  badRequest,
+  badRequest as writeBadRequest,
   json,
   jsonWithHeaders,
   notFound,
@@ -143,6 +146,11 @@ import {
 } from "./mesh-trust-enrollment.js";
 import { normalizeConversationTitle } from "./conversation-title.js";
 
+function badRequest(response: RuntimeHttpResponseLike, error: unknown): void {
+  if (error instanceof BrokerBusyError) json(response, 503, { error: error.code, retryable: true, detail: error.message });
+  else writeBadRequest(response, error);
+}
+
 export type BrokerHttpRuntime = {
   /** Metadata-only peek: endpoint readers must not detach/message-scan the registry. */
   peek?: () => { endpoints: Record<string, AgentEndpoint> };
@@ -163,8 +171,8 @@ export type BrokerHttpRuntime = {
 };
 
 export type BrokerHttpJournal = {
-  listDeliveries: (options: { limit: number }) => DeliveryIntent[];
-  listScoutDispatches: (options: { limit: number }) => ScoutDispatchRecord[];
+  listDeliveries: (options: { limit: number; invocationId?: string }) => DeliveryIntent[];
+  listScoutDispatches: (options: { limit: number; invocationId?: string }) => ScoutDispatchRecord[];
 };
 
 /**
@@ -192,6 +200,10 @@ export type BrokerHttpRouterDeps = {
   operatorActorId: string;
   runtime: BrokerHttpRuntime;
   requestReceipts?: BrokerRequestReceipts;
+  historyQueries?: BrokerHistoryQueries;
+  quarantineQueries?: BrokerQuarantineQueries;
+  readHistoricalInvocationSnapshot?: (id: string) => Promise<{ invocation: InvocationRequest | null; flight: FlightRecord | null; deliveries: DeliveryIntent[] }>;
+  deliveryReceiptsOwnedByService?: boolean;
   mcpEvents?: BrokerMcpEvents;
   /** Cross-machine approvals: share this machine's with chosen peers, watch theirs. */
   meshApprovals?: MeshApprovalsHttpDeps;
@@ -1167,6 +1179,13 @@ export function createBrokerHttpRouter(
     return;
   }
 
+  if (method === "GET" && url.pathname === "/v1/notification-routing") {
+    if (denyRemoteMutation()) return;
+    if (!brokerService.readNotificationRouting) { notFound(response); return; }
+    json(response, 200, await brokerService.readNotificationRouting());
+    return;
+  }
+
   // /v1/mesh/snapshot is the remote-tier twin (mesh trust cone §4): peer
   // discovery (fetchPeerAgents) reads it in enforce mode; the local-tier
   // route stays loopback-only and is never widened. Keep the remote route
@@ -1878,6 +1897,29 @@ export function createBrokerHttpRouter(
     return;
   }
 
+  if (await handleBrokerHistoryRoute(request, response, url, deps.historyQueries, json)) return;
+  if (await handleBrokerQuarantineRoute(request, response, url, deps.quarantineQueries, json)) return;
+
+  async function readInvocationSnapshot(invocationId: string) {
+    const invocation = knownInvocations.get(invocationId);
+    const flight = runtime.flightForInvocation(invocationId);
+    const deliveries = journal.listDeliveries({ invocationId, limit: 500 });
+    const dispatches = journal.listScoutDispatches({ invocationId, limit: 50 });
+    if ((invocation && flight) || !deps.readHistoricalInvocationSnapshot) {
+      return { invocationId, invocation: invocation ?? null, flight: flight ?? null, deliveries, dispatches };
+    }
+    const stored = await deps.readHistoricalInvocationSnapshot(invocationId);
+    // A live transition may occur during the worker read. Refresh synchronously
+    // before seeding SSE so its terminal state cannot fall into the read/subscribe gap.
+    const currentInvocation = knownInvocations.get(invocationId) ?? invocation;
+    const currentFlight = runtime.flightForInvocation(invocationId) ?? flight;
+    const currentDeliveries = journal.listDeliveries({ invocationId, limit: 500 });
+    const mergedDeliveries = new Map(stored.deliveries.map(delivery => [delivery.id, delivery]));
+    for (const delivery of currentDeliveries) mergedDeliveries.set(delivery.id, delivery);
+    return { invocationId, invocation: currentInvocation ?? stored.invocation, flight: currentFlight ?? stored.flight,
+      deliveries: [...mergedDeliveries.values()], dispatches };
+  }
+
   // Per-invocation snapshot — current state of the invocation, its flight,
   // its deliveries, and any scout dispatch that fired for it. Callers use
   // this to seed UI state before subscribing to the stream.
@@ -1886,21 +1928,11 @@ export function createBrokerHttpRouter(
     : null;
   if (invocationSnapshotMatch) {
     const invocationId = decodeURIComponent(invocationSnapshotMatch[1] ?? "");
-    const flight = runtime.flightForInvocation(invocationId);
-    const deliveries = journal
-      .listDeliveries({ limit: 500 })
-      .filter((delivery) => delivery.invocationId === invocationId);
-    const dispatches = journal
-      .listScoutDispatches({ limit: 50 })
-      .filter((record) => record.invocationId === invocationId);
-    const invocation = knownInvocations.get(invocationId);
-    json(response, 200, {
-      invocationId,
-      invocation: invocation ?? null,
-      flight: flight ?? null,
-      deliveries,
-      dispatches,
-    });
+    try {
+      json(response, 200, await readInvocationSnapshot(invocationId));
+    } catch (error) {
+      json(response, 503, { error: "invocation_storage_unavailable", retryable: true, detail: error instanceof Error ? error.message : String(error) });
+    }
     return;
   }
 
@@ -1918,26 +1950,17 @@ export function createBrokerHttpRouter(
   const anyInvocationStreamMatch = invocationStreamMatch ?? meshInvocationStreamMatch;
   if (anyInvocationStreamMatch) {
     const invocationId = decodeURIComponent(anyInvocationStreamMatch[1] ?? "");
-    const flight = runtime.flightForInvocation(invocationId);
-    const deliveries = journal
-      .listDeliveries({ limit: 500 })
-      .filter((delivery) => delivery.invocationId === invocationId);
-    const dispatches = journal
-      .listScoutDispatches({ limit: 50 })
-      .filter((record) => record.invocationId === invocationId);
-    const invocation = knownInvocations.get(invocationId);
-    controlStreams.addInvocationStream({
-      request,
-      response,
-      invocationId,
-      snapshot: {
-        invocationId,
-        invocation: invocation ?? null,
-        flight: flight ?? null,
-        deliveries,
-        dispatches,
-      },
-    });
+    try {
+      const snapshot = await readInvocationSnapshot(invocationId);
+      snapshot.invocation = knownInvocations.get(invocationId) ?? snapshot.invocation;
+      snapshot.flight = runtime.flightForInvocation(invocationId) ?? snapshot.flight;
+      const currentDeliveries = new Map(snapshot.deliveries.map(delivery => [delivery.id, delivery]));
+      for (const delivery of journal.listDeliveries({ invocationId, limit: 500 })) currentDeliveries.set(delivery.id, delivery);
+      snapshot.deliveries = [...currentDeliveries.values()];
+      controlStreams.addInvocationStream({ request, response, invocationId, snapshot });
+    } catch (error) {
+      json(response, 503, { error: "invocation_storage_unavailable", retryable: true, detail: error instanceof Error ? error.message : String(error) });
+    }
     return;
   }
 
@@ -2292,33 +2315,37 @@ export function createBrokerHttpRouter(
   }
 
   if (method === "GET" && url.pathname.startsWith("/v1/request-receipts/")) {
-    const key = decodeURIComponent(url.pathname.slice("/v1/request-receipts/".length));
-    const requesterId = url.searchParams.get("requesterId") || "";
-    const operation = url.searchParams.get("operation") || "deliver";
-    let receipt = requestReceipts.get(requesterId, key, operation);
-    // The broker can die after committing canonical work but before saving its
-    // receipt. Recover only from positive evidence; absence never authorizes replacement.
-    if (receipt?.state === "unknown") {
-      const snapshot = runtime.snapshot();
-      if (operation === "deliver") {
-        const message = Object.values(snapshot.messages ?? {}).find(m => m.actorId === requesterId && m.metadata?.requestId === key);
-        const invocation = message && Object.values(snapshot.invocations ?? {}).find(i => i.messageId === message.id);
-        const flight = invocation && runtime.flightForInvocation(invocation.id);
-        const conversation = message && snapshot.conversations[message.conversationId];
-        if (message && conversation && (flight || message.metadata?.requestIntent === "tell")) {
-          receipt = requestReceipts.recover(requesterId, key, operation, {
-            kind: "delivery", accepted: true, conversation, message,
-            ...(flight ? { flight, targetAgentId: flight.targetAgentId } : {}),
-          });
+    try {
+      const key = decodeURIComponent(url.pathname.slice("/v1/request-receipts/".length));
+      const requesterId = url.searchParams.get("requesterId") || "";
+      const operation = url.searchParams.get("operation") || "deliver";
+      let receipt = await requestReceipts.get(requesterId, key, operation);
+      // The broker can die after committing canonical work but before saving its
+      // receipt. Recover only from positive evidence; absence never authorizes replacement.
+      if (receipt?.state === "unknown") {
+        const snapshot = runtime.snapshot();
+        if (operation === "deliver") {
+          const recovered = await deliveryAcceptanceService.recoverReceipt?.(requesterId, key);
+          if (recovered) receipt = await requestReceipts.recover(requesterId, key, operation, recovered);
+          const message = Object.values(snapshot.messages ?? {}).find(m => m.actorId === requesterId && m.metadata?.requestId === key);
+          const invocation = message && Object.values(snapshot.invocations ?? {}).find(i => i.messageId === message.id);
+          const flight = invocation && runtime.flightForInvocation(invocation.id);
+          const conversation = message && snapshot.conversations[message.conversationId];
+          if (!recovered && message && conversation && (flight || message.metadata?.requestIntent === "tell")) {
+            receipt = await requestReceipts.recover(requesterId, key, operation, {
+              kind: "delivery", accepted: true, conversation, message,
+              ...(flight ? { flight, targetAgentId: flight.targetAgentId } : {}),
+            });
+          }
+        } else if (operation === "invoke") {
+          const invocation = Object.values(snapshot.invocations ?? {}).find(i => i.requesterId === requesterId && i.requestId === key);
+          const flight = invocation && runtime.flightForInvocation(invocation.id);
+          if (invocation && flight) receipt = await requestReceipts.recover(requesterId, key, operation,
+            { accepted: true, invocationId: invocation.id, flightId: flight.id, targetAgentId: flight.targetAgentId, state: flight.state, flight });
         }
-      } else if (operation === "invoke") {
-        const invocation = Object.values(snapshot.invocations ?? {}).find(i => i.requesterId === requesterId && i.requestId === key);
-        const flight = invocation && runtime.flightForInvocation(invocation.id);
-        if (invocation && flight) receipt = requestReceipts.recover(requesterId, key, operation,
-          { accepted: true, invocationId: invocation.id, flightId: flight.id, targetAgentId: flight.targetAgentId, state: flight.state, flight });
       }
-    }
-    json(response, 200, { receipt });
+      json(response, 200, { receipt });
+    } catch (error) { badRequest(response, error); }
     return;
   }
 
@@ -2412,11 +2439,13 @@ export function createBrokerHttpRouter(
         !payload.requestId && payload.target?.kind === "route_alias"
         && await forwardAliasIfRemote(payload.target.scope?.nodeId, url.pathname, "POST", payload)
       ) return;
-      if (payload.requestId) {
+      if (payload.requestId && !deps.deliveryReceiptsOwnedByService) {
         if (typeof payload.requestId !== "string") throw new Error("invalid requestId");
         payload.messageMetadata = { ...payload.messageMetadata, requestId: payload.requestId, requestIntent: payload.intent };
         payload.invocationMetadata = { ...payload.invocationMetadata, requestId: payload.requestId };
       }
+      const reserveInRouter = Boolean(payload.requestId && (!deps.deliveryReceiptsOwnedByService
+        || (payload.target?.kind === "route_alias" && payload.target.scope?.nodeId && forwardRouteAliasRequest)));
       const accept = async (): Promise<ScoutDeliverResponse> => {
         if (payload.requestId && payload.target?.kind === "route_alias" && payload.target.scope?.nodeId && forwardRouteAliasRequest) {
           const forwarded = await forwardRouteAliasRequest({ nodeSelector: payload.target.scope.nodeId, path: url.pathname, method: "POST", body: payload });
@@ -2425,11 +2454,16 @@ export function createBrokerHttpRouter(
             return forwarded.body as ScoutDeliverResponse;
           }
         }
+        if (reserveInRouter && deps.deliveryReceiptsOwnedByService) {
+          return deliveryAcceptanceService.accept(payload, { receiptReserved: true, admissionReserved: true });
+        }
         return brokerService.deliver ? brokerService.deliver(payload, { signal }) : deliveryAcceptanceService.accept(payload, { signal });
       };
-      const result = payload.requestId
+      const result = payload.requestId && reserveInRouter
         ? await requestReceipts.run(payload.caller?.actorId || payload.requesterId || operatorActorId,
-            payload.requestId, "deliver", payload, accept)
+            payload.requestId, "deliver", payload, accept,
+            deps.deliveryReceiptsOwnedByService ? () => deliveryAcceptanceService.recoverReceipt(payload.caller?.actorId || payload.requesterId || operatorActorId, payload.requestId!) : undefined,
+            deps.deliveryReceiptsOwnedByService ? () => deliveryAcceptanceService.reserveCommand(payload) : undefined)
         : await accept();
       throwIfAborted(signal);
       json(

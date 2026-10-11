@@ -317,6 +317,29 @@ describe("broker flight lifecycle helpers", () => {
     ]);
   });
 
+  test("late terminal metadata cannot erase a pending result or reopen a delivered result", async () => {
+    for (const status of ["pending", "delivered"]) {
+      const resultReply = { version: 1, status, message: { id: "reply-original", body: "complete output" } };
+      const terminal = testFlight({ state: "completed", completedAt: 2_000, output: "complete output", metadata: { resultReply } });
+      const harness = createHarness({ snapshot: testSnapshot({ flights: { [terminal.id]: terminal } }) });
+      await harness.service.recordFlight({ ...terminal, metadata: { lateObservation: true, resultReply: { ...resultReply, status: status === "pending" ? "delivered" : "pending" } } });
+      expect(harness.committedFlights.at(-1)?.metadata?.resultReply).toEqual(resultReply);
+    }
+  });
+
+  test("late terminal outcomes cannot replace captured output or cancellation", async () => {
+    for (const state of ["completed", "failed", "cancelled"] as const) {
+      const terminal = testFlight({ state, output: "preserved context", completedAt: 2_000 });
+      const harness = createHarness({ snapshot: testSnapshot({ flights: { [terminal.id]: terminal } }) });
+      await harness.service.recordFlight({ ...terminal, state: state === "failed" ? "completed" : "failed", error: "late failure" });
+      await harness.service.recordFlight({ ...terminal, output: "stale result" });
+      await harness.service.recordFlight({ ...terminal, completedAt: 1_000 });
+      expect(harness.committedFlights).toEqual([]);
+      expect(harness.forwardedFlights).toEqual([]);
+      expect(harness.promoted).toEqual([]);
+    }
+  });
+
   test("ignores identical flight updates without persisting or forwarding them", async () => {
     const running = testFlight({
       summary: "Still running.",

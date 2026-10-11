@@ -610,6 +610,7 @@ export function queryInvocationById(id: string): InvocationRequest | null {
 
 export function queryInvocations(opts: {
   conversationId: string;
+  targetAgentId?: string;
 }): InvocationRequest[] {
   const conversationIds = opts.conversationId.trim()
     ? conversationIdAliases(opts.conversationId)
@@ -621,14 +622,16 @@ export function queryInvocations(opts: {
   const rows = db().prepare(
     `${DURABLE_INVOCATION_SELECT_SQL}
      WHERE inv.conversation_id IN (${sqlPlaceholders(conversationIds.length)})
+       ${opts.targetAgentId ? "AND inv.target_agent_id = ?" : ""}
      ORDER BY ${sqlTimestampMsExpression("inv.created_at")} DESC, inv.id DESC
      LIMIT 200`,
-  ).all(...conversationIds) as RunQueryRow[];
+  ).all(...conversationIds, ...(opts.targetAgentId ? [opts.targetAgentId] : [])) as RunQueryRow[];
   return rows.map(projectInvocationFromRunRow).reverse();
 }
 
 export function queryFlightRecords(opts: {
   conversationId: string;
+  targetAgentId?: string;
 }): FlightRecord[] {
   const conversationIds = opts.conversationId.trim()
     ? conversationIdAliases(opts.conversationId)
@@ -638,10 +641,11 @@ export function queryFlightRecords(opts: {
     `${DURABLE_INVOCATION_SELECT_SQL}
      WHERE inv.flight_id IS NOT NULL
        AND inv.conversation_id IN (${sqlPlaceholders(conversationIds.length)})
+       ${opts.targetAgentId ? "AND inv.target_agent_id = ?" : ""}
      ORDER BY COALESCE(${sqlTimestampMsExpression("inv.started_at")}, ${sqlTimestampMsExpression("inv.created_at")}, 0) DESC,
        inv.flight_id DESC
      LIMIT 200`,
-  ).all(...conversationIds) as RunQueryRow[];
+  ).all(...conversationIds, ...(opts.targetAgentId ? [opts.targetAgentId] : [])) as RunQueryRow[];
   return rows
     .map((row) => projectFlightFromRunRow(row))
     .filter((flight): flight is FlightRecord => flight !== undefined)

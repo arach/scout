@@ -14,11 +14,12 @@ import {
   invocationIdsForEvent,
   parseInboxReasons,
   parseInboxStatuses,
+  writeSseFrame,
 } from "./broker-control-stream-service.js";
 
 class FakeRequest extends EventEmitter {}
 
-class FakeResponse {
+class FakeResponse extends EventEmitter {
   readonly chunks: string[] = [];
   headers: Record<string, string> | undefined;
   status: number | undefined;
@@ -36,6 +37,7 @@ class FakeResponse {
 
   end(): void {
     this.ended = true;
+    this.emit("finish");
   }
 
   body(): string {
@@ -100,7 +102,11 @@ function createService(input: {
   const service = new BrokerControlStreamService({
     enqueueEvent: (event) => enqueuedEvents.push(event),
     findDeliveryById: (deliveryId) => deliveries.get(deliveryId),
-    listDeliveries: () => [...deliveries.values()],
+    listDeliveries: (options) => [...deliveries.values()]
+      .filter(item => !options.targetId || item.targetId === options.targetId)
+      .filter(item => !options.statuses || options.statuses.includes(item.status))
+      .filter(item => !options.reasons || options.reasons.includes(item.reason))
+      .slice(0, options.limit),
     messageById: (messageId) => messages.get(messageId),
     invocationById: (invocationId) => invocations.get(invocationId),
     presenceSnapshot: input.presenceSnapshot ? () => input.presenceSnapshot ?? [] : undefined,
@@ -129,6 +135,85 @@ function presenceEvent(agentId: string): ControlEvent {
 }
 
 describe("broker control stream service", () => {
+  test("a slow SSE socket disconnects without losing canonical events or blocking other clients", () => {
+    const { service, enqueuedEvents } = createService();
+    const slow = new FakeResponse(); const fast = new FakeResponse();
+    service.addEventStream({ request: new FakeRequest() as never, response: slow as never, hello: {} });
+    service.addEventStream({ request: new FakeRequest() as never, response: fast as never, hello: {} });
+    slow.write = chunk => { slow.chunks.push(chunk); return false; };
+    for (let i = 0; i < 1000; i++) service.streamEvent({
+      id: `event-${i}`, kind: "message.posted", ts: i, actorId: "operator",
+      payload: { message: message({ id: `message-${i}` }) },
+    } as ControlEvent);
+    expect(slow.ended).toBe(true); expect(slow.chunks).toHaveLength(2);
+    expect(service.eventSubscriberCount()).toBe(1);
+    expect(enqueuedEvents).toHaveLength(1000); expect(fast.chunks).toHaveLength(1001);
+  });
+
+  test("frames above the configured singleton limit close before writing", () => {
+    const response = new FakeResponse();
+    expect(writeSseFrame(response as never, "snapshot", "x".repeat(1024), { maxFrameBytes: 1024 })).toBe(false);
+    expect(response.ended).toBe(true); expect(response.chunks).toHaveLength(0);
+  });
+
+  test("a legal large snapshot drains its accepted frame and never registers for later events", () => {
+    const { service } = createService(); const response = new FakeResponse();
+    let destroyed = false;
+    Object.assign(response, { destroy: () => { destroyed = true; } });
+    response.write = chunk => { response.chunks.push(chunk); return false; };
+    const flight = { id: "large-flight", state: "completed", output: "x".repeat(3 * 1024 * 1024) };
+    service.addInvocationStream({ request: new FakeRequest() as never, response: response as never,
+      invocationId: "invocation-1", snapshot: { flight } });
+    expect(response.ended).toBe(true);
+    expect(destroyed).toBe(false);
+    expect(response.chunks).toHaveLength(1);
+    expect(JSON.parse(response.chunks[0]!.split("data: ")[1]!.trim()).flight).toEqual(flight);
+    expect(service.invocationSubscriberCount("invocation-1")).toBe(0);
+    expect(response.listenerCount("finish")).toBe(0);
+    expect(response.listenerCount("close")).toBe(0);
+  });
+
+  test("an accepted frame on a stalled socket has a bounded drain deadline", async () => {
+    const response = new FakeResponse(); let destroyed = false;
+    Object.assign(response, { destroy: () => { destroyed = true; } });
+    response.end = () => { response.ended = true; }; // No finish/close: a stalled peer.
+    response.write = chunk => { response.chunks.push(chunk); return false; };
+    expect(writeSseFrame(response as never, "snapshot", { complete: true }, { drainTimeoutMs: 5 })).toBe(false);
+    expect(destroyed).toBe(false);
+    expect(writeSseFrame(response as never, "later", { ignored: true })).toBe(false);
+    expect(response.chunks).toHaveLength(1);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(destroyed).toBe(true);
+    expect(response.listenerCount("finish")).toBe(0);
+    expect(response.listenerCount("close")).toBe(0);
+  });
+
+  test("a stalled inbox history read has bounded publications and forces resnapshot", async () => {
+    let resolveRead!: (value: MessageRecord) => void; let reads = 0; let committed = 0;
+    const read = new Promise<MessageRecord>(resolve => { resolveRead = resolve; });
+    const service = new BrokerControlStreamService({ enqueueEvent: () => { committed++; },
+      findDeliveryById: () => undefined, listDeliveries: () => [], invocationById: () => undefined,
+      messageById: () => { reads++; return read; } });
+    const response = new FakeResponse();
+    service.addInboxStream({ request: new FakeRequest() as never, response: response as never, targetId: "agent-1", snapshot: {} });
+    service.streamEvent({ id: "first", kind: "delivery.planned", payload: { delivery: delivery() } } as ControlEvent);
+    await Promise.resolve();
+    for (let i = 0; i < 1000; i++) service.streamEvent({ id: `event-${i}`, kind: "delivery.planned",
+      payload: { delivery: delivery({ id: `delivery-${i}` }) } } as ControlEvent);
+    expect(response.ended).toBe(true); expect(service.inboxSubscriberCount("agent-1")).toBe(0);
+    expect(committed).toBe(1001); expect(reads).toBe(1);
+    resolveRead(message()); await new Promise(resolve => setTimeout(resolve, 0));
+    expect(reads).toBe(1); expect(response.chunks).toHaveLength(1);
+  });
+
+  test("history for other recipients or states cannot hide a pending inbox delivery", async () => {
+    const rows = Array.from({ length: 5_001 }, (_, index) => delivery({
+      id: `older-${index}`, targetId: index % 2 ? "other-agent" : "agent-1", status: "completed",
+    }));
+    rows.push(delivery({ id: "wanted", status: "accepted" }));
+    const { service } = createService({ deliveries: rows });
+    expect((await service.listInboxItems({ targetId: "agent-1", limit: 1 })).map(item => item.id)).toEqual(["wanted"]);
+  });
   test("parses comma-separated inbox filters", () => {
     const url = new URL("http://broker.test/v1/inbox?status=pending,leased&reason=direct_message&reason=invocation");
 

@@ -39,6 +39,19 @@ function fixture(deliveryMode?: "cloud_cli") {
   return { service, options, setup, sent, endpoints, deliveries, flights, messages, invocations, address, fail: (error: Error) => { failure = error; } };
 }
 describe("external session attachment", () => {
+  test("cancellation racing durable delivery preparation fences provider submission", async () => {
+    const f = fixture();
+    const { invocation, endpoint } = await f.setup();
+    const record = f.options.recordDelivery;
+    f.options.recordDelivery = async delivery => {
+      await record(delivery);
+      f.flights.set(invocation.id, { ...f.flights.get(invocation.id)!, state: "cancelled" });
+    };
+    await f.service.dispatch(invocation, endpoint);
+    expect(f.sent).toHaveLength(0);
+    expect([...f.deliveries.values()][0]?.status).toBe("cancelled");
+    expect(f.flights.get(invocation.id)?.state).toBe("cancelled");
+  });
   test("Cloud CLI remains exact-session routable and requires the correlated MCP reply", async () => {
     const f = fixture("cloud_cli");
     const { invocation, endpoint, receipt } = await f.setup();

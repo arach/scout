@@ -1,3 +1,6 @@
+import { ControlPlaneHistoryReader, ControlPlaneHistoryStore, type HistoricalPublication, type HistoricalRecordLocation } from "./control-plane-history-store.js";
+import { ControlPlaneHistoryRelocation, ensureHistoryAnchorSchema, type HistoricalTypedReader } from "./control-plane-history-relocation.js";
+import type { HistoryRotationPlan } from "./history-rotation.js";
 import { NATIVE_READ_THREAD_MAX_MESSAGE_BYTES } from "./conversation-thread-artifact.js";
 import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
@@ -1601,34 +1604,71 @@ export class SQLiteControlPlaneStore {
   private conversationsApi: ConversationsApi | null = null;
   private closed = false;
   private lastQuotaHistoryPruneAt = 0;
+  private historyReader: ControlPlaneHistoryReader | null = null;
+  private historyRelocation: ControlPlaneHistoryRelocation | null = null;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
     this.db = openControlPlaneSqliteDatabase(dbPath, { create: true });
     configureControlPlaneDatabase(this.db);
     migrateControlPlaneDatabaseSchema(this.db);
+    ensureHistoryAnchorSchema(this.db);
     this.readDb = openControlPlaneSqliteDatabase(dbPath, { readonly: true });
     this.readDb.exec("PRAGMA busy_timeout = 5000;");
     this.readDb.exec("PRAGMA query_only = ON;");
     this.drizzleDb = openControlPlaneDrizzle(this.db);
     this.drizzleReadDb = openControlPlaneDrizzle(this.readDb);
     this.persistEventsBatch = (this.db as SQLiteTransactionalDatabase).transaction((events: ControlEvent[]) => {
-      const statement = this.db.query(
-        `INSERT OR REPLACE INTO events (id, kind, actor_id, node_id, ts, payload_json)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6)`,
-      );
-
-      for (const event of events) {
-        statement.run(
-          event.id,
-          event.kind,
-          event.actorId,
-          event.nodeId ?? null,
-          event.ts,
-          JSON.stringify(event.payload),
-        );
-      }
+      for (const event of events) this.recordEventDurably(event);
     });
+  }
+
+  configureHistory(directory: string): void {
+    this.historyReader?.close();
+    this.historyReader = new ControlPlaneHistoryReader(directory);
+  }
+
+  publishHistoryRotation(plan: HistoryRotationPlan, history: ControlPlaneHistoryStore) {
+    return this.relocation().publish(plan, history);
+  }
+
+  removePublishedHistory(publication: HistoricalPublication | readonly HistoricalPublication[], allowed: HistoryRotationPlan, history: ControlPlaneHistoryStore) {
+    return this.relocation().remove(publication, allowed, history);
+  }
+
+  private relocation(): ControlPlaneHistoryRelocation {
+    if (this.historyRelocation) return this.historyRelocation;
+    const read: HistoricalTypedReader = (kind, ids) => {
+      switch (kind) {
+        case "message": return this.readMessages(ids);
+        case "invocation": return this.readInvocations(ids);
+        case "flight": return this.readFlights(ids);
+        case "delivery": return this.readDeliveries(ids);
+        case "delivery_attempt": return this.readDeliveryAttempts(ids);
+        case "collaboration_event": return this.readCollaborationEvents(ids);
+      }
+    };
+    return this.historyRelocation = new ControlPlaneHistoryRelocation(this.db, read);
+  }
+
+  readArchivedMessage(id: string): MessageRecord | undefined { return this.anchoredRecord<MessageRecord>("message", id); }
+
+  private anchoredRecord<T>(kind: string, id: string): T | undefined {
+    const anchor = this.readDb.query<{ location_json: string }>("SELECT location_json FROM broker_history_anchors WHERE kind=?1 AND id=?2").get(kind, id);
+    if (!anchor) return undefined;
+    if (!this.historyReader) throw new Error("historical reader not configured for archived anchor");
+    return this.historyReader.readLocation<T>(JSON.parse(anchor.location_json) as HistoricalRecordLocation);
+  }
+
+  private historicalFallback<T>(kind: string, ids: readonly string[], found: Map<string, T>): Map<string, T> {
+    for (const id of ids) {
+      const anchored = this.anchoredRecord<T>(kind, id);
+      if (anchored !== undefined) { found.set(id, anchored); continue; }
+      if (found.has(id) || !this.historyReader) continue;
+      const historical = this.historyReader.read<T>(kind, id);
+      if (historical !== undefined) found.set(id, historical);
+    }
+    return found;
   }
 
   get isClosed(): boolean {
@@ -2043,6 +2083,7 @@ export class SQLiteControlPlaneStore {
       clearTimeout(this.flushPendingEventsTimer);
       this.flushPendingEventsTimer = null;
     }
+    this.historyReader?.close();
     this.readDb.close?.();
     this.db.close?.();
   }
@@ -2200,7 +2241,7 @@ export class SQLiteControlPlaneStore {
       };
     }
 
-    const messages = queryAll<MessageRow>(this.readDb, "SELECT * FROM messages");
+    const messages = queryAll<MessageRow>(this.readDb, "SELECT * FROM messages WHERE NOT EXISTS (SELECT 1 FROM broker_history_anchors h WHERE h.kind='message' AND h.id=messages.id)");
     const mentionRows = queryAll<MentionRow>(
       this.readDb,
       "SELECT * FROM message_mentions ORDER BY message_id, actor_id",
@@ -2253,7 +2294,7 @@ export class SQLiteControlPlaneStore {
       snapshot.readCursors[`${cursor.conversationId}\u0000${cursor.actorId}`] = cursor;
     }
 
-    const invocations = queryAll<InvocationRow>(this.readDb, "SELECT * FROM invocations");
+    const invocations = queryAll<InvocationRow>(this.readDb, "SELECT * FROM invocations WHERE NOT EXISTS (SELECT 1 FROM broker_history_anchors h WHERE h.kind='invocation' AND h.id=invocations.id)");
     for (const row of invocations) {
       snapshot.invocations[row.id] = invocationRequestFromRow(row);
     }
@@ -2401,6 +2442,12 @@ export class SQLiteControlPlaneStore {
     );
     const hasEarlier = rows.length > limit;
     const page = rows.slice(0, limit).reverse();
+    for (const row of page) {
+      const historical = this.anchoredRecord<MessageRecord>("message", row.id);
+      if (historical) row.body = options.nativePreview
+        ? Buffer.from(historical.body).subarray(0, NATIVE_READ_THREAD_MAX_MESSAGE_BYTES + 4).toString("utf8")
+        : historical.body;
+    }
 
     return {
       projectionId: options.projectionId,
@@ -3462,6 +3509,7 @@ export class SQLiteControlPlaneStore {
         stringify(nextMessage.metadata),
         nextMessage.createdAt,
       );
+      this.db.query("DELETE FROM broker_history_anchors WHERE kind='message' AND id=?1").run(nextMessage.id);
       this.db.query("DELETE FROM message_mentions WHERE message_id = ?1").run(nextMessage.id);
       for (const mention of nextMessage.mentions ?? []) {
         this.db.query(
@@ -3697,6 +3745,7 @@ export class SQLiteControlPlaneStore {
       stringify(invocation.metadata),
       invocation.createdAt,
     );
+    this.db.query("DELETE FROM broker_history_anchors WHERE kind='invocation' AND id=?1").run(invocation.id);
     this.recordActivityItem(this.projectInvocationActivity({ ...invocation, messageId: messageId ?? undefined }));
   }
 
@@ -3706,6 +3755,8 @@ export class SQLiteControlPlaneStore {
   }
 
   recordFlight(flight: FlightRecord): ThreadEventEnvelope[] {
+    const archivedInvocation = this.anchoredRecord<InvocationRequest>("invocation", flight.invocationId);
+    if (archivedInvocation) this.recordInvocation(archivedInvocation);
     let recorded = flight;
     // One transaction so the flight row and the invocation shadow can never
     // durably diverge — a crash between the two writes would otherwise leave
@@ -4138,6 +4189,10 @@ export class SQLiteControlPlaneStore {
   listDeliveries(options: {
     transport?: DeliveryIntent["transport"];
     status?: DeliveryIntent["status"];
+    targetId?: string;
+    invocationId?: string;
+    statuses?: DeliveryIntent["status"][];
+    reasons?: DeliveryIntent["reason"][];
     limit?: number;
   } = {}): DeliveryIntent[] {
     const limit = options.limit ?? 200;
@@ -4145,20 +4200,17 @@ export class SQLiteControlPlaneStore {
     const baseQuery = this.drizzleReadDb
       .select()
       .from(deliveriesTable)
-      .orderBy(asc(deliveriesTable.createdAt))
+      .orderBy(asc(deliveriesTable.createdAt), asc(deliveriesTable.id))
       .limit(limit);
-    const rows = (options.transport && options.status
-      ? baseQuery.where(
-        and(
-          eq(deliveriesTable.transport, options.transport),
-          eq(deliveriesTable.status, options.status),
-        ),
-      ).all()
-      : options.transport
-        ? baseQuery.where(eq(deliveriesTable.transport, options.transport)).all()
-        : options.status
-          ? baseQuery.where(eq(deliveriesTable.status, options.status)).all()
-          : baseQuery.all()) as Array<{
+    const filters = [
+      ...(options.invocationId ? [eq(deliveriesTable.invocationId, options.invocationId)] : []),
+      ...(options.transport ? [eq(deliveriesTable.transport, options.transport)] : []),
+      ...(options.status ? [eq(deliveriesTable.status, options.status)] : []),
+      ...(options.targetId ? [eq(deliveriesTable.targetId, options.targetId)] : []),
+      ...(options.statuses ? [inArray(deliveriesTable.status, options.statuses)] : []),
+      ...(options.reasons ? [inArray(deliveriesTable.reason, options.reasons)] : []),
+    ];
+    const rows = baseQuery.where(and(...filters)).all() as Array<{
             id: string;
             messageId: string | null;
             invocationId: string | null;
@@ -4186,6 +4238,24 @@ export class SQLiteControlPlaneStore {
    * sides). Chunked `IN` lists keep bound-parameter counts bounded; a
    * lookup error propagates so the caller can fail closed.
    */
+  readInvocationSnapshot(invocationId: string): { invocation: InvocationRequest | null; flight: FlightRecord | null; deliveries: DeliveryIntent[] } {
+    const invocation = this.readInvocations([invocationId]).get(invocationId) ?? null;
+    if (!invocation) return { invocation: null, flight: null, deliveries: [] };
+    const shadow = this.readDb.query<{ flight_id: string | null }>("SELECT flight_id FROM invocations WHERE id=?1").get(invocationId)?.flight_id;
+    const latest = shadow ?? this.readDb.query<{ id: string }>("SELECT id FROM flights WHERE invocation_id=?1 ORDER BY rowid DESC LIMIT 1").get(invocationId)?.id;
+    let flight = latest ? this.readFlights([latest]).get(latest) ?? null : null;
+    if (!flight && this.historyReader) {
+      const location = this.historyReader.page({ kind: "flight", invocationId, order: "desc", limit: 1 })[0];
+      if (location) flight = this.historyReader.readLocation<FlightRecord>(location);
+    }
+    const deliveries = new Map(this.listDeliveries({ invocationId, limit: 500 }).map(delivery => [delivery.id, delivery]));
+    for (const location of this.historyReader?.page({ kind: "delivery", invocationId, limit: 500 }) ?? []) {
+      if (deliveries.size >= 500) break;
+      if (!deliveries.has(location.id)) deliveries.set(location.id, this.historyReader!.readLocation<DeliveryIntent>(location));
+    }
+    return { invocation, flight, deliveries: [...deliveries.values()] };
+  }
+
   readMessages(ids: readonly string[]): Map<string, MessageRecord> {
     const found = new Map<string, MessageRecord>();
     for (const chunk of chunksOf(ids)) {
@@ -4230,7 +4300,7 @@ export class SQLiteControlPlaneStore {
         ));
       }
     }
-    return found;
+    return this.historicalFallback("message", ids, found);
   }
 
   readInvocations(ids: readonly string[]): Map<string, InvocationRequest> {
@@ -4245,7 +4315,7 @@ export class SQLiteControlPlaneStore {
         found.set(row.id, invocationRequestFromRow(row));
       }
     }
-    return found;
+    return this.historicalFallback("invocation", ids, found);
   }
 
   readFlights(ids: readonly string[]): Map<string, FlightRecord> {
@@ -4260,7 +4330,7 @@ export class SQLiteControlPlaneStore {
         found.set(row.id, flightRecordFromRow(row));
       }
     }
-    return found;
+    return this.historicalFallback("flight", ids, found);
   }
 
   readDeliveries(ids: readonly string[]): Map<string, DeliveryIntent> {
@@ -4275,7 +4345,7 @@ export class SQLiteControlPlaneStore {
         found.set(row.id, deliveryIntentFromRow(row));
       }
     }
-    return found;
+    return this.historicalFallback("delivery", ids, found);
   }
 
   readDeliveryAttempts(ids: readonly string[]): Map<string, DeliveryAttempt> {
@@ -4290,7 +4360,7 @@ export class SQLiteControlPlaneStore {
         found.set(row.id, deliveryAttemptFromRow(row));
       }
     }
-    return found;
+    return this.historicalFallback("delivery_attempt", ids, found);
   }
 
   readCollaborationEvents(ids: readonly string[]): Map<string, CollaborationEvent> {
@@ -4305,7 +4375,7 @@ export class SQLiteControlPlaneStore {
         found.set(row.id, collaborationEventFromRow(row));
       }
     }
-    return found;
+    return this.historicalFallback("collaboration_event", ids, found);
   }
 
   updateDeliveryStatus(
@@ -5569,6 +5639,15 @@ export class SQLiteControlPlaneStore {
         ? this.buildThreadFlightSummary(flight)
         : flight;
     });
+  }
+
+  /** Canonical replay writes the event in the caller's transaction before its
+   * checkpoint advances. Ordinary UI/event batching retains recordEvent(). */
+  recordEventDurably(event: ControlEvent): void {
+    this.db.query(`INSERT OR REPLACE INTO events (id, kind, actor_id, node_id, ts, payload_json)
+      VALUES (?1, ?2, ?3, ?4, ?5, ?6)`).run(
+      event.id, event.kind, event.actorId, event.nodeId ?? null, event.ts, JSON.stringify(event.payload),
+    );
   }
 
   recordEvent(event: ControlEvent): void {

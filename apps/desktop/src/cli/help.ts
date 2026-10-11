@@ -13,6 +13,7 @@ export function renderScoutHelp(version = "0.2.19", detail = false): string {
     "Start here:",
     "  status       Orient yourself and find the next command",
     "  doctor       What works, what is impaired, and what to do next",
+    "  quarantine   Inspect preserved failures; acknowledge reviewed evidence",
     "  setup        Configure projects and runtimes",
     "  who          Agent roster",
     "  check        Live work by topic or machine (machines and their projects: hosts)",
@@ -29,10 +30,8 @@ export function renderScoutHelp(version = "0.2.19", detail = false): string {
     "  scout status --all --blocked",
     '  scout operator --question "Ship to staging or prod?" --option staging --option prod',
     "",
-    "Help: scout <command> --help (or scout help <command>)",
-    "All commands and examples: scout help --detail",
+    "Help: scout <command> --help (or scout help <command>); all commands: scout help --detail",
     "Structured output: --json (doctor retains its v1 NDJSON stream)",
-    "",
     QUICK_LINKS,
   ].join("\n");
   const commandLines = listScoutPrimaryCommands()

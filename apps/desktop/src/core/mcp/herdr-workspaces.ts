@@ -101,7 +101,7 @@ export function registerHerdrWorkspaceTools(server: McpServer, deps: HerdrWorksp
       "Read the operator's herdr terminal workspaces: which panes are blocked and waiting on a person, which are working, what directory each sits in, and how each tab is arranged.",
       "Use query to find a named panel such as devon-2 before searching transcripts. Carries the assigned pane name, terminal title, and Herdr-reported harness session separately. These are observed identities, not Scout routing addresses. Multiple matches must be disambiguated; a bounded miss does not prove absence.",
       "Herdr reports agent state; Scout does not infer it. blocked means herdr recognized an approval or question UI. idle and done both mean ready for input. unknown means an agent is present that herdr could not classify — it is the absence of a signal, never completion.",
-      "Read-only. This tool cannot split panes, start agents, focus, or close anything; herdr owns the layout. To act, hand the operator the herdr command or dispatch an agent with ask.",
+      "Read-only. This tool cannot split panes, start agents, focus, or close anything; herdr owns the layout. To type into a pane's agent, call session_send with the pane's harness session id; for a tracked request, dispatch with ask.",
       "A session reported not live is a persisted last-known layout, not running work. Never describe its panes as active.",
     ].join(" "),
     inputSchema: z.object({
