@@ -75,14 +75,20 @@ function run(
       } catch { /* already gone */ }
     };
     const timeoutError = () => new Error(`${command} timed out after ${RUN_TIMEOUT_MS / 1000}s`);
-    // On timeout: TERM the tree, KILL it after a grace period, and settle once it
-    // has exited, so a fallback harness never runs beside this one. If the pipes
-    // still never close, tear them down and settle anyway.
+    let closed = false;
+    let groupKilled = false;
+    // On timeout: TERM the group, then always KILL it after a grace period, even
+    // if the launcher already exited (a worker in the group may ignore TERM). The
+    // run settles only after that KILL and the pipes closing, so a fallback
+    // harness never runs beside this one; pipes still open after a bounded wait
+    // are torn down.
     timers.push(setTimeout(() => {
       timedOut = true;
       signalTree("SIGTERM");
       timers.push(setTimeout(() => {
         signalTree("SIGKILL");
+        groupKilled = true;
+        if (closed) return finish(() => reject(timeoutError()));
         timers.push(setTimeout(() => {
           child.stdout.destroy();
           child.stderr.destroy();
@@ -93,7 +99,11 @@ function run(
     child.stdout.on("data", (chunk) => { stdout += chunk; });
     child.stderr.on("data", (chunk) => { stderr += chunk; });
     child.on("error", (error) => finish(() => reject(error)));
-    child.on("close", (code) => finish(() => (timedOut ? reject(timeoutError()) : resolve({ code, stdout, stderr }))));
+    child.on("close", (code) => {
+      closed = true;
+      if (!timedOut) finish(() => resolve({ code, stdout, stderr }));
+      else if (groupKilled) finish(() => reject(timeoutError()));
+    });
     child.stdin.end(stdin);
   });
 }
