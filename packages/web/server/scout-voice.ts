@@ -101,15 +101,20 @@ export async function synthesizeScoutSpeech(input: {
   }
   const playback = input.playback ?? "browser";
   const resolved = resolveScoutSpeechRequest(input, env);
-  // Spoken on host: the web's environment defaults do not apply. An explicit
-  // model or voice from the request is honored; otherwise Scout Menu speaks
-  // in the voice chosen in its own Settings › Voice (Kokoro included).
+  // An explicit model or voice from the request is honored. Otherwise Scout
+  // Menu speaks in the voice chosen in Settings › Voice (ElevenLabs, Kokoro,
+  // whatever was picked), on the host or as bytes for the browser alike. The
+  // web's built-in default ("system") must not stand in for that pick; only
+  // a deployment that sets OPENSCOUT_VOICE_TTS_MODEL_ID overrides it, and
+  // only for browser playback.
   const explicitModelId = input.modelId?.trim() || undefined;
   const explicitVoiceId = input.voiceId?.trim() || undefined;
+  const envModelId = env.OPENSCOUT_VOICE_TTS_MODEL_ID?.trim() || undefined;
+  const useEnvDefault = playback === "browser" && !explicitModelId && Boolean(envModelId);
   return await synthesizeScoutVoiceSpeech({
     text: input.text,
-    modelId: playback === "host" ? explicitModelId : resolved.modelId,
-    voiceId: playback === "host" ? explicitVoiceId : resolved.voiceId,
+    modelId: useEnvDefault ? resolved.modelId : explicitModelId,
+    voiceId: useEnvDefault ? resolved.voiceId : explicitVoiceId,
     speed: input.speed,
     instructions: input.instructions,
     originAppId: resolved.originAppId,

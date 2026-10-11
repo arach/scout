@@ -13,6 +13,7 @@ export type ScoutAskSenderContext = {
 };
 
 type ScoutAskCommandBase = {
+  requestId?: string;
   senderId: string;
   body: string;
   harness?: AgentHarness;
@@ -41,6 +42,11 @@ type ScoutAskCommandBase = {
   currentDirectory?: string;
   source?: string;
   aliasScope?: RouteAliasScope;
+  /**
+   * The mesh machine to start the session on (`--on archie`). Requires a
+   * projectPath, which is then read as a path on that machine, unresolved here.
+   */
+  host?: string;
 };
 
 type ScoutAskTargetInput =

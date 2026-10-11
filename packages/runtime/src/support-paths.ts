@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -132,16 +132,14 @@ export function relayAgentLogsDirectory(agentId: string): string {
 }
 
 export function ensureOpenScoutCleanSlateSync(): void {
-  assertTestIsolatedUserData("reset the OpenScout support directory", "OPENSCOUT_SUPPORT_DIRECTORY");
+  assertTestIsolatedUserData("initialize the OpenScout support directory", "OPENSCOUT_SUPPORT_DIRECTORY");
   const paths = resolveOpenScoutSupportPaths();
   if (existsSync(paths.cutoverMarkerPath)) {
     return;
   }
 
-  rmSync(paths.supportDirectory, { recursive: true, force: true });
-  rmSync(paths.controlHome, { recursive: true, force: true });
-  rmSync(paths.relayHubDirectory, { recursive: true, force: true });
-
+  // Keep the compatibility marker without discarding durable state or files
+  // already opened by the supervisor before the broker's first startup.
   mkdirSync(paths.supportDirectory, { recursive: true });
   writeFileSync(paths.cutoverMarkerPath, `${Date.now()}\n`, "utf8");
 }

@@ -1,5 +1,6 @@
 import { requireProtectedAccessState, protectAccessDirectories, removeLocalAdminEnvironment } from "./mesh-access-startup.js";
 import { inspectMeshAccessIngressPosture } from "./mesh-access-ingress-posture.js";
+import { BrokerMcpEvents } from "./broker-mcp-events.js";
 import { readLocalAdminKey, preserveProtectedIngress } from "./mesh-access-local-auth.js";
 import { MeshAccessStore } from "./mesh-access-store.js";
 import { IntegrationSlackEvents } from "./integration-slack-events.js";
@@ -43,6 +44,7 @@ import {
   type ScoutDispatchEnvelope,
   type ScoutDispatchRecord,
   AGENT_HARNESSES,
+  scoutSessionHostForNode,
   mintChannelId,
   OPENSCOUT_COORDINATOR_AGENT_ID,
   SCOUT_DISPATCHER_AGENT_ID,
@@ -105,6 +107,7 @@ import {
 } from "./iroh-bridge.js";
 import { createPeerDeliveryWorker, type PeerDeliveryWorker } from "./peer-delivery.js";
 import {
+  areHarnessBinariesAvailable,
   ensureLocalSessionEndpointOnline,
   ensureLocalAgentBindingOnline,
   isLocalAgentEndpointAlive,
@@ -133,7 +136,15 @@ import {
   getPairingSessionSnapshot,
   invokePairingSessionEndpoint,
   listPairingSessions,
+  listPairingSessionSnapshots,
+  decidePairingApproval,
 } from "./pairing-session-agents.js";
+import {
+  createMeshApprovalShare,
+  createMeshApprovalWatch,
+  meshApprovalsConfigPath,
+  readMeshApprovalsConfig,
+} from "./mesh-approvals.js";
 import { normalizeCodexAppServerLaunchArgs } from "./codex-app-server.js";
 import { RecoverableSQLiteProjection } from "./sqlite-projection.js";
 import {
@@ -189,6 +200,7 @@ import {
   resolveScoutWebNamedHostname,
 } from "./local-config.js";
 import { BrokerWebControlService } from "./broker-web-control-service.js";
+import { BrokerScoutbotService, SCOUTBOT_PROCESS_ENV } from "./broker-scoutbot-service.js";
 import { BrokerJetStreamService, resolveJetStreamConfig } from "./jetstream/index.js";
 import { BrokerA2AService } from "./broker-a2a-service.js";
 import { BrokerCapabilityMatrixService } from "./broker-capability-matrix-service.js";
@@ -230,6 +242,8 @@ import {
   postMeshPeerJson,
 } from "./broker-mesh-forwarding-service.js";
 import {
+  resolveMeshHost,
+  suggestHostForProjectPath,
   startSessionOnPeers,
   wakeLocalHarnessSession,
   wakeSessionOnPeers,
@@ -273,6 +287,7 @@ import {
 } from "./broker-endpoint-selection.js";
 import { readMeshNodeState } from "./mesh-node-state.js";
 import { BrokerHomeService } from "./broker-home-service.js";
+import { isDirectLocalAgentTransport } from "./local-agent-transports.js";
 import { BrokerUnavailableTargetService } from "./broker-unavailable-target-service.js";
 import { BrokerRouteAliasStore } from "./broker-route-alias-store.js";
 import { BrokerRouteAliasError, BrokerRouteAliasService } from "./broker-route-alias-service.js";
@@ -536,7 +551,9 @@ const meshAccessStore: MeshAccessStore | null = sharedControlPlaneStore
 // Bind controller is assigned after the HTTP server stack is built; the gate
 // reads forceRemoteEnforce via this ref so §11.6 can key off live listeners.
 let meshBindController: MeshBindController | null = null;
+let localIrohEntrypoint = resolveIrohMeshEntrypointFromEnv();
 const meshIngressGate = createMeshIngressGate({
+  irohEndpointId: () => localIrohEntrypoint?.endpointId,
   localAdminKey,
   keyConflict: (id) => [Boolean(trustedPeerStore?.knownTrustedPeerKey(id)), Boolean(guestGrantStore?.knownKey(id)), Boolean(meshAccessStore?.knownDevice(id)), Boolean(meshAccessStore?.knownPrincipal(id))].filter(Boolean).length > 1,
   scopedAccess: meshAccessStore ? {
@@ -655,6 +672,13 @@ const jetStreamService = !localAdminKey && jetStreamConfig?.enabled
       error: (message, detail) => (detail === undefined ? console.error(message) : console.error(message, detail)),
     })
   : null;
+const mcpEvents = process.env.OPENSCOUT_MCP_EVENTS === "1" && sharedControlPlaneStore
+  ? new BrokerMcpEvents(sharedControlPlaneStore.routeAliasDatabase, {
+      flight: (id) => runtime.flight(id),
+      work: (id) => runtime.collaborationRecord(id),
+      channel: (id) => runtime.conversation(id),
+    })
+  : undefined;
 const durableStore = new BrokerDurableStore({
   memoryMaintenance,
   deferProjection: () => deferStartupProjection,
@@ -662,7 +686,10 @@ const durableStore = new BrokerDurableStore({
   journal,
   projection,
   threadEvents,
-  ...(jetStreamService ? { eventPublisher: jetStreamService } : {}),
+  eventPublisher: { notifyCommitted(entries) {
+    try { jetStreamService?.notifyCommitted(entries); }
+    finally { mcpEvents?.capture(entries); }
+  } },
 });
 // Before the broker admits a single write: a first-enable `now` boundary has
 // to be committed ahead of the records it is meant to exclude, not after the
@@ -971,6 +998,21 @@ const webControl = new BrokerWebControlService({
     }
   },
 });
+// Scoutbot runs beside the broker on the local socket. scout-web inherits
+// this environment, so the flag tells it to leave answering to Scoutbot.
+const scoutbotService = new BrokerScoutbotService({
+  brokerSocketPath,
+  brokerUrl,
+  env: process.env,
+  log: (message) => console.log(message),
+  warn: (message) => console.warn(message),
+  error: (message, detail) => {
+    if (detail === undefined) console.error(message);
+    else console.error(message, detail);
+  },
+});
+const scoutbotProcessEnabled = scoutbotService.enabled();
+if (scoutbotProcessEnabled) process.env[SCOUTBOT_PROCESS_ENV] = "managed";
 const a2aService = new BrokerA2AService({
   nodeId,
   brokerUrl,
@@ -1073,7 +1115,6 @@ if (sseKeepAliveIntervalMs > 0) {
 }
 
 let irohBridgeService: IrohBridgeService | undefined;
-let localIrohEntrypoint = resolveIrohMeshEntrypointFromEnv();
 if (!localAdminKey && !localIrohEntrypoint) {
   try {
     irohBridgeService = await startIrohBridgeServeFromEnv({ brokerUrl });
@@ -1989,11 +2030,58 @@ function isLocalDirectory(path: string): boolean {
  * forwards the invocation to that machine.
  */
 async function createProjectSessionForDelivery(
-  input: Parameters<typeof createCardlessProjectSessionForDelivery>[0],
+  input: Parameters<typeof createCardlessProjectSessionForDelivery>[0] & { host?: string },
 ) {
-  const projectRoot = resolve(expandHomePath(input.projectPath));
-  if (isLocalDirectory(projectRoot)) {
-    return createCardlessProjectSessionForDelivery(input);
+  const { host, ...localInput } = input;
+  let onlyPeer: NodeDefinition | undefined;
+  if (host?.trim()) {
+    const snapshot = runtime.snapshot();
+    const resolution = resolveMeshHost({
+      host,
+      localNode: snapshot.nodes[nodeId],
+      nodes: Object.values(snapshot.nodes).filter((node) => node.meshId === meshId),
+      trustedNodeIds: new Set(trustedPeerStore?.listTrustedPeers().flatMap((peer) => peer.nodeId ? [peer.nodeId] : []) ?? []),
+      isReachable: isReachableMeshNode,
+    });
+    if (resolution.kind === "local") {
+      if (!isLocalDirectory(resolve(expandHomePath(input.projectPath)))) {
+        throw new Error(`--on ${host} is this machine, and ${input.projectPath} is not a folder here.`);
+      }
+      return createCardlessProjectSessionForDelivery(localInput);
+    }
+    if (resolution.kind === "ambiguous") {
+      throw new Error(
+        `--on ${host} matches more than one machine: `
+        + resolution.nodes.map((node) => `${scoutSessionHostForNode(node)} (${node.id}${node.id === nodeId ? ", this machine" : ""})`).join(", ")
+        + ". Use the node id with --on.",
+      );
+    }
+    if (resolution.kind === "unknown") {
+      throw new Error(
+        `--on ${host}: no mesh machine by that name.`
+        + (resolution.knownHosts.length ? ` Known machines: ${resolution.knownHosts.join(", ")}.` : " This broker knows no mesh peers yet.")
+        + " See them with `scout machines`.",
+      );
+    }
+    if (resolution.kind === "not_trusted") {
+      throw new Error(
+        `--on ${host}: ${scoutSessionHostForNode(resolution.node)} is in the mesh but not a trusted peer, so Scout will not start work there. `
+        + "The operator can enroll it with `scout mesh enroll`.",
+      );
+    }
+    if (resolution.kind === "unreachable") {
+      throw new Error(
+        `--on ${host}: ${scoutSessionHostForNode(resolution.node)} is trusted but not reachable right now`
+        + (resolution.node.lastSeenAt ? ` (last seen ${new Date(resolution.node.lastSeenAt).toISOString()})` : "")
+        + ". Check it with `scout mesh peers`.",
+      );
+    }
+    onlyPeer = resolution.node;
+  } else {
+    const projectRoot = resolve(expandHomePath(input.projectPath));
+    if (isLocalDirectory(projectRoot)) {
+      return createCardlessProjectSessionForDelivery(localInput);
+    }
   }
   const execution = input.execution;
   const request: MeshProjectSessionStartInput = {
@@ -2007,7 +2095,7 @@ async function createProjectSessionForDelivery(
   const snapshot = runtime.snapshot();
   const started = await startSessionOnPeers({
     localNodeId: nodeId,
-    peers: trustedReachableMeshPeers(),
+    peers: onlyPeer ? [onlyPeer] : trustedReachableMeshPeers(),
     peerProjectRoots: (peerNodeId) => Object.values(snapshot.agents).flatMap((agent) => {
       const root = agent.homeNodeId === peerNodeId ? agent.metadata?.projectRoot : undefined;
       return typeof root === "string" && root.trim() ? [root.trim()] : [];
@@ -2017,11 +2105,35 @@ async function createProjectSessionForDelivery(
     log: (message) => console.log(message),
   }, request);
   if (!started.ok) {
+    if (onlyPeer) {
+      const failure = started.failures[0];
+      throw new Error(
+        `--on ${host}: ${scoutSessionHostForNode(onlyPeer)} could not start a session in ${input.projectPath}`
+        + (failure?.detail ? `: ${failure.detail}` : failure?.reason ? ` (${failure.reason})` : "")
+        + ".",
+      );
+    }
+    const peerRootsNow = (peerNodeId: string) => Object.values(runtime.snapshot().agents).flatMap((agent) => {
+      const root = agent.homeNodeId === peerNodeId ? agent.metadata?.projectRoot : undefined;
+      return typeof root === "string" && root.trim() ? [root.trim()] : [];
+    });
+    const suggestion = suggestHostForProjectPath(
+      input.projectPath,
+      Object.values(runtime.snapshot().nodes).filter((node) => node.id !== nodeId),
+      peerRootsNow,
+    );
+    const peerNotes = started.failures
+      .filter((failure) => failure.reason !== "project_unknown")
+      .map((failure) => `${failure.host}: ${failure.detail || failure.reason}`);
     throw new Error(
       `project path ${input.projectPath} does not exist on this node`
       + (started.peersTried > 0
         ? `, and none of ${started.peersTried} trusted mesh peer(s) could start a session there`
-        : ", and no trusted mesh peer is reachable"),
+        : ", and no trusted mesh peer is reachable")
+      + (peerNotes.length ? ` (${peerNotes.join("; ")})` : "")
+      + (suggestion
+        ? `. ${suggestion.root} is on ${suggestion.host}: add \`--on ${suggestion.host} --project ${suggestion.root}\`.`
+        : ". To name the machine, add `--on <host>` (machines and their projects: `scout hosts`)."),
     );
   }
   const endpoint = runtime.snapshot().endpoints[started.endpoint.id] ?? started.endpoint;
@@ -2409,6 +2521,19 @@ const operatorAttentionService = new BrokerOperatorAttentionService({
 
 const unavailableTargetService = new BrokerUnavailableTargetService({
   nodeId,
+  verifiedLaunchRoute: (agent, endpoint) => {
+    if (agent.authorityNodeId !== nodeId || !endpoint || endpoint.nodeId !== nodeId) return null;
+    const managed = endpoint.metadata?.source === "local-session" && endpoint.metadata?.managedByScout === true;
+    const configured = agent.metadata?.source === "relay-agent-registry" || agent.metadata?.source === "project-inferred";
+    if (!managed && !(configured && agent.wakePolicy !== "manual")) return null;
+    if (endpoint.transport !== "tmux" && !isDirectLocalAgentTransport(endpoint.transport)) return null;
+    const projectRoot = endpoint.projectRoot ?? endpoint.cwd;
+    if (!projectRoot) return null;
+    try { if (!statSync(projectRoot).isDirectory()) return null; } catch { return null; }
+    if (!areHarnessBinariesAvailable({ harness: endpoint.harness, transport: endpoint.transport })) return null;
+    return { projectRoot, harness: endpoint.harness };
+  },
+  isEndpointAlive: isLocalAgentEndpointAlive,
   describeRemoteAuthorityIssue: (agent, authorityNode) =>
     meshForwardingService.describeRemoteAuthorityIssue(agent, authorityNode),
 });
@@ -2483,12 +2608,12 @@ const brokerService = createBrokerCoreService({
   readHome: () => homeService.read(),
   // Observe-tier twin of the home feed: bounded, scoped to agents homed here,
   // and readable by a signed peer where /v1/home never is (mesh trust cone §4).
-  readMeshNodeState: () => readMeshNodeState({
+  readMeshNodeState: (query) => readMeshNodeState({
     snapshot: () => runtime.snapshot(),
     nodeId,
     meshId,
     actorDisplayName: brokerActorDisplayName,
-  }),
+  }, query),
   readCapabilities: readBrokerCapabilityMatrixSnapshot,
   readRuntimeCatalog: readBrokerRuntimeCatalogSnapshot,
   executeCommand: handleCommand,
@@ -2539,7 +2664,29 @@ const machineService = new BrokerMachineService({
   localHostName: hostname(),
 });
 
+const meshApprovalsConfigFile = meshApprovalsConfigPath(supportDirectory);
+const readMeshApprovals = () => readMeshApprovalsConfig(meshApprovalsConfigFile);
+const meshApprovalShare = createMeshApprovalShare({
+  nodeId,
+  listSnapshots: () => listPairingSessionSnapshots(),
+  decide: (input) => decidePairingApproval(input),
+  readConfig: readMeshApprovals,
+  auditPath: join(supportDirectory, "logs", "mesh-approvals.log"),
+});
+const meshApprovalWatch = createMeshApprovalWatch({
+  peerFetch: daemonMeshPeerFetch,
+  readConfig: readMeshApprovals,
+  listPeers: () => (trustedPeerStore?.listTrustedPeers() ?? []).flatMap((peer) => {
+    if (peer.revokedAt || !peer.nodeId || peer.nodeId === nodeId) return [];
+    if (peer.expiresAt && peer.expiresAt <= Date.now()) return [];
+    const node = runtime.node(peer.nodeId);
+    return [{ keyId: peer.keyId, nodeId: peer.nodeId, label: node?.name || peer.label, brokerUrl: node?.brokerUrl }];
+  }),
+});
+
 const routeRequest = createBrokerHttpRouter({
+  mcpEvents,
+  meshApprovals: { share: meshApprovalShare, watch: meshApprovalWatch },
   encodedSnapshotBodies: process.env.OPENSCOUT_BROKER_ENCODED_SNAPSHOT === "1",
   onSnapshotFlushedBytes: memoryMaintenance ? (bytes) => memoryMaintenance.snapshotEncoded(bytes) : undefined,
   host,
@@ -3024,6 +3171,7 @@ try {
   }
   console.log(`[openscout-runtime] broker listening on 127.0.0.1:${port} (scope: ${advertiseScope}, url: ${brokerUrl})`);
   console.log(`[openscout-runtime] broker local socket ${brokerSocketPath}`);
+  if (scoutbotProcessEnabled) scoutbotService.start();
   const bindState = meshBindController.getState();
   if (bindState.tlsAddresses.length > 0) {
     console.log(`[openscout-runtime] mesh TLS on ${bindState.tlsAddresses.map((a) => `https://${a}:${port}`).join(", ")}`);
@@ -3216,6 +3364,8 @@ async function shutdownBroker(exitCode = 0): Promise<void> {
     return;
   }
   shuttingDown = true;
+  meshApprovalWatch.stop();
+  meshApprovalShare.stop();
   await slackWorkerSupervisor?.stop();
   await otlpReceiver?.close().catch(() => {
     console.warn("[openscout-runtime] OTLP receiver shutdown failed");
@@ -3228,6 +3378,7 @@ async function shutdownBroker(exitCode = 0): Promise<void> {
     clearInterval(routeAliasSweepTimer);
     routeAliasSweepTimer = null;
   }
+  await scoutbotService.stop();
   await webControl.stop();
   // Publisher-first, transport-last: the final checkpoint pass needs a live
   // server to ack against, and an owned sidecar must outlive the broker's drain.

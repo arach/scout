@@ -1,8 +1,13 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, setSystemTime, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createScoutPairingBridgeClient } from "./pairing.ts";
 import { startBridgeServerTRPC } from "./core/pairing/runtime/bridge/server-trpc.ts";
 import type { Bridge } from "./core/pairing/runtime/bridge/bridge.ts";
 
+// These bridges run plaintext; pin it rather than read this machine's config.
+const PLAINTEXT = { expectedMode: "plaintext" } as const;
 const cleanup: Array<() => void> = [];
 afterEach(() => { for (const close of cleanup.splice(0).reverse()) close(); });
 
@@ -20,7 +25,7 @@ test("status clients request no event stream and release the connection", async 
   const server = startBridgeServerTRPC({ bridge, port, secure: false });
   cleanup.push(() => server.stop());
   for (let i = 0; i < 10; i++) {
-    const client = await createScoutPairingBridgeClient(port);
+    const client = await createScoutPairingBridgeClient(port, PLAINTEXT);
     try {
       const result = await client.query<{ sessions: unknown[] }>("bridgeStatus");
       expect(result.sessions).toEqual([]);
@@ -44,7 +49,7 @@ test("a timed-out handshake closes even when the server accepts it late", async 
     },
   });
   cleanup.push(() => server.stop(true));
-  await expect(createScoutPairingBridgeClient(server.port!)).rejects.toThrow("Timed out connecting");
+  await expect(createScoutPairingBridgeClient(server.port!, PLAINTEXT)).rejects.toThrow("Timed out connecting");
   await Bun.sleep(500);
   expect(live).toBe(0);
   expect(server.pendingWebSockets).toBe(0);
@@ -54,7 +59,7 @@ test("connection refusal rejects without waiting for the connection timeout", as
   const server = Bun.serve({ port: 0, fetch: () => new Response() });
   const port = server.port!;
   server.stop(true);
-  await expect(createScoutPairingBridgeClient(port)).rejects.toThrow("Unable to connect");
+  await expect(createScoutPairingBridgeClient(port, PLAINTEXT)).rejects.toThrow("Unable to connect");
 });
 
 function startLimitedBridge(connectionLimits: Parameters<typeof startBridgeServerTRPC>[0]["connectionLimits"]) {
@@ -109,7 +114,7 @@ test("connection admission is bounded and recovers after a client disconnects", 
   expect(replacement.readyState).toBe(WebSocket.OPEN);
 });
 
-test("concurrent snapshot polls use one connection and later polls refresh", async () => {
+test("snapshot polls share one connection per window and refresh after it", async () => {
   const { loadScoutPairingSessionSnapshots } = await import("./pairing.ts");
   let connections = 0;
   const server = Bun.serve({
@@ -127,6 +132,13 @@ test("concurrent snapshot polls use one connection and later polls refresh", asy
   await Promise.all(Array.from({ length: 100 }, () => loadScoutPairingSessionSnapshots(server.port!)));
   expect(connections).toBe(1);
   await loadScoutPairingSessionSnapshots(server.port!);
+  expect(connections).toBe(1);
+  setSystemTime(new Date(Date.now() + 6_000));
+  try {
+    await loadScoutPairingSessionSnapshots(server.port!);
+  } finally {
+    setSystemTime();
+  }
   expect(connections).toBe(2);
 });
 
@@ -167,3 +179,25 @@ test("expired clients cannot hold a slot by ignoring the close handshake", async
   });
   expect(upgraded).toBe(true);
 });
+
+test("local readers reach a secure bridge with its own key and leave no paired-device record", async () => {
+  const home = mkdtempSync(join(tmpdir(), "scout-pairing-home-"));
+  cleanup.push(() => rmSync(home, { recursive: true, force: true }));
+  const child = Bun.spawn(["bun", `${import.meta.dir}/fixtures/pairing-secure-local-reader.ts`], {
+    env: { ...process.env, HOME: home },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  expect(exitCode, stderr).toBe(0);
+  const result = JSON.parse(stdout.trim().split("\n").at(-1)!);
+  expect(result.sessions).toEqual([]);
+  expect(result.strangerCloseCode).toBe(4003);
+  expect(result.trustedPeersWritten).toBe(false);
+  expect(result.seededRecordUntouched).toBe(true);
+  expect(result.squatterError).toContain("did not answer with this machine's bridge key");
+}, 15_000);

@@ -46,6 +46,12 @@ export type AmbientVoiceDeps = {
   respond: (body: string) => Promise<string>;
   speak: (text: string) => Promise<void>;
   askAgent: (ask: AmbientAgentAsk) => Promise<void>;
+  /**
+   * A page that turns words into its own moves (the World HUD) can take an
+   * excerpt before Scoutbot sees it: return its page actions, or null. Pages
+   * say they're open through markPageOpen.
+   */
+  routePageCommand?: (excerpt: string, openPages: ReadonlySet<string>) => ScoutbotUiAction[] | null;
   now?: () => number;
   setTimer?: (fn: () => void, ms: number) => { cancel: () => void };
 };
@@ -83,6 +89,8 @@ export function createAmbientVoiceController(deps: AmbientVoiceDeps) {
   const pageSubscribers = new Set<(batch: AmbientPageActions) => void>();
   const unclaimed = new Map<string, number>();
   let pageBatchSeq = 0;
+  const openPageCounts = new Map<string, number>();
+  const openPages = () => new Set([...openPageCounts].filter(([, n]) => n > 0).map(([page]) => page));
 
   const publishPageActions = (actions: ScoutbotUiAction[]) => {
     const at = now();
@@ -134,8 +142,12 @@ export function createAmbientVoiceController(deps: AmbientVoiceDeps) {
     replying = true;
     status = "replying";
     try {
+      const routed = excerpt ? deps.routePageCommand?.(excerpt.text, openPages()) : null;
       if (!excerpt) {
         record.reply = "I didn't catch anything new to send.";
+      } else if (routed?.length) {
+        // the page answers on screen; nothing to say
+        publishPageActions(routed);
       } else {
         const reply = await deps.respond(`${AMBIENT_SUBMIT_PROMPT}\n"${excerpt.text}"`);
         const actions = extractScoutbotUiActions(reply);
@@ -225,6 +237,16 @@ export function createAmbientVoiceController(deps: AmbientVoiceDeps) {
     subscribePageActions(fn: (batch: AmbientPageActions) => void): () => void {
       pageSubscribers.add(fn);
       return () => pageSubscribers.delete(fn);
+    },
+    /** A page that can take routed commands is open (until the returned release). */
+    markPageOpen(page: string): () => void {
+      openPageCounts.set(page, (openPageCounts.get(page) ?? 0) + 1);
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        openPageCounts.set(page, Math.max(0, (openPageCounts.get(page) ?? 1) - 1));
+      };
     },
     /** First claim wins, so several open pages don't all navigate. */
     claimPageActions(id: string): boolean {

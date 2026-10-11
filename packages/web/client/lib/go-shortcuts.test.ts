@@ -5,7 +5,7 @@ describe("go shortcuts", () => {
   test("maps mnemonic keys to top-level routes", () => {
     expect(goShortcutForKey("h")?.route).toEqual({ view: "inbox" });
     expect(goShortcutForKey("i")?.route).toEqual({ view: "messages" });
-    expect(goShortcutForKey("p")?.route).toEqual({ view: "agents-v2" });
+    expect(goShortcutForKey("p")?.route).toEqual({ view: "agents-v2", indexView: "projects" });
     expect(goShortcutForKey("t")?.route).toEqual({ view: "terminal" });
     expect(goShortcutForKey("r")?.route).toEqual({ view: "repos" });
     expect(goShortcutForKey("f")?.route).toEqual({ view: "search" });

@@ -13,7 +13,7 @@ import {
 } from "react";
 import { isComposerSendShortcut } from "../../lib/compose-shortcuts.ts";
 import { currentAttentionTarget, setAttentionTarget } from "../../lib/crew-gaze.ts";
-import { DictationMic, type MicStatus } from "../DictationMic.tsx";
+import { DictationMic, type DictationMicControl, type MicStatus } from "../DictationMic.tsx";
 import { useRouter } from "../../lib/router.ts";
 import { executeScoutVoiceIssueAction } from "../../lib/scout-voice.ts";
 import { useMessageComposerEmbedded } from "./MessageComposerEmbedBoundary.tsx";
@@ -209,9 +209,10 @@ function voiceLabel(status: MicStatus): string {
  * 2. Body — message input; live dictation partials appear here
  * 3. Toolbar — attach (left) · tools/model · mic · Send (right)
  *
- * Mic only starts/stops recording. Final transcript lands in the draft so
- * the operator can edit, then hit Send — or hit Send anytime the draft is
- * ready. Send never stops the mic; the mic never sends.
+ * The live partial is a preview only; it never enters the draft. Stopping
+ * with the mic lands the finalized transcript in the draft for editing.
+ * Send during a take stops the mic, waits for that finalized transcript,
+ * folds it into the draft, then sends — never the draft without it.
  */
 export function MessageComposer({
   renderWhenEmbedded = false,
@@ -272,6 +273,9 @@ function MessageComposerControl({
   const [voiceStatus, setVoiceStatus] = useState<MicStatus | null>(null);
   const [voiceActionPending, setVoiceActionPending] = useState(false);
   const [voiceActionError, setVoiceActionError] = useState<string | null>(null);
+  const micControlRef = useRef<DictationMicControl | null>(null);
+  // Send was pressed mid-take: send once the finalized transcript has landed.
+  const [sendAfterDictation, setSendAfterDictation] = useState(false);
 
   const setTextareaRef = useCallback(
     (node: HTMLTextAreaElement | null) => {
@@ -312,10 +316,12 @@ function MessageComposerControl({
     resizeTextarea(el, maxHeightPx);
   }, [value, autoResize, maxHeightPx]);
 
-  const sendEnabled = (canSend ?? value.trim().length > 0) && !sending && !disabled;
   const toolsSlot = tools ?? footer;
   const recording = voiceStatus?.state === "recording" || voiceStatus?.state === "starting";
   const processing = voiceStatus?.state === "processing";
+  // A take in progress counts as content: its transcript is on the way.
+  const sendEnabled = ((canSend ?? value.trim().length > 0) || recording || processing)
+    && !sending && !disabled;
   const showVoiceLine = Boolean(
     voiceStatus
     && (
@@ -327,11 +333,25 @@ function MessageComposerControl({
   );
 
   const trySend = useCallback(() => {
-    // Send always means commit the draft — independent of mic state.
-    if (stopMode) return;
-    if (!(canSend ?? value.trim().length > 0) || sending || disabled) return;
+    if (stopMode || sending || disabled) return;
+    // Mid-take, the draft is missing everything said so far. Finish the take
+    // and send once its finalized transcript is in the draft.
+    if ((recording || processing) && micControlRef.current?.finish()) {
+      setSendAfterDictation(true);
+      return;
+    }
+    if (!(canSend ?? value.trim().length > 0)) return;
     onSend();
-  }, [canSend, disabled, onSend, sending, stopMode, value]);
+  }, [canSend, disabled, onSend, processing, recording, sending, stopMode, value]);
+
+  useEffect(() => {
+    if (!sendAfterDictation || !voiceStatus || voiceStatus.state !== "idle") return;
+    setSendAfterDictation(false);
+    // A failed or empty take leaves the draft for review instead of sending
+    // something the operator did not finish saying.
+    if (voiceStatus.tone === "error") return;
+    trySend();
+  }, [sendAfterDictation, trySend, voiceStatus]);
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -365,6 +385,8 @@ function MessageComposerControl({
     const next = value.trim() ? `${value.trimEnd()} ${text}` : text;
     onChange(next, { caret: next.length });
     if (onDictationCommit) {
+      // This surface already sends on commit; a pending Send is satisfied.
+      setSendAfterDictation(false);
       onDictationCommit(next);
       return;
     }
@@ -431,7 +453,7 @@ function MessageComposerControl({
   const statusCopy = isError
     ? voiceStatus?.message
     : processing
-      ? "Finalizing transcript…"
+      ? sendAfterDictation ? "Finalizing transcript, then sending…" : "Finalizing transcript…"
       : partialText;
 
   const shell = (
@@ -559,6 +581,7 @@ function MessageComposerControl({
             <DictationMic
               onAppend={handleDictationAppend}
               onStatus={handleDictationStatus}
+              controlRef={micControlRef}
               disabled={disabled || sending}
             />
           ) : null}

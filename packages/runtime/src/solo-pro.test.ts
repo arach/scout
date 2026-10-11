@@ -80,11 +80,11 @@ const commands = (status: SoloProStatus) =>
   [...status.access.actions, ...status.components.flatMap((entry) => entry.actions)]
     .map((action) => (action.kind === "command" ? action.command : action.kind === "link" ? action.href : action.kind));
 
-describe("Solo Pro status: access × installed × ready", () => {
+describe("Scout Pro status: access × installed × ready", () => {
   test("confirmed access with everything installed and running is active", async () => {
     const status = await read(GRANTED);
     expect(status.phase).toBe("active");
-    expect(status.access).toMatchObject({ confirmed: true, tier: "solo_pro", title: "Solo Pro" });
+    expect(status.access).toMatchObject({ confirmed: true, tier: "solo_pro", title: "Scout Pro" });
     expect(status.components.map((entry) => [entry.id, entry.installed, entry.ready])).toEqual([
       ["full_web_app", "installed", "ready"],
       ["native_app", "installed", "ready"],
@@ -95,12 +95,12 @@ describe("Solo Pro status: access × installed × ready", () => {
   test("confirmed access without the full web app is 'Finish setting up', with the install CLI", async () => {
     const status = await read(GRANTED, { fullInstalled: false, served: SERVING_BASIC });
     expect(status.phase).toBe("finish_setup");
-    expect(status.headline).toBe("Finish setting up Solo Pro");
+    expect(status.headline).toBe("Finish setting up Scout Pro");
     expect(component(status, "full_web_app")).toMatchObject({ installed: "missing", ready: "not_ready" });
     expect(commands(status)).toContain("scout web install");
   });
 
-  test("Scout for Mac is optional: missing never blocks Solo Pro, and scout install is offered", async () => {
+  test("Scout for Mac is optional: missing never blocks Scout Pro, and scout install is offered", async () => {
     const status = await read(GRANTED, { native: APP_MISSING });
     expect(status.phase).toBe("active");
     expect(component(status, "native_app")).toMatchObject({ required: false, installed: "missing" });
@@ -200,8 +200,8 @@ describe("Solo Pro status: access × installed × ready", () => {
   });
 });
 
-describe("Solo Pro status: no false upgrade or downgrade", () => {
-  test.each(UNKNOWN)("$state with everything installed is unconfirmed, not Solo Pro", async (access) => {
+describe("Scout Pro status: no false upgrade or downgrade", () => {
+  test.each(UNKNOWN)("$state with everything installed is unconfirmed, not Scout Pro", async (access) => {
     const status = await read(access);
     expect(status.phase).toBe("unconfirmed");
     expect(status.access.confirmed).toBe(false);
@@ -237,7 +237,7 @@ describe("Solo Pro status: no false upgrade or downgrade", () => {
   });
 });
 
-describe("Solo Pro status: recovery paths", () => {
+describe("Scout Pro status: recovery paths", () => {
   test("missing credentials point at making and saving a download key", async () => {
     const status = await read({ state: "no_credential", checkedAt: NOW });
     expect(commands(status)).toEqual(expect.arrayContaining(["https://console.openscout.app/#downloads", "scout web login", "check_access"]));

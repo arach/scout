@@ -31,6 +31,8 @@ export type LaneRosterEntry = {
 
 /** The floor's per-lane ledger row: action line + activity strip + counts. */
 export type LaneRosterFloorEntry = {
+  /** Exact scene membership; names alone are not island identities. */
+  place?: { islandId: string; islandLabel: string; workspace: string; roomId: string; roomLabel: string };
   live: boolean;
   harness: string | null;
   /**
@@ -68,6 +70,11 @@ function floorEntriesEqual(
     && a.actionLabel === b.actionLabel
     && a.actionMeta === b.actionMeta
     && a.countsLabel === b.countsLabel
+    && a.place?.islandId === b.place?.islandId
+    && a.place?.islandLabel === b.place?.islandLabel
+    && a.place?.workspace === b.place?.workspace
+    && a.place?.roomId === b.place?.roomId
+    && a.place?.roomLabel === b.place?.roomLabel
     && a.strip.length === b.strip.length
     && a.strip.every((kind, index) => kind === b.strip[index]);
 }
@@ -153,6 +160,9 @@ export function useLaneFocusId(): string | null {
 export type FloorLedgerHandlers = {
   onHover: (laneId: string | null) => void;
   onSelect: (laneId: string) => void;
+  /** Only opt-in scenes install a context action; existing floor behavior stays native. */
+  onContextMenu?: (laneId: string, point: { x: number; y: number }) => void;
+  onPlaceSelect?: (islandId: string, roomId?: string) => void;
 };
 
 let floorLedgerHandlers: FloorLedgerHandlers | null = null;

@@ -489,7 +489,7 @@
 .rd-selection-context-chip:hover,
 .rd-selection-context-chip:focus-visible {
   background: var(--accent);
-  color: var(--bg);
+  color: var(--on-accent, var(--bg));
   outline: none;
 }
 

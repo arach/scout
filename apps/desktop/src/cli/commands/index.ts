@@ -27,6 +27,9 @@ export type ScoutCommandName =
   | "integration"
   | "label"
   | "latest"
+  | "recent"
+  | "check"
+  | "hosts"
   | "machines"
   | "match"
   | "mcp"
@@ -39,12 +42,15 @@ export type ScoutCommandName =
   | "restart"
   | "role"
   | "runtimes"
+  | "route"
+  | "where"
   | "search"
   | "send"
   | "session"
   | "server"
   | "setup"
   | "speak"
+  | "voice"
   | "statusline"
   | "tail"
   | "tell"
@@ -131,6 +137,9 @@ export async function loadScoutCommandHandler(name: ScoutCommandName): Promise<S
       return (await import("./role.ts")).runRoleCommand;
     case "runtimes":
       return (await import("./runtimes.ts")).runRuntimesCommand;
+    case "where":
+    case "route":
+      return (await import("./route.ts")).runRouteCommand;
     case "search":
       return (await import("./search.ts")).runSearchCommand;
     case "send":
@@ -143,6 +152,8 @@ export async function loadScoutCommandHandler(name: ScoutCommandName): Promise<S
       return (await import("./setup.ts")).runSetupCommand;
     case "speak":
       return (await import("./speak.ts")).runSpeakCommand;
+    case "voice":
+      return (await import("./voice.ts")).runVoiceCommand;
     case "statusline":
       return (await import("./statusline.ts")).runStatuslineCommand;
     case "web":
@@ -163,6 +174,11 @@ export async function loadScoutCommandHandler(name: ScoutCommandName): Promise<S
       return (await import("./watch.ts")).runWatchCommand;
     case "who":
       return (await import("./who.ts")).runWhoCommand;
+    case "check":
+    case "recent":
+      return (await import("./recent.ts")).runRecentCommand;
+    case "hosts":
+      return (await import("./hosts.ts")).runHostsCommand;
     case "whoami":
       return (await import("./whoami.ts")).runWhoAmICommand;
   }

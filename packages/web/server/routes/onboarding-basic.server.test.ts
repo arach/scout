@@ -101,7 +101,7 @@ describe("basic web server: first-run routes", () => {
     expect(resumed.needed).toBe(true);
   });
 
-  test("Solo Pro status is served beside the basic client, unchecked until asked", async () => {
+  test("Scout Pro status is served beside the basic client, unchecked until asked", async () => {
     const server = await basicServer();
     const response = await server.app.request("http://localhost/api/solo-pro");
     expect(response.status).toBe(200);
@@ -118,7 +118,7 @@ describe("basic web server: first-run routes", () => {
     expect(body.components.find((component) => component.id === "full_web_app")?.ready).not.toBe("ready");
   });
 
-  test("Settings › Solo Pro is a basic client page, not a 404", async () => {
+  test("Settings › Scout Pro is a basic client page, not a 404", async () => {
     const server = await basicServer();
     const response = await server.app.request("http://localhost/settings/pro", { headers: { accept: "text/html" } });
     expect(response.status).toBe(200);

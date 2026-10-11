@@ -2029,6 +2029,8 @@ export function BrokerAttemptInspector({
 
 export const scoutSurface = defineSurface({
   id: "dispatch",
+  // Literal, not getDestination(): BrokerScreen ships in the basic client, and
+  // importing nav-destinations drags every full-app label into that bundle.
   label: "Dispatch",
   route: { view: "broker" },
   webPath: "/dispatch",

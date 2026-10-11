@@ -196,7 +196,7 @@ export type ActiveScoutBrokerService = {
   readHealth: () => Promise<ScoutBrokerHealthPayload>;
   readHome?: () => Promise<unknown>;
   /** Observe-tier compact node state; absent on brokers that predate it. */
-  readMeshNodeState?: () => Promise<unknown> | unknown;
+  readMeshNodeState?: (query?: import("./mesh-node-state.js").MeshNodeStateQuery) => Promise<unknown> | unknown;
   readNode: () => Promise<NodeDefinition>;
   readSnapshot: (query?: RuntimeRegistrySnapshotQuery) => Promise<RuntimeRegistrySnapshot>;
   withSnapshot?: <T>(query:RuntimeRegistrySnapshotQuery,consume:(snapshot:RuntimeRegistrySnapshot)=>Promise<T>,options?:{signal?:AbortSignal})=>Promise<T>;
@@ -468,7 +468,9 @@ async function requestBrokerWire<T>(
     ...options,
     signal: defaultBrokerRequestSignal(options),
   };
+  const socketOnly = process.env.OPENSCOUT_BROKER_SOCKET_ONLY === "1";
   const socketPath = options.socketPath?.trim();
+  if (socketOnly && !socketPath) throw new Error("Scout broker socket-only request has no socket path");
   if (socketPath) {
     try {
       return {
@@ -479,7 +481,7 @@ async function requestBrokerWire<T>(
         },
       };
     } catch (error) {
-      if (!shouldFallbackFromUnixSocket(error)) {
+      if (socketOnly || !shouldFallbackFromUnixSocket(error)) {
         throw error;
       }
       return {

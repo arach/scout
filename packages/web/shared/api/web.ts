@@ -231,6 +231,8 @@ export type WebWorkItem = {
   activeFlightCount: number;
   lastMeaningfulAt: number;
   lastMeaningfulSummary: string | null;
+  /** A Codex chat pinned from the ChatGPT app (`scout session pin`): its thread id. */
+  codexThreadId?: string | null;
 };
 
 export type WebMeshOpsFlight = {

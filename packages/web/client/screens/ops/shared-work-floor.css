@@ -7,7 +7,6 @@
 .shared-floor.is-map { container-type: inline-size; display: flex; flex-direction: column; overflow: hidden; border-radius: 12px; }
 /* The chrome-free app embed gives the world the whole section — no 80px/14px slice. */
 .s-discovered-embed .shared-floor { inset: 0; border-radius: 0; }
-.s-discovered-embed .shared-floor__teams { top: 60px; }
 .agent-floor:has(.shared-floor) .agent-floor__dock, .agent-floor:has(.shared-floor) .agent-floor__legend { display: none; }
 /* The lane trace panel opens bottom-right on actor select; lift it clear of the camera cluster. */
 .agent-floor:has(.shared-floor) .agent-floor__trace-panel { bottom: 72px; max-height: calc(100% - 140px); }
@@ -22,13 +21,10 @@
    and stay sharp at every zoom instead of scaling a fixed-resolution image. */
 .shared-floor__sky-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
 .shared-floor__benches { position: absolute; left: 50%; top: 50%; z-index: 1; transform-origin: center; }
-.shared-floor__connections { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
-.shared-floor__connections path { fill: none; stroke: var(--floor-accent); stroke-width: 1.5; opacity: .4; }
-.shared-floor__connections .is-shared { stroke-dasharray: 5 6; }
 
 /* Islands: the island box is the painting; caption and tether share its upright
    plane (billboarded in Iso) and the crew stand on its painted deck. */
-.shared-floor__island { position: absolute; cursor: grab; touch-action: none; }
+.shared-floor__island { position: absolute; touch-action: none; }
 .shared-floor__island.is-dragging { cursor: grabbing; filter: drop-shadow(0 18px 28px #0009); }
 .has-boundaries .shared-floor__island { border: 1px dashed var(--floor-line-2); border-radius: 25px; }
 .shared-floor__place-presentation { position: absolute; inset: 0; pointer-events: none; transform-origin: center; }
@@ -39,6 +35,54 @@
    coordinates (shared-floor-layout.ts) stay true at any island size. The mask
    reaches full transparency at the panel edge so no rectangle ghosts through. */
 .shared-floor__outpost { position: absolute; inset: 0; pointer-events: none; background-size: 300% 100%; background-repeat: no-repeat; opacity: .9; mask-image: radial-gradient(ellipse 50% 50% at center, #000 60%, transparent 100%); }
+/* Individual alpha sprites keep their fine instruments and rock silhouette;
+   only the legacy sheet needs a starfield crop and feathered panel edges. */
+.shared-floor__outpost.is-engraved { background-size: 100% 100%; opacity: 1; mask-image: none; }
+/* Daylight maps split expandable stone from fixed-size scenery. The landmark
+   stands on the back rim; its 87% image baseline meets the deck at 36%. */
+.shared-floor__landmark { position: absolute; left: 50%; top: 36%; width: min(72%, 520px); height: auto; transform: translate(-50%, -87%); pointer-events: none; }
+/* The map plane projects the continuous tiles once. Scenery and actors remain
+   upright about their ground-contact points, keeping feet on the same cells. */
+.shared-floor__terrain { position: absolute; overflow: hidden; background: transparent; pointer-events: none; }
+.shared-floor__foundation { position: absolute; width: 0; height: 0; transform-origin: 0 0; transform: matrix(.57735027, -.57735027, 1, 1, 0, 0); pointer-events: none; }
+.shared-floor__foundation svg { position: absolute; top: 0; max-width: none; overflow: visible; }
+.has-terrain .shared-floor__viewport { background-color: #000; }
+.has-terrain .shared-floor__sky-canvas { opacity: 1; }
+.shared-floor__terrain-garden { position: absolute; width: 1px; height: 1px; transform-origin: 0 0; pointer-events: none; }
+.is-iso .shared-floor__terrain-garden { transform: matrix(.57735027, -.57735027, 1, 1, 0, 0); }
+.shared-floor__terrain-bank { position: absolute; width: 1px; height: 1px; transform-origin: 0 0; pointer-events: none; }
+.is-iso .shared-floor__terrain-bank { transform: matrix(.57735027, -.57735027, 1, 1, 0, 0); }
+.shared-floor__terrain-bank img { position: absolute; max-width: none; height: auto; transform: translate(-50%, -80%); }
+.shared-floor__terrain-garden img { width: 260px; max-width: none; transform: translate(-50%, -91%); }
+.shared-floor__terrain-landmark { position: absolute; left: 50%; top: 29%; width: 1px; height: 1px; pointer-events: none; transform-origin: 0 0; }
+.shared-floor__terrain-landmark img { position: absolute; left: 0; top: 0; width: 420px; max-width: none; height: auto; transform: translate(-50%, -87%); }
+.shared-floor__terrain-caption { position: absolute; left: 50%; top: 72%; width: 1px; height: 1px; transform-origin: 0 0; transform: scale(var(--garden-caption-scale, 1)); }
+.is-iso .shared-floor__terrain-landmark { transform: matrix(.57735027, -.57735027, 1, 1, 0, 0); }
+.is-iso .shared-floor__terrain-caption { transform: matrix(.57735027, -.57735027, 1, 1, 0, 0) scale(var(--garden-caption-scale, 1)); }
+.shared-floor__island .shared-floor__terrain-caption button.shared-floor__gathering-label { position: absolute; top: 0; left: 0; padding: 3px 8px; gap: 1px; border-radius: 5px; background: #151619ed; opacity: 1; }
+.shared-floor__terrain-caption .shared-floor__gathering-label small { font-size: 12px; }
+.is-count-only .shared-floor__terrain-caption strong { display: none; }
+.is-count-only .shared-floor__terrain-caption small { font-size: 14px; color: #e8e9eb; }
+.is-count-only .shared-floor__terrain-caption small span { display: none; }
+.is-count-only .shared-floor__terrain-caption button.shared-floor__gathering-label { border-radius: 16px; min-width: 28px; }
+.is-count-only .shared-floor__overview-actor { display: none; }
+.has-hidden-captions .shared-floor__terrain-caption { visibility: hidden; }
+.has-terrain .shared-floor__wanderer { transform-origin: 42px 84px; }
+.has-terrain .shared-floor__crew .shared-floor-character::before { background: #443a2d1c; border: 0; backdrop-filter: none; -webkit-backdrop-filter: none; box-shadow: 0 4px 6px #443a2d26; }
+.has-terrain .shared-floor__crew .shared-floor-character .shared-floor-character__label { background: #17191ded; border-color: #ffffff22; backdrop-filter: none; -webkit-backdrop-filter: none; }
+.has-terrain .shared-floor__layers > button { background: #17191ded; color: #e8e9eb; }
+.has-terrain.is-distant .shared-floor__crew .shared-floor-character .shared-floor-character__label { opacity: 0; }
+.has-terrain.is-distant .shared-floor__crew .shared-floor-character:hover .shared-floor-character__label,
+.has-terrain.is-distant .shared-floor__crew .shared-floor-character:focus-visible .shared-floor-character__label,
+.has-terrain.is-distant .shared-floor__crew .is-selected .shared-floor-character__label { opacity: 1; transform: translateX(-50%) scale(var(--garden-caption-scale)); transform-origin: top center; }
+.has-terrain .shared-floor-character__context { transform: translateX(-50%) scale(var(--garden-inverse-scale)); transform-origin: bottom center; }
+.shared-floor__overview-actor { position: absolute; left: 42px; top: 84px; width: 24px; height: 24px; padding: 0; display: grid; place-items: center; transform: translate(-50%, -50%) scale(var(--garden-inverse-scale)); border: 0; border-radius: 50%; background: transparent; color: #e8e9eb; cursor: pointer; }
+.shared-floor__overview-dot { width: 6px; height: 6px; border: 1px solid #ffffffb3; border-radius: 50%; background: #596671; box-shadow: 0 1px 3px #0009; }
+.shared-floor__overview-actor.is-working .shared-floor__overview-dot { background: #e0e7eb; }
+.shared-floor__overview-actor.is-attention .shared-floor__overview-dot, .shared-floor__overview-actor.is-blocked .shared-floor__overview-dot { background: #ddb886; }
+.shared-floor__overview-actor[aria-pressed="true"] .shared-floor__overview-dot { outline: 2px solid #fff; outline-offset: 3px; }
+.shared-floor__overview-name { position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); padding: 4px 7px; border-radius: 4px; background: #151619; color: #eeeeef; font-size: 11px; white-space: nowrap; pointer-events: none; opacity: 0; }
+.shared-floor__overview-actor:hover .shared-floor__overview-name, .shared-floor__overview-actor:focus-visible .shared-floor__overview-name, .shared-floor__overview-actor[aria-pressed="true"] .shared-floor__overview-name { opacity: 1; }
 /* layout: platform socket, hung under the panel, independent of caption size. */
 .shared-floor__label-anchor { position: absolute; left: 50%; top: 89.4%; width: 1px; height: 7.8%; background: linear-gradient(#c0d5d580, #c0d5d530); pointer-events: none; }
 .shared-floor__label-anchor::before { content: ""; position: absolute; top: -2px; left: -2px; width: 5px; height: 5px; border-radius: 50%; background: #b6ccc7; }
@@ -101,7 +145,7 @@
    In the app embed the floor is full-bleed and teams drops below the floating
    command bar (see the .s-discovered-embed rules above). */
 .shared-floor__camera { position: absolute; z-index: 10; bottom: 12px; right: 12px; display: flex; gap: 4px; padding: 5px; background: var(--floor-bg); border: 1px solid var(--floor-line-soft); border-radius: 7px; }
-.shared-floor__camera button, .shared-floor__layers > button, .shared-floor__teams > button { padding: 7px 9px; border: 0; border-radius: 4px; background: transparent; color: var(--floor-muted); cursor: pointer; font-size: 11px; }
+.shared-floor__camera button, .shared-floor__layers > button { padding: 7px 9px; border: 0; border-radius: 4px; background: transparent; color: var(--floor-muted); cursor: pointer; font-size: 11px; }
 .shared-floor__camera [role="group"] { display: flex; gap: 3px; padding-right: 5px; border-right: 1px solid var(--floor-line-soft); }
 .shared-floor__camera button[aria-pressed="true"] { color: var(--floor-accent); background: var(--floor-face-2); }
 /* How far out the camera is, as a ratio. Over a range this wide the buttons
@@ -113,21 +157,15 @@
 .shared-floor__layers > div { margin-top: 5px; padding: 10px; border: 1px solid var(--floor-line-2); border-radius: 6px; background: var(--floor-bg); }
 .shared-floor__layers label { display: flex; align-items: center; gap: 8px; padding: 5px; }
 .shared-floor__layers input { accent-color: var(--floor-accent); }
+.shared-floor__layers select { min-width: 0; max-width: 170px; margin-left: auto; padding: 4px; border: 1px solid var(--floor-line-soft); border-radius: 4px; background: var(--floor-bg); color: var(--floor-ink); font: inherit; }
 .shared-floor__layout-actions { padding: 5px 5px 9px; margin-bottom: 7px; border-bottom: 1px solid var(--floor-line-2); }
 .shared-floor__layout-actions button { padding: 7px 9px; border: 1px solid var(--floor-line-soft); border-radius: 4px; background: var(--floor-face-2); color: var(--floor-ink); cursor: pointer; font-size: 11px; }
 .shared-floor__layout-actions small { display: block; padding-top: 6px; color: var(--floor-muted); font-size: 10px; max-width: 210px; }
-.shared-floor__teams { position: absolute; top: 10px; left: 18px; z-index: 20; }
-.shared-floor__teams section { width: 230px; max-height: 300px; overflow: auto; background: #111715f5; border: 1px solid #ffffff20; border-radius: 12px; padding: 12px; }
-.shared-floor__teams section > strong { display: block; font-size: 11px; color: var(--floor-muted); margin-bottom: 8px; }
-.shared-floor__teams section button { display: block; width: 100%; text-align: left; border: 0; border-radius: 5px; padding: 7px; background: transparent; color: var(--floor-ink); cursor: pointer; }
-.shared-floor__teams section button:hover { background: #ffffff0b; }
-.shared-floor__teams section .shared-floor__team-child { padding-left: 20px; color: var(--floor-accent); }
-.shared-floor__teams small { float: right; color: var(--floor-muted); font-size: 10px; }
-.shared-floor__teams p { color: var(--floor-muted); font-size: 12px; }
 /* A bounded, projection-aware navigation surface (176×112, mirrored in floor-minimap.ts). */
-.shared-floor__minimap { position: absolute; z-index: 10; left: 12px; bottom: 12px; width: 176px; height: 112px; overflow: hidden; border: 1px solid var(--floor-line-soft); border-radius: 6px; background: rgba(9, 22, 29, .72); backdrop-filter: blur(12px); opacity: .8; touch-action: none; cursor: grab; }
+.shared-floor__minimap { position: absolute; z-index: 10; left: 12px; bottom: 12px; width: 176px; height: 112px; overflow: hidden; border: 1px solid var(--floor-line-soft); border-radius: 6px; background: rgba(14, 15, 18, .88); backdrop-filter: blur(12px); opacity: .8; touch-action: none; cursor: grab; }
 .shared-floor__minimap:active { cursor: grabbing; }
 .shared-floor__minimap svg { display: block; width: 100%; height: 100%; pointer-events: none; }
+@container (max-width: 540px) { .shared-floor__minimap { bottom: 66px; width: 132px; height: 84px; } }
 .shared-floor__mini-ground { fill: var(--floor-bg); }
 .shared-floor__mini-camera { fill: #b9e46c08; stroke: var(--floor-accent); stroke-width: 1; pointer-events: none; }
 .shared-floor__minimap button { position: absolute; width: 12px; height: 12px; transform: translate(-50%, -50%); padding: 0; border: 1px solid var(--floor-bg); background: var(--floor-accent); border-radius: 50%; cursor: pointer; }
@@ -184,3 +222,46 @@
   .shared-floor__camera { left: 12px; right: 12px; justify-content: flex-end; }
   .shared-floor__camera button { padding-inline: 6px; }
 }
+
+/* Low botanical masses sit on the shore; their short vines can trail over rock. */
+.shared-floor__terrain-planting { position: absolute; width: 1px; height: 1px; transform-origin: 0 0; pointer-events: none; }
+.is-iso .shared-floor__terrain-planting { transform: matrix(.57735027, -.57735027, 1, 1, 0, 0); }
+.shared-floor__terrain-planting img { position: absolute; max-width: none; height: auto; }
+.is-count-only .shared-floor__terrain-planting { display: none; }
+
+/* Small gathering rooms retain a single workspace island. */
+.shared-floor__micro-rooms { position: absolute; inset: 0; pointer-events: none; }
+.shared-floor__room-surfaces { position: absolute; inset: 0; overflow: visible; }
+.shared-floor__room-inlay { fill: #d6ccab18; stroke: #d6ccab85; stroke-width: 3; }
+.shared-floor__room-outline { fill: none; stroke: #93856745; stroke-width: 2; }
+.shared-floor__micro-rooms.is-receiving .shared-floor__room-outline { fill: #e3d8ad12; stroke: #e3d8ad99; stroke-width: 4; stroke-dasharray: 12 8; }
+.shared-floor__room-surfaces .is-drop-target .shared-floor__room-outline { fill: #e3d8ad44; stroke: #fff3ce; stroke-width: 7; stroke-dasharray: none; }
+.shared-floor__room-marker { position: absolute; width: 1px; height: 1px; transform-origin: 0 0; transform: scale(var(--garden-caption-scale, 1)); z-index: 3; }
+.is-iso .shared-floor__room-planting { transform: matrix(.57735027, -.57735027, 1, 1, 0, 0); }
+.shared-floor__room-label { display: flex; gap: 7px; align-items: center; white-space: nowrap; transform: translate(-50%, 0); border: 1px solid #d1c5a84d; border-radius: 4px; padding: 4px 7px; background: #252623ed; color: #eee5d3; font-size: 13px; line-height: 1.25; cursor: pointer; pointer-events: auto; }
+.shared-floor__room-label span { color: #c5c0b5; }
+.shared-floor__room-planting { position: absolute; width: 1px; height: 1px; transform-origin: 0 0; }
+.shared-floor__room-planting img { position: absolute; width: 145px; max-width: none; height: auto; transform: translate(-50%, -70%); }
+.is-count-only .shared-floor__micro-rooms { visibility: hidden; }
+.shared-floor__room-members { margin: 14px 0; }
+.shared-floor__room-members label { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; font-size: 12px; }
+.shared-floor__room-members select { max-width: 130px; min-height: 32px; color: #eee5d3; background: #242728; border: 1px solid #797d7a66; border-radius: 4px; padding: 4px 6px; }
+.shared-floor__room-members > p { color: #c5c7c5; line-height: 1.5; }
+.shared-floor__room-reset { color: #e5ded0; padding: 6px 9px; background: #242728; border: 1px solid #797d7a66; border-radius: 4px; cursor: pointer; }
+
+.is-iso .shared-floor__room-marker { transform: matrix(.57735027, -.57735027, 1, 1, 0, 0) scale(var(--garden-caption-scale, 1)); }
+
+.has-micro-rooms .shared-floor__terrain-caption { top: 78%; }
+
+/* Illustrated platforms already contain their perspective. Keep room bounds,
+   feet and drag coordinates in that same upright plane, rather than tilting twice. */
+.is-iso:not(.has-terrain) .shared-floor__crew,
+.is-iso:not(.has-terrain) .shared-floor__micro-rooms { transform: matrix(.57735027, -.57735027, 1, 1, 0, 0); transform-origin: center; }
+.is-iso:not(.has-terrain) .shared-floor__wanderer { transform: none; }
+.is-iso:not(.has-terrain) .shared-floor__room-marker { transform: scale(var(--garden-caption-scale, 1)); }
+
+.shared-floor__island-grip { color: #d4d0c7; font-size: 12px; letter-spacing: 0; }
+.shared-floor__island button.shared-floor__gathering-label { cursor: grab; background: #111111e8; }
+.shared-floor__island:has([data-island-handle]:hover) .shared-floor__outpost { filter: brightness(1.1); }
+.shared-floor__island.is-dragging button.shared-floor__gathering-label { cursor: grabbing; }
+.shared-floor__wanderer .shared-floor-character:focus-visible { outline: 2px solid #ede1c6; outline-offset: 5px; }

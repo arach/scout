@@ -165,6 +165,14 @@ export function projectPathRouteTarget(input: BrokerRouteTargetInput): string | 
   return undefined;
 }
 
+/** The mesh machine a project-path ask names with `--on`, when it names one. */
+export function projectHostRouteTarget(input: BrokerRouteTargetInput): string | undefined {
+  if (input.target?.kind === "project_path") {
+    return input.target.host?.trim() || undefined;
+  }
+  return undefined;
+}
+
 /** Resolver refusal codes for a session address scoped to a host this broker cannot answer for. */
 const SESSION_HOST_REFUSALS: ReadonlySet<string> = new Set([
   "session_host_unknown",

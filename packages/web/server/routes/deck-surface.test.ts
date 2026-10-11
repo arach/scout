@@ -325,3 +325,34 @@ describe("Scout Deck web surface", () => {
     expect((await valid.json() as { result: { surface: string } }).result.surface).toBe("deck");
   });
 });
+
+describe('harness-neutral Deck controls', () => {
+  test('Claude supports native start/interrupt and history, not fake steer/queue/attachments/approvals', async () => {
+    const calls: string[] = [];
+    const service = createScoutDeckSurfaceService({ currentDirectory, hostName: 'Air', hostId,
+      listAgents: () => [agent({ id: 'claude', harness: 'claude', transport: 'claude_stream_json' })],
+      codex: { snapshot: async id => ({ ...snapshot(id), adapter: 'claude_stream_json' }),
+        start: async () => { calls.push('start'); return { accepted: true }; },
+        interrupt: async () => { calls.push('interrupt'); return { accepted: true }; },
+        steer: async () => { throw new Error('must not degrade'); } },
+    });
+    const lanes = await service.handle(request('agents.list', {}, true));
+    if (!('result' in lanes)) throw new Error('expected lanes');
+    const result = lanes.result as { hosts: { value: { agents: { capabilities: unknown }[] } }[] };
+    expect(result.hosts[0]?.value.agents[0]?.capabilities).toEqual({ send: true, steer: false, steerMode: 'unsupported', queue: false, interrupt: true, attachments: false, approvals: false, history: true });
+    const route = { hostId, agentId: 'claude' };
+    for (const method of ['codex.thread.snapshot', 'codex.thread.connect', 'codex.turn.start', 'codex.turn.interrupt'] as const) {
+      expect('result' in await service.handle(request(method, { route, text: 'hello' }))).toBe(true);
+    }
+    const steer = await service.handle(request('codex.turn.steer', { route, text: 'stop' }));
+    expect('error' in steer && steer.error.code).toBe('unsupported_capability');
+    expect(calls).toEqual(['start', 'interrupt']);
+  });
+  test('ACP stays honestly view-only until its shared owner exposes Deck state/control', async () => {
+    const service = createScoutDeckSurfaceService({ currentDirectory, hostName: 'Air', hostId,
+      listAgents: () => [agent({ id: 'acp', transport: 'opencode_acp', harness: 'opencode' })],
+    });
+    const reply = await service.handle(request('codex.turn.start', { route: { hostId, agentId: 'acp' }, text: 'hello' }));
+    expect('error' in reply && reply.error.code).toBe('unsupported_capability');
+  });
+});

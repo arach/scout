@@ -1032,7 +1032,7 @@
 
 .s-mission-overlay-jump:hover {
   background: var(--accent);
-  color: var(--bg);
+  color: var(--on-accent, var(--bg));
 }
 
 .s-mission-overlay-jump:focus-visible {

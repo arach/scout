@@ -87,17 +87,16 @@ describe("ChannelComposer toolbar", () => {
   test("carries no affordance that does nothing", () => {
     const html = composer().toLowerCase();
     expect(html).toContain("attach a file");
-    // No emoji or voice control: none of them is wired to anything.
-    for (const absent of ["emoji", "record", "microphone", "voice"]) {
+    // Emoji is wired: it types at the caret from the reaction set.
+    expect(html).toContain('aria-label="insert emoji"');
+    // Recording is offered only where the browser can record; the server
+    // render has no MediaRecorder, so no clip control is drawn.
+    for (const absent of ["record", "microphone", "voice"]) {
       expect(html).not.toContain(absent);
     }
-    for (const absent of ["strikethrough", "blockquote", "code block"]) {
-      expect(html).not.toContain(absent);
-    }
-    expect(html).toContain('aria-label="bold"');
-    expect(html).toContain('aria-label="italic"');
-    expect(html).toContain('aria-label="code"');
-    expect(html).toContain('aria-label="list"');
+    expect(html).toContain('aria-label="run a shortcut"');
+    expect(html).toContain('aria-label="hide formatting"');
+    expect(html).toContain('aria-label="bold ⌘b"');
   });
 
   test("the send does not fire on an empty draft without files, and wakes on text", () => {
@@ -157,7 +156,8 @@ describe("ChannelComposer routing boundary", () => {
     // The agent is named once, on the control that armed it — not again in a
     // banner chip beside it.
     expect(html).toContain('data-armed="true"');
-    expect(html).toContain('<span class="chat-composer-ask-name">Maya&#x27;s Codex</span>');
+    // The control is an icon (the agent's face); its tooltip names who.
+    expect(html).toContain('title="Change agent — currently asking Maya&#x27;s Codex"');
     expect(html).toContain("Creates a tracked request for Maya&#x27;s Codex");
     expect(html).toContain("reply lands in this thread");
     expect(html).toContain("Change agent");
@@ -219,4 +219,38 @@ test("an empty agent request explains the required instructions", () => {
   expect(html).toContain("Add instructions for the agent before sending.");
   expect(html).toMatch(/class="chat-composer-send"[^>]*disabled=""/);
   expect(composer({ askTargetId: codex.actorId, draft: "Review this file" })).not.toContain("Add instructions for the agent before sending.");
+});
+
+import { FORMATS, formatShortcut } from "./composer-formats.tsx";
+import { filterShortcuts } from "./composer-shortcuts.ts";
+describe("approved composer", () => {
+ test("ten marks in order, above the one-line editor", () => {
+  const html = composer();
+  let previous = -1;
+  for (const format of FORMATS) { const at = html.indexOf(`aria-label="${format.label}"`); expect(at).toBeGreaterThan(previous); previous = at; }
+  expect(previous).toBeLessThan(html.indexOf('class="chat-composer-input"'));
+ });
+ test("slash opens and filters; SOON commands are disabled", () => {
+  const html = composer({ draft: "/", onInvite: () => {}, onDirect: () => {} });
+  expect(html).toContain('aria-label="Shortcuts"');
+  expect(html).toContain('SOON');
+  expect(html).toMatch(/disabled=""[^>]*class="chat-shortcut-row"/);
+  expect(composer({ draft: "/in" })).toContain('/invite');
+  expect(composer({ draft: "/in" })).not.toContain('/topic');
+  expect(filterShortcuts('/ask @codex question').map(command => command.name)).toEqual(['/ask']);
+ });
+ test("Slack modifier grammar", () => {
+  expect(formatShortcut({ metaKey: true, ctrlKey: false, shiftKey: true, altKey: true, key: 'c', code: 'KeyC' })).toBe('block');
+  expect(formatShortcut({ metaKey: true, ctrlKey: false, shiftKey: true, altKey: false, key: '&', code: 'Digit7' })).toBe('ol');
+ });
+});
+
+test("mic stays on the right next to send; the editor opens at one line", async () => {
+ const source = await Bun.file(new URL('./ChannelComposer.tsx', import.meta.url)).text();
+ const right = source.slice(source.indexOf('<span className="chat-composer-right">'));
+ expect(right.indexOf('aria-label="Record an audio clip"')).toBeGreaterThan(0);
+ expect(right.indexOf('aria-label="Record an audio clip"')).toBeLessThan(right.indexOf('className="chat-composer-send"'));
+ const css = await Bun.file(new URL('./chat-space.css', import.meta.url)).text();
+ expect(css).toContain('min-height: 42px;');
+ expect(css).toContain('line-height: 22px;');
 });

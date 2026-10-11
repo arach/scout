@@ -1,3 +1,6 @@
+import { loadOrCreateNodeIdentity, type NodeIdentity } from "./node-identity.js";
+import { signPeerRequest } from "./mesh-peer-auth.js";
+import { IROH_MESH_PATHS, irohDestinationKeyId } from "./iroh-peer-auth.js";
 import type { RuntimeChildProcessLike, RuntimeEnv, RuntimeReadableLike } from "./portable-types.js";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { join } from "node:path";
@@ -17,6 +20,8 @@ export type IrohBridgeMeshRoute =
   | "collaboration/events";
 
 export interface IrohBridgeForwardOptions {
+  /** Scout signing identity; independent of the Iroh transport key. */
+  nodeIdentity?: NodeIdentity;
   timeoutMs?: number;
   bridgeBin?: string;
   identityPath?: string;
@@ -174,6 +179,7 @@ export async function startIrohBridgeServe(options: IrohBridgeServeOptions): Pro
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      child.kill("SIGTERM");
       reject(error);
     }
 
@@ -274,6 +280,15 @@ export async function forwardIrohMeshEnvelope<TResponse>(
     throw new Error("OPENSCOUT_IROH_BRIDGE_BIN is not configured");
   }
 
+  if (entrypoint.alpn !== OPENSCOUT_IROH_MESH_ALPN || entrypoint.bridgeProtocolVersion !== OPENSCOUT_MESH_PROTOCOL_VERSION) {
+    throw new Error("Iroh peer does not support authenticated forwarding");
+  }
+  if (readEndpointId(entrypoint.endpointAddr) !== entrypoint.endpointId) throw new Error("Iroh endpoint identity mismatch");
+  const body = JSON.stringify(payload);
+  const headers = signPeerRequest(options.nodeIdentity ?? loadOrCreateNodeIdentity(), {
+    method: "POST", path: IROH_MESH_PATHS[route], body,
+    destinationKeyId: irohDestinationKeyId(entrypoint.endpointId),
+  });
   const identityPath = options.identityPath?.trim() || resolveIrohBridgeIdentityPath();
   const args = [
     "forward",
@@ -301,7 +316,7 @@ export async function forwardIrohMeshEnvelope<TResponse>(
     stderrChunks.push(chunk);
   });
 
-  child.stdin.end(JSON.stringify(payload));
+  child.stdin.end(JSON.stringify({ body, headers }));
 
   const exitCode = await new Promise<number | null>((resolve, reject) => {
     child.on("error", reject);

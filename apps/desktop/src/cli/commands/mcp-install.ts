@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { accessSync, constants, existsSync } from "node:fs";
+import { accessSync, constants } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { delimiter, join } from "node:path";
 
 import type { ScoutCommandContext } from "../context.ts";
 import { ScoutCliError } from "../errors.ts";
@@ -95,17 +95,9 @@ function resolveHostExecutable(
   return resolveExecutableFromSearchPath(["claude"], env);
 }
 
-function resolveCurrentScoutMcpLaunchCommand(
+export function resolveCurrentScoutMcpLaunchCommand(
   env: NodeJS.ProcessEnv,
 ): ScoutMcpLaunchCommand {
-  const currentScript = process.argv[1];
-  if (currentScript && existsSync(currentScript) && isExecutable(process.execPath)) {
-    return {
-      command: process.execPath,
-      args: [resolve(currentScript), "mcp"],
-    };
-  }
-
   const explicitCandidates = [
     env.OPENSCOUT_CLI_BIN,
     env.SCOUT_CLI_BIN,
@@ -130,7 +122,7 @@ function resolveCurrentScoutMcpLaunchCommand(
   }
 
   throw new ScoutCliError(
-    "Could not resolve a Scout CLI command to register with MCP hosts.",
+    "Could not resolve a stable Scout launcher. Install @openscout/scout globally or set OPENSCOUT_CLI_BIN; do not register a node_modules script.",
   );
 }
 

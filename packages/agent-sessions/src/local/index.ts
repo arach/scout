@@ -1,3 +1,4 @@
+import { AcpAdapter } from "../adapters/acp/adapter.js";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -24,6 +25,7 @@ import {
 import { buildLocalCodexLaunchArgs } from "./codex-launch-args.js";
 
 export {
+  existingCodexNativeSession,
   CODEX_ATTACHED_CAPABILITY_GAPS,
   CodexAppServerClient,
   CodexAppServerExitError,
@@ -152,6 +154,7 @@ export type LocalAgentClient = {
   close(): Promise<void>;
   interrupt?(): void;
   isAlive?(): boolean;
+  nativeAttention?: { observe: () => { state: "idle" | "active" | "unknown" | "gone"; sessionId?: string; turnId?: string; token: string; steer: boolean }; submit: AcpAdapter["submitExisting"] };
 };
 
 type LocalAdapterSpec = {
@@ -793,9 +796,11 @@ export async function createLocalAgentClient(
   }
 
   const spec = adapterSpecForTransport(transport);
+  let nativeAdapter: AcpAdapter | undefined;
+  let pendingTurns = 0;
   const registry = new SessionRegistry({
     adapters: {
-      [spec.adapterType]: spec.createAdapter,
+      [spec.adapterType]: config => { const adapter = spec.createAdapter(config); if (adapter instanceof AcpAdapter) nativeAdapter = adapter; return adapter; },
     },
   });
   const sessionId = options.sessionId?.trim() || options.reuseKey?.trim() || randomUUID();
@@ -880,8 +885,15 @@ export async function createLocalAgentClient(
   };
 
   return {
+    nativeAttention: {
+      observe: () => !nativeAdapter || closed ? { state: "unknown", steer: false, token: "" }
+        : pendingTurns && nativeAdapter.observeExisting().state === "idle" ? { state: "unknown", steer: false, token: "" } : nativeAdapter.observeExisting(),
+      submit: (expected, action, prompt) => !nativeAdapter || closed || pendingTurns
+        ? { accepted: false, evidence: "native_busy_or_unknown" } : nativeAdapter.submitExisting(expected, action, prompt),
+    },
     turn(input: string | LocalAgentClientTurnOptions): Promise<LocalAgentTurnResult> {
-      const next = queue.then(() => runTurn(input), () => runTurn(input));
+      pendingTurns++;
+      const next = queue.then(() => runTurn(input), () => runTurn(input)).finally(() => { pendingTurns--; });
       queue = next.then(() => undefined, () => undefined);
       return next;
     },

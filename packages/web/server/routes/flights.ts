@@ -66,8 +66,14 @@ export function mountFlightRoutes(app: Hono) {
     return c.json(queryBrokerFlightsForWeb(broker, query));
   });
   app.get("/api/follow", (c) => {
-    const conversationId = c.req.query("conversationId") || undefined;
-    if (conversationId && !isOpaqueChannelId(conversationId)) {
+    const requestedConversationId = c.req.query("conversationId") || undefined;
+    const conversationId = requestedConversationId && isOpaqueChannelId(requestedConversationId)
+      ? requestedConversationId : undefined;
+    // Old receipts embedded legacy DM names alongside durable task ids.
+    // Resolve through the task and recover its canonical conversation instead
+    // of rejecting the whole link because of a redundant stale hint.
+    const hasTask = Boolean(c.req.query("flightId")?.trim() || c.req.query("invocationId")?.trim() || c.req.query("workId")?.trim());
+    if (requestedConversationId && !conversationId && !hasTask) {
       return c.json({ error: "chatId must be an opaque chat id" }, 400);
     }
     return c.json(

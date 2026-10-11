@@ -12,7 +12,7 @@ import {
 export type { TopNavItem, TopNavKey };
 export { ROUTE_VIEW_LABELS, routeBreadcrumbForRoute };
 
-// Flat single-row nav: Home · Chat · Agents · Terminals · Broker · Search ·
+// Flat single-row nav: Home · Sessions · Chats · Projects · Terminals · Dispatch · Search ·
 // Ops. Every primary surface is one click from chrome — the System dropdown
 // is gone; the ops cluster's mode surfaces live on the Ops screens' own
 // secondary strip. There is no lean/full switch — `nav.clean` is gone.
@@ -36,14 +36,16 @@ export function topNavKeyForRoute(route: Route): TopNavKey {
     return "agents";
   }
   switch (route.view) {
+    case "requests":
+      return "requests";
     case "agents-v2":
     case "agent-info":
     case "repos":
     case "repo-diff":
     case "code":
       return "agents";
-    // Harness session transcripts live under the Terminals tab.
     case "sessions":
+      return "sessions";
     case "terminal":
       return "terminals";
     case "conversation":
@@ -74,8 +76,8 @@ export function topNavKeyForRoute(route: Route): TopNavKey {
 
 /**
  * Breadcrumb for the current route. Delegates to the neutral route-breadcrumb
- * module; preserves the historical agents-config "Configuration" crumb and
- * the prior sparse set used by top-tab chrome tests.
+ * module; preserves the prior sparse set used by top-tab chrome tests,
+ * without redefining any destination label.
  *
  * For new callers prefer `routeBreadcrumbForRoute` (complete for all areas).
  */
@@ -83,7 +85,7 @@ export function topNavBreadcrumbForRoute(route: Route): string | null {
   // Keep the legacy sparse contract for top-tab chrome: only detail-ish routes
   // that the old strip showed. The fuller map lives in routeBreadcrumbForRoute.
   if (route.view === "settings" && route.section === "agents") {
-    return "Configuration";
+    return routeBreadcrumbForRoute(route);
   }
   switch (route.view) {
     case "conversation":

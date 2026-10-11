@@ -16,6 +16,7 @@ import { BackToPicker } from "../../scout/slots/BackToPicker.tsx";
 import { ConversationScreen } from "../chat/ConversationScreen.tsx";
 import { SessionObserve, SessionObserveContextRail } from "./SessionObserve.tsx";
 import { SessionRetrospective, sessionRetrospectiveIsComplete } from "./SessionRetrospective.tsx";
+import { SessionWorkRead } from "./SessionWorkRead.tsx";
 import {
   SessionRefObserveHeader,
   sessionRefObserveOriginLabel,
@@ -93,7 +94,7 @@ function isNativeProcessRef(value: string): boolean {
   return value.startsWith("native:process:");
 }
 
-function useSessionRefLookup(sessionRef: string) {
+export function useSessionRefLookup(sessionRef: string) {
   const [state, setState] = useState<SessionRefLookupState<SessionRefLookup>>(() => ({
     sessionRef,
     lookup: null,
@@ -129,7 +130,7 @@ function useSessionRefLookup(sessionRef: string) {
   }
 
   const load = useCallback(async () => {
-    await coordinatorRef.current!.request(sessionRef);
+    if (sessionRef) await coordinatorRef.current!.request(sessionRef);
   }, [sessionRef]);
 
   useEffect(() => {
@@ -201,7 +202,7 @@ function useSessionRefLookup(sessionRef: string) {
     };
   }, []);
 
-  return { lookup, loading, error };
+  return { lookup, loading, error, refresh: load };
 }
 
 export function SessionRefContextRail({ sessionRef }: { sessionRef: string }) {
@@ -276,6 +277,11 @@ export function SessionRefScreen({
           observe={lookup.observe}
           machineId={machineId}
           navigate={navigate}
+        />
+        <SessionWorkRead
+          agentId={lookup.observe.agentId ?? lookup.session?.agentId ?? null}
+          sessionId={lookup.observe.sessionId ?? lookup.observe.refId}
+          live={lookup.observe.data.live ?? false}
         />
         {sessionRetrospectiveIsComplete(lookup.observe.data, lookup.observe.source) && (
           <SessionRetrospective

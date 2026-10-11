@@ -14,3 +14,5 @@ export * from "./sessions.js";
 export * from "./cert-status.js";
 export * from "./diagnostics.js";
 export * from "./lan-scan.js";
+export * from "./ssh-config.js";
+export * from "./machine-readiness.js";

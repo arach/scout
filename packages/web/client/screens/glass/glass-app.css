@@ -1,0 +1,33 @@
+/* Glass, the whole app: the chrome is gone, so content runs edge to edge
+   under a drag strip. */
+
+/* The tokens that make the ground glass and the content solid live in
+   styles/glass.css, shared with the main window's glass mode. */
+
+.glass-app {
+  display: block;
+  height: 100vh;
+  overflow: hidden;
+}
+.glass-app__content {
+  position: absolute;
+  inset: 0;
+  /* Top clears the invisible strip the window keeps for dragging. */
+  padding-top: 28px;
+  overflow: auto;
+  scrollbar-width: none;
+}
+.glass-app__content::-webkit-scrollbar { display: none; }
+
+/* The bar floats low and centred, over whatever screen is up. */
+.glass-app__bar {
+  position: fixed;
+  z-index: 90;
+  left: 50%;
+  bottom: 28px;
+  width: min(560px, calc(100vw - 32px));
+  translate: -50% 0;
+  --rk-cbar-max: min(360px, 60vh);
+}
+.glass-app__bar .rk-cbar { position: relative; left: 0; right: 0; bottom: 0; }
+.glass-app .glass-mode { position: fixed; z-index: 90; }

@@ -9,7 +9,7 @@ import { runAskWithOptions } from "./commands/ask.ts";
 import { loadScoutCommandHandler } from "./commands/index.ts";
 import { renderScoutHelp } from "./help.ts";
 import { parseImplicitAskCommandOptions } from "./options.ts";
-import { findScoutCommandRegistration } from "./registry.ts";
+import { findScoutCommandRegistration, unknownScoutCommandMessage } from "./registry.ts";
 import {
   normalizeCliBinaryMtimeMs,
   shouldEnsureBrokerUptodateForCommand,
@@ -72,7 +72,7 @@ async function main() {
   }
   if (!registration) {
     if (commandArgs.includes("--help") || commandArgs.includes("-h")) {
-      throw new ScoutCliError(`unknown command: ${command}; see scout help --detail`);
+      throw new ScoutCliError(unknownScoutCommandMessage(command, SCOUT_APP_VERSION));
     }
     const implicitPromptArgs = [command, ...commandArgs];
     try {
@@ -82,7 +82,7 @@ async function main() {
       return;
     } catch (error) {
       if (error instanceof ScoutCliError && error.message.startsWith("implicit ask requires")) {
-        throw new ScoutCliError(`unknown command: ${command}`);
+        throw new ScoutCliError(unknownScoutCommandMessage(command, SCOUT_APP_VERSION));
       }
       throw error;
     }

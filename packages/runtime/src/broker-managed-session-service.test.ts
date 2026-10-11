@@ -194,6 +194,104 @@ describe("BrokerManagedSessionService", () => {
     expect(harness.shutDownEndpointIds).toEqual([]);
   });
 
+  test("attaches a live terminal harness to its own tmux pane without a pairing session", async () => {
+    const harness = createHarness();
+
+    const attached = await harness.service.attachManagedLocalSession({
+      externalSessionId: "",
+      transport: "tmux",
+      cwd: "/tmp/grok-here",
+      liveTerminal: {
+        harness: "grok",
+        pid: 85103,
+        tty: "ttys009",
+        surface: { backend: "tmux", pane: "%12", session: "work" },
+      },
+    });
+    const snapshot = harness.runtime.snapshot();
+
+    expect(attached.selector).toBe("@grok-grok-here");
+    expect(attached.sessionId).toBe("work");
+    expect(harness.ensuredThreads).toEqual([]);
+    expect(snapshot.agents[attached.agentId]).toEqual(expect.objectContaining({
+      displayName: "Grok (grok-here)",
+      wakePolicy: "manual",
+    }));
+    expect(snapshot.endpoints[attached.endpointId]).toEqual(expect.objectContaining({
+      transport: "tmux",
+      harness: "grok",
+      sessionId: "work",
+      pane: "%12",
+      metadata: expect.objectContaining({
+        source: "local-session",
+        managedByScout: true,
+        attachedLive: true,
+        livePid: 85103,
+        liveTty: "ttys009",
+        tmuxPane: "%12",
+      }),
+    }));
+
+    const detached = await harness.service.detachManagedLocalSession({ alias: "@grok-grok-here" });
+    expect(detached.endpointId).toBe(attached.endpointId);
+    expect(harness.runtime.snapshot().endpoints[attached.endpointId]?.state).toBe("offline");
+  });
+
+  test("attaches a live harness in a Ghostty terminal by surface id", async () => {
+    const harness = createHarness();
+
+    const attached = await harness.service.attachManagedLocalSession({
+      externalSessionId: "",
+      transport: "ghostty",
+      cwd: "/tmp/repo",
+      alias: "@tchaikovsky",
+      liveTerminal: {
+        harness: "grok",
+        pid: 85103,
+        tty: "ttys013",
+        surface: { backend: "ghostty", terminalId: "D0B1E807-7BA3-4786-A0EB-18EDEF5CA895" },
+      },
+    });
+
+    expect(attached.selector).toBe("@tchaikovsky");
+    expect(harness.ensuredThreads).toEqual([]);
+    expect(harness.runtime.snapshot().endpoints[attached.endpointId]).toEqual(expect.objectContaining({
+      transport: "ghostty",
+      harness: "grok",
+      sessionId: "D0B1E807-7BA3-4786-A0EB-18EDEF5CA895",
+      metadata: expect.objectContaining({
+        attachedLive: true,
+        livePid: 85103,
+        liveTty: "ttys013",
+        ghosttyTerminalId: "D0B1E807-7BA3-4786-A0EB-18EDEF5CA895",
+      }),
+    }));
+  });
+
+  test("rejects a surface that does not match the transport", async () => {
+    const harness = createHarness();
+    await expect(harness.service.attachManagedLocalSession({
+      externalSessionId: "",
+      transport: "tmux",
+      cwd: "/tmp/repo",
+      liveTerminal: {
+        harness: "grok",
+        pid: 85103,
+        tty: "ttys013",
+        surface: { backend: "ghostty", terminalId: "D0B1E807" },
+      },
+    })).rejects.toThrow("tmux attach needs liveTerminal");
+  });
+
+  test("rejects a tmux attach without a live pane", async () => {
+    const harness = createHarness();
+    await expect(harness.service.attachManagedLocalSession({
+      externalSessionId: "",
+      transport: "tmux",
+      cwd: "/tmp/grok-here",
+    })).rejects.toThrow("tmux attach needs liveTerminal");
+  });
+
   test("reconciles managed pairing endpoints and retires legacy pairing registrations", async () => {
     const harness = createHarness({
       snapshotSessions: {

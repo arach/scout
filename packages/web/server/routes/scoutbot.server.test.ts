@@ -66,6 +66,7 @@ describe("createOpenScoutWebServer: scoutbot routes", () => {
   });
 
   test("runs Scoutbot assistant through direct OpenAI control loop", async () => {
+    useIsolatedOpenScoutHome();
     process.env.OPENAI_API_KEY = "sk-test";
     process.env.OPENSCOUT_SCOUTBOT_ASSISTANT_MODEL = "gpt-test-scoutbot";
     const fetchCalls: Array<{
@@ -137,6 +138,7 @@ describe("createOpenScoutWebServer: scoutbot routes", () => {
   });
 
   test("streams Scoutbot voice replies as sentence SSE events before the final payload", async () => {
+    useIsolatedOpenScoutHome();
     process.env.OPENAI_API_KEY = "sk-test";
     process.env.OPENSCOUT_SCOUTBOT_ASSISTANT_MODEL = "gpt-test-scoutbot";
     const fetchBodies: Array<Record<string, unknown>> = [];
@@ -197,6 +199,30 @@ describe("createOpenScoutWebServer: scoutbot routes", () => {
     expect(final.session.messages.map((message) => message.role)).toEqual(["user", "assistant"]);
     expect(fetchBodies).toHaveLength(1);
     expect(fetchBodies[0]!.stream).toBe(true);
+  });
+
+  test("a restarted web server still has the Scoutbot conversation", async () => {
+    useIsolatedOpenScoutHome();
+    process.env.OPENAI_API_KEY = "sk-test";
+    globalThis.fetch = (async () => Response.json({ id: "resp_kept", output_text: "Noted." })) as typeof fetch;
+    const boot = () => createOpenScoutWebServer({
+      currentDirectory: "/tmp/openscout", assetMode: "static", staticRoot: makeStaticRoot(),
+      scoutbotAssistant: { agentAvailable: () => false },
+    });
+
+    const before = await boot();
+    const sent = await before.app.request("http://localhost/api/scoutbot/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ body: "Keep this one." }),
+    });
+    expect(sent.status).toBe(200);
+
+    const after = await boot();
+    const state = await (await after.app.request("http://localhost/api/scoutbot/session")).json() as {
+      session: { messages: Array<{ body: string }> };
+    };
+    expect(state.session.messages.map((message) => message.body)).toEqual(["Keep this one.", "Noted."]);
   });
 
   test("Scoutbot overlapping chat requests expose 409 without starting a second provider", async () => {
@@ -268,6 +294,7 @@ describe("createOpenScoutWebServer: scoutbot routes", () => {
   });
 
   test("ends the Scoutbot stream with an in-band error event on mid-stream failure", async () => {
+    useIsolatedOpenScoutHome();
     process.env.OPENAI_API_KEY = "sk-test";
     globalThis.fetch = (async () => {
       const sse = [
@@ -386,6 +413,7 @@ describe("createOpenScoutWebServer: scoutbot routes", () => {
   });
 
   test("a Local Live turn prewarms, goes direct to OpenAI with reasoning off, and sends the slim snapshot", async () => {
+    useIsolatedOpenScoutHome();
     process.env.OPENAI_API_KEY = "sk-test";
     const bodies: Array<Record<string, unknown>> = [];
     globalThis.fetch = (async (_input, init) => {
@@ -441,6 +469,7 @@ describe("createOpenScoutWebServer: scoutbot routes", () => {
   });
 
   test("routes Scoutbot chat to the agent path first when it can launch", async () => {
+    useIsolatedOpenScoutHome();
     process.env.OPENAI_API_KEY = "sk-test";
     let fetchCalled = false;
     globalThis.fetch = (async () => {
@@ -480,6 +509,7 @@ describe("createOpenScoutWebServer: scoutbot routes", () => {
   });
 
   test("streams agent deltas as SSE sentences before the final payload", async () => {
+    useIsolatedOpenScoutHome();
     process.env.OPENAI_API_KEY = "sk-test";
     globalThis.fetch = (async () => {
       throw new Error("OpenAI must not be called when the agent path serves the turn");
@@ -524,6 +554,7 @@ describe("createOpenScoutWebServer: scoutbot routes", () => {
   });
 
   test("creates a structured Scoutbot one-minute brief with TTL", async () => {
+    useIsolatedOpenScoutHome();
     process.env.OPENAI_API_KEY = "sk-test";
     const fetchCalls: Array<{
       body: Record<string, unknown>;
@@ -622,6 +653,7 @@ describe("createOpenScoutWebServer: scoutbot routes", () => {
   });
 
   test("caches the fleet home brief until its thirty-minute TTL expires and ignores refresh hints", async () => {
+    useIsolatedOpenScoutHome();
     process.env.OPENAI_API_KEY = "sk-test";
     const fetchCalls: Array<Record<string, unknown>> = [];
     globalThis.fetch = (async (_input, init) => {
@@ -914,6 +946,7 @@ describe("createOpenScoutWebServer: scoutbot routes", () => {
   });
 
   test("uses the local Scout relay OpenAI key for Scoutbot assistant", async () => {
+    useIsolatedOpenScoutHome();
     delete process.env.OPENAI_API_KEY;
     stubs.scoutRelayConfigResult = { openaiApiKey: "sk-relay-test" };
     const fetchCalls: Array<{ authorization: string | null }> = [];

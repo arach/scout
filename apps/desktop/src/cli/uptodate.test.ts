@@ -20,6 +20,12 @@ describe("CLI broker update check", () => {
     expect(shouldEnsureBrokerUptodateForCommand("mcp")).toBe(false);
     expect(shouldEnsureBrokerUptodateForCommand("statusline")).toBe(false);
     expect(shouldEnsureBrokerUptodateForCommand("search")).toBe(false);
+    expect(shouldEnsureBrokerUptodateForCommand("who")).toBe(false);
+    expect(shouldEnsureBrokerUptodateForCommand("recent")).toBe(false);
+    expect(shouldEnsureBrokerUptodateForCommand("check")).toBe(false);
+    expect(shouldEnsureBrokerUptodateForCommand("where", ["index"])).toBe(false);
+    expect(shouldEnsureBrokerUptodateForCommand("hosts")).toBe(false);
+    expect(shouldEnsureBrokerUptodateForCommand("whoami")).toBe(false);
     expect(shouldEnsureBrokerUptodateForCommand("web", ["install"])).toBe(false);
     expect(shouldEnsureBrokerUptodateForCommand("report")).toBe(false);
     expect(shouldEnsureBrokerUptodateForCommand("feedback")).toBe(false);

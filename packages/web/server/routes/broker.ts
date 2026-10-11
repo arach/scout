@@ -27,6 +27,10 @@ import { readLocalHarnessTopologySnapshot } from "../harness-topology.ts";
 import type { ScoutbotWebServices } from "./scoutbot.ts";
 import { brokerDispatchReviewBody } from "../../shared/api/broker.ts";
 import { readJsonBody } from "../request-body.ts";
+import { loadRevealObservePayload } from "../observe-payload.ts";
+import { readSessionWork } from "../session-work-read.ts";
+import { completeViaSubscription } from "../harness-completion.ts";
+import { readSessionPrompts } from "../session-prompts.ts";
 
 type BrokerDispatchReviewAttempt = ReturnType<typeof queryBrokerDiagnostics>["attempts"][number];
 
@@ -393,6 +397,32 @@ export function mountBrokerRoutes(app: Hono, deps: BrokerRouteDeps) {
       completeCheap: (input) => scoutbot.assistant.completeCheap(input),
     });
     return c.json({ ...budgets, advice });
+  });
+  // Scoutbot's read of a session's work (now, guidance in force, shape).
+  // Returns at once; a fresh read is "pending" until the cheap call lands.
+  app.get("/api/session-work-read", async (c) => {
+    const agentId = optionalString(c.req.query("agentId"));
+    const sessionId = optionalString(c.req.query("sessionId"));
+    if (!agentId && !sessionId) {
+      return c.json({ error: "agentId or sessionId is required" }, 400);
+    }
+    const payload = await loadRevealObservePayload({ agentId, sessionId }).catch(() => null);
+    if (!payload) {
+      return c.json({ status: "unavailable", detail: "No trace for this session.", turn: 0 });
+    }
+    const key = payload.sessionId ?? sessionId ?? agentId ?? "";
+    const prompts = await readSessionPrompts(payload.historyPath);
+    // A broker run's brief is its first prompt when the transcript lacks it.
+    const brief = "initiatingAsk" in payload ? payload.initiatingAsk : null;
+    if (brief?.task.trim() && !prompts.some((prompt) => prompt.text === brief.task.trim())) {
+      prompts.unshift({ text: brief.task.trim(), at: brief.requestedAt });
+    }
+    return c.json(await readSessionWork(key, payload.data, prompts, {
+      complete: (input) => completeViaSubscription(input, {
+        loadGauges: async () => (await loadServiceBudgets()).gauges,
+      }),
+      wait: c.req.query("wait") === "1",
+    }));
   });
   app.post("/api/service-budgets/dashboard-import", async (c) => {
     const body = await c.req.json<{ provider?: unknown; text?: unknown }>().catch(() => null);

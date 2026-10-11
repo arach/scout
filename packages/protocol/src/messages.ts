@@ -38,6 +38,8 @@ export interface MessageAudience {
 }
 
 export interface MessageRecord {
+  /** Requester-scoped idempotency key for client posts. */
+  requestId?: ScoutId;
   id: ScoutId;
   conversationId: ScoutId;
   actorId: ScoutId;

@@ -1,3 +1,4 @@
+import { agentInterruptBody } from "../../shared/api/agents.ts";
 import type { Hono } from "hono";
 import { resolve } from "node:path";
 import {
@@ -1422,6 +1423,14 @@ export function mountAgentRoutes(app: Hono, deps: AgentRouteDeps) {
 
   app.post("/api/agents/:agentId/interrupt", async (c) => {
     const agentId = c.req.param("agentId");
+    const parsed = await readJsonBody(c, agentInterruptBody);
+    if (!parsed.ok) return parsed.response;
+    if (parsed.body.expectedSessionId) {
+      const current = queryAgentById(agentId);
+      if (current?.harnessSessionId !== parsed.body.expectedSessionId || current?.terminalSurface?.backend !== "tmux") {
+        return c.json({ error: "The live session changed or is not tmux-backed. Refresh before interrupting." }, 409);
+      }
+    }
     const { interruptLocalAgent } =
       await import("@openscout/runtime/local-agents");
     const result = await interruptLocalAgent(agentId);

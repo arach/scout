@@ -182,6 +182,36 @@ describe("parseSendCommandOptions", () => {
 });
 
 describe("parseAskCommandOptions", () => {
+  test("--on keeps the project path as typed, for the other machine to resolve", () => {
+    const parsed = parseAskCommandOptions(
+      ["--on", "archie", "--project", "~/renders/arsenal-x", "--runtime", "codex/gpt-6-astra/high", "build the arsenal"],
+      "/Users/art/dev/openscout",
+    );
+    expect(parsed).toEqual(expect.objectContaining({
+      onHost: "archie",
+      projectPath: "~/renders/arsenal-x",
+      harness: "codex",
+      model: "gpt-6-astra",
+      reasoningEffort: "high",
+      session: "new",
+      message: "build the arsenal",
+    }));
+  });
+
+  test("--host is the same flag as --on", () => {
+    expect(parseAskCommandOptions(["--host=archie", "--project", "/srv/x", "go"], "/tmp").onHost).toBe("archie");
+  });
+
+  test("--on without --project says what is missing", () => {
+    expect(() => parseAskCommandOptions(["--on", "archie", "go"], "/tmp"))
+      .toThrow("--on archie needs --project <path on archie>");
+  });
+
+  test("--on does not combine with an existing target", () => {
+    expect(() => parseAskCommandOptions(["--on", "archie", "--project", "/srv/x", "--to", "@talkie", "go"], "/tmp"))
+      .toThrow("drop --to/--ref/--profile");
+  });
+
   test("round-trips orchestration advisor routes through supported ask flags", () => {
     const routes: OrchestrationRuntimeRoute[] = [
       {

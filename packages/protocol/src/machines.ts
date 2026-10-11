@@ -26,7 +26,7 @@ import type { AdvertiseScope, MetadataMap, ScoutId } from "./common.js";
 
 export const MACHINE_ID_PREFIX = "mach-";
 
-export type MachineEvidenceKind = "scout" | "tailnet" | "lan" | "host";
+export type MachineEvidenceKind = "scout" | "tailnet" | "lan" | "host" | "ssh";
 
 export type MachinePlatform =
   | "macos"
@@ -132,11 +132,39 @@ export interface HostMachineEvidence extends MachineEvidenceBase {
   version?: string;
 }
 
+/**
+ * One `Host` block from the operator's SSH config: how they already reach a
+ * machine. It is configuration, not a sighting — it names the machine and the
+ * way in, but proves nothing about whether the machine is up, so it never
+ * moves `lastSeenAt` and never adds a capability (see `isMachineSighting`).
+ */
+export interface SshMachineEvidence extends MachineEvidenceBase {
+  kind: "ssh";
+  /** The first pattern on the `Host` line — what the operator types. */
+  alias: string;
+  /** Every concrete pattern on the line, `alias` first. */
+  aliases: string[];
+  /** `HostName`, or the alias itself when the block sets none. */
+  hostName: string;
+  user?: string;
+  port?: number;
+  identityFile?: string;
+  proxyJump?: string;
+  /** The file the block came from, for "edit in" affordances. */
+  configPath: string;
+}
+
 export type MachineEvidence =
   | ScoutMachineEvidence
   | TailnetMachineEvidence
   | LanMachineEvidence
-  | HostMachineEvidence;
+  | HostMachineEvidence
+  | SshMachineEvidence;
+
+/** Whether a piece of evidence is someone actually seeing the machine. */
+export function isMachineSighting(evidence: MachineEvidence): boolean {
+  return evidence.kind !== "ssh";
+}
 
 /**
  * Identity keys, split by how long they stay true.
@@ -321,6 +349,22 @@ export function machineIdentityKeys(evidence: MachineEvidence): MachineIdentityK
       if (host) pushKey(durable, `host:${host}`);
       return { durable, transient };
     }
+    case "ssh": {
+      // Only HostName identifies the machine. The aliases are the operator's
+      // shorthand (`art` for arts-mac-mini) and would fuse unrelated machines
+      // that happen to share a nickname with someone's hostname.
+      const address = normalizeMachineAddress(evidence.hostName);
+      if (/^[\d.]+$|:/.test(address)) {
+        // A literal address: a tailnet one stays with its node; a LAN one is
+        // DHCP's to reassign, so it joins only within this pass.
+        if (isTailnetAddress(address)) pushKey(durable, `ip:${address}`);
+        else if (!isLoopbackAddress(address)) pushKey(transient, `ip:${address}`);
+        return { durable, transient };
+      }
+      const host = normalizeMachineHostName(evidence.hostName);
+      if (host) pushKey(durable, `host:${host}`);
+      return { durable, transient };
+    }
     default:
       return EMPTY_KEYS;
   }
@@ -481,6 +525,10 @@ export function deriveMachineName(evidence: readonly MachineEvidence[]): string 
     if (name) return name;
   }
 
+  // Known only from the SSH config: the alias the operator types for it.
+  const ssh = evidenceOf(evidence, "ssh")[0];
+  if (ssh) return ssh.alias;
+
   const mac = evidenceOf(evidence, "lan")
     .map((lan) => normalizeMacAddress(lan.macAddress))
     .find(Boolean);
@@ -627,6 +675,35 @@ export type MachinePresence = "online" | "recent" | "offline";
 export const MACHINE_ONLINE_WINDOW_MS = 2 * 60_000;
 export const MACHINE_RECENT_WINDOW_MS = 60 * 60_000;
 
+/** One way in over SSH, as the operator's config spells it. */
+export interface MachineSshTarget {
+  alias: string;
+  aliases: string[];
+  hostName: string;
+  user?: string;
+  port?: number;
+  identityFile?: string;
+  proxyJump?: string;
+  configPath: string;
+}
+
+/**
+ * The SSH ways in, read off the evidence. Stored records keep only the
+ * evidence, so readers derive this rather than trusting a persisted copy.
+ */
+export function machineSshTargets(evidence: readonly MachineEvidence[]): MachineSshTarget[] {
+  return evidenceOf(evidence, "ssh").map((ssh) => ({
+    alias: ssh.alias,
+    aliases: ssh.aliases,
+    hostName: ssh.hostName,
+    ...(ssh.user ? { user: ssh.user } : {}),
+    ...(ssh.port ? { port: ssh.port } : {}),
+    ...(ssh.identityFile ? { identityFile: ssh.identityFile } : {}),
+    ...(ssh.proxyJump ? { proxyJump: ssh.proxyJump } : {}),
+    configPath: ssh.configPath,
+  }));
+}
+
 export interface MachineRecord {
   id: ScoutId;
   /** Operator-set name. Null means "use `name`". */
@@ -646,6 +723,8 @@ export interface MachineRecord {
   macAddresses: string[];
   capabilities: MachineCapability[];
   routes: MachineRoute[];
+  /** SSH config entries that reach this machine. Configured, not observed. */
+  sshTargets?: MachineSshTarget[];
   evidence: MachineEvidence[];
   /** Operator marked it worth keeping even when nothing has seen it in weeks. */
   pinned: boolean;
@@ -679,7 +758,13 @@ export function buildMachineRecord(
   previous?: Partial<MachineRecord> | null,
 ): MachineRecord {
   const evidence = [...group.evidence].sort((a, b) => a.observedAt - b.observedAt);
-  const observedAt = evidence.reduce((latest, item) => Math.max(latest, item.observedAt), 0);
+  // Presence comes from sightings only: reading the SSH config every pass
+  // would otherwise make every machine in it look online forever.
+  const observedAt = evidence
+    .filter(isMachineSighting)
+    .reduce((latest, item) => Math.max(latest, item.observedAt), 0);
+  const configuredAt = evidence.reduce((latest, item) => Math.max(latest, item.observedAt), 0);
+  const sshTargets = machineSshTargets(evidence);
 
   const scout = evidenceOf(evidence, "scout")[0];
   const tailnet = evidenceOf(evidence, "tailnet")
@@ -726,10 +811,12 @@ export function buildMachineRecord(
     macAddresses,
     capabilities: deriveMachineCapabilities(evidence),
     routes: deriveMachineRoutes(evidence, isSelf),
+    ...(sshTargets.length > 0 ? { sshTargets } : {}),
     evidence,
     pinned: previous?.pinned ?? false,
     ...(previous?.notes ? { notes: previous.notes } : {}),
-    firstSeenAt: previous?.firstSeenAt ?? observedAt,
+    // A machine known only from config was first *listed* when it was read.
+    firstSeenAt: previous?.firstSeenAt ?? (observedAt || configuredAt),
     lastSeenAt: Math.max(observedAt, previous?.lastSeenAt ?? 0),
     ...(previous?.metadata ? { metadata: previous.metadata } : {}),
   };

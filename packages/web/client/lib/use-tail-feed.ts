@@ -1,8 +1,8 @@
-import { startTransition, useCallback, useEffect, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "./api.ts";
 import { useTailEvents } from "./tail-events.ts";
-import { appendLiveTailEvent, mergeHydratedTailEvents } from "./tail-event-merge.ts";
+import { appendLiveTailEvent, mergeHydratedTailEvents, mergeTailSessionPresence } from "./tail-event-merge.ts";
 import { isScoutSurfaceActive, onScoutSurfaceActivated } from "./surface-activity.ts";
 import type { TailDiscoverySnapshot, TailEvent } from "./types.ts";
 import {
@@ -100,6 +100,7 @@ export function useTailFeed(options?: {
 
   const [discovery, setDiscovery] = useState<TailDiscoverySnapshot | null>(null);
   const [events, setEvents] = useState<TailEvent[]>([]);
+  const [sessionPresence, setSessionPresence] = useState<TailEvent[]>([]);
   const [loadState, setLoadState] = useState<TailFeedLoadState>({
     discovery: "loading",
     recent: "loading",
@@ -253,5 +254,40 @@ export function useTailFeed(options?: {
     void refreshRecent(true);
   }, [enabled, historyHydrationKey, refreshRecent]);
 
-  return { discovery, events, loadState, refreshDiscovery, retryInitialLoad };
+  // Admission needs sparse session evidence across the whole horizon, while
+  // the trace keeps its existing global detail budget. The broker's replies
+  // mode already returns at most one genuine assistant reply per session.
+  useEffect(() => {
+    if (!enabled || !includeTranscriptReplay || !recentWindowMs) return;
+    let cancelled = false;
+    let inFlight = false;
+    let initial = true;
+    const load = async () => {
+      if (inFlight || (pauseWhenHidden && !initial && !isScoutSurfaceActive())) return;
+      initial = false;
+      inFlight = true;
+      const params = new URLSearchParams({
+        limit: String(Math.min(discoveryLimit ?? 160, 200)),
+        transcripts: "true",
+        mode: "assistant-replies",
+        windowMs: String(Math.floor(recentWindowMs)),
+      });
+      try {
+        const payload = await api<{ events: TailEvent[] }>(`/api/tail/recent?${params}`);
+        if (!cancelled) setSessionPresence(payload.events ?? []);
+      } catch {
+        // The normal live/history channels remain usable; retry on activation
+        // or the next discovery interval without blocking startup.
+      } finally { inFlight = false; }
+    };
+    void load();
+    const timer = setInterval(() => void load(), discoveryIntervalMs);
+    const stopActivationListener = pauseWhenHidden ? onScoutSurfaceActivated(() => void load()) : null;
+    return () => { cancelled = true; clearInterval(timer); stopActivationListener?.(); };
+  }, [enabled, includeTranscriptReplay, recentWindowMs, discoveryLimit, discoveryIntervalMs, pauseWhenHidden]);
+
+  const rosterEvents = useMemo(() => includeTranscriptReplay && recentWindowMs
+    ? mergeTailSessionPresence(events, sessionPresence, Date.now(), recentWindowMs)
+    : events, [events, sessionPresence, includeTranscriptReplay, recentWindowMs]);
+  return { discovery, events: rosterEvents, loadState, refreshDiscovery, retryInitialLoad };
 }

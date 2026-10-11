@@ -7,6 +7,7 @@ import type {
   SessionPlacement,
 } from "@openscout/protocol";
 
+import { describeAttachedLiveTerminal, isAttachedLiveTerminalEndpoint } from "./live-terminal-session.js";
 import { isA2AHttpEndpoint } from "./a2a-http-endpoint.js";
 import { isCodexThreadHeldExternallyError } from "./codex-app-server.js";
 import {
@@ -307,6 +308,18 @@ export class BrokerLocalEndpointResolver {
 
     if (targetSessionId) {
       return undefined;
+    }
+
+    // An agent bound to the operator's own live session is reachable only
+    // there. Never spawn a replacement when that process is gone.
+    const attachedLive = this.options.runtime.endpointsForAgent(invocation.targetAgentId, {
+      nodeId: this.options.nodeId,
+    }).find(isAttachedLiveTerminalEndpoint);
+    if (attachedLive) {
+      throw new Error(
+        `live ${attachedLive.harness} session in ${describeAttachedLiveTerminal(attachedLive)} is no longer running; `
+          + "Scout does not start a replacement. Attach the session again from where it runs.",
+      );
     }
 
     const binding = await this.options.ensureLocalAgentBindingOnline(invocation.targetAgentId, this.options.nodeId, {

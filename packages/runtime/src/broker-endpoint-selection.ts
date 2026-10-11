@@ -118,11 +118,13 @@ export function classifyEndpoint(
   const candidateState = endpointCandidateState(endpoint?.state);
   const onlineState = isEndpointOnlineState(endpoint?.state);
   const stale = !endpoint || hasRetiredEndpointRegistration(endpoint);
-  const busy = endpoint?.state === "active" || endpoint?.state === "waiting";
+  const busy = endpoint?.state === "active" || endpoint?.state === "waiting" || endpoint?.state === "working";
   const supportedTransport = Boolean(
     endpoint
       && (
         endpoint.transport === "pairing_bridge"
+        || endpoint.transport === "mcp_poll"
+        || endpoint.transport === "claude_channel"
         || isA2AHttpEndpoint(endpoint)
         || isExternalSessionEndpoint(endpoint)
         || isBrokerRunnableLocalAgentTransport(endpoint.transport)
@@ -213,16 +215,17 @@ export function isStaleLocalEndpoint(
 export function describeUnavailableSessionEndpoint(
   endpoint: AgentEndpoint,
 ): ScoutDispatchUnavailableTarget | null {
-  if (endpoint.transport === "mcp_poll" && endpoint.state === "registered") return null;
+  const availability = evaluateBrokerAvailability({
+    endpoint, authority: endpoint.nodeId, authorityAvailable: true,
+    checkedAt: Date.now(), targetSessionId: endpoint.sessionId ?? endpoint.id,
+  });
   const endpointState = endpointCandidateState(endpoint.state);
-  if (endpointState === "online") {
-    return null;
-  }
+  if (availability.state === "ready") return null;
   return {
     agentId: endpoint.agentId,
     displayName: endpoint.agentId,
     reason: "session_reference_not_attachable",
-    detail: `Session ${endpoint.sessionId ?? endpoint.id} is no longer attachable (endpoint ${endpoint.state}).`,
+    detail: `Session ${endpoint.sessionId ?? endpoint.id} is no longer attachable (${availability.reason}). Start fresh explicitly: scout ask --project ${JSON.stringify(endpoint.projectRoot ?? endpoint.cwd ?? "/path/to/project")} --harness ${endpoint.harness} "your request".`,
     endpointState,
     transport: endpoint.transport,
     projectRoot: endpoint.projectRoot ?? endpoint.cwd ?? null,
@@ -312,4 +315,80 @@ export function compareHomeEndpointPreference(left: AgentEndpoint, right: AgentE
     return stateDelta;
   }
   return endpointLifecycleAt(right) - endpointLifecycleAt(left);
+}
+
+/** Admission evidence, not a presence/card projection or a wake-policy hint. */
+export type BrokerAvailability = {
+  state: "ready" | "can_start" | "gone";
+  reason: string;
+  checkedAt: number;
+  supportedActions: Array<"receive" | "queue" | "start">;
+  authority: string;
+  selectedRoute: { kind: "session"; endpointId: string; sessionId: string | null }
+    | { kind: "launch"; projectRoot: string; harness: AgentEndpoint["harness"] }
+    | null;
+};
+
+export type VerifiedLaunchRoute = {
+  projectRoot: string;
+  harness: AgentEndpoint["harness"];
+};
+
+/** A verified launcher must come from the authority's capability check. */
+export function evaluateBrokerAvailability(input: {
+  endpoint: AgentEndpoint | null;
+  agent?: AgentDefinition;
+  authority: string;
+  authorityAvailable: boolean;
+  checkedAt: number;
+  alive?: boolean;
+  queueSupported?: boolean;
+  launchRoute?: VerifiedLaunchRoute | null;
+  targetSessionId?: string;
+}): BrokerAvailability {
+  const { endpoint, agent } = input;
+  const classification = classifyEndpoint(endpoint, { agent, alive: input.alive });
+  const result: BrokerAvailability = {
+    state: "gone", reason: "no_receive_or_verified_launcher",
+    checkedAt: input.checkedAt, supportedActions: [], authority: input.authority,
+    selectedRoute: null,
+  };
+  if (isInactiveLocalAgent(agent)) {
+    result.reason = isRetiredLocalAgent(agent) ? "retired" : "stale_registration";
+    return result;
+  }
+  if (endpoint && hasRetiredEndpointRegistration(endpoint)) {
+    result.reason = "stale_registration";
+    return result;
+  }
+  if (!input.authorityAvailable) {
+    result.reason = "authority_unavailable";
+    return result;
+  }
+  if (input.targetSessionId && (!endpoint || !endpointMatchesTargetSession(endpoint, input.targetSessionId))) {
+    result.reason = "session_reference_not_attachable";
+    return result;
+  }
+  if (endpoint && classification.reachable && classification.supportedTransport
+    && (!classification.busy || input.queueSupported)) {
+    return {
+      ...result, state: "ready", reason: classification.busy ? "queue_supported" : "receive_supported",
+      supportedActions: classification.busy ? ["queue"] : ["receive"],
+      selectedRoute: { kind: "session", endpointId: endpoint.id, sessionId: endpoint.sessionId ?? null },
+    };
+  }
+  // Exact continuation cannot fall through to launch, even with a valid launcher.
+  if (input.targetSessionId) {
+    result.reason = "session_reference_not_attachable";
+    return result;
+  }
+  if (input.launchRoute?.projectRoot.trim() && input.launchRoute.harness) {
+    return {
+      ...result, state: "can_start", reason: "verified_launcher",
+      supportedActions: ["start"], selectedRoute: { kind: "launch", ...input.launchRoute },
+    };
+  }
+  result.reason = classification.reasons[0] ?? (classification.reachable ? "busy_without_queue" : "not_alive");
+  if (classification.busy && classification.reachable && classification.supportedTransport) result.reason = "busy_without_queue";
+  return result;
 }

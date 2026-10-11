@@ -5,7 +5,7 @@
  */
 import type { OnboardingError, OnboardingState } from "../Provider.tsx";
 
-/** The Solo setup facts the takeover walks, in order. */
+/** The setup facts the takeover walks, in order. */
 export type SoloSetupGap = "local_config" | "identity" | "project" | "services";
 
 export function soloSetupGaps(onboarding: OnboardingState): SoloSetupGap[] {

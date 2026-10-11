@@ -1,3 +1,4 @@
+import { getDestination } from "../../scout/nav-destinations.ts";
 // Reuse the web area rather than maintaining a second native implementation.
 import { KnowledgeSearchInspector } from "./right.tsx";
 import { SearchContent } from "./content.tsx";
@@ -19,7 +20,7 @@ export function NativeAreaScreen({ navigate }: EmbedScreenProps) {
 
 export const scoutSurface = defineSurface({
   id: "search",
-  label: "Search",
+  label: getDestination("search").label,
   route: { view: "search" },
   webPath: "/search",
   screen: "NativeAreaScreen",

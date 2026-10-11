@@ -1,6 +1,6 @@
 {
   "name": "@openscout/runtime",
-  "version": "0.3.6-dev.2",
+  "version": "0.3.6-dev.3",
   "description": "Local runtime foundation for the OpenScout control plane",
   "type": "module",
   "bin": {
@@ -42,6 +42,12 @@
       "types": "./dist/local-agents.d.ts",
       "import": "./dist/local-agents.js",
       "default": "./dist/local-agents.js"
+    },
+    "./live-terminal-session": {
+      "bun": "./src/live-terminal-session.ts",
+      "types": "./dist/live-terminal-session.d.ts",
+      "import": "./dist/live-terminal-session.js",
+      "default": "./dist/live-terminal-session.js"
     },
     "./terminal-environment": {
       "bun": "./src/terminal-environment.ts",
@@ -150,6 +156,36 @@
       "types": "./dist/support-paths.d.ts",
       "import": "./dist/support-paths.js",
       "default": "./dist/support-paths.js"
+    },
+    "./pairing-security": {
+      "bun": "./src/pairing-security/index.ts",
+      "types": "./dist/pairing-security/index.d.ts",
+      "import": "./dist/pairing-security/index.js",
+      "default": "./dist/pairing-security/index.js"
+    },
+    "./pairing-security/noise": {
+      "bun": "./src/pairing-security/noise.ts",
+      "types": "./dist/pairing-security/noise.d.ts",
+      "import": "./dist/pairing-security/noise.js",
+      "default": "./dist/pairing-security/noise.js"
+    },
+    "./pairing-security/identity": {
+      "bun": "./src/pairing-security/identity.ts",
+      "types": "./dist/pairing-security/identity.d.ts",
+      "import": "./dist/pairing-security/identity.js",
+      "default": "./dist/pairing-security/identity.js"
+    },
+    "./pairing-security/transport": {
+      "bun": "./src/pairing-security/transport.ts",
+      "types": "./dist/pairing-security/transport.d.ts",
+      "import": "./dist/pairing-security/transport.js",
+      "default": "./dist/pairing-security/transport.js"
+    },
+    "./pairing-local-socket": {
+      "bun": "./src/pairing-local-socket.ts",
+      "types": "./dist/pairing-local-socket.d.ts",
+      "import": "./dist/pairing-local-socket.js",
+      "default": "./dist/pairing-local-socket.js"
     },
     "./claude-statusline": {
       "bun": "./src/claude-statusline.ts",
@@ -331,6 +367,12 @@
       "import": "./dist/conversations/legacy-ids.js",
       "default": "./dist/conversations/legacy-ids.js"
     },
+    "./routing": {
+      "bun": "./src/routing/index.ts",
+      "types": "./dist/routing/index.d.ts",
+      "import": "./dist/routing/index.js",
+      "default": "./dist/routing/index.js"
+    },
     "./knowledge": {
       "bun": "./src/knowledge/index.ts",
       "types": "./dist/knowledge/index.d.ts",
@@ -397,6 +439,18 @@
       "types": "./dist/slack-identities.d.ts",
       "import": "./dist/slack-identities.js",
       "default": "./dist/slack-identities.js"
+    },
+    "./mcp-events": {
+      "bun": "./src/broker-mcp-events.ts",
+      "types": "./dist/broker-mcp-events.d.ts",
+      "import": "./dist/broker-mcp-events.js",
+      "default": "./dist/broker-mcp-events.js"
+    },
+    "./mcp-event-webhook": {
+      "bun": "./src/mcp-event-webhook.ts",
+      "types": "./dist/mcp-event-webhook.d.ts",
+      "import": "./dist/mcp-event-webhook.js",
+      "default": "./dist/mcp-event-webhook.js"
     }
   },
   "types": "./dist/index.d.ts",
@@ -433,14 +487,19 @@
   "dependencies": {
     "@nats-io/jetstream": "3.4.0",
     "@nats-io/transport-node": "3.4.0",
+    "@noble/ciphers": "^2.1.1",
+    "@noble/curves": "^2.0.1",
+    "@noble/hashes": "^2.0.1",
     "@openscout/agent-sessions": "workspace:*",
     "@openscout/protocol": "workspace:*",
     "@peculiar/x509": "1.12.3",
     "@trpc/server": "^11.16.0",
     "bonjour-service": "^1.4.4",
     "drizzle-orm": "^0.45.2",
+    "ipaddr.js": "2.2.0",
     "protobufjs": "7.6.6",
     "smol-toml": "^1.6.1",
+    "standardwebhooks": "1.0.0",
     "varlock": "^1.16.0",
     "ws": "^8.18.3",
     "zod": "^4.3.6"

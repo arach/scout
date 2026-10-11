@@ -26,6 +26,8 @@ export type PendingOperatorNeed = {
   options: string[];
   blockedReason: string | null;
   createdAt: number;
+  /** Declared with `--permission` (`operatorSignal.requestKind === "permission"`). */
+  permission?: true;
 };
 
 /** A need nobody answered in a week is history, not a queue item. */
@@ -67,6 +69,7 @@ export function pendingOperatorNeeds(input: {
       options: Array.isArray(record.options) ? record.options.flatMap((option) => text(option) ?? []) : [],
       blockedReason: text(record.blockedReason),
       createdAt: message.createdAt,
+      ...(record.requestKind === "permission" ? { permission: true as const } : {}),
     });
   }
 

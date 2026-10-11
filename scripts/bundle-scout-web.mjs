@@ -148,7 +148,8 @@ export function buildControlPlaneClientAndCopy(repoRoot, targetClientDir) {
  * artifact means the profile flag stopped pruning that graph.
  *
  * Markers come from inside the views, not their nav labels: the basic sidebar
- * shares area metadata, so names like "Mission Control" legitimately ship. Terminals is a basic area, so xterm is allowed.
+ * lists every area (day one shows them all), so names like "Mission Control"
+ * legitimately ship. Terminals is a basic area, so xterm is allowed.
  */
 export const BASIC_CLIENT_FORBIDDEN_MARKERS = [
   "No logs on the wire", // Ops › Mission Control view

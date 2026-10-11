@@ -346,6 +346,28 @@ describe("setup inventory", () => {
     }));
   });
 
+  test("wires the statusline only to a Scout CLI that can run", async () => {
+    const home = join(tmpdir(), `openscout-claude-statusline-runnable-test-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    testDirectories.add(home);
+    process.env.HOME = home;
+    process.env.OPENSCOUT_SUPPORT_DIRECTORY = join(home, "Library", "Application Support", "OpenScout");
+    const scoutCommand = process.env.OPENSCOUT_SCOUT_COMMAND;
+    delete process.env.OPENSCOUT_SCOUT_COMMAND;
+    mkdirSync(join(home, ".claude"), { recursive: true });
+
+    const report = await installClaudeStatuslineTool().finally(() => {
+      if (scoutCommand !== undefined) process.env.OPENSCOUT_SCOUT_COMMAND = scoutCommand;
+    });
+
+    // Either an installed `scout`, or (in this checkout) Bun plus the CLI's source
+    // entry; never a bare name that isn't on PATH.
+    expect(report.status).toBe("installed");
+    const execLine = readFileSync(report.wrapperPath, "utf8").match(/^exec\s+(.+)$/mu)?.[1] ?? "";
+    const paths = [...execLine.matchAll(/'([^']+)'/gu)].map((match) => match[1]!);
+    expect(paths.length).toBeGreaterThan(0);
+    expect(paths.every((path) => existsSync(path))).toBe(true);
+  });
+
   test("does not repoint Claude away from another install's live statusline wrapper", async () => {
     const home = join(tmpdir(), `openscout-claude-statusline-owned-test-${Date.now()}-${Math.random().toString(16).slice(2)}`);
     const settingsPath = join(home, ".claude", "settings.json");

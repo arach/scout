@@ -84,6 +84,25 @@ function basicWebPlugin(): Plugin {
   };
 }
 
+/**
+ * Dev only. React's development build records a `performance.measure` for
+ * every component render and update, each carrying a props diff, and nothing
+ * ever clears them: a long-lived dev page (the Mac app's embeds, the
+ * companion, an open tab) gathers ~300 entries a second and grows by GBs an
+ * hour. Production React records none. Clear them on every dev page.
+ */
+function devPerformanceEntriesPlugin(): Plugin {
+  return {
+    name: "scout-dev-clear-performance-entries",
+    apply: "serve",
+    transformIndexHtml: () => [{
+      tag: "script",
+      injectTo: "head-prepend",
+      children: "setInterval(function(){try{performance.clearMeasures();performance.clearMarks();}catch(e){}},5000);",
+    }],
+  };
+}
+
 const hudsonSdk = resolveHudsonSdkSource();
 const webNodeModules = resolve(__dirname, "node_modules");
 const bunTarget = process.env.OPENSCOUT_WEB_BUN_URL?.trim() || "http://127.0.0.1:43120";
@@ -110,7 +129,7 @@ export default defineConfig({
   root: resolve(__dirname, "client"),
   clearScreen: false,
   ...(accessWeb ? { publicDir: false as const } : {}),
-  plugins: [react(), tailwindcss(), ...(basicWeb ? [basicWebPlugin()] : []), ...(accessWeb ? [{ name: "scout-access-public", closeBundle() { copyFileSync(resolve(__dirname, "client/public/favicon.ico"), resolve(__dirname, "dist/access-client/favicon.ico")); } }] : [])],
+  plugins: [react(), tailwindcss(), devPerformanceEntriesPlugin(), ...(basicWeb ? [basicWebPlugin()] : []), ...(accessWeb ? [{ name: "scout-access-public", closeBundle() { copyFileSync(resolve(__dirname, "client/public/favicon.ico"), resolve(__dirname, "dist/access-client/favicon.ico")); } }] : [])],
   define: { "import.meta.env.VITE_SCOUT_WEB_PROFILE": JSON.stringify(accessWeb ? "access" : basicWeb ? "basic" : "full") },
   server: {
     // The portal name (DEFAULT_SCOUT_WEB_PORTAL_HOST) and its subdomains, so
@@ -146,6 +165,7 @@ export default defineConfig({
       "@hudsonkit/overlays": hudsonKitAlias("overlays.ts", "hudsonkit/overlays"),
       "hudsonkit/terminal": hudsonKitAlias("terminal.ts", "hudsonkit/terminal"),
       "hudsonkit/flags": hudsonKitAlias("flags/index.ts", "hudsonkit/flags"),
+      "@hudsonkit/styles/tokens.css": hudsonKitAlias("styles/tokens.css", "hudsonkit/styles/tokens.css"),
       "@hudsonkit/styles": hudsonKitAlias("styles/bundle.css", "hudsonkit/styles"),
       "@hudsonkit": hudsonKitAlias("index.ts", "hudsonkit"),
       "@openscout/agent-sessions/client": resolve(__dirname, "../agent-sessions/src/client.ts"),
@@ -158,6 +178,15 @@ export default defineConfig({
   build: {
     outDir: resolve(__dirname, accessWeb ? "dist/access-client" : basicWeb ? "dist/basic-client" : "dist/client"),
     ...(accessWeb ? { rollupOptions: { input: resolve(__dirname, "client/scoped-access/index.html") } } : {}),
+    // The full build also emits the desktop companion's own small runtime.
+    ...(!accessWeb && !basicWeb ? {
+      rollupOptions: {
+        input: {
+          main: resolve(__dirname, "client/index.html"),
+          companion: resolve(__dirname, "client/companion.html"),
+        },
+      },
+    } : {}),
     emptyOutDir: true,
     sourcemap: false,
   },

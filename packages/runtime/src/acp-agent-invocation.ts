@@ -256,3 +256,12 @@ async function waitForRequesterResult<T>(
     if (timer) clearTimeout(timer);
   });
 }
+
+/** Read only the existing pool; do not use entryForInvocation (which can spawn). */
+export async function existingAcpNativeSession(poolKey: string) {
+  const pending = activeAcpSessions.get(poolKey);
+  if (!pending) return undefined;
+  const entry = await pending.catch(() => null);
+  if (!entry || activeAcpSessions.get(poolKey) !== pending) return undefined;
+  return entry.client.nativeAttention;
+}

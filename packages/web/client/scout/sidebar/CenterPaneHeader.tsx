@@ -19,6 +19,7 @@ import { ArrowLeft, ArrowRight, Search } from "lucide-react";
 import { routeBreadcrumbForRoute } from "../route-breadcrumb.ts";
 import {
   areaSubNavForRoute,
+  getDestination,
   type AreaSubNavItem,
 } from "../nav-destinations.ts";
 import { useScout } from "../Provider.tsx";
@@ -114,11 +115,12 @@ export function CenterPaneHeader({
   const subNav = areaSubNavForRoute(route);
   const secondaryKind = secondaryNavKindForRoute(route);
   const isTopRow = variant === "top-row";
-  const showSecondaryRow = Boolean(subNav) || secondaryKind !== null;
+  const isRequests = route.view === "requests";
+  const showSecondaryRow = isRequests || Boolean(subNav) || secondaryKind !== null;
 
   // The top row is the app frame: it always mounts (it hosts machine scope +
   // utilities + the drag region), even on flush landings with no crumb/sub-nav.
-  if (!isTopRow && !breadcrumb && !subNav && !secondaryKind && !rightUtility) {
+  if (!isTopRow && !isRequests && !breadcrumb && !subNav && !secondaryKind && !rightUtility) {
     return null;
   }
 
@@ -126,6 +128,7 @@ export function CenterPaneHeader({
   // "tabs" the user wants OUT of the title bar. Shared by both variants.
   const secondaryNav = showSecondaryRow ? (
     <>
+      {isRequests ? <nav className="scout-requests-places" aria-label="Requests places"><button type="button" aria-current="page" onClick={() => navigate({ view: "requests" })}>Open</button></nav> : null}
       {subNav ? (
         <AreaSubNavStrip items={subNav.items} route={route} navigate={navigate} />
       ) : null}
@@ -144,7 +147,8 @@ export function CenterPaneHeader({
   // route breadcrumb — avoids a dim leaf that duplicates the active tab (the old
   // /ops/lanes "Lanes" case). Tabs never wrap; they scroll. Utilities pinned right.
   if (isTopRow) {
-    const sectionName = getPrimaryArea(primaryAreaForRoute(route)).label;
+    const entryId = primaryAreaForRoute(route);
+    const sectionName = entryId === "requests" ? getDestination("requests").label : getPrimaryArea(entryId).label;
     if (presentation === "slack") {
       const slackSectionName = primaryAreaForRoute(route) === "chat"
         ? "Home"
@@ -231,7 +235,7 @@ export function CenterPaneHeader({
             <ArrowLeft size={16} strokeWidth={1.9} aria-hidden="true" />
           </button>
           <div className="scout-center-pane-breadcrumb" data-scout-breadcrumb="">
-            <span className="scout-nav-crumb">{sectionName}</span>
+            {!isRequests ? <span className="scout-nav-crumb">{sectionName}</span> : null}
           </div>
           {crumbUtility ? (
             <>
@@ -244,7 +248,7 @@ export function CenterPaneHeader({
             </>
           ) : (
             <>
-              {showSecondaryRow ? (
+              {showSecondaryRow && !isRequests ? (
                 <span className="scout-top-row-sep" aria-hidden="true">
                   /
                 </span>

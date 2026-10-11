@@ -2152,7 +2152,7 @@
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  color: var(--bg);
+  color: var(--on-accent, var(--bg));
   font-size: var(--text-2xs);
   font-weight: 700;
 }
@@ -3290,7 +3290,7 @@
   border: 0;
   border-radius: 50%;
   background: var(--ink);
-  color: var(--bg);
+  color: var(--on-accent, var(--bg));
   display: flex;
   align-items: center;
   justify-content: center;

@@ -5,6 +5,7 @@ import { subscribeInboxChanges } from "../channel-inbox-source.ts";
 import { filterChannelInbox, holdChannelInbox, inboxWaitSeconds } from "../../shared/channel-inbox.ts";
 import type { Hono } from "hono";
 import { parseChatPresenceBeat } from "../../shared/chat-presence.ts";
+import { pickChatLastMessage, type ChatChannelLastMessage } from "../../shared/chat-last-message.ts";
 import { chatExecutionSession, chatSessionApprovals } from "../chat-approval-association.ts";
 import { chatQuestionPage, chatQuestionAttentionCounts, decodeChatQuestionCursor } from "../chat-question-page.ts";
 import { chatRequestResponsibility } from "../chat-request-responsibility.ts";
@@ -157,6 +158,9 @@ import {
   chatSpaceCreateBody,
 } from "../../shared/api/chat.ts";
 import { readJsonBody } from "../request-body.ts";
+
+/** Rows scanned per room to find its last spoken root message past any notices. */
+const BOOTSTRAP_LAST_MESSAGE_SCAN = 20;
 
 export type ChatRouteDeps = {
   options: Pick<CreateOpenScoutWebServerOptions, "advertisedHost" | "authToken" | "portalHost" | "publicOrigin" | "webPort">;
@@ -1294,7 +1298,16 @@ export function mountChatRoutes(app: Hono, deps: ChatRouteDeps) {
 
     const questionCounts = chatQuestionAttentionCounts(Object.values(broker.snapshot.collaborationRecords ?? {}),
       broker.snapshot.conversations, new Set(channels.map(channel => channel.id)), viewer.actorId);
-    return c.json({ viewer, space: space.slug, spaces, channels, questionCounts });
+    // The last root message of each room, so the sidebar can show what was
+    // said without a read per row. Same source the feed reads; a failed read
+    // leaves that room out rather than failing the bootstrap.
+    const lastMessages: Record<string, ChatChannelLastMessage> = {};
+    await Promise.all(channels.map(async (channel) => {
+      const recent = await loadChatConversationMessages(channel.id, BOOTSTRAP_LAST_MESSAGE_SCAN).catch(() => []);
+      const last = pickChatLastMessage(recent, { viewerActorIds: [viewer.actorId] });
+      if (last) lastMessages[channel.id] = last;
+    }));
+    return c.json({ viewer, space: space.slug, spaces, channels, questionCounts, lastMessages });
   });
 
   /**
@@ -1904,6 +1917,44 @@ export function mountChatRoutes(app: Hono, deps: ChatRouteDeps) {
    * `channelPollPage` refuses with `stale_cursor` instead of handing back the
    * tail with the middle quietly missing.
    */
+  // Custody proof for the separate local listening service. Point-read the
+  // web's read-only projection; never request a message-bearing broker snapshot.
+  app.get("/api/channels/:id/:listeningResource{listening-membership|listening}", async (c) => {
+    const grant = readChannelMemberGrant(c.req.raw);
+    if (!grant) return c.json({ error: "Member credential required" }, 401);
+    const channelId = c.req.param("id");
+    if (!isOpaqueChannelId(channelId)) return c.json({ error: "Invalid channel" }, 400);
+    const space = resolveChatSpaceFor(c.req.raw);
+    if (!space.ok) return c.json({ error: space.error }, space.status);
+    let conversation: ConversationDefinition | null;
+    try { conversation = queryConversationDefinitionById(channelId) as ConversationDefinition | null; }
+    catch { return c.json({ error: "Membership source unavailable" }, 503); }
+    const denied = channelMemberRosterDecision({ grant, brokerReachable: true, conversation });
+    if (denied) return c.json({ error: denied.error }, denied.status);
+    if (!conversation || conversation.kind !== "channel") return c.json({ error: "Channel unavailable" }, 404);
+    const spaceDenial = chatChannelSpaceDecision({ channelSpaceSlug: channelSpaceSlug(conversation),
+      selectedSpaceSlug: space.slug, grantSpaceSlug: grant.spaceSlug ?? DEFAULT_CHAT_SPACE_SLUG });
+    if (spaceDenial) return c.json({ error: spaceDenial.error }, spaceDenial.status);
+    c.header("cache-control", "no-store");
+    const membership = { actorId: grant.actorId, channelId, space: channelSpaceSlug(conversation),
+      nodeId: conversation.authorityNodeId, expiresAt: grant.expiresAt };
+    if (c.req.param("listeningResource") === "listening-membership") {
+      const renewed = renewMember(c.req.raw);
+      if (!renewed) return c.json({ error: "Member credential unavailable" }, 401);
+      return c.json({ ...membership, expiresAt: renewed.expiresAt });
+    }
+    // Stable signing authority required for restart-safe opaque source cursors.
+    if (!options.authToken) return c.json({ error: "listening_authority_unconfigured" }, 503);
+    try {
+      const page = readLocalRoomListeningPage({ channelId, actorId: grant.actorId,
+        cursor: c.req.query("cursor"), secret: options.authToken });
+      const renewed = renewMember(c.req.raw);
+      if (!renewed) return c.json({ error: "Member credential unavailable" }, 401);
+      return c.json({ ...page, membership: { ...membership, expiresAt: renewed.expiresAt } });
+    }
+    catch (error) { return c.json({ error: error instanceof RoomListeningPageError ? error.message : "source_unavailable" }, error instanceof RoomListeningPageError ? 409 : 503); }
+  });
+
   app.get("/api/channels/:id/:pollResource{poll|inbox}", async (c) => {
     const inbox = c.req.param("pollResource") === "inbox";
     let wait = 0;

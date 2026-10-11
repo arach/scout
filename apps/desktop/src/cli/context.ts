@@ -19,8 +19,11 @@ export function createScoutCommandContext(input: {
   outputMode?: ScoutOutputMode;
   isTty?: boolean;
 } = {}): ScoutCommandContext {
-  const stdout = input.stdout ?? ((line: string) => console.log(line));
-  const stderr = input.stderr ?? ((line: string) => console.error(line));
+  // Use the drainable Node streams. Bun's native console can buffer outside
+  // process.stdout after an isTTY probe; finishing that stream alone then
+  // cannot flush a large console.log before the package shim forces exit.
+  const stdout = input.stdout ?? ((line: string) => { process.stdout.write(`${line}\n`); });
+  const stderr = input.stderr ?? ((line: string) => { process.stderr.write(`${line}\n`); });
 
   return {
     cwd: input.cwd ?? process.cwd(),

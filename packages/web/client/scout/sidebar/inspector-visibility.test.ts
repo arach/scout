@@ -24,6 +24,8 @@ describe("context inspector visibility", () => {
       { view: "ops", mode: "world" },
       { view: "repo-diff", path: "/repo" },
       { view: "sessions", flightId: "flight-1" },
+      { view: "sessions" },
+      { view: "sessions", sessionId: "s" },
       { view: "settings", section: "appearance" },
       { view: "settings", section: "agents", agentId: "agent-1" },
       { view: "voice" },
@@ -62,7 +64,6 @@ describe("context inspector visibility", () => {
       { view: "mesh-ops" },
       { view: "ops", mode: "mission" },
       { view: "repos" },
-      { view: "sessions" },
       { view: "terminal" },
       { view: "work", workId: "work-1" },
     ];

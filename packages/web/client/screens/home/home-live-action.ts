@@ -81,6 +81,18 @@ export function isWeakToolHeadline(line: string): boolean {
   return false;
 }
 
+/**
+ * Codex code mode logs a shell step as the call that ran it:
+ * `text(await tools.exec_command({cmd:"rg -n foo", …}))`, often truncated
+ * before the closing quote. The command is the readable part.
+ */
+function codeModeCommand(raw: string): string | null {
+  const match = raw.match(/exec_command\(\s*\{\s*"?(?:cmd|command)"?\s*:\s*"((?:\\.|[^"\\])*)"?/u);
+  if (!match?.[1]) return null;
+  const cmd = match[1].replace(/\\n/gu, " ").replace(/\\(["\\])/gu, "$1").trim();
+  return cmd || null;
+}
+
 /** Make tool lines scannable (bash/mcp especially). Null when too thin. */
 export function prettifyToolLine(tool: string, arg: string | null | undefined): string | null {
   const name = tool.trim();
@@ -93,7 +105,7 @@ export function prettifyToolLine(tool: string, arg: string | null | undefined): 
 
   // bash · <command> — drop wrapper noise, keep the command head
   if (/^bash$/i.test(name) || /shell|terminal/i.test(name)) {
-    const cmd = raw
+    const cmd = codeModeCommand(raw) ?? raw
       .replace(/^const\s+\w+\s*=\s*await\s+/u, "")
       .replace(/^await\s+/u, "")
       .replace(/^\$\s*/u, "");

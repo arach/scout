@@ -72,6 +72,8 @@ export type ScoutAskCommandOptions = ContextRootOptions & {
   promptFile?: string;
   aliasProject?: string;
   aliasHost?: string;
+  /** `--on <host>`: start the session on that mesh machine; --project is a path there. */
+  onHost?: string;
 };
 
 export type ScoutImplicitAskCommandOptions = ScoutAskCommandOptions;
@@ -599,6 +601,23 @@ export function parseContextRootCommandOptions(
   return parsed;
 }
 
+export function parseWhoCommandOptions(args: string[], defaultCurrentDirectory: string): ContextRootOptions & { machine?: string } {
+  const parsed = parseContextRootPrefix(args, defaultCurrentDirectory);
+  let machine: string | undefined;
+  for (let index = 0; index < parsed.args.length; index += 1) {
+    const current = parsed.args[index]!;
+    if (current === "--machine" || current.startsWith("--machine=")) {
+      const flag = parseFlagValue(parsed.args, index, "--machine");
+      if (!flag.value.trim() || flag.value.startsWith("--")) missingFlagValue("--machine");
+      machine = flag.value.trim();
+      index = flag.nextIndex;
+    } else {
+      unexpectedArgs("who", args);
+    }
+  }
+  return { ...parsed, machine };
+}
+
 export function parseDoctorCommandOptions(
   args: string[],
   defaultCurrentDirectory: string,
@@ -695,7 +714,7 @@ function parseTargetableMessageCommandOptions(
       && SEND_TRACKED_FLAGS.some((flag) => current === flag || current.startsWith(`${flag}=`))
     ) {
       throw new ScoutCliError(
-        `${current.split("=")[0]} belongs to \`scout send --tracked\`; \`scout tell\` posts a message only and never creates work`,
+        `${current.split("=")[0]} is for work: use \`scout ask\` (\`--notify\` to return right away); \`scout tell\` posts a message only and never creates work`,
       );
     }
     if (allowTrackedFlags && current === "--tracked") {
@@ -776,7 +795,7 @@ function parseTargetableMessageCommandOptions(
     if (current === "--wake") {
       if (!allowTrackedFlags) {
         throw new ScoutCliError(
-          "--wake forces a dispatch turn; `scout tell` never wakes or launches a target. Use `scout send --tracked --to` or `scout ask` when the target should act",
+          "--wake forces a dispatch turn; `scout tell` never wakes or launches a target. Use `scout ask` when the target should act",
         );
       }
       wake = true;
@@ -867,6 +886,8 @@ export function parseAskCommandOptions(
   let explicitEffortFlag = false;
   let targetRef: string | undefined;
   let projectPath: string | undefined;
+  let rawProjectPath: string | undefined;
+  let onHost: string | undefined;
   let channel: string | undefined;
   let harness: string | undefined;
   let session: ScoutAskCommandOptions["session"];
@@ -934,7 +955,16 @@ export function parseAskCommandOptions(
     }
     if (current === "--project" || current.startsWith("--project=")) {
       const value = parseFlagValue(parsed.args, index, "--project");
+      rawProjectPath = value.value;
       projectPath = resolveInputFilePath(parsed.currentDirectory, value.value);
+      index = value.nextIndex;
+      continue;
+    }
+    if (current === "--on" || current.startsWith("--on=") || current === "--host" || current.startsWith("--host=")) {
+      const flag = current.startsWith("--host") ? "--host" : "--on";
+      const value = parseFlagValue(parsed.args, index, flag);
+      if (!value.value.trim() || value.value.startsWith("--")) missingFlagValue(flag);
+      onHost = value.value.trim();
       index = value.nextIndex;
       continue;
     }
@@ -1079,6 +1109,17 @@ export function parseAskCommandOptions(
   harness = mergeRuntimeDimension("harness", harness, runtimeLiteralHarness);
   model = mergeRuntimeDimension("model", model, runtimeLiteralModel);
   reasoningEffort = mergeRuntimeDimension("reasoning effort", reasoningEffort, runtimeLiteralEffort);
+  if (onHost) {
+    if (!rawProjectPath?.trim()) {
+      throw new ScoutCliError(`--on ${onHost} needs --project <path on ${onHost}>: the folder the new session starts in, as it exists on ${onHost}`);
+    }
+    if (targetLabel || existingTargetHandle || runtimeProfile) {
+      throw new ScoutCliError(`--on ${onHost} starts a fresh session from --project; drop --to/--ref/--profile`);
+    }
+    // The path belongs to the other machine; resolving it here would bake in this machine's home and cwd.
+    projectPath = rawProjectPath.trim();
+    session ??= "new";
+  }
   if (!runtimeProfile && shouldInferCurrentProjectAskTarget({ targetLabel, projectPath, harness, model, reasoningEffort, session })) {
     projectPath = parsed.currentDirectory;
   }
@@ -1149,6 +1190,7 @@ export function parseAskCommandOptions(
     promptFile,
     aliasProject,
     aliasHost,
+    ...(onHost ? { onHost } : {}),
   };
 }
 

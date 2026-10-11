@@ -1037,7 +1037,7 @@
   font-weight: 650;
   letter-spacing: var(--tracking-sm);
   text-transform: uppercase;
-  color: var(--bg);
+  color: var(--on-accent, var(--bg));
   background: var(--accent);
   padding: 2px 7px;
   border-radius: 999px;

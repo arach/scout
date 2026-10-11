@@ -13,6 +13,7 @@ import {
 import {
   readChatMessageCorrection,
   EPOCH_MILLISECONDS_FLOOR,
+  machineSshTargets,
   epochMs,
   normalizeTerminalWorkspaceColumns,
   nowMs,
@@ -900,6 +901,11 @@ function terminalSessionFromRow(row: TerminalSessionRow): TerminalSessionRecord 
   };
 }
 
+function machineSshTargetsField(evidence: MachineRecord["evidence"]): Pick<MachineRecord, "sshTargets"> {
+  const sshTargets = machineSshTargets(evidence);
+  return sshTargets.length > 0 ? { sshTargets } : {};
+}
+
 function machineFromRow(row: MachineRow): MachineRecord {
   return {
     id: row.id,
@@ -917,6 +923,7 @@ function machineFromRow(row: MachineRow): MachineRecord {
     macAddresses: parseJson<string[]>(row.mac_addresses_json, []),
     capabilities: parseJson<MachineRecord["capabilities"]>(row.capabilities_json, []),
     routes: parseJson<MachineRecord["routes"]>(row.routes_json, []),
+    ...machineSshTargetsField(parseJson<MachineRecord["evidence"]>(row.evidence_json, [])),
     evidence: parseJson<MachineRecord["evidence"]>(row.evidence_json, []),
     pinned: row.pinned === 1,
     ...(row.notes ? { notes: row.notes } : {}),
@@ -3635,7 +3642,15 @@ export class SQLiteControlPlaneStore {
   }
 
   recordInvocation(invocation: InvocationRequest): void {
-    const collaborationRecordId = resolveInvocationCollaborationRecordId(invocation);
+    // A mesh-forwarded invocation names the sender's message and work record,
+    // which this node may never hold. Both columns are ON DELETE SET NULL
+    // soft references, so a parent absent here is stored as NULL rather than
+    // failing the row — and every flight under it — on the foreign key.
+    const collaborationRecordId = this.existingParentId(
+      "collaboration_records",
+      resolveInvocationCollaborationRecordId(invocation),
+    );
+    const messageId = this.existingParentId("messages", invocation.messageId);
     this.db.query(
       `INSERT INTO invocations (
         id, requester_id, requester_node_id, target_agent_id, target_node_id, action, task,
@@ -3669,9 +3684,9 @@ export class SQLiteControlPlaneStore {
       invocation.targetNodeId ?? null,
       invocation.action,
       invocation.task,
-      collaborationRecordId ?? null,
+      collaborationRecordId,
       invocation.conversationId ?? null,
-      invocation.messageId ?? null,
+      messageId,
       stringify(invocation.context),
       stringify(invocation.execution),
       stringify(invocation.executionResolution),
@@ -3682,7 +3697,12 @@ export class SQLiteControlPlaneStore {
       stringify(invocation.metadata),
       invocation.createdAt,
     );
-    this.recordActivityItem(this.projectInvocationActivity(invocation));
+    this.recordActivityItem(this.projectInvocationActivity({ ...invocation, messageId: messageId ?? undefined }));
+  }
+
+  private existingParentId(table: "messages" | "collaboration_records", id: string | undefined): string | null {
+    if (!id) return null;
+    return this.db.query(`SELECT 1 FROM ${table} WHERE id = ?1`).get(id) ? id : null;
   }
 
   recordFlight(flight: FlightRecord): ThreadEventEnvelope[] {

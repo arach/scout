@@ -62,7 +62,17 @@ export type ScoutRouteTarget =
       value?: string;
     }
   | { kind: "binding_ref"; ref: string; value?: string }
-  | { kind: "project_path"; projectPath: string; value?: string }
+  | {
+      kind: "project_path";
+      /** The project folder, as it exists on the machine that will run the session. */
+      projectPath: string;
+      /**
+       * The mesh machine to start the session on (`scout ask --on archie`). When set,
+       * the path is resolved on that machine only: no local check, no peer ranking.
+       */
+      host?: string;
+      value?: string;
+    }
   | { kind: "channel"; channel: string; value?: string }
   | { kind: "broadcast"; value?: string };
 

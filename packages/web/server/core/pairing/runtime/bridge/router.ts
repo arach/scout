@@ -68,6 +68,7 @@ import { formatSessionRouteRef } from "../../../../../shared/session-route-ref.t
 import { toSessionUpdate } from "../../../../../client/screens/agents/agents-feed-article.ts";
 import { pendingOperatorNeeds } from "../../../attention/operator-needs.ts";
 import { collectHerdrHostAttention } from "../../../attention/herdr-host-attention.ts";
+import { answerHerdrPermission } from "../../../attention/herdr-permission-answer.ts";
 import { resolveOperatorName } from "@openscout/runtime/user-config";
 import {
   provisionMobileTerminalAccess,
@@ -133,11 +134,11 @@ const t = initTRPC.context<BridgeContext>().create();
 
 const logged = t.middleware(async ({ path, type, next }) => {
   const start = Date.now();
-  log.info("rpc:req", `-> ${type} ${path}`);
+  log.debug("rpc:req", `-> ${type} ${path}`);
   const result = await next();
   const elapsed = Date.now() - start;
   if (result.ok) {
-    log.info("rpc:res", `✓ ${path} (${elapsed}ms)`);
+    log.debug("rpc:res", `✓ ${path} (${elapsed}ms)`);
   } else {
     log.error("rpc:res", `✗ ${path} (${elapsed}ms)`);
   }
@@ -868,8 +869,9 @@ async function queryOperatorNeedInboxItems(): Promise<MobileInboxItem[]> {
 
 /**
  * Terminal sessions herdr reports as blocked — a native Claude/Codex/etc. at a
- * permission or input prompt. Read-only: the phone can see what is being
- * asked, and answering happens at that terminal.
+ * permission or input prompt. A Claude permission dialog Scout could parse
+ * carries its fingerprint as `version`, and the phone can answer it through
+ * `mobile.answerTerminalPermission`; anything else is answered at the terminal.
  */
 async function queryHerdrInboxItems(): Promise<MobileInboxItem[]> {
   const items = await collectHerdrHostAttention().catch(() => []);
@@ -882,7 +884,7 @@ async function queryHerdrInboxItems(): Promise<MobileInboxItem[]> {
     adapterType: item.harness,
     turnId: null,
     blockId: null,
-    version: null,
+    version: item.version,
     risk: "medium" as const,
     title: item.title,
     description: item.summary,
@@ -1446,6 +1448,19 @@ const mobileRouter = t.router({
         senderId: resolveOperatorName().trim() || "operator",
         fallbackCurrentDirectory: resolveMobileCurrentDirectory(),
       });
+    }),
+
+  // Approve / Deny a Claude permission prompt in a Herdr pane: presses the
+  // dialog's Yes or No, only while the dialog the phone was shown (`version`)
+  // is still up. Expected refusals return { ok: false }, not errors.
+  answerTerminalPermission: procedure
+    .input(z.object({
+      itemId: z.string(),
+      version: z.number().int(),
+      decision: z.enum(["approve", "deny"]),
+    }))
+    .mutation(async ({ input }) => {
+      return answerHerdrPermission(input);
     }),
 
   agentDetail: procedure

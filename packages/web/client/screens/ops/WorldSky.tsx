@@ -160,6 +160,7 @@ function drawBeacons(
   height: number,
   beacons: readonly SkyBeacon[],
   strength: number,
+  sparse: boolean,
 ): void {
   if (strength <= 0) return;
   const centerX = width / 2;
@@ -172,16 +173,16 @@ function drawBeacons(
     // workspace has collapsed to the same point and this is all that is left.
     const radius = Math.min(7, Math.max(1.1, beacon.spread * 0.5));
     const halo = ctx.createRadialGradient(x, y, 0, x, y, radius * 6);
-    halo.addColorStop(0, `rgba(150, 226, 214, ${0.5 * strength})`);
-    halo.addColorStop(0.4, `rgba(120, 196, 200, ${0.16 * strength})`);
-    halo.addColorStop(1, "rgba(80, 150, 170, 0)");
+    halo.addColorStop(0, `rgba(${sparse ? "235, 238, 242" : "150, 226, 214"}, ${0.5 * strength})`);
+    halo.addColorStop(0.4, `rgba(${sparse ? "215, 220, 228" : "120, 196, 200"}, ${0.16 * strength})`);
+    halo.addColorStop(1, sparse ? "rgba(215, 220, 228, 0)" : "rgba(80, 150, 170, 0)");
     ctx.fillStyle = halo;
     ctx.beginPath();
     ctx.arc(x, y, radius * 6, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.globalAlpha = strength;
-    ctx.fillStyle = "#e8fffb";
+    ctx.fillStyle = sparse ? "#eeeeef" : "#e8fffb";
     ctx.beginPath();
     ctx.arc(x, y, radius, 0, Math.PI * 2);
     ctx.fill();
@@ -197,6 +198,7 @@ function draw(
   pan: { x: number; y: number },
   beacons: readonly SkyBeacon[],
   beaconStrength: number,
+  sparse: boolean,
 ): void {
   const ratio = Math.min(window.devicePixelRatio || 1, 3);
   const pixelWidth = Math.round(width * ratio);
@@ -209,9 +211,9 @@ function draw(
   if (!ctx) return;
 
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-  ctx.fillStyle = "#05070d";
+  ctx.fillStyle = sparse ? "#000000" : "#05070d";
   ctx.fillRect(0, 0, width, height);
-  drawBand(ctx, width, height, zoom);
+  if (!sparse) drawBand(ctx, width, height, zoom);
 
   const centerX = width / 2;
   const centerY = height * 0.46;
@@ -222,6 +224,7 @@ function draw(
 
   ctx.fillStyle = "#dbe6f2";
   for (const layer of LAYERS) {
+    if (sparse && layer.bandBound) continue;
     // Sky → screen. A power law rather than a subtraction: it has no bottom to
     // hit, so the layer keeps answering the camera however far back it goes.
     const span = Math.pow(safeZoom, layer.depth);
@@ -245,7 +248,7 @@ function draw(
         },
         {
           salt: layer.salt + octave * OCTAVE_SALT,
-          density: layer.density,
+          density: layer.density * (sparse ? .58 : 1),
           size: layer.size,
           cell,
         },
@@ -267,7 +270,7 @@ function draw(
         // rather than as a grey stripe painted over an even field.
         ctx.globalAlpha = Math.min(
           1,
-          star.alpha * layer.alpha * weight * (0.55 + inBand * 1.05),
+          star.alpha * layer.alpha * weight * (sparse ? .95 : (0.55 + inBand * 1.05)),
         );
         ctx.beginPath();
         // Never below a device pixel: a sub-pixel arc renders as grey mush,
@@ -279,14 +282,15 @@ function draw(
   }
   ctx.globalAlpha = 1;
 
-  drawBeacons(ctx, width, height, beacons, beaconStrength);
+  drawBeacons(ctx, width, height, beacons, beaconStrength, sparse);
 }
 
-export function WorldSky({ zoom, pan, beacons, beaconStrength }: {
+export function WorldSky({ zoom, pan, beacons, beaconStrength, sparse = false }: {
   zoom: number;
   pan: { x: number; y: number };
   beacons: readonly SkyBeacon[];
   beaconStrength: number;
+  sparse?: boolean;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const size = useRef({ width: 0, height: 0 });
@@ -298,7 +302,7 @@ export function WorldSky({ zoom, pan, beacons, beaconStrength }: {
     const paint = () => {
       const { width, height } = size.current;
       if (width > 0 && height > 0) {
-        draw(node, width, height, zoom, pan, beacons, beaconStrength);
+        draw(node, width, height, zoom, pan, beacons, beaconStrength, sparse);
       }
     };
     const observer = new ResizeObserver(([entry]) => {
@@ -311,7 +315,7 @@ export function WorldSky({ zoom, pan, beacons, beaconStrength }: {
     observer.observe(parent);
     paint();
     return () => observer.disconnect();
-  }, [zoom, pan, beacons, beaconStrength]);
+  }, [zoom, pan, beacons, beaconStrength, sparse]);
 
   return <canvas className="shared-floor__sky-canvas" ref={canvas} aria-hidden="true" />;
 }

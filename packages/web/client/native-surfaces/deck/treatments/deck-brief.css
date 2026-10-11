@@ -121,7 +121,7 @@
   outline: 0;
   background: transparent;
   color: var(--deck-ink);
-  font: 500 16px/1 Inter, ui-sans-serif, sans-serif;
+  font: 500 16px/1 system-ui, -apple-system, sans-serif;
 }
 .brief__palette input::placeholder { color: rgba(222,236,226,.32); }
 .brief__palette-list { min-height: 0; overflow: auto; padding: 6px; }

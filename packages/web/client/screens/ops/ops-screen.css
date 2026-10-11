@@ -83,7 +83,7 @@
 
 .s-ops-tab--active {
   background: var(--accent);
-  color: var(--bg);
+  color: var(--on-accent, var(--bg));
 }
 
 .s-ops-body {
@@ -174,7 +174,7 @@
 
 .s-ops-btn--primary {
   background: var(--accent);
-  color: var(--bg);
+  color: var(--on-accent, var(--bg));
   border-color: var(--accent);
 }
 
@@ -274,7 +274,7 @@
 
 .s-runs-toggle-btn--active {
   background: var(--accent);
-  color: var(--bg);
+  color: var(--on-accent, var(--bg));
 }
 
 .s-runs-filter {
@@ -623,3 +623,6 @@
   0%, 100% { opacity: 0.5; transform: scale(1); }
   50% { opacity: 0; transform: scale(1.5); }
 }
+
+/* /ops/week: the week HUD fills the Ops body; the engine owns everything inside */
+.s-world-week-host { position: relative; flex: 1; min-height: 0; min-width: 0; height: 100%; overflow: hidden; }

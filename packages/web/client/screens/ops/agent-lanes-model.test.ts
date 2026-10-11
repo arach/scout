@@ -25,6 +25,7 @@ import {
   type AgentLane,
 } from "./agent-lanes-model.ts";
 import { agentLaneToCardModel } from "./agent-lane-card-model.ts";
+import { mergeTailSessionPresence } from "../../lib/tail-event-merge.ts";
 
 const NOW = 1_700_000_000_000;
 
@@ -1391,6 +1392,19 @@ describe("sortLanesWithStableOrder", () => {
 });
 
 describe("buildAgentLanes roster", () => {
+  test("a quiet Claude reply restores horizon admission without admitting stale sessions", () => {
+    const transcript = {
+      source: "claude" as const, transcriptPath: "/tmp/quiet-claude.jsonl",
+      sessionId: "quiet-claude", cwd: "/repo", project: "openscout",
+      harness: "unattributed" as const, mtimeMs: NOW, size: 1200,
+    };
+    const reply = stubTailEvent("quiet-claude", NOW - 90 * 60_000, "assistant", { source: "claude", summary: "Finished the design review" });
+    const input = { transcripts: [transcript], now: NOW, workingOnly: true };
+    expect(buildAgentLanes({ ...input, tailEvents: [], horizon: "4h" }).lanes).toHaveLength(0);
+    const events = mergeTailSessionPresence([], [reply], NOW, 4 * 60 * 60_000);
+    expect(buildAgentLanes({ ...input, tailEvents: events, horizon: "4h" }).lanes).toHaveLength(1);
+    expect(buildAgentLanes({ ...input, tailEvents: events, horizon: "5m" }).lanes).toHaveLength(0);
+  });
   test("surfaces binding conflicts when multiple scout agents share one session", () => {
     const mkAgent = (suffix: string) => {
       const agent = stubAgent(`relay-card-${suffix}`);

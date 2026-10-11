@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { CHIP_ART, CREW_ART, crewGround, displayCoin, hasPose, poseAsset } from "./crew-registry.ts";
+import { CHIP_ART, CREW_ART, CAST_MEMBERS, EDGE_POSE_NAMES, edgePoseArt, hasEdgePoses, crewGround, displayCoin, hasPose, poseAsset } from "./crew-registry.ts";
 
 describe("displayCoin", () => {
   test("keeps the authored crop at the crew floor", () => {
@@ -82,5 +82,22 @@ describe("poses", () => {
     expect(poseAsset("milo", "wave")).toBe("milo-bust.webp");
     expect(hasPose("milo", "wave")).toBe(false);
     expect(hasPose(null, "wave")).toBe(false);
+  });
+});
+
+describe("Edge pose coverage", () => {
+  test("all ten original members have four poses and bounded contact anchors", () => {
+    expect(CAST_MEMBERS.length).toBe(10);
+    for (const {slug} of CAST_MEMBERS) {
+      expect(hasEdgePoses(slug)).toBe(true);
+      for (const pose of EDGE_POSE_NAMES) {
+        const a = edgePoseArt(slug,pose)!;
+        expect(a.w).toBe(CREW_ART[slug].w); expect(a.h).toBe(CREW_ART[slug].h);
+        expect(a.contact[0]).toBeGreaterThan(0); expect(a.contact[0]).toBeLessThan(a.w);
+        expect(a.contact[1]).toBeGreaterThan(0); expect(a.contact[1]).toBeLessThan(a.h);
+        expect(poseAsset(slug,pose)).toBe(`edge-poses-v1/${slug}/${pose}.webp`);
+      }
+    }
+    expect(hasEdgePoses("unknown")).toBe(false);
   });
 });

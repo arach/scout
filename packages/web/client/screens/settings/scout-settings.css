@@ -3,8 +3,8 @@
  * One page for the web app, the Scout app's embed, and the menu's Settings
  * window. Each page states its purpose in one line, then groups hairline cards
  * of rows: a title, one sentence, and the control on the right. Type is
- * Scout's: Inter Tight for the page title, Inter for the interface, JetBrains
- * Mono for labels and states.
+ * Scout's: the system sans (SF Pro) for title and interface, set light, and
+ * SF Mono for labels and states.
  *
  * Frame: the sidebar lies on the window frame and the content is one stage
  * card with a rounded top-leading corner (the macOS shell's
@@ -27,7 +27,7 @@
   --sq-live: var(--green);
   --sq-accent: var(--hud-accent);
   --sq-danger: var(--red);
-  --sq-display: "Inter Tight", var(--font-sans);
+  --sq-display: var(--font-accent-title, var(--font-sans));
   --sq-sans: var(--font-sans);
   --sq-mono: var(--font-mono);
   --sq-top: 0px;
@@ -35,7 +35,7 @@
   display: flex;
   height: 100%;
   min-height: 0;
-  background: var(--sq-side);
+  background: var(--sq-paper);
   color: var(--sq-ink);
   font-family: var(--sq-sans);
   font-size: 13.5px;
@@ -46,74 +46,91 @@
 .sq-win * { box-sizing: border-box; }
 .sq-win :focus-visible { outline: 2px solid var(--sq-ink); outline-offset: 2px; }
 
-/* ── sidebar ─────────────────────────────────────────────────────────────── */
+/* ── sidebar: a card laid over the stage ─────────────────────────────────
+ * Studio: design/studio/views/scout-settings-nav.tsx, take C. The nav is a
+ * floating card inset a hairline (3px) from the app sidebar and the window
+ * edge, full height: top light, 0.5px edge, grouped rows, the lit row on a soft plate with
+ * its glyph in the accent. No brand foot — the version lives on About. */
 
 .sq-side {
+  position: relative;
   display: flex;
   flex-direction: column;
-  width: 224px;
+  width: 232px;
   flex: none;
   min-height: 0;
+  /* Full height in every window. Where the host reserves a title-bar strip
+     (data-inset), the card holds it as padding — the window controls sit in
+     the card's top, as in a Finder sidebar — rather than starting below it. */
+  margin: 3px 0 3px 3px;
   padding-top: var(--sq-top);
+  border-radius: 9px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--ink) 4%, transparent), transparent 120px),
+    var(--sq-side);
+  box-shadow:
+    inset 0 0 0 0.5px var(--sq-rule-strong),
+    0 12px 28px -14px color-mix(in srgb, black 55%, transparent);
+  overflow: hidden;
 }
-.sq-side-eyebrow {
-  margin: 22px 18px 8px;
-  font: 500 10.5px/1 var(--sq-mono);
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--sq-label);
+.sq-side-title {
+  margin: 16px 16px 4px;
+  font: 600 15px/1.2 var(--sq-display);
+  letter-spacing: -0.01em;
+  color: var(--sq-ink);
 }
-.sq-nav { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow-y: auto; padding-bottom: 8px; }
+.sq-nav { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow-y: auto; scrollbar-width: none; padding-bottom: 8px; }
+.sq-nav-group { padding-top: 4px; }
+.sq-nav-group[data-end] { margin-top: 12px; }
+.sq-nav-group-label { padding: 10px 16px 4px; font: 500 11px var(--sq-sans); color: var(--sq-label); }
 .sq-nav-row {
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 34px;
-  padding: 0 16px 0 18px;
-  color: var(--sq-soft);
-  font: 450 13.5px var(--sq-sans);
+  height: 30px;
+  margin: 0 6px;
+  padding: 0 10px;
+  border-radius: 7px;
+  color: var(--sq-ink);
+  font: 450 13px var(--sq-sans);
   text-decoration: none;
   cursor: pointer;
 }
-.sq-nav-row:hover { color: var(--sq-ink); }
-.sq-nav-row[aria-current="page"] { background: var(--sq-wash); color: var(--sq-ink); font-weight: 500; }
-.sq-nav-icon { width: 16px; height: 16px; flex: none; }
+.sq-nav-row:hover { background: color-mix(in srgb, var(--ink) 4%, transparent); }
+.sq-nav-row[aria-current="page"] {
+  background: color-mix(in srgb, var(--ink) 9%, transparent);
+  box-shadow: inset 0 0 0 0.5px var(--sq-rule-strong);
+  font-weight: 500;
+}
+.sq-nav-icon { width: 15px; height: 15px; flex: none; color: var(--sq-soft); }
+.sq-nav-row[aria-current="page"] .sq-nav-icon { color: var(--sq-accent); }
 .sq-nav-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sq-nav-key { font: 10px var(--sq-mono); color: var(--sq-label); opacity: 0; }
-.sq-nav-row:hover .sq-nav-key,
-.sq-nav-row[aria-current="page"] .sq-nav-key { opacity: 0.8; }
+.sq-nav-row:hover .sq-nav-key { opacity: 0.8; }
 
-.sq-foot { border-top: 1px solid var(--sq-rule); }
+.sq-foot { padding: 4px 0 10px; }
 .sq-update {
   display: flex;
   align-items: center;
   gap: 10px;
   width: calc(100% - 20px);
-  margin: 10px 10px 0;
-  padding: 9px 10px;
-  border: 1px solid var(--sq-ink);
+  margin: 0 10px;
+  padding: 8px 10px;
+  border: 0;
   border-radius: 8px;
-  background: var(--sq-ink);
-  color: var(--sq-paper);
+  background: color-mix(in srgb, var(--sq-accent) 14%, transparent);
+  box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--sq-accent) 45%, transparent);
+  color: var(--sq-ink);
   font: 500 12.5px var(--sq-sans);
   text-align: left;
   cursor: pointer;
 }
-.sq-update:hover { opacity: 0.9; }
+.sq-update:hover { background: color-mix(in srgb, var(--sq-accent) 20%, transparent); }
 .sq-update:disabled { opacity: 0.6; cursor: default; }
-.sq-update svg { width: 16px; height: 16px; flex: none; }
+.sq-update svg { width: 16px; height: 16px; flex: none; color: var(--sq-accent); }
 .sq-update span { flex: 1; min-width: 0; }
-.sq-update small { display: block; font: 10.5px var(--sq-mono); opacity: 0.7; }
-.sq-brand {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 48px;
-  padding: 0 18px;
-}
+.sq-update small { display: block; font: 10.5px var(--sq-mono); color: var(--sq-label); }
 .sq-mark { width: 16px; height: 16px; color: var(--sq-ink); flex: none; }
-.sq-brand-name { font: 600 14px var(--sq-display); letter-spacing: -0.01em; }
-.sq-brand-version { font: 10.5px var(--sq-mono); color: var(--sq-label); }
 
 /* ── the stage card ──────────────────────────────────────────────────────── */
 
@@ -132,14 +149,14 @@
 .sq-win[data-frame="flat"] .sq-main {
   margin-top: 0;
   border-top: 0;
+  border-left: 0;
   border-top-left-radius: 0;
-  border-left-color: var(--sq-rule);
 }
 .sq-page { max-width: 680px; padding: 40px 44px 72px; animation: sq-rise 280ms cubic-bezier(0.16, 1, 0.3, 1) both; }
 @keyframes sq-rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .sq-page { animation: none; } }
 .sq-head { display: flex; align-items: baseline; gap: 16px; }
-.sq-title { flex: 1; margin: 0; font: 600 28px/1.1 var(--sq-display); letter-spacing: -0.02em; color: var(--sq-ink); }
+.sq-title { flex: 1; margin: 0; font: 300 26px/1.1 var(--sq-display); letter-spacing: -0.01em; color: var(--sq-ink); }
 .sq-promise { margin: 8px 0 0; font-size: 14px; line-height: 1.45; color: var(--sq-soft); }
 .sq-sections { display: flex; flex-direction: column; gap: 28px; margin-top: 32px; }
 .sq-save { font: 500 10.5px/1 var(--sq-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--sq-label); }
@@ -185,7 +202,7 @@
 .sq-fact > span:first-child { flex: none; color: var(--sq-soft); }
 .sq-fact > span:last-child { min-width: 0; text-align: right; overflow-wrap: anywhere; }
 .sq-mono { font-family: var(--sq-mono); font-size: 11.5px; }
-.sq-value { font: 12px var(--sq-mono); color: var(--sq-soft); }
+.sq-value { font: var(--font-weight-body) 12px var(--sq-mono); color: var(--sq-soft); }
 
 /* ── controls ────────────────────────────────────────────────────────────── */
 
@@ -227,7 +244,7 @@
   border-radius: 7px;
   background: var(--sq-paper);
   color: var(--sq-ink);
-  font: 12.5px var(--sq-sans);
+  font: var(--font-weight-body) 12.5px var(--sq-sans);
   text-overflow: ellipsis;
 }
 .sq-select:disabled { opacity: 0.5; }
@@ -238,7 +255,7 @@
   border-radius: 7px;
   background: var(--sq-paper);
   color: var(--sq-ink);
-  font: 13px var(--sq-sans);
+  font: var(--font-weight-body) 13px var(--sq-sans);
 }
 .sq-input { width: 184px; height: 28px; padding: 0 10px; }
 .sq-input[data-narrow] { width: 140px; }
@@ -250,7 +267,7 @@
 
 .sq-range { display: inline-flex; align-items: center; gap: 10px; }
 .sq-range input { width: 144px; accent-color: var(--sq-ink); }
-.sq-range output { min-width: 40px; font: 11.5px var(--sq-mono); color: var(--sq-soft); text-align: right; }
+.sq-range output { min-width: 40px; font: var(--font-weight-body) 11.5px var(--sq-mono); color: var(--sq-soft); text-align: right; }
 
 .sq-button {
   height: 28px;
@@ -300,7 +317,7 @@
   cursor: pointer;
   box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.12);
 }
-.sq-hue[aria-checked="true"] { box-shadow: 0 0 0 2px var(--sq-card), 0 0 0 3px var(--sq-ink); }
+.sq-hue[aria-checked="true"] { box-shadow: 0 0 0 2px var(--sq-card), 0 0 0 2.5px var(--sq-ink); }
 
 .sq-cast { width: 100%; min-width: 0; margin: 0 -4px; }
 .sq-cast .s-settings-cast-grid {
@@ -325,8 +342,8 @@
   align-items: stretch;
   gap: 2px;
   min-width: 0;
-  padding: 6px 6px 8px;
-  border: 1px solid var(--sq-rule);
+  padding: 6.5px 6.5px 8.5px;
+  border: 0.5px solid var(--sq-rule-strong);
   border-radius: 9px;
   background: var(--sq-paper);
   color: var(--sq-soft);
@@ -335,10 +352,9 @@
   cursor: pointer;
   transition: border-color 160ms, box-shadow 160ms, color 160ms;
 }
-.sq-tile:hover { border-color: var(--sq-rule-strong); color: var(--sq-ink); }
+.sq-tile:hover { border-color: color-mix(in srgb, var(--sq-ink) 40%, transparent); color: var(--sq-ink); }
 .sq-tile[aria-pressed="true"] {
-  border-color: var(--sq-ink);
-  box-shadow: inset 0 0 0 0.5px var(--sq-ink);
+  border-color: color-mix(in srgb, var(--sq-ink) 82%, transparent);
   color: var(--sq-ink);
 }
 .sq-tile-art {
@@ -369,7 +385,7 @@
   flex-direction: row;
   align-items: center;
   gap: 8px;
-  padding: 5px 10px 5px 6px;
+  padding: 5.5px 10.5px 5.5px 6.5px;
   border-radius: 999px;
 }
 .sq-tiles[data-variant="swatch"] .sq-tile-art { min-height: 0; margin: 0; background: none; }
@@ -418,19 +434,17 @@
 .sq-win { container: sq-win / inline-size; }
 
 @container sq-win (max-width: 860px) {
-  .sq-side { width: 184px; }
-  .sq-side-eyebrow { margin-left: 16px; }
-  .sq-nav-row { padding: 0 12px 0 16px; }
+  .sq-side { width: 196px; }
   .sq-nav-key { display: none; }
   .sq-page { padding: 32px 28px 64px; }
 }
 
 @container sq-win (max-width: 600px) {
   .sq-side { width: 52px; }
-  .sq-side-eyebrow, .sq-nav-label, .sq-brand-name, .sq-brand-version { display: none; }
-  .sq-nav-row { justify-content: center; padding: 0; margin: 1px 8px; height: 34px; border-radius: 7px; }
-  .sq-brand { justify-content: center; padding: 0; }
-  .sq-update { justify-content: center; width: auto; margin: 10px 8px 0; padding: 8px 0; }
+  .sq-side-title, .sq-nav-group-label, .sq-nav-label { display: none; }
+  .sq-side { padding-top: calc(var(--sq-top) + 8px); }
+  .sq-nav-row { justify-content: center; padding: 0; margin: 1px 6px; height: 32px; }
+  .sq-update { justify-content: center; width: auto; margin: 0 6px; padding: 8px 0; }
   .sq-update span { display: none; }
   .sq-page { padding: 24px 16px 56px; }
   .sq-row { flex-wrap: wrap; gap: 12px; }
@@ -443,7 +457,7 @@
 /* The embed root (/embed/settings) gives the window a definite height. */
 .s-discovered-embed.sq-embed { height: 100vh; min-height: 0; }
 
-/* ── Solo Pro ────────────────────────────────────────────────────────────
+/* ── Scout Pro ────────────────────────────────────────────────────────────
  * One plate that answers "where do I stand", then the three facts it rests on.
  * The accent (amber by default) is spent once: on the sigil, and on the plate's
  * top edge when access is confirmed and everything is running. */
@@ -520,7 +534,7 @@
 .sq-pro-facts [data-tone="ok"] dt::before { border-color: var(--sq-live); background: var(--sq-live); }
 .sq-pro-facts [data-tone="bad"] dt::before { border-color: var(--sq-danger); }
 .sq-pro-facts dd { margin: 7px 0 0; font-size: 13px; font-weight: 500; color: var(--sq-ink); overflow-wrap: anywhere; }
-.sq-pro-facts dd small { display: block; margin-top: 2px; font: 11px var(--sq-mono); font-weight: 400; color: var(--sq-soft); }
+.sq-pro-facts dd small { display: block; margin-top: 2px; font: var(--font-weight-body) 11px var(--sq-mono); color: var(--sq-soft); }
 .sq-pro-summary-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .sq-pro-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .sq-pro-command {

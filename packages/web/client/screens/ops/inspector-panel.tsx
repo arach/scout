@@ -1,3 +1,4 @@
+import { getDestination } from "../../scout/nav-destinations.ts";
 import { Check, Copy, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useScout } from "../../scout/Provider.tsx";
@@ -41,14 +42,15 @@ type OpsDetailSnapshot = {
 };
 
 const OPS_MODE_LABELS: Record<OpsMode, string> = {
-  mission: "Control",
-  advisor: "Host Advisor",
+  mission: getDestination("mission-control").label,
+  advisor: getDestination("advisor").label,
   issues: "Alerts",
-  tail: "Tail",
-  atop: "Runtime",
+  tail: getDestination("tail").label,
+  atop: getDestination("runtime").label,
   agents: "Agents",
-  lanes: "Lanes",
-  world: "World",
+  lanes: getDestination("lanes").label,
+  world: getDestination("world").label,
+  week: getDestination("week").label,
 };
 
 export function OpsInspectorPanel({
@@ -111,7 +113,7 @@ export function OpsInspectorPanel({
   const activeAsks = (fleet?.activeAsks ?? []).filter((ask) => ask.status !== "needs_attention");
   const needsAttention = fleet?.needsAttention ?? [];
 
-  if (mode === "lanes" || mode === "world") {
+  if (mode === "lanes" || mode === "world" || mode === "week") {
     return null;
   }
 

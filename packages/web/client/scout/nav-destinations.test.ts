@@ -33,6 +33,17 @@ describe("nav destination catalog", () => {
     }
   });
 
+  test("Requests is a standalone catalog destination", () => {
+    const requests = getDestination("requests");
+    expect(requests.label).toBe("Requests");
+    expect(requests.route).toEqual({ view: "requests" });
+    expect(requests.active({ view: "requests" })).toBe(true);
+    expect(requests.active({ view: "inbox" })).toBe(false);
+    expect(projectTopNavItems().some((item) => item.route.view === "requests")).toBe(false);
+    expect(areaSubNavForRoute({ view: "requests" })).toBeNull();
+    expect(sidebarSubNavForRoute({ view: "requests" })).toBeNull();
+  });
+
   test("every projected destination id resolves to a catalog entry", () => {
     for (const id of allProjectedDestinationIds()) {
       const destination = getDestination(id);
@@ -41,25 +52,59 @@ describe("nav destination catalog", () => {
     }
   });
 
-  test("exposes Agents, Repositories, and Code Browser as first-class destinations", () => {
+  test("exposes Agents, Repos, and Code as first-class destinations", () => {
     expect(getDestination("projects")).toMatchObject({
       label: "Agents",
       route: { view: "agents-v2" },
     });
     expect(getDestination("repos")).toMatchObject({
-      label: "Repositories",
+      label: "Repos",
       route: { view: "repos" },
     });
     expect(getDestination("code")).toMatchObject({
-      label: "Code Browser",
+      label: "Code",
       route: { view: "code" },
     });
+  });
+
+  test("all destination projections inherit catalog labels", () => {
+    for (const shortcut of projectGoShortcuts()) {
+      expect(shortcut.label).toBe(`Go to ${getDestination(shortcut.destinationId).label}`);
+    }
+    for (const command of projectPaletteNavCommands()) {
+      expect(command.label.replace(/^(Go to|Open) /, "")).toBe(getDestination(command.destinationId).label);
+    }
+    for (const jump of projectJumpDockItems()) {
+      expect(jump.label).toBe(getDestination(jump.destinationId).label);
+    }
+    for (const area of ["projects"] as const) {
+      for (const item of projectAreaSubNav(area)) {
+        expect(item.label).toBe(getDestination(item.destinationId).label);
+      }
+    }
+    const sidebar = sidebarSubNavForRoute({ view: "ops" })!.items;
+    expect(sidebar.map(({ id, label, route }) => ({ id, label, route }))).toEqual(
+      projectOpsSecondaryNav().flatMap((group) => group.items)
+        .map(({ id, label, route }) => ({ id, label, route })),
+    );
+    for (const item of sidebar) {
+      expect(item.label).toBe(getDestination(item.destinationId).label);
+    }
+  });
+
+  test("area entry points lead to the Projects list without renaming ids", () => {
+    const projectsRoute = { view: "agents-v2", indexView: "projects" } as const;
+    expect(getDestination("project-list").route).toEqual(projectsRoute);
+    expect(projectTopNavItems().find((item) => item.key === "agents")?.route).toEqual(projectsRoute);
+    expect(projectGoShortcuts().find((item) => item.key === "p")?.route).toEqual(projectsRoute);
+    expect(projectPaletteNavCommands().find((item) => item.id === "nav:agents")?.route).toEqual(projectsRoute);
   });
 
   test("top nav projection matches the public TOP_NAV_ITEMS export", () => {
     expect(projectTopNavItems()).toEqual(TOP_NAV_ITEMS);
     expect(TOP_NAV_ITEMS.map((item) => item.key)).toEqual([
       "home",
+      "sessions",
       "chat",
       "agents",
       "terminals",
@@ -110,14 +155,15 @@ describe("nav destination catalog", () => {
     expect(ids).not.toContain("repos");
     expect(ids).not.toContain("code");
     expect(ids).toEqual([
+      "control",
       "lanes",
       "world",
-      "control",
-      "harnesses",
-      "mesh",
+      "week",
       "tail",
-      "runtime",
       "advisor",
+      "harnesses",
+      "runtime",
+      "mesh",
     ]);
   });
 
@@ -163,9 +209,9 @@ describe("nav destination catalog", () => {
     expect(gated.some((c) => c.id === "nav:ops-atop")).toBe(false);
     // Settings drawer is intentionally absent from the destination projection.
     expect(all.some((c) => c.id === "nav:settings")).toBe(false);
-    expect(all.find((c) => c.id === "nav:agents")?.label).toBe("Go to Agents");
-    expect(all.find((c) => c.id === "nav:repos")?.label).toBe("Open Repositories");
-    expect(all.find((c) => c.id === "nav:code")?.label).toBe("Open Code Browser");
+    expect(all.find((c) => c.id === "nav:agents")?.label).toBe("Go to Projects");
+    expect(all.find((c) => c.id === "nav:repos")?.label).toBe("Open Repos");
+    expect(all.find((c) => c.id === "nav:code")?.label).toBe("Open Code");
     // Agent config remains a routed destination.
     expect(all.find((c) => c.id === "nav:agent-config")?.route).toEqual({
       view: "settings",
@@ -186,7 +232,7 @@ describe("nav destination catalog", () => {
 
   test("AREA_SUB_NAV projection covers repos/code/terminals (SCO-085)", () => {
     const projects = projectAreaSubNav("projects");
-    expect(projects.map((item) => item.id)).toEqual(["projects", "project-list", "repos", "code"]);
+    expect(projects.map((item) => item.id)).toEqual(["project-list", "projects", "repos", "code"]);
     const projectsTab = projects.find((item) => item.id === "project-list")!;
     const agentsTab = projects.find((item) => item.id === "projects")!;
     expect(projectsTab.active({ view: "agents-v2", indexView: "projects" })).toBe(true);
@@ -195,19 +241,16 @@ describe("nav destination catalog", () => {
     expect(agentsTab.active({ view: "agents-v2", indexView: "projects" })).toBe(false);
     expect(agentsTab.active({ view: "agents-v2", projectSlug: "openscout", agentId: "a" })).toBe(true);
     expect(projects.map((item) => item.label)).toEqual([
-      "Agents",
       "Projects",
-      "Repositories",
-      "Code Browser",
+      "Agents",
+      "Repos",
+      "Code",
     ]);
     expect(projects.find((item) => item.id === "repos")?.route).toEqual({ view: "repos" });
     expect(projects.find((item) => item.id === "code")?.route).toEqual({ view: "code" });
 
-    const sessions = projectAreaSubNav("sessions");
-    expect(sessions.map((item) => item.id)).toEqual(["sessions", "terminals"]);
-    expect(sessions.find((item) => item.id === "terminals")?.route).toEqual({
-      view: "terminal",
-    });
+    expect(areaSubNavForRoute({ view: "sessions" })).toBeNull();
+    expect(areaSubNavForRoute({ view: "terminal" })).toBeNull();
   });
 
   test("repos.active includes repo-diff (SCO-085)", () => {
@@ -226,8 +269,8 @@ describe("nav destination catalog", () => {
   test("areaSubNavForRoute maps projects and sessions surfaces", () => {
     expect(areaSubNavForRoute({ view: "agents-v2" })?.areaId).toBe("projects");
     expect(areaSubNavForRoute({ view: "code" })?.areaId).toBe("projects");
-    expect(areaSubNavForRoute({ view: "sessions" })?.areaId).toBe("sessions");
-    expect(areaSubNavForRoute({ view: "terminal" })?.areaId).toBe("sessions");
+    expect(areaSubNavForRoute({ view: "sessions" })).toBeNull();
+    expect(areaSubNavForRoute({ view: "terminal" })).toBeNull();
     expect(areaSubNavForRoute({ view: "ops", mode: "lanes" })).toBeNull();
     expect(areaSubNavForRoute({ view: "inbox" })).toBeNull();
   });
@@ -269,14 +312,15 @@ describe("nav destination catalog", () => {
     );
     expect(all?.areaId).toBe("ops");
     expect(all?.items.map((item) => item.label)).toEqual([
-      "Lanes",
-      "World",
       "Mission Control",
+      "Lanes",
+      "Fleet",
+      "Week",
+      "Tail",
+      "Host Advisor",
       "Providers",
       "Runtime",
       "Network",
-      "Live Activity",
-      "Host Advisor",
     ]);
 
     const gated = sidebarSubNavForRoute(
@@ -285,11 +329,12 @@ describe("nav destination catalog", () => {
     );
     expect(gated?.items.map((item) => item.label)).toEqual([
       "Lanes",
-      "World",
+      "Fleet",
+      "Week",
+      "Tail",
+      "Host Advisor",
       "Providers",
       "Network",
-      "Live Activity",
-      "Host Advisor",
     ]);
   });
 });

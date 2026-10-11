@@ -114,6 +114,15 @@ describe("hosted bootstrap", () => {
     expect(write.body).toEqual({ messageId: "m-1", change: { expectedRevision: 1, deleted: true } });
   });
 
+  test("passes each room's last message through, and omits the field when the Worker sends none", async () => {
+    const last = { id: "m-9", actorId: "owner", authorName: "Owner", text: "shipped", createdAt: 900, fromViewer: true as const };
+    const base = hostedWorker();
+    stubFetch(call => call.url === `/api/chat/spaces/${SPACE_ID}` ? json({ channels: [{ id: "channel-one", title: "general" }], lastMessages: { "channel-one": last } }) : base(call));
+    expect((await createHostedChatApi().bootstrap({ space: "work" })).lastMessages).toEqual({ "channel-one": last });
+    stubFetch(hostedWorker());
+    expect("lastMessages" in await createHostedChatApi().bootstrap({ space: "work" })).toBe(false);
+  });
+
   test("composes the session, the space list and the selected space", async () => {
     stubFetch(hostedWorker());
     const found = await createHostedChatApi().bootstrap();

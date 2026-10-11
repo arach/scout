@@ -46,6 +46,39 @@
   color: var(--red);
 }
 
+/* New chat: the one action on Home, small and quiet until hovered. */
+.hd-new-chat {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 8px 0 6px;
+  margin-right: 6px;
+  border-radius: var(--radius-sm);
+  border: 0.5px solid color-mix(in srgb, var(--border) 90%, transparent);
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+  color: var(--muted, var(--dim));
+  font: 500 10.5px/1 var(--font-mono);
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background var(--motion-duration-fast) ease, color var(--motion-duration-fast) ease, border-color var(--motion-duration-fast) ease;
+}
+
+.hd-new-chat svg {
+  color: var(--dim);
+  transition: color var(--motion-duration-fast) ease;
+}
+
+.hd-new-chat:hover {
+  background: color-mix(in srgb, var(--ink) 9%, transparent);
+  color: var(--ink);
+  border-color: var(--border);
+}
+
+.hd-new-chat:hover svg {
+  color: var(--accent);
+}
+
 .hd-refresh-btn {
   display: inline-flex;
   align-items: center;
@@ -205,7 +238,7 @@
 .hd-gauge-label {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
-  font-weight: 600;
+  font-weight: var(--scout-weight-medium, 500);
   color: var(--ink);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -215,7 +248,7 @@
 .hd-gauge-pct {
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
-  font-weight: 600;
+  font-weight: var(--scout-weight-medium, 500);
   font-variant-numeric: tabular-nums;
 }
 
@@ -305,12 +338,13 @@
 .hd-gauge-reset--featured {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   line-height: 1.15;
   gap: 1px;
 }
 
 .hd-gauge-reset--featured strong {
-  font-weight: 600;
+  font-weight: var(--scout-weight-medium, 500);
   color: var(--ink);
   font-size: var(--text-xs);
 }

@@ -55,7 +55,13 @@ async function connectTestServer(
       OPENSCOUT_REPLY_CONTEXT_FILE: "",
       ...envOverrides,
     },
-    dependencies,
+    // Never read the real mesh from a test; a test that needs it passes its own.
+    dependencies: {
+      loadMeshOverview: async () => {
+        throw new Error("mesh overview is not available in this test");
+      },
+      ...dependencies,
+    },
   });
   const client = new Client(
     { name: "openscout-test-client", version: "1.0.0" },
@@ -110,6 +116,8 @@ describe("createScoutMcpServer", () => {
 
     const result = await client.listTools();
     expect(result.tools.map((tool) => tool.name)).toEqual([
+      "where",
+      "check",
       "sessions_inventory",
       "sessions_search",
       "herdr_workspaces",
@@ -136,6 +144,7 @@ describe("createScoutMcpServer", () => {
       "aliases_repoint",
       "aliases_unset",
       "whoami",
+      "hosts_list",
       "feedback_send",
       "messages_inbox",
       "messages_channel",
@@ -1159,10 +1168,11 @@ describe("createScoutMcpServer", () => {
             targetAgentId: "talkie.main",
             invocationId: "inv-1",
             flightId: "flt-1",
+            workId: "work-1",
           },
         };
       },
-    });
+    }, { OPENSCOUT_WEB_PUBLIC_ORIGIN: "http://scout.test" });
 
     const result = await client.callTool({
       name: "ask",
@@ -1191,7 +1201,7 @@ describe("createScoutMcpServer", () => {
       source: "scout-mcp",
       aliasScope: undefined,
     });
-    expect(result.structuredContent).toEqual({
+    expect(result.structuredContent).toMatchObject({
       ok: true,
       state: "queued",
       delivery: "none",
@@ -1203,11 +1213,18 @@ describe("createScoutMcpServer", () => {
         targetAgentId: "talkie.main",
         invocationId: "inv-1",
         flightId: "flt-1",
+        workId: "work-1",
+      },
+      followUrl: "http://scout.test/work/work-1",
+      links: {
+        follow: "http://scout.test/work/work-1",
+        work: "http://scout.test/work/work-1",
+        tail: "http://scout.test/follow?view=tail&flightId=flt-1&invocationId=inv-1&workId=work-1&targetAgentId=talkie.main",
       },
     });
     const content = result.content as Array<{ type: string; text: string }> | undefined;
     expect(content?.[0]?.text).toBe(
-      "Ask queued to talkie.main; flight flt-1. MCP notification was not scheduled; use invocations_wait with flightId=flt-1.",
+      "Ask queued to talkie.main; flight flt-1; work work-1. MCP notification was not scheduled; use invocations_wait with flightId=flt-1. Follow the task: http://scout.test/work/work-1",
     );
   });
 
@@ -1255,6 +1272,118 @@ describe("createScoutMcpServer", () => {
         flightId: "flt-1",
       },
     });
+  });
+
+  test("every tool on the setup allow list is annotated read-only", async () => {
+    const { SCOUT_READ_ONLY_TOOLS } = await import("../setup/agent-guide.ts");
+    const { client } = await connectTestServer({});
+    const { tools } = await client.listTools();
+    for (const name of SCOUT_READ_ONLY_TOOLS) {
+      const tool = tools.find((candidate) => candidate.name === name);
+      expect({ name, readOnly: tool?.annotations?.readOnlyHint }).toEqual({ name, readOnly: true });
+    }
+  });
+
+  test("server instructions teach cross-machine asks", async () => {
+    const { client } = await connectTestServer({});
+    const instructions = client.getInstructions() ?? "";
+    expect(instructions).toContain("`on`");
+    expect(instructions).toContain("ssh");
+    const { tools } = await client.listTools();
+    const ask = tools.find((tool) => tool.name === "ask");
+    expect(ask?.description).toContain("another mesh machine");
+    expect(Object.keys(ask?.inputSchema.properties ?? {})).toContain("on");
+  });
+
+  test("hosts_list returns each machine with its projects and the ask that starts work there", async () => {
+    let receivedMachine: string | undefined = "unset";
+    const { client } = await connectTestServer({
+      loadMeshOverview: async (machine) => {
+        receivedMachine = machine;
+        return {
+          howTo: "Start work on another machine with `scout ask --on`.",
+          machines: [
+            {
+              host: "arts-mini", nodeId: "arts-mini-openscout", nodeName: "arts-mini", local: true,
+              reach: "answering",
+              activity: { agents: 3, working: 1, liveSessions: 2, runningWork: 1 },
+              projects: { total: 1, truncated: false, items: [{ root: "/Users/art/dev/openscout", name: "openscout", agents: 3, liveSessions: 2 }] },
+              startWork: "scout ask --on arts-mini --project /Users/art/dev/openscout --harness codex \"<brief>\"",
+            },
+            {
+              host: "archie", nodeId: "archie-openscout", nodeName: "archie", local: false,
+              reach: "answering",
+              activity: { agents: 1, working: 0, liveSessions: 0, runningWork: 0 },
+              projects: { total: 1, truncated: false, items: [{ root: "/home/arach/renders/arsenal-x", name: "arsenal-x", agents: 1, liveSessions: 0 }] },
+              startWork: "scout ask --on archie --project /home/arach/renders/arsenal-x --harness codex \"<brief>\"",
+            },
+            { host: "hutch", nodeId: "hutch-openscout", nodeName: "hutch", local: false, reach: "no_answer", error: "no answer in 3s", next: "scout mesh doctor" },
+          ],
+        };
+      },
+    });
+
+    const result = await client.callTool({ name: "hosts_list", arguments: {} });
+    expect(receivedMachine).toBeUndefined();
+    const text = (result.content as Array<{ text: string }>)[0]!.text;
+    expect(text).toContain("arts-mini (this machine): 1 working · 2 live sessions · projects: /Users/art/dev/openscout");
+    expect(text).toContain("archie: quiet · projects: /home/arach/renders/arsenal-x");
+    expect(text).toContain("hutch: no answer (no answer in 3s) · try `scout mesh doctor`");
+    expect(result.structuredContent).toMatchObject({ machines: [{ host: "arts-mini" }, { host: "archie" }, { host: "hutch", reach: "no_answer" }] });
+  });
+
+  test("agents_search names the machine when the query is a machine, even with every card offline", async () => {
+    const { client } = await connectTestServer({
+      searchAgents: async () => [],
+      loadMeshOverview: async (machine) => {
+        if (machine !== "archie") throw new Error(`Unknown machine: ${machine}`);
+        return {
+          howTo: "",
+          machines: [{
+            host: "archie", nodeId: "archie-openscout", nodeName: "archie", local: false,
+            reach: "answering",
+            activity: { agents: 11, working: 0, liveSessions: 0, runningWork: 0 },
+            projects: { total: 1, truncated: false, items: [{ root: "/home/arach/renders/arsenal-x", name: "arsenal-x", agents: 1, liveSessions: 0 }] },
+            startWork: "scout ask --on archie --project /home/arach/renders/arsenal-x --harness codex \"<brief>\"",
+          }],
+        };
+      },
+    });
+
+    const hit = await client.callTool({ name: "agents_search", arguments: { query: "archie" } });
+    expect(hit.structuredContent).toMatchObject({ candidates: [], machine: { host: "archie", reach: "answering" } });
+
+    const miss = await client.callTool({ name: "agents_search", arguments: { query: "talkie" } });
+    expect((miss.structuredContent as Record<string, unknown>).machine).toBeUndefined();
+  });
+
+  test("ask with on routes to the named machine and keeps the path raw", async () => {
+    let receivedAsk: ScoutAskCommand | undefined;
+    const { client } = await connectTestServer({
+      resolveSenderId: async () => "operator.main",
+      scoutAskHandler: async (input) => {
+        receivedAsk = input;
+        return {
+          ok: true,
+          state: "queued",
+          ids: { targetAgentId: "x.archie", invocationId: "inv-1", flightId: "flt-1" },
+        };
+      },
+    });
+
+    await client.callTool({
+      name: "ask",
+      arguments: {
+        on: "archie",
+        projectPath: "~/renders/arsenal-x",
+        harness: "codex",
+        body: "Build the arsenal.",
+      },
+    });
+
+    expect(receivedAsk?.host).toBe("archie");
+    expect(receivedAsk?.projectPath).toBe("~/renders/arsenal-x");
+    expect(receivedAsk?.harness).toBe("codex");
   });
 
   test("ask schedules MCP reply notifications in opt-in notify mode", async () => {
@@ -1840,6 +1969,8 @@ describe("createScoutMcpServer", () => {
       replyToSessionId: string | null;
       workId: string | null;
       workUrl: string | null;
+      followUrl: string | null;
+      links: { work: string | null; follow: string | null; tail: string | null; observe: string | null };
     };
 
     expect(receivedAsk).toEqual({
@@ -1859,8 +1990,15 @@ describe("createScoutMcpServer", () => {
     expect(structured.replyToSessionId).toBe("codex-thread-explicit");
     expect(structured.workId).toBe("work-1");
     expect(structured.workUrl).toBe("http://scout.test/work/work-1");
+    expect(structured.followUrl).toBe(structured.workUrl);
+    expect(structured.links.follow).toBe(structured.workUrl);
+    expect(structured.links.work).toBe(structured.workUrl);
+    expect(structured.links.tail).toContain("/follow?view=tail");
+    expect(structured.links.observe).toContain("/agents/hudson.main?tab=observe");
     const content = result.content as Array<{ type: string; text: string }> | undefined;
     expect(content?.[0]?.text).toContain("Ask acknowledged running; use invocations_wait with flightId=flight-1.");
+    expect(content?.[0]?.text).toContain("Follow the task: http://scout.test/work/work-1");
+    expect(content?.[0]?.text).not.toContain("Scout tail:");
   });
 
   test("continues a specific target session without asking for a new one", async () => {
@@ -2254,7 +2392,7 @@ describe("createScoutMcpServer", () => {
     );
   });
 
-  test("fetches a previously-created ask flight without waiting", async () => {
+  test("fetches a previously-created ask flight without waiting and shares its work ticket", async () => {
     const { client } = await connectTestServer({
       resolveSenderId: async () => "operator",
       resolveBrokerUrl: () => "http://broker.test",
@@ -2283,6 +2421,7 @@ describe("createScoutMcpServer", () => {
         targetAgentId: "hudson.main",
         state: "running",
         summary: "Reviewing auth module",
+        metadata: { collaborationRecordId: "work-1" },
       }),
       getInvocationLifecycle: async (_baseUrl, invocationId) => ({
         invocationId,
@@ -2329,12 +2468,13 @@ describe("createScoutMcpServer", () => {
     expect(structured.lifecycle?.state).toBe("running");
     const observeUrl = "http://scout.test/agents/hudson.main?tab=observe";
     const tailUrl =
-      "http://scout.test/follow?view=tail&flightId=flight-1&invocationId=inv-1&targetAgentId=hudson.main";
-    expect(structured.links.follow).toBe(observeUrl);
+      "http://scout.test/follow?view=tail&flightId=flight-1&invocationId=inv-1&workId=work-1&targetAgentId=hudson.main";
+    expect(structured.links.follow).toBe("http://scout.test/work/work-1");
     expect(structured.links.observe).toBe(observeUrl);
     expect(structured.links.tail).toBe(tailUrl);
     const content = result.content as Array<{ type: string; text: string }> | undefined;
     expect(content?.[0]?.text).toContain("Flight flight-1 is running.");
+    expect(content?.[0]?.text).toContain("Follow the task: http://scout.test/work/work-1");
   });
 
   test("bounded wait returns the latest flight state when the caller wait elapses", async () => {

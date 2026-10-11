@@ -88,6 +88,7 @@ function parseOpsMode(value: string | undefined): OpsMode | undefined {
     case "atop":
     case "lanes":
     case "world":
+    case "week":
       return value;
     default:
       return undefined;
@@ -206,7 +207,7 @@ function isTailCoreSurface(mode: string | undefined): boolean {
 // Lanes is shared with the native app and chrome-free embeds, so direct links are
 // not gated with the broader Ops cluster.
 function isLanesCoreSurface(mode: string | undefined): boolean {
-  return mode === "lanes" || mode === "world";
+  return mode === "lanes" || mode === "world" || mode === "week";
 }
 
 function isUngatedOpsSurface(mode: string | undefined): boolean {
@@ -302,7 +303,7 @@ export function routeFromUrl(urlLike: string | URL): Route {
     canonical.searchParams.delete("workId");
     return routeFromUrl(canonical);
   }
-  if (parts[0] === "embed" && ["home", "search", "ops"].includes(parts[1] ?? "")) {
+  if (parts[0] === "embed" && ["home", "search", "ops", "requests"].includes(parts[1] ?? "")) {
     const canonical = new URL(url);
     const area = parts[1]!;
     const mode = url.searchParams.get("mode");
@@ -317,6 +318,7 @@ export function routeFromUrl(urlLike: string | URL): Route {
   const scoped = <T extends Route>(route: T): T => withMachineScope(route, machineId);
   const scopeRoute = parseScopeRouteFromUrl(parts, url, scoped);
   if (scopeRoute) return scopeRoute;
+  if (parts[0] === "requests") return { view: "requests" };
   const messageHashId = hashMessageId(url.hash);
   const agentTab = parseAgentTab(url.searchParams.get("tab"))
     ?? (messageHashId ? "message" : undefined);
@@ -769,9 +771,15 @@ export function routeFromUrl(urlLike: string | URL): Route {
     const sessionId = url.searchParams.get("sessionId")?.trim();
     const targetAgentId = url.searchParams.get("targetAgentId")?.trim()
       ?? url.searchParams.get("agentId")?.trim();
+    const dataset = mode === "week" && url.searchParams.get("data") === "team" ? "team" as const : undefined;
+    // /ops/week?source=live|otlp (or ?live) follows the machines as they work instead of the snapshot week
+    const rawSource = url.searchParams.get("source") ?? (url.searchParams.has("live") ? "live" : null);
+    const source = mode === "week" && (rawSource === "live" || rawSource === "otlp") ? rawSource : undefined;
     return {
       view: "ops",
       mode,
+      ...(dataset ? { dataset } : {}),
+      ...(source ? { source } : {}),
       ...(tailQuery ? { tailQuery } : {}),
       ...(planDocumentId ? { planDocumentId } : {}),
       ...(flightId ? { flightId } : {}),
@@ -792,6 +800,8 @@ export function routePath(r: Route, pathname?: string): string {
   if (scopePath) return scopePath;
 
   switch (r.view) {
+    case "requests":
+      return "/requests";
     case "inbox":
       return pathWithMachineScope("/", r);
     case "conversation": {
@@ -959,6 +969,12 @@ export function routePath(r: Route, pathname?: string): string {
         if (r.targetAgentId) params.set("targetAgentId", r.targetAgentId);
         return `/ops/${opsModePath(r.mode)}${searchSuffix(params)}`;
       }
+      if (r.mode === "week" && (r.dataset || r.source)) {
+        const params = new URLSearchParams();
+        if (r.dataset) params.set("data", r.dataset);
+        if (r.source) params.set("source", r.source);
+        return `/ops/week${searchSuffix(params)}`;
+      }
       return `/ops/${opsModePath(r.mode)}`;
     case "follow": {
       const params = new URLSearchParams();
@@ -1083,7 +1099,8 @@ function locationHashSuffix(hash: string): string {
 }
 
 function isStandaloneEmbedPath(pathname: string): boolean {
-  return pathname.startsWith("/embed/") || pathname === "/ops/lanes/embed";
+  // /glass and /glass/conversation are the Mac Glass window's entry pages (screens/glass), not shell routes.
+  return pathname.startsWith("/embed/") || pathname === "/ops/lanes/embed" || pathname === "/glass" || pathname === "/glass/conversation";
 }
 
 function readBrowserLocation(): BrowserLocationState {
@@ -1362,7 +1379,7 @@ export function planNavigation(
   const preservedSearch = options.preserveSearch === false ? "" : current.searchStr;
   let path = routePath(nextRoute, current.pathname);
   const nativeAreaView: Record<string, Route["view"]> = {
-    "/embed/home": "inbox", "/embed/search": "search", "/embed/ops": "ops",
+    "/embed/requests": "requests", "/embed/home": "inbox", "/embed/search": "search", "/embed/ops": "ops",
   };
   if (nativeAreaView[current.pathname] === nextRoute.view) {
     // Keep the native document entry point across local filters/mode changes

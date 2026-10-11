@@ -1,4 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
+import { resolveScoutMachines } from "../mesh/machine-selector.ts";
+import type { LiveTerminalSession } from "@openscout/runtime/live-terminal-session";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -139,7 +141,7 @@ export type ScoutBrokerContext = {
   snapshot: ScoutBrokerSnapshot;
 };
 
-export type ScoutManagedLocalSessionTransport = "codex_app_server";
+export type ScoutManagedLocalSessionTransport = "codex_app_server" | "tmux" | "ghostty";
 
 export type ScoutManagedLocalSessionAttachment = {
   ok: boolean;
@@ -593,6 +595,9 @@ export type ScoutWhoRegistrationKind = "broker" | "configured" | "discovered";
 
 export type ScoutWhoEntry = {
   agentId: string;
+  nodeId: string | null;
+  nodeName: string | null;
+  projectRoot: string | null;
   state: AgentState | "discovered";
   messages: number;
   lastSeen: number | null;
@@ -2799,6 +2804,70 @@ function createTrackedWorkItemSummary(
   };
 }
 
+/** The work id a pinned Codex chat always gets, so pinning twice reuses it. */
+export function scoutCodexChatWorkId(threadId: string): string {
+  return `work-codex-${threadId}`;
+}
+
+export type ScoutCodexChatWork = { workId: string; title: string; created: boolean };
+
+/**
+ * A ChatGPT-app Codex chat as Scout work, so a figure can stand for it.
+ * Nothing is attached or resumed: the chat keeps its one writer (the app);
+ * the work only remembers the thread id (`metadata.codexThreadId`) for Talk
+ * and later replies in place. Idempotent per thread.
+ */
+export async function ensureScoutCodexChatWork(input: {
+  threadId: string;
+  title: string;
+  cwd?: string | null;
+  createdAtMs?: number;
+}): Promise<ScoutCodexChatWork> {
+  const threadId = input.threadId.trim();
+  if (!/^[0-9a-f-]{16,64}$/iu.test(threadId)) throw new Error(`not a Codex thread id: ${input.threadId}`);
+  const broker = await requireScoutBrokerContext();
+  const workId = scoutCodexChatWorkId(threadId);
+  const existing = broker.snapshot.collaborationRecords?.[workId];
+  if (existing) return { workId, title: existing.title, created: false };
+
+  const createdAt = input.createdAtMs ?? Date.now();
+  const title = input.title.trim() || `Codex ${threadId.slice(0, 8)}`;
+  const record: CollaborationRecord = {
+    id: workId,
+    kind: "work_item",
+    state: "open",
+    acceptanceState: "none",
+    title,
+    createdById: OPERATOR_ID,
+    // The operator drives the chat in the ChatGPT app.
+    ownerId: OPERATOR_ID,
+    nextMoveOwnerId: OPERATOR_ID,
+    requestedById: OPERATOR_ID,
+    createdAt,
+    updatedAt: createdAt,
+    labels: ["codex-chat"],
+    metadata: {
+      source: "scout-session-pin",
+      harness: "codex",
+      codexThreadId: threadId,
+      ...(input.cwd?.trim() ? { cwd: input.cwd.trim() } : {}),
+    },
+  };
+  await brokerPostJson(broker.baseUrl, scoutBrokerPaths.v1.collaborationRecords, record);
+  const event: CollaborationEvent = {
+    id: buildScoutEntityId("evt", createdAt),
+    recordId: workId,
+    recordKind: "work_item",
+    kind: "created",
+    actorId: OPERATOR_ID,
+    at: createdAt,
+    summary: `Pinned the Codex chat “${title}”`,
+    metadata: { source: "scout-session-pin" },
+  };
+  await brokerPostJson(broker.baseUrl, scoutBrokerPaths.v1.collaborationEvents, event);
+  return { workId, title, created: true };
+}
+
 async function createScoutTrackedWorkItem(input: {
   baseUrl: string;
   senderId: string;
@@ -3165,6 +3234,7 @@ async function ensureBrokerDirectConversationBetween(
 }
 
 export async function sendScoutMessage(input: {
+  requestId?: string;
   senderId: string;
   body: string;
   targetLabel?: string;
@@ -3226,6 +3296,7 @@ export async function sendScoutMessage(input: {
       input.aliasScope,
     );
     const delivery = await brokerPostDeliver(contextResult.context.baseUrl, {
+      ...(input.requestId ? { requestId: input.requestId } : {}),
       caller: {
         actorId: senderId,
         nodeId: contextResult.context.node.id,
@@ -3300,6 +3371,7 @@ export async function sendScoutMessage(input: {
   ) {
     const targetLabel = selectors[0]!.label;
     const delivery = await brokerPostDeliver(broker.baseUrl, {
+      ...(input.requestId ? { requestId: input.requestId } : {}),
       caller: {
         actorId: senderId,
         nodeId: broker.node.id,
@@ -3894,12 +3966,14 @@ export async function attachScoutManagedLocalSession(input: {
   agentId?: string;
   alias?: string;
   displayName?: string;
+  liveTerminal?: LiveTerminalSession;
 }): Promise<ScoutManagedLocalSessionAttachment> {
   const broker = await requireScoutBrokerContext();
   return brokerPostJson<ScoutManagedLocalSessionAttachment>(
     broker.baseUrl,
     scoutBrokerPaths.v1.localSessionsAttach,
     {
+      ...(input.liveTerminal ? { liveTerminal: input.liveTerminal } : {}),
       externalSessionId: input.externalSessionId,
       transport: input.transport,
       cwd: input.currentDirectory,
@@ -4135,6 +4209,7 @@ function defaultAskExecutionSession(
 }
 
 export async function deliverScoutAsk(input: {
+  requestId?: string;
   senderId: string;
   target: ScoutRouteTarget;
   targetLabel?: string;
@@ -4219,6 +4294,7 @@ export async function deliverScoutAsk(input: {
     ...(input.replyMode ? { replyMode: input.replyMode } : {}),
   };
   const delivery = await brokerPostDeliver(brokerBaseUrl, {
+    ...(input.requestId ? { requestId: input.requestId } : {}),
     caller: {
       actorId: senderId,
       nodeId: brokerNodeId,
@@ -5225,19 +5301,18 @@ function whoEntryState(
   }, "offline");
 }
 
-async function loadConfiguredAgentIds(): Promise<Set<string>> {
+async function loadConfiguredAgentMap(): Promise<Map<string, { projectRoot: string }>> {
   try {
     const overrides = await readRelayAgentOverrides();
-    return new Set(
+    return new Map(
       Object.entries(overrides)
         .filter(([agentId, record]) => {
           const defId = record.definitionId ?? agentId;
           return !BUILT_IN_AGENT_DEFINITION_IDS.has(defId);
-        })
-        .map(([agentId]) => agentId),
+        }),
     );
   } catch {
-    return new Set();
+    return new Map();
   }
 }
 
@@ -5253,13 +5328,17 @@ async function loadDiscoveredAgentMap(
 }
 
 export async function listScoutAgents(
-  options: { currentDirectory?: string } = {},
+  options: { currentDirectory?: string; machine?: string } = {},
 ): Promise<ScoutWhoEntry[]> {
   const broker = await requireScoutBrokerContext();
+  const nodes = { ...broker.snapshot.nodes, [broker.node.id]: broker.node };
+  const selectedNodeIds = options.machine
+    ? new Set(resolveScoutMachines(Object.values(nodes), options.machine).map((node) => node.id))
+    : null;
   const currentDirectory = options.currentDirectory ?? process.cwd();
   const aliasParams = new URLSearchParams({ currentDirectory });
-  const [configuredAgentIds, discoveredAgents, aliasResult] = await Promise.all([
-    loadConfiguredAgentIds(),
+  const [configuredAgents, discoveredAgents, aliasResult] = await Promise.all([
+    loadConfiguredAgentMap(),
     loadDiscoveredAgentMap(currentDirectory),
     brokerReadJson<{ bindings: RouteAliasBinding[] }>(broker.baseUrl, `/v1/aliases?${aliasParams}`)
       .catch(() => ({ bindings: [] })),
@@ -5306,7 +5385,7 @@ export async function listScoutAgents(
       ...Object.keys(broker.snapshot.agents ?? {}),
       ...Array.from(endpointsByAgent.keys()),
       ...Array.from(messageStats.keys()),
-      ...Array.from(configuredAgentIds.values()),
+      ...Array.from(configuredAgents.keys()),
       ...Array.from(discoveredAgents.keys()),
     ]),
   ]
@@ -5318,7 +5397,7 @@ export async function listScoutAgents(
       const brokerMessages = messageStats.get(agentId);
       const registrationKind: ScoutWhoRegistrationKind =
         discoveredAgents.get(agentId)?.registrationKind
-        ?? (configuredAgentIds.has(agentId) ? "configured" : "broker");
+        ?? (configuredAgents.has(agentId) ? "configured" : "broker");
       const state = whoEntryState(endpoints, registrationKind);
       const lastSeen = maxDefined([
         brokerMessages?.lastSeen,
@@ -5326,8 +5405,18 @@ export async function listScoutAgents(
       ]);
       const messages = brokerMessages?.messages ?? 0;
       const aliases = aliasesByAgent.get(agentId);
-      return { agentId, state, messages, lastSeen, registrationKind, ...(aliases?.length ? { aliases } : {}) };
+      const agent = broker.snapshot.agents?.[agentId];
+      const discovered = discoveredAgents.get(agentId);
+      const endpoint = [...endpoints].sort((a, b) =>
+        (whoEndpointActivity(b) ?? 0) - (whoEndpointActivity(a) ?? 0))[0];
+      const nodeId = agent?.homeNodeId ?? agent?.authorityNodeId ?? endpoint?.nodeId
+        ?? (discovered || configuredAgents.has(agentId) ? broker.node.id : null);
+      const nodeName = nodeId ? nodes[nodeId]?.name ?? null : null;
+      const projectRoot = metadataString(agent?.metadata, "projectRoot")
+        ?? endpoint?.projectRoot ?? discovered?.projectRoot ?? configuredAgents.get(agentId)?.projectRoot ?? null;
+      return { agentId, nodeId, nodeName, projectRoot, state, messages, lastSeen, registrationKind, ...(aliases?.length ? { aliases } : {}) };
     })
+    .filter((entry) => !selectedNodeIds || (entry.nodeId !== null && selectedNodeIds.has(entry.nodeId)))
     .sort((lhs, rhs) => {
       const stateDelta = whoStateRank(rhs.state) - whoStateRank(lhs.state);
       if (stateDelta !== 0) return stateDelta;

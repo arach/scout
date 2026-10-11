@@ -533,6 +533,10 @@ export class AcpAdapter extends BaseAdapter {
   private pendingCursorQuestionRequests = new Map<JsonRpcId, PendingCursorQuestionRequest>();
   private pendingCursorPlans = new Map<string, PendingCursorPlan>();
   private promptQueue: Promise<void> = Promise.resolve();
+  private queuedPrompts = 0;
+  private readonly liveIncarnation = crypto.randomUUID();
+  private liveRevision = 0;
+  private attentionUnsafe = false;
 
   constructor(config: AdapterConfig) {
     super(config);
@@ -546,10 +550,30 @@ export class AcpAdapter extends BaseAdapter {
   }
 
   send(prompt: Prompt): void {
+    this.queuedPrompts++;
     this.promptQueue = this.promptQueue.then(
       () => this.runPrompt(prompt),
       () => this.runPrompt(prompt),
-    );
+    ).finally(() => { this.queuedPrompts--; });
+  }
+
+  observeExisting() {
+    const alive = !!this.process && !this.process.killed && this.process.exitCode === null;
+    return { state: !alive ? "gone" : !this.currentSessionId || this.attentionUnsafe || this.pendingPermissions.size
+      || this.pendingCursorQuestions.size || this.pendingCursorPlans.size ? "unknown"
+      : this.activeTurn ? "active" : this.queuedPrompts ? "unknown" : "idle",
+      sessionId: this.currentSessionId ?? undefined, turnId: this.activeTurn?.turnId,
+      token: `${this.liveIncarnation}:${this.liveRevision}`, steer: false } as const;
+  }
+
+  submitExisting(expected: { sessionId: string; token: string }, action: "revive" | "steer", text: string) {
+    const observed = this.observeExisting();
+    if (action !== "revive" || observed.state !== "idle" || expected.sessionId !== observed.sessionId
+      || expected.token !== observed.token) return { accepted: false, evidence: "native_state_changed_or_unsupported" };
+    // runPrompt reserves the turn and writes session/prompt synchronously before its first await.
+    // Never start/load an ACP session and never cancel+prompt to emulate steer.
+    this.promptQueue = this.runPrompt({ sessionId: this.session.id, text }).catch(() => undefined);
+    return { accepted: true, evidence: "acp_prompt_requested" };
   }
 
   interrupt(): void {
@@ -891,6 +915,7 @@ export class AcpAdapter extends BaseAdapter {
       return;
     }
 
+    this.liveRevision++;
     const turnId = crypto.randomUUID();
     const turn: Turn = {
       id: turnId,
@@ -929,8 +954,10 @@ export class AcpAdapter extends BaseAdapter {
       if (typeof response.stopReason === "string" && response.stopReason) {
         this.updateProviderMeta({ lastStopReason: response.stopReason });
       }
+      this.attentionUnsafe = false;
       this.finishTurn(mapTurnStatus(response.stopReason));
     } catch (error) {
+      this.attentionUnsafe = true;
       this.emit("event", {
         event: "turn:error",
         sessionId: this.session.id,

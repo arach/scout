@@ -76,6 +76,7 @@ function createHarness(input: {
   now?: number;
   tailRecentServeCacheTtlMs?: number;
   transcriptGate?: Promise<unknown>;
+  sessionEvents?: TailEvent[];
 } = {}) {
   const repoWatchCalls: RepoWatchSnapshotOptions[] = [];
   const warnings: string[] = [];
@@ -132,6 +133,13 @@ function createHarness(input: {
       return (input.transcriptEvents ?? [])
         .filter((event) => !kinds || kinds.has(event.kind))
         .slice(0, limit);
+    },
+    readTailEventsForSession: async (sessionId, options) => {
+      const events = (input.sessionEvents ?? []).filter((event) => event.sessionId === sessionId).slice(-(options?.limit ?? 500));
+      return events.length ? {
+        transcript: { source: "codex", transcriptPath: "/fixture/session.jsonl", sessionId, cwd: "/fixture", project: "fixture", harness: "scout-managed", mtimeMs: 1, size: 1 },
+        events,
+      } : null;
     },
     repoWatchServeCacheTtlMs: 60_000,
     repoWatchRehydrateAfterMs: 30_000,
@@ -217,6 +225,15 @@ describe("BrokerRepoTailService", () => {
     expect(harness.warnings).toEqual([
       "[openscout-runtime] repo-watch test warm failed: boom",
     ]);
+  });
+
+  test("progressive reads pin their scan without triggering a second stale warm", async () => {
+    const harness = createHarness({ now: 100_000 });
+    await harness.service.readRepoWatchSnapshotForUrl(new URL(
+      "http://test/v1/repo-watch/snapshot?progressive=1&scanId=pass-1&maxRoots=128",
+    ));
+    expect(harness.repoWatchCalls).toHaveLength(1);
+    expect(harness.repoWatchCalls[0]).toMatchObject({ progressive: true, scanId: "pass-1", maxRoots: 128 });
   });
 
   test("schedules stale repo-watch rehydrate in the background", async () => {
@@ -407,6 +424,19 @@ describe("BrokerRepoTailService", () => {
     );
 
     expect(payload.events.map((event) => event.id)).toEqual(["cursor-activity"]);
+  });
+});
+
+describe("task-scoped tail history", () => {
+  test("a quiet task is not evicted by a busier sibling or the fleet cache", async () => {
+    const quiet = tailEvent({ id: "quiet", ts: 1, sessionId: "quiet-session" });
+    const busy = tailEvent({ id: "busy", ts: 999, sessionId: "busy-session" });
+    const { service } = createHarness({ liveEvents: [busy], transcriptEvents: [busy], sessionEvents: [quiet, busy], tailRecentServeCacheTtlMs: 5_000 });
+    const read = (query: string) => service.readTailRecentPayloadWithTiming(new URL(`http://test/v1/tail/recent?limit=1&transcripts=true${query}`));
+    expect((await read("")).payload.events).toEqual([busy]);
+    expect((await read("&sessionId=quiet-session")).payload.events).toEqual([quiet]);
+    expect((await read("&sessionId=busy-session")).payload.events).toEqual([busy]);
+    expect((await read("&sessionId=missing-session")).payload.events).toEqual([]);
   });
 });
 

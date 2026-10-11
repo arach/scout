@@ -45,4 +45,26 @@ describe("mobile service budget projection", () => {
       },
     ]);
   });
+
+  test("carries a provider with no quota as activity text", () => {
+    const gauge = {
+      id: "grok",
+      label: "grok",
+      kind: "status",
+      statusLabel: "Local activity",
+      windowLabel: "observed 7d",
+      detailLabel: "138M tokens · 1326 turns · 1326 model calls",
+      tone: "dim",
+      capturedAt: Date.now(),
+      source: "Grok local telemetry",
+    } as unknown as ServiceGauge;
+
+    expect(mobileServiceBudgetFromGauge(gauge)).toEqual({
+      provider: "grok",
+      label: "Grok",
+      plan: "",
+      windows: [],
+      activity: "138M tokens · 7d",
+    });
+  });
 });

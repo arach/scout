@@ -138,6 +138,7 @@ export function projectWorkItemRow(row: {
   latest_event_summary: string | null;
   latest_event_at: number | string | null;
   progress_summary: string | null;
+  codex_thread_id?: string | null;
 }): WebWorkItem {
   const updatedAt = coerceNumber(row.updated_at) ?? 0;
   const latestFlightAt = coerceNumber(row.latest_flight_at);
@@ -186,6 +187,7 @@ export function projectWorkItemRow(row: {
     activeFlightCount: row.active_flight_count ?? 0,
     lastMeaningfulAt: latest.at,
     lastMeaningfulSummary: latest.summary,
+    codexThreadId: typeof row.codex_thread_id === "string" && row.codex_thread_id.trim() ? row.codex_thread_id.trim() : null,
   };
 }
 
@@ -209,6 +211,7 @@ export function queryWorkItemById(id: string): WebWorkDetail | null {
     cr.parent_id,
     parent.title AS parent_title,
     json_extract(cr.detail_json, '$.progress.summary') AS progress_summary,
+    json_extract(cr.detail_json, '$.metadata.codexThreadId') AS codex_thread_id,
     (
       SELECT COUNT(*)
       FROM collaboration_records child
@@ -503,6 +506,7 @@ export function queryWorkItemShallow(id: string): WebWorkItem | null {
     cr.parent_id,
     parent.title AS parent_title,
     json_extract(cr.detail_json, '$.progress.summary') AS progress_summary,
+    json_extract(cr.detail_json, '$.metadata.codexThreadId') AS codex_thread_id,
     0 AS active_child_work_count,
     0 AS active_flight_count,
     NULL AS active_flight_state,
@@ -851,6 +855,7 @@ export function queryWorkItems(opts?: {
     cr.parent_id,
     parent.title AS parent_title,
     json_extract(cr.detail_json, '$.progress.summary') AS progress_summary,
+    json_extract(cr.detail_json, '$.metadata.codexThreadId') AS codex_thread_id,
     (
       SELECT COUNT(*)
       FROM collaboration_records child

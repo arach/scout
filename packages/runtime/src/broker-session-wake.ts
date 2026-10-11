@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 
 import type { ActorIdentity, AgentEndpoint, NodeDefinition } from "@openscout/protocol";
+import { scoutNodeMatchesSessionHost, scoutSessionHostForNode } from "@openscout/protocol";
 
 import type { ExactSessionWakeInput } from "./broker-delivery-routing.js";
 import {
@@ -418,9 +419,78 @@ export type PeerSessionStartDeps = Omit<PeerSessionWakeDeps, "peers"> & {
   peerProjectRoots: (nodeId: string) => string[];
 };
 
+/** Why one peer did not start the session: kept so the asker hears the peer's own words. */
+export type PeerSessionStartFailure = {
+  peerNodeId: string;
+  host: string;
+  reason: string;
+  detail?: string;
+};
+
 export type PeerSessionStartResult =
   | { ok: true; peerNodeId: string; endpoint: AgentEndpoint; actor?: ActorIdentity }
-  | { ok: false; peersTried: number };
+  | { ok: false; peersTried: number; failures: PeerSessionStartFailure[] };
+
+/** What `--on <host>` resolved to among the mesh nodes this broker knows. */
+export type MeshHostResolution =
+  | { kind: "local" }
+  | { kind: "peer"; node: NodeDefinition }
+  | { kind: "not_trusted"; node: NodeDefinition }
+  | { kind: "unreachable"; node: NodeDefinition }
+  | { kind: "unknown"; knownHosts: string[] }
+  | { kind: "ambiguous"; nodes: NodeDefinition[] };
+
+/**
+ * Resolve the machine an ask names with `--on`. Matching reuses the session
+ * address rules (derived label, node id, name, host name), so `archie`,
+ * `archie.local` and the full node id all land on the same machine. A name
+ * that matches more than one machine is `ambiguous`; the node id disambiguates.
+ */
+export function resolveMeshHost(input: {
+  host: string;
+  localNode?: NodeDefinition;
+  nodes: NodeDefinition[];
+  trustedNodeIds: ReadonlySet<string>;
+  isReachable: (node: NodeDefinition) => boolean;
+}): MeshHostResolution {
+  const peers = input.nodes.filter((node) => node.id !== input.localNode?.id);
+  const all = input.localNode ? [input.localNode, ...peers] : peers;
+  // An exact node id names one machine; a label, name or host name can name
+  // several, and then the ask is refused rather than landing on whichever
+  // matched first (or quietly on this machine).
+  const exact = all.filter((node) => node.id === input.host.trim());
+  const matches = exact.length === 1 ? exact : all.filter((node) => scoutNodeMatchesSessionHost(node, input.host));
+  if (matches.length > 1) return { kind: "ambiguous", nodes: matches };
+  const node = matches[0];
+  if (node && node.id === input.localNode?.id) return { kind: "local" };
+  if (!node) {
+    const knownHosts = [...new Set(peers.map((peer) => scoutSessionHostForNode(peer)).filter(Boolean))].sort();
+    return { kind: "unknown", knownHosts };
+  }
+  if (!input.trustedNodeIds.has(node.id)) return { kind: "not_trusted", node };
+  if (!node.brokerUrl || !input.isReachable(node)) return { kind: "unreachable", node };
+  return { kind: "peer", node };
+}
+
+/**
+ * When a project path is not on this node, find the peer that knows a repo of
+ * the same folder name, so the error can say exactly which `--on` to add.
+ * Only exact last-segment matches count; a guess that might be wrong is worse
+ * than the generic hint.
+ */
+export function suggestHostForProjectPath(
+  projectPath: string,
+  peers: NodeDefinition[],
+  peerProjectRoots: (nodeId: string) => string[],
+): { host: string; root: string } | undefined {
+  const name = projectPath.replace(/\/+$/, "").split("/").filter(Boolean).pop();
+  if (!name || name === "~") return undefined;
+  const matches = peers.flatMap((peer) =>
+    [...new Set(peerProjectRoots(peer.id))]
+      .filter((root) => root.replace(/\/+$/, "").split("/").pop() === name)
+      .map((root) => ({ host: scoutSessionHostForNode(peer), root })));
+  return matches.length === 1 ? matches[0] : undefined;
+}
 
 function sharedPathDepth(left: string, right: string): number {
   const leftParts = left.split("/").filter(Boolean);
@@ -463,6 +533,10 @@ export async function startSessionOnPeers(
   input: MeshProjectSessionStartInput,
 ): Promise<PeerSessionStartResult> {
   let tried = 0;
+  const failures: PeerSessionStartFailure[] = [];
+  const fail = (peer: NodeDefinition, reason: string, detail?: string) => {
+    failures.push({ peerNodeId: peer.id, host: scoutSessionHostForNode(peer), reason, ...(detail ? { detail } : {}) });
+  };
   const peers = rankPeersForProjectPath(
     deps.peers.filter((peer) => peer.brokerUrl && peer.id !== deps.localNodeId),
     input.projectPath,
@@ -474,13 +548,17 @@ export async function startSessionOnPeers(
     try {
       response = await deps.postJson<PeerSessionStartResponse>(peer.brokerUrl!, MESH_SESSION_START_PATH, input);
     } catch (error) {
-      deps.log?.(
-        `[openscout-runtime] mesh session start failed on ${peer.id}: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      const message = error instanceof Error ? error.message : String(error);
+      deps.log?.(`[openscout-runtime] mesh session start failed on ${peer.id}: ${message}`);
+      fail(peer, "peer_unreachable", message);
       continue;
     }
-    if (!response?.ok || !response.endpoint) continue;
+    if (!response?.ok || !response.endpoint) {
+      fail(peer, response?.reason || "start_failed", response?.detail);
+      continue;
+    }
     if (response.endpoint.nodeId !== peer.id) {
+      fail(peer, "endpoint_owner_mismatch", `returned an endpoint owned by ${response.endpoint.nodeId}`);
       deps.log?.(
         `[openscout-runtime] mesh session start on ${peer.id} returned endpoint owned by ${response.endpoint.nodeId}; ignoring`,
       );
@@ -495,5 +573,5 @@ export async function startSessionOnPeers(
     );
     return { ok: true, peerNodeId: peer.id, endpoint: response.endpoint, ...(response.actor ? { actor: response.actor } : {}) };
   }
-  return { ok: false, peersTried: tried };
+  return { ok: false, peersTried: tried, failures };
 }

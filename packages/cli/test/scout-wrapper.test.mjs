@@ -44,6 +44,16 @@ test("scout wrapper exposes current ask routing help", () => {
   assert.match(output, /scout ask --harness codex/);
 });
 
+test("tracked send still completes through the command's forced-exit path", () => {
+  const output = execFileSync("bun", ["./bin/scout.mjs", "send", "--tracked", "--help"], {
+    cwd: packageDirectory,
+    env: isolatedEnvironment(),
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  assert.match(output, /Usage: scout send/);
+});
+
 test("scout wrapper rejects unsupported ask session reuse before routing", () => {
   assert.throws(
     () => execFileSync(

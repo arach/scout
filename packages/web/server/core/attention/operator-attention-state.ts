@@ -1,4 +1,4 @@
-import type { CollaborationEvent, CollaborationKind } from "@openscout/protocol";
+import { isOpaqueChannelId, type CollaborationEvent, type CollaborationKind } from "@openscout/protocol";
 import { getScoutWebPairingSessionSnapshots, type ScoutPairingState } from "../../pairing.ts";
 import { queryAgents, queryBrokerDiagnostics, queryFleet } from "../../db-queries.ts";
 import { queryAgentIdsByEndpointSessionId } from "../../db/agents.ts";
@@ -11,12 +11,14 @@ import {
   type HerdrContinuationHooks,
   type HerdrContinuationOptions,
 } from "./herdr-continuation-host.ts";
-import { appendScoutCollaborationEvent, loadScoutBrokerContext, type ScoutBrokerContext } from "../broker/service.ts";
+import { appendScoutCollaborationEvent, loadScoutBrokerContext, loadScoutRemoteApprovals, type ScoutBrokerContext, type ScoutRemoteApprovalNode } from "../broker/service.ts";
 import { projectSessionsAttention, sessionApprovalAttentionId, type SessionAttentionItem } from "@openscout/runtime";
 import { loadPairingState } from "../../pairing-state.ts";
 import { CreateOpenScoutWebServerOptions } from "../../web-server-options.ts";
 import { activeEndpointForAgent, brokerCardAgentsForWeb, mergeBrokerAgentProjection } from "../../broker-agent-projection.ts";
 import { defaultCaptureTmuxPane } from "../../tmux-pane-capture.ts";
+import { resolveOperatorName } from "@openscout/runtime/user-config";
+import { pendingOperatorNeeds } from "./operator-needs.ts";
 
 export type OperatorAttentionItem = {
   id: string;
@@ -31,6 +33,8 @@ export type OperatorAttentionItem = {
   severity: "critical" | "warning" | "info";
   sourceLabel: string;
   approval?: ScoutPairingState["pendingApprovals"][number];
+  /** A declared question's offered answers; one is sent as the operator's reply. */
+  answer?: { conversationId: string; replyToMessageId: string; options: string[] };
   actions: Array<{
     kind: "approve" | "deny" | "open" | "configure" | "copy" | "dismiss";
     label: string;
@@ -360,16 +364,65 @@ export function operatorAttentionFromSessionItem(item: SessionAttentionItem): Op
   };
 }
 
+/**
+ * Approvals waiting on another machine that shares them with this one. Only a
+ * live link offers Approve/Deny; the answer is forwarded to that machine.
+ */
+export function remoteApprovalItems(nodes: ScoutRemoteApprovalNode[]): OperatorAttentionItem[] {
+  return nodes.filter((node) => node.state === "live").flatMap((node) => node.approvals.map((approval): OperatorAttentionItem => ({
+    id: `remote:${node.nodeId}:${sessionApprovalAttentionId(approval.sessionId, approval.turnId, approval.blockId, approval.version)}`,
+    kind: "approval",
+    title: approval.title,
+    summary: approval.description,
+    detail: approval.detail,
+    agentId: null,
+    agentName: approval.sessionName,
+    conversationId: null,
+    updatedAt: node.updatedAt ?? Date.now(),
+    severity: approval.risk === "high" ? "critical" : "warning",
+    sourceLabel: `${approval.adapterType} approval · ${node.label}`,
+    approval: {
+      ...approval,
+      sessionId: remoteApprovalSessionId(node.nodeId, approval.sessionId),
+      actionKind: approval.actionKind as never,
+      actionStatus: "awaiting_approval",
+    },
+    actions: [
+      { kind: "approve", label: "Approve" },
+      { kind: "deny", label: "Deny" },
+    ],
+  })));
+}
+
+const REMOTE_SESSION_PREFIX = "remote:";
+
+/**
+ * A remote approval's sessionId carries its origin machine, so a decide goes
+ * to exactly the machine the operator saw it on: `remote:<nodeId>:<sessionId>`.
+ */
+export function remoteApprovalSessionId(nodeId: string, sessionId: string): string {
+  return `${REMOTE_SESSION_PREFIX}${encodeURIComponent(nodeId)}:${sessionId}`;
+}
+
+export function parseRemoteApprovalSessionId(value: string): { nodeId: string; sessionId: string } | null {
+  if (!value.startsWith(REMOTE_SESSION_PREFIX)) return null;
+  const rest = value.slice(REMOTE_SESSION_PREFIX.length);
+  const split = rest.indexOf(":");
+  if (split <= 0 || split === rest.length - 1) return null;
+  return { nodeId: decodeURIComponent(rest.slice(0, split)), sessionId: rest.slice(split + 1) };
+}
+
 export async function buildOperatorAttentionState(
   currentDirectory: string,
   capture: TmuxPaneCapture = defaultCaptureTmuxPane,
 ) {
-  const [pairing, pairingSnapshots, fleet, brokerDiagnostics, scoutBroker] = await Promise.all([
+  const [pairing, pairingSnapshots, fleet, brokerDiagnostics, scoutBroker, remoteApprovals] = await Promise.all([
     loadPairingState(currentDirectory, false).catch(() => null),
     getScoutWebPairingSessionSnapshots().catch(() => []),
     Promise.resolve(queryFleet({ limit: 24, activityLimit: 120 })),
     Promise.resolve(queryBrokerDiagnostics({ limit: 160, windowMs: 24 * 60 * 60_000 })),
     loadScoutBrokerContext().catch(() => null),
+    loadScoutRemoteApprovals(),
   ]);
   const hostAttention = await queryAgentAttentionSnapshot(scoutBroker, capture);
 
@@ -411,6 +464,43 @@ export async function buildOperatorAttentionState(
         },
       ],
     });
+  }
+
+  items.push(...remoteApprovalItems(remoteApprovals));
+
+  // Declared operator questions (`scout ask --operator --question`) live only as
+  // conversation messages; project the unanswered ones so Requests shows them.
+  if (scoutBroker) {
+    const operatorName = resolveOperatorName().trim() || "operator";
+    for (const need of pendingOperatorNeeds({
+      messages: Object.values(scoutBroker.snapshot.messages ?? {}),
+      operatorIds: [operatorName, "operator"],
+    })) {
+      const name = scoutBroker.snapshot.actors?.[need.actorId]?.displayName?.trim() || need.actorId;
+      items.push({
+        id: `need:${need.messageId}`,
+        kind: "question",
+        title: need.question,
+        summary: need.blockedReason ? `Blocked: ${need.blockedReason}` : null,
+        detail: null,
+        agentId: need.actorId,
+        agentName: name,
+        conversationId: need.conversationId,
+        updatedAt: need.createdAt,
+        severity: "warning",
+        // Declared kind, never inferred from wording: a need raised with
+        // `--permission` is a permission request; anything else is a question.
+        sourceLabel: need.permission ? "Permission request" : "Question",
+        ...(need.options.length && isOpaqueChannelId(need.conversationId)
+          ? { answer: { conversationId: need.conversationId, replyToMessageId: need.messageId, options: need.options } }
+          : {}),
+        actions: [{
+          kind: "open",
+          label: "Open conversation",
+          route: { view: "conversation", conversationId: need.conversationId },
+        }],
+      });
+    }
   }
 
   for (const sessionItem of projectSessionsAttention(pairingSnapshots, { pendingApprovalIds })) {

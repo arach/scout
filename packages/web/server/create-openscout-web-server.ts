@@ -140,6 +140,8 @@ import { mountSendRoutes } from "./routes/send.ts";
 import { mountBrokerRoutes } from "./routes/broker.ts";
 import { mountSessionRoutes } from "./routes/sessions.ts";
 import { mountStreamRoutes } from "./routes/stream.ts";
+import { mountWorldRoutes } from "./routes/world.ts";
+import { worldVoiceActions } from "./world-command.ts";
 
 
 export {
@@ -1547,6 +1549,8 @@ export async function createOpenScoutWebServer(
 
   mountMeshOpsRoutes(app);
 
+  mountWorldRoutes(app, { brokerUrl: resolveScoutBrokerUrl });
+
   mountRoleRoutes(app);
 
   mountFlightRoutes(app);
@@ -1557,7 +1561,7 @@ export async function createOpenScoutWebServer(
 
   mountSessionRoutes(app, { scoutbot });
 
-  mountMeshRoutes(app, { meshNodeStateStore });
+  mountMeshRoutes(app, { meshNodeStateStore, openLocalTerminal: options.openLocalTerminal });
 
   mountLocalHttpsRoutes(app, { options });
 
@@ -1613,6 +1617,8 @@ export async function createOpenScoutWebServer(
       if (!result.usedBroker) throw new Error("broker unreachable");
       if (result.unresolvedTarget) throw new Error(`could not route ask to ${result.unresolvedTarget}`);
     },
+    // HUD moves ("wednesday afternoon", "pause") go to an open World page, or to one the words name
+    routePageCommand: (text, pages) => worldVoiceActions(text, { worldOpen: pages.has("world") }),
   });
   setScoutVoiceAmbientListener(ambientVoice.listener);
 

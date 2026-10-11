@@ -11,18 +11,22 @@ import type {
   CompanionFigure,
   CompanionFigureAnchor,
   CompanionFigureDefaults,
+  CompanionFigureHold,
   CompanionFigureMotion,
   CompanionSide,
 } from "../../lib/companion-host.ts";
+import { hasEdgePoses, type EdgePoseArt, type EdgePoseName } from "../../lib/crew-registry.ts";
 import { EDGE_SLOT } from "./edge-model.ts";
 
 export const FIGURE_SIZE_PRESETS = [16, 24, 32, 48, 64] as const;
 export const FIGURE_MOTIONS: readonly CompanionFigureMotion[] = ["full", "calm", "still"];
 export const FIGURE_MOTION_LABEL: Record<CompanionFigureMotion, string> = { full: "Full", calm: "Calm", still: "Still" };
+export const FIGURE_HOLD_LABEL: Record<CompanionFigureHold, string> = { edge: "Edge", iso: "Platform", latch: "Latch" };
 /** A press that moves this far or less is a click, as on the host. */
 export const FIGURE_CLICK_SLOP = 4;
 /** The ⇧ fall, and a window that went away. Ease-in; instant under Reduce Motion. */
 export const FIGURE_FALL_MS = 520;
+export const FIGURE_LAND_MS = 120;
 
 export function figureSize(figure: CompanionFigure | undefined, defaults: CompanionFigureDefaults): number {
   return figure?.size ?? defaults.size;
@@ -57,28 +61,58 @@ export function figureWhere(figure: CompanionFigure | undefined): FigureWhere {
 }
 
 /**
- * How far a held figure sits off its edge: half the hex plate, so the plate
- * centred on the edge line touches the body. Kept under the host's 8pt
- * cover probe (ghostOffset), so that probe lands on the body, not the gap.
+ * How far a held figure sits off its edge: room for the latch, or the gap an
+ * iso platform floats across. Kept under the host's 8pt cover probe
+ * (ghostOffset), so that probe lands on the body, not the gap.
  */
-export const FIGURE_HEX_REACH = 6;
+export const FIGURE_HOLD_REACH = 6;
+/**
+ * Iso on a side: the figure stands on its platform with its feet a little
+ * below the anchor, so the slot rises this share of its height above it.
+ */
+export const FIGURE_ISO_RISE = 0.72;
 /** How far the state plate overhangs the body's side, × size (edge.css .ce-fig__plate). */
 export const FIGURE_STATE_PLATE_OVERHANG = 0.24;
 
+/** Saved per-pin choice wins; a missing art pack must never produce an invisible grip. */
+export function figureHold(figure: CompanionFigure | undefined, defaults: CompanionFigureDefaults, slug?: string | null): CompanionFigureHold {
+  const hold = figure?.hold ?? defaults.hold;
+  return hold === "edge" && !hasEdgePoses(slug) ? "iso" : hold;
+}
+
+export function figurePose(anchor: Pick<CompanionFigureAnchor, "down" | "attachment">, figure?: CompanionFigure): EdgePoseName | "rest" {
+  if (anchor.down === null) return "rest";
+  if (anchor.attachment === "stand") return "rest";
+  if (anchor.attachment === "sit" || (!anchor.attachment && figure?.placement.kind === "window" && figure.placement.side === "top" && figure.windowTop !== "hang")) return "sit-on-ledge";
+  if (anchor.attachment === "hang" || anchor.down === "top") return "hang-from-top";
+  if (anchor.down === "left") return "cling-left";
+  if (anchor.down === "right") return "cling-right";
+  return "rest";
+}
+
+export type FigureBox = { left: number; top: number; bodyTop: number; bodyBottom: number;
+  /** Edge art offsets in the hit slot. Absent for unchanged legacy geometry. */
+  bodyLeft?: number; bodyOffsetX?: number; bodyOffsetY?: number; contactX?: number; contactY?: number;
+};
+
 export type FigureHoldSide = "top" | "left" | "right";
 
-/** Whether a figure on this edge rests against a hex plate. */
+/** Whether a figure on this edge holds on (platform or latch) rather than standing. */
 export function figureHasPlate(down: CompanionSide | null): down is FigureHoldSide {
   return down === "top" || down === "left" || down === "right";
 }
 
 /**
- * Hex hold: the figure stays upright on every edge, so it never has to be
- * read at a tilt. On a floor or a title bar (down "bottom", or none while
- * dragged) it stands with its feet at the anchor. Under an edge or on a side
- * a small hex dock plate sits across the edge line and the figure rests
- * against it: hanging below it, or beside it centred on the anchor. The body
- * is pushed against the plate inside its slot (see edge.css .is-hold-*).
+ * Held figures stay upright on every edge, so they never have to be read at a
+ * tilt. On a floor or a title bar (down "bottom", or none while dragged) a
+ * figure stands with its feet at the anchor. Under an edge or on a side it
+ * holds on, by the operator's hold:
+ *   latch — a slim glass latch across the edge line; the figure hangs below
+ *           it, or clips on beside it centred on the anchor.
+ *   iso   — a glass isometric platform floating off the edge; the figure
+ *           stands on it, below an edge, or beside a side with its feet
+ *           FIGURE_ISO_RISE down the slot (just below the anchor).
+ * The body sits inside its slot by edge.css .is-hold-*.
  *
  * Returns the slot's top-left and the body's vertical extent, in page px.
  */
@@ -86,9 +120,27 @@ export function figureBox(
   anchor: Pick<CompanionFigureAnchor, "x" | "y" | "down">,
   size: number,
   screen: { width: number; height: number },
-): { left: number; top: number; bodyTop: number; bodyBottom: number } {
+  hold: CompanionFigureHold,
+  art?: EdgePoseArt,
+): FigureBox {
   const slot = figureSlot(size);
-  const gap = FIGURE_HEX_REACH;
+  if (hold === "edge" && art) {
+    const k = size / art.h;
+    const w = art.w * k;
+    const offsetX = (slot.width - w) / 2;
+    const offsetY = (slot.height - size) / 2;
+    let left = anchor.x - art.contact[0] * k - offsetX;
+    let top = anchor.y - art.contact[1] * k - offsetY;
+    // Only slide ALONG the contact edge. Never add the legacy six-point air gap.
+    if (anchor.down === "top" || anchor.down === "bottom") left = Math.max(0, Math.min(screen.width - slot.width, left));
+    if (anchor.down === "left" || anchor.down === "right") top = Math.max(0, Math.min(screen.height - slot.height, top));
+    return { left, top, bodyLeft: left + offsetX, bodyTop: top + offsetY, bodyBottom: top + offsetY + size,
+      bodyOffsetX: offsetX, bodyOffsetY: offsetY, contactX: art.contact[0] * k, contactY: art.contact[1] * k };
+  }
+  const gap = FIGURE_HOLD_REACH;
+  const side = hold !== "latch"
+    ? { top: anchor.y - slot.height * FIGURE_ISO_RISE, bodyOffset: slot.height - size }
+    : { top: anchor.y - slot.height / 2, bodyOffset: (slot.height - size) / 2 };
   let left: number;
   let top: number;
   let bodyOffset: number; // body top, from the slot's top
@@ -96,14 +148,14 @@ export function figureBox(
     case "top":
       left = anchor.x - slot.width / 2; top = anchor.y + gap; bodyOffset = 0; break;
     case "left":
-      left = anchor.x + gap; top = anchor.y - slot.height / 2; bodyOffset = (slot.height - size) / 2; break;
+      left = anchor.x + gap; top = side.top; bodyOffset = side.bodyOffset; break;
     case "right":
-      left = anchor.x - gap - slot.width; top = anchor.y - slot.height / 2; bodyOffset = (slot.height - size) / 2; break;
+      left = anchor.x - gap - slot.width; top = side.top; bodyOffset = side.bodyOffset; break;
     default:
       left = anchor.x - slot.width / 2; top = anchor.y - slot.height; bodyOffset = slot.height - size;
   }
   // Slide along the held edge to stay on screen, never away from it: the
-  // figure stays on its plate and over the host's cover probe. Standing
+  // figure stays on its hold and over the host's cover probe. Standing
   // figures keep their feet on the anchor, as the host placed them.
   // Under an edge the state plate overhangs the body's right side
   // (edge.css .ce-fig__plate: right -0.24 × size); keep room for it too.
@@ -143,10 +195,12 @@ export function placedPopover(
   size: number,
   popWidth: number,
   screen: { width: number; height: number },
+  hold: CompanionFigureHold,
   margin = 12,
+  art?: EdgePoseArt,
 ): { left: number; top?: number; bottom?: number; maxHeight: number } {
   const left = Math.max(margin, Math.min(screen.width - popWidth - margin, anchor.x - popWidth / 2));
-  const { bodyTop, bodyBottom } = figureBox(anchor, size, screen);
+  const { bodyTop, bodyBottom } = figureBox(anchor, size, screen, hold, art);
   const above = bodyTop - margin * 2;
   const below = screen.height - bodyBottom - margin * 2;
   if (above >= Math.min(320, below) || above >= 240) {

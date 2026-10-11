@@ -15,6 +15,14 @@ The operator-attention model should make that boundary explicit:
 - Record durable broker unblock requests for anything that can outlive a single session frame.
 - Route notifications from the broker/session attention model, with dedupe and clear ownership.
 
+The [Shared Interaction Model](./interaction-model.md#human-handoffs) defines
+the target handoff contract across Scout and external personal-agent interfaces:
+one decision reference, an explicit next actor, action or artifact revision
+binding, verified response authority, and a result returned to the waiting work.
+Each surface presents the same decision according to its audience. Displaying
+or dismissing it does not answer it. These are design requirements; current
+coverage below does not yet provide the complete cross-surface lifecycle.
+
 ## Agent-Originated Non-Blocking Signals
 
 Long-running agents also need a way to communicate without manufacturing a
@@ -137,8 +145,10 @@ When an operator prompt appears stuck, first classify where the prompt lives:
 
 ## Durable Unblock Model
 
-Scout uses broker-owned unblock records for human actions that may outlive a
-single websocket frame.
+Planned: broker-owned unblock records for human actions that may outlive a
+single websocket frame. This record lifecycle is not implemented in the current
+protocol/runtime. Existing session attention and collaboration records remain
+the implemented foundations; the fields below describe the target model.
 
 Fields include:
 

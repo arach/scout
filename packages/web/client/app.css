@@ -13,18 +13,22 @@
   --hud-canvas-dot-minor: rgba(255, 255, 255, 0.055);
   --hud-canvas-dot-major: rgba(255, 255, 255, 0.10);
 
-  /* Brand typefaces. Inter + JetBrains Mono are already loaded in index.html,
-     but the hud tokens defaulted to bare system stacks, so the whole app
-     rendered in system-ui / SF Mono. Point the tokens at the loaded faces so
-     the sans (--font-sans) and mono (--font-mono) aliases — and the base
-     elements that read --hud-font-* directly — all pick up the brand type. */
-  --hud-font-sans: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --hud-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  /* App type: the platform's own faces, set light. Sans is system-ui (SF Pro
+     on Apple platforms; Text/Display optical sizes switch automatically) and
+     mono is SF Mono. Both default to weight 300 (--font-weight-body), so body
+     copy and inherited mono read as SF Pro Light / SF Mono Light while the
+     explicit 500–700 role weights carry the hierarchy. No web font is loaded
+     for either; off Apple platforms the stacks fall back to Segoe UI / Roboto
+     and Menlo / Consolas. */
+  --hud-font-sans: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --hud-font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   --hud-font-serif: "Spectral", "Cormorant Garamond", Georgia, serif;
-  --hud-font-accent-title: "Inter Tight", var(--hud-font-sans);
+  --hud-font-accent-title: var(--hud-font-sans);
+  --font-weight-body: 300;
 
   font-family: var(--hud-font-sans);
   font-size: var(--hud-text-base);
+  font-weight: var(--font-weight-body);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
@@ -4178,6 +4182,15 @@ a.s-inline-link {
   color: var(--accent);
 }
 
+.s-context-menu-item--danger {
+  color: var(--red);
+}
+
+.s-context-menu-item--danger:hover {
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+  color: var(--red);
+}
+
 .s-context-menu-label {
   flex: 1;
   min-width: 0;
@@ -4315,7 +4328,7 @@ html[data-scout-shell="slack"] .scout-slack-topbar {
   border: 0;
   background: transparent;
   color: var(--scout-slack-ink);
-  font-family: var(--font-sans, Inter, ui-sans-serif, system-ui, sans-serif);
+  font-family: var(--font-sans, system-ui, sans-serif);
 }
 
 .scout-slack-topbar-history {
@@ -4423,7 +4436,7 @@ html[data-scout-shell="slack"] [data-slot="sidebar-container"] {
   --sidebar-border: var(--scout-slack-line);
   border-color: var(--scout-slack-line);
   background: var(--scout-slack-chrome);
-  font-family: var(--font-sans, Inter, ui-sans-serif, system-ui, sans-serif);
+  font-family: var(--font-sans, system-ui, sans-serif);
 }
 
 html[data-scout-shell="slack"] [data-slot="sidebar-header"] {
@@ -4432,7 +4445,7 @@ html[data-scout-shell="slack"] [data-slot="sidebar-header"] {
 }
 
 html[data-scout-shell="slack"] [data-sidebar="brand-row"] [data-slot="sidebar-menu-button"] {
-  font-family: var(--font-sans, Inter, ui-sans-serif, system-ui, sans-serif);
+  font-family: var(--font-sans, system-ui, sans-serif);
 }
 
 html[data-scout-shell="slack"] [data-sidebar="brand-row"] [data-slot="sidebar-menu-button"] > svg {
@@ -4444,7 +4457,7 @@ html[data-scout-shell="slack"] [data-sidebar="brand-row"] [data-slot="sidebar-me
 
 html[data-scout-shell="slack"] [data-slot="sidebar-group-label"] {
   color: color-mix(in srgb, var(--scout-slack-muted) 78%, transparent);
-  font-family: var(--font-sans, Inter, ui-sans-serif, system-ui, sans-serif);
+  font-family: var(--font-sans, system-ui, sans-serif);
   font-weight: 520;
   letter-spacing: 0.01em;
   text-transform: none;
@@ -4454,7 +4467,7 @@ html[data-scout-shell="slack"] [data-slot="sidebar-menu-button"],
 html[data-scout-shell="slack"] [data-slot="sidebar-menu-sub-button"] {
   border-radius: 3px;
   color: var(--scout-slack-muted);
-  font-family: var(--font-sans, Inter, ui-sans-serif, system-ui, sans-serif);
+  font-family: var(--font-sans, system-ui, sans-serif);
   font-weight: 470;
   letter-spacing: 0;
 }
@@ -4508,7 +4521,7 @@ html[data-scout-shell="slack"] .scout-side-rail-expanded-host[data-presentation=
   --hud-border: var(--scout-slack-line);
   --hud-chrome-border: var(--scout-slack-line);
   color: var(--scout-slack-ink);
-  font-family: var(--font-sans, Inter, ui-sans-serif, system-ui, sans-serif);
+  font-family: var(--font-sans, system-ui, sans-serif);
 }
 
 html[data-scout-shell="slack"] .scout-side-rail-expanded-host[data-presentation="slack"] :is([data-frame-panel="manifest"], [data-hudson-side-panel]) {
@@ -4517,11 +4530,11 @@ html[data-scout-shell="slack"] .scout-side-rail-expanded-host[data-presentation=
 }
 
 html[data-scout-shell="slack"] .scout-side-rail-expanded-host[data-presentation="slack"] :is(button, a) {
-  font-family: var(--font-sans, Inter, ui-sans-serif, system-ui, sans-serif);
+  font-family: var(--font-sans, system-ui, sans-serif);
 }
 
 html[data-scout-shell="slack"] .scout-side-rail-expanded-host[data-presentation="slack"] [data-scout-side-rail] :is(button, a, span, p, h1, h2, h3, h4) {
-  font-family: var(--font-sans, Inter, ui-sans-serif, system-ui, sans-serif);
+  font-family: var(--font-sans, system-ui, sans-serif);
   letter-spacing: normal;
 }
 

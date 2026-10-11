@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { dirname } from "node:path";
 
 import { Database } from "bun:sqlite";
+import { ftsRowidForChunk } from "./chunk-fts-rowid.js";
 
 import { resolveOpenScoutKnowledgePaths, type OpenScoutKnowledgePaths } from "./paths.js";
 import type {
@@ -25,16 +26,6 @@ import type {
 } from "./types.js";
 
 type SQLiteBinding = string | number | bigint | boolean | null | Uint8Array;
-
-/**
- * Deterministic FTS rowid for a chunk id. FTS5 only supports efficient
- * rowid-based deletes; deleting by an UNINDEXED text column is a full index
- * scan (measured ~3s per row on a 30k-chunk index), which made reindexing
- * effectively never terminate.
- */
-function ftsRowidForChunk(chunkId: string): bigint {
-  return createHash("sha256").update(chunkId).digest().readBigInt64BE(0);
-}
 
 type SQLiteTransactionalDatabase = Database & {
   transaction<TArgs extends unknown[], TResult>(

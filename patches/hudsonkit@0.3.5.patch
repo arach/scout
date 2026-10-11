@@ -73,10 +73,18 @@ index 7e17afc57fc63da9c4e93c8f2c490a63ec0dedc5..70fdde1b23cdd43b5013470f2fc230e4
                }
              ),
 diff --git a/dist/chunk-JTPDIGGW.js b/dist/chunk-JTPDIGGW.js
-index 6d52dfc9c0e4236217db3ecce4c7e57eb04360b2..002894b96cf25f3fb07695383c0e25ffed26038b 100644
+index 6d52dfc9c0e4236217db3ecce4c7e57eb04360b2..80ca0634a9dfc8e236898101d4751d78a9abeeb9 100644
 --- a/dist/chunk-JTPDIGGW.js
 +++ b/dist/chunk-JTPDIGGW.js
-@@ -191,6 +191,7 @@ function TerminalRelayInner({
+@@ -164,6 +164,7 @@ function TerminalRelayInner({
+   relay,
+   fontSize = 12,
+   fontFamily = "'JetBrains Mono', 'Hack Nerd Font', monospace",
++  fontWeight,
+   scrollback = 5e3,
+   renderer = "auto",
+   readOnly = false,
+@@ -191,6 +192,7 @@ function TerminalRelayInner({
      sendInput,
      resize,
      onData,
@@ -84,7 +92,7 @@ index 6d52dfc9c0e4236217db3ecce4c7e57eb04360b2..002894b96cf25f3fb07695383c0e25ff
      connect,
      disconnect,
      controlMode = "owner"
-@@ -215,6 +216,7 @@ function TerminalRelayInner({
+@@ -215,6 +217,7 @@ function TerminalRelayInner({
    const dragCounter = useRef(0);
    const readOnlyRef = useRef(effectiveReadOnly);
    const lastSentDimsRef = useRef(null);
@@ -92,7 +100,7 @@ index 6d52dfc9c0e4236217db3ecce4c7e57eb04360b2..002894b96cf25f3fb07695383c0e25ff
    const resizeFrameRef = useRef(null);
    const startConnectTimerRef = useRef(null);
    const onReadyRef = useRef(onReady);
-@@ -271,14 +273,17 @@ function TerminalRelayInner({
+@@ -271,14 +274,17 @@ function TerminalRelayInner({
      const term = termRef.current;
      if (!fit || !term) return null;
      try {
@@ -115,7 +123,25 @@ index 6d52dfc9c0e4236217db3ecce4c7e57eb04360b2..002894b96cf25f3fb07695383c0e25ff
    const scheduleFit = useCallback(() => {
      if (resizeFrameRef.current !== null) return;
      resizeFrameRef.current = window.requestAnimationFrame(() => {
-@@ -533,6 +538,17 @@ function TerminalRelayInner({
+@@ -460,6 +466,7 @@ function TerminalRelayInner({
+       terminal = new Terminal({
+         fontSize,
+         fontFamily,
++        ...fontWeight !== void 0 ? { fontWeight } : {},
+         theme: xtermTheme,
+         minimumContrastRatio,
+         cursorBlink: true,
+@@ -525,14 +532,26 @@ function TerminalRelayInner({
+     if (!term) return;
+     term.options.fontSize = fontSize;
+     term.options.fontFamily = fontFamily;
++    term.options.fontWeight = fontWeight ?? "normal";
+     fitTerminal();
+-  }, [fitTerminal, fontSize, fontFamily]);
++  }, [fitTerminal, fontSize, fontFamily, fontWeight]);
+   useEffect(() => {
+     const term = termRef.current;
+     if (!term) return;
      term.options.theme = xtermTheme;
      term.options.minimumContrastRatio = minimumContrastRatio;
    }, [minimumContrastRatio, xtermTheme]);
@@ -209,7 +235,7 @@ index 1f5ff15cfb417ac62887f76bc8e3a8680857cd0a..4c860fc4f65f2a84dd0b5e84ca9d8b30
      isMaximized?: boolean;
      /** Controlled height in px (default 320) */
 diff --git a/dist/terminal.d.ts b/dist/terminal.d.ts
-index fedb383530bb8728fd4cef7a94460b238b4c990e..1a26f99374f02c27a9d2ebaca482d0e1e72faa41 100644
+index fedb383530bb8728fd4cef7a94460b238b4c990e..50a82072694c6e2ed52fcdf78958fb9921dc318e 100644
 --- a/dist/terminal.d.ts
 +++ b/dist/terminal.d.ts
 @@ -60,6 +60,9 @@ interface TerminalSessionReadyMessage {
@@ -260,3 +286,12 @@ index fedb383530bb8728fd4cef7a94460b238b4c990e..1a26f99374f02c27a9d2ebaca482d0e1
      /**
       * Subscribe to incoming PTY data without claiming the primary sink slot.
       * Returns an unsubscribe function. Multiple subscribers allowed; called
+@@ -203,6 +214,8 @@ interface TerminalRelayProps {
+     relay: TerminalRelayHandle;
+     fontSize?: number;
+     fontFamily?: string;
++    /** Weight for normal (non-bold) cells. Absent keeps xterm's `normal`; ANSI bold keeps its own bold weight. */
++    fontWeight?: 'normal' | 'bold' | '100' | '200' | '300' | '400' | '500' | '600' | '700' | '800' | '900' | number;
+     scrollback?: number;
+     renderer?: TerminalRendererPreference;
+     readOnly?: boolean;

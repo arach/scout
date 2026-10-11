@@ -176,6 +176,8 @@ export type SharedFloorLayoutOptions = {
   positions?: SharedFloorIslandPositions;
   /** Aspect (width / height) the shelf pack should fill, usually the viewport's. */
   targetAspect?: number;
+  /** Reserve real walking space for rooms on the narrower illustrated deck. */
+  microRooms?: "terrain" | "illustrated";
 };
 
 /** Keep returned memory between calls. Vacancies and high-water island sizes are intentional.
@@ -204,6 +206,16 @@ export function buildSharedFloorLayout(lanes: readonly AgentLane[], previous?: S
     }
     for (const id of group.lanes.keys()) if (!remembered.laneIds.includes(id)) remembered.laneIds.push(id);
     remembered.height = Math.max(remembered.height, islandHeightFor(remembered.laneIds.length));
+    if (options?.microRooms && group.lanes.size >= 7) {
+      const rooms = Math.ceil(group.lanes.size / 4);
+      const columns = Math.ceil(Math.sqrt(rooms * 1.6)), rows = Math.ceil(rooms / columns);
+      const deckWidth = columns * 330 + (columns - 1) * 64;
+      const deckHeight = rows * 235 + (rows - 1) * 64;
+      const roomHeight = options.microRooms === "terrain"
+        ? Math.max((deckWidth + ISLAND_WIDTH * .14) / (.86 * ISLAND_ASPECT), (deckHeight + ISLAND_HEIGHT * .3) / .66)
+        : Math.max(deckWidth / ((DECK_RIGHT - DECK_LEFT) * ISLAND_ASPECT), deckHeight / (DECK_FRONT - DECK_BACK));
+      remembered.height = Math.max(remembered.height, Math.ceil(roomHeight));
+    }
   }
   // Placement: manual islands sit where the operator dropped them; the rest
   // shelf-pack in stable memory order toward the viewport aspect. Departed

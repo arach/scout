@@ -151,6 +151,13 @@ import {
 import { RequesterWaitTimeoutError } from "./requester-timeout.js";
 import { locateHarnessSession } from "./session-locator.js";
 import { resolveOperatorHandle, resolveOperatorName } from "./user-config.js";
+import {
+  describeAttachedLiveTerminal,
+  isAttachedLiveTerminalEndpoint,
+  isAttachedLiveTerminalEndpointAlive,
+  isAttachedLiveTerminalEndpointAliveSnapshot,
+  sendGhosttyPrompt,
+} from "./live-terminal-session.js";
 
 const MODULE_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const OPENSCOUT_REPO_ROOT = resolve(MODULE_DIRECTORY, "..", "..", "..");
@@ -2777,13 +2784,13 @@ function isSessionBackedEndpoint(endpoint: AgentEndpoint): boolean {
     || attachedTransport === "pi_rpc";
 }
 
-function endpointAgentName(endpoint: AgentEndpoint): string {
+export function endpointAgentName(endpoint: AgentEndpoint): string {
   return endpointMetadataString(endpoint, "agentName")
     ?? endpointMetadataString(endpoint, "definitionId")
     ?? endpoint.agentId;
 }
 
-function endpointRuntimeInstanceId(endpoint: AgentEndpoint): string {
+export function endpointRuntimeInstanceId(endpoint: AgentEndpoint): string {
   return endpointMetadataString(endpoint, "runtimeInstanceId")
     ?? endpointMetadataString(endpoint, "runtimeSessionId")
     ?? endpoint.sessionId
@@ -3065,6 +3072,10 @@ export function isLocalAgentEndpointAlive(endpoint: AgentEndpoint): boolean {
     return endpoint.state !== "offline";
   }
 
+  if (isAttachedLiveTerminalEndpoint(endpoint)) {
+    return isAttachedLiveTerminalEndpointAliveSnapshot(endpoint);
+  }
+
   const sessionId =
     endpoint.sessionId
     ?? (typeof endpoint.metadata?.tmuxSession === "string" ? String(endpoint.metadata.tmuxSession) : null);
@@ -3072,6 +3083,10 @@ export function isLocalAgentEndpointAlive(endpoint: AgentEndpoint): boolean {
 }
 
 export async function isLocalAgentEndpointAliveAsync(endpoint: AgentEndpoint): Promise<boolean> {
+  if (isAttachedLiveTerminalEndpoint(endpoint)) {
+    return isAttachedLiveTerminalEndpointAlive(endpoint);
+  }
+
   if (endpoint.transport !== "tmux") {
     return isLocalAgentEndpointAlive(endpoint);
   }
@@ -6183,6 +6198,10 @@ export async function invokeLocalAgentEndpoint(
     };
   }
 
+  if (isAttachedLiveTerminalEndpoint(endpoint)) {
+    return invokeAttachedLiveTerminalEndpoint(endpoint, invocation);
+  }
+
   const projectRoot = endpoint.projectRoot ?? endpoint.cwd;
   const requestedHarness = invocation.execution?.harness;
 
@@ -6391,40 +6410,99 @@ export async function invokeLocalAgentEndpoint(
     }
   }
 
-  const deadline = Date.now() + timeoutSeconds * 1000;
+  const output = await waitForLocalAgentReply({
+    agentRuntimeId,
+    invocation,
+    flightId,
+    askedAt,
+    timeoutSeconds,
+    // A harness that quit can never reply. Without this the requester timeout
+    // parks the flight as "still working" forever.
+    exitedError: onlineRecord.transport === "tmux" && onlineRecord.tmuxSession
+      ? async () => await isLocalAgentSessionAliveAsync(onlineRecord.tmuxSession)
+        ? null
+        : `tmux session ${onlineRecord.tmuxSession} exited before ${agentRuntimeId} replied.`
+      : undefined,
+  });
+  return { output, ...await observedSessionMetadata() };
+}
+
+async function waitForLocalAgentReply(input: {
+  agentRuntimeId: string;
+  invocation: InvocationRequest;
+  flightId: string;
+  askedAt: number;
+  timeoutSeconds: number;
+  exitedError?: () => Promise<string | null>;
+}): Promise<string> {
+  const deadline = Date.now() + input.timeoutSeconds * 1000;
   let nextLivenessCheckAt = Date.now() + TMUX_REPLY_LIVENESS_INTERVAL_MS;
   while (Date.now() <= deadline) {
-    const messages = await readBrokerMessagesSince(askedAt - 1);
+    const messages = await readBrokerMessagesSince(input.askedAt - 1);
 
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       const message = messages[index];
-      if (message.actorId !== agentRuntimeId) continue;
-      if (!message.body.includes(`[ask:${flightId}]`)) continue;
-
-      return {
-        output: stripLocalAgentReplyMetadata(message.body, flightId, invocation.requesterId),
-        ...await observedSessionMetadata(),
-      };
+      if (message.actorId !== input.agentRuntimeId) continue;
+      if (!message.body.includes(`[ask:${input.flightId}]`)) continue;
+      return stripLocalAgentReplyMetadata(message.body, input.flightId, input.invocation.requesterId);
     }
 
-    // A harness that quit can never reply. Without this the requester timeout
-    // below parks the flight as "still working" forever.
-    if (onlineRecord.transport === "tmux" && onlineRecord.tmuxSession && Date.now() >= nextLivenessCheckAt) {
+    if (input.exitedError && Date.now() >= nextLivenessCheckAt) {
       nextLivenessCheckAt = Date.now() + TMUX_REPLY_LIVENESS_INTERVAL_MS;
-      if (!await isLocalAgentSessionAliveAsync(onlineRecord.tmuxSession)) {
-        throw new Error(
-          `tmux session ${onlineRecord.tmuxSession} exited before ${agentRuntimeId} replied.`,
-        );
-      }
+      const exited = await input.exitedError();
+      if (exited) throw new Error(exited);
     }
 
     await sleep(500);
   }
 
   throw new RequesterWaitTimeoutError({
-    label: agentRuntimeId,
-    timeoutMs: timeoutSeconds * 1000,
+    label: input.agentRuntimeId,
+    timeoutMs: input.timeoutSeconds * 1000,
   });
+}
+
+/**
+ * Deliver into a harness the operator started in their own terminal: type the
+ * ask into that tmux pane or Ghostty terminal and wait for its reply. When the
+ * process is gone the ask fails — Scout never starts a replacement beside the
+ * operator's session.
+ */
+async function invokeAttachedLiveTerminalEndpoint(
+  endpoint: AgentEndpoint,
+  invocation: InvocationRequest,
+): Promise<LocalAgentInvocationResult> {
+  const agentRuntimeId = endpoint.agentId;
+  const harness = normalizeLocalAgentHarness(typeof endpoint.harness === "string" ? endpoint.harness : undefined);
+  const goneError = `live ${harness} session in ${describeAttachedLiveTerminal(endpoint)} is no longer running; `
+    + "Scout does not start a replacement. Attach the session again from where it runs.";
+  if (!await isAttachedLiveTerminalEndpointAlive(endpoint)) {
+    throw new Error(goneError);
+  }
+
+  const flightId = createLocalAgentFlightId();
+  const askedAt = nowSeconds();
+  const nudge = buildLocalAgentNudge(agentRuntimeId, invocation, flightId);
+  if (endpoint.transport === "ghostty") {
+    await sendGhosttyPrompt(String(endpoint.metadata?.ghosttyTerminalId), nudge);
+  } else {
+    // Only Claude exposes stable composer markers; every other TUI is judged by
+    // the prompt leaving the pane.
+    await sendTmuxPrompt(endpoint.pane!, nudge, buildTmuxDispatchStrategy(harness === "claude" ? "claude" : "grok", nudge));
+  }
+  if (invocation.action === "wake") {
+    return { output: "" };
+  }
+
+  const output = await waitForLocalAgentReply({
+    agentRuntimeId,
+    invocation,
+    flightId,
+    askedAt,
+    timeoutSeconds: invocation.timeoutMs ? Math.max(30, Math.floor(invocation.timeoutMs / 1000)) : 300,
+    exitedError: async () => await isAttachedLiveTerminalEndpointAlive(endpoint) ? null : goneError,
+  });
+  return { output };
 }
 
 export function shouldDisableGeneratedCodexEndpoint(endpoint: AgentEndpoint): boolean {

@@ -6,7 +6,24 @@ Read this after the repo [`README.md`](../README.md) if you are orienting to the
 
 ## Working Thesis
 
-Scout is a local-first control plane for orchestrating AI agents across harnesses, machines, and interfaces.
+Scout is the stable intermediary across agent implementations, with multiple
+human and agent interfaces into the same work. Its local-first control plane
+coordinates agents across harnesses, machines, and services.
+
+Scout mediates capability discovery and routing, context and authority, work
+continuity, attention, and outcomes. A desktop app, web view, phone, CLI, or
+external personal agent provides an entrance to the same durable work and
+coordination model. Each interface presents the view and actions its participant
+is authorized to access; changing interfaces does not create a separate work
+history or grant broader permission.
+
+The broker, runtime, and transport implementations support this enduring product
+role and may evolve or be replaced as external standards mature. Standardized
+communication makes mediation easier to provide; Scout still organizes which
+capabilities to use, how work continues, and what needs a person. Preserve
+interaction meaning and authority boundaries when replacing machinery.
+The [Shared Interaction Model](./interaction-model.md) is the adopted design
+contract; its coverage table identifies behavior that remains unimplemented.
 
 Remember these three things:
 
@@ -47,7 +64,11 @@ A small set of constraints shape every design decision.
 
 **File-based configuration.** Agent definitions, overrides, and project bindings are JSON files on disk. No dashboard required.
 
-**Protocol over product.** The protocol package defines the shared grammar. Products are built on top of it, not beside it.
+**Stable mediation, multiple interfaces.** Scout provides one coherent work
+model through human and agent interfaces. The protocol package expresses the
+shared semantics; adapters connect different implementations. Keep authority,
+continuity, and handoffs coherent as implementations change. Each surface reads
+and acts on the same authorized work rather than owning competing state.
 
 ## Communication Flow
 
@@ -158,7 +179,7 @@ The operator's main interface. It sends route intent such as `--to hudson` or `-
 
 Desktop host, web dashboard, iOS companion, terminal UI, and pi. These are views into broker-owned control-plane state and observed harness activity. None of them own agent state; the broker does.
 
-The pi extension (see [`eng/sco-015-pi-scout-integration.md`](./eng/sco-015-pi-scout-integration.md)) runs Scout coordination as a native pi extension, letting pi sessions send and receive messages via the broker alongside other harnesses.
+The pi extension (see the [archived integration proposal](./archive/eng/founding-proposals/sco-015-pi-scout-integration.md)) runs Scout coordination as a native pi extension, letting pi sessions send and receive messages via the broker alongside other harnesses.
 
 ## Performance Direction
 
@@ -498,7 +519,16 @@ If a configured alias is shorter than the minimal canonical form and resolves un
 
 ## The Integration Boundary
 
-Plugging an agent into Scout means three things at the data level: register an **identity**, expose a reachable **endpoint**, and attach a **session**.
+External participants can request work, receive results, and relay human
+decisions without being executed by Scout. Their boundary is authenticated
+identity, permitted capabilities, durable correlation, and a return path. A
+caller connection must not be registered as a harness session merely to fit the
+execution model. This is the design target for participant adapters; each
+adapter must document its actual supported access and lifecycle behavior.
+
+For a **harness-backed execution target**, the data-level contract has three
+pieces: register an **identity**, expose a reachable **endpoint**, and attach a
+**session**.
 
 - **Identity** is the stable Scout address for the agent, built from the dimensions above (`definitionId`, `workspaceQualifier`, `harness`, `model`, `node`). Human text uses a short handle; the broker resolves it to one exact target.
 - **Endpoint** is how the broker reaches the agent: an agent id, an authority node, a harness, a transport, a session reference, and current reachability. The endpoint is a route, not the agent's personality — an agent can move between sessions or machines while keeping a stable identity.
@@ -512,6 +542,13 @@ Once attached, an integration speaks two paths through the broker:
 Two rules hold across both paths. Do not hide routing instructions in the message body when structured target fields exist — the broker should know the target as metadata, not by parsing prose. And never write harness-owned files: adapters observe `.claude` and Codex state, they do not author or repair it.
 
 That is the shape of the boundary. For the full adapter contract — endpoint states, session invariants, broker-guided routing, preferred MCP tools, human-input and permission handling, and the compatibility checklist — read [`agent-integration-contract.md`](./agent-integration-contract.md). For the wire-level message and invocation workflows, read [`scout-comms.md`](./scout-comms.md).
+
+For represented authority, cross-interface continuity, and human handoffs, use
+the [Shared Interaction Model](./interaction-model.md). Authorization context,
+chat, work item, invocation/flight, and runtime session have separate lifetimes.
+Existing actor and requester ids are coordination facts, not proof of a
+delegated permission. New adapters must not infer authority from body text or
+silently substitute the local operator's privileges.
 
 ## Addressing And Session Lifecycle
 

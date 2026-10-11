@@ -104,7 +104,70 @@ export async function resolveSetupSourceRoots(
   return [resolve(currentDirectory, expandHome(selectedRoot || suggestedRoot))];
 }
 
+const AGENTS_MD_HELP = `scout setup agents-md — add Scout's pointer block to this project's AGENTS.md
+
+  scout setup agents-md            add (or refresh) the block, between <!-- scout:begin/end --> markers
+  scout setup agents-md --dry-run  print what the file would become
+  scout setup agents-md --remove   take the block out; nothing else in the file changes
+
+The block is three lines that point at Scout's help, so every harness that reads
+AGENTS.md knows to use Scout for other agents and other machines. Project files
+only: it refuses a home-level AGENTS.md.`;
+
+const PERMISSIONS_HELP = `scout setup permissions — print a narrow allow list for Scout's read-only MCP tools
+
+  scout setup permissions [--server <name>]   (default server name: scout)
+
+Prints only; it never edits settings. Paste the entries into permissions.allow in
+the settings file you choose. Tools that send or start work (ask, messages_send)
+are not on it and keep the harness's normal approval.`;
+
+async function runSetupSubcommand(context: ScoutCommandContext, args: string[]): Promise<boolean> {
+  const sub = args[0];
+  if (sub !== "agents-md" && sub !== "permissions") return false;
+  const rest = args.slice(1);
+  if (rest.includes("--help") || rest.includes("-h")) {
+    context.output.writeText(sub === "agents-md" ? AGENTS_MD_HELP : PERMISSIONS_HELP);
+    return true;
+  }
+  const { runAgentGuide, claudeAllowList, SCOUT_READ_ONLY_TOOLS } = await import("../../core/setup/agent-guide.ts");
+  if (sub === "agents-md") {
+    const unknown = rest.filter((arg) => arg !== "--remove" && arg !== "--dry-run");
+    if (unknown.length > 0) throw new Error(`unexpected argument for setup agents-md: ${unknown[0]}`);
+    const result = runAgentGuide({
+      directory: defaultScoutContextDirectory(context),
+      remove: rest.includes("--remove"),
+      dryRun: rest.includes("--dry-run"),
+    });
+    context.output.writeValue(result, (value) => {
+      const verb = {
+        added: "Added the Scout block to",
+        updated: "Refreshed the Scout block in",
+        unchanged: "The Scout block is already current in",
+        removed: "Removed the Scout block from",
+        absent: "No Scout block in",
+      }[value.change];
+      return value.dryRun ? `${value.path} would become:\n\n${value.preview}` : `${verb} ${value.path}`;
+    });
+    return true;
+  }
+  const serverIndex = rest.indexOf("--server");
+  const server = serverIndex >= 0 ? rest[serverIndex + 1]?.trim() : undefined;
+  if (serverIndex >= 0 && !server) throw new Error("missing value for --server");
+  const allow = claudeAllowList(server || "scout");
+  context.output.writeValue({ readOnlyTools: [...SCOUT_READ_ONLY_TOOLS], claude: { permissions: { allow } } }, () => [
+    "Read-only Scout tools a harness can allow without a prompt (printed only; nothing was changed):",
+    "",
+    JSON.stringify({ permissions: { allow } }, null, 2),
+    "",
+    "Claude Code: merge into permissions.allow in the settings file you choose.",
+    "Codex and others: allow the same tool names in that client's MCP approval settings.",
+  ].join("\n"));
+  return true;
+}
+
 export async function runSetupCommand(context: ScoutCommandContext, args: string[]): Promise<void> {
+  if (await runSetupSubcommand(context, args)) return;
   if (args.includes("--help") || args.includes("-h")) {
     context.output.writeText(SETUP_HELP);
     return;

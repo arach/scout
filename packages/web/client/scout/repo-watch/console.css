@@ -44,7 +44,7 @@
   --coral: #db8a7c;
   --coral-dim: #b06f63;
   --cobalt: #8aa6ff;
-  --mono: var(--font-mono, "JetBrains Mono", ui-monospace, monospace);
+  --mono: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
   --serif: var(--font-serif, "Spectral", Georgia, serif);
   --row-h: 30px;
   --cell-fs: 12px;

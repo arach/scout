@@ -1,5 +1,7 @@
 import "./ops-screen.css";
 
+import { lazy, Suspense } from "react";
+
 import { useScout } from "../../scout/Provider.tsx";
 import { PageStatusBar } from "../../components/PageStatusBar.tsx";
 import { AgentLanesView } from "./AgentLanesView.tsx";
@@ -14,6 +16,8 @@ import { useContentOwnsSecondaryNav } from "../../scout/sidebar/useContentSecond
 import { OpsSubnav } from "./OpsSubnav.tsx";
 import { FleetRollCallHud } from "./FleetRollCallHud.tsx";
 
+const WorldWeek = lazy(() => import("./world-week/WorldWeek.tsx"));
+
 export function OpsScreen({
   navigate,
   mode = "mission",
@@ -25,7 +29,7 @@ export function OpsScreen({
   tailQuery?: string;
   showSecondaryNav?: boolean;
 }) {
-  const { agents, route } = useScout();
+  const { agents, route, operatorName } = useScout();
   const contentOwnsSecondaryNav = useContentOwnsSecondaryNav();
   const resolvedTailQuery = useFollowTailQuery(route, tailQuery);
 
@@ -57,6 +61,13 @@ export function OpsScreen({
         )}
         {mode === "atop" && <AtopView />}
         {(mode === "lanes" || mode === "world") && <AgentLanesView navigate={navigate} agents={agents} />}
+        {mode === "week" && (
+          <div className="s-world-week-host">
+            <Suspense fallback={<div role="status">Opening the week…</div>}>
+              <WorldWeek operatorName={operatorName ?? undefined} />
+            </Suspense>
+          </div>
+        )}
       </div>
       <PageStatusBar />
     </div>

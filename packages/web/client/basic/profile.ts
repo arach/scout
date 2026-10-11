@@ -12,19 +12,19 @@ export const BASIC_WEB = import.meta.env.VITE_SCOUT_WEB_PROFILE === "basic";
  * the same sidebar as the full web app and the Mac app; adding a surface to it
  * is adding its area here.
  */
-export const SOLO_SIDEBAR_AREAS = ["home", "chat", "sessions", "dispatch", "search", "ops", "settings"] as const;
+export const SOLO_SIDEBAR_AREAS = ["home", "sessions", "chat", "terminals", "dispatch", "search", "ops", "settings"] as const;
 
 /** Where the basic build's areas open: Ops leads with Lanes, Tail one link away. */
 export const SOLO_AREA_ROUTES = { ops: { view: "ops", mode: "lanes" } } as const satisfies Partial<Record<(typeof SOLO_SIDEBAR_AREAS)[number], Route>>;
 
 /** The destinations the basic web client carries. */
-export type BasicArea = "home" | "dms" | "terminal" | "dispatch" | "search" | "ops" | "settings";
+export type BasicArea = "home" | "dms" | "sessions" | "terminal" | "dispatch" | "search" | "ops" | "settings";
 
 /**
  * Folds any full-app route onto the basic surface. Home, DMs, Terminals,
  * Dispatch, Search, Ops (Lanes and Tail) and Settings keep their own state;
- * agent routes become that agent's DM and session links become a filtered
- * Tail. Work and follow links retain their pages; other routes land on Home.
+ * agent routes become that agent's DM, session links open the shared Sessions slots,
+ * work and follow links retain their pages, and everything else lands on Home.
  */
 export function basicRoute(route: Route): Route {
   switch (route.view) {
@@ -57,12 +57,7 @@ export function basicRoute(route: Route): Route {
     case "search":
       return route;
     case "sessions":
-      return {
-        view: "ops",
-        mode: "tail",
-        ...(route.sessionId ? { tailQuery: route.sessionId } : {}),
-        ...(route.flightId ? { flightId: route.flightId } : {}),
-      };
+      return route;
     case "follow":
       return route;
     case "settings":
@@ -117,6 +112,8 @@ export function basicArea(route: Route): BasicArea {
       return "dms";
     case "terminal":
       return "terminal";
+    case "sessions":
+      return "sessions";
     case "broker":
       return "dispatch";
     case "search":
@@ -175,7 +172,7 @@ export function isBasicDmUnread(
 }
 
 /** Native-host embeds the basic client carries; every other embed needs the full app. */
-export const BASIC_EMBED_PATHS = ["/embed/settings", "/embed/home", "/embed/thread", "/embed/session"] as const;
+export const BASIC_EMBED_PATHS = ["/embed/settings", "/embed/home", "/embed/requests", "/embed/thread", "/embed/session"] as const;
 export type BasicEmbedPath = (typeof BASIC_EMBED_PATHS)[number];
 
 /** Whether a path is a native-host embed (any of them, carried or not). */

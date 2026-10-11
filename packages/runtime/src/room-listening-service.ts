@@ -1,3 +1,4 @@
+import { hasRetiredEndpointRegistration } from "./broker-endpoint-selection.js";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { BrokerChatListening, ChatListeningError } from "./broker-chat-listening.js";
@@ -39,6 +40,14 @@ export function createRoomListeningService(options: {
     if (!Array.isArray(value.endpoints)) throw new ChatListeningError("identity_unavailable");
     return value.endpoints;
   }
+  async function nativeRequest(body: unknown): Promise<any> {
+    const response = await (options.fetcher ?? fetch)(new URL("/v1/native-session-attention", broker), {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+      redirect: "error", signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) throw new Error("native_owner_unavailable");
+    return response.json();
+  }
   const herdr = options.herdr ?? readHerdrTopology;
   return new BrokerChatListening({
     path: join(options.controlHome, "chat-listening", "state.json"), sourceKind: "room-http-v1",
@@ -58,10 +67,37 @@ export function createRoomListeningService(options: {
       if (binding.herdrSession && binding.pane) return createListeningSessionObserver({ herdr, nodeId: "", endpoints: () => [] })(binding);
       try {
         const localNode = await nodeId(), observedEndpoints = await endpoints(binding.endpointId);
-        return await createListeningSessionObserver({ herdr, nodeId: localNode,
+        const proof = await createListeningSessionObserver({ herdr, nodeId: localNode,
           endpoints: () => observedEndpoints,
         })(binding);
+        const endpoint = observedEndpoints.find(e => e.id === proof.endpointId);
+        if (proof.availability === "available" && endpoint?.metadata?.placement === "background") {
+          // Identity enrollment remains metadata proof; only positive owner death
+          // overrides it. Missing owner after broker restart is not proof of death.
+          const native = await nativeRequest({ endpointId: endpoint.id }).catch(() => null);
+          if (native?.state === "gone") return { availability: "unavailable" };
+        }
+        return proof;
       } catch { return { availability: "unknown" }; }
+    },
+    delivery: {
+      observe: async (agentId, binding) => {
+        if (binding.facing === "operator" || binding.herdrSession || binding.pane) return { state: "unsupported", facing: "operator" };
+        const localNode = await nodeId();
+        const candidates = (await endpoints(binding.mode === "session" ? binding.endpointId : undefined)).filter(e =>
+          e.nodeId === localNode && (binding.mode === "agent" ? e.agentId === agentId
+            : [e.sessionId, e.metadata?.nativeSessionId, e.metadata?.externalSessionId].includes(binding.sessionId))
+          && !hasRetiredEndpointRegistration(e)
+          && (binding.mode === "session" || !["stopped", "superseded"].includes(e.state)));
+        if (candidates.length !== 1) return { state: "unknown" };
+        const endpoint = candidates[0]!;
+        if (endpointListeningFacing(endpoint) === "operator" || endpoint.metadata?.placement !== "background") return { state: "unsupported" };
+        const observed = await nativeRequest({ endpointId: endpoint.id });
+        if (binding.mode === "session" && observed.sessionId && ![observed.sessionId, endpoint.sessionId].includes(binding.sessionId)) return { state: "gone" };
+        return { ...observed, endpointId: endpoint.id, facing: "background" };
+      },
+      submit: async (destination, action, prompt) => nativeRequest({ endpointId: destination.endpointId,
+        sessionId: destination.sessionId, token: destination.token, action, prompt }),
     },
     source: createRoomHttpSource(options.roomGet),
   });

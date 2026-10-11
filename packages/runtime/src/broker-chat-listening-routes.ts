@@ -19,6 +19,8 @@ export async function handleChatListeningRoute(request: RuntimeHttpRequestLike, 
     const command = url.pathname.slice("/v1/chat-listening/".length);
     let result: unknown;
     if (command === "enroll") result = await service.enroll(agentId, input.membership as ListeningMembership, operatorActorId, input.binding as Partial<ListeningBinding> | undefined);
+    else if (command === "policy" && typeof input.subscriptionId === "string") result = await service.setPolicy(agentId, input.subscriptionId, input.policy as any, input.author === agentId ? agentId : operatorActorId);
+    else if (command === "policy-confirm" && typeof input.subscriptionId === "string") result = await service.confirmPolicy(agentId, input.subscriptionId, Number(input.revision), input.author === agentId ? agentId : operatorActorId);
     else if (command === "status") result = service.status(agentId);
     else if (command === "catch-up" && typeof input.subscriptionId === "string") result = await service.catchUp(agentId, input.subscriptionId, input.limit === undefined ? 50 : Number(input.limit));
     else if (command === "ack" && typeof input.subscriptionId === "string" && typeof input.receipt === "string") result = await service.ack(agentId, input.subscriptionId, input.receipt);

@@ -819,6 +819,10 @@ class ClaudeStreamJsonSession {
 
   // Claude stream-json has no steer primitive; overlapping broker asks cue here.
   private turnQueue: Promise<void> = Promise.resolve();
+  private queuedOperations = 0;
+  private readonly liveIncarnation = randomUUID();
+  private liveRevision = 0;
+  private attentionUnsafe = false;
 
   private starting: Promise<void> | null = null;
 
@@ -848,6 +852,34 @@ class ClaudeStreamJsonSession {
     return Boolean(this.process && !this.process.killed && this.process.exitCode === null);
   }
 
+  observeExisting() {
+    return { state: !this.isAlive() ? "gone" : !this.claudeSessionId || this.attentionUnsafe ? "unknown"
+      : this.activeTurn ? "active" : this.queuedOperations ? "unknown" : "idle",
+      sessionId: this.claudeSessionId ?? undefined, turnId: this.activeTurn?.id,
+      token: `${this.liveIncarnation}:${this.liveRevision}`, steer: false } as const;
+  }
+
+  submitExisting(expected: { sessionId: string; token: string }, action: "revive" | "steer", prompt: string) {
+    const observed = this.observeExisting();
+    if (action !== "revive" || observed.state !== "idle" || expected.sessionId !== observed.sessionId
+      || expected.token !== observed.token) return { accepted: false, evidence: "native_state_changed_or_unsupported" };
+    // Synchronous validation + reservation + stdin write. No invoke/ensure/retry path.
+    const turn = this.startTurn(prompt);
+    this.turnQueue = turn.outputPromise.then(() => undefined, () => undefined);
+    return { accepted: true, evidence: "claude_stdin_written" };
+  }
+
+  async connectDeck(): Promise<void> { await this.ensureStarted(); }
+
+  async startDeck(prompt: string, signal?: AbortSignal): Promise<{ output: Promise<string>; sessionId: string | null }> {
+    await this.ensureStarted();
+    signal?.throwIfAborted();
+    if (this.queuedOperations || this.activeTurn) throw new Error("Claude lane already has an active or queued turn.");
+    const turn = this.startTurn(prompt);
+    this.turnQueue = turn.outputPromise.then(() => undefined, () => undefined);
+    return { output: turn.outputPromise, sessionId: this.claudeSessionId };
+  }
+
   async ensureOnline(): Promise<{ sessionId: string | null }> {
     if (!this.isAlive()) {
       const catalog = await readSessionCatalog(this.catalogDirectory);
@@ -868,6 +900,7 @@ class ClaudeStreamJsonSession {
     timeoutMs: number | undefined,
     allowStaleResumeRetry: boolean,
   ): Promise<{ output: string; sessionId: string | null }> {
+    this.queuedOperations++;
     const queuedTurn = this.turnQueue
       .catch(() => undefined)
       .then(async () => {
@@ -877,7 +910,7 @@ class ClaudeStreamJsonSession {
     this.turnQueue = queuedTurn.then(
       (turn) => turn.outputPromise.then(() => undefined, () => undefined),
       () => undefined,
-    );
+    ).finally(() => { this.queuedOperations--; });
 
     const turn = await queuedTurn;
     let output: string;
@@ -916,6 +949,7 @@ class ClaudeStreamJsonSession {
         resolve,
         reject,
       };
+      this.liveRevision++;
       this.activeTurn = turn;
     });
 
@@ -1046,6 +1080,7 @@ class ClaudeStreamJsonSession {
       throw new Error(`Failed to spawn claude: ${errorMessage(error)}`);
     }
 
+    this.liveRevision++;
     this.process = child;
 
     // Catch spawn errors (e.g. ENOENT when "claude" is not in PATH).
@@ -1147,6 +1182,7 @@ class ClaudeStreamJsonSession {
     }
 
     if (event.type === "result") {
+      this.attentionUnsafe = false;
       const resultError = claudeResultErrorMessage(event);
       this.activeTurn = null;
       if (resultError) {
@@ -1165,6 +1201,7 @@ class ClaudeStreamJsonSession {
     }
 
     if (event.type === "error") {
+      this.attentionUnsafe = true;
       this.activeTurn = null;
       turn.reject(new Error(event.error?.message ?? event.message ?? "Unknown Claude error"));
     }
@@ -1189,6 +1226,13 @@ function getOrCreateSession(options: SessionRequestOptions): ClaudeStreamJsonSes
   const session = new ClaudeStreamJsonSession(options);
   sessions.set(key, session);
   return session;
+}
+
+export function existingClaudeNativeSession(agentName: string, sessionId: string) {
+  const session = sessions.get(`${agentName}:${sessionId}`);
+  if (!session) return undefined;
+  return { observe: () => session.observeExisting(),
+    submit: (expected: { sessionId: string; token: string }, action: "revive" | "steer", prompt: string) => session.submitExisting(expected, action, prompt) };
 }
 
 export async function ensureClaudeStreamJsonAgentOnline(options: SessionRequestOptions): Promise<{ sessionId: string | null }> {
@@ -1263,4 +1307,18 @@ export async function shutdownClaudeStreamJsonAgent(
 
   sessions.delete(key);
   await session.shutdown(shutdownOptions);
+}
+
+/** Deck connect starts the transport without submitting a prompt. */
+export async function connectClaudeDeck(options: SessionRequestOptions): Promise<void> {
+  const session = getOrCreateSession(options);
+  session.update(options);
+  await session.connectDeck();
+}
+
+/** Native conflict guard and accepted-start boundary; never queues a Deck turn. */
+export async function startClaudeDeckTurn(options: InvocationOptions, signal?: AbortSignal): Promise<{ output: Promise<string>; sessionId: string | null }> {
+  const session = getOrCreateSession(options);
+  session.update(options);
+  return session.startDeck(options.prompt, signal);
 }

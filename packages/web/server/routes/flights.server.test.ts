@@ -14,6 +14,16 @@ await loadWebServerUnderTest();
 installWebServerTestHooks();
 
 describe("createOpenScoutWebServer: flights routes", () => {
+  test("legacy chat hints do not invalidate a durable task follow link", async () => {
+    const server = await createOpenScoutWebServer({ currentDirectory: "/tmp/openscout", assetMode: "static", staticRoot: makeStaticRoot() });
+    try {
+      for (const handle of ["flightId=flt-1", "invocationId=inv-1", "workId=work-1"]) {
+        const response = await server.app.request(`http://localhost/api/follow?${handle}&conversationId=dm.operator.hudson`);
+        expect(response.status).toBe(200);
+      }
+      expect((await server.app.request("http://localhost/api/follow?conversationId=dm.operator.hudson")).status).toBe(400);
+    } finally { await server.stop(); }
+  });
   test("passes run filters to the run registry API", async () => {
     const server = await createOpenScoutWebServer({
       currentDirectory: "/tmp/openscout",

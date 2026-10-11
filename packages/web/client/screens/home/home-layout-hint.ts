@@ -13,6 +13,8 @@ export type HomeLayoutHint = {
   moving: number;
   /** Rows in the coordination stream, before its own scroll cap. */
   activity: number;
+  /** The coordination window the auto ladder settled on, ms. */
+  lookback?: number;
 };
 
 // First launch ever: assume the common operator shape (both cockpit cards, a
@@ -35,6 +37,7 @@ export function readHomeLayoutHint(): HomeLayoutHint {
       heartrate: typeof parsed.heartrate === "boolean" ? parsed.heartrate : DEFAULT_HINT.heartrate,
       moving: clampInt(parsed.moving, 8, DEFAULT_HINT.moving),
       activity: clampInt(parsed.activity, 30, DEFAULT_HINT.activity),
+      lookback: typeof parsed.lookback === "number" && Number.isFinite(parsed.lookback) ? parsed.lookback : undefined,
     };
   } catch {
     return DEFAULT_HINT;

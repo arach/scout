@@ -9,7 +9,9 @@ import { OnboardingTakeover } from "../scout/takeover/OnboardingTakeover.tsx";
 import { onboardingTakeoverActive } from "../scout/takeover/onboarding-gate.ts";
 import { ScoutSidebar } from "../scout/sidebar/ScoutSidebar.tsx";
 import {
+  RAIL_TOGGLE_HEADER_TOP,
   SIDEBAR_COLLAPSED_WIDTH,
+  railToggleOffset,
   useSidebarCollapse,
 } from "../scout/sidebar/useSidebarCollapse.ts";
 import { BasicDms } from "./BasicDms.tsx";
@@ -38,6 +40,7 @@ const BasicSettings = lazy(async () => {
   return { default: BasicSettings };
 });
 
+const SessionsContent = lazy(() => import("../screens/sessions/content.tsx").then((module) => ({ default: module.SessionsContent })));
 const TerminalContent = lazy(() => import("../screens/terminal/Terminal.tsx").then((module) => ({ default: module.TerminalContent })));
 const SearchContent = lazy(() => import("../screens/search/content.tsx").then((module) => ({ default: module.SearchContent })));
 const BasicLanes = lazy(async () => {
@@ -50,6 +53,7 @@ const BasicLanes = lazy(async () => {
 });
 const WorkDetailScreen = lazy(() => import("../screens/work/WorkDetailScreen.tsx").then((module) => ({ default: module.WorkDetailScreen })));
 const FollowScreen = lazy(() => import("../screens/follow/FollowScreen.tsx").then((module) => ({ default: module.FollowScreen })));
+
 
 export function BasicApp() {
   const { route, navigate, onboarding, onboardingSkipped } = useScout();
@@ -87,21 +91,26 @@ export function BasicApp() {
               areas={SOLO_SIDEBAR_AREAS}
               areaRoutes={SOLO_AREA_ROUTES}
               subNav={false}
+              showRequests={false}
               onNewTask={() => navigate({ view: "messages" })}
             />
           </SidebarProvider>
-
-        </>
-      )}
-      <header className="sb-header">
-        {!takeover && (
           <RailToggle
             side="left"
             collapsed={sidebar.effectiveCollapsed}
             label="Sidebar"
             onToggle={sidebar.toggleCollapsed}
+            className="scout-rail-toggle--band"
+            style={{
+              position: "fixed",
+              left: railToggleOffset(sidebar.width, sidebar.effectiveCollapsed, SIDEBAR_COLLAPSED_WIDTH),
+              top: RAIL_TOGGLE_HEADER_TOP,
+              zIndex: 46,
+            }}
           />
-        )}
+        </>
+      )}
+      <header className="sb-header">
         <BrokerStatus />
       </header>
       {!takeover && area === "terminal" && (
@@ -121,6 +130,7 @@ export function BasicApp() {
             : route.view === "follow" ? <Suspense fallback={null}><FollowScreen route={route} navigate={navigate} /></Suspense>
             : area === "home" && <BasicHome lead={<BasicNextStep />} deliveries={false} />}
           {area === "dms" && <BasicDms />}
+          {area === "sessions" && <Suspense fallback={null}><SessionsContent route={route} navigate={navigate} /></Suspense>}
           {area === "terminal" && route.view === "terminal" && (
             <Suspense fallback={null}><TerminalContent route={route} navigate={navigate} compact /></Suspense>
           )}

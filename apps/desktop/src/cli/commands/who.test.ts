@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { createScoutCommandContext } from "../context.ts";
 import { renderWhoCommandHelp, runWhoCommand } from "./who.ts";
+import { parseWhoCommandOptions } from "../options.ts";
 
 describe("who command help", () => {
   test("documents routing discovery and qualified handles", () => {
@@ -11,6 +12,15 @@ describe("who command help", () => {
     expect(help).toContain("exact target");
     expect(help).toContain("Short handles");
     expect(help).toContain("@talkie#codex?5.5");
+    expect(help).toContain("--machine <name>");
+  });
+
+  test("parses machine and context root together and rejects missing or unknown flags", () => {
+    expect(parseWhoCommandOptions(["--machine", "mini", "--context-root", "/work"], "/tmp")).toMatchObject({ machine: "mini", currentDirectory: "/work" });
+    expect(parseWhoCommandOptions(["--machine=node-1"], "/tmp").machine).toBe("node-1");
+    for (const args of [["--machine"], ["--machine="], ["--machine", "--since"], ["--topic", "hello"]]) {
+      expect(() => parseWhoCommandOptions(args, "/tmp")).toThrow();
+    }
   });
 
   test("prints help before broker access", async () => {

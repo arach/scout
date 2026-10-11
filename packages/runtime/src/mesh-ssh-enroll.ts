@@ -199,14 +199,31 @@ export async function defaultSshExec(input: SshExecInput): Promise<SshExecResult
       windowsHide: true,
       // Explicit: never shell.
       shell: false,
+      // Its own process group, so a timeout also reaches what it started
+      // (a login shell, a ProxyCommand).
+      detached: process.platform !== "win32",
     });
+    let exited = false;
+    child.once("exit", () => {
+      exited = true;
+    });
+    const signal = (name: NodeJS.Signals) => {
+      try {
+        if (child.pid && process.platform !== "win32") process.kill(-child.pid, name);
+        else child.kill(name);
+      } catch {
+        // Already gone.
+      }
+    };
 
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      child.kill("SIGTERM");
+      signal("SIGTERM");
+      // `child.killed` only says a signal was sent. The group is killed even
+      // when the leader exited, since a descendant may have ignored TERM.
       setTimeout(() => {
-        if (!child.killed) child.kill("SIGKILL");
+        if (!exited || process.platform !== "win32") signal("SIGKILL");
       }, 500).unref?.();
       reject(
         new SshEnrollError(

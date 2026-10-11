@@ -120,6 +120,13 @@ export type HostSettingsSnapshot = {
 
 export type HostOption = { value: string; label: string };
 
+/** What a voice test actually played. `fallbackReason` is set when the chosen
+ * voice failed and the macOS system voice spoke instead. */
+export type HostVoiceTest =
+  | { outcome: "finished"; modelId: string; voiceId: string; providerId: string; fallbackReason: string | null }
+  | { outcome: "cancelled" }
+  | { outcome: "failed"; error: string };
+
 export type HostSettingKey =
   | "window.sidebarMaterial"
   | "window.sidebarBlur"
@@ -184,7 +191,7 @@ function installReply() {
   };
 }
 
-function call<T>(method: string, params?: Record<string, unknown>): Promise<T> {
+function call<T>(method: string, params?: Record<string, unknown>, timeoutMs = 8000): Promise<T> {
   const h = handler();
   if (!h) return Promise.reject(new Error("Settings is not open in the Scout app."));
   installReply();
@@ -192,7 +199,7 @@ function call<T>(method: string, params?: Record<string, unknown>): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
       if (pending.delete(id)) reject(new Error("The Scout app did not answer."));
-    }, 8000);
+    }, timeoutMs);
     pending.set(id, {
       resolve: (v) => {
         clearTimeout(timer);
@@ -210,6 +217,8 @@ function call<T>(method: string, params?: Record<string, unknown>): Promise<T> {
 export const hostSettings = {
   snapshot: () => call<HostSettingsSnapshot>("snapshot"),
   speechCatalog: () => call<HostSettingsSnapshot>("spokenReplies.catalog"),
+  /** Speaks a sample with this Mac's voice; resolves when playback ends. */
+  testVoice: () => call<HostVoiceTest>("spokenReplies.test", undefined, 45000),
   set: (key: HostSettingKey, value: string | number | boolean) =>
     call<HostSettingsSnapshot>("set", { key, value }),
   requestPermission: (kind: HostPermissionKind) => call<HostSettingsSnapshot>("permission", { kind }),

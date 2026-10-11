@@ -1,5 +1,6 @@
 export type ScoutCommandRegistration = {
   name: string;
+  hidden?: boolean;
   summary: string;
   status?: "stable" | "deprecated";
   canonicalName?: string;
@@ -23,6 +24,8 @@ export const SCOUT_COMMANDS: ScoutCommandRegistration[] = [
   { name: "role", summary: "Assign roles (orchestrator) and read/write mission logs" },
   { name: "env", summary: "Show executable and agent identity context" },
   { name: "whoami", summary: "Resolve your current Scout sender identity" },
+  { name: "where", summary: "Find the top 3 local projects, agents or sessions by topic" },
+  { name: "route", summary: "Deprecated alias for where", canonicalName: "where", status: "deprecated", hidden: true, deprecationMessage: "`scout route` is deprecated; use `scout where`." },
   { name: "search", summary: "Past harness sessions — explicit index → FTS (prefer over grepping ~/.codex|claude|kimi)" },
   { name: "inbox", summary: "Read recent direct or addressed messages for this identity" },
   { name: "match", summary: "Rendezvous with one participant by shared project topic" },
@@ -31,6 +34,7 @@ export const SCOUT_COMMANDS: ScoutCommandRegistration[] = [
   { name: "session", summary: "Actions on a harness session" },
   { name: "statusline", summary: "Capture harness statusline metadata" },
   { name: "speak", summary: "Send and speak aloud via TTS" },
+  { name: "voice", summary: "Codex voice chat in the ChatGPT app: status, talk, mic, speakers, stop" },
   { name: "ask", summary: "Hand work to one agent and wait for acknowledgement" },
 
   { name: "alias", summary: "Manage scoped broker-owned route aliases" },
@@ -40,8 +44,11 @@ export const SCOUT_COMMANDS: ScoutCommandRegistration[] = [
   { name: "card", summary: "Create a dedicated reply-ready Scout agent card" },
   { name: "watch", summary: "Stream broker messages" },
   { name: "tail", summary: "Stream observed harness events" },
-  { name: "who", summary: "List agents and last activity" },
-  { name: "latest", summary: "Show the latest Scout activity" },
+  { name: "who", summary: "List the agent roster (not a live work probe)" },
+  { name: "check", summary: "Read live work, optionally resolving a topic first" },
+  { name: "recent", summary: "Alias for check", canonicalName: "check", hidden: true },
+  { name: "hosts", summary: "Mesh machines: activity, projects, and how to start work there (ask --on)" },
+  { name: "latest", summary: "Read the broker activity timeline" },
   { name: "mcp", summary: "Run a Scout MCP server over stdio" },
   { name: "chat", summary: "Join Chat invitations, read, post, reply, and watch" },
   { name: "channel", summary: "Read channel messages or run a Claude Code channel server" },
@@ -71,13 +78,52 @@ export const SCOUT_COMMANDS: ScoutCommandRegistration[] = [
 ];
 
 export function listScoutPrimaryCommands(): ScoutCommandRegistration[] {
-  return SCOUT_COMMANDS.filter((command) => (command.status ?? "stable") === "stable");
+  return SCOUT_COMMANDS.filter((command) => !command.hidden && (command.status ?? "stable") === "stable");
 }
 
 export function listScoutDeprecatedCommands(): ScoutCommandRegistration[] {
-  return SCOUT_COMMANDS.filter((command) => command.status === "deprecated");
+  return SCOUT_COMMANDS.filter((command) => !command.hidden && command.status === "deprecated");
 }
 
 export function findScoutCommandRegistration(name: string): ScoutCommandRegistration | undefined {
   return SCOUT_COMMANDS.find((command) => command.name === name);
+}
+
+/** Optimal string alignment distance: an adjacent swap ("hsots") costs one edit. */
+function editDistance(a: string, b: string): number {
+  const d: number[][] = Array.from({ length: a.length + 1 }, (_, i) =>
+    Array.from({ length: b.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)));
+  for (let i = 1; i <= a.length; i += 1) {
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      d[i]![j] = Math.min(d[i - 1]![j]! + 1, d[i]![j - 1]! + 1, d[i - 1]![j - 1]! + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        d[i]![j] = Math.min(d[i]![j]!, d[i - 2]![j - 2]! + 1);
+      }
+    }
+  }
+  return d[a.length]![b.length]!;
+}
+
+/** Closest primary command for a typo, or undefined when nothing is near. */
+export function suggestScoutCommand(name: string): string | undefined {
+  const wanted = name.trim().toLowerCase();
+  if (!wanted || wanted.includes(" ")) return undefined;
+  let best: { name: string; distance: number } | undefined;
+  for (const command of listScoutPrimaryCommands()) {
+    const distance = editDistance(wanted, command.name);
+    if (!best || distance < best.distance) best = { name: command.name, distance };
+  }
+  return best && best.distance <= Math.max(1, Math.floor(wanted.length / 3)) ? best.name : undefined;
+}
+
+/**
+ * The teaching error for an unknown command: a near miss gets "did you mean",
+ * anything else gets the version, because an agent copying a command from
+ * newer docs onto an older install is the common cause.
+ */
+export function unknownScoutCommandMessage(name: string, version: string): string {
+  const suggestion = suggestScoutCommand(name);
+  if (suggestion) return `unknown command: ${name}. Did you mean \`scout ${suggestion}\`? (scout help --detail lists all)`;
+  return `unknown command: ${name}. This scout is ${version}; if \`${name}\` is from newer docs, run \`scout update\`. All commands: scout help --detail`;
 }

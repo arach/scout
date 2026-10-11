@@ -9,7 +9,7 @@
 import { parseMessageMarkup } from "../../lib/message-markup.ts";
 
 const INLINE_PATTERN =
-  /`([^`\n]+)`|\*\*(.+?)\*\*|\*([^*\s][^*]*?)\*|\[([^\]\n]+)\]\(([^)\s]+)\)/gu;
+  /`([^`\n]+)`|\*\*(.+?)\*\*|\*([^*\s][^*]*?)\*|\[([^\]\n]+)\]\(([^)\s]+)\)|<u>(.+?)<\/u>|~~(.+?)~~/gu;
 
 function escapeHtml(value: string): string {
   return value
@@ -37,13 +37,17 @@ function inlineToHtml(text: string): string {
     if (match[1] !== undefined) {
       pieces.push(`<code class="chat-md-code">${escapeHtml(match[1])}</code>`);
     } else if (match[2] !== undefined) {
-      pieces.push(`<strong>${escapeHtml(match[2])}</strong>`);
+      pieces.push(`<strong>${inlineToHtml(match[2])}</strong>`);
     } else if (match[3] !== undefined) {
-      pieces.push(`<em>${escapeHtml(match[3])}</em>`);
+      pieces.push(`<em>${inlineToHtml(match[3])}</em>`);
     } else if (match[4] !== undefined && match[5] !== undefined) {
       pieces.push(
         `<a class="chat-url" href="${escapeHtml(match[5])}">${escapeHtml(match[4])}</a>`,
       );
+    } else if (match[6] !== undefined) {
+      pieces.push(`<u>${inlineToHtml(match[6])}</u>`);
+    } else if (match[7] !== undefined) {
+      pieces.push(`<s>${inlineToHtml(match[7])}</s>`);
     } else {
       pieces.push(escapeHtml(match[0] ?? ""));
     }
@@ -107,7 +111,13 @@ function serializeNode(node: Node): string {
     const text = (el.textContent ?? "").replace(/\n$/u, "");
     return `\n\`\`\`\n${text}\n\`\`\`\n`;
   }
-  const inner = Array.from(el.childNodes).map(serializeNode).join("");
+  let inner = Array.from(el.childNodes).map(serializeNode).join("");
+  if (tag === "SPAN") {
+    if (el.style.textDecoration.includes("underline")) inner = `<u>${inner}</u>`;
+    if (el.style.textDecoration.includes("line-through")) inner = wrap("~~", inner);
+    if (el.style.fontWeight === "bold" || Number(el.style.fontWeight) >= 600) inner = wrap("**", inner);
+    if (el.style.fontStyle === "italic") inner = wrap("*", inner);
+  }
   switch (tag) {
     case "STRONG":
     case "B":
@@ -115,6 +125,10 @@ function serializeNode(node: Node): string {
     case "EM":
     case "I":
       return wrap("*", inner);
+    case "U": return inner ? `<u>${inner}</u>` : "";
+    case "S":
+    case "STRIKE":
+    case "DEL": return wrap("~~", inner);
     case "CODE":
       return el.closest("pre") ? inner : (inner ? `\`${inner}\`` : "");
     case "A": {

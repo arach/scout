@@ -1,4 +1,4 @@
-import type { MessageMention } from "@openscout/protocol";
+import { REACTION_EMOJI_MORE, REACTION_EMOJI_QUICK, type MessageMention } from "@openscout/protocol";
 /**
  * The composer, and with it the boundary this feature turns on.
  *
@@ -10,12 +10,12 @@ import type { MessageMention } from "@openscout/protocol";
  * different hat.
  *
  * Shape: a roomy rich field over a quiet toolbar, closed by a round send.
- * Formatting marks the feed can actually paint (bold, italic, code, list) live
- * on the toolbar; the wire is still markdown. `@` opens the real member list,
+ * The ten formatting marks live above the field; the wire remains markdown
+ * with explicit safe underline and strike encodings. `@` opens the real member list,
  * the selector opens the real agent list, and send sends.
  */
 
-import { ArrowUp, AtSign, Bold, Bot, ChevronDown, Code, Italic, List, Loader2, Paperclip, Type, X } from "lucide-react";
+import { ArrowUp, Loader2, Mic, Plus, Square, Trash2, Video, X } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -28,10 +28,17 @@ import {
 
 import { useComposerAttachments } from "../../components/MessageComposer/ComposerAttachments.tsx";
 
+import { FORMATS, ComposerIcon, TOOL_PATHS, formatShortcut, type ComposerFormat } from "./composer-formats.tsx";
+import { filterShortcuts, type COMPOSER_SHORTCUTS } from "./composer-shortcuts.ts";
 import { ChatRichInput, type ChatRichInputHandle } from "./ChatRichInput.tsx";
 import type { ChannelMemberView } from "./chat-api.ts";
 import { useChatCapabilities } from "./chat-transport.tsx";
 import { MemberAvatar } from "./ChatAvatar.tsx";
+import { clipElapsed } from "./chat-media-clip.ts";
+import { useMediaClip } from "./use-media-clip.ts";
+
+/** The composer's emoji set is the reaction set: one list, already vetted. */
+const COMPOSER_EMOJI = [...REACTION_EMOJI_QUICK, ...REACTION_EMOJI_MORE] as const;
 import {
   composerHint,
   isAgentMember,
@@ -88,7 +95,11 @@ export function ChannelComposer({
   attachmentScope,
   autoFocus = false,
   request = null,
+  onInvite,
+  onDirect,
 }: {
+  onInvite?: (name: string) => void;
+  onDirect?: (name: string) => void;
   members: ChannelMemberView[];
   mentions?: MessageMention[];
   onMentionsChange?: (mentions: MessageMention[]) => void;
@@ -111,12 +122,107 @@ export function ChannelComposer({
   const [query, setQuery] = useState<MentionQuery | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [pickerOpen, setPickerOpen] = useState(false);
-  // Where the bar is too narrow for four marks, they live behind one control.
-  // Wide bars ignore this and show them all (see chat-space.css).
-  const [marksOpen, setMarksOpen] = useState(false);
+  // Formatting is on by default; a viewer can explicitly opt out.
+  const formattingKey = useMemo(() => {
+    try { const scope = JSON.parse(attachmentScope ?? "[]"); return `scout.chat.formatting:${scope[0] ?? "local"}`; }
+    catch { return "scout.chat.formatting:local"; }
+  }, [attachmentScope]);
+  const [marksOpen, setMarksOpen] = useState(() => { try { return localStorage.getItem(formattingKey) !== "off"; } catch { return true; } });
+  useEffect(() => { try { setMarksOpen(localStorage.getItem(formattingKey) !== "off"); } catch { setMarksOpen(true); } }, [formattingKey]);
+  const [activeMarks, setActiveMarks] = useState<ComposerFormat[]>([]);
+  const [shortcutsOpen, setShortcutsOpen] = useState(draft.startsWith("/"));
+  const [shortcutIndex, setShortcutIndex] = useState(0);
+  const [shortcutError, setShortcutError] = useState<string | null>(null);
+  const shortcuts = filterShortcuts(draft.startsWith("/") ? draft : "");
+  useEffect(() => { setShortcutIndex(0); }, [draft]);
   const marksId = useId();
   const capabilities = useChatCapabilities();
   const attachments = useComposerAttachments(attachmentScope, Boolean(attachmentScope));
+  // A finished clip is staged like a picked file; send is still the person's.
+  const clip = useMediaClip((file) => { attachments.stage([file], "Recorded"); });
+  const canRecord = capabilities.attachments && clip.supported;
+  const recordingBusy = clip.state.phase === "requesting" || clip.state.phase === "recording";
+  const clipKind = clip.state.phase === "idle" ? null : clip.state.kind;
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const addButtonRef = useRef<HTMLButtonElement | null>(null);
+  const addMenuRef = useRef<HTMLDivElement | null>(null);
+  const emojiButtonRef = useRef<HTMLButtonElement | null>(null);
+  const emojiRef = useRef<HTMLDivElement | null>(null);
+  const addMenuId = useId();
+  const emojiId = useId();
+  const previewRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    if (previewRef.current) previewRef.current.srcObject = clip.stream;
+  }, [clip.stream]);
+
+  // The two popovers close on a press anywhere outside them or their button.
+  useEffect(() => {
+    if (!addMenuOpen && !emojiOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (addMenuOpen && !addMenuRef.current?.contains(target) && !addButtonRef.current?.contains(target)) setAddMenuOpen(false);
+      if (emojiOpen && !emojiRef.current?.contains(target) && !emojiButtonRef.current?.contains(target)) setEmojiOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [addMenuOpen, emojiOpen]);
+
+  // Opening either popover from the keyboard lands on its first item.
+  useEffect(() => {
+    if (addMenuOpen) addMenuRef.current?.querySelector<HTMLButtonElement>("[role=menuitem]")?.focus();
+  }, [addMenuOpen]);
+  useEffect(() => {
+    if (emojiOpen) emojiRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+  }, [emojiOpen]);
+
+  const closeAddMenu = useCallback((returnFocus: boolean) => {
+    setAddMenuOpen(false);
+    if (returnFocus) addButtonRef.current?.focus();
+  }, []);
+  const closeEmoji = useCallback((returnFocus: boolean) => {
+    setEmojiOpen(false);
+    if (returnFocus) emojiButtonRef.current?.focus();
+  }, []);
+
+  /** Arrow keys walk a popover's items; Escape closes it and hands focus back. */
+  const popoverKeys = useCallback((
+    event: ReactKeyboardEvent<HTMLDivElement>,
+    selector: string,
+    close: (returnFocus: boolean) => void,
+    columns = 1,
+  ) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      close(true);
+      return;
+    }
+    if (event.key === "Tab") {
+      close(false);
+      return;
+    }
+    const step = event.key === "ArrowDown" ? columns
+      : event.key === "ArrowUp" ? -columns
+        : event.key === "ArrowRight" && columns > 1 ? 1
+          : event.key === "ArrowLeft" && columns > 1 ? -1
+            : 0;
+    if (!step) return;
+    event.preventDefault();
+    const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>(selector)];
+    const index = items.indexOf(document.activeElement as HTMLButtonElement);
+    const next = items[(index + step + items.length) % items.length];
+    next?.focus();
+  }, []);
+
+  const insertEmoji = useCallback((emoji: string) => {
+    const editor = inputRef.current;
+    if (editor) editor.insertText(emoji);
+    else onDraftChange(`${draft}${emoji}`);
+    setEmojiOpen(false);
+  }, [draft, onDraftChange]);
 
   // The picker offers only members `/asks` will actually route to. An API
   // participant is listed inertly below — hiding the one agent in the room
@@ -225,11 +331,31 @@ export function ChannelComposer({
     });
   }, [attachments, canSend, draft, onSend]);
 
+  const runShortcut = (command: typeof COMPOSER_SHORTCUTS[number]) => {
+    if (!command.action || sending) return;
+    const args = draft.startsWith(command.name) ? draft.slice(command.name.length).trim() : "";
+    if (command.action === "ask") {
+      const match = /^@([^ ]+)\s*(.*)$/s.exec(args);
+      const agent = askable.find(member => (member.displayName.toLowerCase() === match?.[1]?.toLowerCase() || member.actorId === match?.[1] || memberDisplayName(member).toLowerCase() === match?.[1]?.toLowerCase()));
+      if (match && agent) { onAskTargetChange(agent.actorId); onDraftChange(match[2] ?? ""); }
+      else if (!args) { setPickerOpen(true); onDraftChange(""); }
+      else { setShortcutError("Choose an askable agent in this room: /ask @agent question"); return; }
+    } else if (command.action === "invite" && onInvite) { onInvite(args.replace(/^@/, "")); onDraftChange(""); }
+    else if (command.action === "dm" && onDirect) { onDirect(args.replace(/^@/, "")); onDraftChange(""); }
+    else return;
+    setShortcutsOpen(false); setQuery(null); inputRef.current?.focus();
+  };
+
   const onKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLDivElement>) => {
       // IME confirmation belongs to the text input, including while a mention
       // list is open. Some WebKit versions expose only the legacy 229 code.
       if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+      if (shortcutsOpen) {
+        if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setShortcutsOpen(false); return; }
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setShortcutIndex(index => (index + (event.key === "ArrowDown" ? 1 : -1) + shortcuts.length) % Math.max(1, shortcuts.length)); return; }
+        if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); const command = shortcuts[shortcutIndex]; if (command) runShortcut(command); return; }
+      }
       if (query && matches.length > 0) {
         if (event.key === "ArrowDown") {
           event.preventDefault();
@@ -261,27 +387,14 @@ export function ChannelComposer({
         setPickerOpen(false);
         return;
       }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") {
-        event.preventDefault();
-        inputRef.current?.applyFormat("bold");
-        return;
-      }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "i") {
-        event.preventDefault();
-        inputRef.current?.applyFormat("italic");
-        return;
-      }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "e") {
-        event.preventDefault();
-        inputRef.current?.applyFormat("code");
-        return;
-      }
+      const format = formatShortcut(event);
+      if (format) { event.preventDefault(); inputRef.current?.applyFormat(format); return; }
       if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
         if (canSend) submit();
       }
     },
-    [activeIndex, applyMention, canSend, matches, pickerOpen, query, sending, submit],
+    [activeIndex, applyMention, canSend, matches, pickerOpen, query, sending, submit, shortcutsOpen, shortcuts, shortcutIndex, runShortcut],
   );
 
   const hint = composerHint(target ? memberDisplayName(target) : null);
@@ -292,6 +405,7 @@ export function ChannelComposer({
       : "Send to the channel";
 
   return (
+    <>
     <div
       className="chat-composer"
       data-variant={variant}
@@ -332,13 +446,28 @@ export function ChannelComposer({
 
       {attachments.recoveryPending ? <p className="chat-composer-hint" role="status">Restoring attachments…</p> : null}
       {attachments.recoveryError ? <p className="chat-send-error" role="alert">{attachments.recoveryError}</p> : null}
+      {marksOpen ? (
+        <div className="chat-composer-marks" id={marksId} role="toolbar" aria-label="Formatting">
+          {FORMATS.map((format, index) => <span className="chat-format-slot" key={format.id}>
+            {index === 4 || index === 7 ? <span className="chat-composer-divider" aria-hidden="true" /> : null}
+            <button type="button" className="chat-composer-tool chat-composer-tool--icon" disabled={sending}
+              aria-label={format.label} title={format.label} aria-pressed={activeMarks.includes(format.id)} data-active={activeMarks.includes(format.id)}
+              onMouseDown={event => event.preventDefault()} onClick={() => inputRef.current?.applyFormat(format.id)}>
+              <ComposerIcon paths={format.svg} />
+            </button>
+          </span>)}
+        </div>
+      ) : null}
       <ChatRichInput
         ref={inputRef}
         value={draft}
+        onFormatsChange={setActiveMarks}
         placeholder={placeholder}
         disabled={sending}
         onChange={(markdown) => {
           onDraftChange(markdown);
+          setShortcutsOpen(markdown.startsWith("/"));
+          setShortcutError(null);
           const before = inputRef.current?.textBeforeCaret() ?? markdown;
           setQuery(readMentionQuery(before, before.length));
         }}
@@ -490,147 +619,229 @@ export function ChannelComposer({
         </div>
       ) : null}
 
+      {shortcutsOpen ? <div className="chat-composer-shortcuts" role="listbox" aria-label="Shortcuts">
+        <div className="chat-shortcuts-label">SHORTCUTS</div>
+        {shortcuts.map((command, index) => {
+          const available = Boolean(command.action && (command.action === "ask" ? capabilities.asks : command.action === "invite" ? onInvite : onDirect));
+          return <button key={command.name} type="button" role="option" aria-selected={index === shortcutIndex} disabled={!available} data-active={index === shortcutIndex} className="chat-shortcut-row"
+            onMouseDown={event => event.preventDefault()} onClick={() => runShortcut(command)}>
+            <strong>{command.name}</strong><code>{command.args}</code><span>{command.description}</span>
+            {!command.action ? <small>SOON</small> : index === shortcutIndex ? <kbd>↵</kbd> : null}
+          </button>;
+        })}
+        {!shortcuts.length ? <p className="chat-side-empty">No matching shortcuts</p> : null}
+        <footer>↑↓ navigate · ↵ run · esc close · type to filter</footer>
+      </div> : null}
+      {shortcutError ? <p className="chat-send-error" role="alert">{shortcutError}</p> : null}
       {error ? <p className="chat-send-error" role="alert">{error}</p> : null}
 
-      {/* Two halves with different jobs. Left: how the message is written —
-          attachment, mention, and the four marks the feed can actually paint,
-          which fold behind one control where the bar is too narrow to hold
-          them, and the quiet "ask an agent" tool. Right: send, joined by the
-          ask target only once one is armed — that is when it changes what
-          send does. */}
+      {addMenuOpen && capabilities.attachments ? (
+        <div
+          ref={addMenuRef}
+          id={addMenuId}
+          className="chat-composer-menu"
+          role="menu"
+          aria-label="Add to message"
+          onKeyDown={(event) => popoverKeys(event, "[role=menuitem]", closeAddMenu)}
+        >
+          <button type="button" role="menuitem" className="chat-composer-menu-item"
+            onClick={() => { closeAddMenu(false); attachments.openPicker(); }}>
+            <Plus size={16} strokeWidth={1.8} aria-hidden />
+            Upload a file
+          </button>
+          {canRecord ? (
+            <>
+              <button type="button" role="menuitem" className="chat-composer-menu-item" disabled={recordingBusy}
+                onClick={() => { closeAddMenu(false); clip.start("audio"); }}>
+                <Mic size={16} strokeWidth={1.8} aria-hidden />
+                Record audio clip
+              </button>
+              <button type="button" role="menuitem" className="chat-composer-menu-item" disabled={recordingBusy}
+                onClick={() => { closeAddMenu(false); clip.start("video"); }}>
+                <Video size={16} strokeWidth={1.8} aria-hidden />
+                Record video clip
+              </button>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+
+      {emojiOpen ? (
+        <div
+          ref={emojiRef}
+          id={emojiId}
+          className="chat-composer-emoji"
+          role="dialog"
+          aria-label="Insert emoji"
+          onKeyDown={(event) => popoverKeys(event, "button", closeEmoji, 6)}
+        >
+          {COMPOSER_EMOJI.map((emoji) => (
+            <button
+              key={emoji}
+              type="button"
+              className="chat-composer-emoji-option"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => insertEmoji(emoji)}
+              aria-label={`Insert ${emoji}`}
+            >
+              {emoji}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {recordingBusy ? (
+        <div className="chat-composer-recording" role="status" aria-live="polite">
+          {clip.state.phase === "recording" && clip.state.kind === "video" ? (
+            <video ref={previewRef} className="chat-composer-recording-preview" autoPlay muted playsInline aria-hidden="true" />
+          ) : null}
+          <span className="chat-composer-recording-dot" data-live={clip.state.phase === "recording" ? "true" : undefined} aria-hidden="true" />
+          <span className="chat-composer-recording-label">
+            {clip.state.phase === "requesting"
+              ? `Waiting for the ${clip.state.kind === "audio" ? "microphone" : "camera"}…`
+              : `Recording ${clipKind === "audio" ? "audio" : "video"}`}
+          </span>
+          {clip.state.phase === "recording" ? (
+            <span className="chat-composer-recording-time">{clipElapsed(clip.elapsedMs)}</span>
+          ) : null}
+          <span className="chat-composer-recording-actions">
+            <button type="button" className="chat-composer-tool" onClick={clip.discard} aria-label="Discard the recording" title="Discard">
+              <Trash2 size={16} strokeWidth={1.8} aria-hidden />
+              Discard
+            </button>
+            <button type="button" className="chat-composer-tool" data-tone="stop" onClick={clip.stop}
+              disabled={clip.state.phase !== "recording"} aria-label="Stop and attach the recording" title="Stop and attach">
+              <Square size={14} strokeWidth={2} aria-hidden />
+              Stop
+            </button>
+          </span>
+        </div>
+      ) : null}
+      {clip.state.phase === "error" ? (
+        <p className="chat-send-error chat-composer-clip-error" role="alert">
+          {clip.state.message}
+          <button type="button" className="chat-ask-target-clear" onClick={clip.dismissError} aria-label="Dismiss">×</button>
+        </p>
+      ) : null}
+
       <div className="chat-composer-foot">
         <span className="chat-composer-tools">
           {capabilities.attachments ? (
             <button
+              ref={addButtonRef}
               type="button"
-              className="chat-composer-tool chat-composer-tool--icon"
-              onClick={attachments.openPicker}
+              className="chat-composer-tool chat-composer-tool--icon chat-composer-add"
+              data-active={addMenuOpen}
+              aria-haspopup="menu"
+              aria-expanded={addMenuOpen}
+              aria-controls={addMenuOpen ? addMenuId : undefined}
+              onClick={() => { setEmojiOpen(false); setAddMenuOpen((open) => !open); }}
               disabled={sending}
-              aria-label="Attach a file"
-              title="Attach a file"
+              aria-label={canRecord ? "Attach a file or record a clip" : "Attach a file"}
+              title={canRecord ? "Attach a file or record a clip" : "Attach a file"}
             >
-              <Paperclip size={14} strokeWidth={2} aria-hidden />
+              <ComposerIcon paths={TOOL_PATHS.plus} />
             </button>
           ) : null}
           <button
             type="button"
             className="chat-composer-tool chat-composer-tool--icon"
-            onClick={openMentionList}
-            disabled={sending}
-            aria-label="Mention a member"
-            title="Mention a member"
-          >
-            <AtSign size={14} strokeWidth={2} aria-hidden />
-          </button>
-          {/* A message is a post by default. Asking an agent is the exception,
-              so unarmed it is one quiet tool among the others; only once armed
-              does it move beside send, because then it changes what send does. */}
-          {capabilities.asks && !target ? (
-            <button
-              ref={pickerButtonRef}
-              type="button"
-              className="chat-composer-tool chat-composer-tool--icon"
-              data-active={pickerOpen}
-              aria-expanded={pickerOpen}
-              aria-haspopup="listbox"
-              disabled={sending}
-              aria-label="Ask an agent"
-              title="Ask an agent — turns this message into a tracked request"
-              onClick={() => setPickerOpen((open) => !open)}
-            >
-              <Bot size={15} strokeWidth={2} aria-hidden />
-            </button>
-          ) : null}
-          <button
-            type="button"
-            className="chat-composer-tool chat-composer-tool--icon chat-composer-marks-toggle"
             data-active={marksOpen}
             aria-expanded={marksOpen}
-            aria-controls={marksId}
+            aria-controls={marksOpen ? marksId : undefined}
             disabled={sending}
             aria-label={marksOpen ? "Hide formatting" : "Show formatting"}
             title={marksOpen ? "Hide formatting" : "Show formatting"}
-            onClick={() => setMarksOpen((open) => !open)}
+            onClick={() => setMarksOpen(open => { const next = !open; try { localStorage.setItem(formattingKey, next ? "on" : "off"); } catch {} return next; })}
           >
-            <Type size={14} strokeWidth={2} aria-hidden />
+            <span className="chat-composer-aa">Aa</span>
           </button>
-          <span className="chat-composer-marks" id={marksId} data-open={marksOpen ? "true" : undefined}>
-            <button
-              type="button"
-              className="chat-composer-tool chat-composer-tool--icon"
-              onMouseDown={(event) => {
-                event.preventDefault();
-                inputRef.current?.applyFormat("bold");
-              }}
-              disabled={sending}
-              aria-label="Bold"
-              title="Bold"
-            >
-              <Bold size={14} strokeWidth={2} aria-hidden />
-            </button>
-            <button
-              type="button"
-              className="chat-composer-tool chat-composer-tool--icon"
-              onMouseDown={(event) => {
-                event.preventDefault();
-                inputRef.current?.applyFormat("italic");
-              }}
-              disabled={sending}
-              aria-label="Italic"
-              title="Italic"
-            >
-              <Italic size={14} strokeWidth={2} aria-hidden />
-            </button>
-            <button
-              type="button"
-              className="chat-composer-tool chat-composer-tool--icon"
-              onMouseDown={(event) => {
-                event.preventDefault();
-                inputRef.current?.applyFormat("code");
-              }}
-              disabled={sending}
-              aria-label="Code"
-              title="Code"
-            >
-              <Code size={14} strokeWidth={2} aria-hidden />
-            </button>
-            <button
-              type="button"
-              className="chat-composer-tool chat-composer-tool--icon"
-              onMouseDown={(event) => {
-                event.preventDefault();
-                inputRef.current?.applyFormat("list");
-              }}
-              disabled={sending}
-              aria-label="List"
-              title="List"
-            >
-              <List size={14} strokeWidth={2} aria-hidden />
-            </button>
-          </span>
+          <button
+            ref={emojiButtonRef}
+            type="button"
+            className="chat-composer-tool chat-composer-tool--icon"
+            data-active={emojiOpen}
+            aria-haspopup="dialog"
+            aria-expanded={emojiOpen}
+            aria-controls={emojiOpen ? emojiId : undefined}
+            // Keep the caret where it is in the field; the emoji goes there.
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => { setAddMenuOpen(false); setEmojiOpen((open) => !open); }}
+            disabled={sending}
+            aria-label="Insert emoji"
+            title="Emoji"
+          >
+            <ComposerIcon paths={TOOL_PATHS.emoji} />
+          </button>
+          <button
+            type="button"
+            className="chat-composer-tool chat-composer-tool--icon"
+            disabled={sending}
+            onClick={openMentionList}
+            aria-label="Mention a member"
+            title="Mention a member"
+          >
+            <ComposerIcon paths={TOOL_PATHS.at} />
+          </button>
+          {canRecord ? (
+            <>
+              <span className="chat-composer-divider" aria-hidden="true" />
+              <button
+                type="button"
+                className="chat-composer-tool chat-composer-tool--icon"
+                data-active={recordingBusy && clipKind === "video"}
+                onClick={() => clip.start("video")}
+                disabled={sending || recordingBusy}
+                aria-label="Record a video clip"
+                title="Record video clip"
+              >
+                <ComposerIcon paths={TOOL_PATHS.video} />
+              </button>
+
+            </>
+          ) : null}
+          <span className="chat-composer-divider" aria-hidden="true" />
+          <button type="button" className="chat-composer-tool chat-composer-tool--icon" aria-label="Run a shortcut" title="Run a shortcut" data-active={shortcutsOpen} aria-expanded={shortcutsOpen} disabled={sending}
+            onMouseDown={event => event.preventDefault()} onClick={() => { if (!shortcutsOpen && !draft) inputRef.current?.insertText("/"); setShortcutsOpen(open => !open); inputRef.current?.focus(); }}>
+            <ComposerIcon paths={TOOL_PATHS.slash} />
+          </button>
         </span>
         <span className="chat-composer-right">
-          {capabilities.asks && target ? (
+          {/* Ask-an-agent is an icon like the rest: a robot unarmed, the
+              agent's face once armed. The hint line above says what it does;
+              the tooltip says who. */}
+          {capabilities.asks ? (
             <button
               ref={pickerButtonRef}
               type="button"
-              className="chat-composer-tool chat-composer-ask"
-              data-armed="true"
+              className="chat-composer-tool chat-composer-tool--icon chat-composer-ask"
+              data-armed={target ? "true" : undefined}
               data-active={pickerOpen}
               aria-expanded={pickerOpen}
               aria-haspopup="listbox"
               disabled={sending}
-              // Armed, the control shows a face and a name — which says who but
-              // not what pressing it does. The label supplies the verb.
-              aria-label={`Change agent — currently asking ${memberDisplayName(target)}`}
-              title={`Change agent — currently asking ${memberDisplayName(target)}`}
+              aria-label={target ? `Change agent — currently asking ${memberDisplayName(target)}` : "Ask an agent"}
+              title={target
+                ? `Change agent — currently asking ${memberDisplayName(target)}`
+                : "Ask an agent — turns this message into a tracked request"}
               onClick={() => setPickerOpen((open) => !open)}
             >
-              <MemberAvatar member={target} size={14} />
-              <span className="chat-composer-ask-name">{memberDisplayName(target)}</span>
-              <ChevronDown size={12} strokeWidth={2} aria-hidden />
+              {target ? <MemberAvatar member={target} size={18} /> : <ComposerIcon paths={TOOL_PATHS.robot} />}
             </button>
           ) : null}
+          {canRecord ? <>
+              <button
+                type="button"
+                className="chat-composer-tool chat-composer-tool--icon"
+                data-active={recordingBusy && clipKind === "audio"}
+                onClick={() => clip.start("audio")}
+                disabled={sending || recordingBusy}
+                aria-label="Record an audio clip"
+                title="Record audio clip"
+              >
+                <ComposerIcon paths={TOOL_PATHS.mic} />
+              </button>
+          </> : null}
           <button
             type="button"
             className="chat-composer-send"
@@ -642,10 +853,12 @@ export function ChannelComposer({
           >
             {sending
               ? <Loader2 size={15} strokeWidth={2.2} className="chat-composer-spin" aria-hidden />
-              : <ArrowUp size={16} strokeWidth={2.4} aria-hidden />}
+              : <ArrowUp size={16} strokeWidth={2.2} aria-hidden />}
           </button>
         </span>
       </div>
     </div>
+    <p className="chat-composer-return-hint" aria-hidden="true"><b>Shift + Return</b> to add a new line</p>
+    </>
   );
 }

@@ -18,6 +18,8 @@ import type {
 } from "@openscout/protocol";
 import { api } from "../../lib/api.ts";
 import { loadFleet } from "../../lib/fleet-store.ts";
+import { useOperatorRequests } from "../../lib/use-operator-requests.ts";
+import { selectDeclaredConversationRequest } from "../../lib/declared-requests.ts";
 import { uploadMediaFiles, type OutgoingAttachment } from "../../lib/media-blobs.ts";
 import { useComposerAttachments } from "../../components/MessageComposer/index.ts";
 import {
@@ -179,7 +181,6 @@ import {
   type QueuedDraft,
   selectCurrentFlight,
   selectLatestConversationFlight,
-  selectOperatorPendingAsk,
   selectTurnActivity,
   selectTurnAsk,
   sortMessages,
@@ -375,6 +376,8 @@ export function ConversationScreen({
     scrollTop: number;
   } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const centerRef = useRef<HTMLDivElement>(null);
+  const dockRef = useRef<HTMLDivElement>(null);
   const wasAtBottomRef = useRef(true);
   const autoScrollActiveRef = useRef(false);
   const autoScrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -395,6 +398,31 @@ export function ConversationScreen({
   // the same commit: by then `pendingHistoryScrollRef` has already been
   // consumed, so this is what tells autoscroll to stand down.
   const historyRestoreAppliedRef = useRef(false);
+
+  // The composer floats over the feed. Its measured height becomes the feed's
+  // bottom padding, so the last message rests above it and earlier ones scroll
+  // on underneath. A feed resting at the bottom stays there as the box grows.
+  useLayoutEffect(() => {
+    const center = centerRef.current;
+    const dock = dockRef.current;
+    if (!center || !dock || typeof ResizeObserver === "undefined") return;
+    let last = -1;
+    const apply = () => {
+      const height = Math.round(dock.getBoundingClientRect().height);
+      if (height === last) return;
+      const feed = feedRef.current;
+      const resting = feed
+        ? feed.scrollHeight - feed.scrollTop - feed.clientHeight <= 24
+        : false;
+      last = height;
+      center.style.setProperty("--s-thread-dock-h", `${height}px`);
+      if (feed && resting) feed.scrollTop = feed.scrollHeight;
+    };
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(dock);
+    return () => observer.disconnect();
+  }, []);
 
   useLayoutEffect(() => {
     const pending = pendingHistoryScrollRef.current;
@@ -508,20 +536,14 @@ export function ConversationScreen({
     machineId,
   });
 
-  const [pinnedAsk, setPinnedAsk] = useState<FleetAsk | null>(null);
-
-  useEffect(() => {
-    loadFleet()
-      .then((fleet) => {
-        setPinnedAsk((previous) =>
-          keepPreviousIfJsonEqual(
-            previous,
-            selectOperatorPendingAsk(fleet.activeAsks, conversationId, agentId),
-          ),
-        );
-      })
-      .catch(() => {});
-  }, [conversationId, agentId]);
+  // The pinned card shows only a DECLARED request living in this
+  // conversation (an operator need, a question, an approval) — never the
+  // agent's reply to the operator's own ask.
+  const { state: requestsState } = useOperatorRequests();
+  const pinnedRequest = useMemo(
+    () => selectDeclaredConversationRequest(requestsState?.items ?? [], equivalentConversationIds),
+    [requestsState?.items, equivalentConversationIds],
+  );
 
   const load = useCallback(async (
     options: {
@@ -657,16 +679,6 @@ export function ConversationScreen({
         keepPreviousIfJsonEqual(previous, nextTurnActivity),
       );
       setTurnAsk((previous) => keepPreviousIfJsonEqual(previous, nextTurnAsk));
-      setPinnedAsk((previous) =>
-        keepPreviousIfJsonEqual(
-          previous,
-          selectOperatorPendingAsk(
-            fleet.activeAsks,
-            canonicalConversationId,
-            resolvedAgentId,
-          ),
-        ),
-      );
     } catch (cause) {
       if (activeConversationIdRef.current !== conversationId) return;
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -2367,7 +2379,7 @@ export function ConversationScreen({
       className={`s-thread-layout${embedded ? " s-thread-layout--embedded" : ""}`}
       data-thread-treatment={treatment === "standard" ? undefined : treatment}
     >
-      <div className="s-thread-center">
+      <div className="s-thread-center s-thread-center--docked" ref={centerRef}>
         {!embedded && (
           <ConversationHeader
             showBackNav={showBackNav}
@@ -2419,16 +2431,16 @@ export function ConversationScreen({
           />
         )}
 
-        {pinnedAsk && (
+        {pinnedRequest && (
           <PinnedAskCard
-            pinnedAsk={pinnedAsk}
+            request={pinnedRequest}
             onAnswer={() => {
               // Answer must visibly arm the composer — a bare focus() reads as
               // "nothing happened". Anchor the reply to the agent's latest
               // word so the chip shows who is being answered.
               const anchor = [...messages]
                 .reverse()
-                .find((candidate) => candidate.actorId === pinnedAsk.agentId)
+                .find((candidate) => candidate.actorId === pinnedRequest.agentId)
                 ?? [...messages]
                   .reverse()
                   .find((candidate) =>
@@ -3063,6 +3075,7 @@ export function ConversationScreen({
         </div>
         )}
 
+        <div className="s-thread-dock" ref={dockRef}>
         {presence.showTyping && (
           <div className={presenceLineClassName}>
             <div className="s-thread-presence-line-avatars">
@@ -3117,6 +3130,7 @@ export function ConversationScreen({
           onUnqueue={unqueue}
           onSendQueuedNow={(id) => void sendQueuedNow(id)}
         />
+        </div>
       </div>
 
     </div>

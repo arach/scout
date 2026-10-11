@@ -1,5 +1,6 @@
-import { basename, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { statSync } from "node:fs";
+import { readFile, stat } from "node:fs/promises";
 
 import type {
   AgentDefinition,
@@ -126,6 +127,10 @@ export type ScoutMobileWorkspaceSummary = {
   sourceRoot: string;
   relativePath: string;
   registrationKind: ProjectInventoryEntry["registrationKind"];
+  /** Checked-out branch, or null when detached / not a git checkout. */
+  branch: string | null;
+  /** True for a linked git worktree (its `.git` is a file), false for a main checkout. */
+  isWorktree: boolean;
   defaultHarness: string;
   harnesses: Array<{
     harness: string;
@@ -450,8 +455,12 @@ async function loadMobileWorkspaceInventory(currentDirectory?: string): Promise<
   ]);
   const readinessByHarness = harnessReadinessMap(catalog);
 
+  const checkouts = await Promise.all(
+    setup.projectInventory.map((project) => readGitCheckout(project.projectRoot)),
+  );
+
   return setup.projectInventory
-    .map((project) => ({
+    .map((project, index) => ({
       id: project.projectRoot,
       title: project.displayName,
       projectName: project.projectName,
@@ -459,6 +468,8 @@ async function loadMobileWorkspaceInventory(currentDirectory?: string): Promise<
       sourceRoot: project.sourceRoot,
       relativePath: project.relativePath,
       registrationKind: project.registrationKind,
+      branch: checkouts[index]?.branch ?? null,
+      isWorktree: checkouts[index]?.isWorktree ?? false,
       defaultHarness: project.defaultHarness,
       harnesses: project.harnesses.map((harness) => {
         const readiness = readinessByHarness.get(harness.harness);
@@ -472,6 +483,30 @@ async function loadMobileWorkspaceInventory(currentDirectory?: string): Promise<
       }),
     }))
     .sort((left, right) => left.relativePath.localeCompare(right.relativePath) || left.title.localeCompare(right.title));
+}
+
+/**
+ * The branch a checkout is on and whether it is a linked worktree, from its
+ * `.git` alone: no git process, so a 200-project inventory stays cheap. A
+ * worktree's `.git` is a file pointing at its gitdir, which holds its HEAD.
+ */
+export async function readGitCheckout(root: string): Promise<{ branch: string | null; isWorktree: boolean } | null> {
+  const dotGit = join(root, ".git");
+  try {
+    const info = await stat(dotGit);
+    let gitDir = dotGit;
+    const isWorktree = info.isFile();
+    if (isWorktree) {
+      const pointer = (await readFile(dotGit, "utf8")).match(/^gitdir:\s*(.+)$/m)?.[1]?.trim();
+      if (!pointer) return { branch: null, isWorktree };
+      gitDir = resolve(root, pointer);
+    }
+    const head = (await readFile(join(gitDir, "HEAD"), "utf8")).trim();
+    const branch = head.match(/^ref:\s*refs\/heads\/(.+)$/)?.[1] ?? null;
+    return { branch, isWorktree };
+  } catch {
+    return null;
+  }
 }
 
 function isDirectory(path: string): boolean {
@@ -1179,6 +1214,7 @@ export async function createScoutSession(
   }
   const workspaceRoot = await resolveMobileWorkspaceRoot(rawWorkspaceId, currentDirectory);
   const projectName = basename(workspaceRoot) || workspaceRoot;
+  const checkout = await readGitCheckout(workspaceRoot);
   const workspace: ScoutMobileWorkspaceSummary = {
     id: workspaceRoot,
     title: projectName,
@@ -1187,6 +1223,8 @@ export async function createScoutSession(
     sourceRoot: workspaceRoot,
     relativePath: workspaceRoot.replace(`${process.env.HOME ?? ""}/`, ""),
     registrationKind: "configured",
+    branch: checkout?.branch ?? null,
+    isWorktree: checkout?.isWorktree ?? false,
     defaultHarness: input.harness ?? "claude",
     harnesses: [],
   };
@@ -1453,11 +1491,9 @@ export async function getScoutMobileActivity(
 // per-provider row that PRESERVES each provider's individual quota windows so
 // the phone can render one meter per window (e.g. Claude 5h + weekly) instead of
 // a single collapsed percent. Windows are emitted in source order (short window
-// first). Providers with at least one quota window are kept; non-quota/failed
-// providers are skipped rather than surfaced as empty rows.
-
-const MOBILE_SERVICE_BUDGET_PROVIDERS = ["claude", "codex", "kimi", "github"] as const;
-type MobileServiceBudgetProvider = (typeof MOBILE_SERVICE_BUDGET_PROVIDERS)[number];
+// first). Every provider the aggregator reports is sent, in its order: a quota
+// provider with live windows, or a status provider as `activity` text. The
+// phone arranges and hides them itself (Settings › Home quotas).
 
 export type ScoutMobileServiceBudgetWindow = {
   /// Short window label, e.g. "5h", "wk", "7d".
@@ -1472,28 +1508,24 @@ export type ScoutMobileServiceBudgetWindow = {
 };
 
 export type ScoutMobileServiceBudget = {
-  provider: MobileServiceBudgetProvider;
+  provider: string;
   /// Display name, e.g. "Claude".
   label: string;
   /// Plan/tier string from the gauge (for example Kimi's membership level); "" if none.
   plan: string;
   /// Per-window meters in source order (short window first).
   windows: ScoutMobileServiceBudgetWindow[];
-};
-
-const MOBILE_SERVICE_BUDGET_LABELS: Record<MobileServiceBudgetProvider, string> = {
-  claude: "Claude",
-  codex: "Codex",
-  kimi: "Kimi",
-  github: "GitHub",
+  /// Observed activity for a provider with no readable quota (Grok's local
+  /// telemetry), e.g. "138M tokens · 7d". Only set when `windows` is empty.
+  activity?: string;
 };
 
 const MOBILE_RESET_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
-function mobileServiceBudgetProvider(id: string): MobileServiceBudgetProvider | null {
-  return (MOBILE_SERVICE_BUDGET_PROVIDERS as readonly string[]).includes(id)
-    ? (id as MobileServiceBudgetProvider)
-    : null;
+/// Display name: the gauge's own label, capitalized ("grok" → "Grok").
+function mobileServiceBudgetLabel(gauge: ServiceGauge): string {
+  const label = gauge.label?.trim() || gauge.id;
+  return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
 /// Short reset text for a single window: minutes under an hour ("48m"), hours
@@ -1522,11 +1554,25 @@ function mobileServiceBudgetPlan(gauge: ServiceGauge): string {
 }
 
 /// Project one quota gauge onto the phone's per-provider budget row, preserving
-/// each quota window as its own meter. Returns null for a non-quota gauge (status
-/// tiles), a provider we don't surface on mobile, or a provider with no windows.
+/// each quota window as its own meter. A status gauge (no quota) becomes a row
+/// with `activity` text. Returns null for a quota gauge with no live windows or
+/// a status gauge with nothing to say.
 export function mobileServiceBudgetFromGauge(gauge: ServiceGauge): ScoutMobileServiceBudget | null {
-  const provider = mobileServiceBudgetProvider(gauge.id);
+  const provider = gauge.id;
   if (!provider) return null;
+  if (gauge.kind === "status") {
+    // No quota to meter: carry the lead of the activity readout instead.
+    const lead = gauge.detailLabel?.split("·")[0]?.trim();
+    if (!lead) return null;
+    const window = gauge.windowLabel?.replace(/^observed\s+/u, "").trim();
+    return {
+      provider,
+      label: mobileServiceBudgetLabel(gauge),
+      plan: "",
+      windows: [],
+      activity: window ? `${lead} · ${window}` : lead,
+    };
+  }
   if (gauge.kind !== "quota") return null;
 
   // Each window carries a `fill` (0-1 fraction used). Preserve source order (the
@@ -1544,7 +1590,7 @@ export function mobileServiceBudgetFromGauge(gauge: ServiceGauge): ScoutMobileSe
 
   return {
     provider,
-    label: MOBILE_SERVICE_BUDGET_LABELS[provider],
+    label: mobileServiceBudgetLabel(gauge),
     plan: mobileServiceBudgetPlan(gauge),
     windows,
   };
@@ -1561,12 +1607,7 @@ export async function getScoutMobileServiceBudgets(
   const response = await loadServiceBudgets();
   const budgets = response.gauges
     .map(mobileServiceBudgetFromGauge)
-    .filter((budget): budget is ScoutMobileServiceBudget => budget !== null)
-    .sort(
-      (left, right) =>
-        MOBILE_SERVICE_BUDGET_PROVIDERS.indexOf(left.provider)
-        - MOBILE_SERVICE_BUDGET_PROVIDERS.indexOf(right.provider),
-    );
+    .filter((budget): budget is ScoutMobileServiceBudget => budget !== null);
   return { budgets };
 }
 

@@ -9,3 +9,6 @@ export const agentArchiveBody = z.object({
   archived: z.boolean().optional(),
 });
 export type AgentArchiveBody = z.input<typeof agentArchiveBody>;
+
+// A Sessions slot interrupts only the concrete live session it is showing.
+export const agentInterruptBody = z.object({ expectedSessionId: z.string().min(1).optional() });

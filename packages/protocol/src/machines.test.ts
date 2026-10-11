@@ -18,6 +18,7 @@ import {
   type LanMachineEvidence,
   type MachineEvidence,
   type ScoutMachineEvidence,
+  type SshMachineEvidence,
   type TailnetMachineEvidence,
 } from "./machines.js";
 
@@ -46,6 +47,19 @@ function tailnet(overrides: Partial<TailnetMachineEvidence> = {}): TailnetMachin
     addresses: ["100.101.102.103"],
     online: true,
     os: "macOS",
+    ...overrides,
+  };
+}
+
+function ssh(overrides: Partial<SshMachineEvidence> = {}): SshMachineEvidence {
+  return {
+    kind: "ssh",
+    observedAt: NOW,
+    alias: "art",
+    aliases: ["art", "mini-box"],
+    hostName: "mini.tail1234.ts.net",
+    user: "arach",
+    configPath: "/Users/me/.ssh/config",
     ...overrides,
   };
 }
@@ -380,5 +394,45 @@ describe("presence and ordering", () => {
     const fresh = { ...base, id: "mach-fresh", lastSeenAt: NOW };
     expect([stale, fresh, self].sort(compareMachines).map((machine) => machine.id))
       .toEqual(["mach-self", "mach-fresh", "mach-stale"]);
+  });
+});
+
+describe("ssh config evidence", () => {
+  test("folds into the machine its HostName names, aliases and all", () => {
+    const groups = groupMachineEvidence([tailnet(), ssh()]);
+    expect(groups).toHaveLength(1);
+    const record = buildMachineRecord(groups[0]!);
+    expect(record.name).toBe("mini");
+    expect(record.sshTargets).toEqual([{
+      alias: "art",
+      aliases: ["art", "mini-box"],
+      hostName: "mini.tail1234.ts.net",
+      user: "arach",
+      configPath: "/Users/me/.ssh/config",
+    }]);
+  });
+
+  test("an alias is shorthand, never identity", () => {
+    expect(machineIdentityKeys(ssh({ alias: "mini", aliases: ["mini"], hostName: "box.example" })).durable)
+      .toEqual(["host:box"]);
+    expect(groupMachineEvidence([tailnet(), ssh({ alias: "mini", aliases: ["mini"], hostName: "box.example" })]))
+      .toHaveLength(2);
+  });
+
+  test("a literal tailnet address is durable; a LAN one joins only this pass", () => {
+    expect(machineIdentityKeys(ssh({ hostName: "100.101.102.103" }))).toEqual({ durable: ["ip:100.101.102.103"], transient: [] });
+    expect(machineIdentityKeys(ssh({ hostName: "192.168.1.23" }))).toEqual({ durable: [], transient: ["ip:192.168.1.23"] });
+  });
+
+  test("reading the config is not seeing the machine", () => {
+    const configured = buildMachineRecord(groupMachineEvidence([ssh({ observedAt: NOW })])[0]!);
+    expect(configured.name).toBe("art");
+    expect(configured.lastSeenAt).toBe(0);
+    expect(configured.firstSeenAt).toBe(NOW);
+    expect(machinePresence(configured, NOW)).toBe("offline");
+    expect(configured.capabilities).toEqual([]);
+
+    const seen = buildMachineRecord(groupMachineEvidence([tailnet({ observedAt: NOW - 10 * 60_000 }), ssh({ observedAt: NOW })])[0]!);
+    expect(seen.lastSeenAt).toBe(NOW - 10 * 60_000);
   });
 });

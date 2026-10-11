@@ -41,7 +41,7 @@ export function OnboardingHarnessPicker({
   const selected = observations?.find((entry) => entry.id === value);
   return (
     <fieldset style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
-      <legend style={{ fontSize: 13, fontWeight: 600, marginBottom: 12 }}>Preferred coding agent</legend>
+      <legend style={{ fontSize: 10, fontWeight: 300, fontFamily: "var(--hud-font-mono)", textTransform: "uppercase", letterSpacing: "0.02em", color: "var(--hud-muted)", marginBottom: 12 }}>Preferred coding agent</legend>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))", gap: 8 }}>
         {ONBOARDING_HARNESSES.map((entry) => {
           const active = entry.id === value;
@@ -63,7 +63,7 @@ export function OnboardingHarnessPicker({
             >
               <HarnessMark harness={entry.id} size={26} title={null} style={{ flexShrink: 0 }} />
               <span style={{ display: "flex", flexDirection: "column", gap: 3, flex: 1, minWidth: 0 }}>
-                <span style={{ fontSize: 14, fontWeight: 600 }}>{entry.label}</span>
+                <span style={{ fontSize: 13, fontWeight: 500, letterSpacing: "-0.01em" }}>{entry.label}</span>
                 <span style={{ fontSize: 12, color: "var(--hud-muted)" }}>{onboardingHarnessStatus(observed)}</span>
               </span>
               {active ? <span aria-hidden="true" style={{ fontSize: 15 }}>✓</span> : null}

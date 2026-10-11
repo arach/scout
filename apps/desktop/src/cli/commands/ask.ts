@@ -1,4 +1,5 @@
 import { flightSessionTrace } from "@openscout/protocol";
+import { buildFlightLinks } from "./flight.ts";
 import type { ScoutCommandContext } from "../context.ts";
 import { defaultScoutContextDirectory } from "../context.ts";
 import {
@@ -27,10 +28,15 @@ const DEFAULT_ASK_DISPATCH_SETTLE_MS = 4_000;
 
 export function renderAskCommandHelp(): string {
   return [
-    "Usage: scout ask [(--to <existing-target> | --ref <ref> | --project <path> | --profile <runtime-profile>)] [--runtime <harness/model/effort>] [--harness <runtime>] [--model <model>] [--effort <level>] [--new] [--placement <background|foreground|attached> | --foreground] [--notify | --reply-mode <inline|notify|none>] [--prompt-file <path> | <message>]",
+    "Usage: scout ask [(--to <existing-target> | --ref <ref> | --project <path> [--on <host>] | --profile <runtime-profile>)] [--runtime <harness/model/effort>] [--harness <runtime>] [--model <model>] [--effort <level>] [--new] [--placement <background|foreground|attached> | --foreground] [--notify | --reply-mode <inline|notify|none>] [--prompt-file <path> | <message>]",
     "",
     "Ask one agent to do work or return a concrete answer.",
     "Async receipts show the routed target, harness evidence, and a scout wait command (including --notify).",
+    "",
+    "On another machine (never ssh in to launch an agent; Scout carries the brief, receipt and replies):",
+    '  scout ask --on archie --project ~/renders/arsenal-x --harness codex --prompt-file ./brief.md',
+    "  --on <host> starts a fresh session in that folder on that machine. The path is the path ON that machine.",
+    "  Machines and their projects: scout hosts (MCP: hosts_list).",
     "",
     "First collaboration (replace the project path; keep the returned ref):",
     '  scout ask --project /path/to/repo --harness claude --notify "Review the changes and report back."',
@@ -54,6 +60,7 @@ export function renderAskCommandHelp(): string {
     "  --to session:<id>                  -> continue one exact existing session",
     "  --to alias:<name>                  -> explicit broker route alias; use --alias-project/--alias-host for cross-scope routing",
     "  --project <path>                   -> ask by repo/workspace path; Scout resolves the concrete worker",
+    "  --project <path> --on <host>       -> fresh session in that folder on another mesh machine",
     "  --project <path> --harness <rt>     -> capability request; broker chooses/creates worker",
     "  --runtime <harness/model/effort>    -> exact shell-safe runtime; fixed slash positions",
     "  codex/gpt-5.6-sol/xhigh to ...      -> natural RuntimeSpec form for the current project",
@@ -119,11 +126,15 @@ export function renderScoutAskReceipt(value: {
   receipt: ScoutAskReceipt;
   replyMode: NonNullable<ScoutAskCommandOptions["replyMode"]>;
   flight?: ScoutFlightRecord | null;
+  links?: ReturnType<typeof buildFlightLinks>;
+  /** The machine named with `--on`, said first so the asker sees where the work landed. */
+  onHost?: string;
 }): string {
   const { ids } = value.receipt;
   const bindingRef = renderBindingRef(ids.bindingRef);
   const pieces = [
-    ids.targetAgentId ? `Routed to ${ids.targetAgentId}` : "Ask queued",
+    value.onHost ? `On ${value.onHost}` : null,
+    ids.targetAgentId ? `${value.onHost ? "routed" : "Routed"} to ${ids.targetAgentId}` : value.onHost ? "ask queued" : "Ask queued",
     renderScoutAskHarness(value.receipt, value.flight),
     bindingRef,
     ids.flightId ? `flight ${ids.flightId}` : null,
@@ -137,6 +148,7 @@ export function renderScoutAskReceipt(value: {
     `${pieces.join(" · ")}.`,
     delivery,
     value.replyMode === "notify" && !terminal ? "Scout will surface the completion when it arrives." : null,
+    value.links?.work ? `Follow the task: ${value.links.work}` : null,
     waitRef ? `Follow: scout wait ${quoteWaitReference(waitRef)} --timeout 600` : "No wait reference returned; inspect the ask receipt.",
   ].filter((line): line is string => Boolean(line)).join("\n");
 }
@@ -425,6 +437,7 @@ export async function runAskWithOptions(
     replyMode,
     currentDirectory,
     source: "scout-cli",
+    ...(options.onHost ? { host: options.onHost } : {}),
     aliasScope: options.aliasProject || options.aliasHost ? {
       ...(options.aliasProject ? { projectRoot: options.aliasProject } : {}),
       ...(options.aliasHost ? { nodeId: options.aliasHost } : {}),
@@ -441,7 +454,7 @@ export async function runAskWithOptions(
   }
 
   context.stderr(
-    `asking ${receipt.ids.targetAgentId ?? options.targetLabel ?? options.existingTargetHandle ?? options.runtimeProfile ?? options.projectPath ?? "target"} as ${senderId} via ${renderConversationRoute(receipt.ids.conversationId)}... (flight ${receipt.ids.flightId})`,
+    `asking ${receipt.ids.targetAgentId ?? options.targetLabel ?? options.existingTargetHandle ?? options.runtimeProfile ?? (options.onHost && options.projectPath ? `${options.projectPath} on ${options.onHost}` : options.projectPath) ?? "target"} as ${senderId} via ${renderConversationRoute(receipt.ids.conversationId)}... (flight ${receipt.ids.flightId})`,
   );
 
   if (replyMode !== "inline") {
@@ -458,6 +471,8 @@ export async function runAskWithOptions(
         receipt,
         replyMode,
         flight,
+        links: buildFlightLinks(receipt.ids, context.env),
+        ...(options.onHost ? { onHost: options.onHost } : {}),
       },
       renderScoutAskReceipt,
     );
@@ -486,7 +501,7 @@ export async function runAskWithOptions(
       id: receipt.ids.flightId,
       invocationId: receipt.ids.invocationId ?? receipt.ids.flightId,
       requesterId: senderId,
-      targetAgentId: receipt.ids.targetAgentId ?? options.targetLabel ?? options.existingTargetHandle ?? options.runtimeProfile ?? options.projectPath ?? "target",
+      targetAgentId: receipt.ids.targetAgentId ?? options.targetLabel ?? options.existingTargetHandle ?? options.runtimeProfile ?? (options.onHost && options.projectPath ? `${options.projectPath} on ${options.onHost}` : options.projectPath) ?? "target",
       state: "queued",
     };
   }
@@ -499,6 +514,7 @@ export async function runAskWithOptions(
       bindingRef: renderBindingRef(receipt.ids.bindingRef),
       receipt,
       flight: completed,
+      links: buildFlightLinks(receipt.ids, context.env),
       output: renderScoutAskInlineResult({
         conversationId: receipt.ids.conversationId ?? null,
         messageId: receipt.ids.messageId ?? null,
@@ -508,7 +524,7 @@ export async function runAskWithOptions(
         timedOut,
       }),
     },
-    (value) => value.output,
+    (value) => [value.output, value.links.work ? `Follow the task: ${value.links.work}` : null].filter(Boolean).join("\n"),
   );
 }
 

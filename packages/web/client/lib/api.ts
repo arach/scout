@@ -8,6 +8,10 @@ type ApiTextResponse = {
 const inFlightGets = new Map<string, Promise<ApiTextResponse>>();
 const settledGets = new Map<string, { response: ApiTextResponse; receivedAt: number }>();
 const MAX_SETTLED_GETS = 128;
+/** Total text kept for peeks. Polled payloads (conversations, fleet, tail
+    with transcripts) run to MBs each; 128 of them stayed resident for good. */
+const MAX_SETTLED_CHARS = 8_000_000;
+let settledChars = 0;
 
 let inFlightAuthRefresh: Promise<boolean> | null = null;
 
@@ -109,15 +113,26 @@ async function fetchApiText(path: string, init?: RequestInit): Promise<ApiTextRe
 export function clearApiGetCache(): void {
   inFlightGets.clear();
   settledGets.clear();
+  settledChars = 0;
+}
+
+function forgetSettledGet(key: string): void {
+  const prior = settledGets.get(key);
+  if (!prior) return;
+  settledChars -= prior.response.text.length;
+  settledGets.delete(key);
 }
 
 function rememberSettledGet(key: string, response: ApiTextResponse): void {
-  settledGets.delete(key);
+  forgetSettledGet(key);
+  // One response bigger than the whole budget is never worth keeping.
+  if (response.text.length > MAX_SETTLED_CHARS / 2) return;
   settledGets.set(key, { response, receivedAt: Date.now() });
-  while (settledGets.size > MAX_SETTLED_GETS) {
+  settledChars += response.text.length;
+  while (settledGets.size > MAX_SETTLED_GETS || settledChars > MAX_SETTLED_CHARS) {
     const oldestKey = settledGets.keys().next().value;
     if (typeof oldestKey !== "string") break;
-    settledGets.delete(oldestKey);
+    forgetSettledGet(oldestKey);
   }
 }
 

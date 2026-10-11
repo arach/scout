@@ -1,10 +1,12 @@
 import { useState, type ReactNode } from "react";
 import { api } from "../../lib/api.ts";
+import { ScoutMark } from "../../components/ScoutMark.tsx";
 import { useScout, type OnboardingState } from "../Provider.tsx";
 import { friendlyOnboardingError } from "./onboarding-errors.ts";
 import { OnboardingHarnessPicker, onboardingHarnessDefault } from "./OnboardingHarnessPicker.tsx";
 
-const TOTAL_STEPS = 4;
+// Step 4 (SetupStep) only appears when the broker or agent still needs a check.
+const TOTAL_STEPS = 3;
 
 /** Apply the state observed by the write, avoiding an immediate duplicate read. */
 export async function submitOnboardingMutation(
@@ -121,11 +123,13 @@ function Actions({
   onPrimary,
   primaryDisabled,
   busy,
+  foot,
 }: {
   primary: string;
   onPrimary: () => void;
   primaryDisabled?: boolean;
   busy?: boolean;
+  foot?: ReactNode;
 }) {
   const { skipOnboarding, onboardingError } = useScout();
   return (
@@ -153,9 +157,7 @@ function Actions({
           Set up later
         </button>
       </div>
-      <div style={{ fontSize: 11, color: "var(--hud-muted)", lineHeight: 1.5 }}>
-        Scout stays limited until setup finishes.
-      </div>
+      {foot ? <div style={footStyle}>{foot}</div> : null}
       {onboardingError?.kind === "skip" ? (
         <div role="alert" style={{ fontSize: 12, color: "var(--hud-status-error)", lineHeight: 1.5 }}>
           Couldn't save "Set up later". {onboardingError.message}
@@ -185,10 +187,19 @@ function ErrorBanner({ message }: { message: string | null }) {
 }
 
 /* ── Step 0 — write ~/.openscout/config.json (ports) ────────────────────── */
+// The steps ahead, phrased as things to do — the first screen never opens on
+// what's missing.
+const WELCOME_TODO = [
+  { label: "Set up this Mac", detail: "Local settings and Scout's own service" },
+  { label: "Add your name", detail: "It goes on the messages you send" },
+  { label: "Choose your projects", detail: "Where your repos live, and the agent you prefer" },
+];
+
 function PortsStep({ step }: { step: number }) {
   const { onboarding, refreshOnboarding } = useScout();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const found = (onboarding?.harnesses ?? []).filter((harness) => harness.state !== "missing");
 
   const run = async () => {
     setBusy(true);
@@ -204,25 +215,55 @@ function PortsStep({ step }: { step: number }) {
 
   return (
     <>
-      <Header
-        eyebrow={`First-run setup · Step ${step} of ${TOTAL_STEPS}`}
-        title="Welcome to Scout"
-        description="Start with local settings, then choose your project folders and a coding agent. No Scout account or vault access is needed."
-      />
-      <ul style={checklistStyle}>
-        <Row
-          label="Local Scout settings"
-          done={false}
-          hint="missing"
-        />
-        <Row
-          label="Project folder"
-          done={Boolean(onboarding?.hasProjectConfig)}
-          hint={onboarding?.hasProjectConfig ? onboarding.projectRoot ?? undefined : "checked after setup"}
-        />
-      </ul>
+      <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
+        <div
+          aria-label={`First-run setup, step ${step} of ${TOTAL_STEPS}`}
+          style={{ display: "flex", alignItems: "center", gap: 10, color: "var(--hud-accent)" }}
+        >
+          <ScoutMark className="size-[22px] shrink-0" />
+          <span style={{ fontSize: 15, fontWeight: 400, letterSpacing: "-0.01em", color: "var(--hud-ink)" }}>Scout</span>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <h1 style={{ ...titleStyle, margin: 0 }}>Welcome to Scout</h1>
+          <div style={descStyle}>
+            Scout connects the coding agents on this Mac, so you can give them work, follow what they do, and pick up where they left off.
+          </div>
+        </div>
+      </div>
+      <ol style={{ ...checklistStyle, gap: 16 }}>
+        {WELCOME_TODO.map((item, index) => (
+          <li key={item.label} style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
+            <span
+              aria-hidden="true"
+              style={{
+                flexShrink: 0,
+                width: 14,
+                height: 14,
+                marginTop: 3,
+                borderRadius: 4,
+                border: `0.5px solid ${index === 0 ? "var(--hud-accent)" : "var(--hud-border)"}`,
+              }}
+            />
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 13, lineHeight: 1.5, color: "var(--hud-ink)" }}>{item.label}</div>
+              <div style={{ fontSize: 12, lineHeight: 1.5, color: "var(--hud-muted)" }}>{item.detail}</div>
+            </div>
+          </li>
+        ))}
+      </ol>
+      {found.length > 0 ? (
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 12, paddingTop: 14, borderTop: "0.5px solid var(--hud-border)" }}>
+          <span style={footStyle}>Already on this Mac</span>
+          <span style={{ fontSize: 12, color: "var(--hud-ink)" }}>{found.map((harness) => harness.label).join(" · ")}</span>
+        </div>
+      ) : null}
       <ErrorBanner message={error} />
-      <Actions primary="Set up this Mac" onPrimary={() => { void run(); }} busy={busy} />
+      <Actions
+        primary="Set up this Mac"
+        onPrimary={() => { void run(); }}
+        busy={busy}
+        foot="About a minute · stays on this Mac · no account"
+      />
     </>
   );
 }
@@ -425,7 +466,7 @@ function SetupStep({ step }: { step: number }) {
   return (
     <>
       <Header
-        eyebrow={`Setup · Step ${step} of ${TOTAL_STEPS}`}
+        eyebrow="Setup · One more check"
         title="Finish setup"
         description="Scout checks the local setup of your chosen coding agent. Your first task will confirm that it can connect and reply."
       />
@@ -506,21 +547,23 @@ function Row({ label, done, hint }: { label: string; done: boolean; hint?: strin
 
 /* ── Styles ─────────────────────────────────────────────────────────────── */
 const eyebrowStyle: React.CSSProperties = {
-  fontSize: 11,
+  fontSize: 10,
   fontFamily: "var(--hud-font-mono)",
+  fontWeight: 300,
   textTransform: "uppercase",
-  letterSpacing: "0.18em",
+  letterSpacing: "0.02em",
   color: "var(--hud-muted)",
 };
 const titleStyle: React.CSSProperties = {
-  fontSize: "clamp(28px, 4vw, 36px)",
-  fontWeight: 600,
-  letterSpacing: "-0.01em",
+  fontSize: "clamp(24px, 3vw, 28px)",
+  fontWeight: 300,
+  letterSpacing: "-0.025em",
   lineHeight: 1.15,
 };
 const descStyle: React.CSSProperties = {
-  fontSize: 15,
-  lineHeight: 1.75,
+  fontSize: 13,
+  fontWeight: 300,
+  lineHeight: 1.6,
   color: "var(--hud-muted)",
   maxWidth: 580,
 };
@@ -530,17 +573,20 @@ const sectionStyle: React.CSSProperties = {
   gap: 10,
 };
 const labelStyle: React.CSSProperties = {
-  fontSize: 11,
+  fontSize: 10,
   fontFamily: "var(--hud-font-mono)",
+  fontWeight: 300,
   textTransform: "uppercase",
-  letterSpacing: "0.15em",
+  letterSpacing: "0.02em",
   color: "var(--hud-muted)",
 };
 const inputStyle: React.CSSProperties = {
   width: "100%",
   padding: "10px 14px",
-  fontSize: 14,
+  fontSize: 12,
   fontFamily: "var(--hud-font-mono)",
+  fontWeight: 300,
+  letterSpacing: "-0.02em",
   color: "var(--hud-ink)",
   backgroundColor: "var(--hud-surface)",
   border: "1px solid var(--hud-border)",
@@ -553,8 +599,9 @@ const hintStyle: React.CSSProperties = {
   lineHeight: 1.6,
 };
 const primaryButtonStyle: React.CSSProperties = {
-  fontSize: 13,
-  fontWeight: 600,
+  fontSize: 12,
+  fontWeight: 500,
+  letterSpacing: "-0.01em",
   padding: "12px 24px",
   borderRadius: 10,
   backgroundColor: "var(--hud-accent)",
@@ -563,8 +610,9 @@ const primaryButtonStyle: React.CSSProperties = {
   transition: "opacity 0.15s ease",
 };
 const secondaryButtonStyle: React.CSSProperties = {
-  fontSize: 13,
-  fontWeight: 500,
+  fontSize: 12,
+  fontWeight: 400,
+  letterSpacing: "-0.01em",
   padding: "10px 14px",
   borderRadius: 8,
   backgroundColor: "var(--hud-surface)",
@@ -582,6 +630,14 @@ const skipLinkStyle: React.CSSProperties = {
   cursor: "pointer",
   padding: "4px 2px",
   transition: "color 0.15s ease",
+};
+const footStyle: React.CSSProperties = {
+  fontSize: 10,
+  fontFamily: "var(--hud-font-mono)",
+  fontWeight: 300,
+  letterSpacing: "0.01em",
+  color: "var(--hud-muted)",
+  lineHeight: 1.5,
 };
 const checklistStyle: React.CSSProperties = {
   display: "flex",

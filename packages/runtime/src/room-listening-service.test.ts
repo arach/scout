@@ -75,6 +75,8 @@ test("boot reload and room recovery fetch saved cursor even without broker/datab
     expect(service.status("session:native")[0]!.connection).not.toBe("connected");
     await service.stop(); h.online(); h.post("while-down");
     const restarted = createRoomListeningService(h.options); await restarted.load();
+    // Restart preserves source backoff, rather than bypassing a failed source deadline.
+    await new Promise(r => setTimeout(r, 5100));
     restarted.start();
     for (let i=0;i<100 && restarted.status("session:native")[0]!.unreadCount !== 3;i++) await new Promise(r => setTimeout(r, 20));
     expect(restarted.status("session:native")[0]!.unreadCount).toBe(3);
@@ -84,7 +86,7 @@ test("boot reload and room recovery fetch saved cursor even without broker/datab
     await restarted.stop();
     await expect(stat(join(h.home, "control-plane.sqlite"))).rejects.toMatchObject({ code: "ENOENT" });
   } finally { await service.stop(); await h.close(); }
-});
+}, 10000);
 
 test("durable-agent ingestion survives unavailable local identity API without treating it as confirmed removal", async () => {
   const h = await fixture(); let online = true;
@@ -199,5 +201,31 @@ test("R3: confirmed broker supersession ends binding; plain offline stays unknow
     await expect(service.enroll("new-owner", h.member, "operator", binding)).rejects.toThrow("session_not_verified_live");
     endpoint.state = "idle"; // A contradictory stale positive state must not count as live proof either.
     await expect(service.enroll("new-owner", h.member, "operator", binding)).rejects.toThrow("session_not_verified_live");
+  } finally { await service.stop(); await h.close(); }
+});
+
+test("agent binding requires a unique background native owner, not an idle inventory label", async () => {
+  const h = await fixture(); let count = 1, placement = "background", state = "unknown", submits = 0;
+  const service = createRoomListeningService({ ...h.options, fetcher: (async (url: any, init?: any) => {
+    if (String(url).includes("/health")) return Response.json({ nodeId: "node" });
+    if (String(url).includes("/v1/native-session-attention")) {
+      const input = JSON.parse(init.body);
+      if (input.action) { submits++; return Response.json({ accepted: true, evidence: "fake_native" }); }
+      return Response.json({ state, sessionId: "native", token: "native:0", steer: false });
+    }
+    if (String(url).includes("/v1/endpoints")) return Response.json({ endpoints: Array.from({ length: count }, (_, i) => ({
+      id: `endpoint-${i}`, agentId: "durable", nodeId: "node", sessionId: "native", state: "idle", transport: "claude_stream_json", metadata: { placement },
+    })) });
+    return Response.json({ agents: { durable: { kind: "agent" } } });
+  }) as typeof fetch });
+  try {
+    await service.load(); const s = await service.enroll("durable", h.member, "operator");
+    const p = await service.setPolicy("durable", s.id, { active: true, awake: "queue", idle: "revive" }, "operator");
+    await service.confirmPolicy("durable", s.id, p.proposedPolicy!.revision, "durable");
+    h.post("mention"); await service.tick(); expect(submits).toBe(0);
+    // fixture messages mention the enrolled reader, so it is automatically eligible.
+    state = "idle"; count = 2; await service.tick(); expect(submits).toBe(0);
+    count = 1; placement = "foreground"; await service.tick(); expect(submits).toBe(0);
+    placement = "background"; await service.tick(); expect(submits).toBe(1);
   } finally { await service.stop(); await h.close(); }
 });

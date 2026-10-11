@@ -24,6 +24,14 @@ function entry(overrides: Partial<LaneRosterEntry> & { id: string }): LaneRoster
 }
 
 describe("lane roster store", () => {
+  test("room moves publish even when an agent's name and activity do not change", () => {
+    const floor = { live: false, harness: "codex", identity: "Ada", project: "repo", actionGlyph: "", actionLabel: "Idle", actionMeta: "", strip: [], countsLabel: "", place: { islandId: "checkout-a", islandLabel: "repo", workspace: "/a/repo", roomId: "room-1", roomLabel: "Room 1" } } satisfies import("./lane-roster-store.ts").LaneRosterFloorEntry;
+    publishLaneRoster([entry({ id: "ada", floor })]);
+    const first = getLaneRosterSnapshot();
+    publishLaneRoster([entry({ id: "ada", floor: { ...floor, place: { ...floor.place, roomId: "room-2", roomLabel: "Room 2" } } })]);
+    expect(getLaneRosterSnapshot()).not.toBe(first);
+    expect(getLaneRosterSnapshot()?.[0]?.floor?.place?.roomId).toBe("room-2");
+  });
   test("publishes the deck roster in order and notifies subscribers", () => {
     let notified = 0;
     const unsubscribe = subscribeLaneRoster(() => {

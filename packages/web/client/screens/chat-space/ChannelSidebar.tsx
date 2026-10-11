@@ -17,7 +17,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Users } from "lucide-react";
+import { Plus, Users } from "lucide-react";
 import type { ChatReadState, ConversationDefinition } from "@openscout/protocol";
 import { summarizeChatReadState } from "../../../shared/chat-read-state.ts";
 
@@ -25,8 +25,9 @@ import type { ScoutThemePreference } from "../../lib/theme.ts";
 import { useChatCapabilities } from "./chat-transport.tsx";
 import { MemberCoin } from "./ChatAvatar.tsx";
 import { SpaceSwitcher } from "./SpaceSwitcher.tsx";
-import type { ChatSpaceView } from "./chat-api.ts";
-import { channelLabel } from "./chat-space-model.ts";
+import type { ChannelFeed, ChannelMemberView, ChatChannelLastMessage, ChatSpaceView } from "./chat-api.ts";
+import { activityVerb, channelLabel, freshestRowPreview, isAgentMember, isStatusMessage, listTime, type RowPreview } from "./chat-space-model.ts";
+import { chatMessagePreviewText } from "./chat-message-preview.ts";
 
 const THEME_CHOICES: { value: ScoutThemePreference; label: string }[] = [
   { value: "dark", label: "Dark" },
@@ -42,6 +43,118 @@ function moveFocus(container: HTMLElement | null, from: HTMLElement, delta: numb
   const next = rows[(index + delta + rows.length) % rows.length];
   next?.focus();
 }
+
+/**
+ * What the sidebar has seen of a conversation, from reads the surface already
+ * made: the last message of a feed once it was opened, and the agent in a
+ * direct chat once its roster was read. Nothing here is fetched per row, so a
+ * room never opened this session has no preview and says so quietly.
+ */
+export interface SidebarRowSeen {
+  preview?: RowPreview;
+  harness?: string;
+  working?: boolean;
+}
+
+const RECENT_MS = 15 * 60_000;
+
+/** What the ⌘K palette shows beside a conversation: the sidebar's own facts. */
+export interface ConversationFacts {
+  detail: string | null;
+  /** Chip text ("3", "3+"), or null when nothing is unread. */
+  unread: string | null;
+  mentioned: boolean;
+  /** Latest activity we know of, for recency order; 0 when unknown. */
+  at: number;
+}
+
+export function conversationFacts(
+  conversation: ConversationDefinition,
+  input: {
+    readStates: Record<string, ChatReadState>;
+    seen: Record<string, SidebarRowSeen>;
+    lastMessages: Record<string, ChatChannelLastMessage>;
+    viewerActorId: string | null;
+  },
+): ConversationFacts {
+  const isDirect = conversation.kind === "direct" || conversation.kind === "group_direct";
+  const readState = input.readStates[conversation.id];
+  const attention = readState ? summarizeChatReadState(readState) : null;
+  const unread = attention && (attention.unread > 0 || attention.incomplete)
+    ? `${attention.unread || ""}${attention.incomplete ? "+" : ""}`
+    : null;
+  const facts = input.seen[conversation.id];
+  const preview = freshestRowPreview(facts?.preview, input.lastMessages[conversation.id], input.viewerActorId);
+  const people = conversation.participantIds?.length ?? 0;
+  const detail = !isDirect
+    ? people > 0 ? `${people} in the room` : null
+    : conversation.kind === "group_direct"
+      ? people > 0 ? `${people} in the chat` : null
+      : facts?.harness ?? null;
+  return { detail, unread, mentioned: Boolean(attention && attention.mentions > 0), at: preview?.at ?? 0 };
+}
+
+export function useSidebarSeen({
+  channelId,
+  feed,
+  feedIsCurrent,
+  members,
+  membersAreCurrent,
+  viewerActorId,
+}: {
+  channelId: string | null;
+  feed: ChannelFeed | null;
+  feedIsCurrent: boolean;
+  members: ChannelMemberView[];
+  membersAreCurrent: boolean;
+  viewerActorId: string | null;
+}): Record<string, SidebarRowSeen> {
+  const [seen, setSeen] = useState<Record<string, SidebarRowSeen>>({});
+
+  useEffect(() => {
+    if (!channelId || !feed || !feedIsCurrent) return;
+    const last = feed.messages
+      .filter((message) => !message.replyToMessageId && !isStatusMessage(message))
+      .reduce<ChannelFeed["messages"][number] | null>(
+        (latest, message) => (!latest || message.createdAt >= latest.createdAt ? message : latest),
+        null,
+      );
+    if (!last) return;
+    const who = last.actorId === viewerActorId
+      ? "You"
+      : last.actorName?.trim()
+        || members.find((member) => member.actorId === last.actorId)?.displayName
+        || last.actorId;
+    const preview = { who, text: chatMessagePreviewText(last), at: last.createdAt };
+    setSeen((current) => {
+      const before = current[channelId]?.preview;
+      if (before && before.at === preview.at && before.text === preview.text && before.who === preview.who) return current;
+      return { ...current, [channelId]: { ...current[channelId], preview } };
+    });
+  }, [channelId, feed, feedIsCurrent, members, viewerActorId]);
+
+  useEffect(() => {
+    if (!channelId || !membersAreCurrent) return;
+    const agent = members.find((member) => member.actorId !== viewerActorId && isAgentMember(member));
+    if (!agent) return;
+    const harness = agent.harness?.trim() || undefined;
+    const working = activityVerb(agent) === "working";
+    setSeen((current) => {
+      const before = current[channelId];
+      if (before && before.harness === harness && before.working === working) return current;
+      return { ...current, [channelId]: { ...before, harness, working } };
+    });
+  }, [channelId, members, membersAreCurrent, viewerActorId]);
+
+  return seen;
+}
+
+type ListFilter = "all" | "direct" | "rooms";
+const FILTERS: { value: ListFilter; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "direct", label: "Direct" },
+  { value: "rooms", label: "Rooms" },
+];
 
 /** The rail has one glyph's worth of room: the hash, and the letter it starts with. */
 function railGlyph(title: string): string {
@@ -187,6 +300,10 @@ export function ChannelSidebar({
   addressedChannelIds,
   readStates = {},
   questionCounts = {},
+  seen = {},
+  lastMessages = {},
+  viewerActorId = null,
+  nowMs,
   canCreate,
   viewerName,
   viewerIsHost,
@@ -214,6 +331,12 @@ export function ChannelSidebar({
   addressedChannelIds: ReadonlySet<string>;
   readStates?: Record<string, ChatReadState>;
   questionCounts?: Record<string, number>;
+  /** Previews and direct-chat facts from reads already made; see `useSidebarSeen`. */
+  seen?: Record<string, SidebarRowSeen>;
+  /** The server's summary of each room's last message, when it sends one. */
+  lastMessages?: Record<string, ChatChannelLastMessage>;
+  viewerActorId?: string | null;
+  nowMs: number;
   canCreate: boolean;
   viewerName: string;
   viewerIsHost: boolean;
@@ -239,6 +362,7 @@ export function ChannelSidebar({
   const [title, setTitle] = useState("");
   const [topic, setTopic] = useState("");
   const [busy, setBusy] = useState(false);
+  const [filter, setFilter] = useState<ListFilter>("all");
 
   const submit = useCallback(async () => {
     const name = title.trim();
@@ -265,6 +389,48 @@ export function ChannelSidebar({
       ? `${attention.unread}${attention.incomplete ? "+" : ""} unread messages${attention.mentions ? `, ${attention.mentions} mentions` : ""}${attention.replies ? `, ${attention.replies} thread replies` : ""}`
       : undefined;
     const name = isChannel ? conversation.title.replace(/^#/u, "") : conversation.title;
+    const facts = seen[conversation.id];
+    const preview = freshestRowPreview(facts?.preview, lastMessages[conversation.id], viewerActorId);
+    const people = conversation.participantIds?.length ?? 0;
+    const detail = isChannel
+      ? people > 0 ? `${people} in the room` : null
+      : conversation.kind === "group_direct"
+        ? people > 0 ? `${people} in the chat` : null
+        : facts?.harness ?? null;
+    const lamp = facts?.working
+      ? "working"
+      : preview && nowMs - preview.at < RECENT_MS ? "recent" : "idle";
+    // Two lines, full width: who and when, then what was said last.
+    const listRowBody = () => (
+      <>
+        <span className="chat-row-lead" aria-hidden="true">
+          {isChannel ? <span className="chat-hash">#</span> : <span className="chat-lamp" data-state={lamp} />}
+        </span>
+        <span className="chat-row-main">
+          <span className="chat-row-top">
+            <span className="chat-row-name">{name}</span>
+            <span className="chat-row-detail">{detail}</span>
+            {preview ? <span className="chat-row-time">{listTime(preview.at, nowMs)}</span> : null}
+          </span>
+          <span className="chat-row-bottom">
+            {preview ? (
+              <span className="chat-row-preview">{preview.who}: {preview.text}</span>
+            ) : (
+              <span className="chat-row-preview" data-quiet="true">{conversation.topic?.trim() || "No preview"}</span>
+            )}
+            {questionCount > 0 ? <span id={`chat-questions-${conversation.id}`} className="chat-question-count" title={questionLabel} aria-label={questionLabel}>? {questionCount}</span> : null}
+            {addressed ? (
+              <span className="dot dot--accent dot--sm" aria-label="Addressed to you, unanswered" />
+            ) : null}
+            {unread && attention ? (
+              <span id={`chat-unread-${conversation.id}`} className="chat-unread-chip" data-mentioned={attention.mentions > 0} aria-label={unreadLabel}>
+                {`${attention.unread || ""}${attention.incomplete ? "+" : ""}`}
+              </span>
+            ) : null}
+          </span>
+        </span>
+      </>
+    );
     return (
       <button
         key={conversation.id}
@@ -299,24 +465,27 @@ export function ChannelSidebar({
             <MemberCoin name={name} size={22} title={name} />
           )
         ) : (
-          <>
-            {isChannel ? <span className="chat-hash">#</span> : null}
-            <span className="chat-row-name">{name}</span>
-          </>
+          listRowBody()
         )}
-        {unread && attention ? (
+        {railed && unread && attention ? (
           <span id={`chat-unread-${conversation.id}`} className="chat-unread-count" data-mentioned={attention.mentions > 0} aria-label={unreadLabel}>
-            {railed ? "•" : `${attention.unread || ""}${attention.incomplete ? "+" : ""}`}
+            •
           </span>
         ) : null}
-        {questionCount > 0 ? <span id={`chat-questions-${conversation.id}`} className="chat-question-count" title={questionLabel} aria-label={questionLabel}>{railed ? "?" : `? ${questionCount}`}</span> : null}
-        {addressed ? (
+        {railed && questionCount > 0 ? <span id={`chat-questions-${conversation.id}`} className="chat-question-count" title={questionLabel} aria-label={questionLabel}>?</span> : null}
+        {railed && addressed ? (
           <span className="dot dot--accent dot--sm" aria-label="Addressed to you, unanswered" />
         ) : null}
       </button>
     );
   };
 
+  const shown = [
+    ...(filter === "direct" ? [] : channels.map((conversation) => ({ conversation, isChannel: true }))),
+    ...(filter === "rooms" ? [] : directs.map((conversation) => ({ conversation, isChannel: false }))),
+  ];
+
+  const spaceMenuUseful = spaces.length > 1 || (canCreate && capabilities.spaceCreate);
   const switcher = spaces.length > 0 ? (
     <SpaceSwitcher
       spaces={spaces}
@@ -384,10 +553,25 @@ export function ChannelSidebar({
 
   return (
     <nav className="chat-sidebar" ref={listRef} aria-label="Channels and direct messages">
-      {switcher}
       <div className="chat-side-list">
-        <div className="chat-side-section">
-          <span className="label-md">Channels</span>
+        <div className="chat-side-controls">
+          <div className="chat-side-filter" role="radiogroup" aria-label="Show conversations">
+            {FILTERS.map((choice) => (
+              <button
+                key={choice.value}
+                type="button"
+                role="radio"
+                aria-checked={filter === choice.value}
+                data-active={filter === choice.value}
+                onClick={() => setFilter(choice.value)}
+              >
+                {choice.label}
+              </button>
+            ))}
+          </div>
+          <span className="chat-side-count" aria-label={`${shown.length} ${shown.length === 1 ? "conversation" : "conversations"}`}>
+            {shown.length}
+          </span>
           {canCreate && capabilities.channelCreate ? (
             <button
               type="button"
@@ -396,7 +580,7 @@ export function ChannelSidebar({
               aria-expanded={creating}
               onClick={() => setCreating((open) => !open)}
             >
-              +
+              <Plus size={14} strokeWidth={1.8} aria-hidden="true" />
             </button>
           ) : null}
         </div>
@@ -444,26 +628,25 @@ export function ChannelSidebar({
           </div>
         ) : null}
 
-        {channels.length === 0 ? (
+        {shown.length === 0 ? (
           <p className="chat-side-empty">
-            {canCreate
-              ? `No channels in ${spaces.find((space) => space.slug === activeSpace)?.title ?? "this space"} yet. Create one to get started.`
-              : "You are not in any channel yet. Open the invitation you were sent."}
+            {filter === "direct"
+              ? "No direct chats in this space."
+              : canCreate
+                ? `No channels in ${spaces.find((space) => space.slug === activeSpace)?.title ?? "this space"} yet. Create one to get started.`
+                : "You are not in any channel yet. Open the invitation you were sent."}
           </p>
         ) : (
-          channels.map((channel) => row(channel, true))
+          <div className="chat-side-rows">
+            {shown.map(({ conversation, isChannel }) => row(conversation, isChannel))}
+          </div>
         )}
-
-        {directs.length > 0 ? (
-          <>
-            <div className="chat-side-section">
-              <span className="label-md">Direct messages</span>
-            </div>
-            {directs.map((direct) => row(direct, false))}
-          </>
-        ) : null}
       </div>
 
+      {/* The list starts at the filter row. The space moved down here, and
+          only when there is something to do with it — another space to
+          switch to, or one to create. One space and no create: no row. */}
+      {spaceMenuUseful ? <div className="chat-sidebar-space">{switcher}</div> : null}
       <div className="chat-sidebar-foot">
         {!capabilities.invitesRequireOwner || viewerIsHost ? <button type="button" className="btn btn--ghost btn--sm" onClick={onInvite}>
           + Invite

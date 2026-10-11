@@ -108,7 +108,7 @@
 
 .s-mc-window-tab.is-active {
   background: var(--accent);
-  color: var(--bg);
+  color: var(--on-accent, var(--bg));
 }
 
 /* ── KPIs ───────────────────────────────────────── */
@@ -299,7 +299,7 @@
   font-family: var(--font-sans);
   font-size: var(--text-md);
   line-height: var(--leading-snug);
-  font-weight: 400;
+  font-weight: var(--font-weight-body);
   color: color-mix(in srgb, var(--ink) 90%, transparent);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -485,10 +485,11 @@
   cursor: pointer;
   text-align: left;
   display: grid;
-  grid-template-columns: 36px minmax(0, 168px) 128px minmax(0, 1fr);
+  /* time · (mark slot) · who · text · kind — the Home row grid. */
+  grid-template-columns: var(--home-cols, 44px 16px minmax(96px, 168px) minmax(0, 1fr) auto);
   align-items: baseline;
-  gap: var(--space-lg);
-  padding: var(--space-sm) var(--space-xl);
+  gap: var(--space-sm) var(--home-col-gap, var(--space-lg));
+  padding: var(--home-row-pad, var(--space-md)) var(--home-gutter, var(--space-xl));
   font-family: var(--font-sans);
   font-size: var(--text-lg);
   line-height: var(--leading-tight);
@@ -527,6 +528,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-align: right;
 }
 
 .s-mc-stream-text {
@@ -544,7 +546,8 @@
 }
 
 @container fleet-home (max-width: 720px) {
-  .s-mc-stream-row { grid-template-columns: 36px minmax(0, 120px) minmax(0, 1fr); }
+  .s-mc-stream-row { grid-template-columns: 44px minmax(0, 120px) minmax(0, 1fr); }
+  .s-mc-stream-mark,
   .s-mc-stream-verb { display: none; }
 }
 

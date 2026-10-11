@@ -9,7 +9,7 @@
   --scope-muted: #8d8980;
   --scope-accent: #5fd0c4;
   --scope-live: #7bd88f;
-  --scope-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --scope-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 
   display: flex;
   flex-direction: column;
@@ -857,7 +857,7 @@
   --scope-muted: #8d8980;
   --scope-accent: #5fd0c4;
   --scope-live: #7bd88f;
-  --scope-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --scope-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 
   display: flex;
   flex-direction: column;
@@ -1074,7 +1074,7 @@
   --scope-muted: #8d8980;
   --scope-accent: #5fd0c4;
   --scope-live: #7bd88f;
-  --scope-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --scope-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 
   display: flex;
   flex-direction: column;

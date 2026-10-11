@@ -19,7 +19,7 @@ import { REACTION_EMOJI_MORE, REACTION_EMOJI_QUICK } from "@openscout/protocol";
 import type { MessageRecord } from "@openscout/protocol";
 import type { ChannelMemberReception, ChannelMemberView, TrackedRequest } from "./chat-api.ts";
 
-const { MessageBody, ReceptionBlock, TrackedAskCard, Turn } = await import("./ChatBits.tsx");
+const { MessageBody, ReceptionBlock, TrackedAskCard, Turn, messageClickStartsReply } = await import("./ChatBits.tsx");
 const { ChatTransportProvider } = await import("./chat-transport.tsx");
 const { HOSTED_CHAT_CAPABILITIES } = await import("../../hosted-chat/hosted-chat-api.ts");
 const { chatApi } = await import("./chat-api.ts");
@@ -204,9 +204,22 @@ describe("Turn", () => {
       }),
     );
     // Starting a thread is an action in the hover toolbar, not a reserved row.
+    // The message body itself is also a reply target. More opens the rest.
     expect(html).toContain('aria-label="Reply in thread to');
+    expect(html).toContain('aria-label="More actions"');
+    expect(html).toContain('data-replyable="true"');
     expect(html).toContain('role="toolbar"');
     expect(html).not.toContain("chat-thread-stub");
+  });
+
+  test("a click on the message starts a reply, and a click on a control does not", () => {
+    const skip = (selector: string) => (selector.includes("button") ? {} : null);
+    expect(messageClickStartsReply({ closest: () => null } as unknown as EventTarget, "")).toBe(true);
+    expect(messageClickStartsReply({ closest: skip } as unknown as EventTarget, "")).toBe(false);
+    expect(messageClickStartsReply({ closest: () => null } as unknown as EventTarget, "quoted")).toBe(false);
+    expect(messageClickStartsReply(null, "")).toBe(false);
+    const text = { parentElement: { closest: () => null } };
+    expect(messageClickStartsReply(text as unknown as EventTarget, "")).toBe(true);
   });
 
   test("with no thread handler there is no reply affordance at all", () => {
@@ -214,6 +227,7 @@ describe("Turn", () => {
       createElement(Turn, { message: message({ id: "m1" }), members: roster(maya), nowMs: NOW }),
     );
     expect(html).not.toContain("chat-thread-stub");
+    expect(html).not.toContain("data-replyable");
   });
 
   test("video and html attachments use media and a sandbox, not a plus", () => {
@@ -449,7 +463,7 @@ describe("MessageBody", () => {
           body: [
             "### Notes",
             "",
-            "See **bold** and `code` for @Maya's Codex and @nobody.",
+            "See **bold** and `code` for @Maya's Codex and @nobody. <u>underlined</u> and ~~struck~~.",
             "",
             "- one",
             "- two",
@@ -464,6 +478,8 @@ describe("MessageBody", () => {
     );
     expect(html).toContain("chat-md-h");
     expect(html).toContain("<strong>bold</strong>");
+    expect(html).toContain("<u><span>underlined</span></u>");
+    expect(html).toContain("<s><span>struck</span></s>");
     expect(html).toContain("chat-md-code");
     expect(html).toContain("chat-md-list");
     expect(html).toContain("chat-md-pre");

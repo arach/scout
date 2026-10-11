@@ -62,7 +62,7 @@ export function renderWebCommandHelp(): string {
     "  scout web login --key <key|->   Pass the key directly, or - to read stdin",
     "  scout web install [--version <x.y.z>] [--no-restart]",
     "                                  Download, verify and install the full web app",
-    "  scout web status                Show the key, the installed app, and what's served",
+    "  scout web status                Show installed versions, client selection, and next step",
     "  scout web uninstall             Remove installed full web apps (back to basic)",
     "  scout web logout                Forget the saved download key",
     "",
@@ -278,23 +278,60 @@ function runUninstall(context: ScoutCommandContext, deps: ScoutWebCommandDeps): 
     : "The full web app isn't installed.");
 }
 
+function installedFullVersions(supportDirectory: string): string[] {
+  const root = webFullClientsDirectory(supportDirectory);
+  if (!existsSync(root)) return [];
+  return readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+    .filter((entry) => {
+      const directory = join(root, entry.name);
+      return existsSync(join(directory, "index.html"))
+        && readWebFullClientProfile(directory)?.version === entry.name;
+    })
+    .map((entry) => entry.name)
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+}
+
 async function runStatus(context: ScoutCommandContext, deps: ScoutWebCommandDeps): Promise<void> {
   const supportDirectory = supportDirectoryOf(deps);
   const version = deps.version ?? SCOUT_APP_VERSION;
   const key = await resolveKey(context, await distKeyStores(deps, context.env));
-  const installed = resolveInstalledWebFullClient(version, { env: context.env, supportDirectory });
+  // Installation and selection are separate: forcing Basic does not uninstall
+  // Full, and upgrading the CLI does not remove a Full client for an older version.
+  const installed = resolveInstalledWebFullClient(version, { env: {}, supportDirectory });
+  const installedVersions = installedFullVersions(supportDirectory);
+  const basicForced = context.env.OPENSCOUT_WEB_CLIENT_PROFILE?.trim() === "basic";
+  const serves = !basicForced && installed ? "full" : "basic";
+  const reason = basicForced ? "basic-forced"
+    : installed ? "full-installed"
+    : installedVersions.length ? "version-mismatch" : "not-installed";
+  const nextSteps = installed ? []
+    : key ? ["scout web install"]
+    : ["Create a download key at https://console.openscout.app/#downloads", "scout web login", "scout web install"];
+  if (basicForced) {
+    nextSteps.push("To use Full, remove OPENSCOUT_WEB_CLIENT_PROFILE=basic from the web server's environment and restart it.");
+  }
   const status = {
     version,
     downloadHost: distBaseUrl(context.env),
     key: key?.where ?? null,
     installed,
-    serves: installed ? "full" : "basic",
+    installedVersions,
+    serves,
+    reason,
+    nextSteps,
   };
   context.output.writeValue(status, (value) => [
     `Scout ${value.version}`,
     `key        ${value.key ?? "none (scout web login)"}`,
     `installed  ${value.installed ?? "no"}`,
+    ...(value.installedVersions.length ? [`versions   ${value.installedVersions.join(", ")}`] : []),
     `serves     ${value.serves === "full" ? "the full web app" : "the basic web app (Home, DMs, Tail)"}`,
+    ...(value.reason === "version-mismatch"
+      ? [`The installed full web app does not match Scout ${value.version}. Install the matching version to use Full again.`]
+      : value.reason === "basic-forced" ? ["Basic is selected by OPENSCOUT_WEB_CLIENT_PROFILE=basic."] : []),
+    "Selection uses this CLI's version and environment; the running web server may differ.",
+    ...value.nextSteps.map((step) => `Next: ${step}`),
   ].join("\n"));
 }
 

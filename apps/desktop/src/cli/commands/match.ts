@@ -367,7 +367,7 @@ export function renderMatchResponse(response: ScoutRendezvousResponse): string {
       `Matched with ${guide.peerSessionIds.join(", ")} in ${projectName}.`,
       `Temporary handoff: ${response.matchId}`,
       "Connection ready. Both sessions should now use this exact-session route:",
-      `Send: ${guide.sendCommand}`,
+      `Message: ${guide.sendCommand}`,
       `Inbox: ${guide.inboxCommand}`,
       `Project: ${guide.projectRoot}`,
       `First exchange: ${guide.coordinationChecklist.join(", ")}.`,
@@ -401,7 +401,7 @@ function buildMatchCommunicationGuide(
   return {
     peerSessionIds,
     projectRoot: response.projectRoot,
-    sendCommand: `scout send --to ${target} "<message>"`,
+    sendCommand: `scout tell --to ${target} "<message>"`,
     inboxCommand: "scout inbox --latest 10 --json",
     coordinationChecklist: [
       "worktree path or creation request",

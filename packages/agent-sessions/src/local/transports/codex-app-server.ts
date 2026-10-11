@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -897,6 +898,8 @@ export class CodexAppServerTransport {
   private readonly stderrLogPath: string;
 
   private connection: CodexAppServerConnection | null = null;
+  connectionGeneration = 0;
+  nativeControlBlocked = false;
   private serverIdentity: CodexAppServerIdentity | null = null;
   private nextRequestId = 1;
   private readonly pendingRequests = new Map<string | number, {
@@ -1009,6 +1012,17 @@ export class CodexAppServerTransport {
     await this.persistThreadId();
     return response;
   }
+
+  /** Strict live-only write. No ensureStarted, fallback, attach, or thread load. */
+  submitExisting(prompt: string, expectedTurnId?: string): Promise<any> {
+    if (!this.isAlive() || !this.threadId || this.connection?.mode === "attached") throw new Error("native_not_owned_live");
+    return this.request(expectedTurnId ? "turn/steer" : "turn/start", {
+      threadId: this.threadId, input: this.textInput(prompt),
+      ...(expectedTurnId ? { expectedTurnId } : { cwd: this.options.cwd, ...this.attachedRuntimeParams({ includeEffort: true }) }),
+    });
+  }
+
+  get ownedLive(): boolean { return this.isAlive() && this.connection?.mode !== "attached"; }
 
   async steerTurn(prompt: string, expectedTurnId: string): Promise<void> {
     await this.ensureStarted();
@@ -1217,6 +1231,7 @@ export class CodexAppServerTransport {
       });
     }
 
+    this.connectionGeneration++;
     this.connection = connection;
     this.serverIdentity = null;
 
@@ -1433,6 +1448,7 @@ export class CodexAppServerTransport {
   }
 
   private handleServerRequest(message: CodexAppServerServerRequest): void {
+    this.nativeControlBlocked = true;
     this.writeMessage({
       id: message.id,
       error: buildUnsupportedServerRequestError(message),
@@ -1459,6 +1475,7 @@ export class CodexAppServerTransport {
       void this.persistThreadId();
     }
 
+    if (method === "turn/completed") this.nativeControlBlocked = false;
     this.emitNotification(message);
   }
 
@@ -1637,6 +1654,10 @@ type ActiveTurn = {
 export class CodexAppServerClient {
   private readonly transport: CodexAppServerTransport;
   private serialized = Promise.resolve();
+  private queuedOperations = 0;
+  private readonly liveIncarnation = randomUUID();
+  private liveRevision = 0;
+  private attentionUnsafe = false;
   private activeTurn: ActiveTurn | null = null;
   private removeNotificationListener: (() => void) | null = null;
   private removeErrorListener: (() => void) | null = null;
@@ -1681,6 +1702,32 @@ export class CodexAppServerClient {
 
   hasActiveTurn(): boolean {
     return Boolean(this.activeTurn);
+  }
+
+  observeExisting() {
+    const state = !this.isAlive() ? "gone" : !this.transport.ownedLive || !this.threadId || this.attentionUnsafe || this.transport.nativeControlBlocked ? "unknown"
+      : this.activeTurn ? (this.activeTurn.turnId ? "active" : "unknown") : this.queuedOperations ? "unknown" : "idle";
+    return { state, sessionId: this.threadId ?? undefined, turnId: this.activeTurn?.turnId || undefined,
+      token: `${this.liveIncarnation}:${this.transport.connectionGeneration}:${this.liveRevision}`, steer: true } as const;
+  }
+
+  async submitExisting(expected: { sessionId: string; token: string }, action: "revive" | "steer", prompt: string) {
+    const observed = this.observeExisting();
+    if (observed.sessionId !== expected.sessionId || observed.token !== expected.token
+      || observed.state !== (action === "steer" ? "active" : "idle")) return { accepted: false, evidence: "native_state_changed" };
+    if (action === "steer") {
+      // No await between expected-state validation and the native expectedTurnId write.
+      await this.transport.submitExisting(prompt, observed.turnId);
+      return { accepted: true, evidence: "codex_turn_steer_accepted" };
+    }
+    let turn!: ActiveTurn;
+    const completion = new Promise<string>((resolve, reject) => { turn = this.createActiveTurn(resolve, reject); });
+    void completion.catch(() => undefined);
+    try {
+      const response = await this.transport.submitExisting(prompt);
+      turn.turnId = response.turn.id;
+      return { accepted: true, evidence: "codex_turn_start_accepted" };
+    } catch (error) { this.clearActiveTurn(turn); this.attentionUnsafe = true; turn.reject(error instanceof Error ? error : new Error(String(error))); throw error; }
   }
 
   ensureOnline(): Promise<CodexAppServerThreadResult> {
@@ -1846,7 +1893,8 @@ export class CodexAppServerClient {
   }
 
   private enqueue<T>(task: () => Promise<T>): Promise<T> {
-    const next = this.serialized.then(task, task);
+    this.queuedOperations++;
+    const next = this.serialized.then(task, task).finally(() => { this.queuedOperations--; });
     this.serialized = next.then(() => undefined, () => undefined);
     return next;
   }
@@ -1871,6 +1919,7 @@ export class CodexAppServerClient {
       watchers: [],
     };
 
+    this.liveRevision++;
     this.activeTurn = turn;
     return turn;
   }
@@ -1921,6 +1970,8 @@ export class CodexAppServerClient {
   private clearActiveTurn(turn: ActiveTurn): void {
     if (this.activeTurn === turn) {
       this.activeTurn = null;
+      this.liveRevision++;
+      this.attentionUnsafe = true; // Only turn/completed below proves an idle boundary.
     }
   }
 
@@ -1928,7 +1979,10 @@ export class CodexAppServerClient {
     const method = message.method;
     const params = message.params ?? {};
 
+    if (method === "item/started" && (params.item as any)?.type === "contextCompaction") this.attentionUnsafe = true;
+    if (method === "item/completed" && (params.item as any)?.type === "contextCompaction") { this.attentionUnsafe = false; this.liveRevision++; }
     if (method === "turn/started") {
+      if (!this.activeTurn) { this.attentionUnsafe = true; this.liveRevision++; }
       const turn = params.turn as { id?: string } | undefined;
       if (this.activeTurn && turn?.id && !this.activeTurn.turnId) {
         this.activeTurn.turnId = turn.id;
@@ -1996,6 +2050,7 @@ export class CodexAppServerClient {
       if (this.activeTurn) {
         const activeTurn = this.activeTurn;
         this.clearActiveTurn(activeTurn);
+        this.attentionUnsafe = true;
         activeTurn.reject(new Error(error));
       }
     }
@@ -2012,6 +2067,7 @@ export class CodexAppServerClient {
     }
 
     this.clearActiveTurn(activeTurn);
+    this.attentionUnsafe = false;
 
     if (params.turn.status === "failed") {
       const message = params.turn.error?.message || params.turn.error?.additionalDetails || `Turn failed for ${this.options.agentName}.`;
@@ -2091,6 +2147,14 @@ export function getOrCreateCodexAppServerClient(options: CodexAppServerSessionOp
   const session = new CodexAppServerClient(options);
   codexAppServerClients.set(key, session);
   return session;
+}
+
+/** Transport-owner access only; absence is unknown after owner restart, not a launch request. */
+export function existingCodexNativeSession(agentName: string, sessionId: string) {
+  const client = codexAppServerClients.get(`${agentName}:${sessionId}`);
+  if (!client) return undefined;
+  return { observe: () => client.observeExisting(),
+    submit: (expected: { sessionId: string; token: string }, action: "revive" | "steer", prompt: string) => client.submitExisting(expected, action, prompt) };
 }
 
 export async function ensureCodexAppServerLocalAgentOnline(

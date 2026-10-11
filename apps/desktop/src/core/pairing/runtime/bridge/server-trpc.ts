@@ -294,7 +294,7 @@ export function startBridgeServerTRPC(options: {
       const msgs = Array.isArray(msgJSON) ? msgJSON : [msgJSON];
 
       for (const raw of msgs) {
-        log.info("rpc:req", `→ ${raw.params?.path ?? raw.method ?? "?"}`);
+        log.debug("rpc:req", `→ ${raw.params?.path ?? raw.method ?? "?"}`);
         const parsed = parseTRPCMessage(raw, bridgeRouter._def._config.transformer);
         const { id, method } = parsed;
 
@@ -650,7 +650,7 @@ export function startBridgeServerTRPC(options: {
 
     websocket: {
       open(ws) {
-        log.info("srv", "client connected");
+        log.debug("srv", "client connected");
 
         const state: SocketState = {
           abortController: new AbortController(),
@@ -769,7 +769,7 @@ export function startBridgeServerTRPC(options: {
       },
 
       close(ws) {
-        log.info("srv", "client disconnected");
+        log.debug("srv", "client disconnected");
         const state = socketState.get(ws);
         if (!state) return;
 

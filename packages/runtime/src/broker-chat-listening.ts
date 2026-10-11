@@ -1,3 +1,4 @@
+import { deliveryDecision, roomDeliveryPrompt, type ListeningDeliveryAdapter, type ListeningPolicy, type ListeningAttempt, type ListeningRetry } from "./room-listening-delivery.js";
 import type { BindingObservation } from "./broker-chat-listening-binding.js";
 import { randomUUID, createHash } from "node:crypto";
 import { mkdir, open, readFile, rename, unlink, chmod } from "node:fs/promises";
@@ -19,7 +20,7 @@ export interface ChatListeningSource {
   }>;
 }
 export class ChatListeningError extends Error {
-  constructor(readonly code: string) { super(code); }
+  constructor(readonly code: string, readonly terminal = false) { super(code); }
 }
 export type ListeningBinding = {
   mode: "agent" | "session"; facing: "operator" | "background"; facingSource?: "derived" | "explicit" | "fallback";
@@ -34,8 +35,11 @@ type Subscription = {
   messages: Attention[];
   receipt?: { id: string; from: number; through: number };
   lastAck?: string;
-  policy: { mode: "catch-up"; awake: "steer" | "queue"; idle: "revive" | "hold";
-    author: string; updatedAt: number; revision: number; active: false };
+  policy: ListeningPolicy;
+  proposedPolicy?: ListeningPolicy;
+  attempts?: ListeningAttempt[];
+  handledIds?: string[];
+  retry?: ListeningRetry;
 };
 type State = { version: 1; lastEventSeq?: number; subscriptions: Subscription[] };
 
@@ -53,11 +57,13 @@ export class BrokerChatListening {
   private indexes = new WeakMap<Subscription, Map<string, Attention>>();
   private bindingAvailability = new Map<string, string>();
   private connectedAt = new Map<string, number>();
+  private deliveryStatus = new Map<string, string>();
   private enrolling = new Map<string, number>();
   constructor(private readonly options: {
     path: string; source: ChatListeningSource; isDurableAgent: (id: string) => boolean | undefined | Promise<boolean | undefined>;
     sourceKind?: "local-changes-v2" | "room-http-v1";
     deriveFacing?: (agentId: string) => "operator" | "background" | undefined | Promise<"operator" | "background" | undefined>;
+    delivery?: ListeningDeliveryAdapter;
     now?: () => number; observeSession?: (binding: ListeningBinding) => Promise<BindingObservation>;
   }) {}
   private now() { return (this.options.now ?? Date.now)(); }
@@ -85,6 +91,12 @@ export class BrokerChatListening {
         if (!subscription) throw new Error("Listening event references unknown subscription");
         if (event.page) this.applyPage(subscription, event.page);
         if (event.binding) subscription.binding = event.binding;
+        if (event.retry !== undefined) subscription.retry = event.retry ?? undefined;
+        if (event.attempt) {
+          subscription.attempts ??= [];
+          const prior = subscription.attempts.findIndex(a => a.id === event.attempt.id);
+          if (prior < 0) subscription.attempts.push(event.attempt); else subscription.attempts[prior] = event.attempt;
+        }
         this.state.lastEventSeq = event.seq;
       }
       this.rebuildIndexes();
@@ -169,7 +181,7 @@ export class BrokerChatListening {
       };
       if (existing?.binding) binding.revision = (existing.binding.revision ?? 1) + 1;
       subscription.binding = binding; subscription.sourceKind = this.options.sourceKind ?? "room-http-v1";
-      subscription.membership = membership; subscription.enabled = true;
+      subscription.membership = membership; subscription.enabled = true; delete subscription.retry;
       this.applyPage(subscription, page);
       if (!existing) next.subscriptions.push(subscription);
       await this.commit(next);
@@ -202,15 +214,17 @@ export class BrokerChatListening {
   status(agentId: string) {
     return this.state.subscriptions.filter(s => s.agentId === agentId).map(s => ({
       id: s.id, agentId, sourceKind: s.sourceKind, binding: s.binding ?? { mode: "agent", facing: "background", state: "active" }, bindingAvailability: s.binding?.state === "ended" ? "ended" : this.bindingAvailability.get(s.id) ?? "unknown", room: { origin: s.membership.origin, channelId: s.membership.channelId, space: s.membership.space, actorId: s.membership.actorId },
-      membership: !s.enabled ? "withdrawn" : s.expiresAt <= this.now() ? "expired" : this.connections.get(s.id) === "membership_denied" ? "denied" : "enrolled",
-      connection: this.connections.get(s.id) ?? "disconnected",
+      membership: !s.enabled ? "withdrawn" : s.expiresAt <= this.now() ? "expired" : (s.retry?.error ?? this.connections.get(s.id)) === "membership_denied" ? "denied" : "enrolled",
+      connection: s.retry?.error ?? this.connections.get(s.id) ?? "disconnected",
+      retry: s.retry ?? null, proposedPolicy: s.proposedPolicy ?? null,
+      delivery: { status: this.deliveryStatus.get(s.id) ?? "not_observed", attempts: s.attempts ?? [] },
       expiresAt: s.expiresAt === Number.MAX_SAFE_INTEGER ? null : s.expiresAt, lastConnectedAt: this.connectedAt.get(s.id) ?? s.lastConnectedAt,
-      pendingCount: s.messages.filter(m => m.position > s.readPosition && m.relevance).length,
-      unreadCount: s.messages.length - s.readPosition, readPosition: s.readPosition,
+      pendingCount: s.messages.filter(m => m.position > s.readPosition && !s.handledIds?.includes(m.id) && m.relevance).length,
+      unreadCount: s.messages.filter(m => m.position > s.readPosition && !s.handledIds?.includes(m.id)).length, readPosition: s.readPosition,
       ingestedCount: s.messages.length, policy: s.policy,
     }));
   }
-  private async persistDelta(subscription: Subscription, change: { page?: Awaited<ReturnType<ChatListeningSource["read"]>>; binding?: ListeningBinding }) {
+  private async persistDelta(subscription: Subscription, change: { page?: Awaited<ReturnType<ChatListeningSource["read"]>>; binding?: ListeningBinding; retry?: ListeningRetry | null; attempt?: ListeningAttempt }) {
     const seq = (this.state.lastEventSeq ?? 0) + 1;
     const handle = await open(`${this.options.path}.events`, "a", 0o600);
     const size = (await handle.stat()).size;
@@ -219,6 +233,12 @@ export class BrokerChatListening {
     finally { await handle.close(); }
     if (change.page) this.applyPage(subscription, change.page);
     if (change.binding) subscription.binding = change.binding;
+    if (change.retry !== undefined) subscription.retry = change.retry ?? undefined;
+    if (change.attempt) {
+      subscription.attempts ??= [];
+      const prior = subscription.attempts.findIndex(a => a.id === change.attempt!.id);
+      if (prior < 0) subscription.attempts.push(change.attempt); else subscription.attempts[prior] = change.attempt;
+    }
     this.state.lastEventSeq = seq;
   }
   async tick() {
@@ -238,18 +258,30 @@ export class BrokerChatListening {
             }
             else this.bindingAvailability.set(original.id, observed?.availability ?? "unknown");
           } else if (original.binding?.mode !== "session" && await this.options.isDurableAgent(original.agentId) === false) { this.connections.set(original.id, "identity_unavailable"); continue; }
+          if (current.retry?.terminal || (current.retry?.nextAttemptAt ?? 0) > this.now()) continue;
           const page = await this.options.source.read(current.membership, current.sourceCursor, current.agentId, { afterMessageId: current.messages.at(-1)?.id });
           if (page.hasMore) this.backlog = true;
           if (page.cursor !== current.sourceCursor || page.messages.length || page.expiresAt !== current.expiresAt) {
             // Append only this bounded delta; never clone/stringify accumulated history on a scan.
             await this.persistDelta(current, { page });
           }
+          if (current.retry) await this.persistDelta(current, { retry: null });
           this.connectedAt.set(original.id, this.now());
           this.connections.set(original.id, "connected");
         } catch (error) {
           // Never put raw transport responses (which can contain tokens) in status.
-          this.connections.set(original.id, error instanceof ChatListeningError ? error.code : "source_unavailable");
+          const code = error instanceof ChatListeningError ? error.code : "source_unavailable";
+          const failures = (original.retry?.failures ?? 0) + 1;
+          const terminal = error instanceof ChatListeningError && error.terminal;
+          this.connections.set(original.id, code);
+          await this.persistDelta(original, { retry: { failures, terminal, error: code,
+            nextAttemptAt: terminal ? null : this.now() + Math.min(300_000, 5000 * 2 ** Math.min(failures - 1, 6)) } }).catch(() => undefined);
+          this.connections.set(original.id, code);
         }
+      }
+      // Room scheduling belongs here, never the broker loop. Source errors suppress dispatch.
+      for (const s of this.state.subscriptions) {
+        if (!this.closing && s.enabled && !s.retry && this.connections.get(s.id) === "connected") await this.deliver(s);
       }
     });
   }
@@ -258,7 +290,7 @@ export class BrokerChatListening {
       if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new ChatListeningError("invalid_limit");
       const next = structuredClone(this.state);
       const s = this.find(next, agentId, id);
-      let messages = s.messages.filter(m => m.position > s.readPosition && (!s.receipt || m.position <= s.receipt.through));
+      let messages = s.messages.filter(m => m.position > s.readPosition && (!s.handledIds?.includes(m.id) || !!s.receipt) && (!s.receipt || m.position <= s.receipt.through));
       // A receipt is replayable after a lost response/restart. Never overwrite an
       // outstanding batch with a later batch that could implicitly ack skipped rows.
       if (!s.receipt) {
@@ -285,12 +317,94 @@ export class BrokerChatListening {
   async ack(agentId: string, id: string, receipt: string) {
     return this.serial(async () => {
       const next = structuredClone(this.state), s = this.find(next, agentId, id);
+      const attempt = s.attempts?.find(a => a.id === receipt);
+      if (attempt) {
+        attempt.state = "acknowledged"; attempt.evidence = "agent_acknowledged";
+        s.handledIds = [...new Set([...(s.handledIds ?? []), ...attempt.messageIds])];
+        await this.commit(next); return { readPosition: s.readPosition };
+      }
       if (s.lastAck === receipt) return { readPosition: s.readPosition };
       if (!s.receipt || s.receipt.id !== receipt || s.receipt.from !== s.readPosition) throw new ChatListeningError("invalid_ack");
+      for (const attempt of s.attempts ?? []) {
+        if (attempt.messageIds.every(id => s.messages.some(m => m.id === id && m.position <= s.receipt!.through))) { attempt.state = "acknowledged"; attempt.evidence = "catch_up_acknowledged"; }
+      }
       s.readPosition = s.receipt.through; s.lastAck = receipt; delete s.receipt;
       await this.commit(next);
       return { readPosition: s.readPosition };
     });
+  }
+  /** Machine-local two-party policy handshake. Restriction is immediate; broadenings
+   * are proposals until the OTHER principal confirms the exact next revision. */
+  async setPolicy(agentId: string, id: string, input: { active: boolean; awake: "queue" | "steer"; idle: "hold" | "revive" }, author: string) {
+    return this.serial(async () => {
+      if (!["operator", agentId].includes(author) || typeof input?.active !== "boolean"
+        || !["queue", "steer"].includes(input.awake) || !["hold", "revive"].includes(input.idle)) throw new ChatListeningError("invalid_policy");
+      const next = structuredClone(this.state), s = this.find(next, agentId, id);
+      const policy: ListeningPolicy = { ...input, mode: input.active ? "automatic" : "catch-up", author,
+        updatedAt: this.now(), revision: Math.max(s.policy.revision, s.proposedPolicy?.revision ?? 0) + 1 };
+      const broader = policy.active && (!s.policy.active || policy.awake === "steer" && s.policy.awake !== "steer"
+        || policy.idle === "revive" && s.policy.idle !== "revive");
+      if (broader) {
+        // Mixed changes restrict immediately even while the broader half awaits consent.
+        const restricts = input.awake === "queue" && s.policy.awake === "steer" || input.idle === "hold" && s.policy.idle === "revive";
+        if (restricts) {
+          s.policy = { ...s.policy, awake: input.awake === "queue" ? "queue" : s.policy.awake,
+            idle: input.idle === "hold" ? "hold" : s.policy.idle, author, updatedAt: this.now(), revision: policy.revision };
+          policy.revision++;
+        }
+        s.proposedPolicy = policy;
+      }
+      else { s.policy = policy; delete s.proposedPolicy; }
+      await this.commit(next); return this.status(agentId).find(s => s.id === id)!;
+    });
+  }
+  async confirmPolicy(agentId: string, id: string, revision: number, author: string) {
+    return this.serial(async () => {
+      const next = structuredClone(this.state), s = this.find(next, agentId, id), p = s.proposedPolicy;
+      if (!p || p.revision !== revision || p.author === author || !["operator", agentId].includes(author)) throw new ChatListeningError("policy_confirmation_required");
+      s.policy = { ...p, author: `${p.author}+${author}`, updatedAt: this.now() }; delete s.proposedPolicy;
+      await this.commit(next); return this.status(agentId).find(s => s.id === id)!;
+    });
+  }
+  private async deliver(s: Subscription) {
+    const hold = (reason: string) => { this.deliveryStatus.set(s.id, reason); };
+    if (!s.policy.active) return hold("catch_up_only");
+    if (!s.binding || s.binding.state === "ended") return hold("binding_ended");
+    if (s.binding.facing === "operator" || s.binding.herdrSession || s.binding.pane) return hold("operator_catch_up_only");
+    if (!this.options.delivery) return hold("unsupported");
+    let destination;
+    try { destination = await this.options.delivery.observe(s.agentId, s.binding); }
+    catch { return hold("unknown"); }
+    if (destination.state === "gone" && s.binding.mode === "session") {
+      await this.persistDelta(s, { binding: { ...s.binding, state: "ended", endedAt: this.now() } });
+      return hold("binding_ended");
+    }
+    const action = deliveryDecision(s.policy, destination);
+    if (action !== "revive" && action !== "steer") return hold(action);
+    if (!destination.endpointId || !destination.sessionId || !destination.token) return hold("unknown");
+    // One unacknowledged/uncertain batch per endpoint across ALL rooms, including after restart.
+    if (this.state.subscriptions.some(other => other.attempts?.some(a => a.endpointId === destination.endpointId && a.state !== "acknowledged"))) return hold("awaiting_ack_or_reconciliation");
+    const reserved = new Set(s.attempts?.flatMap(a => a.messageIds) ?? []);
+    const messages = s.messages.filter(m => m.position > s.readPosition && m.relevance === "mention"
+      && !s.handledIds?.includes(m.id) && !reserved.has(m.id)).slice(0, 5);
+    if (!messages.length) return hold("no_eligible_messages");
+    const attempt: ListeningAttempt = { id: randomUUID(), messageIds: messages.map(m => m.id),
+      endpointId: destination.endpointId, sessionId: destination.sessionId, token: destination.token,
+      action, policyRevision: s.policy.revision, bindingRevision: s.binding.revision ?? 1,
+      state: "uncertain", evidence: "attempt_started", createdAt: this.now() };
+    const renderPrompt = () => roomDeliveryPrompt({ id: attempt.id, agentId: s.agentId, subscriptionId: s.id, room: {
+      origin: s.membership.origin, space: s.membership.space, channelId: s.membership.channelId }, messages });
+    let prompt = renderPrompt();
+    while (Buffer.byteLength(prompt) > 4096 && messages.length > 1) { messages.pop(); attempt.messageIds = messages.map(m => m.id); prompt = renderPrompt(); }
+    if (Buffer.byteLength(prompt) > 4096) return hold("batch_too_large");
+    // Write-ahead reservation is never replayed. A crash even BEFORE write is uncertain:
+    // at-most-once automatic input, not an exactly-once model-consumption claim.
+    await this.persistDelta(s, { attempt });
+    try {
+      const result = await this.options.delivery.submit(destination, action, prompt);
+      await this.persistDelta(s, { attempt: { ...attempt, state: result.accepted ? "accepted" : "uncertain", evidence: result.evidence } });
+      hold(result.accepted ? "submitted_awaiting_ack" : "submission_uncertain");
+    } catch { hold("submission_uncertain"); }
   }
   private find(state: State, agentId: string, id: string) {
     const s = state.subscriptions.find(s => s.id === id && s.agentId === agentId);

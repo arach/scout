@@ -32,7 +32,7 @@ function paint(
   const h = VOICE_FIELD_ROWS * cell;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
-  ctx.font = `${cell - 1}px ui-monospace, "JetBrains Mono", Menlo, monospace`;
+  ctx.font = `${cell - 1}px ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   for (let y = 0; y < VOICE_FIELD_ROWS; y++) {

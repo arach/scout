@@ -55,6 +55,7 @@ function harness(options: {
   restarted?: string[];
   keyStores?: DistKeyStore[];
   stdin?: string;
+  json?: boolean;
 } = {}) {
   const lines: string[] = [];
   const requests: Array<{ url: string; auth: string | null }> = [];
@@ -64,6 +65,7 @@ function harness(options: {
     stdout: (line) => lines.push(line),
     stderr: () => undefined,
     isTty: false,
+    outputMode: options.json ? "json" : "plain",
   });
   const deps: ScoutWebCommandDeps = {
     supportDirectory: support,
@@ -172,6 +174,104 @@ describe("scout web", () => {
     const { context, deps } = harness({ stdin: `${KEY}\n` });
     await runWebCommand(context, ["login"], deps);
     expect(readFileSync(distKeyPath(support), "utf8").trim()).toBe(KEY);
+  });
+
+  test("a fresh Basic install explains how to get Full without exposing a key", async () => {
+    const run = harness({ json: true });
+    await runWebCommand(run.context, ["status"], run.deps);
+    expect(JSON.parse(run.lines[0]!)).toMatchObject({
+      serves: "basic", reason: "not-installed", installed: null, installedVersions: [],
+      nextSteps: ["Create a download key at https://console.openscout.app/#downloads", "scout web login", "scout web install"],
+    });
+    expect(run.requests).toHaveLength(0);
+  });
+
+  test("an upgraded CLI diagnoses the old Full client and recovers with the saved key", async () => {
+    const previousVersion = "9.8.6";
+    const previous = harness({ tarball: packClient(previousVersion), env: { SCOUT_DIST_KEY: KEY } });
+    await fileDistKeyStore(support).write(KEY);
+    await runWebCommand(previous.context, ["install", "--no-restart"], { ...previous.deps, version: previousVersion });
+
+    const current = harness({ tarball: packClient(VERSION), json: true });
+    await runWebCommand(current.context, ["status"], current.deps);
+    expect(JSON.parse(current.lines[0]!)).toMatchObject({
+      version: VERSION, serves: "basic", reason: "version-mismatch", installed: null,
+      installedVersions: [previousVersion], nextSteps: ["scout web install"],
+    });
+    expect(current.lines[0]).not.toContain(KEY);
+    expect(current.requests).toHaveLength(0);
+
+    const plain = harness();
+    await runWebCommand(plain.context, ["status"], plain.deps);
+    expect(plain.lines.join("\n")).toContain(`does not match Scout ${VERSION}`);
+    expect(plain.lines.join("\n")).toContain("Next: scout web install");
+
+    await runWebCommand(current.context, ["install", "--no-restart"], current.deps);
+    current.lines.length = 0;
+    await runWebCommand(current.context, ["status"], current.deps);
+    expect(JSON.parse(current.lines[0]!)).toMatchObject({
+      serves: "full", reason: "full-installed", installedVersions: [VERSION], nextSteps: [],
+    });
+  });
+
+  test("forcing Basic preserves the installed Full path and explains the override", async () => {
+    const run = harness({ tarball: packClient(VERSION), env: { SCOUT_DIST_KEY: KEY, OPENSCOUT_WEB_CLIENT_PROFILE: " basic " }, json: true });
+    await runWebCommand(run.context, ["install", "--no-restart"], run.deps);
+    run.lines.length = 0;
+    await runWebCommand(run.context, ["status"], run.deps);
+    const status = JSON.parse(run.lines[0]!);
+    expect(status).toMatchObject({
+      serves: "basic", reason: "basic-forced", installed: join(support, "web", "full", VERSION),
+      installedVersions: [VERSION],
+    });
+    expect(status.nextSteps[0]).toContain("remove OPENSCOUT_WEB_CLIENT_PROFILE=basic");
+    expect(run.lines[0]).not.toContain(KEY);
+  });
+
+  test("partial, hidden, and mismatched installs are not reported as another usable version", async () => {
+    for (const [name, profile] of [
+      [".install-in-progress", { profile: "full", version: ".install-in-progress" }],
+      ["9.8.5", { profile: "basic", version: "9.8.5" }],
+      ["9.8.4", { profile: "full", version: "9.8.3" }],
+    ] as const) {
+      const directory = join(support, "web", "full", name);
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(join(directory, "index.html"), "<title>Scout</title>");
+      writeFileSync(join(directory, "scout-web-profile.json"), JSON.stringify(profile));
+    }
+    const partial = join(support, "web", "full", "9.8.2");
+    mkdirSync(partial, { recursive: true });
+    writeFileSync(join(partial, "scout-web-profile.json"), JSON.stringify({ profile: "full", version: "9.8.2" }));
+    const run = harness({ json: true });
+    await runWebCommand(run.context, ["status"], run.deps);
+    expect(JSON.parse(run.lines[0]!)).toMatchObject({ reason: "not-installed", installedVersions: [] });
+  });
+
+  test("a Basic override on a fresh install still explains that Full must be installed", async () => {
+    const run = harness({ json: true, env: { OPENSCOUT_WEB_CLIENT_PROFILE: "basic" } });
+    await runWebCommand(run.context, ["status"], run.deps);
+    const status = JSON.parse(run.lines[0]!);
+    expect(status.reason).toBe("basic-forced");
+    expect(status.nextSteps).toContain("scout web login");
+    expect(status.nextSteps).toContain("scout web install");
+    expect(status.nextSteps.at(-1)).toContain("remove OPENSCOUT_WEB_CLIENT_PROFILE=basic");
+  });
+
+  test("an unpublished upgrade leaves the old Full install and saved key intact", async () => {
+    const previousVersion = "9.8.6";
+    const previous = harness({ tarball: packClient(previousVersion), env: { SCOUT_DIST_KEY: KEY } });
+    await fileDistKeyStore(support).write(KEY);
+    await runWebCommand(previous.context, ["install", "--no-restart"], { ...previous.deps, version: previousVersion });
+    const restarted: string[] = [];
+    const current = harness({ json: true, restarted });
+    await expect(runWebCommand(current.context, ["install"], current.deps)).rejects.toThrow(`isn't published for Scout ${VERSION}`);
+    expect(restarted).toEqual([]);
+    expect(await fileDistKeyStore(support).read()).toBe(KEY);
+    expect(resolveInstalledWebFullClient(previousVersion, { env: {}, supportDirectory: support })).not.toBeNull();
+    await runWebCommand(current.context, ["status"], current.deps);
+    expect(JSON.parse(current.lines[0]!)).toMatchObject({
+      serves: "basic", reason: "version-mismatch", installedVersions: [previousVersion], nextSteps: ["scout web install"],
+    });
   });
 
   test("an encrypted store wins, and the plain file is cleared once it takes the key", async () => {

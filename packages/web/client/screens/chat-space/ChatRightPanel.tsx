@@ -10,7 +10,7 @@ import { captureChatReadingPosition, restoreChatReadingPosition, type ChatReadin
  * and this panel is where the difference is visible.
  */
 
-import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
+import { useLayoutEffect, useRef, type ReactNode } from "react";
 import type { ChannelInvitePublicView, ConversationDefinition } from "@openscout/protocol";
 
 import type { ChannelMemberView, ChatMessage, TrackedRequest } from "./chat-api.ts";
@@ -19,32 +19,7 @@ import { MemberAvatar } from "./ChatAvatar.tsx";
 import { ChatMemberRemoval } from "./ChatMemberRemoval.tsx";
 import { ChannelComposer } from "./ChannelComposer.tsx";
 import { CopyAction, Field, ReceptionBlock, Turn } from "./ChatBits.tsx";
-
-function ThreadReadMarker({ messageId, onRead }: { messageId: string; onRead: () => void }) {
-  const marker = useRef<HTMLDivElement | null>(null);
-  const callback = useRef(onRead);
-  callback.current = onRead;
-  useEffect(() => {
-    const node = marker.current;
-    if (!node || typeof IntersectionObserver === "undefined") return;
-    let visible = false;
-    let acknowledged = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const schedule = () => {
-      clearTimeout(timer);
-      if (!visible || acknowledged || document.visibilityState !== "visible") return;
-      timer = setTimeout(() => { acknowledged = true; callback.current(); }, 800);
-    };
-    const observer = new IntersectionObserver(([entry]) => {
-      visible = Boolean(entry?.isIntersecting);
-      schedule();
-    }, { root: node.closest(".chat-rpanel-body"), threshold: 1 });
-    observer.observe(node);
-    document.addEventListener("visibilitychange", schedule);
-    return () => { clearTimeout(timer); observer.disconnect(); document.removeEventListener("visibilitychange", schedule); };
-  }, [messageId]);
-  return <div ref={marker} aria-hidden="true" style={{ height: 1 }} />;
-}
+import { useReportSeenMessages } from "./use-seen-read.ts";
 import {
   canRevokeInvite,
   channelLabel,
@@ -171,6 +146,8 @@ export function ChatRightPanel({
   onThreadMentionsChange,
   onThreadDraftChange,
   onSendThreadReply,
+  onReplyInThread,
+  threadReplyRequest,
   onReact,
   onCopyLink,
   savedMessageIds,
@@ -188,6 +165,7 @@ export function ChatRightPanel({
   contextNotice,
   onRetryContext,
   onMarkThreadRead,
+  onMessagesSeen,
   onMarkChannelRead,
   onToggleFollow,
   following,
@@ -224,6 +202,9 @@ export function ChatRightPanel({
   onThreadMentionsChange?: (mentions: MessageMention[]) => void;
   onThreadDraftChange: (value: string) => void;
   onSendThreadReply: (files: File[]) => void | boolean | Promise<boolean | void>;
+  /** Clicking a message already in this thread puts the caret in the reply field. */
+  onReplyInThread?: () => void;
+  threadReplyRequest?: { kind: "focus"; at: number } | null;
   onReact?: (messageId: string, emoji: string, remove: boolean) => void;
   onCopyLink?: (messageId: string) => void;
   savedMessageIds?: string[];
@@ -241,6 +222,8 @@ export function ChatRightPanel({
   contextNotice?: string | null;
   onRetryContext?: () => void;
   onMarkThreadRead?: () => void;
+  /** Message ids resting on screen in the open thread, including the anchor. */
+  onMessagesSeen?: (seenIds: string[]) => void;
   /** Marks the channel and its threads read. Lives here, not in the channel header. */
   onMarkChannelRead?: () => void;
   onToggleFollow?: () => void;
@@ -261,6 +244,15 @@ export function ChatRightPanel({
   const capabilities = useChatCapabilities();
   const threadBody = useRef<HTMLDivElement | null>(null);
   const beforePage = useRef<ChatReadingPosition | null>(null);
+  const threadSeenVersion = view.kind === "thread"
+    ? `${threadRoot?.id ?? ""}:${threadReplies.at(-1)?.id ?? ""}:${threadReplies.length}`
+    : "";
+  useReportSeenMessages(
+    threadBody,
+    view.kind === "thread" && Boolean(onMessagesSeen),
+    threadSeenVersion,
+    (seenIds) => onMessagesSeen?.(seenIds),
+  );
   useLayoutEffect(() => {
     if (loadingEarlier || !beforePage.current || !threadBody.current) return;
     restoreChatReadingPosition(threadBody.current, beforePage.current);
@@ -308,6 +300,7 @@ export function ChatRightPanel({
                 viewerIsOperator={viewerIsOperator}
                 onCorrect={onCorrect}
                 onStopAsk={onStopAsk}
+                onReply={onReplyInThread}
                 focused={focusMessageId === threadRoot.id}
               />
             </div>
@@ -339,13 +332,13 @@ export function ChatRightPanel({
                 viewerActorId={viewerActorId}
                 viewerIsOperator={viewerIsOperator}
                 onCorrect={onCorrect}
+                onReply={onReplyInThread}
               focused={focusMessageId === reply.id}
             />
           ))}
           {threadReplies.length === 0 && threadRoot ? (
             <p className="chat-feed-notice">No replies yet.</p>
           ) : null}
-          {onMarkThreadRead && threadReplies.length > 0 ? <ThreadReadMarker messageId={threadReplies.at(-1)!.id} onRead={onMarkThreadRead} /> : null}
         </div>
           <div className="chat-thread-composer">
             <ChannelComposer
@@ -362,6 +355,7 @@ export function ChatRightPanel({
               error={threadError}
               placeholder="Reply in thread…"
               variant="thread"
+              request={threadReplyRequest}
             />
           </div>
       </aside>

@@ -1,3 +1,4 @@
+import { getDestination } from "../../scout/nav-destinations.ts";
 import { ClipboardPaste, ExternalLink, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
@@ -1405,7 +1406,7 @@ export function HarnessesScreen({ navigate }: { navigate: (r: Route) => void }) 
           <header className="hs-page-head">
             <div className="hs-title-group">
               <span className="hs-kicker">ops / provider central</span>
-              <h2>Agent Providers</h2>
+              <h2>{getDestination("providers").label}</h2>
               <p>
                 {providerView === "budget"
                   ? "See what you pay for, how much remains, and where to use it."

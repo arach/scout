@@ -1,3 +1,4 @@
+import { getDestination } from "../../scout/nav-destinations.ts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Check, ChevronRight, Copy } from "lucide-react";
 import { api } from "../../lib/api.ts";
@@ -827,7 +828,7 @@ export function CodeContent({
 
 export const scoutSurface = defineSurface({
   id: "code",
-  label: "Code Browser",
+  label: getDestination("code").label,
   route: { view: "code" },
   webPath: "/code",
   screen: "CodeContent",

@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { Activity, RefreshCw } from "lucide-react";
+import { Activity, Plus, RefreshCw } from "lucide-react";
 import type { Route } from "../../lib/types.ts";
 import "./home-hero.css";
 import {
@@ -70,6 +70,8 @@ export type HomeHeroProps = {
   loading: boolean;
   refreshing: boolean;
   onRefresh: () => void;
+  /** Starts a new chat: the Mac app's composer when embedded, the web one otherwise. */
+  onNewChat?: () => void;
   navigate: (route: Route) => void;
   heartrate: HeartrateBucketView[];
   heartrateWindow: string;
@@ -498,6 +500,7 @@ export default function HomeHero(props: HomeHeroProps) {
     loading,
     refreshing,
     onRefresh,
+    onNewChat,
     navigate,
     heartrate,
     heartrateWindow,
@@ -540,6 +543,12 @@ export default function HomeHero(props: HomeHeroProps) {
         </div>
         <span className="s-section-rule-line" aria-hidden="true" />
         <div className="hd-vitals-right">
+          {onNewChat && (
+            <button type="button" className="hd-new-chat" onClick={onNewChat} title="New chat (⌘N)">
+              <Plus size={11} aria-hidden="true" />
+              New chat
+            </button>
+          )}
           {error && !loading && !refreshing && <span className="dot dot--warning" aria-hidden="true" />}
           <span className={`hd-meta hd-meta--${syncTone}`}>{syncLabel}</span>
           <button

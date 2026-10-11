@@ -58,6 +58,57 @@ function snapshotWith(
 const displayName = (_snapshot: RuntimeRegistrySnapshot, actorId: string): string => actorId;
 
 describe("readMeshNodeState", () => {
+  test("filters exact projectRoot and agentId before all caps, never by cwd", () => {
+    const agents: Record<string, unknown> = {};
+    const endpoints: Record<string, unknown> = {};
+    const flights: Record<string, unknown> = {};
+    for (let i = 0; i < 40; i += 1) {
+      const id = `other-${i}`;
+      agents[id] = agent(id, "arc-server-openscout", { metadata: { projectRoot: "/other/project" } });
+      endpoints[id] = { ...endpoint(id, id, "arc-server-openscout", "active"), cwd: "/wanted/project" };
+      flights[id] = { id, targetAgentId: id, state: "running" };
+    }
+    agents.wanted = agent("wanted", "arc-server-openscout");
+    endpoints.wanted = { ...endpoint("wanted-ep", "wanted", "arc-server-openscout", "active"), projectRoot: "/wanted/project" };
+    flights.wanted = { id: "wanted-flight", targetAgentId: "wanted", state: "completed" };
+    endpoints.orphan = endpoint("orphan", "not-registered", "arc-server-openscout", "active");
+    const snapshot = snapshotWith(agents, endpoints, flights);
+    const deps = { snapshot: () => snapshot, nodeId: "arc-server-openscout", meshId: "openscout", actorDisplayName: displayName };
+    for (const query of [{ projectRoot: "/wanted/project" }, { agentId: "wanted" }, { projectRoot: "/wanted/project", agentId: "wanted" }]) {
+      const report = readMeshNodeState(deps, query);
+      expect(report.workload).toMatchObject({ total: 1, truncated: false });
+      expect(report.roster.map((row) => row.id)).toEqual(["wanted"]);
+      expect(report.sessions).toMatchObject({ total: 1, truncated: false });
+      expect(report.sessions.items.map((row) => row.id)).toEqual(["wanted-ep"]);
+      expect(report.work).toMatchObject({ total: 1, truncated: false });
+      expect(report.work.items.map((row) => row.id)).toEqual(["wanted-flight"]);
+      expect(report.sessions.items[0]).not.toHaveProperty("lastSeenAt");
+    }
+    expect(readMeshNodeState(deps, { projectRoot: "/wanted/project", agentId: "other-0" }).workload.total).toBe(0);
+    expect(readMeshNodeState(deps).workload.total).toBe(41);
+  });
+
+  test("default caps are 24/16/16 and are marked truncated even when exactly hit", () => {
+    const agents: Record<string, unknown> = {};
+    const endpoints: Record<string, unknown> = {};
+    const flights: Record<string, unknown> = {};
+    for (let i = 0; i < 24; i += 1) {
+      const id = `agent-${i}`;
+      agents[id] = agent(id, "arc-server-openscout");
+      if (i < 16) {
+        endpoints[id] = endpoint(id, id, "arc-server-openscout", "active");
+        flights[id] = { id, targetAgentId: id, state: "running" };
+      }
+    }
+    const report = readMeshNodeState({ snapshot: () => snapshotWith(agents, endpoints, flights), nodeId: "arc-server-openscout", meshId: "openscout", actorDisplayName: displayName });
+    expect(report.roster).toHaveLength(24);
+    expect(report.sessions.items).toHaveLength(16);
+    expect(report.work.items).toHaveLength(16);
+    expect(report.workload.truncated).toBe(true);
+    expect(report.sessions.truncated).toBe(true);
+    expect(report.work.truncated).toBe(true);
+  });
+
   test("reports node identity and the workloads homed on this node", () => {
     const snapshot = snapshotWith(
       {
@@ -96,6 +147,36 @@ describe("readMeshNodeState", () => {
     expect(report.work.total).toBe(1);
     expect(report.work.running).toBe(1);
     expect(report.work.items[0]?.targetAgentId).toBe("exedev.arc-server");
+  });
+
+  test("lists the repos a peer can start work in, ranked by live sessions", () => {
+    const snapshot = snapshotWith(
+      {
+        "a.arc": agent("a.arc", "arc-server-openscout", { metadata: { projectRoot: "/home/a/renders/arsenal-x" } }),
+        "b.arc": agent("b.arc", "arc-server-openscout", { metadata: { projectRoot: "/home/a/dev/peal" } }),
+        "c.arc": agent("c.arc", "arc-server-openscout", { metadata: { projectRoot: "/home/a/dev/peal" } }),
+        "elsewhere": agent("elsewhere", "other-node", { metadata: { projectRoot: "/home/a/dev/secret" } }),
+      },
+      {
+        "ep-1": { ...endpoint("ep-1", "a.arc", "arc-server-openscout", "active"), projectRoot: "/home/a/renders/arsenal-x", cwd: "/home/a/renders/arsenal-x/frames" },
+      },
+    );
+
+    const report = readMeshNodeState({
+      snapshot: () => snapshot,
+      nodeId: "arc-server-openscout",
+      meshId: "openscout",
+      actorDisplayName: displayName,
+    });
+
+    expect(report.projects?.total).toBe(2);
+    expect(report.projects?.truncated).toBe(false);
+    expect(report.projects?.items).toEqual([
+      { root: "/home/a/renders/arsenal-x", name: "arsenal-x", agents: 1, liveSessions: 1 },
+      { root: "/home/a/dev/peal", name: "peal", agents: 2, liveSessions: 0 },
+    ]);
+    expect(JSON.stringify(report.projects)).not.toContain("frames");
+    expect(JSON.stringify(report.projects)).not.toContain("secret");
   });
 
   test("scopes sessions and work to this node's own agents", () => {

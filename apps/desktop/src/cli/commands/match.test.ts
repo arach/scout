@@ -286,7 +286,7 @@ describe("scout match options", () => {
     expect(peerEvents[0]).toMatchObject({ matchId: "match-ceremony", codename: "BlueBird" });
     expect(ownerEvents[1].communication).toMatchObject({
       peerSessionIds: ["session:peer"],
-      sendCommand: 'scout send --to session:peer "<message>"',
+      sendCommand: 'scout tell --to session:peer "<message>"',
       inboxCommand: "scout inbox --latest 10 --json",
       coordinationChecklist: [
         "worktree path or creation request",
@@ -298,7 +298,7 @@ describe("scout match options", () => {
     });
     expect(peerEvents[0].communication).toMatchObject({
       peerSessionIds: ["session:creator"],
-      sendCommand: 'scout send --to session:creator "<message>"',
+      sendCommand: 'scout tell --to session:creator "<message>"',
       inboxCommand: "scout inbox --latest 10 --json",
     });
     service.dispose();
@@ -331,7 +331,7 @@ describe("scout match options", () => {
 
   test("renders an exact-session continuation command after matching", () => {
     const rendered = renderMatchResponse(matchedResponse("/repo/talkie"));
-    expect(rendered).toContain('scout send --to session:peer "<message>"');
+    expect(rendered).toContain('Message: scout tell --to session:peer "<message>"');
     expect(rendered).toContain("scout inbox --latest 10 --json");
     expect(rendered).toContain("Project: /repo/talkie");
     expect(rendered).toContain(

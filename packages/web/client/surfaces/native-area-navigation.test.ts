@@ -44,18 +44,19 @@ test("embedded area chords route once and relinquish typing, terminal, modal and
   }
 });
 
-nativeTest("native primary navigation follows the web area order", () => {
+nativeTest("native primary navigation follows shared web areas; Sessions remains web-only", () => {
   const navigation = read("../../../../apps/macos/Sources/Scout/ScoutSidebarNavigation.swift");
   const sections = navigation.match(/static let destinations: \[ScoutSection\] = \[([^\]]+)/)![1]
     .match(/\.\w+/g)!.map((value) => value.slice(1));
   const nativeToWeb: Record<string, string> = {
-    home: "home", comms: "chat", agents: "projects", terminals: "sessions",
+    home: "home", comms: "chat", agents: "projects", terminals: "terminals",
     dispatch: "dispatch", search: "search", ops: "ops",
   };
-  // Spaces embeds the shared chat room natively; the web reaches it inside Chat.
+  // Spaces embeds rooms natively; Sessions slots currently ship only in web.
+  // Keep parity for shared areas without changing native navigation in this PR.
   const nativeOnly = new Set(["spaces"]);
   expect(sections.filter((section) => !nativeOnly.has(section)).map((section) => nativeToWeb[section]))
-    .toEqual(PRIMARY_AREAS.filter((area) => area.id !== "settings").map((area) => area.id));
+    .toEqual(PRIMARY_AREAS.filter((area) => area.id !== "settings" && area.id !== "sessions").map((area) => area.id));
 });
 
 test("new area embeds are discoverable with web route ownership", () => {

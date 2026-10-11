@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { createScoutCommandContext } from "../context.ts";
 import {
+  buildFlightLinks,
   parseFlightCommandOptions,
   renderFlightCommandHelp,
   renderFlightCommandResult,
@@ -62,6 +63,7 @@ describe("renderFlightCommandResult", () => {
         workId: null,
         sessionId: null,
         links: {
+          work: null,
           follow: "http://scout.test/follow?flightId=flight-1",
           tail: "http://scout.test/follow?flightId=flight-1",
           session: null,
@@ -76,7 +78,24 @@ describe("renderFlightCommandResult", () => {
     expect(output).toContain("Target: hudson.main");
     expect(output).toContain("Conversation: dm.operator.hudson");
     expect(output).toContain("Output:\nDone.");
-    expect(output).toContain("Follow: http://scout.test/follow?flightId=flight-1");
+    expect(output).toContain("Follow the task: http://scout.test/follow?flightId=flight-1");
+  });
+});
+
+describe("task sharing links", () => {
+  const env = { OPENSCOUT_WEB_PUBLIC_ORIGIN: "https://scout.test/" };
+  test("work ticket wins over session and tail, preserving the configured origin", () => {
+    const links = buildFlightLinks({ workId: "work/a b", flightId: "flt-1", sessionId: "session-1" }, env);
+    expect(links.follow).toBe("https://scout.test/work/work%2Fa%20b");
+    expect(links.work).toBe(links.follow);
+    expect(new URL(links.tail!).searchParams.get("view")).toBe("tail");
+    expect(new URL(links.tail!).searchParams.get("workId")).toBe("work/a b");
+  });
+  test("missing work falls back to session observation without inventing a ticket", () => {
+    const links = buildFlightLinks({ flightId: "flt-1" }, env);
+    expect(links.work).toBeNull();
+    expect(links.follow).toBe(links.session);
+    expect(buildFlightLinks({}, env).follow).toBeNull();
   });
 });
 

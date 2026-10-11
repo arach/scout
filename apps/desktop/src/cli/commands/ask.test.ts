@@ -199,6 +199,16 @@ describe("ask receipt follow-up clarity", () => {
     ids: { targetAgentId: "project-hudson-3", invocationId: "inv-1", flightId: "flt-1", bindingRef: "abc12345" },
   };
 
+  test("shares a work ticket separately from the completion wait command", () => {
+    const text = renderScoutAskReceipt({ replyMode: "notify", receipt, links: {
+      work: "http://scout.test/work/work-1", follow: "http://scout.test/work/work-1",
+      tail: "http://scout.test/follow?view=tail&flightId=flt-1", session: null, agent: null,
+    } });
+    expect(text).toContain("Follow the task: http://scout.test/work/work-1");
+    expect(text).toContain("scout wait ref:abc12345 --timeout 600");
+    expect(text).not.toContain("view=tail");
+  });
+
   test("notify shows destination, selected harness, and one wait command using the short ref", () => {
     const text = renderScoutAskReceipt({ replyMode: "notify", receipt: {
       ...receipt,

@@ -65,8 +65,10 @@ backend subset.
 integration, and harness speaks: the TypeScript shapes for identities,
 messages, invocations, flights, conversations, delivery, reply context, and
 collaboration records. Anything that crosses a boundary — between agents,
-harnesses, or machines — is described here. Scout is protocol-over-product:
-surfaces are built on the protocol, not beside it.
+harnesses, or machines — is described here. Human and agent surfaces use one
+interaction model. The current protocol expresses that model; its wire format
+and transports can change while preserving authority, continuity, and lifecycle
+meaning. See the [Shared Interaction Model](./interaction-model.md).
 
 **Mesh.** Mesh is how agents on different machines reach and coordinate with
 each other. Each broker advertises its local agents to peers and syncs endpoint

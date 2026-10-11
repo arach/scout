@@ -3,6 +3,9 @@ import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { closeSync, constants, fstatSync, openSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { createModernScoutHandler, eventBrokerClient, startMcpEventDeliveryWorker } from "./mcp-events.ts";
+import { mcpEventPrincipalSchema } from "@openscout/runtime/mcp-events";
+import type { McpEventPrincipal } from "@openscout/protocol";
 import { SCOUT_MCP_CORE_TOOL_NAMES } from "@openscout/protocol";
 import { resolveScoutBrokerUrl } from "../broker/service.ts";
 
@@ -14,6 +17,8 @@ export interface McpBridgeBoundEnvelope {
   kind: "mcp_request" | "mcp_cancel";
   id: string;
   agent?: string;
+  principal?: McpEventPrincipal;
+  headers?: Record<string, string>;
   payload?: string;
 }
 
@@ -41,6 +46,9 @@ export function parseBridgeBoundEnvelope(data: unknown): McpBridgeBoundEnvelope 
       id: parsed.id,
       agent: typeof parsed.agent === "string" ? parsed.agent : undefined,
       payload: typeof parsed.payload === "string" ? parsed.payload : undefined,
+      ...(parsed.principal && mcpEventPrincipalSchema.safeParse(parsed.principal).success ? { principal: parsed.principal } : {}),
+      ...(parsed.headers && typeof parsed.headers === "object" ? { headers: Object.fromEntries(Object.entries(parsed.headers).filter(([key, value]) =>
+        typeof value === "string" && (key.startsWith("mcp-") || key === "accept"))) } : {}),
     };
   } catch {
     return null;
@@ -317,6 +325,46 @@ export async function startScoutMeshMcpBridge(
     return instance;
   };
 
+  const eventsEnabled = (options.env ?? process.env).OPENSCOUT_MCP_EVENTS === "1";
+  const broker = eventBrokerClient(options.env?.OPENSCOUT_BROKER_URL?.trim() || resolveScoutBrokerUrl());
+  const modernInstances = new Map<string, Promise<Awaited<ReturnType<typeof createModernScoutHandler>>>>();
+  const modernRequests = new Map<string, AbortController>();
+  const deliveryWorker = eventsEnabled ? startMcpEventDeliveryWorker({ relayUrl: options.relayUrl, token: options.token, broker, log }) : undefined;
+  const deliverModern = async (envelope: McpBridgeBoundEnvelope, agent: string) => {
+    if (!eventsEnabled || !envelope.principal || envelope.principal.agentId !== agent) {
+      sendRaw({ v: 1, kind: "mcp_error", id: envelope.id, status: eventsEnabled ? 403 : 503, message: "MCP Events unavailable for this connection" });
+      return;
+    }
+    const principal = envelope.principal;
+    const key = JSON.stringify([principal.kind, principal.id, principal.userId, principal.ownerKey, principal.node, principal.agentId]);
+    let instance = modernInstances.get(key);
+    if (!instance) {
+      if (modernInstances.size >= MAX_IDENTITY_INSTANCES) {
+        sendRaw({ v: 1, kind: "mcp_error", id: envelope.id, status: 503, message: "bridge identity capacity reached" });
+        return;
+      }
+      instance = createModernScoutHandler(principal, createScoutMcpServer({
+        defaultCurrentDirectory: options.currentDirectory,
+        env: { ...(options.env ?? process.env), OPENSCOUT_MCP_ENABLE_NOTIFICATIONS: "0" },
+        dependencies: { resolveSenderId: async () => agent },
+        toolFilter: (name) => allowedTools.has(name),
+      }), broker);
+      modernInstances.set(key, instance);
+      instance.catch(() => modernInstances.delete(key));
+    }
+    const abort = new AbortController();
+    modernRequests.set(envelope.id, abort);
+    try {
+      const handler = await instance;
+      const response = await handler.fetch(new Request("https://scout-bridge.invalid/mcp", {
+        method: "POST", headers: { ...envelope.headers, "content-type": "application/json" },
+        body: envelope.payload ?? "", signal: abort.signal,
+      }));
+      if (!abort.signal.aborted) sendRaw({ v: 1, kind: response.status === 202 ? "mcp_accepted" : "mcp_response", id: envelope.id,
+        payload: await response.text(), status: response.status });
+    } finally { modernRequests.delete(envelope.id); }
+  };
+
   const wsUrl = resolveBridgeWebSocketUrl(options.relayUrl);
 
   const scheduleReconnect = () => {
@@ -399,6 +447,14 @@ export async function startScoutMeshMcpBridge(
       );
       if (!envelope) return;
       const agent = envelope.agent?.trim() || options.senderId;
+      if (envelope.kind === "mcp_cancel" && modernRequests.has(envelope.id)) {
+        modernRequests.get(envelope.id)!.abort(); return;
+      }
+      const protocol = envelope.headers?.["mcp-protocol-version"];
+      if (envelope.kind === "mcp_request" && shouldUseModernMcpRoute(protocol, eventsEnabled)) {
+        void deliverModern(envelope, agent).catch(() => sendRaw({ v: 1, kind: "mcp_error", id: envelope.id, status: 503, message: "MCP event gateway unavailable" }));
+        return;
+      }
       void getOrCreateInstance(agent).then((instance) => {
         if (!instance) {
           if (envelope.kind === "mcp_request") {
@@ -478,6 +534,15 @@ export async function startScoutMeshMcpBridge(
         await instance.server.close().catch(() => {});
       }
       instances.clear();
+      for (const abort of modernRequests.values()) abort.abort();
+      await deliveryWorker?.close();
+      for (const instance of modernInstances.values()) await instance.then((handler) => handler.close()).catch(() => {});
+      modernInstances.clear();
     },
   };
+}
+
+/** Keep newer clients on the legacy transport until MCP Events is enabled. */
+export function shouldUseModernMcpRoute(protocol: string | undefined, eventsEnabled: boolean): boolean {
+  return eventsEnabled && Boolean(protocol && !/^202[45]-/.test(protocol));
 }

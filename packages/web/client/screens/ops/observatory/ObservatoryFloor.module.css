@@ -1,0 +1,110 @@
+.root { position: relative; flex: 1; min-height: 360px; height: 100%; color: #efeee9; background: #000; font: 13px/1.45 var(--font-sans, system-ui, sans-serif); isolation: isolate; }
+/* Camera transforms own movement. Native focus/scrollIntoView must not add a
+   second, invisible scroll offset to the scene or its fixed controls. */
+.viewport { position: absolute; inset: 0; overflow: clip; touch-action: none; cursor: grab; }
+.viewport[data-dragging] { cursor: grabbing; }
+.sky, .sky > canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.world { position: absolute; top: 0; left: 0; width: 0; height: 0; transform-origin: 0 0; }
+.island { position: absolute; pointer-events: none; transition: left 420ms cubic-bezier(.16,1,.3,1), top 420ms cubic-bezier(.16,1,.3,1); }
+.island[data-held] { transition: none; }
+.platform, .art { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; user-select: none; }
+.islandHit { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.islandHit path { fill: transparent; pointer-events: fill; cursor: grab; }
+.island[data-highlight] .art { filter: drop-shadow(0 0 3px #f4e5bb66); }
+.rim { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.rim path { fill: none; stroke: transparent; stroke-width: 24; pointer-events: stroke; cursor: grab; }
+.rim path.rimOutline { pointer-events: none; stroke-width: 4; }
+.island[data-highlight] .rim .rimOutline { stroke: #ece0bc88; }
+.bridges { position: absolute; inset: 0; overflow: visible; }
+.bridges path { stroke: #928c7c; stroke-width: 34; fill: none; }
+.room { position: absolute; pointer-events: none; z-index: 2; transition: left 320ms cubic-bezier(.16,1,.3,1), top 320ms cubic-bezier(.16,1,.3,1); }
+.room[data-held] { transition: none; }
+.roomRing { position: absolute; inset: 0; border: 2px solid #e2d8b84d; border-radius: 50%; background: #d7c8a009; opacity: 0; transition: opacity 130ms ease; }
+.room[data-highlight] .roomRing, .room[data-held] .roomRing { border-color: #f2e9d4bf; background: #e6d9b81a; }
+.room[data-receiving] .roomRing { border: 4px solid #f4e3b7; background: #e6d9b82e; }
+.roomGrip { position: absolute; top: 100%; left: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 7px; min-height: 34px; padding: 4px 10px; width: max-content; border: 1px solid #d2c9ad99; border-radius: 2px; background: #514e437a; color: #fff3d4; text-shadow: 0 1px 1px #171612; font: inherit; font-size: 14px; font-weight: 550; line-height: 1.2; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity 130ms ease; cursor: grab; }
+.roomGrip small { font-size: 12px; color: #f2e6c9; }
+.roomGrip > span { font-size: 16px; color: #e8d6aa; }
+/* An invisible grip never intercepts scenery. Keyboard focus reveals it before
+   interaction; touch surfaces retain visible grips because they have no hover. */
+.room[data-preview] .roomGrip, .room:focus-within .roomGrip { opacity: 1; pointer-events: auto; }
+.room[data-preview] .roomRing, .room:focus-within .roomRing { opacity: 1; }
+.actor { position: absolute; width: 86px; height: 92px; transform: translate(-50%, -88px); display: flex; align-items: flex-start; justify-content: center; padding: 0; border: 0; background: transparent; color: #fff; pointer-events: auto; cursor: grab; touch-action: none; transition: left 320ms cubic-bezier(.16,1,.3,1), top 320ms cubic-bezier(.16,1,.3,1); }
+.actor[data-held] { transition: none; }
+.actor > :not(.actorLabel) { pointer-events: none; }
+.foot { position: absolute; top: 72px; left: 8px; width: 70px; height: 20px; background: #08080755; border-radius: 50%; border: 1px solid #e1d2ae50; }
+.actor:hover .foot, .actor:focus-visible .foot, .actor[data-held] .foot, .actor[data-selected] .foot { border: 2px solid #f0dfb6; background: #f0dfb633; }
+.actor[data-attention] .foot { border-color: #e6ad73; }
+.actorLabel { position: absolute; top: 92px; left: 50%; transform: translateX(-50%); max-width: 160px; padding: 3px 6px; display: flex; align-items: center; gap: 4px; font-size: 12px; line-height: 1.2; white-space: nowrap; border-radius: 3px; background: #1c1b19e8; color: #f7f3ea; pointer-events: none; }
+.islandName { position: absolute; display: flex; align-items: center; gap: 10px; width: max-content; max-width: 500px; padding: 10px 15px; border: 1px solid #c4bda345; border-radius: 6px; background: #101010eb; color: #f6f1e4; pointer-events: auto; cursor: grab; z-index: 1; }
+.islandName > span:first-child { font-size: 24px; color: #c2baa8; }
+.islandName strong { font-size: 21px; font-weight: 550; }
+.islandName small { display: block; font-size: 13px; color: #c6c1b5; text-align: left; }
+.toolbar { position: absolute; top: 18px; left: 22px; right: 22px; display: flex; align-items: center; justify-content: space-between; gap: 16px; z-index: 40; pointer-events: auto; cursor: default; }
+.toolbar > div { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.toolbar strong { font-size: 16px; font-weight: 550; }
+.toolbar span { color: #c5bcaa; border: 1px solid #c5bcaa40; border-radius: 4px; padding: 2px 6px; font-size: 11px; }
+.toolbar small { color: #b8b6b2; font-size: 12px; }
+.toolbar a { color: #c9c7c2; text-decoration: none; font-size: 12px; padding: 10px 0 10px 12px; }
+.toolbar a:hover { color: #fff; text-decoration: underline; }
+.camera { position: absolute; right: 18px; bottom: 18px; display: flex; align-items: center; gap: 3px; padding: 4px; border: 1px solid #ffffff26; border-radius: 7px; background: #0c0c0cf5; cursor: default; z-index: 40; }
+.camera button, .inspector button { min-height: 40px; border: 0; border-radius: 4px; background: transparent; color: #dedbd3; padding: 6px 13px; font: inherit; cursor: pointer; }
+.camera button:hover, .inspector button:hover { background: #ffffff12; color: #fff; }
+.camera > span { width: 1px; height: 18px; margin: 0 6px; background: #ffffff26; }
+.hint { position: absolute; bottom: 186px; left: 22px; max-width: min(420px, calc(100% - 380px)); color: #b9b6ae; font-size: 12px; line-height: 1.5; pointer-events: none; }
+.inspector { position: absolute; top: 72px; right: 18px; width: 270px; max-height: calc(100% - 155px); overflow: auto; padding: 20px; border: 1px solid #a79e894d; border-radius: 8px; background: #151411f7; z-index: 40; cursor: default; }
+.inspector > small { display: block; margin-right: 18px; color: #c6bda9; font-size: 11px; }
+.inspector h2 { font-size: 19px; font-weight: 550; margin: 9px 0 16px; overflow-wrap: anywhere; }
+.inspector p { color: #dfd8c9; font-size: 13px; line-height: 1.55; margin: 0 0 16px; overflow-wrap: anywhere; }
+.activityPanel { top: auto; bottom: 80px; width: 310px; max-width: calc(100% - 36px); max-height: min(460px, calc(100% - 155px)); background: #111111f7; border-color: #ffffff29; }
+.activityPanel h2 { margin-bottom: 5px; }
+.agentStatus { display: block; font-size: 11px; color: #aba79e; margin-bottom: 17px; }
+.activityList { padding: 0; margin: 0; list-style: none; }
+.activityList li + li { border-top: 1px solid #ffffff12; padding-top: 12px; }
+.activityList li > div { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 5px; color: #b0aba1; font-size: 11px; }
+.activityList li:not(:first-child) p { font-size: 12px; color: #b5afa4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.activityList li:first-child p { color: #eeebe4; }
+.overhead { position: absolute; z-index: 35; width: 280px; padding: 12px 14px; transform: translate(-50%, -100%); border: 1px solid #ffffff30; border-radius: 7px; background: #111111f5; box-shadow: 0 8px 24px #0006; pointer-events: none; }
+.overhead::after { content: ""; position: absolute; top: 100%; left: calc(50% - 5px); border: 5px solid transparent; border-top-color: #969084; }
+.overhead strong { font-size: 12px; font-weight: 550; }
+.overhead small { display: block; margin-top: 3px; color: #b7b0a2; font-size: 10px; }
+.overhead p { margin: 8px 0 0; color: #e5e1d7; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.inspector label { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 18px 0 10px; color: #d9d3c7; }
+.inspector select { min-height: 38px; max-width: 160px; border: 1px solid #c5bba34d; border-radius: 4px; background: #25231d; color: #f4eee0; padding: 5px 8px; font: inherit; }
+.inspector > button:not(.close) { text-align: left; padding-left: 0; width: 100%; }
+.inspector .close { position: absolute; top: 7px; right: 7px; min-height: 32px; width: 32px; padding: 0; font-size: 22px; }
+.saveNotice { position: absolute; top: 56px; left: 22px; color: #e1c7a2; font-size: 12px; }
+.destination { position: absolute; transform: translate(-50%, -50%); width: 108px; height: 100px; border: 0; padding: 0; background: transparent; color: #e6dfcf; cursor: pointer; z-index: 20; font: inherit; }
+.destination img { display: block; width: 76px; height: 80px; object-fit: contain; margin: -7px auto -3px; opacity: .72; transition: opacity 160ms ease, transform 240ms ease; pointer-events: none; }
+.destination:hover img, .destination:focus-visible img { opacity: 1; transform: translateY(-4px); }
+.destination span, .destination small { display: block; max-width: 108px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.destination span { font-size: 11px; background: #000a; }
+.destination small { font-size: 10px; color: #bcb4a3; }
+.contextMenu { position: fixed; z-index: 1000; width: 225px; padding: 7px; border: 1px solid #a79e8966; border-radius: 7px; background: #1b1915; cursor: default; color: #f4eddf; }
+.contextMenu strong { display: block; padding: 7px 9px; font-weight: 550; font-size: 12px; overflow-wrap: anywhere; color: #c9c0ad; }
+.contextMenu button { width: 100%; min-height: 38px; border: 0; border-radius: 4px; padding: 7px 9px; background: transparent; color: #f4eddf; font: inherit; text-align: left; cursor: pointer; }
+.contextMenu button:hover, .contextMenu button:focus-visible { background: #d6c8a71a; }
+.root button:focus-visible, .root a:focus-visible, .root select:focus-visible { outline: 2px solid #edd9a8; outline-offset: 4px; }
+.srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@media (max-width: 800px) { .toolbar { top: 12px; left: 14px; right: 14px; }.toolbar small { display: none; }.toolbar a { max-width: 145px; text-align: right; }.hint { bottom: 216px; left: 14px; max-width: calc(100% - 28px); font-size: 11px; }.camera { right: 12px; bottom: 12px; }.inspector { right: 12px; width: 240px; } }
+@media (prefers-reduced-motion: reduce) { .island, .room, .actor, .roomGrip, .roomRing { transition: none; } }
+@media (hover: none) { .roomGrip { opacity: 1; pointer-events: auto; }.roomRing { opacity: 1; } }
+/* Exposed stone moves an island; agents and revealed room grips take priority. */
+.rim path { pointer-events: none; }
+.actor:hover, .actor:focus-visible { outline: 1px solid #f0dfb699; outline-offset: 4px; border-radius: 6px; background: #ead9b00d; }
+.actor[data-group-highlight] .foot { border: 2px solid #e9dcc0; background: #e9dcc02b; }
+.roomGrip:hover, .roomGrip:focus-visible, .islandName:hover, .islandName:focus-visible { border-color: #efe1bd; background: #302c23; }
+.dropSeat { position: absolute; width: 72px; height: 24px; transform: translate(-50%, -50%); border: 2px dashed #fff0cc; border-radius: 50%; background: #edd8a840; pointer-events: none; z-index: 2; }
+.hint[data-active] { padding: 10px 13px; border: 1px solid #d7c8a75c; border-radius: 6px; background: #111; color: #f4e7cd; }
+.exchanges { position: absolute; inset: 0; overflow: visible; pointer-events: none; z-index: 1; color: #bdb4a2; }
+.exchangeLine { fill: none; stroke: currentColor; stroke-width: 1; vector-effect: non-scaling-stroke; opacity: .22; }
+.exchangeHit { fill: none; stroke: transparent; stroke-width: 10; pointer-events: stroke; cursor: pointer; vector-effect: non-scaling-stroke; }
+.exchanges [data-emphasized] .exchangeLine { opacity: .55; }
+.exchanges g:hover .exchangeLine, .exchanges g:focus-visible .exchangeLine { opacity: 1; stroke-width: 1.5; }
+.exchanges g:focus-visible { outline: none; }
+.exchangePanel { position: absolute; right: 18px; top: 72px; width: min(360px, calc(100% - 36px)); z-index: 40; }
+.exchangePanel :global(.floor-exchange-panel) { position: relative; inset: auto; width: 100%; max-height: 450px; background: #141414; }
+
+/* Stone inlays follow the island's isometric ground plane. The transformed
+   button itself remains the hit target; no invisible padding grabs a room. */
+.roomGrip:hover, .roomGrip:focus-visible { border-color: #fff0cc; background: #716b58b3; outline: 1px solid #fff0cc88; outline-offset: 2px; }

@@ -42,3 +42,9 @@ describe("htmlToMarkdown", () => {
     expect(markdown).toContain("- two");
   });
 });
+
+test("underline and strike safely survive serialized wire text", () => {
+ expect(markdownToHtml('<u>**underlined**</u> and ~~struck~~')).toContain('<u><strong>underlined</strong></u>');
+ expect(markdownToHtml('~~struck~~')).toContain('<s>struck</s>');
+ expect(markdownToHtml('<u><script>x</script></u>')).not.toContain('<script>');
+});

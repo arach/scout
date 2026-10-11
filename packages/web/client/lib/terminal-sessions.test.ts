@@ -50,7 +50,7 @@ describe("terminal session resolution", () => {
     expect(target?.surface.sessionName).toBe("hudson-dm79928c");
   });
 
-  test("falls back to surface key when a remembered session id is stale", () => {
+  test("rejects a stale session id even when another session has the requested surface", () => {
     const target = resolveRegisteredTerminalTarget(
       [
         terminalSession("ts.old", "zellij", "scout-zj-final-7e55c009"),
@@ -60,8 +60,32 @@ describe("terminal session resolution", () => {
       "zellij:hudson-dm79928c",
     );
 
-    expect(target?.session.id).toBe("discovered.zellij.1");
-    expect(target?.surface.sessionName).toBe("hudson-dm79928c");
+    expect(target).toBeNull();
+  });
+
+  test("rejects a surface belonging to a different session than the explicit target", () => {
+    const target = resolveRegisteredTerminalTarget(
+      [
+        terminalSession("ts.selected", "zellij", "scout-zj-final-7e55c009"),
+        terminalSession("ts.other", "zellij", "hudson-dm79928c"),
+      ],
+      "ts.selected",
+      "zellij:hudson-dm79928c",
+    );
+
+    expect(target).toBeNull();
+  });
+
+  test("selects the explicit session when another session shares its surface key", () => {
+    const selected = terminalSession("ts.selected", "zellij", "hudson-dm79928c");
+    const target = resolveRegisteredTerminalTarget(
+      [terminalSession("ts.other", "zellij", "hudson-dm79928c"), selected],
+      "ts.selected",
+      "zellij:hudson-dm79928c",
+    );
+
+    expect(target?.session).toBe(selected);
+    expect(target?.surface).toBe(selected.surfaces[0]);
   });
 });
 

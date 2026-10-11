@@ -1,6 +1,7 @@
 import { lstat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
+import { getProgressiveRepoWatchSnapshot } from "./progressive.js";
 
 import type { DiscoverySnapshot } from "../tail/index.js";
 import {
@@ -107,6 +108,7 @@ export type RepoWatchWorktree = {
   sessions: RepoWatchSessionRef[];
   hints: RepoWatchHintSummary[];
   lastCommitAt: number | null;
+  lastTouchedAt?: number;
   scannedAt: number;
   error: string | null;
 };
@@ -133,6 +135,10 @@ export type RepoWatchProject = {
   worktrees: RepoWatchWorktree[];
   stats: RepoWatchProjectStats;
   hints: RepoWatchHintSummary[];
+  lastTouchedAt?: number;
+  sortTouchedAt?: number;
+  scanState?: "pending" | "ready" | "error";
+  scanError?: string;
 };
 
 export type RepoWatchSnapshot = {
@@ -148,6 +154,7 @@ export type RepoWatchSnapshot = {
     attachedSessions: number;
   };
   warnings: string[];
+  scan?: { id: string; phase: "loading" | "complete"; completed: number; total: number };
 };
 
 type GitExec = {
@@ -171,6 +178,8 @@ export type RepoWatchSnapshotOptions = {
   includeLastCommit?: boolean;
   useNativeRepoService?: boolean;
   nativeScan?: RepoWatchNativeScanExec;
+  progressive?: boolean;
+  scanId?: string;
   now?: () => number;
   git?: GitExec;
 };
@@ -915,6 +924,11 @@ async function scanWorktree(
     error,
   });
   const lastCommitSeconds = Number.parseInt(lastCommitRaw?.trim() ?? "", 10);
+  const touchedFiles = statusOutput ? parseGitStatusPorcelainV2(statusOutput, { maxFiles: 512 }).status.files : [];
+  const touchedTimes = await Promise.all(touchedFiles.map(async (file) => {
+    try { return (await lstat(resolve(worktree.path, file.path))).mtimeMs; } catch { return 0; }
+  }));
+  const lastTouchedAt = Math.max(0, Number.isFinite(lastCommitSeconds) ? lastCommitSeconds * 1_000 : 0, ...touchedTimes);
 
   return {
     id: `worktree:${hashId(worktree.path)}`,
@@ -934,6 +948,7 @@ async function scanWorktree(
     sessions: refs.sessions,
     hints,
     lastCommitAt: Number.isFinite(lastCommitSeconds) ? lastCommitSeconds * 1_000 : null,
+    lastTouchedAt,
     scannedAt: now,
     error,
   };
@@ -1359,6 +1374,20 @@ export async function getRepoWatchSnapshot(options: RepoWatchSnapshotOptions = {
     scanBudgetMs,
     scanner: useNativeRepoService ? "native" : "typescript",
   });
+
+  if (options.progressive) {
+    return getProgressiveRepoWatchSnapshot({
+      key: `${scopeSignature}:${maxRoots}:${maxWorktrees}:${maxFiles}:${includeDiff}:${includeLastCommit}:${scanBudgetMs}`,
+      hints, maxRoots, force: options.force, scanId: options.scanId, cacheTtlMs,
+      previous: lastUsefulSnapshot?.scopeSignature === scopeSignature ? lastUsefulSnapshot.snapshot : undefined,
+      idForRoot: (path) => `repo:${hashId(path)}`,
+      totals: totalsForProjects,
+      scan: (root) => scanProject(root, git, Date.now(), maxWorktrees, {
+        maxFiles, includeDiff, includeLastCommit,
+        deadlineMs: Date.now() + Math.max(1, scanBudgetMs),
+      }),
+    });
+  }
 
   if (!options.force
     && cachedSnapshot

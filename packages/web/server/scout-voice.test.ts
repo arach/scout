@@ -114,19 +114,20 @@ describe("fallbackScoutSpeechCatalog", () => {
 });
 
 describe("Scout Menu speech dispatch", () => {
-  test("resolves the system model before queuing an omitted model", async () => {
+  test("leaves an omitted model to Scout Menu, which speaks the Settings pick", async () => {
     registerScoutVoiceHost({
       hostId: "scout-menu",
       instanceId: "menu-process",
       platform: "macos",
     });
-    const resultPromise = synthesizeScoutSpeech({ text: "Use the server default." }, {});
+    const resultPromise = synthesizeScoutSpeech({ text: "Use the operator's voice." }, {});
     const { command } = await awaitScoutVoiceHostCommand("scout-menu", 1_000, "menu-process");
     expect(command).toMatchObject({
       type: "speech.synthesize",
-      text: "Use the server default.",
-      modelId: "system",
+      text: "Use the operator's voice.",
     });
+    // The web's own default ("system") must not stand in for Settings › Voice.
+    expect(command).not.toHaveProperty("modelId");
     expect(command).not.toHaveProperty("voiceId");
     const sessionId = command && "sessionId" in command ? command.sessionId : "";
     expect(sessionId).toMatch(/^scout-speech:/);
@@ -137,14 +138,14 @@ describe("Scout Menu speech dispatch", () => {
       sessionId,
       event: "speech.result",
       data: {
-        contentType: "audio/wav",
-        audioBase64: "UklGRg==",
-        modelId: "system",
-        voiceId: "system-default",
-        audioBytes: 4,
+        contentType: "audio/mpeg",
+        audioBase64: "SUQz",
+        modelId: "eleven_multilingual_v2",
+        voiceId: "UmQN7jS1Ee8B1czsUtQh",
+        audioBytes: 3,
       },
     });
-    await expect(resultPromise).resolves.toMatchObject({ modelId: "system" });
+    await expect(resultPromise).resolves.toMatchObject({ modelId: "eleven_multilingual_v2" });
   });
 
   test("carries environment defaults and request correlation through the host command", async () => {

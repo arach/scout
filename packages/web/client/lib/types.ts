@@ -386,6 +386,8 @@ export type OperatorAttentionItem = {
   severity: "critical" | "warning" | "info";
   sourceLabel: string;
   approval?: PairingApprovalRequest;
+  /** A declared question's offered answers; one is sent as the operator's reply. */
+  answer?: { conversationId: string; replyToMessageId: string; options: string[] };
   actions: OperatorAttentionAction[];
 };
 
@@ -750,6 +752,7 @@ export type MachineScopedRoute = {
 };
 
 export type Route =
+  | { view: "requests" }
   | ({ view: "inbox" } & MachineScopedRoute)
   | ({
       view: "conversation";
@@ -852,6 +855,10 @@ export type Route =
       workId?: string;
       sessionId?: string;
       targetAgentId?: string;
+      /** /ops/week only: "team" swaps in the seeded team mock. */
+      dataset?: "team";
+      /** /ops/week only: follow the machines live, or only what OTLP exporters send (absent = the snapshot week). */
+      source?: "live" | "otlp";
     }
   | ({
       view: "follow";
@@ -877,7 +884,7 @@ export type Route =
 	    };
 
 export type AgentTab = "profile" | "config" | "observe" | "message";
-export type OpsMode = "advisor" | "mission" | "issues" | "agents" | "tail" | "atop" | "lanes" | "world";
+export type OpsMode = "advisor" | "mission" | "issues" | "agents" | "tail" | "atop" | "lanes" | "world" | "week";
 export type FollowPreferredView = "tail" | "session" | "chat" | "work";
 /** URL-addressable settings surface sections (SCO-082 Phase B). */
 export type SettingsSection =

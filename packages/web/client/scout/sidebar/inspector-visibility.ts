@@ -28,15 +28,17 @@ export function routeHasMeaningfulInspector(
     case "work":
       return true;
     case "ops":
-      return route.mode !== "lanes" && route.mode !== "world";
+      return route.mode !== "lanes" && route.mode !== "world" && route.mode !== "week";
     case "sessions":
-      return !route.flightId;
+      // Each session slot owns its inspector; never reserve a second shell rail.
+      return false;
     case "messages":
       return Boolean(route.conversationId);
     case "search":
       return Boolean(route.hitId && selection.hasKnowledgeHit);
     case "broker":
       return Boolean(route.attemptId && selection.hasBrokerAttempt);
+    case "requests":
     case "activity":
     case "briefings":
     case "code":

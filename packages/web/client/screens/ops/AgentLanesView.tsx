@@ -1,3 +1,4 @@
+import { getDestination } from "../../scout/nav-destinations.ts";
 import "./agent-lanes.css";
 import { BASIC_WEB } from "../../basic/profile.ts";
 
@@ -105,7 +106,10 @@ import {
 import { shouldBlockLaneDeckStartup } from "./lanes-preflight.ts";
 
 // Keep the full floor and its 3D studio outside the basic npm client graph.
-const AgentFloorView = BASIC_WEB ? null : lazy(() => import("./AgentFloorView.tsx").then((module) => ({ default: module.AgentFloorView })));
+// The env check is inline (not BASIC_WEB) so the build folds it and the basic
+// bundle drops these chunks and the world art behind them.
+const AgentFloorView = import.meta.env.VITE_SCOUT_WEB_PROFILE === "basic" ? null : lazy(() => import("./AgentFloorView.tsx").then((module) => ({ default: module.AgentFloorView })));
+const ObservatoryFloor = import.meta.env.VITE_SCOUT_WEB_PROFILE === "basic" ? null : lazy(() => import("./observatory/ObservatoryFloor.tsx"));
 
 const LANE_HORIZON_STORAGE_KEY = "openscout:agent-lanes-horizon";
 const LANE_LAYOUT_STORAGE_KEY = "openscout:agent-lanes-layout";
@@ -619,6 +623,12 @@ export function AgentLanesView({
   projectFilter?: string | null;
 }) {
   useEmbedHeadline("Lanes", embedded);
+  const [observatoryPreview, setObservatoryPreview] = useState(() => window.location.hash === "#observatory");
+  useEffect(() => {
+    const update = () => setObservatoryPreview(window.location.hash === "#observatory");
+    window.addEventListener("hashchange", update);
+    return () => window.removeEventListener("hashchange", update);
+  }, []);
   const scoutContext = useContext(ScoutContext);
   const scoutAgents = data?.agents ?? agentsProp ?? scoutContext?.agents ?? [];
   const laneOperatorName = data?.operatorName?.trim()
@@ -1016,7 +1026,7 @@ export function AgentLanesView({
     >
       <div className="s-agent-lanes-bar">
         <div className="s-agent-lanes-bar-leading">
-          <div className="s-agent-lanes-title">{floorMode ? "World" : "Agent Lanes"}</div>
+          <div className="s-agent-lanes-title">{getDestination(floorMode ? "world" : "lanes").label}</div>
           <div className="s-agent-lanes-meta" aria-label="Lane deck status">
             <span className="s-agent-lanes-meta-stat">
               {visibleLaneCount} {floorMode ? "actors" : "live"}
@@ -1221,9 +1231,11 @@ export function AgentLanesView({
           />
         )
       ) : floorMode && AgentFloorView ? (
-        <Suspense fallback={null}>
-          <AgentFloorView lanes={filteredLanes} now={now} onOpenTrace={openFloorTrace} railLedger operatorName={laneOperatorName} />
-        </Suspense>
+        observatoryPreview && ObservatoryFloor ?
+          <Suspense fallback={<div role="status">Opening Observatory…</div>}><ObservatoryFloor lanes={filteredLanes} now={now} onActor={openFloorTrace} /></Suspense> :
+          <Suspense fallback={null}>
+            <AgentFloorView lanes={filteredLanes} now={now} onOpenTrace={openFloorTrace} railLedger operatorName={laneOperatorName} />
+          </Suspense>
       ) : gridMode ? (
         <div
           className="s-agent-lanes-grid"
@@ -1407,7 +1419,7 @@ function embedFilterLabel(filters: AgentLaneEmbedFilters): string {
 
 export const scoutSurface = defineSurface({
   id: "lanes",
-  label: "Agent Lanes",
+  label: getDestination("lanes").label,
   route: { view: "ops", mode: "lanes" },
   webPath: "/ops/lanes",
   screen: "AgentLanesView",

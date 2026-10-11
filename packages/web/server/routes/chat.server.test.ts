@@ -429,6 +429,36 @@ describe("the Scout Chat surface over HTTP", () => {
     expect(body.channels.map((channel: { id: string }) => channel.id)).toEqual([CHANNEL_ID]);
   });
 
+  test("bootstrap carries each room's last spoken root message for the sidebar", async () => {
+    seedChatChannel();
+    stubs.queryRecentMessagesResult = [];
+    const messages = (stubs.scoutBrokerContextResult as any).snapshot.messages;
+    // Newer than m-root, but neither is something somebody said: a notice and
+    // a deleted message never stand in as the preview.
+    messages["m-status"] = {
+      id: "m-status", conversationId: CHANNEL_ID, actorId: "agent-kepler",
+      originNodeId: "node-1", class: "status", body: "Kepler joined",
+      visibility: "workspace", policy: "durable", createdAt: NOW - 200,
+    };
+    messages["m-gone"] = {
+      id: "m-gone", conversationId: CHANNEL_ID, actorId: "agent-kepler",
+      originNodeId: "node-1", class: "agent", body: "withdrawn",
+      visibility: "workspace", policy: "durable", createdAt: NOW - 100,
+      metadata: { chatCorrection: { revision: 1, changedBy: "agent-kepler", deletedAt: NOW - 50 } },
+    };
+    messages["m-root"].body = `cut   the\ntag? ${"x".repeat(300)}`;
+    const server = await makeServer();
+
+    const body = await (await server.app.request("http://localhost/api/chat/bootstrap")).json() as any;
+    const last = body.lastMessages[CHANNEL_ID];
+    expect(last).toMatchObject({ id: "m-root", actorId: "person-art", createdAt: NOW - 400 });
+    expect(typeof last.authorName).toBe("string");
+    expect(last.text.startsWith("cut the tag? xxx")).toBe(true);
+    expect(last.text.length).toBe(160);
+    expect(last.text.endsWith("…")).toBe(true);
+    expect(last.fromViewer).toBeUndefined();
+  });
+
   test("chat cancellation delegates to the broker and preserves an active refusal", async () => {
     seedChatChannel();
     const server = await makeServer();

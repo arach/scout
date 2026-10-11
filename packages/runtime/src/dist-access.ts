@@ -1,7 +1,7 @@
 // The download key `scout web login` saves, and the one question Scout can ask
 // the download host with it: does this account have the full web app?
 //
-// The CLI (`scout web`) and the web server's Solo Pro read model share this so
+// The CLI (`scout web`) and the web server's Scout Pro read model share this so
 // there is one place that knows where the key lives and how whoami answers.
 // The key itself never leaves this module: callers get where it is stored,
 // never what it is.

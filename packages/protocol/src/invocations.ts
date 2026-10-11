@@ -90,6 +90,8 @@ export interface InvocationExecutionPreference {
 }
 
 export interface InvocationRequest {
+  /** Caller-supplied, requester-scoped idempotency key. */
+  requestId?: string;
   id: ScoutId;
   requesterId: ScoutId;
   requesterNodeId: ScoutId;

@@ -1,4 +1,5 @@
 import type { RuntimeEnv } from "./portable-types.js";
+import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -31,7 +32,7 @@ export type ProviderTelemetryBootstrapReport = {
       | "already-installed"
       | "skipped"
       | "error";
-    reason?: "settings-missing" | "disabled" | "owned-by-other-install" | "isolated-support-directory";
+    reason?: "settings-missing" | "disabled" | "owned-by-other-install" | "isolated-support-directory" | "scout-cli-not-found";
     command?: string;
     previousCommand?: string;
     error?: string;
@@ -98,9 +99,28 @@ async function wrapperExecTargetExists(wrapperPath: string): Promise<boolean> {
   } catch {
     return false;
   }
-  const target = content.match(/^exec\s+'([^']+)'/mu)?.[1];
-  if (!target || !target.startsWith("/")) return true;
-  return existsSync(target);
+  const execLine = content.match(/^exec\s+(.+)$/mu)?.[1];
+  if (!execLine) return true;
+  // Quoted absolute paths (the CLI, or Bun plus the CLI's source entry) must all exist.
+  const paths = [...execLine.matchAll(/'([^']+)'/gu)].map((match) => match[1]!).filter((path) => path.startsWith("/"));
+  if (paths.length > 0) return paths.every((path) => existsSync(path));
+  // A bare command (`exec scout …`) only works if it resolves on PATH.
+  const bare = execLine.split(/\s+/u)[0];
+  return bare ? await commandOnPath(bare) : true;
+}
+
+const COMMAND_PROBE_TIMEOUT_MS = 3_000;
+
+/** A login shell can stall on a slow profile, so the probe is async and bounded. */
+function commandOnPath(command: string): Promise<boolean> {
+  if (!/^[\w.+-]+$/u.test(command)) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    execFile("sh", ["-lc", `command -v ${command}`], {
+      encoding: "utf8",
+      timeout: COMMAND_PROBE_TIMEOUT_MS,
+      killSignal: "SIGKILL",
+    }, (error, stdout) => resolve(!error && stdout.trim().length > 0));
+  });
 }
 
 async function readClaudeStatuslineCommand(settingsPath: string): Promise<string | undefined> {

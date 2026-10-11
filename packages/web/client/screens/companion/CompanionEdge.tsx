@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
-import { castSlugForAgent } from "../../components/AgentAvatar.tsx";
+import { castSlugForAgent, type CastScope } from "../../lib/cast-slug.ts";
 import { ScoutMark } from "../../components/ScoutMark.tsx";
 import { SpriteAvatar } from "../../components/SpriteAvatar.tsx";
 import {
@@ -7,8 +7,14 @@ import {
   companionHostAvailable,
   onCompanionAnchors,
   onCompanionFigureDrag,
+  onCompanionLeave,
   onCompanionPointer,
+  FIGURE_HOLDS,
+  focusCompanionInput,
+  pressCodexVoice,
+  reportCompanionLeft,
   reportCompanionHitRegions,
+  SCOUTBOT_FIGURE_ID,
   setCompanionEngaged,
   type CompanionAnchorUpdate,
   type CompanionEdgeAnchor,
@@ -16,13 +22,14 @@ import {
   type CompanionFigure,
   type CompanionFigureDefaults,
   type CompanionFigureDrag,
+  type CompanionFigureHold,
   type CompanionFigureMotion,
   type CompanionFigurePatch,
   type CompanionHitRegion,
+  type CompanionVoiceControl,
 } from "../../lib/companion-host.ts";
-import { CREW_ART, crewAssetUrl, poseAsset, projectHue, type PoseName } from "../../lib/crew-registry.ts";
+import { CREW_ART, crewAssetUrl, hasPose, poseAsset, projectHue, edgePoseArt, type EdgePoseArt, type EdgePoseName, type PoseName } from "../../lib/crew-registry.ts";
 import type { Agent } from "../../lib/types.ts";
-import { useOptionalScout } from "../../scout/Provider.tsx";
 import { pruneKeys } from "./companion-data.ts";
 import { clockLabel, type CompanionCardState } from "./companion-model.ts";
 import {
@@ -50,8 +57,29 @@ import {
   type EdgeVisible,
 } from "./edge-model.ts";
 import { WorkInstrument } from "./WorkInstrument.tsx";
+import { BASE_PLATE, basePlatePath, homeBaseSpan, onBase } from "./home-base.ts";
+import { receiveRequests, refreshRequests } from "../../lib/operator-requests-store.ts";
+import { useOperatorRequests } from "../../lib/use-operator-requests.ts";
+import {
+  ScoutbotCard,
+  ScoutbotFigure,
+  ScoutbotRequest,
+  ScoutbotSettings,
+  previewRequests,
+  readScoutbotPrefs,
+  writeScoutbotPrefs,
+  type ScoutbotPrefs,
+} from "./Scoutbot.tsx";
+import { ScoutbotPanel, useScoutbotSpeech } from "./ScoutbotTalk.tsx";
+import { requestKind } from "../requests/requests-model.ts";
+import type { OperatorAttentionItem } from "../../lib/types.ts";
 import {
   FIGURE_FALL_MS,
+  FIGURE_LAND_MS,
+  figureHold,
+  figurePose,
+  FIGURE_HOLD_LABEL,
+  FIGURE_HOLD_REACH,
   FIGURE_MOTIONS,
   FIGURE_MOTION_LABEL,
   FIGURE_SIZE_PRESETS,
@@ -63,10 +91,13 @@ import {
   figureSlot,
   figureWhere,
   hiddenFigures,
+  type FigureHoldSide,
   isFigureClick,
   placedPopover,
   workPopoverSpot,
 } from "./figure-model.ts";
+import { WindowChase, type ChaseAway } from "./window-chase.ts";
+import { BEAT as CHASE_BEAT, type Variant as ChaseVariant } from "./window-chase-model.ts";
 
 /** One piece of work on the edge: a pin, or work a grant surfaced. */
 export type EdgeWork = {
@@ -86,7 +117,50 @@ export type EdgeWork = {
   /** What the work last said: the reported headline, or what was observed. */
   report: string | null;
   harness: string | null;
+  /** A Codex chat pinned from the ChatGPT app: its thread there (Talk). */
+  codexThreadId?: string | null;
+  /** Codex voice is on in this chat in the ChatGPT app, read from the app
+   *  itself; null for a side the app shows no toggle for. */
+  voice?: EdgeVoice | null;
+  /** Exact words for the state when the grouped label is too coarse ("Ready for review"). */
+  status: string | null;
+  /** The operator dismissed this ask; it rests until something newer happens. */
+  seen: boolean;
 };
+
+/** A thread the hex can bring out onto the desktop, or put away again. */
+export type EdgeThread = Pick<EdgeWork, "workId" | "title" | "state" | "agent" | "ownerName" | "harness" | "lastActivityAt"> & {
+  project: string | null;
+  /** Pinned: its character is out on the desktop. */
+  out: boolean;
+  /** Finished work waiting on the operator's review, not a request. */
+  review?: boolean;
+};
+
+export type EdgeVoice = { micMuted: boolean | null; speakersMuted: boolean | null };
+
+/** A thread's state in the hex list. */
+const THREAD_WORD: Record<EdgeVisible, string> = {
+  working: "Working",
+  resting: "Resting",
+  needs: "Request",
+  done: "Done",
+  disconnected: "Offline",
+};
+
+/** Right-click menu on a figure, at the pointer. */
+type FigureMenu = { x: number; y: number } & ({ kind: "work"; workId: string } | { kind: "scoutbot" });
+
+/** What Scoutbot says when a request arrives or is read aloud. */
+function spokenRequest(item: OperatorAttentionItem): string {
+  const who = item.agentName ?? "An agent";
+  return `${requestKind(item)} from ${who}. ${item.title}`;
+}
+
+/** A figure dropped this close to the hex's center is put away. */
+const PUT_AWAY_REACH = 46;
+/** A press on a thread row that moves this far is a drag out. */
+const THREAD_DRAG_PX = 5;
 
 type Arrival = { kind: "chute" | "visitor"; at: number; until: number };
 type Walk = { target: number; n: number; until: number; facing: "left" | "right" };
@@ -130,6 +204,57 @@ function useViewport(geometry: CompanionEdgeGeometry | null): { width: number; h
     // geometry changes resize the panel; the resize event follows.
   }, [geometry?.width, geometry?.height]);
   return size;
+}
+
+/** Codex voice on in this chat: microphone and speaker side by side, each
+ *  struck through when ChatGPT mutes it. Study: companion-listening (A2). */
+export function VoicePlate({ voice }: { voice: EdgeVoice }) {
+  const closed = voice.micMuted === true && voice.speakersMuted === true;
+  return (
+    <svg className={`ce-plate is-voice${closed ? " is-closed" : ""}`} viewBox="0 0 22 12" aria-hidden="true">
+      <rect className="ce-plate__pill" x="0.5" y="0.5" width="21" height="11" rx="5.5" />
+      <g transform="translate(1 0)">
+        <rect x="4.6" y="2.6" width="2.8" height="4.6" rx="1.4" />
+        <path d="M3.6 5.9a2.4 2.4 0 0 0 4.8 0M6 8.3v1.2" />
+        {voice.micMuted && <path className="is-slash" d="M3.2 9.2 8.8 2.8" />}
+      </g>
+      <g transform="translate(10 0)">
+        <path d="M2.6 4.9h1.5l2-1.6v5.4l-2-1.6H2.6z" />
+        {voice.speakersMuted ? <path className="is-slash" d="M7.3 4.6 9.4 7.4M9.4 4.6 7.3 7.4" /> : <path d="M7.6 4.5a2.2 2.2 0 0 1 0 3" />}
+      </g>
+    </svg>
+  );
+}
+
+/** Each half of the pill presses that side's own toggle in the ChatGPT app.
+ *  Spans, not buttons: the figure itself is the button. */
+function VoiceKeys({ voice, onPress }: { voice: EdgeVoice; onPress: (control: CompanionVoiceControl, muted: boolean) => void }) {
+  const key = (control: CompanionVoiceControl, muted: boolean | null, noun: string) => {
+    if (muted === null) return <span className="ce-vkey is-none" />;
+    const fire = (event: { stopPropagation(): void; preventDefault(): void }) => {
+      event.stopPropagation();
+      event.preventDefault();
+      onPress(control, !muted);
+    };
+    return (
+      <span
+        className="ce-vkey"
+        role="button"
+        tabIndex={-1}
+        aria-label={`${muted ? "Unmute" : "Mute"} ${noun} in ChatGPT`}
+        aria-pressed={muted}
+        // Keep the press from starting a figure drag or opening its card.
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={fire}
+      />
+    );
+  };
+  return (
+    <span className="ce-vkeys">
+      {key("microphone", voice.micMuted, "microphone")}
+      {key("speakers", voice.speakersMuted, "speakers")}
+    </span>
+  );
 }
 
 export function StatePlate({ visible }: { visible: EdgeVisible }) {
@@ -177,8 +302,17 @@ function EdgeCharacter({
   onEdge = false,
   hop = false,
   reduced = false,
+  voice = null,
+  voiceHit,
+  onVoice,
+  contact,
+  settleKey = 0,
+  landing = false,
 }: {
   slug: string | undefined;
+  contact?: { pose: EdgePoseName | "rest"; art: EdgePoseArt; x: number; y: number };
+  settleKey?: number;
+  landing?: boolean;
   name: string;
   state: CompanionCardState | undefined;
   offline: boolean;
@@ -189,15 +323,22 @@ function EdgeCharacter({
   onEdge?: boolean;
   hop?: boolean;
   reduced?: boolean;
+  voice?: EdgeVoice | null;
+  /** The pill's hit-region id; set where the figure takes clicks. */
+  voiceHit?: string;
+  onVoice?: (control: CompanionVoiceControl, muted: boolean) => void;
 }) {
   const visible = edgeVisible(state, offline);
+  // A request still wins the plate seat; offline, nothing is known to be listening.
+  const voicePlate = voice && visible !== "needs" && visible !== "disconnected";
   // Geometry follows the underlying reading, so a dropped link freezes figures where they stood.
   const sunk = onEdge && edgeVisible(state, false) === "resting";
   const art = slug ? CREW_ART[slug] : undefined;
-  const pose: PoseName | "rest" = walking ? (stride ? "run-b" : "run-a") : visible === "done" ? "wave" : "rest";
-  const width = art ? Math.round((size * art.w) / art.h) : size;
+  const pose: PoseName | "rest" = contact ? contact.pose : walking ? (stride ? "run-b" : "run-a") : visible === "done" ? "wave" : "rest";
+  const width = contact ? size * contact.art.w / contact.art.h : art ? Math.round((size * art.w) / art.h) : size;
   const classes = [
     "ce-fig",
+    contact ? "is-contact" : "",
     `is-${visible}`,
     walking && !reduced ? "is-moving" : "",
     reduced ? "is-reduced" : "",
@@ -206,12 +347,21 @@ function EdgeCharacter({
     hop && !reduced ? "is-hop" : "",
   ].filter(Boolean).join(" ");
   return (
-    <span className={classes} data-facing={facing} style={{ "--fig": `${size}px` } as CSSProperties} aria-hidden="true">
+    <span className={classes} data-facing={facing} style={{ "--fig": `${size}px`, ...(contact ? { position: "absolute", left: contact.x, top: contact.y } : {}) } as CSSProperties} aria-hidden="true">
+      <span key={contact ? `${contact.pose}-${settleKey}` : "legacy"} className={`ce-contact-motion${contact && !reduced ? landing ? " is-landing" : contact.pose === "hang-from-top" ? " is-settling-top" : contact.pose.startsWith("cling") ? " is-settling-side" : "" : ""}`} style={contact ? { transformOrigin: `${contact.art.contact[0] * size / contact.art.h}px ${contact.art.contact[1] * size / contact.art.h}px` } : undefined}>
       <span className="ce-fig__body" style={{ width, height: size }}>
         {art && slug
           ? <img className="ce-fig__art" src={crewAssetUrl(poseAsset(slug, pose))} alt="" draggable={false} />
           : <span className="ce-fig__sprite"><SpriteAvatar name={name} size={Math.round(size * 0.86)} /></span>}
-        <span className="ce-fig__plate"><StatePlate visible={visible} /></span>
+        {voicePlate
+          ? (
+            <span className="ce-fig__plate is-voice" data-hit={onVoice ? voiceHit : undefined}>
+              <VoicePlate voice={voice} />
+              {onVoice && <VoiceKeys voice={voice} onPress={onVoice} />}
+            </span>
+          )
+          : <span className="ce-fig__plate"><StatePlate visible={visible} /></span>}
+      </span>
       </span>
     </span>
   );
@@ -228,6 +378,8 @@ function Canopy({ hue }: { hue: number }) {
 
 export type CompanionEdgeProps = {
   works: EdgeWork[];
+  /** Who the operator is and their character picks, for each figure's cast. */
+  cast?: CastScope | null;
   geometry: CompanionEdgeGeometry | null;
   anchor: CompanionEdgeAnchor;
   originPins: boolean;
@@ -243,6 +395,8 @@ export type CompanionEdgeProps = {
   onSelect: (workId: string | null) => void;
   onOpenSurfaced: (target: "work" | "thread", work: EdgeWork) => void;
   onPinSurfaced: (work: EdgeWork) => void;
+  /** Clear a figure's alert until the work reports something newer. */
+  onDismiss: (work: EdgeWork) => void;
   onOpenThread: (conversationId: string, workId: string) => void;
   onOpenPinned: (target: "work" | "thread", work: EdgeWork) => void;
   onUnpin: (workId: string) => void;
@@ -253,25 +407,48 @@ export type CompanionEdgeProps = {
   onFigureNudge: (workId: string, dx: number, dy: number) => void;
   onFigureDefaults: (patch: Partial<CompanionFigureDefaults>) => void;
   onFiguresHome: () => void;
+  /** Scoutbot's figure from the host; null in the browser preview. */
+  scoutbotFigure?: CompanionFigure | null;
+  /** The hex's Threads list; null until the first read. */
+  threads?: EdgeThread[] | null;
+  /** Pin a thread. `dragging`: the press is still held, so the host carries it. */
+  onBringOut?: (workId: string, dragging: boolean) => void;
 };
 
 /**
- * The hex dock plate a held figure rests against: 1px, centred on the edge
- * line, on the figure's edge side. Drawn inside the figure's button so it
- * moves with it; it takes no pointer.
+ * What a held figure holds on by, drawn inside its slot so it moves with it
+ * and takes no pointer. Glass: a 1px rim over a faint fill.
+ *   latch — a slim capsule across the edge line, FIGURE_HOLD_REACH off the slot.
+ *   iso   — an isometric platform under the feet; on a side a faint
+ *           projection runs from the edge to it.
+ * `slot` and `size` place the platform under the body (see figureBox).
  */
-function HexPlate({ side }: { side: "top" | "left" | "right" }) {
-  // Flat side toward the figure: flat-topped under an edge, pointy-topped on a side.
-  return side === "top" ? (
-    <svg className="ce-hex is-top" width="14" height="12" viewBox="0 0 14 12" aria-hidden="true">
-      <path d="M3.75 0.5h6.5L13.5 6l-3.25 5.5h-6.5L0.5 6z" />
-      <circle cx="7" cy="6" r="1.4" />
-    </svg>
-  ) : (
-    <svg className={`ce-hex is-${side}`} width="12" height="14" viewBox="0 0 12 14" aria-hidden="true">
-      <path d="M6 0.5l5.5 3.25v6.5L6 13.5 0.5 10.25v-6.5z" />
-      <circle cx="6" cy="7" r="1.4" />
-    </svg>
+function HoldMark({ side, hold, slot, size }: {
+  side: FigureHoldSide;
+  hold: CompanionFigureHold;
+  slot: { width: number; height: number };
+  size: number;
+}) {
+  const gap = FIGURE_HOLD_REACH;
+  if (hold === "latch") {
+    return side === "top"
+      ? <span className="ce-latch is-h" style={{ left: "calc(50% - 9px)", top: -gap - 3 }} />
+      : <span className="ce-latch is-v" style={{ top: "calc(50% - 9px)", [side]: -gap } as CSSProperties} />;
+  }
+  // The body's feet in slot coordinates: under an edge it hangs from the slot
+  // top; on a side it stands at the slot bottom (edge.css .is-hold-*).
+  const feet = side === "top" ? size : slot.height;
+  const width = size + 8;
+  const left = side === "top" ? (slot.width - width) / 2 : side === "left" ? -4 : slot.width - size - 4;
+  return (
+    <>
+      {side !== "top" ? <span className={`ce-iso-beam is-${side}`} style={{ top: feet - 8, [side]: -gap, width: gap + 4 } as CSSProperties} /> : null}
+      <svg className="ce-iso" style={{ left, top: feet - 11, width }} viewBox="0 0 40 16" preserveAspectRatio="none" aria-hidden="true">
+        <ellipse className="ce-iso__glow" cx="20" cy="12" rx="17" ry="3.2" />
+        <path className="ce-iso__rim" d="M2 7v2l9 5h18l9-5V7l-9 5H11z" />
+        <path className="ce-iso__top" d="M2 7 11 2h18l9 5-9 5H11z" />
+      </svg>
+    </>
   );
 }
 
@@ -290,17 +467,21 @@ export function CompanionEdge({
   onSelect,
   onOpenSurfaced,
   onPinSurfaced,
+  onDismiss,
   onOpenThread,
   onOpenPinned,
-  onUnpin,
+  onUnpin: unpinWork,
   figures,
   figureDefaults,
-  onFigure,
+  onFigure: changeFigure,
   onFigureNudge,
   onFigureDefaults,
-  onFiguresHome,
+  onFiguresHome: sendFiguresHome,
+  scoutbotFigure = null,
+  threads = null,
+  onBringOut,
+  cast = null,
 }: CompanionEdgeProps) {
-  const scout = useOptionalScout();
   const hosted = companionHostAvailable();
   const reduced = usePrefersReducedMotion();
   // The panel covers the whole display; the home row lives in the band by the
@@ -317,6 +498,7 @@ export function CompanionEdge({
   // Keyed by content: the parent rebuilds the array on every render.
   const pushedAnchors = JSON.stringify(figures.map((figure) => [figure.workId, figure.placement, figure.anchor, figure.label]));
   useEffect(() => { setLiveAnchors(new Map()); }, [pushedAnchors]);
+  const [settles, setSettles] = useState<Map<string, number>>(new Map());
   const [falling, setFalling] = useState<Map<string, { until: number }>>(new Map());
   const [drag, setDrag] = useState<Extract<CompanionFigureDrag, { workId: string }> | null>(null);
   const press = useRef<{ id: string; x: number; y: number } | null>(null);
@@ -331,10 +513,106 @@ export function CompanionEdge({
   const motionOf = (workId: string): CompanionFigureMotion => figureMotion(figureById.get(workId), figureDefaults, reduced);
   const sizeOf = (workId: string): number => figureSize(figureById.get(workId), figureDefaults);
 
+  // When the window moves (window-chase.ts): a placed figure is left hanging
+  // where its perch was, then scurries back once the window settles; a window
+  // that closes gets the Coyote fall; every put-away is a scurry. The
+  // controller writes transforms per frame; React only learns who is mid-chase,
+  // so those figures leave the hit regions meanwhile.
+  const ghostsRef = useRef<HTMLDivElement | null>(null);
+  const [chasing, setChasing] = useState<ReadonlySet<string>>(() => new Set());
+  const chaseRead = useRef<{
+    variantOf: (workId: string) => ChaseVariant;
+    screen: { width: number; height: number };
+    hex: { x: number; y: number };
+    skip: (workId: string) => boolean;
+  }>({ variantOf: () => "scurry", screen, hex: { x: 0, y: 0 }, skip: () => false });
+  chaseRead.current.variantOf = (workId) => {
+    if (reduced) return "reduced";
+    const motion = motionOf(workId);
+    return motion === "full" ? "scurry" : motion === "calm" ? "float" : "reduced";
+  };
+  chaseRead.current.screen = screen;
+  const chaseRef = useRef<WindowChase | null>(null);
+  if (!chaseRef.current) {
+    chaseRef.current = new WindowChase({
+      root: () => rootRef.current,
+      ghosts: () => ghostsRef.current,
+      variantOf: (workId) => chaseRead.current.variantOf(workId),
+      screen: () => chaseRead.current.screen,
+      hex: () => chaseRead.current.hex,
+      skip: (workId) => chaseRead.current.skip(workId),
+      onChasing: setChasing,
+    });
+  }
+  const chase = chaseRef.current;
+  useEffect(() => () => chase.dispose(), [chase]);
+  useEffect(() => { if (!visible) chase.dispose(); }, [visible, chase]);
+  // Put away, from wherever it is asked: the figure scurries off first.
+  const onFigure = (workId: string, patch: CompanionFigurePatch) => {
+    if (patch.home === true) chase.away(workId, "home");
+    else if (patch.hidden === true) chase.away(workId, "hidden");
+    changeFigure(workId, patch);
+  };
+  const onUnpin = (workId: string) => {
+    chase.away(workId, "unpin");
+    unpinWork(workId);
+  };
+  const onFiguresHome = () => {
+    let index = 0;
+    for (const el of rootRef.current?.querySelectorAll<HTMLElement>("[data-placed]") ?? []) {
+      if (chase.away(el.dataset.placed!, "home", index * CHASE_BEAT.STAGGER_MS)) index += 1;
+    }
+    sendFiguresHome();
+  };
+  useEffect(() => onCompanionLeave((ms) => chase.leave(ms, reportCompanionLeft)), [chase]);
+
   // Popover state: only a click opens a figure's popover. Passing the
   // pointer over the crew on the way to the Dock or menubar opens nothing.
   const [kept, setKept] = useState<string | null>(null);
-  const [panel, setPanel] = useState<"settings" | "overflow" | `pin:${string}` | null>(null);
+  const [panel, setPanel] = useState<"settings" | "overflow" | "scoutbot" | `pin:${string}` | null>(null);
+  const [hexTab, setHexTab] = useState<"threads" | "settings">("threads");
+  const [menu, setMenu] = useState<FigureMenu | null>(null);
+  const [threadQuery, setThreadQuery] = useState("");
+  const threadPress = useRef<{ id: string; x: number; y: number; out: boolean; sent: boolean } | null>(null);
+
+  // Scoutbot: the one front door for requests, and the hex tool's size.
+  const [bot, setBot] = useState<ScoutbotPrefs>(readScoutbotPrefs);
+  const updateBot = useCallback((patch: Partial<ScoutbotPrefs>) => {
+    setBot((prev) => {
+      const next = { ...prev, ...patch };
+      writeScoutbotPrefs(next);
+      return next;
+    });
+  }, []);
+  const requests = useOperatorRequests();
+  const requestItems = requests.state?.items ?? [];
+  const speech = useScoutbotSpeech();
+  // With voice on, a request that arrives while the panel watches is spoken
+  // once. The first read only seeds what was already waiting.
+  const heardRequests = useRef<Set<string> | null>(null);
+  const requestKey = requestItems.map((item) => item.id).join(",");
+  useEffect(() => {
+    if (!requests.state) return;
+    const ids = new Set(requestItems.map((item) => item.id));
+    const before = heardRequests.current;
+    heardRequests.current = ids;
+    if (!before || !bot.voice || !visible) return;
+    const fresh = requestItems.filter((item) => !before.has(item.id));
+    if (fresh.length === 1) speech.speak(spokenRequest(fresh[0]!));
+    else if (fresh.length > 1) speech.speak(`${fresh.length} new requests. ${spokenRequest(fresh[fresh.length - 1]!)}`);
+    // requestItems is read through requestKey.
+  }, [requestKey, requests.state, bot.voice, visible, speech.speak]);
+  // The panel is never the key window, so the shared poll (focus-gated) would
+  // stop; Scoutbot watches while it is on screen.
+  useEffect(() => {
+    if (!visible) return;
+    const sample = hosted ? null : previewRequests();
+    if (sample) { receiveRequests(sample); return; }
+    void refreshRequests();
+    const timer = setInterval(() => { void refreshRequests(); }, 15_000);
+    return () => clearInterval(timer);
+  }, [visible, hosted]);
+
   const stepCount = useRef(new Map<string, number>());
 
   const [arrivals, setArrivals] = useState<Map<string, Arrival>>(new Map());
@@ -436,9 +714,10 @@ export function CompanionEdge({
   }, [walking]);
 
   // Placement.
+  const homeSlot = Math.max(EDGE_HOME_SLOT, bot.hex + 4);
   const homeSpan = anchor === "left"
-    ? { start: EDGE_MARGIN, end: EDGE_MARGIN + EDGE_HOME_SLOT }
-    : { start: width - EDGE_MARGIN - EDGE_HOME_SLOT, end: width - EDGE_MARGIN };
+    ? { start: EDGE_MARGIN, end: EDGE_MARGIN + homeSlot }
+    : { start: width - EDGE_MARGIN - homeSlot, end: width - EDGE_MARGIN };
   const homeX = (homeSpan.start + homeSpan.end) / 2;
   const obstacles = geometry?.obstacles ?? [];
   const free = useMemo(
@@ -482,27 +761,57 @@ export function CompanionEdge({
   useExpiry(falling, setFalling);
   // The host tracks a figure drag; the page draws the figure at the pointer
   // and the guide for the held modifier.
+  const lastDrag = useRef<{ x: number; y: number } | null>(null);
+  const hexCenter = { x: band.x + homeX, y: band.y + height - 2 - BASE_PLATE - bot.hex / 2 };
+  const hexCenterRef = useRef(hexCenter);
+  hexCenterRef.current = hexCenter;
+  chaseRead.current.hex = hexCenter;
+  chaseRead.current.skip = (workId) => drag?.workId === workId || kept === workId;
+  const putAway = useRef({ onUnpin, onFigure });
+  putAway.current = { onUnpin, onFigure };
   useEffect(() => onCompanionFigureDrag((event) => {
     if (event.workId === null) {
       setDrag(null);
+      if (event.dropped) setSettles(prev => new Map(prev).set(event.dropped!, (prev.get(event.dropped!) ?? 0) + 1));
+      // Dropped on the hex: the character goes back in (Scoutbot goes home).
+      const at = lastDrag.current;
+      lastDrag.current = null;
+      if (!event.dropped || !at) return;
+      const hex = hexCenterRef.current;
+      if (Math.hypot(at.x - hex.x, at.y - hex.y) > PUT_AWAY_REACH) return;
+      if (event.dropped === SCOUTBOT_FIGURE_ID) putAway.current.onFigure(SCOUTBOT_FIGURE_ID, { home: true });
+      else putAway.current.onUnpin(event.dropped);
       return;
     }
+    lastDrag.current = { x: event.x, y: event.y };
+    setMenu(null);
     setDrag(event);
     setKept(null);
     setPanel(null);
   }), []);
   useEffect(() => onCompanionAnchors((update) => {
+    // The chase reads the update first, so the figures it takes are marked
+    // mid-chase in the same render that moves their anchors.
+    const chased = chase.anchors(update);
     setLiveAnchors(update.anchors);
-    if (!update.falling.length || reduced) return;
-    const until = Date.now() + FIGURE_FALL_MS;
-    setFalling((prev) => new Map([...prev, ...update.falling.map((id) => [id, { until }] as const)]));
-  }), [reduced]);
+    const fall = update.falling.filter((id) => !chased.has(id));
+    if (!fall.length || reduced) return;
+    const until = Date.now() + FIGURE_FALL_MS + FIGURE_LAND_MS;
+    setFalling((prev) => new Map([...prev, ...fall.map((id) => [id, { until }] as const)]));
+  }), [reduced, chase]);
 
   type Slot = { kind: "work"; key: string; work: EdgeWork; x: number } | { kind: "stack"; key: "stack"; ids: string[]; x: number };
   const slots: Slot[] = rowWorks.filter((work) => pos.has(work.workId))
     .map((work): Slot => ({ kind: "work", key: work.workId, work, x: pos.get(work.workId)! }));
   if (overflow.length && stackAt !== null) slots.push({ kind: "stack", key: "stack", ids: overflow, x: stackAt });
   slots.sort((a, b) => a.x - b.x);
+  // Home base: the crew next to the hex gathers on it.
+  const base = homeBaseSpan({
+    anchor,
+    home: homeSpan,
+    slots: slots.map((slot) => ({ x: slot.x, w: slot.kind === "work" ? figureSlot(sizeOf(slot.work.workId)).width : EDGE_SLOT })),
+    width,
+  });
 
   const open = kept;
   const openWork = open ? byId.get(open) ?? null : null;
@@ -525,37 +834,65 @@ export function CompanionEdge({
   // The host reports a click elsewhere on the desktop: close what was open.
   useEffect(() => onCompanionPointer(({ outside }) => {
     if (!outside) return;
+    setMenu(null);
     setKept(null);
     setPanel(null);
   }), []);
 
   useEffect(() => {
     if (!hosted) return;
-    setCompanionEngaged(Boolean(kept || panel));
-  }, [hosted, kept, panel]);
+    setCompanionEngaged(Boolean(kept || panel || menu));
+  }, [hosted, kept, panel, menu]);
+
+  // The selected figure: a placed one whose card is kept, or a placed
+  // Scoutbot whose panel is open. Arrow keys move it.
+  const scoutbotPlaced = Boolean(scoutbotFigure && scoutbotFigure.placement.kind !== "home");
+  const steerable = kept && figureWhere(figureById.get(kept)) === "placed"
+    ? kept
+    : panel === "scoutbot" && scoutbotPlaced ? SCOUTBOT_FIGURE_ID : null;
+  // The panel only takes keys when asked; selecting a figure asks, so the
+  // arrows reach it instead of the app underneath.
+  useEffect(() => {
+    if (hosted && steerable) focusCompanionInput();
+  }, [hosted, steerable]);
+  // The hint shows only while the keys really land here: once another app
+  // takes the keyboard back, the figure no longer reads as selected.
+  const [keysHere, setKeysHere] = useState(() => typeof document !== "undefined" && document.hasFocus());
+  useEffect(() => {
+    const on = () => setKeysHere(true);
+    const off = () => setKeysHere(false);
+    window.addEventListener("focus", on);
+    window.addEventListener("blur", off);
+    return () => {
+      window.removeEventListener("focus", on);
+      window.removeEventListener("blur", off);
+    };
+  }, []);
+  const steering = keysHere ? steerable : null;
 
   useEffect(() => {
     const onKey = (event: globalThis.KeyboardEvent) => {
       const nudge = figureNudge(event.key, event.shiftKey);
       if (nudge) {
-        // Arrows move the focused placed figure, or the one whose popover is kept.
+        // Arrows move the focused placed figure, or the selected one.
         const target = event.target as HTMLElement | null;
         if (target?.closest("input, select, textarea")) return;
         const focused = target?.closest<HTMLElement>("[data-placed]")?.dataset.placed ?? null;
-        const id = focused ?? (kept && figureWhere(figureById.get(kept)) === "placed" ? kept : null);
+        const id = focused ?? steerable;
         if (!id) return;
         event.preventDefault();
         onFigureNudge(id, nudge.dx, nudge.dy);
         return;
       }
       if (event.key !== "Escape") return;
+      setMenu(null);
       if (kept) rootRef.current?.querySelector<HTMLElement>(`[data-slot="${CSS.escape(kept)}"]`)?.focus();
       setKept(null);
       setPanel(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [kept, figureById, onFigureNudge]);
+  }, [kept, steerable, onFigureNudge]);
 
   // Report what takes the pointer. Everything else passes through to the desktop.
   const lastRegions = useRef("");
@@ -584,7 +921,7 @@ export function CompanionEdge({
     // The popover grows from inside (Reply, the gear) without a parent
     // render; its new controls must take the pointer as soon as they show.
     const resize = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => reportRegions());
-    const watch = () => root.querySelectorAll<HTMLElement>("[data-hit=\"popover\"]").forEach((el) => resize?.observe(el));
+    const watch = () => root.querySelectorAll<HTMLElement>("[data-hit^=\"popover\"]").forEach((el) => resize?.observe(el));
     watch();
     const added = new MutationObserver(watch);
     added.observe(root, { childList: true, subtree: true });
@@ -596,11 +933,11 @@ export function CompanionEdge({
     };
   }, [reportRegions]);
 
-  const castOf = (work: EdgeWork) => castSlugForAgent(scout, {
+  const castOf = (work: Pick<EdgeWork, "agent" | "ownerName">) => castSlugForAgent(cast, {
     agent: work.agent ? { id: work.agent.id, name: work.agent.name, slug: (work.agent as { slug?: string | null }).slug ?? undefined } : undefined,
     name: work.agent?.name ?? work.ownerName ?? undefined,
   }).castSlug;
-  const nameOf = (work: EdgeWork) => work.agent?.name ?? work.ownerName ?? "Unassigned";
+  const nameOf = (work: Pick<EdgeWork, "agent" | "ownerName">) => work.agent?.name ?? work.ownerName ?? "Unassigned";
 
   // A press on a pinned figure hands the drag to the host; a press that the
   // host tracked as a drag is not also a click.
@@ -609,8 +946,24 @@ export function CompanionEdge({
     press.current = { id: work.workId, x: event.clientX, y: event.clientY };
     if (hosted) beginFigureDrag(work.workId);
   };
+  // The pill's halves press the chat's own mic and speaker toggles.
+  const voiceHandler = (work: EdgeWork) => {
+    const thread = work.codexThreadId;
+    if (!hosted || !thread || !work.voice) return undefined;
+    return (control: CompanionVoiceControl, muted: boolean) => {
+      void pressCodexVoice(control, { muted, threadIds: [thread] }).catch(() => {});
+    };
+  };
   const wasDragged = (event: MouseEvent<HTMLElement>, id: string) =>
     event.detail !== 0 && press.current?.id === id && !isFigureClick(press.current, { x: event.clientX, y: event.clientY });
+
+  // Right-click any figure for its quick actions.
+  const openMenu = (event: MouseEvent<HTMLElement>, target: { kind: "work"; workId: string } | { kind: "scoutbot" }) => {
+    event.preventDefault();
+    setKept(null);
+    setPanel(null);
+    setMenu({ ...target, x: event.clientX, y: event.clientY });
+  };
 
   const onCrewKey = (event: KeyboardEvent<HTMLElement>, index: number) => {
     if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
@@ -627,7 +980,7 @@ export function CompanionEdge({
     "Scout companion",
     `${works.length - hidden.length} on screen`,
     hidden.length ? `${hidden.length} hidden` : "",
-    counts.needs ? `${counts.needs} ${counts.needs === 1 ? "needs" : "need"} you` : "",
+    requestItems.length ? `${requestItems.length} ${requestItems.length === 1 ? "request" : "requests"}` : "",
     offline ? `offline, synced ${lastSync ? clockLabel(lastSync) : "never"}` : "",
   ].filter(Boolean).join(" · ");
 
@@ -644,6 +997,7 @@ export function CompanionEdge({
         : null}
       onWork={() => (work.kind === "pinned" ? onOpenPinned("work", work) : onOpenSurfaced("work", work))}
       onPin={work.kind === "surfaced" && hosted ? () => onPinSurfaced(work) : null}
+      onDismiss={edgeVisible(work.state, false) === "needs" ? () => onDismiss(work) : null}
       // Replying keeps the popover open, as a click on it would.
       onComposing={(composing) => { if (composing) setKept(work.workId); }}
     />
@@ -676,6 +1030,12 @@ export function CompanionEdge({
               <button key={option} type="button" role="radio" aria-checked={motion === option} onClick={() => onFigure(work.workId, { motion: option })}>{FIGURE_MOTION_LABEL[option]}</button>
             ))}
           </span>
+        </span>
+        <span className="ce-in__cell"><i>Hold</i>
+          <select aria-label="This figure's hold" value={figure.hold ?? "default"} onChange={event => onFigure(work.workId, { hold: event.target.value as CompanionFigureHold | "default" })}>
+            <option value="default">Default</option>{FIGURE_HOLDS.map(hold => <option key={hold} value={hold}>{FIGURE_HOLD_LABEL[hold]}</option>)}
+          </select>
+          {figure.placement.kind === "window" && figure.placement.side === "top" && <select aria-label="Window top pose" value={figure.windowTop ?? "sit"} onChange={event => onFigure(work.workId, { windowTop: event.target.value as "hang" | "sit" })}><option value="sit">Sit above</option><option value="hang">Hang underneath</option></select>}
         </span>
         <span className="ce-in__cell ce-in__cell--acts"><i title={figure.label}>Place</i>
           <span>
@@ -710,6 +1070,16 @@ export function CompanionEdge({
           ))}
         </div>
         <p className="co-hint">Full walks and parachutes in; Calm only hops when work needs you; Still never moves.{reduced ? " Reduce Motion is on, so every figure holds still." : ""}</p>
+      </div>
+      <div className="co-field">
+        <span className="co-sheet-h" id="ce-default-hold">Hold</span>
+        <div className="co-seg" role="radiogroup" aria-labelledby="ce-default-hold">
+          {FIGURE_HOLDS.map((hold) => (
+            <button key={hold} type="button" role="radio" aria-checked={figureDefaults.hold === hold} className="co-seg-btn"
+              onClick={() => onFigureDefaults({ hold })}>{FIGURE_HOLD_LABEL[hold]}</button>
+          ))}
+        </div>
+        <p className="co-hint">Edge uses real hands and seated poses. Platform and Latch preserve the original upright holds. Missing edge art falls back to Platform.</p>
       </div>
       <div className="co-field">
         <span className="co-sheet-h">Figures</span>
@@ -772,10 +1142,115 @@ export function CompanionEdge({
     </>
   );
 
+  // Threads: drag one out onto the desktop, double-click to bring it out
+  // beside the hex, Put away (or drop its character on the hex) to unpin.
+  const outCount = threads?.filter((thread) => thread.out).length ?? works.filter((work) => work.kind === "pinned").length;
+  const bringOut = (thread: EdgeThread, dragging: boolean) => {
+    if (thread.out) {
+      if (dragging && hosted) beginFigureDrag(thread.workId);
+      return;
+    }
+    onBringOut?.(thread.workId, dragging);
+  };
+  const onThreadPointerDown = (event: PointerEvent<HTMLElement>, thread: EdgeThread) => {
+    if (event.button !== 0 || (event.target as HTMLElement).closest("button, input")) return;
+    threadPress.current = { id: thread.workId, x: event.clientX, y: event.clientY, out: thread.out, sent: false };
+  };
+  const onThreadPointerMove = (event: PointerEvent<HTMLElement>, thread: EdgeThread) => {
+    const pressed = threadPress.current;
+    if (!pressed || pressed.sent || pressed.id !== thread.workId || !(event.buttons & 1)) return;
+    if (Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) < THREAD_DRAG_PX) return;
+    pressed.sent = true;
+    bringOut(thread, true);
+  };
+  const renderThreads = () => {
+    if (threads === null) return <p className="ce-pop__why">Reading threads&hellip;</p>;
+    const query = threadQuery.trim().toLowerCase();
+    const shown = query
+      ? threads.filter((thread) => [thread.title, nameOf(thread), thread.project ?? "", thread.harness ?? ""].some((text) => text.toLowerCase().includes(query)))
+      : threads;
+    const groups = new Map<string, EdgeThread[]>();
+    for (const thread of shown) {
+      const key = thread.project ?? "Other";
+      groups.set(key, [...(groups.get(key) ?? []), thread]);
+    }
+    return (
+      <>
+        <input
+          className="ce-find"
+          type="search"
+          placeholder="Find a thread"
+          aria-label="Find a thread"
+          value={threadQuery}
+          onChange={(event) => setThreadQuery(event.target.value)}
+        />
+        {shown.length === 0 && <p className="ce-pop__why">{query ? "No thread matches." : "No active threads."}</p>}
+        {[...groups].map(([project, rows]) => (
+          <section key={project} className="ce-threads" aria-label={project}>
+            <h3 className="ce-threads__h">{project}</h3>
+            <ul className="ce-list">
+              {rows.map((thread) => {
+                const reading = edgeVisible(thread.state, offline);
+                const word = thread.review && reading === "needs" ? "Review" : THREAD_WORD[reading];
+                return (
+                  <li key={thread.workId}>
+                    <div
+                      className={`ce-thread${thread.out ? " is-out" : ""}`}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`${thread.title}. ${word}.${thread.out ? " Out on the desktop." : " Enter or double-click to bring out."}`}
+                      onPointerDown={(event) => onThreadPointerDown(event, thread)}
+                      onPointerMove={(event) => onThreadPointerMove(event, thread)}
+                      onPointerUp={() => { threadPress.current = null; }}
+                      onDoubleClick={() => bringOut(thread, false)}
+                      onKeyDown={(event) => {
+                        if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return;
+                        event.preventDefault();
+                        bringOut(thread, false);
+                      }}
+                    >
+                      <EdgeCharacter slug={castOf(thread)} name={nameOf(thread)} state={thread.state} offline={offline} size={18} reduced />
+                      <span className="ce-list__t">
+                        <b>{thread.title}</b>
+                        <small>{[nameOf(thread), thread.harness].filter(Boolean).join(" · ")}</small>
+                      </span>
+                      {thread.out
+                        ? <button type="button" className="ce-thread__away" onClick={() => onUnpin(thread.workId)}>Put away</button>
+                        : <span className={`ce-thread__word is-${thread.review ? "review" : reading}`}>{word}</span>}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ))}
+        <p className="ce-pop__hint">Drag a thread onto the desktop, or double-click to bring it out beside the hex. Drop a character on the hex to put it away.</p>
+      </>
+    );
+  };
+
   // What the popover shows, if anything: a clicked figure, "+N", a pin, or settings.
   let popover: { x: number; body: ReactNode; label: string } | null = null;
   if (panel === "settings") {
-    popover = { x: homeX, label: "Companion settings", body: <>{renderSettings()}{renderFigureSettings()}</> };
+    popover = {
+      x: homeX,
+      label: hexTab === "threads" ? "Threads" : "Companion settings",
+      body: (
+        <>
+          <div className="ce-tabs" role="tablist" aria-label="Scout companion">
+            {(["threads", "settings"] as const).map((tab) => (
+              <button key={tab} type="button" role="tab" aria-selected={hexTab === tab} className="ce-tab" onClick={() => setHexTab(tab)}>
+                {tab === "threads" ? "Threads" : "Settings"}
+              </button>
+            ))}
+            <span className="ce-tabs__count">{outCount} out</span>
+          </div>
+          {hexTab === "threads"
+            ? renderThreads()
+            : <><ScoutbotSettings prefs={bot} onChange={updateBot} placed={Boolean(scoutbotFigure && scoutbotFigure.placement.kind !== "home")} onHome={() => onFigure(SCOUTBOT_FIGURE_ID, { home: true })} />{renderSettings()}{renderFigureSettings()}</>}
+        </>
+      ),
+    };
   } else if (panel?.startsWith("pin:")) {
     const index = groups.findIndex((group) => `pin:${group.conversationId}` === panel);
     const group = groups[index];
@@ -809,7 +1284,7 @@ export function CompanionEdge({
   const popMaxHeight = Math.max(120, height - EDGE_SLOT_HEIGHT - 40);
   // A placed figure's popover opens beside the figure, anywhere on the display.
   const placedPop = popover && !panel && openSpot?.placed && openWork
-    ? placedPopover(openSpot.placed, sizeOf(openWork.workId), Math.min(POP_WIDTH, screen.width - 24), screen)
+    ? placedPopover(openSpot.placed, sizeOf(openWork.workId), Math.min(POP_WIDTH, screen.width - 24), screen, figureHold(figureById.get(openWork.workId), figureDefaults, castOf(openWork)), 12, edgePoseArt(castOf(openWork), figurePose(openSpot.placed, figureById.get(openWork.workId))))
     : null;
   const renderPopover = () => popover && (
     <div
@@ -831,12 +1306,148 @@ export function CompanionEdge({
     </div>
   );
 
+  const renderMenu = () => {
+    if (!menu) return null;
+    const items: { label: string; run: () => void; quiet?: boolean }[] = [];
+    if (menu.kind === "scoutbot") {
+      const placedBot = Boolean(scoutbotFigure && scoutbotFigure.placement.kind !== "home");
+      items.push({ label: "Talk", run: () => setPanel("scoutbot") });
+      items.push({ label: bot.voice ? "Turn voice off" : "Turn voice on", run: () => { if (bot.voice) speech.stop(); updateBot({ voice: !bot.voice }); } });
+      if (speech.speaking) items.push({ label: "Stop speaking", run: speech.stop });
+      else if (requestItems.length) items.push({ label: "Read the newest request", run: () => speech.speak(spokenRequest(requestItems[requestItems.length - 1]!)) });
+      if (placedBot) items.push({ label: "Back beside the hex", run: () => onFigure(SCOUTBOT_FIGURE_ID, { home: true }) });
+    } else {
+      const work = byId.get(menu.workId);
+      if (!work) return null;
+      const pinned = work.kind === "pinned";
+      if (work.conversationId) {
+        items.push({ label: "Open conversation", run: () => (pinned ? onOpenPinned("thread", work) : onOpenSurfaced("thread", work)) });
+      }
+      if (!pinned && hosted) items.push({ label: "Bring out", run: () => onPinSurfaced(work) });
+      if (edgeVisible(work.state, false) === "needs" && !work.seen) items.push({ label: "Dismiss alert", run: () => onDismiss(work) });
+      if (pinned) items.push({ label: "Put away", run: () => onUnpin(work.workId) });
+    }
+    if (!items.length) return null;
+    const width = 188;
+    const left = Math.min(menu.x, screen.width - width - 8);
+    const top = Math.min(menu.y, screen.height - items.length * 28 - 16);
+    const title = menu.kind === "scoutbot" ? bot.name : byId.get(menu.workId)?.title ?? "";
+    return (
+      <div className="ce-menu" role="menu" aria-label={title} data-hit="figure-menu" style={{ left, top, width }}>
+        <p className="ce-menu__title">{title}</p>
+        {items.map((item) => (
+          <button
+            key={item.label}
+            type="button"
+            role="menuitem"
+            className="ce-menu__item"
+            onClick={() => { setMenu(null); item.run(); }}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+    );
+  };
+
+  // Scoutbot is a figure the host places like any other (drag, ⌥ to the
+  // nearest edge or window, ⇧ to the floor); at home it stands above the hex.
+  const liveBot = liveAnchors.get(SCOUTBOT_FIGURE_ID);
+  const botFigure = scoutbotFigure && liveBot && scoutbotFigure.placement.kind !== "home"
+    ? { ...scoutbotFigure, anchor: liveBot.anchor, label: liveBot.label ?? scoutbotFigure.label }
+    : scoutbotFigure;
+  const botDragging = drag?.workId === SCOUTBOT_FIGURE_ID;
+  const botMood = requestItems.length ? "ask" : "rest";
+  const renderScoutbot = () => {
+    const size = bot.size;
+    const box = figureSlot(size);
+    const at = botDragging
+      ? { x: drag.x, y: drag.y, down: null, covered: false, away: false }
+      : botFigure && botFigure.placement.kind !== "home" ? botFigure.anchor : null;
+    // Placed but its window is on another Space: it waits there, out of view.
+    if (at?.away) return null;
+    const placed = Boolean(at);
+    const held = at
+      ? figureBox(at, size, screen, figureHold(botFigure ?? undefined, figureDefaults))
+      : { left: band.x + homeX - box.width / 2, top: band.y + height - BASE_PLATE - bot.hex - 10 - box.height };
+    const hold = at && figureHasPlate(at.down) && !botDragging ? at.down : null;
+    const botChasing = placed && chasing.has(SCOUTBOT_FIGURE_ID);
+    const centerX = held.left + box.width / 2;
+    const roomRight = centerX < screen.width / 2;
+    const botPanel = panel === "scoutbot";
+    const popWide = Math.min(POP_WIDTH, screen.width - 24);
+    const popLeft = Math.min(screen.width - popWide - 12, Math.max(12, roomRight ? held.left + box.width + 8 : held.left - 8 - popWide));
+    const below = held.top < screen.height / 2;
+    const popStyle: CSSProperties = below
+      ? { left: popLeft, top: held.top, width: popWide, maxHeight: screen.height - held.top - 16 }
+      : { left: popLeft, bottom: screen.height - (held.top + box.height), width: popWide, maxHeight: held.top + box.height - 16 };
+    const newest = requestItems[requestItems.length - 1];
+    const cardStyle: CSSProperties = roomRight
+      ? { left: held.left + box.width + 6, top: held.top }
+      : { right: screen.width - held.left + 6, top: held.top };
+    const now = Date.now();
+    return (
+      <>
+        <button
+          type="button"
+          className={`ce-placed sbt-home${hold ? ` is-hold-${hold} is-${figureHold(botFigure ?? undefined, figureDefaults)}` : ""}${botPanel ? " is-open" : ""}${steering === SCOUTBOT_FIGURE_ID ? " is-selected" : ""}${at?.covered ? " is-covered" : ""}${botDragging ? " is-dragging" : ""}${falling.has(SCOUTBOT_FIGURE_ID) && !botDragging ? " is-falling" : ""}${botChasing ? " is-chasing" : ""}`}
+          data-slot={SCOUTBOT_FIGURE_ID}
+          data-placed={placed ? SCOUTBOT_FIGURE_ID : undefined}
+          data-ax={at ? at.x : undefined}
+          data-ay={at ? at.y : undefined}
+          // A ghosted Scoutbot is behind a window: clicks there belong to that window.
+          data-hit={at?.covered || botDragging || botChasing ? undefined : "scoutbot"}
+          style={{ left: held.left, top: held.top, width: box.width, height: box.height, transformOrigin: at ? `${at.x - held.left}px ${at.y - held.top}px` : undefined }}
+          aria-label={`${bot.name}${requestItems.length ? `, ${requestItems.length} ${requestItems.length === 1 ? "request" : "requests"}` : ", no open requests"}. ${botFigure?.label ?? ""}`}
+          aria-expanded={botPanel}
+          title={placed ? `${botFigure?.label ?? bot.name} · Drag to move; hold \u2325 to stick to an edge or window, \u21E7 to drop to the floor.` : undefined}
+          onPointerDown={(event) => {
+            if (event.button !== 0) return;
+            press.current = { id: SCOUTBOT_FIGURE_ID, x: event.clientX, y: event.clientY };
+            if (hosted) beginFigureDrag(SCOUTBOT_FIGURE_ID);
+          }}
+          onContextMenu={(event) => openMenu(event, { kind: "scoutbot" })}
+          onClick={(event) => {
+            if (wasDragged(event, SCOUTBOT_FIGURE_ID)) return;
+            setKept(null);
+            setPanel((current) => (current === "scoutbot" ? null : "scoutbot"));
+          }}
+        >
+          {hold ? <HoldMark side={hold} hold={figureHold(botFigure ?? undefined, figureDefaults)} slot={box} size={size} /> : null}
+          <ScoutbotFigure look={bot.look} mood={botMood} size={size} />
+        </button>
+        {newest && !botPanel && !botDragging && !at?.covered ? (
+          <ScoutbotCard item={newest} more={requestItems.length - 1} side={roomRight ? "right" : "left"} style={cardStyle}
+            onOpen={() => { setKept(null); setPanel("scoutbot"); }} />
+        ) : null}
+        {botPanel ? (
+          <ScoutbotPanel
+            name={bot.name}
+            look={bot.look}
+            status={requestItems.length ? `${requestItems.length} ${requestItems.length === 1 ? "request" : "requests"}` : "nothing waiting"}
+            voice={bot.voice}
+            speech={speech}
+            readAloud={requestItems.length ? spokenRequest(requestItems[requestItems.length - 1]!) : null}
+            onVoice={(voice) => updateBot({ voice })}
+            empty={Boolean(requests.state) && requestItems.length === 0}
+            style={popStyle}
+          >
+            {requests.error ? <p className="sbt-req__error" role="alert">{requests.error}{requests.state ? " · Showing the last snapshot." : ""}</p> : null}
+            {requests.loading && !requests.state ? <p className="ce-pop__why">Loading requests…</p> : null}
+            {[...requestItems].reverse().map((item) => <ScoutbotRequest key={item.id} item={item} now={now} />)}
+          </ScoutbotPanel>
+        ) : null}
+      </>
+    );
+  };
+
   return (
     <div
       ref={rootRef}
       className={`ce-root${reduced ? " is-reduced" : ""}${offline ? " is-offline" : ""}`}
       data-anchor={anchor}
       onPointerDown={(event) => {
+        if (!(event.target as HTMLElement).closest(".ce-menu")) setMenu(null);
         if (!(event.target as HTMLElement).closest("[data-hit]")) {
           setKept(null);
           setPanel(null);
@@ -886,7 +1497,7 @@ export function CompanionEdge({
           if (slot.kind === "stack") {
             const needs = slot.ids.filter((id) => edgeVisible(byId.get(id)?.state, false) === "needs").length;
             return (
-              <button key="stack" {...common} className={`ce-slot is-stack${isOpen ? " is-open" : ""}`} style={{ left: slot.x }}
+              <button key="stack" {...common} className={`ce-slot is-stack${isOpen ? " is-open" : ""}${onBase(base, slot.x) ? " is-onbase" : ""}`} style={{ left: slot.x }}
                 aria-label={`${slot.ids.length} more with no room on the edge${needs ? `, ${needs} needing you` : ""}`}>
                 <span className="ce-stack__n">+{slot.ids.length}</span>
               </button>
@@ -909,12 +1520,15 @@ export function CompanionEdge({
           const size = sizeOf(work.workId);
           const motion = motionOf(work.workId);
           const box = figureSlot(size);
+          // On the base a figure stands on top of it; resting, it sinks behind.
+          const based = onBase(base, slot.x) ? (reading === "resting" ? " is-behind" : " is-onbase") : "";
           return (
             <button
               key={work.workId}
               {...common}
               onPointerDown={(event) => onFigurePointerDown(event, work)}
-              className={`ce-slot${isOpen ? " is-open" : ""}${moving && animate ? " is-walk" : ""}${lit === false ? " is-unlit" : ""}${lit ? " is-lit" : ""}`}
+              onContextMenu={(event) => openMenu(event, { kind: "work", workId: work.workId })}
+              className={`ce-slot${based}${isOpen ? " is-open" : ""}${moving && animate ? " is-walk" : ""}${lit === false ? " is-unlit" : ""}${lit ? " is-lit" : ""}`}
               style={{ left: slot.x, width: box.width, height: box.height }}
               aria-label={`${nameOf(work)}: ${work.title}. ${EDGE_VISIBLE_LABEL[reading]}${reading !== "disconnected" && exactDiffers(work.state) ? ` (${exactLabel(work.state)})` : ""}${work.visitorFrom ? `. Runs on ${work.visitorFrom}` : ""}`}
             >
@@ -933,6 +1547,9 @@ export function CompanionEdge({
                     onEdge
                     hop={hops.has(work.workId)}
                     reduced={!animate || motion === "still"}
+                    voice={work.voice}
+                    voiceHit={`voice.${work.workId}`}
+                    onVoice={voiceHandler(work)}
                   />
                 </span>
               </span>
@@ -941,18 +1558,35 @@ export function CompanionEdge({
         })}
       </div>
 
+      <svg className="ce-base" width={base.end - base.start} height={BASE_PLATE} viewBox={`0 -0.5 ${base.end - base.start} ${BASE_PLATE + 0.5}`} style={{ left: base.start }} aria-hidden="true">
+        <defs>
+          <linearGradient id="ce-base-fill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#3a3e44" />
+            <stop offset="1" stopColor="#24272b" />
+          </linearGradient>
+          <linearGradient id="ce-base-light" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stopColor="#fff" stopOpacity="0" />
+            <stop offset="0.5" stopColor="#fff" stopOpacity="0.3" />
+            <stop offset="1" stopColor="#fff" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <path className="ce-base__face" d={basePlatePath(base.end - base.start)} />
+        <path className="ce-base__light" d={`M${BASE_PLATE} 1.5 H${base.end - base.start - BASE_PLATE}`} />
+      </svg>
       <button
         type="button"
         className={`ce-home${panel === "settings" ? " is-open" : ""}`}
         data-hit="home"
-        style={{ left: homeX }}
+        style={{ left: homeX, width: bot.hex, height: bot.hex, "--hex": `${bot.hex}px` } as CSSProperties}
         aria-expanded={panel === "settings"}
-        aria-label={`${homeLabel}. Settings`}
+        aria-label={`${homeLabel}. Threads and settings`}
         title={homeLabel}
         onClick={() => { setKept(null); setPanel((current) => (current === "settings" ? null : "settings")); }}
       >
+        <svg className="ce-home__hex" viewBox="-26 -26 52 52" aria-hidden="true">
+          <polygon points="0,-24 20.8,-12 20.8,12 0,24 -20.8,12 -20.8,-12" />
+        </svg>
         <ScoutMark className="ce-home__mark" />
-        {counts.needs > 0 && <span className="ce-home__ask" aria-hidden="true" />}
         {offline && <span className="ce-home__off" aria-hidden="true" />}
       </button>
       {hidden.length > 0 && (
@@ -995,43 +1629,66 @@ export function CompanionEdge({
           const size = sizeOf(work.workId);
           const motion = motionOf(work.workId);
           const box = figureSlot(size);
-          const held = figureBox(at, size, screen);
+          const slug = castOf(work);
+          const effectiveHold = figureHold(figure, figureDefaults, slug);
+          const edgePose = figurePose(at, figure);
+          const edgeArt = effectiveHold === "edge" ? edgePoseArt(slug, edgePose) : undefined;
+          const held = figureBox(at, size, screen, effectiveHold, edgeArt);
+          const contact = edgeArt ? { pose: edgePose, art: edgeArt, x: held.bodyOffsetX!, y: held.bodyOffsetY! } : undefined;
           const hold = figureHasPlate(at.down) && !dragging ? at.down : null;
           const reading = edgeVisible(work.state, offline);
           const isOpen = open === work.workId && !panel;
+          const chased = chasing.has(work.workId) && !dragging;
+          const runs = slug && hasPose(slug, "run-a") && hasPose(slug, "run-b");
           return (
             <button
               key={work.workId}
               type="button"
               data-slot={work.workId}
               data-placed={work.workId}
+              data-ax={at.x}
+              data-ay={at.y}
+              data-run-a={runs ? crewAssetUrl(poseAsset(slug, "run-a")) : undefined}
+              data-run-b={runs ? crewAssetUrl(poseAsset(slug, "run-b")) : undefined}
               // A ghosted figure is behind a window: clicks there belong to that window.
-              data-hit={at.covered || dragging ? undefined : work.workId}
-              className={`ce-placed${hold ? ` is-hold-${hold}` : ""}${isOpen ? " is-open" : ""}${at.covered ? " is-covered" : ""}${dragging ? " is-dragging" : ""}${falling.has(work.workId) && !dragging ? " is-falling" : ""}`}
-              style={{ left: held.left, top: held.top, width: box.width, height: box.height } as CSSProperties}
+              // Mid-chase it is somewhere else than its box; it takes clicks again once back.
+              data-hit={at.covered || dragging || chased ? undefined : work.workId}
+              className={`ce-placed${hold ? ` is-hold-${hold} is-${effectiveHold}` : ""}${contact ? " is-edge-pose" : ""}${motion === "still" || !animate ? " is-still" : ""}${isOpen ? " is-open" : ""}${steering === work.workId ? " is-selected" : ""}${at.covered ? " is-covered" : ""}${dragging ? " is-dragging" : ""}${falling.has(work.workId) && !dragging ? " is-falling" : ""}${chased ? " is-chasing" : ""}`}
+              style={{ left: held.left, top: held.top, width: box.width, height: box.height, transformOrigin: `${at.x - held.left}px ${at.y - held.top}px` } as CSSProperties}
               aria-label={`${nameOf(work)}: ${work.title}. ${EDGE_VISIBLE_LABEL[reading]}. ${figure?.label ?? ""}`}
               aria-pressed={kept === work.workId}
               onPointerDown={(event) => onFigurePointerDown(event, work)}
+              onContextMenu={(event) => openMenu(event, { kind: "work", workId: work.workId })}
               onClick={(event) => {
                 if (wasDragged(event, work.workId)) return;
                 setPanel(null);
                 setKept((current) => (current === work.workId ? null : work.workId));
               }}
             >
-              {hold ? <HexPlate side={hold} /> : null}
+              {hold && !contact ? <HoldMark side={hold} hold={effectiveHold} slot={box} size={size} /> : null}
               <EdgeCharacter
-                slug={castOf(work)}
+                slug={slug}
+                contact={contact}
+                settleKey={settles.get(work.workId)}
+                landing={falling.has(work.workId) && !dragging}
                 name={nameOf(work)}
                 state={work.state}
                 offline={offline}
                 size={size}
                 hop={hops.has(work.workId)}
                 reduced={!animate || motion === "still"}
+                voice={work.voice}
+                voiceHit={at.covered || dragging || chased ? undefined : `voice.${work.workId}`}
+                onVoice={voiceHandler(work)}
               />
             </button>
           );
         })}
+        {/* Put-away ghosts: written by window-chase.ts, never by React. */}
+        <div ref={ghostsRef} className="ce-ghosts" aria-hidden="true" />
         {placedPop && renderPopover()}
+        {renderScoutbot()}
+        {renderMenu()}
       </div>
     </div>
   );

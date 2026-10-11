@@ -311,6 +311,8 @@ export const chatMarkReadCalls: Array<Record<string, unknown>> = [];
 
 mock.module("./core/broker/service.ts", () => ({
   requestScoutHostWeb: async () => ({ status: 503, body: { error: "No test host transport" } }),
+  loadScoutRemoteApprovals: async () => [],
+  decideScoutRemoteApproval: async () => ({ ok: false, error: "not_watching" }),
   readScoutChatQuestionHistory: async (baseUrl: string, channelId: string, after: unknown) => {
     questionHistoryCalls.push({ baseUrl, channelId, after });
     if (stubs.questionHistoryFailure) throw new Error("Controlled history read failure");
@@ -545,6 +547,8 @@ export function useIsolatedOpenScoutHome(): string {
   process.env.OPENSCOUT_CONTROL_HOME = join(home, ".openscout", "control-plane");
   process.env.OPENSCOUT_RELAY_HUB = join(home, ".openscout", "relay");
   process.env.OPENSCOUT_NODE_QUALIFIER = "test-node";
+  // Route tests mock fetch for the provider ladder; the Pi brain has its own tests.
+  process.env.OPENSCOUT_SCOUTBOT_BRAIN = "0";
   return home;
 }
 

@@ -1,3 +1,4 @@
+import { getDestination } from "../../scout/nav-destinations.ts";
 import { AgentAdventures } from "./AgentAdventures.tsx";
 import { SharedWorkFloor } from "./SharedWorkFloor.tsx";
 import { FloorReplay } from "./FloorReplay.tsx";
@@ -1084,7 +1085,7 @@ export function AgentFloorView({ lanes, now: suppliedNow, onOpenTrace, railLedge
           <div className="agent-floor__command-bar">
             {historyView || !sharedWork ? <strong>Operations floor</strong> : null}
             <div className="agent-floor__view-switch" role="group" aria-label="Floor view">
-              <button type="button" aria-pressed={!historyView && !adventures} onClick={() => { setAdventures(false); setHistoryView(false); resetFloorView(); }}>World</button>
+              <button type="button" aria-pressed={!historyView && !adventures} onClick={() => { setAdventures(false); setHistoryView(false); resetFloorView(); }}>{getDestination("world").label}</button>
               <button type="button" aria-pressed={adventures} onClick={() => { setAdventures(true); setHistoryView(false); setContextRoom(null); setResourceView(null); resetFloorView(); }}>Replay</button>
               <button type="button" aria-pressed={historyView} onClick={() => { setAdventures(false); setHistoryView(true); setContextRoom(null); setResourceView(null); resetFloorView(); }}>History</button>
             </div>

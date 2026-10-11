@@ -1,14 +1,57 @@
 # Agent Integration Contract
 
-This page is for coding agents, agent runtimes, and adapter authors that want to plug into OpenScout without first learning the whole product.
+This page is for external participants, coding agents, agent runtimes, and
+adapter authors that want to plug into OpenScout without first learning the
+whole product.
 
-OpenScout is a local-first broker. The integration contract is simple: identify yourself, register how you can be reached, send messages and invocations through the broker, and report enough lifecycle state that humans and other agents can understand what is happening.
+OpenScout is a local-first broker. Integrations identify the caller, send
+messages and work requests through the broker, and preserve enough lifecycle
+state for humans and agents to understand what is happening. Execution targets
+also register how work can reach them. The participation boundary below
+distinguishes those responsibilities.
 
 Status: v0 integration guidance. This is the contract OpenScout is intentionally converging on for local developer pilots, not a frozen public API or enterprise compatibility guarantee. Treat changes to these semantics as product-significant and update this page when they move.
 
+The [Shared Interaction Model](./interaction-model.md) is the design contract
+for represented authority, continuity, and human handoffs across interfaces.
+Its [coverage table](./interaction-model.md#implementation-coverage) separates
+existing foundations from requirements that still need implementation. No new
+authorization fields or supported external protocols are implied by this page.
+
+## Participation Boundary
+
+An external personal agent or service can request work, follow progress, and
+relay decisions without running inside Scout. It needs an authenticated caller
+identity, permitted operations, durable work/conversation correlation, and a
+return path. Do not invent a local harness or `sess.*` handle for the caller.
+A participant becomes an execution target only when an adapter can actually
+deliver work to it and report results. One integration may support both modes.
+
+Participant adapters must document:
+
+- how the caller is authenticated and any represented principal is verified;
+  claimed `actorId`, body text, or metadata alone cannot grant authority;
+- which capabilities and resources the caller can discover and use, including
+  how external resource references map to Scout targets;
+- the granted actions, resource scope, expiry/revocation behavior, and whether
+  further delegation is supported; credentials stay outside model context;
+- how source ids are namespaced and mapped to Scout chat/work/run handles, and
+  how the original caller receives follow-up after a reconnect;
+- which human decisions can be forwarded to their owning authority, including
+  response provenance and action/artifact revision binding;
+- retry scope and retention, replay/gap behavior, cancellation support, and the
+  distinction between accepted, acknowledged, completed, and externally verified.
+
+These are design and acceptance requirements for new adapters. If an adapter
+cannot verify or enforce a requested authority boundary, it must report that
+limitation before dispatch rather than treating missing support as unrestricted
+access. Legacy pilot integrations retain their documented permission posture.
+Use the [acceptance scenario](./interaction-model.md#implementation-order-and-acceptance)
+before claiming the full participant contract is implemented.
+
 ## Integration Goals
 
-A good Scout integration should let an agent:
+For a harness-backed execution target, a good integration should let an agent:
 
 - have a stable address
 - receive a durable message with a broker receipt
@@ -39,7 +82,11 @@ explicitly instead of relying on the host name.
 
 ## Minimum Contract
 
-At minimum, an integration needs five pieces.
+The following five pieces describe a harness-backed execution target. They
+extend the participation boundary; they are not prerequisites for an external
+client merely to request or inspect work. A remote service target must document
+its actual execution and continuation model without inventing a local harness
+session.
 
 ### 1. Identity
 
@@ -149,6 +196,14 @@ Use the invocation path for work:
 - the invocation creates a flight
 - the flight tracks queued, running, waiting, completed, failed, or cancelled
 - the final reply should land back in the same conversation or work context
+
+Share the returned work-ticket URL with the user as **Follow the task**.
+`links.work` / `workUrl` point to the ticket; `links.follow` / `followUrl` prefer
+that ticket when a work record exists. Keep its supplied origin and machine
+scope. The ticket holds the request, status, progress, and results across session
+changes. Tail and session observation remain secondary diagnostic links.
+Continue observing completion through the returned flight/invocation handle;
+sharing a link does not prove completion or schedule a notification.
 
 If work becomes blocked, report a waiting state with who or what owns the next move.
 
@@ -321,7 +376,12 @@ An integration should treat a remote Scout agent as reachable through broker rou
 
 ## Compatibility Checklist
 
-Before calling an integration "Scout-native", verify:
+For an external participant, verify the supported operations and authority,
+correlation, reply, handoff, and recovery behavior in the
+[participation boundary](#participation-boundary). Report unsupported parts
+explicitly; transport connectivity alone is not acceptance.
+
+For a harness-backed execution target, additionally verify:
 
 - it has a stable agent identity
 - it registers or attaches a reachable endpoint

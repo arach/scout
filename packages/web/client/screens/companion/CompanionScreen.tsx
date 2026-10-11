@@ -16,6 +16,7 @@ import {
   disallowCompanionScope,
   hideCompanion,
   openFromCompanion,
+  beginFigureDrag,
   pinToCompanion,
   reorderCompanion,
   reportCompanionLayout,
@@ -23,6 +24,9 @@ import {
   setCompanionMinimized,
   setCompanionPreferences,
   unpinFromCompanion,
+  codexVoiceState,
+  onCodexVoiceState,
+  type CompanionVoiceState,
   type CompanionHostState,
   type CompanionMode,
   type CompanionPin,
@@ -33,7 +37,6 @@ import { filterWorkDetailByMachineScope, machineScopedAgentIds } from "../../lib
 import { isBrokerEventStreamLive, onBrokerEventStreamLiveChange, useBrokerEvents } from "../../lib/sse.ts";
 import { useTailEvents } from "../../lib/tail-events.ts";
 import type { Agent, MeshStatus, Route, TailEvent, WorkDetail, WorkItem } from "../../lib/types.ts";
-import { useScout } from "../../scout/Provider.tsx";
 import { defineSurface } from "../../surfaces/types.ts";
 import {
   detailIdsFor,
@@ -56,6 +59,7 @@ import {
   buildCompanionCard,
   clockLabel,
   groupByState,
+  askStatus,
   groupLabel,
   isCompanionRelevantEvent,
   operatorActorIds,
@@ -68,14 +72,29 @@ import {
   type CompanionCardState,
   type SurfacedItem,
 } from "./companion-model.ts";
-import { CompanionEdge, type EdgeWork } from "./CompanionEdge.tsx";
+import { CompanionEdge, type EdgeThread, type EdgeWork } from "./CompanionEdge.tsx";
 import { isVisitor } from "./edge-model.ts";
 import { useCompanionHostState } from "./useCompanionHostState.ts";
+import { useCompanionRoster } from "./companion-roster.ts";
+import { isSeenAsk, readSeenAsks, writeSeenAsks } from "./companion-seen.ts";
 import "./companion.css";
 import "./edge.css";
 
 const TAIL_BUFFER_LIMIT = 600;
 const REFRESH_DEBOUNCE_MS = 400;
+/** The hex's Threads list: how many recent threads, and how often it reads. */
+const THREAD_ROWS = 60;
+const THREAD_REFRESH_MS = 30_000;
+const VOICE_POLL_MS = 2_000;
+
+/**
+ * A session's project from its broker handle, "openscout-hawking-7" →
+ * "openscout": session owners are not in the agent roster.
+ */
+export function projectFromOwner(ownerName: string | null): string | null {
+  const match = ownerName?.match(/^(.+)-[a-z]+-\d+$/);
+  return match ? match[1]! : null;
+}
 
 type MeshNames = { localNodeId: string | null; names: Map<string, string> };
 
@@ -128,7 +147,8 @@ function TuneGlyph() {
 }
 
 export function CompanionScreen({ workIds, mode: previewMode }: { workIds?: string; mode?: string; navigate: (route: Route) => void; embedded?: boolean }) {
-  const { agents } = useScout();
+  const roster = useCompanionRoster();
+  const { agents } = roster;
   const hostHandle = useCompanionHostState();
   const hosted = hostHandle.available;
   // Browser preview: no Mac host, so the page keeps its own state.
@@ -165,6 +185,7 @@ export function CompanionScreen({ workIds, mode: previewMode }: { workIds?: stri
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [surfacedOpen, setSurfacedOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [seenAsks, setSeenAsks] = useState(readSeenAsks);
   const [opacityDraft, setOpacityDraft] = useState<number | null>(null);
   const [summaries, setSummaries] = useState<Map<string, WorkItem>>(new Map());
   const [surfaceByAgent, setSurfaceByAgent] = useState<Map<string, WorkItem[]>>(new Map());
@@ -315,6 +336,19 @@ export function CompanionScreen({ workIds, mode: previewMode }: { workIds?: stri
     void loadSurfacing();
   }, [loadSurfacing, visible, hostKnown]);
 
+  // The hex's Threads list: recent active work, so any thread can be brought
+  // out onto the desktop. A failed read keeps the last rows.
+  const [threadRows, setThreadRows] = useState<WorkItem[] | null>(null);
+  useEffect(() => {
+    if (!edge || !visible || !hostKnown) return;
+    let cancelled = false;
+    const load = () => api<WorkItem[]>(`/api/work?limit=${THREAD_ROWS}`)
+      .then((rows) => { if (!cancelled) setThreadRows(rows); }, () => undefined);
+    void load();
+    const timer = setInterval(load, THREAD_REFRESH_MS);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [edge, visible, hostKnown]);
+
   // On the edge, looking at a figure past the first few reads only its detail.
   useEffect(() => {
     if (!edge || !visible || !selectedId) return;
@@ -455,7 +489,7 @@ export function CompanionScreen({ workIds, mode: previewMode }: { workIds?: stri
   }, [agents, offline, detailPins, operatorIds, refTime, scopedAgentIds, snapshots, tail]);
 
   // Detailed cards from full detail; every other pin from its list row.
-  const states = useMemo(() => {
+  const factStates = useMemo(() => {
     const map = new Map<string, CompanionCardState>();
     for (const pin of pins) {
       const row = summaries.get(pin.workId);
@@ -464,6 +498,39 @@ export function CompanionScreen({ workIds, mode: previewMode }: { workIds?: stri
     for (const [id, entry] of cards) if (entry.card) map.set(id, entry.card.state);
     return map;
   }, [cards, operatorIds, pins, summaries, refTime]);
+
+  // Latest activity Scout has seen for each work, from its card or list row.
+  const activityAt = useMemo(() => {
+    const map = new Map<string, number>();
+    const note = (id: string, at: number) => map.set(id, Math.max(map.get(id) ?? 0, at));
+    for (const [id, row] of summaries) note(id, Math.max(row.updatedAt, row.lastMeaningfulAt ?? 0));
+    for (const row of surfaceRows) note(row.id, Math.max(row.updatedAt, row.lastMeaningfulAt ?? 0));
+    for (const [id, entry] of cards) if (entry.card) note(id, entry.card.lastActivityAt);
+    return map;
+  }, [cards, summaries, surfaceRows]);
+
+  // A dismissal lasts until the work does something newer; then it is gone
+  // for good, so an older list row can never bring it back.
+  useEffect(() => {
+    let next: Map<string, number> | null = null;
+    for (const [id, at] of seenAsks) {
+      if ((activityAt.get(id) ?? 0) > at) (next ??= new Map(seenAsks)).delete(id);
+    }
+    if (next) {
+      writeSeenAsks(next);
+      setSeenAsks(next);
+    }
+  }, [activityAt, seenAsks]);
+
+  // What every surface reads: a dismissed ask rests (no alert, no slot hold,
+  // no count) while the work's own state stays in factStates for its words.
+  const states = useMemo(() => {
+    const map = new Map(factStates);
+    for (const [id, state] of factStates) {
+      if (isSeenAsk(seenAsks, id, state, activityAt.get(id) ?? 0)) map.set(id, "waiting");
+    }
+    return map;
+  }, [activityAt, factStates, seenAsks]);
 
   const surfaced: SurfacedItem[] = useMemo(() => {
     const workScoped = scopes.filter((scope) => scope.kind === "work")
@@ -476,8 +543,9 @@ export function CompanionScreen({ workIds, mode: previewMode }: { workIds?: stri
       now: refTime,
       operatorIds,
       previousOrder: surfacedOrder.current,
+      seenAsks,
     });
-  }, [agents, operatorIds, pins, refTime, scopes, summaries, surfaceRows]);
+  }, [agents, operatorIds, pins, refTime, scopes, seenAsks, summaries, surfaceRows]);
   useEffect(() => { surfacedOrder.current = surfaced.map((item) => item.workId); }, [surfaced]);
 
   // One-shot motion cues: a new reported milestone draws the hairline, a new
@@ -510,6 +578,36 @@ export function CompanionScreen({ workIds, mode: previewMode }: { workIds?: stri
     report();
     return () => observer.disconnect();
   }, [hosted, edge, hostKnown]);
+
+  // Codex voice in the ChatGPT app, read from the app every couple of
+  // seconds while a pinned chat could have it; it lights that chat's figure.
+  const codexThreadKey = pins
+    .map((pin) => {
+      const snapshot = snapshots.get(pin.workId);
+      return summaries.get(pin.workId)?.codexThreadId ?? (snapshot?.status === "ready" ? snapshot.detail.codexThreadId : null) ?? null;
+    })
+    .filter((id): id is string => Boolean(id))
+    .sort()
+    .join(",");
+  const [voice, setVoice] = useState<CompanionVoiceState | null>(null);
+  useEffect(() => onCodexVoiceState(setVoice), []);
+  useEffect(() => {
+    if (!hosted || !edge || !codexThreadKey) {
+      setVoice(null);
+      return;
+    }
+    const ids = codexThreadKey.split(",");
+    let cancelled = false;
+    const read = () => {
+      codexVoiceState(ids).catch(() => { if (!cancelled) setVoice(null); });
+    };
+    read();
+    const timer = setInterval(read, VOICE_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [hosted, edge, codexThreadKey]);
 
   const touch = (id: string) => touchedAt.current.set(id, Date.now());
 
@@ -878,27 +976,42 @@ export function CompanionScreen({ workIds, mode: previewMode }: { workIds?: stri
       const row = summaries.get(pin.workId);
       const detail = snapshot?.status === "ready" ? snapshot.detail : null;
       const agent = detail ? ownerAgent(detail, agents) : row?.ownerId ? agentById.get(row.ownerId) : undefined;
+      const factState = factStates.get(pin.workId);
+      const pinState = states.get(pin.workId);
+      const pinActivity = card?.lastActivityAt ?? (row ? Math.max(row.updatedAt, row.lastMeaningfulAt ?? 0) : 0);
+      const pinStatus = card && card.state === factState && factState === "question" ? card.status : askStatus(row?.state ?? detail?.state, factState);
+      // A dismissed ask rests: no alert, no hop, until it moves again.
+      const pinSeen = pinState !== factState;
       works.push({
         workId: pin.workId,
         title: card?.title ?? row?.title ?? detail?.title ?? pin.workId,
-        state: states.get(pin.workId),
+        state: pinState,
+        status: pinSeen ? `${pinStatus ?? groupLabel(factState ?? "unknown")} · dismissed` : pinStatus,
+        seen: pinSeen,
         kind: "pinned",
         agent,
         ownerName: row?.ownerName ?? detail?.ownerName ?? null,
         conversationId: card?.conversationId ?? row?.conversationId ?? detail?.conversationId ?? null,
-        lastActivityAt: card?.lastActivityAt ?? (row ? Math.max(row.updatedAt, row.lastMeaningfulAt ?? 0) : 0),
+        lastActivityAt: pinActivity,
         visitorFrom: visitorFrom(pin.machineId, agent),
         origin: null,
         report: card ? card.callout?.text || card.headline || card.observedLine || null : null,
-        harness: agent?.harness ?? null,
+        harness: card?.harness ?? agent?.harness ?? detail?.primaryInvocation?.observedHarness ?? detail?.primaryInvocation?.resolvedHarness ?? detail?.primaryInvocation?.requestedHarness ?? ((row?.codexThreadId ?? detail?.codexThreadId) ? "codex" : null),
+        codexThreadId: row?.codexThreadId ?? detail?.codexThreadId ?? null,
+        voice: voice?.thread && voice.thread === (row?.codexThreadId ?? detail?.codexThreadId)
+          ? { micMuted: voice.micMuted ?? null, speakersMuted: voice.speakersMuted ?? null }
+          : null,
       });
     }
     for (const item of surfaced) {
       const agent = item.ownerId ? agentById.get(item.ownerId) : undefined;
+      const itemSeen = Boolean(item.seen);
       works.push({
         workId: item.workId,
         title: item.title,
         state: item.state,
+        status: itemSeen ? `${item.status ?? groupLabel("question")} · dismissed` : item.status,
+        seen: itemSeen,
         kind: "surfaced",
         agent,
         ownerName: item.owner,
@@ -911,6 +1024,45 @@ export function CompanionScreen({ workIds, mode: previewMode }: { workIds?: stri
       });
     }
     const surfacedById = new Map(surfaced.map((item) => [item.workId, item]));
+    const pinnedIds = new Set(pins.map((pin) => pin.workId));
+    // Threads the hex can bring out: pinned work first (it is out), then the
+    // rest of recent active work, newest first.
+    const threads: EdgeThread[] = [];
+    const listed = new Set<string>();
+    for (const work of works) {
+      if (work.kind !== "pinned") continue;
+      listed.add(work.workId);
+      const row = summaries.get(work.workId);
+      threads.push({ ...work, project: work.agent?.project ?? projectFromOwner(work.ownerName), out: true, review: row?.state === "review" });
+    }
+    for (const row of [...(threadRows ?? [])].sort((a, b) => Math.max(b.updatedAt, b.lastMeaningfulAt ?? 0) - Math.max(a.updatedAt, a.lastMeaningfulAt ?? 0))) {
+      if (listed.has(row.id) || pinnedIds.has(row.id)) continue;
+      listed.add(row.id);
+      const agent = row.ownerId ? agentById.get(row.ownerId) : undefined;
+      threads.push({
+        workId: row.id,
+        title: row.title,
+        state: summaryState(row, refTime, operatorIds),
+        agent,
+        ownerName: row.ownerName,
+        harness: agent?.harness ?? null,
+        project: agent?.project ?? projectFromOwner(row.ownerName),
+        lastActivityAt: Math.max(row.updatedAt, row.lastMeaningfulAt ?? 0),
+        out: false,
+        review: row.state === "review",
+      });
+    }
+    const bringOut = (workId: string, dragging: boolean) => {
+      if (!hosted) {
+        applyLocal((prev) => ({ pins: [...prev.pins.filter((pin) => pin.workId !== workId), { workId }] }));
+        return;
+      }
+      pinToCompanion(workId).then((state) => {
+        apply(state);
+        // Still held: the host carries the new figure under the pointer.
+        if (dragging) beginFigureDrag(workId);
+      }).catch(fail);
+    };
     // One figure per pin. The host sends them in pin order; the browser
     // preview keeps its own and fills in pins it has not seen yet.
     const figureFor = (workId: string): CompanionFigure => host.figures.find((figure) => figure.workId === workId)
@@ -947,6 +1099,7 @@ export function CompanionScreen({ workIds, mode: previewMode }: { workIds?: stri
         {visible && <CompanionLiveFeed onRelevantEvent={scheduleRefresh} onTail={onTail} />}
         <CompanionEdge
           works={works}
+          cast={roster}
           geometry={host.edge}
           anchor={host.edgeAnchor}
           originPins={host.originPins}
@@ -958,6 +1111,7 @@ export function CompanionScreen({ workIds, mode: previewMode }: { workIds?: stri
           hostError={hostError}
           renderSettings={renderSettings}
           figures={figures}
+          scoutbotFigure={host.scoutbot ?? null}
           figureDefaults={host.figureDefaults}
           onFigure={changeFigure}
           onFigureNudge={(workId, dx, dy) => { if (hosted) nudgeCompanionFigure(workId, dx, dy).then(apply).catch(fail); }}
@@ -974,6 +1128,15 @@ export function CompanionScreen({ workIds, mode: previewMode }: { workIds?: stri
             const item = surfacedById.get(work.workId);
             if (item) openSurfaced(target, item);
           }}
+          onDismiss={(work) => {
+            setSeenAsks((prev) => {
+              const next = new Map(prev);
+              // The newest activity any source has shown, so it cannot expire at once.
+              next.set(work.workId, Math.max(work.lastActivityAt, activityAt.get(work.workId) ?? 0));
+              writeSeenAsks(next);
+              return next;
+            });
+          }}
           onPinSurfaced={(work) => {
             const item = surfacedById.get(work.workId);
             if (item) pinSurfaced(item);
@@ -989,6 +1152,8 @@ export function CompanionScreen({ workIds, mode: previewMode }: { workIds?: stri
             openFromCompanion(target, { workId: work.workId, machineId: pin?.machineId, conversationId: target === "thread" ? work.conversationId : null }).then(clearError, fail);
           }}
           onUnpin={unpin}
+          threads={threadRows === null && hosted ? null : threads}
+          onBringOut={bringOut}
           onOpenThread={(conversationId, workId) => {
             if (!hosted) {
               window.open(`/work/${encodeURIComponent(workId)}`, "_blank", "noopener");

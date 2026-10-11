@@ -19,7 +19,7 @@
 .vpd-frame-label,
 .vpd-cloud-label,
 .vpd-stub-label {
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 9px;
   font-weight: 600;
   letter-spacing: 0.18em;
@@ -78,7 +78,7 @@
 }
 
 .vpd-node-label {
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -275,7 +275,7 @@
   border-radius: 999px;
   border: none;
   background: transparent;
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -333,7 +333,7 @@
 }
 
 .voice-id-chip {
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -369,7 +369,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.02em;
   color: var(--scout-chrome-ink-faint);
@@ -403,7 +403,7 @@
   align-items: baseline;
   gap: 10px;
   margin-top: 6px;
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.02em;
   color: var(--scout-chrome-ink-faint);
@@ -444,7 +444,7 @@
 
 .voice-trace-kicker {
   margin: 0 0 8px;
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   letter-spacing: -0.01em;
   color: var(--scout-chrome-ink-ghost);
@@ -554,14 +554,14 @@
 .voice-cta-price {
   margin: 8px 0 0;
   text-align: center;
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 0.04em;
   color: var(--scout-chrome-ink-faint);
 }
 
 .voice-receipt {
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.02em;
   color: var(--scout-chrome-ink-strong);
@@ -591,7 +591,7 @@
 
 .voice-well-sub {
   margin-top: 5px;
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -659,7 +659,7 @@
 .voice-well-note {
   margin: 10px 0 0;
   text-align: center;
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 0.04em;
   color: var(--scout-chrome-ink-faint);
@@ -682,7 +682,7 @@
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--hud-ink) 15%, transparent);
   background: transparent;
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -714,7 +714,7 @@
 .voice-well-flag-note {
   margin-left: auto;
   min-width: 0;
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 9.5px;
   letter-spacing: 0.02em;
   color: var(--scout-chrome-ink-ghost);
@@ -735,7 +735,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 0.02em;
   color: var(--scout-chrome-ink-ghost);
@@ -749,7 +749,7 @@
   padding: 0;
   border: none;
   background: none;
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -820,7 +820,7 @@
   margin-left: auto;
   padding: 8px 16px;
   border-radius: 8px;
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.06em;
@@ -875,7 +875,7 @@
 }
 
 .vp7-stop-label {
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.12em;
@@ -886,7 +886,7 @@
 }
 
 .vp7-stop-time {
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   color: var(--scout-chrome-ink-faint);
   font-variant-numeric: tabular-nums;
@@ -1005,7 +1005,7 @@
   align-items: baseline;
   gap: 10px;
   margin: 0 0 12px;
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   min-width: 0;
 }
@@ -1049,7 +1049,7 @@
 
 .vp7-quote-mark { color: var(--scout-chrome-ink-ghost); }
 .vp7-quote-who {
-  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--scout-chrome-ink-ghost);
   white-space: nowrap;

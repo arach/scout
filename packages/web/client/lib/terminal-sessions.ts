@@ -142,8 +142,9 @@ export function resolveRegisteredTerminalTarget(
 
   // A saved cell may hold a handle in either form; matching resolves both, so a
   // workspace authored before opaque ids keeps finding its surface.
-  const sessionHasSurface = session?.surfaces.some((surface) => terminalSurfaceMatchesId(surface, terminalSurfaceKey));
-  const targetSession = sessionHasSurface
+  // An explicit session id constrains identity, even when its surface is gone.
+  // Surface keys can be reused by another session after the original exits.
+  const targetSession = terminalSessionId !== undefined
     ? session
     : sessions.find((candidate) =>
       candidate.surfaces.some((surface) => terminalSurfaceMatchesId(surface, terminalSurfaceKey))

@@ -1,4 +1,5 @@
 import { captureRegistries } from "./broker-registry-capture.js";
+import { isAttachedLiveTerminalEndpoint, isAttachedLiveTerminalEndpointAlive } from "./live-terminal-session.js";
 import type {
   ActorIdentity,
   AgentDefinition,
@@ -460,13 +461,30 @@ export class BrokerLocalAgentSyncService {
         continue;
       }
 
+      if (endpoint.transport === "ghostty" && isAttachedLiveTerminalEndpoint(endpoint)) {
+        if (endpoint.state !== "offline" && !await isAttachedLiveTerminalEndpointAlive(endpoint)) {
+          await this.options.persistEndpoint({
+            ...endpoint,
+            state: "offline",
+            metadata: {
+              ...(endpoint.metadata ?? {}),
+              lastError: "attached Ghostty terminal or its harness is gone",
+              lastFailedAt: this.now(),
+            },
+          });
+        }
+        continue;
+      }
+
       if (endpoint.transport === "tmux") {
         if (endpoint.state === "offline") {
           continue;
         }
         const sessionId = endpoint.sessionId
           ?? (typeof endpoint.metadata?.tmuxSession === "string" ? String(endpoint.metadata.tmuxSession) : null);
-        const sessionAlive = sessionId ? await this.isLocalAgentSessionAlive(sessionId) : false;
+        const sessionAlive = isAttachedLiveTerminalEndpoint(endpoint)
+          ? await isAttachedLiveTerminalEndpointAlive(endpoint)
+          : sessionId ? await this.isLocalAgentSessionAlive(sessionId) : false;
         if (!sessionAlive) {
           await this.options.persistEndpoint({
             ...endpoint,

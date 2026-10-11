@@ -1,12 +1,18 @@
 # Agent Integration Contract Notes
 
-Source: `docs/agent-integration-contract.md`.
+Sources: `docs/agent-integration-contract.md`, `docs/interaction-model.md`.
 
 Status: v0 integration guidance. Use this as the current Scout-native target, not as a frozen public API guarantee.
 
-Verified: 2026-06-10
+Original runtime guidance verified: 2026-06-10. Shared interaction design adopted:
+2026-10-09; this addition is documentation only, with implementation gaps in the
+source contract.
 
 ## Minimum Scout-Native Integration
+
+The table below applies to harness-backed execution targets. External personal
+agents and services can participate as clients without a Scout-managed runtime
+session. Remote service targets describe their actual execution lifecycle.
 
 | Requirement | Meaning |
 |---|---|
@@ -24,6 +30,29 @@ Verified: 2026-06-10
 | usage provenance | marks usage source as provider exact, tokenizer estimate, character heuristic, or manual estimate |
 | permission posture | documents approval, sandbox, and wake behavior |
 | data boundary | does not import external transcripts as Scout messages |
+
+## Shared Interaction Design
+
+The adopted [interaction model](../interaction-model.md) defines these
+requirements. Its coverage table is authoritative about implementation gaps;
+this digest does not add wire fields or assert Poppy compatibility.
+
+- Keep authenticated caller, represented principal, and executing agent distinct.
+  Actor/requester metadata is attribution, not a verified permission grant.
+- Effective permission is bounded by verified grants, resource policy, and
+  execution restrictions. Delegation cannot expand it or borrow ambient operator
+  credentials. Unsupported authority boundaries fail before dispatch.
+- Keep authorization context, chat, work, invocation/flight, and runtime session
+  separate. Correlate source ids with their authority and account context.
+- Continue owned execution through durable work handles; changing a surface or
+  harness session must not silently re-run or replace the work.
+- A human handoff identifies the decision, relevant revision, respondent, and
+  next move. Forward the outcome to the authority that owns the action; a chat
+  reply or notification dismissal does not itself grant a host permission.
+- Distinguish original human contributions from agent interpretations, and both
+  from verified consent. Human unavailability is not approval.
+- Declare adapter retry, replay, cancellation, and retention limits. A receipt
+  is not completion; closing a conversation does not cancel linked work.
 
 ## Preferred MCP Tools
 
