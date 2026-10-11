@@ -115,8 +115,11 @@ export function classifyEndpoint(
     alive?: boolean;
   } = {},
 ): EndpointClassification {
-  const candidateState = endpointCandidateState(endpoint?.state);
-  const onlineState = isEndpointOnlineState(endpoint?.state);
+  // A registered poll mailbox can accept durable work without a running host.
+  const registeredMailbox = endpoint?.transport === "mcp_poll"
+    && endpoint.metadata?.externalSession === true && endpoint.state === "registered";
+  const candidateState = registeredMailbox ? "online" : endpointCandidateState(endpoint?.state);
+  const onlineState = registeredMailbox || isEndpointOnlineState(endpoint?.state);
   const stale = !endpoint || hasRetiredEndpointRegistration(endpoint);
   const busy = endpoint?.state === "active" || endpoint?.state === "waiting" || endpoint?.state === "working";
   const supportedTransport = Boolean(

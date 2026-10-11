@@ -946,25 +946,14 @@ for await (const line of rl) {
       advertiseScope: "local",
     });
 
-    const accepted = await broker.postJson<{
-      kind: string;
-      flight?: { id: string; state: string; targetAgentId: string };
-    }>(harness.baseUrl, "/v1/deliver", {
-      id: "deliver-stale-race",
-      caller: {
-        actorId: "operator",
-        nodeId: harness.nodeId,
-      },
-      target: {
-        kind: "agent_id",
-        agentId: "hudson.main.mini",
-      },
-      body: "race before stale sync",
-      intent: "consult",
-      createdAt: Date.now(),
+    await broker.postJson(harness.baseUrl, "/v1/actors", { id: "operator", kind: "person", displayName: "Operator" });
+    const accepted = await broker.seedQueuedInvocation(harness, {
+      id: "inv-stale-race", requesterId: "operator", requesterNodeId: harness.nodeId,
+      targetAgentId: "hudson.main.mini", task: "race before stale sync", action: "consult",
+      ensureAwake: true, stream: false, createdAt: Date.now(),
     });
 
-    expect(accepted.kind).toBe("delivery");
+    expect(accepted.accepted).toBe(true);
     expect(accepted.flight?.targetAgentId).toBe("hudson.main.mini");
     const flightId = accepted.flight!.id;
     await broker.waitFor(

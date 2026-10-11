@@ -7,7 +7,7 @@ import type {
   ScoutDispatchUnavailableTarget,
 } from "@openscout/protocol";
 
-import { BrokerUnavailableTargetService } from "./broker-unavailable-target-service.js";
+import { BrokerUnavailableTargetService, localEndpointCanReceive, localEndpointSupportsQueue } from "./broker-unavailable-target-service.js";
 import { evaluateBrokerAvailability } from "./broker-endpoint-selection.js";
 import { createRuntimeRegistrySnapshot } from "./registry.js";
 
@@ -289,4 +289,36 @@ test("exact continuation selects the requested endpoint rather than the home end
   });
   expect(service.evaluate(snapshot, target).state).toBe("ready");
   expect(service.evaluate(snapshot, target, "exact-session").state).toBe("gone");
+});
+
+
+describe("transport-owned availability evidence", () => {
+  test("external HTTP and registered mailboxes do not use local process probes", () => {
+    const unexpectedProbe = () => { throw new Error("not a local process"); };
+    for (const transport of ["http", "devin_cloud_cli", "mcp_poll"] as const) {
+      const candidate = endpoint({ transport, state: transport === "mcp_poll" ? "registered" : "idle", metadata: { externalSession: true } });
+      expect(localEndpointCanReceive(candidate, unexpectedProbe)).toBe(true);
+      expect(classify(candidate).state).toBe("ready");
+      for (const state of ["offline", "stopped", "failed"] as const) {
+        expect(localEndpointCanReceive({ ...candidate, state }, unexpectedProbe)).toBe(false);
+      }
+    }
+    function classify(candidate: AgentEndpoint) {
+      return evaluateBrokerAvailability({ endpoint: candidate, authority: "node-local", authorityAvailable: true,
+        checkedAt: 100, alive: localEndpointCanReceive(candidate, unexpectedProbe), targetSessionId: candidate.sessionId! });
+    }
+  });
+  test("live local owner queues admit busy work but dead processes remain unavailable", () => {
+    const candidate = endpoint({ transport: "codex_app_server", state: "active" });
+    expect(localEndpointSupportsQueue(candidate)).toBe(true);
+    for (const alive of [false, true]) {
+      const availability = evaluateBrokerAvailability({ endpoint: candidate, authority: "node-local", authorityAvailable: true,
+        checkedAt: 100, alive: localEndpointCanReceive(candidate, () => alive), queueSupported: localEndpointSupportsQueue(candidate), targetSessionId: candidate.sessionId! });
+      expect(availability.state).toBe(alive ? "ready" : "gone");
+      if (alive) expect(availability.supportedActions).toEqual(["queue"]);
+    }
+    for (const address of [undefined, "https://provider.invalid/a2a"]) {
+      expect(localEndpointSupportsQueue(endpoint({ transport: "http", address, metadata: { externalSession: true } }))).toBe(false);
+    }
+  });
 });

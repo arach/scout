@@ -88,7 +88,7 @@ export function openRuntimeSqliteDatabase(
   const adapter = controlPlaneSqliteAdapterKind();
   if (adapter === "bun-sqlite") {
     const { Database } = require("bun:sqlite") as { Database: ControlPlaneSqliteDatabaseConstructor };
-    return observeSqliteDatabase(new Database(path, options), { database: "runtime" });
+    return observeSqliteDatabase(bunDatabaseWithImmediateTransactions(new Database(path, options)), { database: "runtime" });
   }
 
   const { DatabaseSync } = require("node:sqlite") as NodeSqliteModule;
@@ -98,6 +98,44 @@ export function openRuntimeSqliteDatabase(
       readOnly: options?.readonly === true,
     }),
   ), { database: "runtime" });
+}
+
+/** Match the Node adapter's writer transaction contract without replacing
+ * Bun's native savepoints. A deferred SELECT followed by INSERT can otherwise
+ * fail with SQLITE_BUSY_SNAPSHOT when the projection worker commits between
+ * them, even with busy_timeout set. Reserve the writer before reading instead.
+ */
+function bunDatabaseWithImmediateTransactions(database: ControlPlaneSqliteDatabase): ControlPlaneSqliteDatabase {
+  const methods = new Map<PropertyKey, Function>();
+  return new Proxy(database, {
+    get(target, key) {
+      const value = Reflect.get(target, key, target);
+      if (typeof value !== "function" || key === "constructor") return value;
+      const cached = methods.get(key);
+      if (cached) return cached;
+      const bound = key === "transaction" ? (...args: unknown[]) => {
+        const transaction = Reflect.apply(value, target, args) as {
+          deferred: (...args: unknown[]) => unknown;
+          immediate: (...args: unknown[]) => unknown;
+          exclusive: (...args: unknown[]) => unknown;
+          database: unknown;
+        };
+        const run = function (this: unknown, ...values: unknown[]) {
+          return Reflect.apply(transaction.immediate, this, values);
+        };
+        // Keep explicitly chosen native modes and the public database handle.
+        return Object.assign(run, {
+          default: run,
+          deferred: transaction.deferred,
+          immediate: transaction.immediate,
+          exclusive: transaction.exclusive,
+          database: transaction.database,
+        });
+      } : value.bind(target);
+      methods.set(key, bound);
+      return bound;
+    },
+  });
 }
 
 type NodeSqlitePreparedSql = {

@@ -4,8 +4,38 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ActorIdentity, AgentEndpoint, ConversationDefinition, FlightRecord, InvocationRequest, MessageRecord, NodeDefinition } from "@openscout/protocol";
 import { createBrokerDaemonTestHarness } from "./test-helpers/broker-daemon-harness.test";
+import { decodeJournalLine } from "./broker-journal-framing.js";
 
 const broker = createBrokerDaemonTestHarness();
+
+test("a journal-only executor accepts a fresh mesh ask and returns its original receipt on retry", async () => {
+  const fixture = authorityFixture();
+  const home = mkdtempSync(join(tmpdir(), "scout-mesh-journal-only-"));
+  const fakeBin = join(home, "bin");
+  broker.writeFakeTmuxBin(fakeBin);
+  const executor = await broker.startBroker({ controlHome: home, env: {
+    OPENSCOUT_DISABLE_SQLITE: "1", OPENSCOUT_NODE_ID: fixture.conversation.authorityNodeId,
+    PATH: `${fakeBin}:${process.env.PATH}`, OPENSCOUT_FAKE_TMUX_SESSION: fixture.invocation.targetAgentId,
+    OPENSCOUT_FAKE_TMUX_LOG: join(fakeBin, "tmux.log"),
+  } });
+  await broker.postJson(executor.baseUrl, "/v1/actors", fixture.actors[1]);
+  await broker.postJson(executor.baseUrl, "/v1/endpoints", {
+    id: "endpoint-journal-only", agentId: fixture.invocation.targetAgentId, nodeId: executor.nodeId,
+    harness: "claude", transport: "tmux", state: "idle", sessionId: fixture.invocation.targetAgentId,
+    metadata: { cardless: true, sessionBacked: true, pendingExternalSession: true },
+  });
+  const bundle = { ...fixture, message: fixture.request };
+  const first = await broker.postJson<{ flight: FlightRecord }>(executor.baseUrl, "/v1/mesh/invocations", bundle);
+  expect(first.flight.invocationId).toBe(fixture.invocation.id);
+  const retry = await broker.postJson<{ duplicate: boolean; flight: FlightRecord }>(executor.baseUrl, "/v1/mesh/invocations", bundle);
+  expect(retry.duplicate).toBe(true);
+  expect(retry.flight.id).toBe(first.flight.id);
+  const messages = await broker.getJson<MessageRecord[]>(executor.baseUrl, `/v1/messages?conversationId=${fixture.conversation.id}`);
+  expect(messages.filter(row => row.id === fixture.request.id)).toHaveLength(1);
+  const entries = readFileSync(join(home, "broker-journal.jsonl"), "utf8").trim().split("\n").flatMap(line => decodeJournalLine(line));
+  expect(entries.filter(entry => entry.kind === "invocation.record" && entry.invocation.id === fixture.invocation.id)).toHaveLength(1);
+  expect(entries.filter(entry => entry.kind === "invocation.dispatch_job.record" && entry.job.invocationId === fixture.invocation.id && entry.job.state === "pending")).toHaveLength(1);
+}, 20_000);
 
 test("cardless tmux reply resolves the remote request anchor, settles both brokers, and releases the waiter", async () => {
   const home = mkdtempSync(join(tmpdir(), "scout-return-origin-"));

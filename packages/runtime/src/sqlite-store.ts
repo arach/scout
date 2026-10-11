@@ -1,3 +1,4 @@
+import { canonicalMessageRecord } from "./message-record-canonical.js";
 import { ControlPlaneHistoryReader, ControlPlaneHistoryStore, type HistoricalPublication, type HistoricalRecordLocation } from "./control-plane-history-store.js";
 import { ControlPlaneHistoryRelocation, ensureHistoryAnchorSchema, type HistoricalTypedReader } from "./control-plane-history-relocation.js";
 import type { HistoryRotationPlan } from "./history-rotation.js";
@@ -182,49 +183,6 @@ function jsonCanonical<T>(value: T | null | undefined): T | undefined {
     : JSON.parse(JSON.stringify(value)) as T;
 }
 
-function compareIds(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
-}
-
-function canonicalMentions(mentions: MessageMention[] | undefined): MessageMention[] | undefined {
-  // The child table cannot distinguish [] from absent — no rows reads back
-  // as undefined, so collapse both to undefined.
-  if (mentions === undefined || mentions.length === 0) {
-    return undefined;
-  }
-  // message_mentions is keyed (message_id, actor_id): the write path's
-  // INSERT OR REPLACE keeps the last mention per actor, and reads order by
-  // actor_id. Mentions are a set, not a list — the canonical form is that set.
-  const byActorId = new Map<string, MessageMention>();
-  for (const mention of mentions) {
-    byActorId.set(mention.actorId, {
-      actorId: mention.actorId,
-      label: mention.label ?? undefined,
-    });
-  }
-  return [...byActorId.values()].sort((a, b) => compareIds(a.actorId, b.actorId));
-}
-
-function canonicalAttachments(attachments: MessageAttachment[] | undefined): MessageAttachment[] | undefined {
-  if (attachments === undefined || attachments.length === 0) {
-    return undefined;
-  }
-  // message_attachments is keyed by attachment id: INSERT OR REPLACE keeps
-  // the last write per id and reads order by id. The canonical form is that set.
-  const byId = new Map<string, MessageAttachment>();
-  for (const attachment of attachments) {
-    byId.set(attachment.id, {
-      id: attachment.id,
-      mediaType: attachment.mediaType,
-      fileName: attachment.fileName ?? undefined,
-      blobKey: attachment.blobKey ?? undefined,
-      url: attachment.url ?? undefined,
-      metadata: jsonCanonical(attachment.metadata),
-    });
-  }
-  return [...byId.values()].sort((a, b) => compareIds(a.id, b.id));
-}
-
 /**
  * Cross-record inputs the write path had when it normalized a record, so the
  * expected (in-memory) side of a persisted-parity comparison can apply the
@@ -249,24 +207,7 @@ export function canonicalRecord<T>(
   const r = record as Record<string, unknown>;
   switch (kind) {
     case "message":
-      return {
-        id: r.id,
-        conversationId: r.conversationId,
-        actorId: r.actorId,
-        originNodeId: r.originNodeId,
-        class: r.class,
-        body: r.body,
-        replyToMessageId: r.replyToMessageId ?? undefined,
-        threadConversationId: r.threadConversationId ?? undefined,
-        mentions: canonicalMentions(r.mentions as MessageMention[] | undefined),
-        attachments: canonicalAttachments(r.attachments as MessageAttachment[] | undefined),
-        speech: jsonCanonical(r.speech),
-        audience: jsonCanonical(r.audience),
-        visibility: r.visibility,
-        policy: r.policy,
-        createdAt: normalizeTimestampMs(r.createdAt as number | null | undefined) ?? r.createdAt,
-        metadata: jsonCanonical(r.metadata),
-      } as T;
+      return canonicalMessageRecord(record as unknown as MessageRecord) as T;
     case "invocation":
       return {
         id: r.id,

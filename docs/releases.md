@@ -79,7 +79,10 @@ checks and packed artifact audit pass.
 Cross-host requests now carry their exact request-message anchor, including
 when that message lives in historical storage. A remote reply completes the
 originating request, and conflicting duplicate submissions are rejected rather
-than silently changing the accepted request.
+than silently changing the accepted request. Completed requests keep their original
+flight receipt after rotation into historical storage, so a retry does not
+create another execution. Explicit journal-only brokers retain their existing
+request path.
 
 The peer worker rechecks cancellation and shutdown after reading historical
 context and immediately before forwarding. The packaged broker includes its
@@ -87,6 +90,12 @@ SQLite projection worker; its regression test verifies startup, incremental
 replay, and restart with complete records intact. Source checks cover delayed
 history reads, cross-host replies, and duplicate delivery identity. Publication
 is followed by a separate installation check against the exact registry bytes.
+
+Availability checks use each transport's receive evidence and the local
+adapter's queue capability. Registered polling mailboxes can accept durable
+work while their consumer is between polls; they do not depend on a tmux
+process probe. Session execution still follows the broker's serialized owner
+lane, and retired endpoints remain unavailable.
 
 ## 0.3.0 package review follow-up
 

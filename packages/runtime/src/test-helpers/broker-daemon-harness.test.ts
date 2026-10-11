@@ -7,6 +7,9 @@ import { basename, join } from "node:path";
 
 import {
   CHAT_ID_PREFIX,
+  type InvocationRequest,
+  type FlightRecord,
+  type RuntimeSnapshot,
   directChannelNaturalKey,
   isOpaqueChannelId,
   namedChannelNaturalKey,
@@ -567,7 +570,7 @@ export function createBrokerDaemonTestHarness() {
     pairingHomes.add(home);
     const pairingRoot = join(home, ".scout", "pairing");
     mkdirSync(pairingRoot, { recursive: true });
-    writeFileSync(join(pairingRoot, "config.json"), JSON.stringify({ port }), "utf8");
+    writeFileSync(join(pairingRoot, "config.json"), JSON.stringify({ port, secure: false }), "utf8");
     writeFileSync(join(pairingRoot, "runtime.json"), JSON.stringify({ status: "paired" }), "utf8");
     return home;
   }
@@ -758,6 +761,31 @@ export function createBrokerDaemonTestHarness() {
     throw new Error(`timed out waiting for invocation stream snapshot for ${invocationId}`);
   }
 
+  async function seedHangingReceiver(harness: BrokerHarness, agentId: string) {
+    // A real, owned receive route. Acceptance tests must not rely on card-only
+    // wakePolicy: it does not prove a launcher or a reachable existing session.
+    await postJson(harness.baseUrl, "/v1/endpoints", {
+      id: `endpoint-test-${agentId}`, agentId, nodeId: harness.nodeId,
+      harness: "http", transport: "http", state: "idle",
+      address: `${startHangingPeerServer()}/a2a`, metadata: { source: "test" },
+    });
+  }
+
+  async function seedQueuedInvocation(harness: BrokerHarness, invocation: InvocationRequest) {
+    // Model an already accepted peer job; recovery must handle its temporarily
+    // absent local endpoint without weakening fresh user-facing admission.
+    const snapshot = await getJson<RuntimeSnapshot>(harness.baseUrl, "/v1/snapshot");
+    const result = await postJson<{ flight: FlightRecord }>(harness.baseUrl, "/v1/mesh/invocations", {
+      originNode: snapshot.nodes[harness.nodeId],
+      actors: [snapshot.actors[invocation.requesterId]],
+      agents: [snapshot.agents[invocation.targetAgentId]],
+      ...(invocation.conversationId ? { conversation: snapshot.conversations[invocation.conversationId] } : {}),
+      invocation,
+    });
+    return { accepted: true, invocationId: invocation.id, flightId: result.flight.id,
+      targetAgentId: result.flight.targetAgentId, state: result.flight.state, flight: result.flight };
+  }
+
   async function seedBasicConversation(harness: BrokerHarness) {
     await postJson(harness.baseUrl, "/v1/actors", {
       id: "operator",
@@ -811,6 +839,8 @@ export function createBrokerDaemonTestHarness() {
     readInvocationStreamSnapshot,
     requestJson,
     seedBasicConversation,
+    seedHangingReceiver,
+    seedQueuedInvocation,
     startA2AResponder,
     startBroker,
     startHangingPeerServer,

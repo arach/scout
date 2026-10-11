@@ -295,7 +295,7 @@ import {
 import { readMeshNodeState } from "./mesh-node-state.js";
 import { BrokerHomeService } from "./broker-home-service.js";
 import { isDirectLocalAgentTransport } from "./local-agent-transports.js";
-import { BrokerUnavailableTargetService } from "./broker-unavailable-target-service.js";
+import { BrokerUnavailableTargetService, localEndpointCanReceive, localEndpointSupportsQueue } from "./broker-unavailable-target-service.js";
 import { BrokerRouteAliasStore } from "./broker-route-alias-store.js";
 import { BrokerRouteAliasError, BrokerRouteAliasService } from "./broker-route-alias-service.js";
 import { LazyControlPlaneStore } from "./lazy-control-plane-store.js";
@@ -730,8 +730,18 @@ const meshHttpService = new BrokerMeshHttpService({
   applyMeshBundle: applyMeshBundleDurably,
   commitEntries: commitDurableEntries,
   applyProjectedEntries,
-  invocationFor: async (invocationId) => knownInvocations.get(invocationId)
-    ?? (await projection.readInvocations([invocationId])).get(invocationId),
+  invocationSnapshotFor: async (invocationId) => {
+    const invocation = knownInvocations.get(invocationId);
+    const flight = runtime.flightForInvocation(invocationId);
+    if ((invocation && flight) || sqliteDisabled) return { invocation, flight };
+    const historical = await projection.readInvocationSnapshot(invocationId);
+    return {
+      invocation: invocation ?? historical.invocation ?? undefined,
+      flight: flight ?? historical.flight ?? undefined,
+    };
+  },
+  messageFor: async (messageId) => await runtime.readMessage(messageId)
+    ?? (sqliteDisabled ? undefined : (await projection.readMessages([messageId])).get(messageId)),
   rememberInvocation: (invocation) => {
     knownInvocations.set(invocation.id, invocation);
   },
@@ -2643,7 +2653,8 @@ const unavailableTargetService = new BrokerUnavailableTargetService({
     if (!areHarnessBinariesAvailable({ harness: endpoint.harness, transport: endpoint.transport })) return null;
     return { projectRoot, harness: endpoint.harness };
   },
-  isEndpointAlive: isLocalAgentEndpointAlive,
+  isEndpointAlive: (endpoint) => localEndpointCanReceive(endpoint, isLocalAgentEndpointAlive),
+  supportsQueue: (endpoint) => endpoint.nodeId === nodeId && localEndpointSupportsQueue(endpoint),
   describeRemoteAuthorityIssue: (agent, authorityNode) =>
     meshForwardingService.describeRemoteAuthorityIssue(agent, authorityNode),
 });

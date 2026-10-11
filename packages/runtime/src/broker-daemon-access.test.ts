@@ -48,6 +48,7 @@ test("scoped signed daemon roundtrip: no discovery leaks, no message wake, owned
   expect(recorded.audience.delivery).toBe("none"); expect(recorded.metadata.wake).toBe("never"); expect(recorded.mentions).toEqual([]);
   const deliveries = await broker.getJson<any>(h.baseUrl, "/v1/deliveries");
   expect(JSON.stringify(deliveries)).not.toContain(sent.body.messageId);
+  await broker.seedHangingReceiver(h, "fabric");
   const accepted = await rpc({ operation: "request", requestId: "request-01", target: "fabric", body: "Inspect this input" });
   expect(accepted.status).toBe(202);
   const withWork = await broker.getJson<any>(h.baseUrl, "/v1/snapshot");
