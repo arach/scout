@@ -444,7 +444,8 @@ export type MeshHostResolution =
  * Resolve the machine an ask names with `--on`. Matching reuses the session
  * address rules (derived label, node id, name, host name), so `archie`,
  * `archie.local` and the full node id all land on the same machine. A name
- * that matches more than one machine is `ambiguous`; the node id disambiguates.
+ * that has multiple equally good matches is `ambiguous`; exact ids and stable
+ * qualifiers outrank display-name and normalized hostname aliases.
  */
 export function resolveMeshHost(input: {
   host: string;
@@ -459,7 +460,15 @@ export function resolveMeshHost(input: {
   // several, and then the ask is refused rather than landing on whichever
   // matched first (or quietly on this machine).
   const exact = all.filter((node) => node.id === input.host.trim());
-  const matches = exact.length === 1 ? exact : all.filter((node) => scoutNodeMatchesSessionHost(node, input.host));
+  // A stable machine qualifier outranks display-name/hostname aliases. Old
+  // mini-local records can advertise "mini" too; they must not shadow the
+  // node whose qualifier is exactly "mini". Equal-best matches still refuse.
+  const rawHost = (value?: string) => value?.trim().toLowerCase().replace(/\.+$/, "") ?? "";
+  const wanted = rawHost(input.host);
+  const labelled = all.filter((node) => rawHost(scoutSessionHostForNode(node)) === wanted);
+  const named = all.filter((node) => [node.name, node.hostName].some((name) => rawHost(name) === wanted));
+  const matches = exact.length ? exact : labelled.length ? labelled : named.length ? named
+    : all.filter((node) => scoutNodeMatchesSessionHost(node, input.host));
   if (matches.length > 1) return { kind: "ambiguous", nodes: matches };
   const node = matches[0];
   if (node && node.id === input.localNode?.id) return { kind: "local" };

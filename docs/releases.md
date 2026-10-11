@@ -74,6 +74,20 @@ Commit the source, version manifests, `apps/desktop/src/shared/product.ts`,
 `docs.json`, and lockfile on a review branch. Merge only after the standalone
 checks and packed artifact audit pass.
 
+## 0.3.6 routing and historical context
+
+Cross-host requests now carry their exact request-message anchor, including
+when that message lives in historical storage. A remote reply completes the
+originating request, and conflicting duplicate submissions are rejected rather
+than silently changing the accepted request.
+
+The peer worker rechecks cancellation and shutdown after reading historical
+context and immediately before forwarding. The packaged broker includes its
+SQLite projection worker; its regression test verifies startup, incremental
+replay, and restart with complete records intact. Source checks cover delayed
+history reads, cross-host replies, and duplicate delivery identity. Publication
+is followed by a separate installation check against the exact registry bytes.
+
 ## 0.3.0 package review follow-up
 
 This release makes an explicitly selected channel authoritative for message

@@ -21,6 +21,7 @@ import {
   endpointStateAfterSuccessfulSessionWarmup,
   areHarnessBinariesAvailable,
   brokerSnapshotMessages,
+  localAgentReplyFromSnapshot,
   getLocalAgentConfig,
   invokeLocalAgentEndpoint,
   listArchivedLocalAgentIds,
@@ -788,7 +789,9 @@ describe("local agent prompts", () => {
     expect(prompt).toContain('Context: {"file":"ShaperProvider.tsx"}');
     expect(prompt).toContain(`${scoutCli} latest --agent shaper --limit 20`);
     expect(prompt).toContain("Reply in the existing thread, not by addressing @hudson.");
-    expect(prompt).toContain(`${scoutCli} send --as shaper --ref msg-request-1 "[ask:flt-1] <your response>"`);
+    expect(prompt).toContain(`${scoutCli} tell --as shaper --ref msg-request-1 "<your response>"`);
+    expect(prompt).toContain("final assistant text is not captured automatically");
+    expect(prompt).not.toContain("[ask:flt-1]");
     expect(prompt).not.toContain("@hudson <your response>");
   });
 
@@ -1328,6 +1331,42 @@ describe("local agent prompts", () => {
       "--model",
       "grok-4.3",
     ]);
+  });
+});
+
+describe("terminal broker reply capture", () => {
+  const invocation = {
+    id: "inv-mini", requesterId: "arts-mini", requesterNodeId: "node-origin", targetAgentId: "session-mini",
+    action: "consult", task: "smoke", ensureAwake: true, stream: false, createdAt: 10_000,
+    conversationId: "chn-smoke", messageId: "msg-smoke",
+  } as const;
+  const input = { agentRuntimeId: "session-mini", invocation, flightId: "legacy-marker", askedAt: 10 };
+  test("accepts a structured reply with no magic body marker", () => {
+    const reply = { class: "agent", actorId: "session-mini", conversationId: "chn-smoke", replyToMessageId: "msg-smoke", body: "0.3.6-dev.3 mini", createdAt: 11_000 };
+    expect(localAgentReplyFromSnapshot({ messages: { reply } }, input)).toBe("0.3.6-dev.3 mini");
+    for (const patch of [{ actorId: "other" }, { replyToMessageId: "other" }, { conversationId: "other" }, { createdAt: 1 }, { body: "" }]) {
+      expect(localAgentReplyFromSnapshot({ messages: { reply: { ...reply, ...patch } } }, input)).toBeNull();
+    }
+  });
+  test("non-answer messages cannot satisfy structured or legacy replies or override a completed flight", () => {
+    const flight = { invocationId: invocation.id, targetAgentId: input.agentRuntimeId, state: "completed", output: "actual final result", metadata: { completedByBrokerReply: true } };
+    for (const messageClass of ["status", "log", "system", "artifact", undefined]) {
+      for (const body of ["still working, not the answer", "[ask:legacy-marker] still working"]) {
+        const reply = { class: messageClass, actorId: input.agentRuntimeId, conversationId: invocation.conversationId, replyToMessageId: invocation.messageId, body, createdAt: 9_000 };
+        expect(localAgentReplyFromSnapshot({ messages: { reply } }, input)).toBeNull();
+        expect(localAgentReplyFromSnapshot({ messages: { reply }, flights: { flight } }, input)).toBe("actual final result");
+      }
+    }
+  });
+  test("releases a tmux waiter from an authority-accepted flight without a local message copy", () => {
+    const flight = { invocationId: "inv-mini", targetAgentId: "session-mini", state: "completed", output: "0.3.6-dev.3 mini", metadata: { completedByBrokerReply: true } };
+    expect(localAgentReplyFromSnapshot({ messages: {}, flights: { flight } }, input)).toBe("0.3.6-dev.3 mini");
+    for (const patch of [{ invocationId: "other" }, { targetAgentId: "other" }, { state: "running" }, { state: "failed" }, { metadata: {} }]) {
+      expect(localAgentReplyFromSnapshot({ flights: { flight: { ...flight, ...patch } } }, input)).toBeNull();
+    }
+  });
+  test("retains legacy tagged reply compatibility", () => {
+    expect(localAgentReplyFromSnapshot({ messages: { reply: { class: "agent", actorId: "session-mini", body: "[ask:legacy-marker] done", createdAt: 11_000 } } }, input)).toBe("done");
   });
 });
 

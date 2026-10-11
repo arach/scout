@@ -609,6 +609,21 @@ describe("resolveMeshHost", () => {
     expect(resolve("archie-mesh-1")).toEqual({ kind: "peer", node: archie });
   });
 
+  test("an exact host qualifier beats stale display-name aliases in either order", () => {
+    const mini = node({ id: "mini-mesh-1", name: "mini", hostName: "mini.local" });
+    const stale = node({ id: "mini-local-mesh-1", name: "mini", hostName: "mini" });
+    for (const order of [[stale, mini], [mini, stale]]) {
+      expect(resolve("mini", { nodes: order, trustedNodeIds: new Set([mini.id, stale.id]) }))
+        .toEqual({ kind: "peer", node: mini });
+      expect(resolve("mini-local", { nodes: order, trustedNodeIds: new Set([mini.id, stale.id]) }))
+        .toEqual({ kind: "peer", node: stale });
+    }
+  });
+
+  test("normalized host aliases remain usable when no exact qualifier matches", () => {
+    expect(resolve("ARCHIE.local.")).toEqual({ kind: "peer", node: archie });
+  });
+
   test("names this machine as local", () => {
     expect(resolve("arts-mini")).toEqual({ kind: "local" });
   });
@@ -626,8 +641,9 @@ describe("resolveMeshHost", () => {
   });
 
   test("a name this machine and a peer share is refused, never resolved to local", () => {
-    const shadow = node({ id: "mini-mesh-1", name: "mini", hostName: "archie", brokerUrl: "http://127.0.0.1:43110" });
-    expect(resolve("archie", { localNode: shadow, nodes: [shadow, archie] })).toEqual({ kind: "ambiguous", nodes: [shadow, archie] });
+    const shadow = node({ id: "mini-mesh-1", name: "shared", brokerUrl: "http://127.0.0.1:43110" });
+    const peer = { ...archie, name: "shared" };
+    expect(resolve("shared", { localNode: shadow, nodes: [shadow, peer] })).toEqual({ kind: "ambiguous", nodes: [shadow, peer] });
     expect(resolve("archie-mesh-1", { localNode: shadow, nodes: [shadow, archie] })).toEqual({ kind: "peer", node: archie });
   });
 

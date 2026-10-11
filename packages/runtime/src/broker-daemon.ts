@@ -730,9 +730,12 @@ const meshHttpService = new BrokerMeshHttpService({
   applyMeshBundle: applyMeshBundleDurably,
   commitEntries: commitDurableEntries,
   applyProjectedEntries,
+  invocationFor: async (invocationId) => knownInvocations.get(invocationId)
+    ?? (await projection.readInvocations([invocationId])).get(invocationId),
   rememberInvocation: (invocation) => {
     knownInvocations.set(invocation.id, invocation);
   },
+  completeInvocationsForBrokerReply: (message) => messageService.completeInvocationsForBrokerReply(message),
   localEndpointForActor: (actorId) => Object.values(runtime.snapshot().endpoints).find((endpoint) =>
     endpoint.agentId === actorId
     && endpoint.nodeId === nodeId
