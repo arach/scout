@@ -83,6 +83,7 @@ const expectedRouteInventory = [
   "GET /v1/pairing/sessions",
   "GET /v1/repo-watch/snapshot",
   "GET /v1/repo-watch/warm",
+  "GET /v1/request-receipts/:id",
   "GET /v1/roles/assignments",
   "GET /v1/roles/catalog",
   "GET /v1/runtime-catalog",

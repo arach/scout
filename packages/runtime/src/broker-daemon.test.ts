@@ -35,7 +35,7 @@ describe("broker daemon core routes", () => {
         terminalRelay?: { managedBy?: string; state?: string; healthy?: boolean | null };
         localEdge?: { managedBy?: string; state?: string; healthy?: boolean | null };
       };
-      projection?: { state?: string; detail?: string | null };
+      projection?: { state?: string; detail?: string | null; worker?: { pendingRequests: number; replay: { bytes: number; fullReplays: number; tailReplays: number } } };
       counts?: { collaborationRecords?: number };
     }>(harness.baseUrl, "/health");
 
@@ -64,7 +64,10 @@ describe("broker daemon core routes", () => {
       state: "unknown",
       healthy: null,
     }));
-    expect(health.projection).toEqual({ state: "ready", detail: null });
+    expect(health.projection).toEqual(expect.objectContaining({ state: "ready", detail: null }));
+    expect(health.projection?.worker?.pendingRequests).toBeGreaterThanOrEqual(0);
+    expect(health.projection?.worker?.replay.bytes).toBeGreaterThanOrEqual(0);
+    expect(health.projection?.worker?.replay.fullReplays).toBeGreaterThanOrEqual(1);
     expect(health.counts?.collaborationRecords).toBe(0);
   });
 
@@ -125,6 +128,7 @@ describe("broker daemon core routes", () => {
   test("keeps invocation snapshot lifecycle and stream routes distinct", async () => {
     const harness = await broker.startBroker();
     await broker.seedBasicConversation(harness);
+    await broker.seedHangingReceiver(harness, "fabric");
 
     const created = await broker.postJson<{
       accepted: boolean;

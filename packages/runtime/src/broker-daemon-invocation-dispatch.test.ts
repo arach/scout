@@ -10,7 +10,7 @@ import { createBrokerDaemonTestHarness } from "./test-helpers/broker-daemon-harn
 const broker = createBrokerDaemonTestHarness();
 
 describe("broker daemon invocation dispatch", () => {
-  test("creates a flight for explicit invocations even when no endpoint is runnable", async () => {
+  test("reports unavailable for a card with no receiver or verified launcher", async () => {
     const harness = await broker.startBroker();
     await broker.seedBasicConversation(harness);
 
@@ -34,6 +34,7 @@ describe("broker daemon invocation dispatch", () => {
 
     const response = await broker.postJson<{
       accepted: boolean;
+      dispatch?: { kind: string; target?: { agentId?: string } };
       invocationId: string;
       flightId: string;
       targetAgentId: string;
@@ -54,42 +55,11 @@ describe("broker daemon invocation dispatch", () => {
       metadata: { source: "test" },
     });
 
-    expect(response.accepted).toBe(true);
-    expect(response.targetAgentId).toBe("ghost");
-    expect(response.state).toBe("waking");
-
-    const events = await broker.getJson<Array<{ kind: string; payload: { invocation?: { id: string }; flight?: { targetAgentId: string; state: string } } }>>(
-      harness.baseUrl,
-      "/v1/events?limit=20",
-    );
-
-    expect(events.some((event) => event.kind === "invocation.requested" && event.payload.invocation?.id === "inv-test-1")).toBe(true);
-    expect(
-      events.some((event) => event.kind === "flight.updated" && event.payload.flight?.targetAgentId === "ghost" && event.payload.flight?.state === "waking"),
-    ).toBe(true);
-
-    const snapshot = await broker.waitFor(
-      () => broker.getJson<{
-        flights: Record<string, {
-          state: string;
-          summary?: string;
-          metadata?: Record<string, unknown>;
-        }>;
-      }>(harness.baseUrl, "/v1/snapshot"),
-      (value) => value.flights[response.flightId]?.state === "queued",
-    );
-    const flight = snapshot.flights[response.flightId];
-    expect([
-      "Ghost waking.",
-      "Message stored for Ghost. Will deliver when online.",
-    ]).toContain(flight?.summary);
-    const dispatchOutcome = flight?.metadata?.dispatchOutcome as { status?: string; reason?: string } | undefined;
-    if (dispatchOutcome) {
-      expect(dispatchOutcome).toEqual(expect.objectContaining({
-        status: "queued_until_online",
-        reason: "no_runnable_endpoint",
-      }));
-    }
+    expect(response.accepted).toBe(true); // The routing decision itself is recorded.
+    expect(response.flightId).toBeUndefined();
+    expect(response.dispatch).toMatchObject({ kind: "unavailable", target: { agentId: "ghost" } });
+    const snapshot = await broker.getJson<{ flights: Record<string, unknown> }>(harness.baseUrl, "/v1/snapshot");
+    expect(Object.keys(snapshot.flights)).toHaveLength(0);
   }, 15_000);
 
   test("drains queued local invocations when the endpoint comes online", async () => {
@@ -130,11 +100,7 @@ describe("broker daemon invocation dispatch", () => {
       advertiseScope: "local",
     });
 
-    const response = await broker.postJson<{
-      accepted: boolean;
-      flightId: string;
-      state: string;
-    }>(harness.baseUrl, "/v1/invocations", {
+    const response = await broker.seedQueuedInvocation(harness, {
       id: "inv-sleepy-queued",
       requesterId: "operator",
       requesterNodeId: harness.nodeId,
@@ -312,7 +278,7 @@ describe("broker daemon invocation dispatch", () => {
       advertiseScope: "local",
     });
 
-    await broker.postJson(firstHarness.baseUrl, "/v1/invocations", {
+    await broker.seedQueuedInvocation(firstHarness, {
       id: "inv-restart-1",
       requesterId: "operator",
       requesterNodeId: firstHarness.nodeId,
@@ -381,7 +347,8 @@ describe("broker daemon invocation dispatch", () => {
   }, 20_000);
 
   test("routes exact session asks to the session owner and preserves existing-session execution", async () => {
-    const harness = await broker.startBroker();
+    const pairing = broker.startPairingBridgeServer({ sessions: [{ id: "codex-thread-reviewer", name: "Reviewer", adapterType: "codex", status: "active" }] });
+    const harness = await broker.startBroker({ env: { HOME: broker.configurePairingHome(pairing.port) } });
 
     await broker.postJson(harness.baseUrl, "/v1/agents", {
       id: "reviewer.main",
@@ -405,9 +372,9 @@ describe("broker daemon invocation dispatch", () => {
       agentId: "reviewer.main",
       nodeId: harness.nodeId,
       harness: "codex",
-      transport: "codex_app_server",
+      transport: "pairing_bridge",
       state: "active",
-      sessionId: "relay-reviewer-codex",
+      sessionId: "codex-thread-reviewer",
       metadata: {
         externalSessionId: "codex-thread-reviewer",
         threadId: "codex-thread-reviewer",
@@ -474,8 +441,9 @@ describe("broker daemon invocation dispatch", () => {
   }, 15_000);
 
   test("collapses broker projections for one exact native session", async () => {
-    const harness = await broker.startBroker();
     const sessionId = "session-msmj8lfe-plfxbs";
+    const pairing = broker.startPairingBridgeServer({ sessions: [{ id: sessionId, name: "Reviewer", adapterType: "claude", status: "active" }] });
+    const harness = await broker.startBroker({ env: { HOME: broker.configurePairingHome(pairing.port) } });
     const projections = [
       { id: "reviewer.main", state: "idle" },
       { id: "reviewer.review-a.node-1", state: "idle" },
@@ -506,9 +474,9 @@ describe("broker daemon invocation dispatch", () => {
         agentId: projection.id,
         nodeId: harness.nodeId,
         harness: "claude",
-        transport: "claude_stream_json",
+        transport: "pairing_bridge",
         state: projection.state,
-        sessionId: `relay-${projection.id}`,
+        sessionId,
         metadata: {
           externalSessionId: sessionId,
           nativeSessionId: sessionId,

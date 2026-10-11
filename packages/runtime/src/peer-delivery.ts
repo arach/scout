@@ -28,6 +28,7 @@ import { MAX_SSE_FRAME_BYTES } from "./broker-control-stream-service.js";
 import type { FileBackedBrokerJournal } from "./broker-journal.js";
 import {
   buildMeshInvocationBundle,
+  buildMeshInvocationBundleAsync,
   forwardMeshInvocation,
   type MeshForwardTarget,
   PeerRejectedError,
@@ -571,17 +572,18 @@ export function createPeerDeliveryWorker(
         leaseExpiresAt: startedAt + cfg.leaseMs,
       });
 
-      if (stopped) return;
-      // No await may sit between this final check and the external submission.
-      const beforeForward = deps.flightForInvocation?.(invocation.id);
-      if (beforeForward?.invocationId === invocation.id && beforeForward.targetAgentId === invocation.targetAgentId
-        && beforeForward.requesterId === invocation.requesterId && TERMINAL_FLIGHT_STATES.has(beforeForward.state)) {
-        await closeIfTerminal();
-        return;
-      }
-
       try {
-        const bundle = buildMeshInvocationBundle(deps.snapshot(), deps.localNode(), invocation);
+        // async: carries the request message so the executor can resolve `--ref msg-…` replies
+        const bundle = await buildMeshInvocationBundleAsync(deps.snapshot(), deps.localNode(), invocation);
+        if (stopped) return;
+        // Cold request history can yield after lease acquisition. No await may
+        // sit between this final check and the external submission.
+        const beforeForward = deps.flightForInvocation?.(invocation.id);
+        if (beforeForward?.invocationId === invocation.id && beforeForward.targetAgentId === invocation.targetAgentId
+          && beforeForward.requesterId === invocation.requesterId && TERMINAL_FLIGHT_STATES.has(beforeForward.state)) {
+          await closeIfTerminal();
+          return;
+        }
         const result = await forward(peerTarget, bundle);
 
         await deps.recordDeliveryAttempt({

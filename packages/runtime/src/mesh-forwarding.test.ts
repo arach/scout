@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
-import type { AgentDefinition, IrohMeshEntrypoint, MessageRecord, NodeDefinition } from "@openscout/protocol";
+import type { AgentDefinition, IrohMeshEntrypoint, InvocationRequest, MessageRecord, NodeDefinition } from "@openscout/protocol";
+import type { RuntimeRegistrySnapshot } from "./registry.js";
+import { registerAsyncMessageRecordView } from "./broker-message-records.js";
 import {
   OPENSCOUT_IROH_MESH_ALPN,
   OPENSCOUT_MESH_PROTOCOL_VERSION,
@@ -10,11 +12,34 @@ import {
   DEFAULT_MESH_FORWARD_TIMEOUT_MS,
   fetchPeerAgents,
   forwardMeshMessage,
+  buildMeshInvocationBundleAsync,
   MAX_PEER_AGENT_SNAPSHOT_BYTES,
   PeerAgentSnapshotTooLargeError,
   type MeshMessageBundle,
   PeerUnreachableError,
 } from "./mesh-forwarding.js";
+
+test("invocation envelope carries the exact Scout request anchor, including cold history reads", async () => {
+  const request = { id: "msg-request", conversationId: "chn-request", actorId: "requester", body: "smoke", class: "agent", visibility: "private", policy: "durable", originNodeId: "origin", createdAt: 1 } satisfies MessageRecord;
+  const invocation = { id: "inv-request", requesterId: "requester", requesterNodeId: "origin", targetAgentId: "session-mini", action: "consult", task: "smoke", ensureAwake: true, stream: false, createdAt: 1, conversationId: request.conversationId, messageId: request.id } satisfies InvocationRequest;
+  const origin = { id: "origin", meshId: "mesh", name: "Origin", advertiseScope: "mesh", registeredAt: 1 } satisfies NodeDefinition;
+  const messages: Record<string, MessageRecord> = {};
+  let reads = 0;
+  registerAsyncMessageRecordView(messages, {
+    count: () => 1,
+    async read(id) { reads++; expect(id).toBe(request.id); return request; },
+    async *iterate() { throw new Error("must not scan all messages"); },
+    async withCapture() { throw new Error("must not capture all history"); },
+  });
+  const snapshot: RuntimeRegistrySnapshot = {
+    nodes: { origin }, actors: {}, agents: {}, endpoints: {}, conversations: {}, bindings: {}, messages,
+    readCursors: {}, invocations: {}, flights: {}, collaborationRecords: {},
+  };
+  const bundle = await buildMeshInvocationBundleAsync(snapshot, origin, invocation);
+  expect(bundle.message).toBe(request);
+  expect(reads).toBe(1);
+  expect(bundle.invocation).toBe(invocation);
+});
 
 test("peer agent snapshots use a 2 MiB wire ceiling", () => {
   expect(MAX_PEER_AGENT_SNAPSHOT_BYTES).toBe(2 * 1024 * 1024);

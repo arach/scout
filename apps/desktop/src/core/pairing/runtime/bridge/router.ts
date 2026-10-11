@@ -81,6 +81,8 @@ import {
   storePairingAttachmentBlob,
 } from "./fileserver.ts";
 import { createArtifactPresentation } from "./artifact-presentation.ts";
+// Keep the transitional bridge on the canonical prompt/version/audit guard.
+import { answerHerdrPermission } from "../../../../../../../packages/web/server/core/attention/herdr-permission-answer.ts";
 
 import { readFileSync, readdirSync, realpathSync, statSync } from "fs";
 import { basename, isAbsolute, join, relative, resolve } from "path";
@@ -1026,6 +1028,16 @@ const mobileRouter = t.router({
   terminalSessions: procedure
     .input(z.object({}).optional())
     .query(async () => getScoutMobileTerminals()),
+
+  answerTerminalPermission: procedure
+    .input(z.object({
+      itemId: z.string(),
+      version: z.number().int(),
+      decision: z.enum(["approve", "deny"]),
+    }))
+    .mutation(async ({ input }) => {
+      return answerHerdrPermission(input);
+    }),
 
   agentDetail: procedure
     .input(z.object({ agentId: z.string() }))

@@ -13,6 +13,7 @@ describe("broker daemon collaboration routes", () => {
   test("links broker delivery work items to invocations and terminal flights", async () => {
     const harness = await broker.startBroker();
     await broker.seedBasicConversation(harness);
+    await broker.seedHangingReceiver(harness, "fabric");
 
     const createdAt = Date.now();
     const response = await broker.postJson<{
@@ -112,6 +113,7 @@ describe("broker daemon collaboration routes", () => {
   test("reuses duplicate delivery work items without appending another created event", async () => {
     const harness = await broker.startBroker();
     await broker.seedBasicConversation(harness);
+    await broker.seedHangingReceiver(harness, "fabric");
 
     const createdAt = Date.now();
     const payload = {
@@ -195,6 +197,7 @@ describe("broker daemon collaboration routes", () => {
   test("does not overwrite or link conflicting delivery work item ids", async () => {
     const harness = await broker.startBroker();
     await broker.seedBasicConversation(harness);
+    await broker.seedHangingReceiver(harness, "fabric");
 
     const createdAt = Date.now();
     await broker.postJson(harness.baseUrl, "/v1/collaboration/records", {

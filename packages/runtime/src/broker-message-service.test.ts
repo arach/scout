@@ -211,6 +211,34 @@ function createHarness(input: {
 }
 
 describe("BrokerMessageService", () => {
+  test("settles the executor flight only after the remote authority accepts its reply", async () => {
+    const nextInvocation = invocation({ requesterNodeId: "node-peer" });
+    const nextFlight = flight();
+    let accepted = false;
+    const harness = createHarness({
+      invocations: { [nextInvocation.id]: nextInvocation },
+      flights: { [nextInvocation.id]: nextFlight },
+      mesh: {
+        authorityNodeForConversation: () => ({ conversation: conversation({ authorityNodeId: "node-peer" }), authorityNode: node() }),
+        async forwardConversationMessageToAuthority() {
+          if (!accepted) expect(harness.persistedFlights).toEqual([]);
+          if (!accepted) throw new Error("peer unavailable");
+          return { forwarded: true, authorityNodeId: "node-peer" };
+        },
+      },
+    });
+    await expect(harness.service.postConversationMessage(message())).rejects.toThrow("peer unavailable");
+    expect(harness.persistedFlights).toEqual([]);
+    accepted = true;
+    await harness.service.postConversationMessage(message());
+    expect(harness.persistedFlights).toMatchObject([{ state: "completed", output: "done", metadata: { completedByBrokerReply: true, replyMessageId: "msg-1" } }]);
+    // Message remains authority-owned: no local duplicate fan-out.
+    expect(harness.recordedMessages).toEqual([]);
+    expect(harness.forwardedPeerDeliveries).toEqual([]);
+    await harness.service.postConversationMessage(message());
+    expect(harness.persistedFlights).toHaveLength(1);
+  });
+
   test("returns an idempotent client-message retry without replaying deliveries", async () => {
     const existing = message({
       id: "m-client-stable",

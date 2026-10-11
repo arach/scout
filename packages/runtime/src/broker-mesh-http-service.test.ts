@@ -1,4 +1,7 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   type ActorIdentity,
@@ -18,7 +21,12 @@ import type { BrokerJournalEntry } from "./broker-journal.js";
 import type { BrokerInvocationDispatchJob } from "./broker-dispatch-job.js";
 import {
   BrokerMeshHttpService,
+  type BrokerMeshHttpServiceDeps,
 } from "./broker-mesh-http-service.js";
+import { createInMemoryControlRuntime } from "./broker.js";
+import { SQLiteControlPlaneStore } from "./sqlite-store.js";
+import { ControlPlaneHistoryStore } from "./control-plane-history-store.js";
+import { emptyHistoryRotationPlan } from "./history-rotation.js";
 import type {
   MeshCollaborationEventBundle,
   MeshCollaborationRecordBundle,
@@ -224,19 +232,26 @@ function createHarness(input: {
   agents?: Record<string, AgentDefinition>;
   messages?: Record<string, MessageRecord>;
   flights?: Record<string, FlightRecord>;
+  invocations?: Record<string, InvocationRequest>;
   records?: Record<string, CollaborationRecord>;
   localEndpoints?: Record<string, AgentEndpoint>;
+  invocationSnapshotFor?: BrokerMeshHttpServiceDeps["invocationSnapshotFor"];
+  messageFor?: BrokerMeshHttpServiceDeps["messageFor"];
 } = {}) {
   const agents = input.agents ?? {};
   const localEndpoints = input.localEndpoints ?? {};
   const messages = input.messages ?? {};
   const flights = input.flights ?? {};
+  const invocations = input.invocations ?? {};
   const records = input.records ?? {};
   const applyBundleCalls: Array<MeshMessageBundle | MeshInvocationBundle | MeshCollaborationRecordBundle | MeshCollaborationEventBundle> = [];
   const committedEntries: BrokerJournalEntry[][] = [];
   const projectedEntries: BrokerJournalEntry[][] = [];
   const rememberedInvocations: InvocationRequest[] = [];
   const runDispatchJobs: Array<{ job: BrokerInvocationDispatchJob; invocation: InvocationRequest }> = [];
+  const completedReplies: MessageRecord[] = [];
+  const plannedInvocations: InvocationRequest[] = [];
+  const messageFor = async (id: string) => messages[id] ?? await input.messageFor?.(id);
 
   const service = new BrokerMeshHttpService({
     nodeId: "node-local",
@@ -248,12 +263,16 @@ function createHarness(input: {
       },
       agent: (agentId) => agents[agentId],
       flightForInvocation: (invocationId) => flights[invocationId],
-      planInvocation: (nextInvocation) => flight({
-        invocationId: nextInvocation.id,
-        requesterId: nextInvocation.requesterId,
-        targetAgentId: nextInvocation.targetAgentId,
-      }),
-      async commitInvocation(_nextInvocation, nextFlight) {
+      planInvocation: (nextInvocation) => {
+        plannedInvocations.push(nextInvocation);
+        return flight({
+          invocationId: nextInvocation.id,
+          requesterId: nextInvocation.requesterId,
+          targetAgentId: nextInvocation.targetAgentId,
+        });
+      },
+      async commitInvocation(nextInvocation, nextFlight) {
+        invocations[nextInvocation.id] = nextInvocation;
         flights[nextFlight.invocationId] = nextFlight;
       },
       collaborationRecord: (recordId) => records[recordId],
@@ -280,8 +299,14 @@ function createHarness(input: {
     async applyProjectedEntries(entries) {
       projectedEntries.push(entries);
     },
+    invocationSnapshotFor: input.invocationSnapshotFor ?? (async (id) => ({ invocation: invocations[id], flight: flights[id] })),
+    messageFor,
     rememberInvocation(nextInvocation) {
       rememberedInvocations.push(nextInvocation);
+    },
+    async completeInvocationsForBrokerReply(reply) {
+      expect(await messageFor(reply.id)).toEqual(reply);
+      completedReplies.push(reply);
     },
     localEndpointForActor: (actorId) => localEndpoints[actorId],
     async runDispatchJob(job, nextInvocation) {
@@ -293,8 +318,11 @@ function createHarness(input: {
     agents,
     applyBundleCalls,
     committedEntries,
+    completedReplies,
     flights,
+    invocations,
     messages,
+    plannedInvocations,
     projectedEntries,
     records,
     rememberedInvocations,
@@ -303,7 +331,216 @@ function createHarness(input: {
   };
 }
 
+const historyCleanups: Array<() => void> = [];
+afterEach(() => { for (const cleanup of historyCleanups.splice(0).reverse()) cleanup(); });
+
+function archivedFixture() {
+  const root = mkdtempSync(join(tmpdir(), "scout-mesh-history-retry-"));
+  historyCleanups.push(() => rmSync(root, { recursive: true, force: true }));
+  const store = new SQLiteControlPlaneStore(join(root, "control.sqlite"));
+  historyCleanups.push(() => store.close());
+  const history = new ControlPlaneHistoryStore(join(root, "history"));
+  historyCleanups.push(() => history.close());
+  store.configureHistory(join(root, "history"));
+  store.upsertNode(node());
+  store.upsertNode(node({ id: "node-local" }));
+  store.upsertActor(actor());
+  store.upsertActor(agent());
+  store.upsertConversation(conversation());
+  const request = message({
+    createdAt: 1_700_000_000_000,
+    mentions: [{ actorId: "operator", label: "Sender" }, { actorId: "agent-1", label: "Target" }],
+    attachments: [{ id: "z", mediaType: "text/plain", url: "https://example.test/context" }, { id: "a", mediaType: "text/plain", blobKey: "preserved" }],
+    metadata: { context: { original: ["retain", "雪"] } },
+  });
+  const originalInvocation = invocation({ createdAt: request.createdAt, context: { original: "full task context" } });
+  const originalFlight = flight({ state: "completed", startedAt: request.createdAt, completedAt: request.createdAt + 1, output: "original answer" });
+  store.recordMessage(request);
+  store.recordInvocation(originalInvocation);
+  store.recordFlight(originalFlight);
+  const runtime = createInMemoryControlRuntime(store.loadSnapshot());
+  const expected = store.readInvocationSnapshot(originalInvocation.id);
+  const expectedMessage = store.readMessages([request.id]).get(request.id);
+  const plan = emptyHistoryRotationPlan();
+  plan.messageIds.add(request.id); plan.invocationIds.add(originalInvocation.id); plan.flightIds.add(originalFlight.id);
+  const published = store.publishHistoryRotation(plan, history);
+  expect(published.publication).not.toBeNull();
+  const removed = store.removePublishedHistory(published.publication!, published.published, history);
+  expect(removed.blocked).toEqual([]);
+  runtime.applyHistoryRotation(removed.removed);
+  expect(runtime.flightForInvocation(originalInvocation.id)).toBeUndefined();
+  expect(runtime.message(request.id)).toBeUndefined();
+  expect(store.writerDb.query("SELECT 1 FROM flights WHERE id=?1").get(originalFlight.id)).toBeNull();
+  expect(store.writerDb.query<{ body: string }>("SELECT body FROM messages WHERE id=?1").get(request.id)?.body).toBe("");
+  const harness = createHarness({
+    invocationSnapshotFor: async id => {
+      const snapshot = store.readInvocationSnapshot(id);
+      return { invocation: snapshot.invocation ?? undefined, flight: snapshot.flight ?? undefined };
+    },
+    messageFor: async id => store.readMessages([id]).get(id),
+  });
+  return { harness, store, request, originalInvocation, originalFlight, expected, expectedMessage };
+}
+
 describe("BrokerMeshHttpService", () => {
+  test("an exact retry after physical history relocation returns the original terminal flight without dispatch or rehydration", async () => {
+    const { harness, store, request, originalInvocation, expected, expectedMessage } = archivedFixture();
+    const result = await harness.service.receiveInvocationBundle(invocationBundle({ invocation: originalInvocation, message: request }));
+    expect(result).toEqual({ status: 200, body: { ok: true, duplicate: true, flight: expected.flight } });
+    expect(harness.plannedInvocations).toEqual([]);
+    expect(harness.runDispatchJobs).toEqual([]);
+    expect(harness.rememberedInvocations).toEqual([]);
+    expect(harness.committedEntries).toEqual([]);
+    expect(harness.messages).toEqual({});
+    expect(harness.invocations).toEqual({});
+    expect(harness.flights).toEqual({});
+    expect(store.readInvocationSnapshot(originalInvocation.id)).toEqual(expected);
+    expect(store.readMessages([request.id]).get(request.id)).toEqual(expectedMessage);
+    expect(store.writerDb.query("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
+
+  test("archived anchors reject changed message content and identity before applying a retried bundle", async () => {
+    const { harness, store, request, originalInvocation, expectedMessage } = archivedFixture();
+    for (const changed of [{ ...request, body: "changed work" }, { ...request, metadata: { replaced: true } }]) {
+      await expect(harness.service.receiveInvocationBundle(invocationBundle({ invocation: originalInvocation, message: changed })))
+        .rejects.toThrow("conflicts with existing record");
+    }
+    await expect(harness.service.receiveInvocationBundle(invocationBundle({ invocation: { ...originalInvocation, requesterNodeId: "wrong-peer" }, message: request })))
+      .rejects.toThrow("persisted request anchor");
+    expect(harness.applyBundleCalls).toEqual([]);
+    expect(harness.committedEntries).toEqual([]);
+    expect(harness.plannedInvocations).toEqual([]);
+    expect(harness.runDispatchJobs).toEqual([]);
+    expect(store.readMessages([request.id]).get(request.id)).toEqual(expectedMessage);
+  });
+
+  test("archived messages remain duplicate receipts and reject collisions without a new delivery", async () => {
+    const { harness, request, expectedMessage } = archivedFixture();
+    expect((await harness.service.receiveMessageBundle(messageBundle({ message: request }))).body).toEqual({ ok: true, duplicate: true });
+    expect(harness.completedReplies).toEqual([expectedMessage!]);
+    await expect(harness.service.receiveMessageBundle(messageBundle({ message: { ...request, body: "collision" } })))
+      .rejects.toThrow("conflicts with existing record");
+    expect(harness.committedEntries).toEqual([]);
+    expect(harness.messages).toEqual({});
+    expect(harness.completedReplies).toHaveLength(1);
+  });
+
+  test("missing or mismatched historical flight cannot turn a persisted invocation into fresh work", async () => {
+    for (const historicalFlight of [undefined, flight({ invocationId: "other-invocation" }), flight({ requesterId: "other-requester" }), flight({ targetAgentId: "other-target" })]) {
+      const harness = createHarness({ invocationSnapshotFor: async () => ({ invocation: invocation(), flight: historicalFlight }) });
+      await expect(harness.service.receiveInvocationBundle(invocationBundle({ message: message() })))
+        .rejects.toThrow(historicalFlight ? "conflicts with its persisted flight" : "has no persisted flight");
+      expect(harness.applyBundleCalls).toEqual([]);
+      expect(harness.committedEntries).toEqual([]);
+      expect(harness.runDispatchJobs).toEqual([]);
+    }
+  });
+
+  test("a failed historical read is not treated as a new invocation or message", async () => {
+    const harness = createHarness({
+      invocationSnapshotFor: async () => { throw new Error("history unavailable"); },
+      messageFor: async () => { throw new Error("history unavailable"); },
+    });
+    await expect(harness.service.receiveInvocationBundle(invocationBundle())).rejects.toThrow("history unavailable");
+    await expect(harness.service.receiveMessageBundle(messageBundle())).rejects.toThrow("history unavailable");
+    expect(harness.applyBundleCalls).toEqual([]);
+    expect(harness.committedEntries).toEqual([]);
+    expect(harness.runDispatchJobs).toEqual([]);
+  });
+
+  test("replicates a cardless tmux ask's request anchor before dispatch, without another delivery", async () => {
+    const targetAgentId = "session-mini";
+    const bundle = invocationBundle({
+      agents: [],
+      invocation: invocation({ targetAgentId }),
+      conversation: conversation({ authorityNodeId: "node-peer" }),
+      message: message(),
+    });
+    const harness = createHarness({ localEndpoints: {
+      [targetAgentId]: { id: "endpoint-mini", agentId: targetAgentId, nodeId: "node-local", harness: "claude", transport: "tmux", state: "idle" },
+    } });
+    expect((await harness.service.receiveInvocationBundle(bundle)).status).toBe(200);
+    expect(harness.messages[bundle.message!.id]).toEqual(bundle.message);
+    expect(harness.committedEntries.flat().map(entry => entry.kind)).toEqual([
+      "message.record", "invocation.record", "invocation.dispatch_job.record", "flight.record",
+    ]);
+    expect(harness.runDispatchJobs).toHaveLength(1);
+    await harness.service.receiveInvocationBundle(bundle);
+    expect(harness.runDispatchJobs).toHaveLength(1);
+    expect(harness.committedEntries.flat().filter(entry => entry.kind === "message.record")).toHaveLength(1);
+  });
+
+  test("duplicate invocation repairs a missing request anchor without redispatch", async () => {
+    const harness = createHarness({ flights: { "invocation-1": flight({ state: "running" }) }, invocations: { "invocation-1": invocation() } });
+    const bundle = invocationBundle({ message: message() });
+    const result = await harness.service.receiveInvocationBundle(bundle);
+    expect(result.body).toMatchObject({ duplicate: true });
+    expect(harness.messages["msg-1"]).toEqual(bundle.message);
+    expect(harness.runDispatchJobs).toEqual([]);
+  });
+
+  test("rejects a mismatched or conflicting request anchor rather than replacing canonical truth", async () => {
+    const harness = createHarness();
+    await expect(harness.service.receiveInvocationBundle(invocationBundle({ message: message({ actorId: "other" }) })))
+      .rejects.toThrow("does not match its request anchor");
+    expect(harness.applyBundleCalls).toEqual([]);
+    harness.messages["msg-1"] = message({ body: "canonical" });
+    await expect(harness.service.receiveInvocationBundle(invocationBundle({ message: message() })))
+      .rejects.toThrow("conflicts with existing record");
+    expect(harness.messages["msg-1"].body).toBe("canonical");
+    expect(harness.runDispatchJobs).toEqual([]);
+  });
+
+  test("rejects conflicting duplicate messages without accepting or completing the incoming reply", async () => {
+    const canonical = message({ id: "collision", body: "unrelated FYI" });
+    const harness = createHarness({ messages: { collision: canonical } });
+    const incoming = message({ id: canonical.id, actorId: "agent-1", replyToMessageId: "msg-request", body: "NONCANONICAL RESULT" });
+    await expect(harness.service.receiveMessageBundle(messageBundle({ message: incoming })))
+      .rejects.toThrow("conflicts with existing record");
+    expect(harness.messages.collision).toBe(canonical);
+    expect(harness.completedReplies).toEqual([]);
+    expect(harness.committedEntries).toEqual([]);
+    expect(harness.applyBundleCalls).toEqual([]);
+  });
+
+  test("exact duplicate messages complete only from the stored canonical record", async () => {
+    const canonical = message({ actorId: "agent-1", replyToMessageId: "msg-request", body: "accepted result" });
+    const harness = createHarness({ messages: { [canonical.id]: canonical } });
+    const result = await harness.service.receiveMessageBundle(messageBundle({ message: { ...canonical } }));
+    expect(result.body).toEqual({ ok: true, duplicate: true });
+    expect(harness.completedReplies).toHaveLength(1);
+    expect(harness.completedReplies[0]).toBe(canonical);
+    expect(harness.committedEntries).toEqual([]);
+  });
+
+  test("duplicate invocation receipts validate the persisted request anchor before any writes", async () => {
+    for (const patch of [
+      { messageId: "msg-other" }, { requesterId: "other-requester" },
+      { requesterNodeId: "other-node" }, { conversationId: "conversation-other" },
+      { targetAgentId: "agent-other" },
+      { messageId: "msg-other", requesterId: "other-requester" },
+    ]) {
+      const harness = createHarness();
+      await harness.service.receiveInvocationBundle(invocationBundle({ message: message() }));
+      const altered = invocation(patch);
+      const bundle = invocationBundle({
+        invocation: altered,
+        conversation: conversation({ id: altered.conversationId }),
+        message: message({ id: altered.messageId, conversationId: altered.conversationId, actorId: altered.requesterId }),
+      });
+      await expect(harness.service.receiveInvocationBundle(bundle)).rejects.toThrow("persisted request anchor");
+      expect(harness.invocations[altered.id]).toEqual(invocation());
+      expect(Object.keys(harness.messages)).toEqual(["msg-1"]);
+      expect(harness.applyBundleCalls).toHaveLength(1);
+      expect(harness.committedEntries).toHaveLength(2);
+      expect(harness.runDispatchJobs).toHaveLength(1);
+      // Old bundles without a message must not bypass the persisted-anchor check.
+      await expect(harness.service.receiveInvocationBundle({ ...bundle, message: undefined }))
+        .rejects.toThrow("persisted request anchor");
+      expect(harness.applyBundleCalls).toHaveLength(1);
+    }
+  });
+
   test("records local-authority mesh messages and projects bundle plus message entries", async () => {
     const harness = createHarness();
     const bundle = messageBundle();
@@ -318,6 +555,7 @@ describe("BrokerMeshHttpService", () => {
       },
     });
     expect(harness.messages["msg-1"]).toBe(bundle.message);
+    expect(harness.completedReplies).toEqual([bundle.message]);
     expect(harness.committedEntries[0]?.map((entry) => entry.kind)).toEqual([
       "message.record",
       "deliveries.record",
@@ -345,6 +583,7 @@ describe("BrokerMeshHttpService", () => {
       },
     });
     expect(harness.messages["msg-1"]).toBeUndefined();
+    expect(harness.completedReplies).toEqual([]);
     expect(harness.committedEntries).toEqual([]);
     expect(harness.projectedEntries[0]?.map((entry) => entry.kind)).toEqual(["node.upsert"]);
   });
@@ -453,6 +692,7 @@ describe("BrokerMeshHttpService", () => {
     const harness = createHarness({
       agents: { "agent-1": agent() },
       flights: { "invocation-1": existing },
+      invocations: { "invocation-1": invocation() },
     });
 
     const result = await harness.service.receiveInvocationBundle(invocationBundle());

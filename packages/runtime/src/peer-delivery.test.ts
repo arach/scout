@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { writeSseFrame } from "./broker-control-stream-service.js";
+import { registerAsyncMessageRecordView } from "./broker-message-records.js";
 
 import type {
   AgentDefinition,
@@ -696,6 +697,42 @@ test("cancellation during the awaited lease write prevents external forwarding",
   expect(harness.deliveries.get(delivery.id)?.status).toBe("cancelled");
   expect(harness.attempts.size).toBe(0);
   worker.stop();
+});
+
+test.each(["cancel", "stop"] as const)("%s during a delayed request-history read prevents external forwarding", async (action) => {
+  const invocation = { ...makeInvocation("cancel-at-history", "remote-agent"), messageId: "cold-request" };
+  const peer = makeNode("remote", "http://remote.test");
+  const harness = makeHarness({ invocation, peer });
+  const delivery = { ...recoveredDelivery(invocation, peer), status: "accepted" as const };
+  harness.deliveries.set(delivery.id, delivery);
+  const snapshot = emptySnapshot();
+  let entered!: () => void, release!: () => void;
+  const reading = new Promise<void>(resolve => { entered = resolve; });
+  const resume = new Promise<void>(resolve => { release = resolve; });
+  registerAsyncMessageRecordView(snapshot.messages, {
+    count: () => 1,
+    async read(id) { expect(id).toBe(invocation.messageId); entered(); await resume; return undefined; },
+    async *iterate() { throw new Error("must not scan all history"); },
+    async withCapture() { throw new Error("must not capture all history"); },
+  });
+  harness.deps.snapshot = () => snapshot;
+  let forwards = 0;
+  harness.setForward(async () => { forwards++; return { ok: true, flight: recoveredFlight(invocation) }; });
+  const worker = createPeerDeliveryWorker(harness.deps);
+  const pending = worker.tick();
+  try {
+    await reading;
+    if (action === "cancel") harness.flights.push(recoveredFlight(invocation, "cancelled"));
+    else worker.stop();
+    release();
+    await pending;
+    expect(forwards).toBe(0);
+    expect(harness.attempts.size).toBe(0);
+    if (action === "cancel") expect(harness.deliveries.get(delivery.id)?.status).toBe("cancelled");
+  } finally {
+    release();
+    worker.stop();
+  }
 });
 
 test("forward concurrency stays at 16 even when peer-online hints arrive during a stalled batch", async () => {

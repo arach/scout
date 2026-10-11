@@ -10,6 +10,7 @@ const broker = createBrokerDaemonTestHarness();
 test("signed guest ask completes through the canonical target reply, without a flight write", async () => {
   const h = await broker.startBroker();
   await broker.seedBasicConversation(h);
+  await broker.seedHangingReceiver(h, "fabric");
   const pair = generateKeyPairSync("ed25519");
   const identity: NodeIdentity = {
     version: 1, createdAt: Date.now(),

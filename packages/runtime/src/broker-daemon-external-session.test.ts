@@ -75,9 +75,16 @@ test("real broker routes an attached exact session into cloud transport and dura
   expect(result.flight?.metadata?.externalDeliveryId).toBeTruthy();
 }, 20_000);
 
-test("existing MCP identity attaches isolated mailboxes and completes an exact-session round trip without API credentials", async () => {
+test.each([false, true])("existing MCP identity attaches isolated mailboxes and completes an exact-session round trip without API credentials (existing card: %s)", async (hasCard) => {
   const h = await broker.startBroker({ env: { OPENSCOUT_EXTERNAL_SESSION_CONNECTIONS: "[]" } });
   await broker.seedBasicConversation(h);
+  // A pre-existing integration card must not turn its registered durable
+  // mailbox into a local-process liveness requirement.
+  if (hasCard) await broker.postJson(h.baseUrl, "/v1/agents", {
+    id: "devin_cloud", kind: "agent", definitionId: "devin_cloud", displayName: "Devin Cloud",
+    agentClass: "bridge", capabilities: ["chat", "invoke"], wakePolicy: "manual",
+    homeNodeId: h.nodeId, authorityNodeId: h.nodeId, advertiseScope: "local",
+  });
   const attach = (nativeSessionId: string) => broker.postJson<{ sessionId: string; agentId: string; wake: string }>(h.baseUrl, "/v1/external-sessions/attach", { ownerId: "devin_cloud", nativeSessionId });
   const sender = await broker.postJson<{ sessionId: string }>(h.baseUrl, "/v1/external-sessions/attach", { ownerId: "operator", nativeSessionId: "current-codex-thread" });
   const a = await attach("devin-conversation-a"); const b = await attach("devin-conversation-b");
@@ -116,5 +123,7 @@ test("existing MCP identity attaches isolated mailboxes and completes an exact-s
   await broker.postJson(h.baseUrl, "/v1/external-sessions/ack", { ownerId: "operator", sessionId: sender.sessionId, deliveryId: results.items[0]!.deliveryId });
   expect((await pollSender()).items).toHaveLength(0);
   const snapshot = await broker.getJson<{ agents: Record<string, unknown> }>(h.baseUrl, "/v1/snapshot?scope=agents");
-  expect(snapshot.agents.devin_cloud).toBeUndefined(); // Attachment creates no agent card, especially not one per session.
+  // Attachment preserves an existing integration card, and never creates one
+  // per session or invents a card for an MCP-only identity.
+  expect(Object.keys(snapshot.agents).filter(id => id.startsWith("devin_cloud"))).toEqual(hasCard ? ["devin_cloud"] : []);
 }, 20_000);

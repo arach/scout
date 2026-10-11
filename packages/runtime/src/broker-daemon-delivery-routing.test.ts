@@ -13,7 +13,7 @@ import {
 const broker = createBrokerDaemonTestHarness();
 
 describe("broker daemon delivery routing", () => {
-  test("accepts broker-owned delivery for a known wakeable target", async () => {
+  test("accepts broker-owned delivery for a known receiving target", async () => {
     const harness = await broker.startBroker();
 
     await broker.postJson(harness.baseUrl, "/v1/agents", {
@@ -33,6 +33,8 @@ describe("broker daemon delivery routing", () => {
       authorityNodeId: harness.nodeId,
       advertiseScope: "local",
     });
+
+    await broker.seedHangingReceiver(harness, "ghost");
 
     const response = await broker.postJson<{
       kind: string;
@@ -80,7 +82,7 @@ describe("broker daemon delivery routing", () => {
     expect(response.conversation?.kind).toBe("direct");
     expect(response.message?.conversationId).toBe(response.conversation?.id);
     expect(response.receipt?.messageId).toBe(response.message?.id);
-    expect(response.flight?.state).toBe("waking");
+    expect(response.flight?.state).toBe("queued");
     expect(response.flight?.targetAgentId).toBe("ghost");
     expect(response.receipt?.flightId).toBe(response.flight?.id);
     expect(response.bindingRef).toBe(response.flight?.id.slice(-8));
@@ -137,6 +139,8 @@ describe("broker daemon delivery routing", () => {
       advertiseScope: "local",
     });
 
+    await broker.seedHangingReceiver(firstHarness, "durable-ghost");
+
     const response = await broker.postJson<{
       kind: string;
       accepted: boolean;
@@ -162,7 +166,7 @@ describe("broker daemon delivery routing", () => {
     expect(response.accepted).toBe(true);
     expect(response.message?.id).toBe(response.receipt?.messageId);
     expect(response.flight?.id).toBe(response.receipt?.flightId);
-    expect(response.flight?.state).toBe("waking");
+    expect(response.flight?.state).toBe("queued");
 
     firstHarness.child.kill();
     await firstHarness.child.exited.catch(() => {});
@@ -236,6 +240,8 @@ describe("broker daemon delivery routing", () => {
       authorityNodeId: harness.nodeId,
       advertiseScope: "local",
     });
+
+    await broker.seedHangingReceiver(harness, "designer");
 
     const request = await broker.postJson<{
       kind: string;
@@ -349,6 +355,8 @@ describe("broker daemon delivery routing", () => {
       advertiseScope: "local",
     });
 
+    await broker.seedHangingReceiver(harness, "hudson");
+
     const response = await broker.postJson<{
       kind: string;
       accepted: boolean;
@@ -378,7 +386,7 @@ describe("broker daemon delivery routing", () => {
     expect(response.accepted).toBe(true);
     expect(response.routeKind).toBe("dm");
     expect(response.message?.body).toBe("Can you take a look at this when you get a turn?");
-    expect(response.flight?.state).toBe("waking");
+    expect(response.flight?.state).toBe("queued");
     expect(response.flight?.targetAgentId).toBe("hudson");
     expect(response.receipt?.flightId).toBe(response.flight?.id);
 
@@ -693,29 +701,11 @@ describe("broker daemon delivery routing", () => {
       }),
     });
 
-    expect(response.status).toBe(202);
-    const body = response.body as {
-      kind: string;
-      accepted: boolean;
-      targetAgentId?: string;
-      conversation?: TestConversationIdentity;
-      flight?: { targetAgentId?: string; state?: string; error?: string };
-    };
-    expect(body.kind).toBe("delivery");
-    expect(body.accepted).toBe(true);
-    expect(body.targetAgentId).toBe("ranger.main.mini");
-    broker.expectOpaqueDirectConversation(body.conversation, {
-      participantIds: ["operator", "ranger.main.mini"],
-    });
-    expect(body.flight?.targetAgentId).toBe("ranger.main.mini");
-    expect(body.flight?.state).toBe("waking");
-    expect(body.flight?.error).toBeUndefined();
-
-    const snapshot = await broker.getJson<{ flights: Record<string, unknown> }>(
-      harness.baseUrl,
-      "/v1/snapshot",
-    );
-    expect(Object.keys(snapshot.flights)).toHaveLength(1);
+    expect(response.status).toBe(409);
+    expect(response.body).toMatchObject({ kind: "question", accepted: false,
+      question: { kind: "unavailable", target: { agentId: "ranger.main.mini", reason: "superseded_registration" } } });
+    const snapshot = await broker.getJson<{ flights: Record<string, unknown> }>(harness.baseUrl, "/v1/snapshot");
+    expect(Object.keys(snapshot.flights)).toHaveLength(0);
   }, 15_000);
 
   test("returns a broker question when the requested session endpoint is not attachable", async () => {

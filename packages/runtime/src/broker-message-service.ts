@@ -91,6 +91,10 @@ export class BrokerMessageService {
     const authority = this.deps.mesh.authorityNodeForConversation(message.conversationId);
     if (authority) {
       const forwarded = await this.deps.mesh.forwardConversationMessageToAuthority(message);
+      // The authority owns the message. Once it acknowledges that durable
+      // reply, the executor must also settle its local flight; otherwise its
+      // tmux waiter and the requester's status mirror remain running forever.
+      await this.completeInvocationsForBrokerReply(message);
       return {
         ok: true,
         message,

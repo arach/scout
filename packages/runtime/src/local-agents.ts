@@ -17,6 +17,7 @@ import type {
   AgentHarness,
   InvocationRequest,
   MessageAttachment,
+  MessageClass,
   ScoutPermissionProfile,
   ScoutReplyContext,
 } from "@openscout/protocol";
@@ -295,9 +296,12 @@ export type PruneOneTimeLocalAgentCardsResult = {
 };
 
 interface BrokerSnapshotMessage {
+  class?: MessageClass;
   actorId: string;
   body: string;
   createdAt: number;
+  conversationId?: string;
+  replyToMessageId?: string;
 }
 
 interface BrokerSnapshot {
@@ -3096,14 +3100,43 @@ export async function isLocalAgentEndpointAliveAsync(endpoint: AgentEndpoint): P
   return sessionId ? isLocalAgentSessionAliveAsync(sessionId) : false;
 }
 
-async function readBrokerMessagesSince(sinceSeconds: number): Promise<BrokerSnapshotMessage[]> {
+async function readBrokerReplySnapshot(): Promise<BrokerSnapshot> {
   const baseUrl = resolveBrokerUrl();
-  const snapshot = await requestScoutBrokerJson<BrokerSnapshot>(baseUrl, "/v1/snapshot", {
+  return await requestScoutBrokerJson<BrokerSnapshot>(baseUrl, "/v1/snapshot", {
     socketPath: resolveBrokerSocketPathForBaseUrl(baseUrl),
   });
-  return brokerSnapshotMessages(snapshot)
-    .filter((message) => normalizeBrokerTimestamp(message.createdAt) >= sinceSeconds)
-    .sort((lhs, rhs) => normalizeBrokerTimestamp(lhs.createdAt) - normalizeBrokerTimestamp(rhs.createdAt));
+}
+
+export function localAgentReplyFromSnapshot(
+  snapshot: unknown,
+  input: { agentRuntimeId: string; invocation: InvocationRequest; flightId: string; askedAt: number },
+): string | null {
+  const messages = brokerSnapshotMessages(snapshot)
+    .filter((message) => normalizeBrokerTimestamp(message.createdAt) >= input.askedAt - 1)
+    .sort((lhs, rhs) => normalizeBrokerTimestamp(rhs.createdAt) - normalizeBrokerTimestamp(lhs.createdAt));
+  for (const message of messages) {
+    if (message.class !== "agent") continue;
+    if (message.actorId !== input.agentRuntimeId) continue;
+    const answersRequest = Boolean(input.invocation.messageId && input.invocation.conversationId)
+      && message.replyToMessageId === input.invocation.messageId
+      && message.conversationId === input.invocation.conversationId;
+    if (!answersRequest && !message.body.includes(`[ask:${input.flightId}]`)) continue;
+    if (!message.body.trim()) continue;
+    return stripLocalAgentReplyMetadata(message.body, input.flightId, input.invocation.requesterId);
+  }
+  // A remote-authority reply lives on the requester, not in this local message
+  // collection. Its accepted reply completes our flight; release the executor
+  // wait without requiring a second message copy or another harness turn.
+  const flights = (snapshot as { flights?: Record<string, unknown> } | null)?.flights;
+  if (flights && typeof flights === "object") {
+    for (const value of Object.values(flights)) {
+      const flight = value as { invocationId?: string; targetAgentId?: string; state?: string; output?: string; metadata?: { completedByBrokerReply?: boolean } } | null;
+      if (flight?.invocationId !== input.invocation.id || flight.targetAgentId !== input.agentRuntimeId) continue;
+      if (flight.state !== "completed" || flight.metadata?.completedByBrokerReply !== true || typeof flight.output !== "string" || !flight.output.trim()) continue;
+      return stripLocalAgentReplyMetadata(flight.output, input.flightId, input.invocation.requesterId);
+    }
+  }
+  return null;
 }
 
 export function buildLocalAgentSystemPrompt(
@@ -3637,7 +3670,7 @@ export function buildLocalAgentNudge(agentName: string, invocation: InvocationRe
 
   parts.push(`Read recent context if needed: ${relayCommand} latest --agent ${agentName} --limit 20.`);
   if (invocation.messageId) {
-    parts.push(`Reply in the existing thread, not by addressing @${invocation.requesterId}. Prefer the Scout reply tool when available; if using the CLI, use: ${relayCommand} send --as ${agentName} --ref ${invocation.messageId} "[ask:${flightId}] <your response>"`);
+    parts.push(`Reply in the existing thread, not by addressing @${invocation.requesterId}. This terminal's final assistant text is not captured automatically. Publish the completed result once with this CLI command (messages_reply is an MCP tool, not a CLI command): ${relayCommand} tell --as ${agentName} --ref ${invocation.messageId} "<your response>"`);
   } else {
     parts.push(`Reply in the existing broker-visible thread. Prefer the Scout reply tool when available; do not guess an @operator route.`);
   }
@@ -6437,14 +6470,8 @@ async function waitForLocalAgentReply(input: {
   const deadline = Date.now() + input.timeoutSeconds * 1000;
   let nextLivenessCheckAt = Date.now() + TMUX_REPLY_LIVENESS_INTERVAL_MS;
   while (Date.now() <= deadline) {
-    const messages = await readBrokerMessagesSince(input.askedAt - 1);
-
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      const message = messages[index];
-      if (message.actorId !== input.agentRuntimeId) continue;
-      if (!message.body.includes(`[ask:${input.flightId}]`)) continue;
-      return stripLocalAgentReplyMetadata(message.body, input.flightId, input.invocation.requesterId);
-    }
+    const output = localAgentReplyFromSnapshot(await readBrokerReplySnapshot(), input);
+    if (output !== null) return output;
 
     if (input.exitedError && Date.now() >= nextLivenessCheckAt) {
       nextLivenessCheckAt = Date.now() + TMUX_REPLY_LIVENESS_INTERVAL_MS;

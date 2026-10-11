@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
 import { OBSERVED_HARNESS_TOPOLOGY_META_KEY } from "@openscout/agent-sessions";
+import { getOrCreateCodexAppServerClient } from "@openscout/agent-sessions/local";
 import {
   buildCodexAppServerSessionSnapshot,
   buildCodexRolloutSessionSnapshot,
@@ -350,6 +351,14 @@ for await (const line of rl) {
 
   if (method === "initialize") {
     console.log(JSON.stringify({ id, result: {} }));
+    continue;
+  }
+
+  if (method === "thread/start") {
+    activeThreadId = "thread-created-1";
+    const thread = { id: activeThreadId, path: null, cwd: params.cwd };
+    console.log(JSON.stringify({ id, result: { thread } }));
+    console.log(JSON.stringify({ method: "thread/started", params: { thread } }));
     continue;
   }
 
@@ -2022,6 +2031,37 @@ describe("ensureCodexAppServerAgentOnline", () => {
     expect(secondResult.output).toBe("Steered current session reply");
 
     await shutdownCodexAppServerAgent(options);
+  });
+
+  test("promoting a started thread into a session selector never replaces its active client", async () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), "openscout-codex-promotion-test-"));
+    tempPaths.add(tempRoot);
+    process.env.OPENSCOUT_CODEX_BIN = writeSteerableFakeCodexExecutable(tempRoot);
+    const options = {
+      agentName: "codex-promoted", sessionId: "scout-promoted", cwd: process.cwd(),
+      systemPrompt: "Keep the same session.", runtimeDirectory: join(tempRoot, "runtime"),
+      logsDirectory: join(tempRoot, "logs"), launchArgs: ["--reasoning-effort", "high"],
+    };
+    const online = await ensureCodexAppServerAgentOnline(options);
+    const first = invokeCodexAppServerAgent({ ...options, prompt: "review", timeoutMs: 5000 });
+    // Wait for the fake server's actual turn/start, not a guessed sleep.
+    await readTextFileEventually(join(tempRoot, "logs", "stdout.log"), text => text.includes('"turn/started"'));
+    const followup = { ...options, threadId: online.threadId, requireExistingThread: true };
+    const client = getOrCreateCodexAppServerClient(options);
+    expect(client.matches({ ...followup, threadId: "different-thread" })).toBe(false);
+    expect(client.matches({ ...followup, launchArgs: ["--reasoning-effort", "low"] })).toBe(false);
+    expect(client.matches({ ...followup, launchArgs: ["--model", "different-model"] })).toBe(false);
+    expect(client.matches({ ...followup, sandbox: "read-only" })).toBe(false);
+    try {
+      const [a, b] = await Promise.all([first, sendCodexAppServerAgent({ ...followup, prompt: "follow-up", timeoutMs: 5000 })]);
+      expect(a.output).toBe("Steered current session reply");
+      expect(b.output).toBe(a.output);
+      expect(existsSync(join(tempRoot, "logs", "stderr.log"))
+        ? readFileSync(join(tempRoot, "logs", "stderr.log"), "utf8") : "")
+        .not.toContain("launch options changed");
+    } finally {
+      await shutdownCodexAppServerAgent(followup);
+    }
   });
 
   test("requester timeout does not interrupt a late-completing turn", async () => {

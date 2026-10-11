@@ -221,7 +221,7 @@ test("an empty agent request explains the required instructions", () => {
   expect(composer({ askTargetId: codex.actorId, draft: "Review this file" })).not.toContain("Add instructions for the agent before sending.");
 });
 
-import { FORMATS, formatShortcut } from "./composer-formats.tsx";
+const { FORMATS, formatShortcut } = await import("./composer-formats.tsx");
 import { filterShortcuts } from "./composer-shortcuts.ts";
 describe("approved composer", () => {
  test("ten marks in order, above the one-line editor", () => {

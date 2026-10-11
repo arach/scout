@@ -31,6 +31,7 @@ import {
 } from "./mesh-peer-client.js";
 import { httpMeshUrlsForNode, orderMeshDialUrls } from "./mesh-dial-order.js";
 import type { RuntimeRegistrySnapshot } from "./registry.js";
+import { readMessageRecord } from "./broker-message-records.js";
 
 /**
  * Peer discovery should carry only an agent roster. The current local roster is
@@ -71,6 +72,8 @@ export interface MeshInvocationBundle {
   actors: ActorIdentity[];
   agents: AgentDefinition[];
   conversation?: ConversationDefinition;
+  /** Scout-owned request anchor, replicated without dispatching it again. */
+  message?: MessageRecord;
   invocation: InvocationRequest;
 }
 
@@ -239,8 +242,22 @@ export function buildMeshInvocationBundle(
     conversation: invocation.conversationId
       ? snapshot.conversations[invocation.conversationId]
       : undefined,
+    message: invocation.messageId ? snapshot.messages[invocation.messageId] : undefined,
     invocation,
   };
+}
+
+export async function buildMeshInvocationBundleAsync(
+  snapshot: Readonly<RuntimeRegistrySnapshot>,
+  originNode: NodeDefinition,
+  invocation: InvocationRequest,
+): Promise<MeshInvocationBundle> {
+  const message = invocation.messageId
+    ? await readMessageRecord(snapshot.messages, invocation.messageId)
+    : undefined;
+  // Async history views do not support synchronous property reads.
+  const bundle = buildMeshInvocationBundle({ ...snapshot, messages: {} }, originNode, invocation);
+  return { ...bundle, message };
 }
 
 export function buildMeshCollaborationRecordBundle(

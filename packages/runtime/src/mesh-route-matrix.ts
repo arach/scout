@@ -133,6 +133,7 @@ const MESH_ROUTE_MATRIX: Record<string, MeshRouteTier> = {
   "GET /v1/repo-watch/snapshot": "local",
   // mutates despite being a GET — never observe
   "GET /v1/repo-watch/warm": "local",
+  "GET /v1/request-receipts/:id": "local",
   "GET /v1/roles/assignments": "local",
   "GET /v1/roles/catalog": "local",
   "GET /v1/snapshot": "local",

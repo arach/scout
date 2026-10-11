@@ -207,6 +207,7 @@ describe("broker daemon messaging routes", () => {
   test("completes an active invocation when the target posts a broker reply", async () => {
     const harness = await broker.startBroker();
     await broker.seedBasicConversation(harness);
+    await broker.seedHangingReceiver(harness, "fabric");
 
     const createdAt = Date.now();
     const request = await broker.postJson<{
