@@ -48,7 +48,8 @@ indices are not searched. Local history retains its age and signal coverage.
   with exact returned machine/project/agent fields. If ambiguity remains, ask
   one human-readable question. If the host cannot ask, return `needs_input`
   with choices and do not dispatch.
-- A continuation uses `candidate.sessions[].continuation.to`, which contains
+- A continuation uses `candidate.sessions[].continuation.to` or `unlinkedSessions[].continuation.to`
+  for a session without a persistent agent card. Both contain
   the broker-issued `session:sess.…@host` address. The node-state producer uses
   the existing broker address function; callers do not hash native session IDs.
   Old peers can omit the address. Never replace a missing continuation with a

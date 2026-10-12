@@ -98,6 +98,29 @@ describe("readMeshNodeState", () => {
     expect(readMeshNodeState(deps).workload.total).toBe(41);
   });
 
+  test("cardless local sessions retain scoped addresses and work without inventing agent cards", () => {
+    const snapshot = snapshotWith({}, {
+      live: { ...endpoint("live", "cardless", "arc-server-openscout", "idle"), projectRoot: "/wanted", metadata: { cardless: true, displayName: "Recall test" } },
+      remote: { ...endpoint("remote", "elsewhere", "other-node", "active"), projectRoot: "/wanted" },
+      stopped: { ...endpoint("stopped", "stopped", "arc-server-openscout", "stopped"), projectRoot: "/wanted" },
+      retired: { ...endpoint("retired", "retired", "arc-server-openscout", "idle"), projectRoot: "/wanted", metadata: { staleLocalRegistration: true } },
+      other: { ...endpoint("other", "other", "arc-server-openscout", "active"), projectRoot: "/other" },
+    }, {
+      done: { id: "done", targetAgentId: "cardless", state: "completed", summary: "Remembered the acceptance phrase" },
+      foreign: { id: "foreign", targetAgentId: "elsewhere", state: "running" },
+    });
+    const deps = { snapshot: () => snapshot, nodeId: "arc-server-openscout", meshId: "openscout", actorDisplayName: displayName };
+    const report = readMeshNodeState(deps, { projectRoot: "/wanted", agentId: "cardless" });
+    expect(report.roster).toEqual([]);
+    expect(report.workload.total).toBe(0);
+    expect(report.sessions.total).toBe(1);
+    expect(report.sessions.items[0]).toMatchObject({ agentId: "cardless", title: "Recall test", address: runtimeSessionAddressForEndpoint(snapshot, snapshot.endpoints.live!) });
+    expect(report.work.items.map((w) => w.id)).toEqual(["done"]);
+    expect(report.projects?.items).toEqual([{ root: "/wanted", name: "wanted", agents: 0, liveSessions: 1 }]);
+    expect(readMeshNodeState(deps).sessions.items.map((s) => s.id).sort()).toEqual(["live", "other"]);
+    expect(readMeshNodeState(deps, { projectRoot: "/other", agentId: "cardless" }).sessions.total).toBe(0);
+  });
+
   test("default caps are 24/16/16 and are marked truncated even when exactly hit", () => {
     const agents: Record<string, unknown> = {};
     const endpoints: Record<string, unknown> = {};

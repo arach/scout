@@ -52,7 +52,8 @@ nodeId, projectRoot or agentId before asking again. Historical search is local
 only; explain missing coverage instead of guessing what ran on a remote host.
 
 For "the agent I was talking to" or "the one that did X", use the returned
-`continuation.to` exactly with `ask`; never substitute a fresh project/card
+`continuation.to` exactly with `ask`, including `unlinkedSessions` (sessions
+without a persistent agent card); never substitute a fresh project/card
 launch. Older peers may lack a conversation address: do not manufacture one
 from a native session id. For clearly fresh work, copy a discovered project's
 `freshWork` fields and add only requested runtime constraints. Clarify fresh

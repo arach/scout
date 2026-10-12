@@ -45,6 +45,27 @@ test("older, malformed and wrong-authority addresses never produce a continuatio
   }
 });
 
+test("cardless sessions expose the same grounded continuation and work evidence", async () => {
+  for (const address of ["sess.0123456789abcdef0123@mini", "sess.0123456789abcdef0123@archie", null]) {
+    const deps = fixture(address);
+    const read = deps.live;
+    deps.live = async (scope) => {
+      const result = await read(scope);
+      const machine = result.machines[0]!;
+      if (machine.status === "ok") machine.report.roster = [];
+      return result;
+    };
+    const result = await loadRouteContext({ query: "permissions", machine: "mini", projectRoot: "/scout", agentId: "a" }, deps);
+    const machine = result.machines[0]!;
+    if (machine.status !== "available") throw new Error("missing machine");
+    expect(machine.candidates).toEqual([]);
+    const session = machine.unlinkedSessions[0]!;
+    expect(session.matchedTerms).toEqual(["permissions"]);
+    expect(session.work[0]?.id).toBe("w");
+    expect(session.continuation).toEqual(address?.endsWith("@mini") ? { to: `session:${address}` } : null);
+  }
+});
+
 test("scope is sent upstream and enforced against old peers ignoring filters", async () => {
   const deps = fixture();
   const read = deps.live;
