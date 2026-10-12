@@ -179,7 +179,7 @@ jobs:
           sha256sum scout-tui-"$VERSION"-*.tar.gz > "$manifest"
           cat "$manifest"
           if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            prerelease=()
+            prerelease=(--prerelease=false)
             [[ "$VERSION" != *-* ]] || prerelease=(--prerelease)
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" --notes "" --latest=false "${prerelease[@]}"
           fi
