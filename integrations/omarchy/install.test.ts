@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -45,6 +45,18 @@ test("a later write failure restores earlier helper files", async () => {
   await expect(install(["--home", home, "--cli", cli, "--apply"])).rejects.toThrow();
   expect(await readFile(helper, "utf8")).toBe("original helper");
   expect(existsSync(join(home, ".local/bin/scout-menu-action"))).toBe(false);
+});
+test("a copied TUI is reused without rewriting its inode and survives receipt-only updates", async () => {
+  const {home, cli} = await fixture(); const source = join(home, "public-tui");
+  await writeFile(source, "#!/bin/sh\nprintf '%s\\n' '--ambient off|shimmer'\n", {mode: 0o755});
+  await install(["--home", home, "--cli", cli, "--tui", source, "--apply"]);
+  const receiptPath = join(home, ".local/share/openscout/linux-desktop/desktop-install.json");
+  const first = JSON.parse(await readFile(receiptPath, "utf8")); const inode = (await stat(first.tuiBin)).ino;
+  await install(["--home", home, "--cli", cli, "--tui", source, "--apply"]);
+  expect((await stat(first.tuiBin)).ino).toBe(inode);
+  await install(["--home", home, "--cli", cli, "--apply"]);
+  const last = JSON.parse(await readFile(receiptPath, "utf8"));
+  expect(last.tuiBin).toBe(first.tuiBin); expect(last.tuiSha256).toBe(first.tuiSha256);
 });
 test("unsupported cached development CLI is rejected before writes", async () => {
   const { home, cli } = await fixture("0.3.6-dev.2");

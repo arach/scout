@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { mkdir, readFile, writeFile, chmod, copyFile, stat, rm } from "node:fs/promises";
+import { mkdir, readFile, writeFile, chmod, copyFile, stat, rm, rename } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve, relative } from "node:path";
@@ -10,6 +10,14 @@ const SOURCE = import.meta.dir;
 const HELPERS = ["scout-menu-common.py", "scout-menu-status", "scout-menu-action", "scout-appearance", "scout-omarchy", "scout-hud-tui"];
 const PLUGIN_FILES = ["Widget.qml", "manifest.json"];
 const RECEIPT_NAME = "desktop-install.json";
+
+async function replaceFile(target: string, bytes: Buffer, mode: number): Promise<void> {
+  const temporary = join(dirname(target), ".scout-install-" + crypto.randomUUID());
+  try {
+    await writeFile(temporary, bytes, {mode}); await chmod(temporary, mode);
+    await rename(temporary, target); // Running Linux executables retain their original inode.
+  } finally { await rm(temporary, {force: true}); }
+}
 
 export async function install(argv: string[]): Promise<void> {
   const { values } = parseArgs({ args: argv, options: { apply: { type: "boolean", default: false }, home: { type: "string" }, cli: { type: "string" }, tui: { type: "string" }, "enable-hud": { type: "boolean", default: false } } });
@@ -80,20 +88,25 @@ export async function install(argv: string[]): Promise<void> {
   try {
     await mkdir(join(config, "openscout"), {recursive: true});
     for (const file of files) {
+      const original = prior.get(file.target);
+      if (original?.bytes.equals(file.bytes) && (!file.executable || original.mode === 0o755)) continue;
       await mkdir(dirname(file.target), { recursive: true }); changed.push(file.target);
-      await writeFile(file.target, file.bytes);
-      if (file.executable) await chmod(file.target, 0o755);
+      await replaceFile(file.target, file.bytes, file.executable ? 0o755 : original?.mode ?? 0o644);
     }
     await mkdir(installation, { recursive: true }); changed.push(receipt);
     const oldReceipt = prior.get(receipt);
     const previous = oldReceipt ? JSON.parse(oldReceipt.bytes.toString()) : {};
-    await writeFile(receipt, JSON.stringify({ schemaVersion: 1, repository: "oscout/scout", sourceRevision, sourceDirty, installedAt: new Date().toISOString(), cliBin: cli, cliVersion: version, tuiBin: tuiBin ?? previous.tuiBin, tuiSha256: tuiSha256 ?? previous.tuiSha256, backup, files: Object.fromEntries(files.map((file) => [file.target, createHash("sha256").update(file.bytes).digest("hex")])) }, null, 2) + "\n");
+    await replaceFile(receipt, Buffer.from(JSON.stringify({ schemaVersion: 1, repository: "oscout/scout", sourceRevision, sourceDirty, installedAt: new Date().toISOString(), cliBin: cli, cliVersion: version, tuiBin: tuiBin ?? previous.tuiBin, tuiSha256: tuiSha256 ?? previous.tuiSha256, backup, files: Object.fromEntries(files.map((file) => [file.target, createHash("sha256").update(file.bytes).digest("hex")])) }, null, 2) + "\n"), oldReceipt?.mode ?? 0o644);
   } catch (error) {
+    const failures: unknown[] = [];
     for (const target of changed.reverse()) {
       const original = prior.get(target);
-      if (original) { await writeFile(target, original.bytes); await chmod(target, original.mode); }
-      else await rm(target, {force: true});
+      try {
+        if (original) await replaceFile(target, original.bytes, original.mode);
+        else await rm(target, {force: true});
+      } catch (failure) { failures.push(failure); }
     }
+    if (failures.length) throw new AggregateError([error, ...failures], "Install failed; some files could not restore from backup " + backup);
     throw error;
   }
   console.log("Installed public Scout desktop files. Existing shell placement and preferences are preserved.");
