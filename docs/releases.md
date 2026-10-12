@@ -464,7 +464,7 @@ publication evidence uploaded only after registry verification.
 GitHub OIDC publishes protocol first and Scout second, directly to `latest`; it
 never invokes `npm dist-tag`. That dependency-safe ordering gives consumers a
 valid protocol before the CLI that consumes it appears. npm may keep an accepted
-upload in processing for several minutes, so the workflow waits for up to five
+upload in processing for several minutes, so the workflow waits for up to ten
 minutes per immutable upload before failing closed.
 
 Recovery is explicit and deliberately narrow. If a run stops after publishing
@@ -499,8 +499,8 @@ is not promoted as a successful release.
 
 `release-package-npm.yml` also accepts `npm_tag=dev`, **only** with a reviewed
 `vX.Y.Z-dev.N` tag. `latest` still accepts only plain `vX.Y.Z`. Both public
-packages publish directly to `dev` using the same Production environment,
-signing, OIDC, canonical main/SHA/reachability, retained candidate, integrity,
+packages publish directly to `dev` using the same Production signing configuration
+without recording a stable Production deployment. They retain the same signing, OIDC, canonical main/SHA/reachability, retained candidate, integrity,
 and recovery gates. No dev command updates `latest` or invokes `npm dist-tag`.
 Local stable/candidate/promotion/recovery commands remain stable-only; do not
 use `bun run ship` for a dev release. The publisher rejects dev rollback and a
@@ -622,3 +622,42 @@ adds no landing, DNS, domain binding, or infrastructure. The site owner can add
 that page and bind npm.openscout.app only after operator approval. A redirect
 alone to npmjs.com is simpler but cannot show the requested dev install command
 and live version together.
+
+## Reconcile an already-published production release
+
+Use `Verify Production Release` when an existing stable publication needs fresh
+production evidence, including a completed local publication with no hosted
+receipt. This is a read-only reconciliation, not a new publication. It requires
+an explicit stable version that is currently `latest` for both packages and a
+final public GitHub release carrying the original `receipt.json`.
+
+```bash
+gh workflow run verify-production-release.yml --repo oscout/scout --ref main \
+  -f version=0.3.8
+```
+
+The workflow checks the original release tag/source against public main, verifies
+both registry metadata records and downloaded tarballs against the exact original
+receipt, installs the verified CLI in an isolated directory with lifecycle scripts
+disabled, checks its version/help, then rechecks stable pointers. It retains the
+byte/source and install evidence. It cannot publish, move npm tags, replace
+artifacts, or confer OIDC provenance on a local release. A passing Production job
+means this exact stable distribution was verified; it does not mean existing
+clients were upgraded or native apps were rebuilt.
+
+GitHub Latest remains the native download pointer until a newer verified stable
+DMG is available. Package-only GitHub releases must not displace it. npm and native
+versions may therefore differ; inspect the native appcast and DMG assets separately.
+
+Dev npm jobs retain access to Production signing configuration but explicitly
+opt out of creating Production deployment records. Only `npm_tag=latest` creates
+a stable publication deployment. TUI-created prerelease tags are marked as GitHub
+prereleases and never become Latest.
+
+Publication verification polls explicitly revalidate npm's cached registry data.
+Missing versions and transient network/registry errors are retried within the
+bounded propagation window; permanent errors fail immediately and timeout output
+preserves the last diagnostic. An accepted upload is never automatically repeated.
+Retain its exact candidate bundle and inspect registry state before using the
+existing recovery path. A historical log that discarded npm stderr establishes
+only a visibility timeout, not its underlying registry cause.

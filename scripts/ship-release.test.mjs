@@ -372,6 +372,15 @@ function createPublishFixture({
     `  if [[ "$identity" == "@openscout/scout@${version}" ]]; then key="scout"; fi`,
     '  if [[ -n "$key" ]]; then',
     '    if [[ ! -f "$state_dir/${key}-exists" ]]; then echo "npm error code E404" >&2; exit 1; fi',
+    '    if [[ "$field" == "version" && -n "${FIXTURE_PROPAGATION_ERROR:-}" ]]; then',
+    '      count=0; [[ ! -f "$state_dir/${key}-reads" ]] || count=$(cat "$state_dir/${key}-reads")',
+    '      count=$((count + 1)); echo "$count" > "$state_dir/${key}-reads"',
+    '      if ((count <= ${FIXTURE_PROPAGATION_FAILURES:-1})); then',
+    '        [[ " $* " == *" --prefer-online "* && " $* " == *" --prefer-offline=false "* && " $* " == *" --offline=false "* && " $* " == *" --fetch-retries=0 "* && " $* " == *" --fetch-timeout="* ]] || { echo "stale cached response: polling was not forced online" >&2; exit 83; }',
+    '        if [[ "$FIXTURE_PROPAGATION_ERROR" == "WRONG_VERSION" ]]; then echo 9.9.9; exit 0; fi',
+    '        echo "npm error code $FIXTURE_PROPAGATION_ERROR: fixture registry diagnostic" >&2; exit 1',
+    '      fi',
+    '    fi',
     '    case "$field" in',
     `      version) echo ${version} ;;`,
     '      gitHead) echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;;',
@@ -1207,7 +1216,7 @@ test("npm publication is pinned, OIDC-compatible, and exactly scoped", () => {
   assert.match(script, /npm release lock already exists/);
   assert.match(script, /refusing to overwrite existing npm release bundle/);
   assert.match(script, /incomplete npm package set and cannot be resumed/);
-  assert.match(script, /NPM_DIST_TAG_VERIFY_ATTEMPTS="\$\{NPM_DIST_TAG_VERIFY_ATTEMPTS:-60\}"/);
+  assert.match(script, /NPM_DIST_TAG_VERIFY_ATTEMPTS="\$\{NPM_DIST_TAG_VERIFY_ATTEMPTS:-120\}"/);
   assert.match(script, /historical and unsupported; publication is disabled/);
   assert.match(script, /GITHUB_WORKFLOW_REF/);
   assert.match(script, /requires npm trusted publishing; refusing token authentication/);
@@ -1883,7 +1892,7 @@ test("workflow release target guard strictly pairs versions and channels", () =>
       const r = spawnSync("bash", ["-c", script], { encoding: "utf8", env: { ...process.env, INPUT_TAG: tag, INPUT_NPM_TAG: channel, INPUT_RECOVERY_RUN_ID: "", GITHUB_OUTPUT: output } });
       assert.equal(r.status === 0, valid, `${tag}/${channel}: ${r.stderr}`);
     }
-    assert.match(workflow, /environment: Production/);
+    assert.match(workflow, /environment:\s*\n\s+name: Production/);
     assert.match(workflow, /release_sha.*DISPATCH_SHA/);
     assert.match(workflow, /merge-base --is-ancestor HEAD FETCH_HEAD/);
   } finally { rmSync(dirname(output), { recursive: true, force: true }); }
@@ -1896,5 +1905,60 @@ test("dev verification fails if stable latest changes during publication", () =>
     assert.notEqual(r.status, 0);
     assert.match(r.stderr, /latest changed during dev publication/);
     assert.doesNotMatch(readFileSync(join(stateDir, "mutations.log"), "utf8"), /promote|tag=latest/);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+for (const code of ["E404", "ECONNRESET", "E503"]) {
+  test(`accepted upload tolerates ${code}, revalidates cache, and publishes only once`, () => {
+    const { fixture, stateDir } = createPublishFixture({ version: "0.3.6-dev.1", authority: "github-oidc" });
+    try {
+      const result = spawnSync("bash", ["scripts/ship-npm.sh", "--publish-prepared"], {
+        cwd: fixture, encoding: "utf8", env: { ...devEnv(fixture), NPM_DIST_TAG_VERIFY_ATTEMPTS: "3",
+          FIXTURE_PROPAGATION_ERROR: code, FIXTURE_PROPAGATION_FAILURES: "2", npm_config_prefer_offline: "true" },
+      });
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stdout + result.stderr, code === "E404" ? /propagation pending/ : /transient registry read failure/);
+      assert.equal(readFileSync(join(stateDir, "mutations.log"), "utf8"), "publish protocol tag=dev\npublish scout tag=dev\n");
+    } finally { rmSync(fixture, { recursive: true, force: true }); }
+  });
+}
+
+for (const code of ["E403", "E401", "UNRECOGNIZED", "WRONG_VERSION", "E404"]) {
+  test(`accepted upload fails closed with ${code} and preserves exact recovery candidates`, () => {
+    const { fixture, stateDir } = createPublishFixture({ version: "0.3.6-dev.1", authority: "github-oidc" });
+    try {
+      const env = { ...devEnv(fixture), NPM_DIST_TAG_VERIFY_ATTEMPTS: "3" };
+      const result = spawnSync("bash", ["scripts/ship-npm.sh", "--publish-prepared"], {
+        cwd: fixture, encoding: "utf8", env: { ...env, FIXTURE_PROPAGATION_ERROR: code, FIXTURE_PROPAGATION_FAILURES: "10" },
+      });
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, code === "WRONG_VERSION" ? /registry returned '9.9.9'/ : new RegExp(code + ": fixture registry diagnostic"));
+      assert.equal(readFileSync(join(stateDir, "protocol-reads"), "utf8").trim(), code === "E404" ? "3" : "1");
+      assert.equal(readFileSync(join(stateDir, "mutations.log"), "utf8"), "publish protocol tag=dev\n");
+      assert.ok(existsSync(join(fixture, "release-state/receipt.json")));
+      if (code === "E404") {
+        assert.match(result.stderr, /3 attempts/);
+        assert.match(result.stderr, /do not re-upload automatically/);
+        const retry = spawnSync("bash", ["scripts/ship-npm.sh", "--publish-prepared"], { cwd: fixture, encoding: "utf8", env });
+        assert.equal(retry.status, 0, retry.stderr);
+        assert.equal(readFileSync(join(stateDir, "mutations.log"), "utf8"), "publish protocol tag=dev\npublish scout tag=dev\n");
+      }
+    } finally { rmSync(fixture, { recursive: true, force: true }); }
+  });
+}
+
+test("registry propagation wall-clock budget caps long configured poll delays", () => {
+  const { fixture, stateDir } = createPublishFixture({ version: "0.3.6-dev.1", authority: "github-oidc" });
+  try {
+    const result = spawnSync("bash", ["scripts/ship-npm.sh", "--publish-prepared"], {
+      cwd: fixture, encoding: "utf8", timeout: 10000,
+      env: { ...devEnv(fixture), NPM_DIST_TAG_VERIFY_ATTEMPTS: "120", NPM_DIST_TAG_VERIFY_DELAY_SECONDS: "60",
+        NPM_REGISTRY_VERIFY_TIMEOUT_SECONDS: "1", FIXTURE_PROPAGATION_ERROR: "E404", FIXTURE_PROPAGATION_FAILURES: "1000" },
+    });
+    assert.equal(result.error, undefined);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /not observable after publication \(1 attempts/);
+    assert.equal(readFileSync(join(stateDir, "protocol-reads"), "utf8").trim(), "1");
+    assert.equal(readFileSync(join(stateDir, "mutations.log"), "utf8"), "publish protocol tag=dev\n");
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
