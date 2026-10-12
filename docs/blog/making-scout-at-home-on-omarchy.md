@@ -123,6 +123,6 @@ I already want the little Scout mark in my bar when I sit down to work. That fee
 The optional [notification observer, controls and cards](../linux-desktop.md)
 now live in public Scout. The [portable usage study](../../examples/linux-usage/README.md)
 runs without the private Studio and uses synthetic fixtures. The original local
-quota capture is not part of that public example. The launcher and full bar
-menu described here remain local customizations; the compact usage study has
-not replaced the installed QML view.
+quota capture is not part of that public example. The [launcher, full bar menu,
+and optional left-edge HUD](../../integrations/omarchy/README.md) are now maintained
+in public Scout too. The compact usage study remains a separate synthetic example.

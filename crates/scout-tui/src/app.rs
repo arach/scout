@@ -409,6 +409,8 @@ enum DeckAssignment {
 }
 
 pub struct App {
+    pub ambient: crate::ambient::Ambient,
+    pub ambient_elapsed: std::time::Duration,
     pub take: Take,
     pub filtering: bool,
     pub fleet_view: bool,
@@ -513,6 +515,8 @@ pub struct Hit {
 impl App {
     pub fn new(take: Take) -> Self {
         Self {
+            ambient: crate::ambient::Ambient::Off,
+            ambient_elapsed: std::time::Duration::ZERO,
             take,
             composition: Composition::Watch,
             focused_slot: 0,

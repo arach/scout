@@ -199,6 +199,11 @@ fn paint_split(frame: &mut Frame, app: &mut App, sep: Rect) {
 }
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
+    draw_content(frame, app);
+    app.ambient.paint(frame.buffer_mut(), app.ambient_elapsed);
+}
+
+fn draw_content(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
     app.clear_hits();
     frame.render_widget(Block::default().style(Style::default().bg(GROUND)), area);

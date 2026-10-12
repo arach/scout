@@ -1,0 +1,22 @@
+#!/usr/bin/env python3
+"""Open the broker-managed Scout web app through Omarchy."""
+import importlib.util
+from pathlib import Path
+import re
+import subprocess
+import sys
+
+spec = importlib.util.spec_from_file_location('scout_menu_common', Path(__file__).with_name('scout-menu-common.py'))
+common = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(common)
+
+try:
+    output = common.ensure_web()
+    match = re.search(r'Scout web at (https?://[^\s]+)', output)
+    if not match:
+        raise ValueError('Scout did not report its web address')
+    subprocess.run(['omarchy', 'launch', 'or', 'focus', 'webapp', '^Scout$', match.group(1)], check=True)
+except Exception as error:
+    print('Scout: ' + str(error), file=sys.stderr)
+    subprocess.run(['notify-send', '--app-name=Scout', '--icon=scout', 'Scout could not open', str(error)], check=False)
+    sys.exit(1)

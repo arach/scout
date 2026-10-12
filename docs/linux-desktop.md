@@ -30,8 +30,8 @@ The installer bundles the observer into
 `${XDG_DATA_HOME:-~/.local/share}/openscout/linux-desktop`, creates a CLI wrapper
 and user service, and preserves existing notification preferences. It adds
 notification controls to an existing `scout.linux` Omarchy bar plugin, backing
-up `Widget.qml` before editing it. The existing `scout.linux` bar plugin is a
-separate local customization; this installer does not create the launcher or
+up `Widget.qml` before editing it. Install the public
+[Omarchy popup and launcher](../integrations/omarchy/README.md) to create the
 full bar menu. Without that plugin, CLI configuration remains available.
 Rerun the installer and restart the notification service
 to update it. The broker is not restarted.

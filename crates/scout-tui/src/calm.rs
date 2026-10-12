@@ -552,6 +552,7 @@ pub const KEYS: &[(&str, &str)] = &[
     ("/", "filter as you type"),
     ("f", "fleet"),
     ("?", "keys"),
+    ("⌃s", "background shimmer"),
     ("⌃c", "quit"),
 ];
 

@@ -71,6 +71,7 @@ export function renderTuiCommandHelp(): string {
     "Usage:",
     "  scout tui [--take now|horizon|twin|mesh|quota|harvest|grid]",
     "  scout tui [--composition focus|watch|review|quad]",
+    "  scout tui --ambient shimmer  Subtle background light; Ctrl+S toggles it",
     "  scout tui --probe",
     "  scout tui install [--force]   Download scout-tui for this Scout version now",
     "  scout tui status              Show which scout-tui would run",

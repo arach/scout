@@ -438,6 +438,10 @@ migration status, target ownership, and release invariants.
 
 ## Linux desktop examples
 
+The optional [Omarchy popup and launcher](./integrations/omarchy/README.md)
+provide attention, tracked work, provider limits, machines, and quick actions.
+They consume the installed public CLI and preserve local desktop preferences.
+
 The optional [Omarchy notification integration](./docs/linux-desktop.md)
 includes a live broker-event observer, a user-service installer, configurable
 controls and native notification cards. It is installed from this checkout,
