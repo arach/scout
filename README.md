@@ -436,6 +436,19 @@ build-time web composition. It must not carry copied public source or a mirrored
 See the [public-source boundary](./docs/public-source-boundary.md) for current
 migration status, target ownership, and release invariants.
 
+## Linux desktop examples
+
+The optional [Omarchy notification integration](./docs/linux-desktop.md)
+includes a live broker-event observer, a user-service installer, configurable
+controls and native notification cards. It is installed from this checkout,
+separately from the npm CLI package.
+
+The [compact usage study](./examples/linux-usage/README.md) compares LED,
+progress and bar treatments with synthetic fixtures. It runs with Bun alone
+and does not query accounts or replace the installed desktop widget. Read
+[Making Scout at home on Omarchy](./docs/blog/making-scout-at-home-on-omarchy.md)
+for the local pilot's design history and preview cards.
+
 ## Work on Scout
 
 ```bash

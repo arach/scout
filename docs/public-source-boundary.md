@@ -44,6 +44,9 @@ private iOS app and are not part of the public supported check surface.
   server routes, and capability providers;
 - portable native services required by the public runtime;
 - public integration contracts, documentation, tests, and release tooling;
+- the optional Linux notification integration in `scripts/linux`, its
+  documentation, and the synthetic standalone usage study in
+  `examples/linux-usage`; these sources do not require the private Studio;
 - assets and community files needed to operate a healthy public project.
 
 Code in this repository must not require a checkout of the private companion
