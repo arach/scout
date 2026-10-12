@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+"""Open the installed public TUI in its own Scout terminal window."""
+import importlib.util
+import json
+import os
+from pathlib import Path
+import subprocess
+import shutil
+import sys
+
+spec = importlib.util.spec_from_file_location('scout_menu_common', Path(__file__).with_name('scout-menu-common.py'))
+common = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(common)
+
+try:
+    cli = common.scout_binary()
+    env = os.environ.copy()
+    receipt = common.data_home() / 'openscout/linux-desktop/desktop-install.json'
+    installed = json.loads(receipt.read_text()) if receipt.exists() else {}
+    binary = env.get('SCOUT_TUI_BIN') or installed.get('tuiBin')
+    if binary:
+        if not Path(binary).is_file() or not os.access(binary, os.X_OK):
+            raise ValueError('The installed public TUI is unavailable; reinstall it.')
+        env['SCOUT_TUI_BIN'] = binary
+    env['SCOUT_TUI_AMBIENT'] = 'shimmer'
+    # Start outside a checkout so an unrelated private debug binary cannot win resolution.
+    command = [cli, 'tui', '--ambient', 'shimmer']
+    if shutil.which('ghostty'):
+        command = ['ghostty', '--class=com.openscout.hud', '--title=Scout HUD', '--working-directory=' + str(Path.home()), '-e', *command]
+    else:
+        command = ['omarchy', 'launch', 'terminal', 'env', 'SCOUT_TUI_AMBIENT=shimmer', *command]
+    subprocess.Popen(command, cwd=Path.home(), env=env, start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+except Exception as error:
+    subprocess.run(['notify-send', 'Scout TUI could not open', str(error)], check=False)
+    sys.exit(str(error))

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "scout.linux",
+  "name": "Scout",
+  "version": "0.6.0",
+  "author": "arach",
+  "description": "An operator overview: attention, tracked work, remaining capacity, machines and quick actions.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Widget.qml"
+  },
+  "barWidget": {
+    "displayName": "Scout",
+    "description": "Click for Scout overview, activity and budgets; right-click to open the app.",
+    "category": "Development",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {},
+    "schema": []
+  }
+}

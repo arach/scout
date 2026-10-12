@@ -4,6 +4,7 @@
 //! STORY: What is moving; last thought already on screen; draft a response.
 //! FORM: Calm list first; legacy fleet views behind explicit keys.
 
+mod ambient;
 mod app;
 mod ask;
 mod calm;
@@ -25,8 +26,8 @@ use std::time::{Duration, Instant};
 
 use crossterm::cursor::Show;
 use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
-    KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    self, DisableFocusChange, DisableMouseCapture, EnableFocusChange, EnableMouseCapture, Event,
+    KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -71,7 +72,13 @@ fn restore_terminal() {
     let _ = disable_raw_mode();
     let mut out = io::stdout();
     let _ = write!(out, "{}", Pointer::Default.osc());
-    let _ = execute!(out, DisableMouseCapture, LeaveAlternateScreen, Show);
+    let _ = execute!(
+        out,
+        DisableFocusChange,
+        DisableMouseCapture,
+        LeaveAlternateScreen,
+        Show
+    );
     let _ = out.flush();
 }
 
@@ -94,18 +101,27 @@ fn pointer_for_hit(kind: Option<HitKind>) -> Pointer {
 }
 
 struct Args {
+    ambient: ambient::Ambient,
     probe: bool,
     take: Take,
     composition: Option<Composition>,
 }
 
 fn parse_args() -> Args {
+    let mut ambient = std::env::var("SCOUT_TUI_AMBIENT")
+        .ok()
+        .map(|value| parse_ambient_or_exit(&value))
+        .unwrap_or_default();
     let mut probe = false;
     let mut take = Take::Now;
     let mut composition = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "--ambient" => ambient = parse_ambient_or_exit(&args.next().unwrap_or_default()),
+            other if other.starts_with("--ambient=") => {
+                ambient = parse_ambient_or_exit(&other[10..])
+            }
             "--probe" => probe = true,
             "--help" | "-h" => {
                 print_help();
@@ -145,10 +161,18 @@ fn parse_args() -> Args {
         }
     }
     Args {
+        ambient,
         probe,
         take,
         composition,
     }
+}
+
+fn parse_ambient_or_exit(value: &str) -> ambient::Ambient {
+    ambient::Ambient::parse(value).unwrap_or_else(|| {
+        eprintln!("unknown ambient: {value} (valid: off, shimmer)");
+        std::process::exit(2);
+    })
 }
 
 fn parse_take_or_exit(value: &str) -> Take {
@@ -169,8 +193,9 @@ fn parse_composition_or_exit(value: &str) -> Composition {
 
 fn print_help() {
     eprintln!(
-        "scout-tui [--take now|horizon|twin|mesh|quota|harvest|grid] [--composition focus|watch|review|quad] [--probe]\n\
-         Scout Nightwatch, Harvest & Grid: seven takes, four grid compositions, one fleet."
+        "scout-tui [--take now|horizon|twin|mesh|quota|harvest|grid] [--composition focus|watch|review|quad] [--ambient off|shimmer] [--probe]\n\
+         Ctrl+S toggles background shimmer. Motion pauses when unfocused.\n\
+         SCOUT_TUI_AMBIENT sets the default (off)."
     );
 }
 
@@ -190,6 +215,11 @@ fn handle_key(app: &mut App, key: KeyEvent, terminal_width: u16) -> bool {
     // Ctrl+C always quits
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
         return true;
+    }
+
+    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('s') {
+        app.ambient.toggle();
+        return false;
     }
 
     if app.help {
@@ -512,7 +542,12 @@ fn main() -> io::Result<()> {
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(
+        stdout,
+        EnterAlternateScreen,
+        EnableMouseCapture,
+        EnableFocusChange
+    )?;
     let _guard = TerminalGuard;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
@@ -524,6 +559,9 @@ fn main() -> io::Result<()> {
     let (ask_tx, ask_rx) = spawn_asker();
     let mut sent_cwds: Vec<String> = Vec::new();
     let mut app = App::new(args.take);
+    app.ambient = args.ambient;
+    let mut ambient_clock = ambient::Clock::new(Instant::now());
+    let mut focused = true;
     if let Some(comp) = args.composition {
         app.set_composition(comp);
     }
@@ -603,12 +641,16 @@ fn main() -> io::Result<()> {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
-        let animated = app.composing
-            || app.filtering
-            || (app.take == Take::Now && !app.fleet_view && now < live_until);
+        let animated = focused
+            && (app.composing
+                || app.filtering
+                || (app.take == Take::Now && !app.fleet_view && now < live_until));
         dirty |= animated != was_animated;
         was_animated = animated;
-        if dirty || (animated && last_draw.elapsed() >= ANIMATION_TICK) {
+        let ambient_tick =
+            focused && app.ambient != ambient::Ambient::Off && last_draw.elapsed() >= ambient::TICK;
+        if dirty || ambient_tick || (animated && last_draw.elapsed() >= ANIMATION_TICK) {
+            app.ambient_elapsed = ambient_clock.elapsed(Instant::now());
             terminal.draw(|frame| draw::draw(frame, &mut app))?;
             dirty = false;
             last_draw = Instant::now();
@@ -623,6 +665,11 @@ fn main() -> io::Result<()> {
                     }
                     Event::Mouse(mouse) if handle_mouse(&mut app, mouse) => dirty = true,
                     Event::Resize(_, _) => dirty = true,
+                    focus @ (Event::FocusGained | Event::FocusLost) => {
+                        focused = matches!(focus, Event::FocusGained);
+                        ambient_clock.focus(focused, Instant::now());
+                        dirty = true;
+                    }
                     _ => {}
                 }
                 if done || !event::poll(Duration::ZERO)? {
@@ -640,6 +687,22 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     use super::*;
+
+    #[test]
+    fn motion_toggle_does_not_send_or_change_a_draft() {
+        let mut app = App::new(Take::Now);
+        app.composing = true;
+        app.draft = "keep this request".into();
+        assert!(!handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL),
+            80
+        ));
+        assert_eq!(app.ambient, ambient::Ambient::Shimmer);
+        assert_eq!(app.draft, "keep this request");
+        assert!(app.composing);
+        assert!(app.take_ask_request().is_none());
+    }
 
     fn add_agents(app: &mut App, count: usize) {
         for id in 0..count {

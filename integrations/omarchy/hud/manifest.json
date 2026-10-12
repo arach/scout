@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "scout.hud",
+  "name": "Scout HUD",
+  "version": "0.1.0",
+  "author": "arach",
+  "description": "A left-edge Scout drawer: approach to peek, pin to keep it open.",
+  "kinds": ["service"],
+  "entryPoints": {"service": "Service.qml"}
+}
