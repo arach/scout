@@ -51,6 +51,8 @@ export type MeshNodeStateAgent = {
 
 export type MeshNodeStateSession = {
   id: string;
+  /** Human-readable session label, including sessions without an agent card. */
+  title?: string | null;
   /** Broker-issued exact conversation address. Older peers may omit it. */
   address?: string | null;
   agentId: string;
@@ -186,9 +188,17 @@ export function readMeshNodeState(deps: MeshNodeStateDeps, query: MeshNodeStateQ
   // oldest records — a live session or a running flight would fall off the end
   // behind a window of finished work. Rank before the cap: live first, then
   // most recent.
-  const sessions = nodeSessions.filter((endpoint) => ownAgentIds.has(endpoint.agentId));
+  const sessions = nodeSessions.filter((endpoint) => {
+    if (ownAgentIds.has(endpoint.agentId)) return true;
+    // Fresh Scout work is cardless. Its endpoint is the local authority;
+    // absence from the home-screen agent roster must not erase the session.
+    if (snapshot.agents[endpoint.agentId] || isStaleLocalEndpoint(snapshot, endpoint)) return false;
+    return (!query.agentId || endpoint.agentId === query.agentId)
+      && (!query.projectRoot || endpoint.projectRoot === query.projectRoot);
+  });
+  const workTargetIds = new Set([...ownAgentIds, ...sessions.map((endpoint) => endpoint.agentId)]);
   const work = Object.values(snapshot.flights ?? {})
-    .filter((flight) => ownAgentIds.has(flight.targetAgentId))
+    .filter((flight) => workTargetIds.has(flight.targetAgentId))
     .sort((a, b) => flightRank(b) - flightRank(a));
 
   const projects = projectList(snapshot, own.map((agent) => agent.id), sessions);
@@ -221,6 +231,8 @@ export function readMeshNodeState(deps: MeshNodeStateDeps, query: MeshNodeStateQ
       truncated: sessions.length >= sessionLimit,
       items: sessions.slice(0, sessionLimit).map((endpoint) => ({
         id: endpoint.id,
+        title: typeof endpoint.metadata?.displayName === "string"
+          ? endpoint.metadata.displayName.slice(0, SUMMARY_MAX) : null,
         address: runtimeSessionAddressForEndpoint(snapshot, endpoint),
         agentId: endpoint.agentId,
         harness: endpoint.harness ?? null,
