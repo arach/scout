@@ -55,9 +55,13 @@ export class RoutingStore {
   readonly path: string;
   private changed = new Set<string>();
 
-  constructor(path?: string) {
-    if (!path) assertTestIsolatedUserData("write routing index", "OPENSCOUT_CONTROL_HOME");
+  constructor(path?: string, options: { readonly?: boolean } = {}) {
+    if (!path && !options.readonly) assertTestIsolatedUserData("write routing index", "OPENSCOUT_CONTROL_HOME");
     this.path = path ?? routingPath();
+    if (options.readonly) {
+      this.db = openRuntimeSqliteDatabase(this.path, { readonly: true, create: false });
+      return;
+    }
     if (this.path !== ":memory:") {
       mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
       // SQLite inherits the DB mode for WAL/SHM: set it before opening WAL.

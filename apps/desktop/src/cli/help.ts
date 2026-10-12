@@ -18,7 +18,7 @@ export function renderScoutHelp(version = "0.2.19", detail = false): string {
     "  who          Agent roster",
     "  check        Live work by topic or machine (machines and their projects: hosts)",
     "  latest       Broker activity timeline",
-    "  where        Find a project, agent or session by topic",
+    "  locate       Find recipients across machines (local topic index: where)",
     "  ask          Request work or a reply; --notify returns after receipt",
     "  tell         Tell an agent something; no reply or work expected",
     "  operator     Reach your operator: a message, or --question when blocked",

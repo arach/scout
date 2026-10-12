@@ -76,7 +76,10 @@ export function resolveRoute(store: RoutingStore, query: string, options: RouteO
   const machines = options.machines ?? store.meta<RouteMachine[]>("machines", []);
   const parsed = parseRouteQuery(query, machines, options);
   const all = store.targets();
-  const scoped = all.filter((t) => parsed.selected === null || parsed.selected.includes(t.nodeId));
+  const scoped = all.filter((t) => (parsed.selected === null || parsed.selected.includes(t.nodeId))
+    && (!options.nodeIds || options.nodeIds.includes(t.nodeId))
+    && (!options.projectRoot || t.projectRoot === options.projectRoot)
+    && (!options.agentId || t.agentId === options.agentId || t.kind === "project"));
   const indexedAt = store.meta<number | null>("indexedAt", null);
   const result: RouteResult = { outcome: "none", query, topic: parsed.topic, reason: "No matching topic in indexed coverage", candidates: [], coverage: {
     localOnly: true, machines: machines.filter((m) => m.id === store.meta("nodeId", "")),

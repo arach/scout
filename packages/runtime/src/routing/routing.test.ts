@@ -55,6 +55,14 @@ function chunksFixture(entries: { collection: string; text: string; time?: numbe
 }
 
 describe("routing lexical index", () => {
+  test("live discovery scope applies before the shortlist cap and fails closed for no nodes", () => {
+    const s = store();
+    for (let i = 0; i < 5; i++) doc(s, target(`/repo/${i}`, ["permissions"]));
+    const selected = resolveRoute(s, "permissions", { nodeIds: ["mini"], projectRoot: "/repo/4" });
+    expect(selected.candidates.map((c) => c.target.projectRoot)).toEqual(["/repo/4"]);
+    expect(selected.coverage.scopedTargets).toBe(1);
+    expect(resolveRoute(s, "permissions", { nodeIds: [] }).candidates).toEqual([]);
+  });
   test("empty index returns none and coverage, without a broker or invented targets", () => {
     const result = resolveRoute(store(), "companion", { signals: ["S0", "S1"], now: NOW });
     expect(result.outcome).toBe("none"); expect(result.coverage.targets).toBe(0);

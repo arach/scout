@@ -45,6 +45,7 @@ export type ScoutCommandName =
   | "runtimes"
   | "route"
   | "where"
+  | "locate"
   | "search"
   | "send"
   | "session"
@@ -143,6 +144,8 @@ export async function loadScoutCommandHandler(name: ScoutCommandName): Promise<S
     case "where":
     case "route":
       return (await import("./route.ts")).runRouteCommand;
+    case "locate":
+      return (await import("./locate.ts")).runLocateCommand;
     case "search":
       return (await import("./search.ts")).runSearchCommand;
     case "send":

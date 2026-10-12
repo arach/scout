@@ -118,6 +118,7 @@ describe("createScoutMcpServer", () => {
     expect(result.tools.map((tool) => tool.name)).toEqual([
       "where",
       "check",
+      "route_context",
       "sessions_inventory",
       "sessions_search",
       "herdr_workspaces",

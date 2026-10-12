@@ -26,6 +26,7 @@ export const SCOUT_COMMANDS: ScoutCommandRegistration[] = [
   { name: "env", summary: "Show executable and agent identity context" },
   { name: "whoami", summary: "Resolve your current Scout sender identity" },
   { name: "where", summary: "Find the top 3 local projects, agents or sessions by topic" },
+  { name: "locate", summary: "Find a roughly remembered recipient across machines with local topic evidence" },
   { name: "route", summary: "Deprecated alias for where", canonicalName: "where", status: "deprecated", hidden: true, deprecationMessage: "`scout route` is deprecated; use `scout where`." },
   { name: "search", summary: "Past harness sessions — explicit index → FTS (prefer over grepping ~/.codex|claude|kimi)" },
   { name: "inbox", summary: "Read recent direct or addressed messages for this identity" },

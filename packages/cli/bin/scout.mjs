@@ -136,7 +136,7 @@ async function main() {
 function isInspectionCommand() {
   const input = parseScoutArgv(process.argv.slice(2));
   const command = input.command === "relay" ? input.args[0] : input.command;
-  return command === "who" || command === "check" || command === "recent" || command === "where" || command === "route";
+  return command === "who" || command === "check" || command === "recent" || command === "where" || command === "locate" || command === "route";
 }
 
 async function finishInspectionOutput() {
