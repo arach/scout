@@ -28,7 +28,7 @@ def main():
     # New builds honor the env preference; older optional TUIs ignore it safely.
     command = [cli, 'tui']
     if shutil.which('ghostty'):
-        command = ['ghostty', '--class=com.openscout.hud', '--title=Scout HUD', '--working-directory=' + str(Path.home()), '-e', *command]
+        command = ['ghostty', '--class=com.openscout.hud', '--title=Scout HUD', '--background-opacity=1', '--working-directory=' + str(Path.home()), '-e', *command]
     else:
         command = ['omarchy', 'launch', 'terminal', 'env', 'SCOUT_TUI_AMBIENT=shimmer', *command]
     subprocess.Popen(command, cwd=Path.home(), env=env, start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
