@@ -15,6 +15,7 @@ spec.loader.exec_module(common)
 def main():
     cli = common.scout_binary()
     env = os.environ.copy()
+    env.pop('NO_COLOR', None) # This explicitly requested visual terminal needs colors.
     receipt = common.data_home() / 'openscout/linux-desktop/desktop-install.json'
     installed = json.loads(receipt.read_text()) if receipt.exists() else {}
     binary = env.get('SCOUT_TUI_BIN') or installed.get('tuiBin')

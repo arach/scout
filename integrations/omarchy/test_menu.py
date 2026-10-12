@@ -22,15 +22,16 @@ def module(name):
 class DesktopMenuTest(unittest.TestCase):
     def test_optional_old_tui_launches_without_new_flags(self):
         launcher = module('scout-hud-tui')
-        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {}, clear=True), patch.object(launcher.common, 'data_home', return_value=Path(tmp)), patch.object(launcher.common, 'scout_binary', return_value='/installed/public/scout'), patch.object(launcher.shutil, 'which', return_value='/usr/bin/ghostty'), patch.object(launcher.subprocess, 'Popen') as spawn:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {'NO_COLOR': '1'}, clear=True), patch.object(launcher.common, 'data_home', return_value=Path(tmp)), patch.object(launcher.common, 'scout_binary', return_value='/installed/public/scout'), patch.object(launcher.shutil, 'which', return_value='/usr/bin/ghostty'), patch.object(launcher.subprocess, 'Popen') as spawn:
             launcher.main()
         command = spawn.call_args.args[0]
         self.assertEqual(command[-2:], ['/installed/public/scout', 'tui'])
         self.assertEqual(spawn.call_args.kwargs['env']['SCOUT_TUI_AMBIENT'], 'shimmer')
+        self.assertNotIn('NO_COLOR', spawn.call_args.kwargs['env'])
     def test_only_positive_kind_specific_progress_counts_as_active(self):
         status = module('scout-menu-status')
-        rows = status.work_rows([{'kind': 'invocation', 'state': 'recorded'}, {'kind': 'flight'}, {'kind': 'flight', 'state': 'waking'}, {'kind': 'flight', 'state': 'running'}, {'kind': 'work_item', 'state': 'active'}, {'kind': 'question', 'state': 'open'}, {'kind': 'flight', 'state': 'running', 'blocked': True}])
-        self.assertEqual([row['active'] for row in rows], [False, False, False, True, True, False, False])
+        rows = status.work_rows([{'kind': 'invocation', 'state': 'recorded'}, {'kind': 'flight'}, {'kind': 'flight', 'state': 'waking'}, {'kind': 'flight', 'state': 'running'}, {'kind': 'work_item', 'state': 'working'}, {'kind': 'work_item', 'state': 'active'}, {'kind': 'question', 'state': 'open'}, {'kind': 'flight', 'state': 'running', 'blocked': True}])
+        self.assertEqual([row['active'] for row in rows], [False, False, False, True, True, False, False, False])
     def test_budget_reader_starts_web_before_usage_and_uses_selected_cli(self):
         status = module('scout-menu-status')
         events = []

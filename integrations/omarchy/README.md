@@ -39,7 +39,7 @@ no workspace area. It uses the same supported CLI reads as the bar menu; unavail
 and stale observations stay unavailable. Quota readings require an observation
 time within 15 minutes; fresh cache reads do not reset that age. Refresh asks
 Scout to refresh provider readings. In-progress work requires an explicit running
-flight or active work item; recorded/starting requests remain in tracked history.
+flight or working work item; recorded/starting requests remain in tracked history.
 Preferences live in
 `${XDG_CONFIG_HOME:-~/.config}/openscout/linux-hud.json`; optional `screen` selects
 a monitor by name (otherwise the first monitor).
@@ -47,7 +47,8 @@ a monitor by name (otherwise the first monitor).
 `--tui` verifies a public TUI candidate's interface and copies it into a directory
 named by its SHA-256. The launcher records and uses that installed binary, outside
 source checkouts. Open TUI launches a separate Ghostty window where available.
-To float that terminal on the left across workspaces, copy `scout-hud.lua` into your
+The HUD launcher requests colors in its own terminal, clearing an inherited
+`NO_COLOR` value for that process. To float that terminal on the left across workspaces, copy `scout-hud.lua` into your
 user `hypr` directory and add `require("hypr.scout-hud")` to your Hyprland Lua config;
 reload and check `hyprctl configerrors`. The rule matches only Scout's HUD terminal.
 
@@ -62,7 +63,8 @@ it open. Hiding can be reversed
 with `show`; removing the `scout.hud` plugin entry disables it on startup.
 
 For first installation, run `omarchy bar put scout.linux --section right`. Existing
-entries hot-reload when their user-owned plugin files are replaced. No files in
+entries retain their placement. After updating, run `omarchy-shell shell rescanPlugins`;
+if the shell retains older compiled plugin code, run `omarchy restart shell`. No files in
 `/usr/share/omarchy` are modified. The menu consumes supported Scout CLI reads;
 budget reads start the web child through `scout server start` before querying
 the feed. They do not launch another broker.

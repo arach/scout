@@ -55,7 +55,7 @@ TERMINAL_STATES = {'completed', 'done', 'answered', 'cancelled', 'failed'}
 def active_work(row):
     return not row.get('blocked') and (
         row.get('kind') == 'flight' and row.get('state') == 'running'
-        or row.get('kind') == 'work_item' and row.get('state') == 'active')
+        or row.get('kind') == 'work_item' and row.get('state') == 'working')
 
 def concise(value, limit=320):
     value = re.sub(r'\[ask:[^\]]+\]\s*', '', str(value or ''))
