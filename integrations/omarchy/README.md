@@ -36,7 +36,11 @@ bar layout, other plugins, and settings. Approach the left-edge Scout handle to
 peek; leave to fold it away. Pin keeps it open. Motion off stops its decorative
 light and makes opening immediate. The drawer takes no keyboard focus and reserves
 no workspace area. It uses the same supported CLI reads as the bar menu; unavailable
-and stale observations stay unavailable. Preferences live in
+and stale observations stay unavailable. Quota readings require an observation
+time within 15 minutes; fresh cache reads do not reset that age. Refresh asks
+Scout to refresh provider readings. In-progress work requires an explicit running
+flight or active work item; recorded/starting requests remain in tracked history.
+Preferences live in
 `${XDG_CONFIG_HOME:-~/.config}/openscout/linux-hud.json`; optional `screen` selects
 a monitor by name (otherwise the first monitor).
 

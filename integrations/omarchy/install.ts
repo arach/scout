@@ -35,6 +35,7 @@ export async function install(argv: string[]): Promise<void> {
     ...PLUGIN_FILES.map((name) => ({ source: join(SOURCE, "plugin", name), target: join(plugin, name), executable: false })),
     ...["Service.qml", "HudButton.qml", "HudModel.js", "manifest.json"].map((name) => ({ source: join(SOURCE, "hud", name), target: join(config, "omarchy/plugins/scout.hud", name), executable: false })),
     { source: join(SOURCE, "../../scripts/linux/NotificationControls.qml"), target: join(plugin, "NotificationControls.qml"), executable: false },
+    { source: join(SOURCE, "hud/HudModel.js"), target: join(plugin, "HudModel.js"), executable: false },
   ];
   // Read every source before replacing anything. Existing preferences and shell layout are not inputs to overwrite.
   const files = await Promise.all(sources.map(async (file) => ({ ...file, bytes: await readFile(file.source) })));

@@ -16,6 +16,7 @@ Item {
     property string screenName: ""
     property var snapshot: ({errors: {}})
     property string loadError: ""
+    property string usageFeedback: ""
     property double fullAt: 0
     property double now: Date.now()
     property bool refreshQueued: false
@@ -85,6 +86,18 @@ Item {
             if (root.refreshQueued) { root.refreshQueued = false; retry.start(); }
         }
     }
+    Process {
+        id: usageUpdater
+        command: [root.bin + "scout-menu-action", "refresh-usage"]
+        stdout: StdioCollector {
+            waitForEnd: true
+            onStreamFinished: {
+                try { root.usageFeedback = JSON.parse(text).message; }
+                catch (e) { root.usageFeedback = "Provider refresh unavailable"; }
+            }
+        }
+        onExited: root.refresh()
+    }
     Timer { id: retry; interval: 50; onTriggered: root.refresh() }
     Timer { interval: root.shown ? 30000 : 60000; running: root.enabled; repeat: true; onTriggered: root.refresh() }
     Timer { interval: 1000; running: root.shown; repeat: true; onTriggered: root.now = Date.now() }
@@ -115,8 +128,16 @@ Item {
         WlrLayershell.namespace: "scout-hud"
         WlrLayershell.layer: WlrLayer.Overlay
         WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+        // Folded transparent margins must pass input through to the app below.
+        mask: Region { item: footprint }
         Behavior on implicitWidth { enabled: root.motion; NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
 
+        Item {
+            id: footprint
+            width: panel.width
+            height: root.shown ? panel.height : handle.height
+            y: root.shown ? 0 : (panel.height - height) / 2
+        }
         Item {
             anchors.fill: parent
             clip: true
@@ -187,7 +208,7 @@ Item {
                         RowLayout {
                             spacing: 24
                             Repeater {
-                                model: [{key: "needsYouCount", error: "blocked", label: "NEEDS YOU"}, {key: "activeCount", error: "work", label: "TRACKED WORK"}]
+                                model: [{key: "needsYouCount", error: "blocked", label: "NEEDS YOU"}, {key: "activeCount", error: "work", label: "IN PROGRESS"}]
                                 ColumnLayout {
                                     required property var modelData
                                     Text { text: root.count(modelData.key, modelData.error); color: root.ink; font.pixelSize: 30; font.family: "monospace" }
@@ -225,10 +246,11 @@ Item {
                         }
                         RowLayout {
                             Layout.fillWidth: true
-                            HudButton { text: "Refresh"; enabled: !reader.running; onClicked: root.refresh() }
+                            HudButton { text: usageUpdater.running ? "Refreshing…" : "Refresh"; enabled: !reader.running && !usageUpdater.running; onClicked: { root.usageFeedback = ""; usageUpdater.running = true; } }
                             HudButton { text: root.motion ? "Motion on" : "Motion off"; checked: root.motion; onClicked: { root.motion = !root.motion; root.savePreferences(); } }
                         }
                         Text { text: root.pinned ? "Pinned · close to tuck away" : "Approach to peek · leave to tuck away"; color: root.muted; font.pixelSize: 10 }
+                        Text { visible: !!root.usageFeedback; text: root.usageFeedback; wrapMode: Text.Wrap; color: root.muted; font.pixelSize: 10; Layout.fillWidth: true }
                     }
                 }
             }

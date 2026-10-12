@@ -6,6 +6,7 @@ import Quickshell.Io
 import Quickshell.Hyprland
 import qs.Ui
 import qs.Commons
+import "HudModel.js" as Model
 
 BarWidget {
     id: root
@@ -31,6 +32,13 @@ BarWidget {
     readonly property string mono: Style.font.family
     readonly property color muted: Util.alpha(ink, 0.72)
     property double now: Date.now()
+    property double fullAt: 0
+    readonly property bool workReady: Model.fullReady(snapshot, fullAt, now, loadError, "work")
+    readonly property bool budgetsReady: Model.fullReady(snapshot, fullAt, now, loadError, "budgets")
+    readonly property var activeWork: workReady ? (snapshot.activeWork || []) : []
+    readonly property var budgetRows: budgetsReady ? (snapshot.budgets || []).map(function(b) {
+        return Object.assign({}, b, {used: Model.budgetKnown(b, root.now) ? b.used : null});
+    }) : []
     readonly property bool opened: menuOpen
     readonly property color paper: Color.popups.background
     property string pendingStyle: ""
@@ -51,7 +59,7 @@ BarWidget {
     property string tab: "Now"
     property string workFilter: "All"
     property bool todayOnly: false
-    readonly property bool unknown: !snapshot.updatedAt || !!loadError || !!snapshot.errors.service || !!snapshot.errors.blocked
+    readonly property bool unknown: !Model.fresh(snapshot, now) || !!loadError || !!snapshot.errors.service || !!snapshot.errors.blocked
 
     function actorLabel(value) {
         if (!value)
@@ -146,15 +154,15 @@ BarWidget {
     }
 
     // Components project broker records; idle agents and trust are not execution/connection states.
-    readonly property var capacity: summarizeCapacity(snapshot.budgets || [])
-    readonly property var providers: Array.from(new Set((snapshot.budgets || []).map(function (b) {
+    readonly property var capacity: summarizeCapacity(budgetRows)
+    readonly property var providers: Array.from(new Set(budgetRows.map(function (b) {
         return b.provider;
     })))
-    readonly property var visibleWork: (snapshot.work || []).filter(function (w) {
+    readonly property var visibleWork: (workReady ? snapshot.work || [] : []).filter(function (w) {
         if (todayOnly && (!snapshot.todayStart || !w.ts || w.ts < snapshot.todayStart))
             return false;
         if (workFilter === "Running")
-            return !w.blocked && ["completed", "done", "answered", "failed", "cancelled"].indexOf(w.state) < 0;
+            return w.active === true;
         if (workFilter === "Done")
             return ["completed", "done", "answered"].indexOf(w.state) >= 0;
         if (workFilter === "Failed")
@@ -169,7 +177,7 @@ BarWidget {
     function summarizeCapacity(rows) {
         var groups = {};
         rows.forEach(function (b) {
-            if (!groups[b.provider] || (b.used !== null && (groups[b.provider].used === null || b.used > groups[b.provider].used)))
+            if (!groups[b.provider] || (groups[b.provider].used !== null && (b.used === null || b.used > groups[b.provider].used)))
                 groups[b.provider] = b;
         });
         return Object.keys(groups).map(function (k) {
@@ -279,6 +287,7 @@ BarWidget {
                         incoming.errors = Object.assign(errors, incoming.errors);
                     }
                     root.snapshot = Object.assign({}, root.snapshot, incoming);
+                    if (incoming.full) root.fullAt = incoming.updatedAt;
                     root.now = Date.now();
                     root.loadError = "";
                 } catch (e) {
@@ -523,19 +532,19 @@ BarWidget {
                             Metric {
                                 width: parent.width / 3
                                 label: "In progress"
-                                value: root.count(root.snapshot.activeCount)
+                                value: root.workReady ? root.count(root.snapshot.activeCount) : "—"
                                 onActivated: root.selectWork("Running")
                             }
                             Metric {
                                 width: parent.width / 3
                                 label: "Done today"
-                                value: root.count(root.snapshot.completedToday)
+                                value: root.workReady ? root.count(root.snapshot.completedToday) : "—"
                                 onActivated: root.selectWork("Done", true)
                             }
                             Metric {
                                 width: parent.width / 3
                                 label: "Failed today"
-                                value: root.count(root.snapshot.failedToday)
+                                value: root.workReady ? root.count(root.snapshot.failedToday) : "—"
                                 onActivated: root.selectWork("Failed", true)
                             }
                         }
@@ -571,12 +580,12 @@ BarWidget {
                             spacing: Style.space(8)
                             SectionTitle {
                                 width: parent.width
-                                label: (root.snapshot.activeWork || []).length ? "Working now" : "Latest outcome"
+                                label: root.activeWork.length ? "In progress" : "Latest outcome"
                                 action: "View work"
                                 onActivated: root.selectWork("All")
                             }
                             Repeater {
-                                model: (root.snapshot.activeWork || []).length ? root.snapshot.activeWork.slice(0, 1) : root.latestOutcome
+                                model: root.activeWork.length ? root.activeWork.slice(0, 1) : root.latestOutcome
                                 delegate: WorkRow {
                                     required property var modelData
                                     width: parent.width
@@ -725,7 +734,7 @@ BarWidget {
                                     font.weight: Font.Medium
                                 }
                                 Repeater {
-                                    model: (root.snapshot.budgets || []).filter(function (b) {
+                                    model: root.budgetRows.filter(function (b) {
                                         return b.provider === providerGroup.modelData;
                                     })
                                     delegate: QuotaDetail {

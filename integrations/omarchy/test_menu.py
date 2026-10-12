@@ -20,6 +20,10 @@ def module(name):
 
 
 class DesktopMenuTest(unittest.TestCase):
+    def test_only_positive_kind_specific_progress_counts_as_active(self):
+        status = module('scout-menu-status')
+        rows = status.work_rows([{'kind': 'invocation', 'state': 'recorded'}, {'kind': 'flight'}, {'kind': 'flight', 'state': 'waking'}, {'kind': 'flight', 'state': 'running'}, {'kind': 'work_item', 'state': 'active'}, {'kind': 'question', 'state': 'open'}, {'kind': 'flight', 'state': 'running', 'blocked': True}])
+        self.assertEqual([row['active'] for row in rows], [False, False, False, True, True, False, False])
     def test_budget_reader_starts_web_before_usage_and_uses_selected_cli(self):
         status = module('scout-menu-status')
         events = []
