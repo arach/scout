@@ -1,0 +1,87 @@
+name: Verify Production Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Already-published stable npm version to reconcile (X.Y.Z)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  # Serialize with publication so a dist-tag cannot advance during reconciliation.
+  group: release-package-npm
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: Production
+      url: https://github.com/oscout/scout/releases/tag/v${{ inputs.version }}
+    steps:
+      - name: Require canonical public main
+        env:
+          REPOSITORY: ${{ github.repository }}
+          REF: ${{ github.ref }}
+        run: |
+          test "$REPOSITORY" = oscout/scout
+          test "$REF" = refs/heads/main
+
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24.x"
+          package-manager-cache: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.3.13"
+
+      - name: Verify stable release identity and public bytes
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          node scripts/verify-public-release.mjs --version "$VERSION" \
+            --output "$RUNNER_TEMP/production-evidence.json" \
+            --artifact-dir "$RUNNER_TEMP/verified-packages"
+
+      - name: Install verified package and check public CLI
+        env:
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_dir="$RUNNER_TEMP/scout-production-smoke"
+          smoke_home="$RUNNER_TEMP/scout-production-home"
+          mkdir -p "$install_dir" "$smoke_home"
+          npm install --prefix "$install_dir" --ignore-scripts --no-audit --no-fund --package-lock=false \
+            "$RUNNER_TEMP/verified-packages/openscout-scout-${VERSION}.tgz"
+          actual="$(HOME="$smoke_home" "$install_dir/node_modules/.bin/scout" --version)"
+          test "$actual" = "$VERSION"
+          HOME="$smoke_home" "$install_dir/node_modules/.bin/scout" --help > "$RUNNER_TEMP/production-cli-help.txt"
+          test -s "$RUNNER_TEMP/production-cli-help.txt"
+          printf 'Verified installed Scout %s; no services started.\n' "$actual" > "$RUNNER_TEMP/production-install-smoke.txt"
+
+      - name: Recheck stable pointers after installation
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          node scripts/verify-public-release.mjs --version "$VERSION" \
+            --output "$RUNNER_TEMP/production-evidence-final.json"
+          echo "### Verified current stable npm release: $VERSION" >> "$GITHUB_STEP_SUMMARY"
+          echo 'Exact published receipt, source, both registry artifacts, current stable tags, and isolated CLI install passed. This reconciles an existing release; it does not republish artifacts, claim new provenance, or certify native app updates.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Retain production verification evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: production-verification-${{ inputs.version }}
+          path: |
+            ${{ runner.temp }}/production-evidence*.json
+            ${{ runner.temp }}/production-cli-help.txt
+            ${{ runner.temp }}/production-install-smoke.txt
+          if-no-files-found: error
+          retention-days: 90

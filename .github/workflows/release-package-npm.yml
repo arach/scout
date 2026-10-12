@@ -35,7 +35,10 @@ jobs:
   publish:
     runs-on: macos-15
     timeout-minutes: 45
-    environment: Production
+    environment:
+      name: Production
+      # Dev needs the same signing secrets, but is not a stable deployment.
+      deployment: ${{ inputs.npm_tag == 'latest' }}
     steps:
       - name: Resolve release target
         id: release

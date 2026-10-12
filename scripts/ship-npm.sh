@@ -85,8 +85,13 @@ export OPENSCOUT_REQUIRE_SCOUTD_SIGN=1
 # npm can accept an upload and keep it in processing for more than a minute.
 # Keep this bounded, but long enough for the accepted artifact to become
 # observable before the fail-closed partial-set rule ends the authority session.
-NPM_DIST_TAG_VERIFY_ATTEMPTS="${NPM_DIST_TAG_VERIFY_ATTEMPTS:-60}"
+NPM_DIST_TAG_VERIFY_ATTEMPTS="${NPM_DIST_TAG_VERIFY_ATTEMPTS:-120}"
 NPM_DIST_TAG_VERIFY_DELAY_SECONDS="${NPM_DIST_TAG_VERIFY_DELAY_SECONDS:-5}"
+NPM_REGISTRY_VERIFY_TIMEOUT_SECONDS="${NPM_REGISTRY_VERIFY_TIMEOUT_SECONDS:-600}"
+for setting in NPM_DIST_TAG_VERIFY_ATTEMPTS NPM_REGISTRY_VERIFY_TIMEOUT_SECONDS; do
+  [[ "${!setting}" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: $setting must be a positive integer" >&2; exit 1; }
+done
+[[ "$NPM_DIST_TAG_VERIFY_DELAY_SECONDS" =~ ^[0-9]+$ ]] || { echo "ERROR: NPM_DIST_TAG_VERIFY_DELAY_SECONDS must be a nonnegative integer" >&2; exit 1; }
 PUBLISH_PACKAGES=(protocol cli)
 EXPECTED_REPOSITORY="https://github.com/oscout/scout"
 mkdir -p "$npm_config_cache"
@@ -686,23 +691,59 @@ prepare_release_tarballs() {
   done
 }
 
+# Revalidate cached metadata on every poll; an inherited prefer-offline setting
+# must not turn a previously missing version into a persistent local result.
+# npm's own retry loop is disabled here so this loop owns the bounded wait.
+wait_for_registry_value() {
+  local identity="$1" field="$2" expected="$3"
+  local error_file="$STATE_DIR/npm-propagation-error"
+  local observed="" diagnostic="" attempt status delay remaining fetch_timeout
+  local started=$SECONDS
+  for ((attempt = 1; attempt <= NPM_DIST_TAG_VERIFY_ATTEMPTS; attempt += 1)); do
+    remaining=$((NPM_REGISTRY_VERIFY_TIMEOUT_SECONDS - (SECONDS - started)))
+    ((remaining > 0)) || break
+    fetch_timeout=10000
+    ((remaining >= 10)) || fetch_timeout=$((remaining * 1000))
+    if observed=$(npm view "$identity" "$field" "${NPM_READ_ARGS[@]}" \
+      --prefer-online --prefer-offline=false --offline=false \
+      --fetch-retries=0 "--fetch-timeout=$fetch_timeout" 2>"$error_file"); then
+      [[ "$observed" == "$expected" ]] && return 0
+      diagnostic="registry returned '${observed:-unset}', expected '$expected'"
+      # An exact-version query must never resolve to another identity.
+      if [[ "$field" == "version" && -n "$observed" ]]; then
+        echo "ERROR: npm view ${identity} ${field}: ${diagnostic}" >&2
+        exit 1
+      fi
+    else
+      status=$?
+      diagnostic="$(<"$error_file")"
+      if [[ "$diagnostic" =~ E404|404.Not.Found|No.match.found.for.version|is.not.in.this.registry ]]; then
+        echo "  ${identity} ${field}: registry reports not found (propagation pending)"
+      elif [[ "$diagnostic" =~ E429|E5[0-9][0-9]|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENETUNREACH ]]; then
+        echo "  ${identity} ${field}: transient registry read failure: ${diagnostic}" >&2
+      else
+        echo "ERROR: npm view ${identity} ${field} failed after publication (exit ${status}): ${diagnostic:-no diagnostic returned}" >&2
+        exit 1
+      fi
+    fi
+    if ((attempt >= NPM_DIST_TAG_VERIFY_ATTEMPTS || SECONDS - started >= NPM_REGISTRY_VERIFY_TIMEOUT_SECONDS)); then
+      break
+    fi
+    echo "  waiting for ${identity} ${field} registry propagation (${attempt}/${NPM_DIST_TAG_VERIFY_ATTEMPTS})…"
+    remaining=$((NPM_REGISTRY_VERIFY_TIMEOUT_SECONDS - (SECONDS - started)))
+    delay=$NPM_DIST_TAG_VERIFY_DELAY_SECONDS
+    ((delay <= remaining)) || delay=$remaining
+    sleep "$delay"
+    ((SECONDS - started < NPM_REGISTRY_VERIFY_TIMEOUT_SECONDS)) || break
+  done
+  echo "ERROR: ${identity} ${field} was not observable after publication (${attempt} attempts, $((SECONDS - started)) seconds): ${diagnostic}" >&2
+  echo "The upload may already be accepted. Preserve the release receipt and inspect registry state before recovery; do not re-upload automatically." >&2
+  exit 1
+}
+
 wait_for_exact_artifact() {
   local index="$1"
-  local name="${PACKAGE_NAMES[$index]}"
-  local version="${PACKAGE_VERSIONS[$index]}"
-  local identity="${name}@${version}"
-  local observed=""
-  local attempt
-  for ((attempt = 1; attempt <= NPM_DIST_TAG_VERIFY_ATTEMPTS; attempt += 1)); do
-    observed=$(npm view "$identity" version "${NPM_READ_ARGS[@]}" 2>/dev/null || true)
-    [[ "$observed" == "$version" ]] && return 0
-    if ((attempt < NPM_DIST_TAG_VERIFY_ATTEMPTS)); then
-      echo "  waiting for ${identity} registry propagation (${attempt}/${NPM_DIST_TAG_VERIFY_ATTEMPTS})…"
-      sleep "$NPM_DIST_TAG_VERIFY_DELAY_SECONDS"
-    fi
-  done
-  echo "ERROR: ${identity} was not observable after publication" >&2
-  exit 1
+  wait_for_registry_value "${PACKAGE_NAMES[$index]}@${PACKAGE_VERSIONS[$index]}" version "${PACKAGE_VERSIONS[$index]}"
 }
 
 publish_missing_artifacts() {
@@ -731,20 +772,7 @@ publish_missing_artifacts() {
 }
 
 wait_for_final_tag() {
-  local name="$1"
-  local version="$2"
-  local observed=""
-  local attempt
-  for ((attempt = 1; attempt <= NPM_DIST_TAG_VERIFY_ATTEMPTS; attempt += 1)); do
-    observed=$(npm view "$name" "dist-tags.${FINAL_NPM_TAG}" "${NPM_READ_ARGS[@]}" 2>/dev/null || true)
-    [[ "$observed" == "$version" ]] && return 0
-    if ((attempt < NPM_DIST_TAG_VERIFY_ATTEMPTS)); then
-      echo "  waiting for ${name} ${FINAL_NPM_TAG} propagation (${attempt}/${NPM_DIST_TAG_VERIFY_ATTEMPTS})…"
-      sleep "$NPM_DIST_TAG_VERIFY_DELAY_SECONDS"
-    fi
-  done
-  echo "ERROR: npm dist-tag ${name}@${FINAL_NPM_TAG} is ${observed:-unset}, expected ${version}" >&2
-  exit 1
+  wait_for_registry_value "$1" "dist-tags.${FINAL_NPM_TAG}" "$2"
 }
 
 promote_package_set() {
