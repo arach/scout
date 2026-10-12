@@ -74,6 +74,19 @@ Commit the source, version manifests, `apps/desktop/src/shared/product.ts`,
 `docs.json`, and lockfile on a review branch. Merge only after the standalone
 checks and packed artifact audit pass.
 
+## 0.3.7 natural-language recipient discovery
+
+The local MCP server exposes `route_context` and a `scout` prompt. An agent host
+can interpret a roughly remembered recipient, inspect live mesh agents and
+conversations alongside local indexed topic evidence, send clear matches through
+`ask`, and clarify ambiguous matches. `scout locate` exposes the same discovery
+primitive to CLI callers. Broker-issued conversation addresses preserve exact
+cross-machine continuation; missing or capped coverage remains explicit.
+
+See [Natural-language recipient routing](./natural-language-routing.md) for the
+host-driven interpretation boundary, local-only history coverage, and installed
+peer requirements. This package release does not publish a new native installer.
+
 ## 0.3.6 routing and historical context
 
 Cross-host requests now carry their exact request-message anchor, including

@@ -44,6 +44,10 @@ export type RouteOptions = {
   /** Fresh caller inventory for machine parsing; never changes indexed identity. */
   machines?: RouteMachine[];
   machine?: string;
+  /** Exact scope supplied by current discovery, before ranking/capping. */
+  nodeIds?: string[];
+  projectRoot?: string;
+  agentId?: string;
   kind?: RouteKind;
   signals?: RouteSignal[];
   now?: number;

@@ -24,6 +24,7 @@ import type { RuntimeRegistrySnapshot } from "./registry.js";
 import { projectHomeAgents } from "./broker-home-service.js";
 import { isWorkingFlightState } from "./broker-local-invocation-helpers.js";
 import { isStaleLocalEndpoint } from "./broker-endpoint-selection.js";
+import { runtimeSessionAddressForEndpoint } from "./runtime-session-address.js";
 
 /** Bounded roster: enough to show what a machine is doing, never its whole registry. */
 export const MESH_NODE_STATE_ROSTER_LIMIT = 24;
@@ -50,6 +51,8 @@ export type MeshNodeStateAgent = {
 
 export type MeshNodeStateSession = {
   id: string;
+  /** Broker-issued exact conversation address. Older peers may omit it. */
+  address?: string | null;
   agentId: string;
   /** Harness running the session, e.g. claude/codex. */
   harness: string | null;
@@ -218,6 +221,7 @@ export function readMeshNodeState(deps: MeshNodeStateDeps, query: MeshNodeStateQ
       truncated: sessions.length >= sessionLimit,
       items: sessions.slice(0, sessionLimit).map((endpoint) => ({
         id: endpoint.id,
+        address: runtimeSessionAddressForEndpoint(snapshot, endpoint),
         agentId: endpoint.agentId,
         harness: endpoint.harness ?? null,
         transport: endpoint.transport ?? null,

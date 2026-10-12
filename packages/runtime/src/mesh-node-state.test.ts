@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import type { RuntimeRegistrySnapshot } from "./registry.js";
 import { readMeshNodeState } from "./mesh-node-state.js";
 import { withNodeCoverage, type BrokerHomeAgent } from "./broker-home-service.js";
+import { runtimeSessionAddressForEndpoint } from "./runtime-session-address.js";
 
 function agent(id: string, homeNodeId: string, extra: Record<string, unknown> = {}) {
   return {
@@ -58,6 +59,15 @@ function snapshotWith(
 const displayName = (_snapshot: RuntimeRegistrySnapshot, actorId: string): string => actorId;
 
 describe("readMeshNodeState", () => {
+  test("exports broker-derived conversation addresses, never endpoint ids as addresses", () => {
+    const snapshot = snapshotWith({ a: agent("a", "arc-server-openscout") }, {
+      e: { ...endpoint("e", "a", "arc-server-openscout", "active"), sessionId: "native-conversation", metadata: { externalSessionId: "actual-context" } },
+    });
+    const report = readMeshNodeState({ snapshot: () => snapshot, nodeId: "arc-server-openscout", meshId: "openscout", actorDisplayName: displayName, now: () => 1000 });
+    expect(report.sessions.items[0]?.address).toBe(runtimeSessionAddressForEndpoint(snapshot, snapshot.endpoints.e!));
+    expect(report.sessions.items[0]?.address).toMatch(/^sess\.[a-f0-9]{20}@arc-server$/);
+    expect(report.sessions.items[0]?.sessionId).toBe("native-conversation");
+  });
   test("filters exact projectRoot and agentId before all caps, never by cwd", () => {
     const agents: Record<string, unknown> = {};
     const endpoints: Record<string, unknown> = {};

@@ -109,6 +109,8 @@ import { SCOUT_APP_VERSION } from "../../shared/product.ts";
 import { registerAttachmentReaderTool } from "./attachment-reader.ts";
 import { herdrWorkspacesDependencies, registerHerdrWorkspaceTools } from "./herdr-workspaces.ts";
 import { registerRoutingTools, routingToolDependencies } from "./routing-tools.ts";
+import { registerRouteContext } from "./route-context.ts";
+import { routeContextDependencies } from "../mesh/route-context.ts";
 import { registerSessionSendTool, sessionSendDependencies } from "./session-send.ts";
 import { registerSessionDiscoveryTools, sessionDiscoveryDependencies } from "./session-discovery.ts";
 import { waitForStdioServerClosure } from "./stdio-server-lifecycle.ts";
@@ -3241,6 +3243,8 @@ export function createScoutMcpServer(options: {
   }
 
   registerRoutingTools(server, routingToolDependencies(deps.resolveBrokerUrl()));
+  registerRouteContext(server, routeContextDependencies({ brokerUrl: deps.resolveBrokerUrl() }),
+    !toolFilter || (toolFilter("route_context") && toolFilter("ask")));
   registerSessionDiscoveryTools(server, sessionDiscoveryDependencies(resolveScoutWebOrigin(env), { env }));
   registerHerdrWorkspaceTools(server, herdrWorkspacesDependencies(resolveScoutWebOrigin(env), { env }));
   registerSessionSendTool(server, sessionSendDependencies(env));
