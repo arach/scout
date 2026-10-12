@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM"],
+    "types": ["bun-types", "node"],
+    "typeRoots": [
+      "../../apps/desktop/node_modules",
+      "../../apps/desktop/node_modules/@types"
+    ],
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["./*.ts", "../../examples/linux-usage/*.ts"]
+}
