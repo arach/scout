@@ -113,6 +113,7 @@ Item {
         function hide(): void { root.close(); root.enabled = false; root.savePreferences(); }
         function show(): void { root.enabled = true; root.savePreferences(); }
         function setMotion(value: bool): void { root.motion = value; root.savePreferences(); }
+        function setPinned(value: bool): void { root.pinned = value; if (value) root.open(); root.savePreferences(); }
         function state(): string { return JSON.stringify({enabled: root.enabled, open: root.shown, pinned: root.pinned, motion: root.motion, fresh: root.fresh, screen: panel.screen ? panel.screen.name : ""}); }
     }
 

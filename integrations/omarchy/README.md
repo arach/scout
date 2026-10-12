@@ -57,7 +57,8 @@ off, or set `SCOUT_TUI_AMBIENT=shimmer`. Shimmer changes background colors only,
 runs at five frames per second while idle, and pauses when the terminal loses focus.
 
 Use `omarchy-shell scout.hud open`, `close`, `toggle`, `hide`, `show`, or `state`
-to control the drawer. `setMotion false` turns motion off. Hiding can be reversed
+to control the drawer. `setMotion false` turns motion off; `setPinned true` keeps
+it open. Hiding can be reversed
 with `show`; removing the `scout.hud` plugin entry disables it on startup.
 
 For first installation, run `omarchy bar put scout.linux --section right`. Existing
