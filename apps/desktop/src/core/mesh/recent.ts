@@ -2,7 +2,7 @@ import { epochMs, type NodeDefinition } from "@openscout/protocol";
 import { requestScoutBrokerJson } from "@openscout/runtime/broker-api";
 import { resolveBrokerSocketPathForBaseUrl } from "@openscout/runtime/broker-process-manager";
 import { httpMeshUrlsForNode } from "@openscout/runtime/mesh-dial-order";
-import { createMeshPeerFetch, type MeshPeerFetch } from "@openscout/runtime/mesh-peer-client";
+import { createMeshPeerFetch, isMeshPeerTrustError, type MeshPeerFetch } from "@openscout/runtime/mesh-peer-client";
 import {
   MESH_NODE_STATE_ROSTER_LIMIT,
   MESH_NODE_STATE_SESSION_LIMIT,
@@ -223,16 +223,29 @@ export async function loadMachineNodeStates(
         if (identity.local) return requireNodeState(await readLocal(path, signal), node.id);
         const urls = httpMeshUrlsForNode(node);
         let error: unknown = new Error("no mesh broker URL advertised");
-        for (const url of urls) {
+        const deadline = performance.now() + timeoutMs;
+        for (const [index, url] of urls.entries()) {
           signal.throwIfAborted();
+          // Reserve a fair share of the existing whole-machine deadline for
+          // every remaining route, including card verification and body reads.
+          const remaining = urls.length - index;
+          const candidateMs = Math.max(1, Math.floor((deadline - performance.now()) / remaining));
           try {
-            const response = await peerFetch(url, path, { signal, headers: { accept: "application/json" } });
-            if (!response.ok) {
-              await response.body?.cancel();
-              throw new Error(`node-state HTTP ${response.status}${response.status === 403 || response.status === 404 ? " (denied or unsupported)" : ""}`);
-            }
-            return requireNodeState(await response.json(), node.id);
+            const readCandidate = async (candidateSignal: AbortSignal) => {
+              const response = await peerFetch(url, path, {
+                signal: candidateSignal,
+                headers: { accept: "application/json" },
+              });
+              if (!response.ok) {
+                await response.body?.cancel();
+                throw new Error(`node-state HTTP ${response.status}${response.status === 403 || response.status === 404 ? " (denied or unsupported)" : ""}`);
+              }
+              return requireNodeState(await response.json(), node.id);
+            };
+            return remaining === 1 ? await readCandidate(signal)
+              : await withinDeadline(candidateMs, (candidateSignal) => readCandidate(AbortSignal.any([signal, candidateSignal])));
           } catch (cause) {
+            if (isMeshPeerTrustError(cause)) throw cause;
             error = cause;
           }
         }

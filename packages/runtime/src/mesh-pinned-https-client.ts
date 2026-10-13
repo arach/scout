@@ -10,8 +10,9 @@ import { tlsSpkiFingerprintFromCertificateDer } from "./node-tls-identity.js";
  * The pin is SHA-256 of the peer certificate's SubjectPublicKeyInfo DER — not
  * of the certificate — so routine cert re-issuance from a retained key never
  * moves it (§11.7). A connection is only handed to the HTTP client once the
- * served key matches the pin; a mismatch, a missing peer certificate, or any
- * TLS failure is a typed `PeerTlsPinError` and never degrades to plaintext.
+ * served key matches the pin; a mismatch or missing peer certificate is a
+ * typed `PeerTlsPinError`. Transport failures before a certificate arrives
+ * remain distinct so another pinned route can be tried; neither permits plaintext.
  *
  * ## Runtime split (observed, not assumed — §11.4's Bun caveat is real)
  *
@@ -66,6 +67,14 @@ export class PeerTlsPinError extends Error {
     readonly observedFingerprint?: string,
   ) {
     super(message);
+  }
+}
+
+/** Transport failure without evidence of a certificate or pin mismatch. */
+export class PeerTlsConnectionError extends Error {
+  override readonly name = "PeerTlsConnectionError";
+  constructor(readonly origin: string, cause: unknown) {
+    super(`TLS connection to ${origin} failed: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
   }
 }
 
@@ -124,6 +133,18 @@ function certificateDerToPem(der: Buffer): string {
   return `-----BEGIN CERTIFICATE-----\n${body}\n-----END CERTIFICATE-----\n`;
 }
 
+function isConnectionFailure(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if (error.name === "AbortError" || error.name === "TimeoutError") return true;
+  const code = "code" in error ? error.code : undefined;
+  // Node errno values and Bun's fetch equivalents. Unknown TLS failures stay
+  // fail-closed; a dial refusal/timeout is not evidence that the pin changed.
+  return typeof code === "string" && [
+    "ECONNREFUSED", "ConnectionRefused", "ECONNRESET", "ConnectionReset",
+    "ETIMEDOUT", "EHOSTUNREACH", "ENETUNREACH", "EAI_AGAIN", "ENOTFOUND",
+  ].includes(code);
+}
+
 function requestBodyBuffer(body: BodyInit | null | undefined): Buffer | undefined {
   if (body === undefined || body === null) {
     return undefined;
@@ -173,15 +194,19 @@ export function createPinnedHttpsClient(deps: PinnedHttpsClientDeps = {}): Pinne
    * is deliberately not validated here (`rejectUnauthorized: false`) — the pin
    * is the authority, and every peer certificate is self-signed.
    */
-  async function bunPeerCertificateDer(host: string, port: number, origin: string): Promise<Buffer> {
+  async function bunPeerCertificateDer(host: string, port: number, origin: string, peer: PinnedPeer, signal?: AbortSignal | null): Promise<Buffer> {
     return await new Promise<Buffer>((resolve, reject) => {
       let settled = false;
+      let socket: Bun.Socket | undefined;
+      const onAbort = (): void => finish({ error: signal?.reason ?? new DOMException("The operation was aborted.", "AbortError") });
       const finish = (result: { der?: Buffer; error?: unknown }): void => {
         if (settled) {
           return;
         }
         settled = true;
         clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
+        socket?.terminate();
         if (result.der) {
           resolve(result.der);
         } else {
@@ -192,12 +217,17 @@ export function createPinnedHttpsClient(deps: PinnedHttpsClientDeps = {}): Pinne
         () => finish({ error: new Error(`TLS handshake to ${origin} timed out after ${connectTimeoutMs}ms`) }),
         connectTimeoutMs,
       );
+      if (signal?.aborted) {
+        onAbort();
+        return;
+      }
+      signal?.addEventListener("abort", onAbort, { once: true });
       Bun.connect({
         hostname: host,
         port,
         tls: { rejectUnauthorized: false },
         socket: {
-          open: () => {},
+          open: (opened) => { socket = opened; if (settled) opened.terminate(); },
           data: () => {},
           handshake: (socket, _success, _authorizationError) => {
             // `_success`/`_authorizationError` report chain validation, which is
@@ -211,17 +241,21 @@ export function createPinnedHttpsClient(deps: PinnedHttpsClientDeps = {}): Pinne
             } catch {
               der = undefined;
             }
-            socket.end();
-            finish(der ? { der } : { error: new Error(`peer ${origin} presented no TLS certificate`) });
+            finish(der ? { der } : { error: new PeerTlsPinError(
+              `peer ${origin} presented no TLS certificate; refusing to send`, origin, peer.spkiFingerprint,
+            ) });
           },
           error: (_socket, error) => finish({ error }),
           close: () => finish({ error: new Error(`connection to ${origin} closed before the TLS handshake`) }),
         },
+      }).then((connected) => {
+        socket = connected;
+        if (settled) connected.terminate();
       }).catch((error: unknown) => finish({ error }));
     });
   }
 
-  async function bunAnchorPem(url: URL, peer: PinnedPeer): Promise<string> {
+  async function bunAnchorPem(url: URL, peer: PinnedPeer, signal?: AbortSignal | null): Promise<string> {
     const origin = originOf(url);
     const key = sessionKey(origin, peer);
     const cached = bunSessions.get(key);
@@ -232,13 +266,10 @@ export function createPinnedHttpsClient(deps: PinnedHttpsClientDeps = {}): Pinne
 
     let der: Buffer;
     try {
-      der = await bunPeerCertificateDer(url.hostname, defaultPort(url), origin);
+      der = await bunPeerCertificateDer(url.hostname, defaultPort(url), origin, peer, signal);
     } catch (error) {
-      throw new PeerTlsPinError(
-        `pinned TLS connection to ${origin} failed: ${(error as Error).message ?? String(error)}`,
-        origin,
-        peer.spkiFingerprint,
-      );
+      if (error instanceof PeerTlsPinError) throw error;
+      throw new PeerTlsConnectionError(origin, error);
     }
 
     const observed = tlsSpkiFingerprintFromCertificateDer(der);
@@ -257,7 +288,7 @@ export function createPinnedHttpsClient(deps: PinnedHttpsClientDeps = {}): Pinne
 
   async function bunFetch(url: URL, peer: PinnedPeer, init: RequestInit): Promise<Response> {
     const origin = originOf(url);
-    const anchor = await bunAnchorPem(url, peer);
+    const anchor = await bunAnchorPem(url, peer, init.signal);
     try {
       return await fetch(url, {
         ...init,
@@ -271,9 +302,10 @@ export function createPinnedHttpsClient(deps: PinnedHttpsClientDeps = {}): Pinne
         },
       } satisfies BunFetchRequestInit);
     } catch (error) {
-      // A handshake failure here means the peer stopped proving the pinned key
-      // between the probe and the request. Drop the session and fail closed.
       dropSessions(origin);
+      if (isConnectionFailure(error)) throw new PeerTlsConnectionError(origin, error);
+      // Certificate validation and unknown TLS errors still fail closed. The
+      // cached anchor never permits a changed TLS key or an unpinned retry.
       throw new PeerTlsPinError(
         `pinned request to ${origin} failed against the pinned TLS key: ${(error as Error).message ?? String(error)}`,
         origin,

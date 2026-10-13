@@ -48,15 +48,15 @@ describe("meshDialRank", () => {
 });
 
 describe("httpMeshUrlsForNode", () => {
-  test("collects brokerUrl and http entrypoints, LAN first", () => {
+  test("preserves the discovered brokerUrl before advertised LAN alternatives", () => {
     expect(httpMeshUrlsForNode({
       brokerUrl: "https://100.123.16.74:43110",
       meshEntrypoints: [
         { kind: "http", url: "https://192.168.18.14:43110" },
       ],
     })).toEqual([
-      "https://192.168.18.14:43110",
       "https://100.123.16.74:43110",
+      "https://192.168.18.14:43110",
     ]);
   });
 });

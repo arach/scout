@@ -1,3 +1,4 @@
+import { createServer } from "node:net";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +7,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 
 import {
   PeerTlsPinError,
+  PeerTlsConnectionError,
   createPinnedHttpsClient,
 } from "./mesh-pinned-https-client.js";
 import {
@@ -279,7 +281,32 @@ console.log(JSON.stringify(result));
     expect(requests.map((request) => request.path)).toEqual(["/v1/node"]);
   });
 
-  test("connection failure to a dead port is a typed pin error, not a plaintext retry", async () => {
+  test("a caller deadline cancels a stalled TLS handshake before the connector timeout", async () => {
+    let closed = false;
+    const sockets = new Set<import("node:net").Socket>();
+    const server = createServer((socket) => {
+      sockets.add(socket);
+      socket.on("data", () => {});
+      socket.on("close", () => { closed = true; sockets.delete(socket); });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address() as import("node:net").AddressInfo;
+    try {
+      const started = performance.now();
+      await expect(makeClient({ connectTimeoutMs: 2_000 }).fetch(
+        `https://127.0.0.1:${address.port}/v1/node`, { spkiFingerprint: "f".repeat(64) },
+        { signal: AbortSignal.timeout(50) },
+      )).rejects.toBeInstanceOf(PeerTlsConnectionError);
+      expect(performance.now() - started).toBeLessThan(1_000);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(closed).toBe(true);
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  test("connection failure before a certificate is reachability failure, not a pin mismatch", async () => {
     const identity = await freshTlsIdentity();
     const { baseUrl } = startTlsPeer(identity);
     const port = Number(new URL(baseUrl).port);
@@ -293,6 +320,6 @@ console.log(JSON.stringify(result));
         `https://127.0.0.1:${port}/v1/node`,
         { spkiFingerprint: identity.spkiFingerprint },
       ),
-    ).rejects.toBeInstanceOf(PeerTlsPinError);
+    ).rejects.toBeInstanceOf(PeerTlsConnectionError);
   });
 });

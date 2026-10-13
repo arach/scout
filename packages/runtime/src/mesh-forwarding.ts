@@ -26,7 +26,7 @@ import {
 } from "./iroh-bridge.js";
 import {
   meshPeerFetch,
-  PeerCardVerificationError,
+  isMeshPeerTrustError,
   type MeshPeerFetch,
 } from "./mesh-peer-client.js";
 import { httpMeshUrlsForNode, orderMeshDialUrls } from "./mesh-dial-order.js";
@@ -391,7 +391,7 @@ async function postJson<TResponse>(
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
-    if (error instanceof PeerCardVerificationError) {
+    if (isMeshPeerTrustError(error)) {
       // A peer presenting an invalid card is a trust failure, not unreachability.
       throw error;
     }
@@ -514,7 +514,7 @@ async function forwardMeshEnvelope<TResponse>(
     try {
       return await postJson(url, path, payload, options);
     } catch (error) {
-      if (error instanceof PeerCardVerificationError || error instanceof PeerRejectedError) {
+      if (isMeshPeerTrustError(error) || error instanceof PeerRejectedError) {
         throw error;
       }
       lastError = error;
