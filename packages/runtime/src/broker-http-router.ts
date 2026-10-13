@@ -1,3 +1,4 @@
+import { PermissionDeliveryUnconfirmedError, type BrokerPermissionService } from "./broker-permission-service.js";
 import { BrokerBusyError } from "./broker-storage-pressure.js";
 import { handleBrokerHistoryRoute, type BrokerHistoryQueries } from "./broker-history-http-service.js";
 import { handleBrokerQuarantineRoute, type BrokerQuarantineQueries } from "./broker-quarantine-http-service.js";
@@ -207,6 +208,7 @@ export type BrokerHttpRouterDeps = {
   mcpEvents?: BrokerMcpEvents;
   /** Cross-machine approvals: share this machine's with chosen peers, watch theirs. */
   meshApprovals?: MeshApprovalsHttpDeps;
+  permissionService?: BrokerPermissionService;
   journal: BrokerHttpJournal;
   knownInvocations: Map<string, InvocationRequest>;
   brokerService: ActiveScoutBrokerService;
@@ -512,6 +514,19 @@ export function createBrokerHttpRouter(
   if (method === "POST" && url.pathname === "/v1/mcp-events") {
     await handleBrokerMcpEvents(request, response, deps.mcpEvents); return;
   }
+  if (method === "POST" && url.pathname === "/v1/permissions/decide") {
+    if (request.transportContext?.transport === "remote") { json(response, 403, { error: "forbidden", detail: "route is machine-local" }); return; }
+    try {
+      const body = await readRequestBody<{ requestId?: unknown; version?: unknown; decision?: unknown }>(request);
+      if (typeof body.requestId !== "string" || typeof body.version !== "string"
+        || !["once", "project", "deny"].includes(String(body.decision))) throw new Error("requestId, version, and decision (once/project/deny) are required");
+      if (!deps.permissionService) throw new Error("Permission decisions are unavailable");
+      await deps.permissionService.decide(body.requestId, body.version, body.decision as "once" | "project" | "deny");
+      json(response, 200, { ok: true });
+    } catch (error) { json(response, error instanceof PermissionDeliveryUnconfirmedError ? 502 : 409, { error: error instanceof Error ? error.message : String(error), outcome: error instanceof PermissionDeliveryUnconfirmedError ? "unconfirmed" : "refused" }); }
+    return;
+  }
+
   if (url.pathname.startsWith("/v1/mesh/approvals/") || url.pathname.startsWith("/v1/approvals/remote")) {
     if (await handleBrokerMeshApprovalsRoute(request, response, url, method, deps.meshApprovals ?? {})) return;
   }

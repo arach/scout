@@ -9,3 +9,7 @@ export const approvalDecisionBody = z.object({
   reason: z.string().nullable().optional(),
 });
 export type ApprovalDecisionBody = z.input<typeof approvalDecisionBody>;
+
+export const permissionDecisionBody = z.object({
+  requestId: z.string().min(1), version: z.string().min(1), decision: z.enum(["once", "project", "deny"]),
+});

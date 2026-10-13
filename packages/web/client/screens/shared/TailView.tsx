@@ -19,6 +19,7 @@ import {
 } from "../../lib/time.ts";
 import {
   collapseTailDisplayRows,
+  tailSummaryLabel,
   isTailNoiseEvent,
   shortTailSession,
   TAIL_KIND_GLYPH as KIND_GLYPH,
@@ -856,7 +857,7 @@ const TailRow = memo(function TailRow({
       </span>
       <span className="s-tail-summary">
         {issueSeverity === "error" ? "✕ " : issueSeverity === "warn" ? "△ " : null}
-        {event.summary}
+        {tailSummaryLabel(event)}
         {repeatCount > 1 ? (
           <span className="s-tail-repeat" title={`${repeatCount} identical events collapsed`}>
             {" "}×{repeatCount}
@@ -1057,7 +1058,7 @@ function TailDetailSheet({
 
           <section className="s-tail-sheet-section">
             <h4 className="s-tail-sheet-h">summary</h4>
-            <div className="s-tail-sheet-summary">{event.summary}</div>
+            <div className="s-tail-sheet-summary">{tailSummaryLabel(event)}</div>
           </section>
 
           {blocks && blocks.length > 0 && (

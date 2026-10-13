@@ -139,7 +139,6 @@ describe("BrokerDurableStore", () => {
     expect(order).toEqual([
       "journal:node.upsert",
       "runtime:node.upsert",
-      "projection:node.upsert",
     ]);
 
     projectionGate.resolve();
@@ -150,6 +149,27 @@ describe("BrokerDurableStore", () => {
       "projection:node.upsert",
       "publish:thread-event-1",
     ]);
+  });
+
+  test("acknowledges a routed write before its synchronous SQLite projection starts", async () => {
+    let acknowledged = false;
+    let projectionSawAcknowledgement = false;
+    const store = new BrokerDurableStore({
+      journal: { async appendEntries(entries) { return entries; } },
+      projection: {
+        async applyEntries() {
+          // SQLite runs synchronously before this async function returns its
+          // promise. A promise-only queue can run it ahead of the caller's ACK.
+          projectionSawAcknowledgement = acknowledged;
+          return [];
+        },
+      },
+      threadEvents: { publish() {} },
+    });
+    await store.runWrite(() => store.commitEntries(nodeEntry("routed"), async () => {}));
+    acknowledged = true;
+    await store.flushProjectedEntries();
+    expect(projectionSawAcknowledgement).toBe(true);
   });
 
   test("can defer projection while still applying journal and runtime effects", async () => {
@@ -1426,6 +1446,9 @@ describe("awaitProjectionBoundary", () => {
       { kind: "invocation.record", invocation: records.invocation } as BrokerJournalEntry,
       async () => {},
     ));
+    // This fixture bypasses the durable queue for the dependent flight repair.
+    // A canonical ACK does not promise that the SQLite parent has landed.
+    await store.flushProjectedEntries();
     await projection.applyEntries([
       { kind: "flight.record", flight: records.flight } as BrokerJournalEntry,
     ]);

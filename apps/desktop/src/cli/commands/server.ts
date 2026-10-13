@@ -50,7 +50,8 @@ export type ScoutWebControlStatus = {
   error: string | null;
 };
 
-const SERVER_CONTROL_TIMEOUT_MS = 20_000;
+// Allow the owned child to drain (10s), force-exit (2s), and become ready (15s).
+const SERVER_CONTROL_TIMEOUT_MS = 45_000;
 const SERVER_OPEN_TIMEOUT_MS = 15_000;
 const SERVER_HEALTH_TIMEOUT_MS = 1_500;
 

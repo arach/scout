@@ -1,6 +1,6 @@
 import { isOpaqueChannelId, type CollaborationEvent, type CollaborationKind } from "@openscout/protocol";
 import { getScoutWebPairingSessionSnapshots, type ScoutPairingState } from "../../pairing.ts";
-import { queryAgents, queryBrokerDiagnostics, queryFleet } from "../../db-queries.ts";
+import { queryAgents, queryBrokerAttentionHints, queryFleet } from "../../db-queries.ts";
 import { queryAgentIdsByEndpointSessionId } from "../../db/agents.ts";
 import { queryOperatorAttentionRows } from "../../db/fleet.ts";
 import { buildAgentAttentionIndex, type AgentAttentionEntry } from "./agent-attention.ts";
@@ -32,6 +32,7 @@ export type OperatorAttentionItem = {
   updatedAt: number;
   severity: "critical" | "warning" | "info";
   sourceLabel: string;
+  permission?: { requestId: string; version: string; sessionId: string; projectRoot: string; flightId?: string };
   approval?: ScoutPairingState["pendingApprovals"][number];
   /** A declared question's offered answers; one is sent as the operator's reply. */
   answer?: { conversationId: string; replyToMessageId: string; options: string[] };
@@ -70,13 +71,21 @@ export let agentAttentionInFlight: {
   promise: Promise<AgentAttentionSnapshot>;
 } | null = null;
 
+let agentAttentionGeneration = 0;
+
+/** A live permission decision invalidates host observations as well as the API row. */
+export function invalidateAgentAttentionSnapshot(): void {
+  agentAttentionGeneration++;
+  agentAttentionCache = null;
+  agentAttentionInFlight = null;
+}
+
 let activeHerdrContinuation: HerdrContinuationHooks | null = null;
 
 /** Called once per web server. Resets the attention cache it feeds. */
 export function configureHerdrContinuation(option: HerdrContinuationOptions | undefined): void {
   activeHerdrContinuation = resolveHerdrContinuationHooks(option);
-  agentAttentionCache = null;
-  agentAttentionInFlight = null;
+  invalidateAgentAttentionSnapshot();
 }
 
 export function queryAgentAttentionSnapshot(
@@ -84,11 +93,12 @@ export function queryAgentAttentionSnapshot(
   capture: TmuxPaneCapture = defaultCaptureTmuxPane,
 ): Promise<AgentAttentionSnapshot> {
   const herdr = activeHerdrContinuation;
+  const generation = agentAttentionGeneration;
   const cached = agentAttentionCache;
   if (cached && cached.capture === capture && cached.herdr === herdr) {
     if (Date.now() - cached.at >= AGENT_ATTENTION_TTL_MS && !agentAttentionInFlight) {
       const promise = delay(AGENT_BACKGROUND_REFRESH_DELAY_MS)
-        .then(() => buildAgentAttentionIndexSnapshot(broker, capture))
+        .then(() => buildAgentAttentionIndexSnapshot(broker, capture, generation))
         .finally(() => {
           if (agentAttentionInFlight?.promise === promise) {
             agentAttentionInFlight = null;
@@ -101,7 +111,7 @@ export function queryAgentAttentionSnapshot(
   if (agentAttentionInFlight?.capture === capture && agentAttentionInFlight.herdr === herdr) {
     return agentAttentionInFlight.promise;
   }
-  const promise = buildAgentAttentionIndexSnapshot(broker, capture).finally(() => {
+  const promise = buildAgentAttentionIndexSnapshot(broker, capture, generation).finally(() => {
     if (agentAttentionInFlight?.promise === promise) {
       agentAttentionInFlight = null;
     }
@@ -117,13 +127,15 @@ export function delay(milliseconds: number): Promise<void> {
 export async function buildAgentAttentionIndexSnapshot(
   broker: ScoutBrokerContext | null,
   capture: TmuxPaneCapture,
+  generation = agentAttentionGeneration,
 ): Promise<AgentAttentionSnapshot> {
   try {
     const pairingSnapshots = await getScoutWebPairingSessionSnapshots().catch(() => []);
     const sessionItems = pairingSnapshots.length > 0 ? projectSessionsAttention(pairingSnapshots) : [];
     let agentIdBySessionId = new Map<string, string>();
     try {
-      agentIdBySessionId = queryAgentIdsByEndpointSessionId();
+      // With no pairing attention to join, the full session-to-agent map is unused.
+      if (sessionItems.length > 0) agentIdBySessionId = queryAgentIdsByEndpointSessionId();
     } catch {
       // A direct host-attention row already owns its agent id; a temporarily
       // unavailable read model must not suppress that independent signal.
@@ -189,7 +201,7 @@ export async function buildAgentAttentionIndexSnapshot(
         hostRows: hostItems,
       }),
     };
-    agentAttentionCache = { at: Date.now(), capture, herdr, snapshot };
+    if (generation === agentAttentionGeneration) agentAttentionCache = { at: Date.now(), capture, herdr, snapshot };
     return snapshot;
   } catch (error) {
     // Attention is a decoration on the agent list, never a reason to 500 it.
@@ -419,8 +431,8 @@ export async function buildOperatorAttentionState(
   const [pairing, pairingSnapshots, fleet, brokerDiagnostics, scoutBroker, remoteApprovals] = await Promise.all([
     loadPairingState(currentDirectory, false).catch(() => null),
     getScoutWebPairingSessionSnapshots().catch(() => []),
-    Promise.resolve(queryFleet({ limit: 24, activityLimit: 120 })),
-    Promise.resolve(queryBrokerDiagnostics({ limit: 160, windowMs: 24 * 60 * 60_000 })),
+    Promise.resolve(queryFleet({ limit: 24, activityLimit: 0 })),
+    Promise.resolve(queryBrokerAttentionHints({ limit: 160, windowMs: 24 * 60 * 60_000 })),
     loadScoutBrokerContext().catch(() => null),
     loadScoutRemoteApprovals(),
   ]);
@@ -503,11 +515,32 @@ export async function buildOperatorAttentionState(
     }
   }
 
+  for (const record of Object.values(scoutBroker?.snapshot.collaborationRecords ?? {})) {
+    const raw = record.metadata?.permissionRequest;
+    if (record.kind !== "question" || record.state !== "open" || !raw || typeof raw !== "object") continue;
+    const permission = raw as { version?: unknown; sessionId?: unknown; projectRoot?: unknown; flightId?: string; decisions?: unknown; decisionLabels?: { deny?: string } };
+    if (typeof permission.version !== "string" || typeof permission.sessionId !== "string" || typeof permission.projectRoot !== "string" || !Array.isArray(permission.decisions)) continue;
+    items.push({
+      id: `permission:${record.id}`, kind: "question", title: "Permission request",
+      summary: record.summary ?? null, detail: `${permission.projectRoot} · ${permission.sessionId}${permission.flightId ? ` · ${permission.flightId}` : ""}`,
+      agentId: record.createdById, agentName: scoutBroker?.snapshot.actors[record.createdById]?.displayName ?? record.createdById,
+      conversationId: record.conversationId ?? null, updatedAt: record.updatedAt, severity: "warning", sourceLabel: "Permission request",
+      permission: { requestId: record.id, version: permission.version, sessionId: permission.sessionId, projectRoot: permission.projectRoot, flightId: permission.flightId },
+      actions: [
+        ...(permission.decisions.includes("once") ? [{ kind: "approve" as const, label: "Allow once", value: "once" }] : []),
+        ...(permission.decisions.includes("project") ? [{ kind: "approve" as const, label: "Allow for project", value: "project" }] : []),
+        ...(permission.decisions.includes("deny") ? [{ kind: "deny" as const, label: permission.decisionLabels?.deny === "Cancel" ? "Cancel" : "Deny", value: "deny" }] : []),
+        { kind: "open", label: "Open conversation", route: { view: "conversation", conversationId: record.conversationId } },
+      ],
+    });
+  }
+
   for (const sessionItem of projectSessionsAttention(pairingSnapshots, { pendingApprovalIds })) {
     items.push(operatorAttentionFromSessionItem(sessionItem));
   }
 
   for (const hostItem of hostAttention.hostItems) {
+    if (items.some(item => item.permission?.sessionId === hostItem.sessionId && item.agentId === hostItem.agentId)) continue;
     const herdrStop = hostItem.id.startsWith("herdr-continuation:");
     const unmatchedHerdrPane = hostItem.agentId.startsWith("herdr:");
     items.push({
@@ -543,6 +576,12 @@ export async function buildOperatorAttentionState(
   }
 
   for (const work of fleet.needsAttention) {
+    // Managed permission IDs belong to the live adapter decision above. The
+    // durable fleet projection can arrive before the broker snapshot warms;
+    // do not briefly publish a second, unactionable question with another ID.
+    if (work.recordId.startsWith("permission-")
+      || scoutBroker?.snapshot.collaborationRecords[work.recordId]?.metadata?.permissionRequest
+      || scoutBroker?.snapshot.collaborationRecords[work.recordId]?.metadata?.operatorNeedMessageId) continue;
     const route = work.conversationId
       ? { view: "conversation", conversationId: work.conversationId }
       : work.kind === "work_item" && work.recordId

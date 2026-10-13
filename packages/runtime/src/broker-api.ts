@@ -59,6 +59,7 @@ export type ScoutBrokerChildServiceSnapshot = {
   port?: number | null;
   url?: string | null;
   healthy?: boolean | null;
+  recovery?: import("./broker-web-control-service.js").WebRecoveryStatus;
   detail?: string | null;
 };
 

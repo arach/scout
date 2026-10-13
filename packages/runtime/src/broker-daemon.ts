@@ -1,5 +1,8 @@
 // Must stay the first import: materializes OPENSCOUT_INSTANCE before any module reads paths/ports.
 import { openScoutCheckoutInstanceDefault, openScoutInstanceBootstrap } from "./instance-checkout-bootstrap.js";
+import { isolatedCodexPermissionMetadata } from "./permission-policy.js";
+import { BrokerPermissionService } from "./broker-permission-service.js";
+import { configureManagedPermissionHandler } from "./managed-permission.js";
 import { requireProtectedAccessState, protectAccessDirectories, removeLocalAdminEnvironment } from "./mesh-access-startup.js";
 import { inspectMeshAccessIngressPosture } from "./mesh-access-ingress-posture.js";
 import { BrokerMcpEvents } from "./broker-mcp-events.js";
@@ -2433,6 +2436,7 @@ async function createIsolatedAgentEndpointForInvocation(
     metadata: {
       ...(sessionEndpoint.metadata ?? {}),
       source: "scout-isolated-agent-session",
+      ...isolatedCodexPermissionMetadata(harness, baseEndpoint, invocation.execution?.permissionProfile),
       ...scoutbotIsolationMetadata(baseEndpoint, invocation.execution, launchArgs),
       cardless: false,
       isolatedExecution: true,
@@ -2476,7 +2480,16 @@ async function postConversationMessage(
   authorityNodeId?: string;
   duplicate?: boolean;
 }> {
-  return await messageService.postConversationMessage(message);
+  const result = await messageService.postConversationMessage(message);
+  if (message.actorId === operatorActorId && message.replyToMessageId) {
+    const record = runtime.collaborationRecord(`operator-question:${message.replyToMessageId}`);
+    if (record?.kind === "question" && record.state === "open" && record.conversationId === message.conversationId) {
+      await recordCollaborationDurably({ ...record, state: "closed", answer: message.body,
+        answeredById: operatorActorId, answeredAt: message.createdAt, closedAt: message.createdAt,
+        nextMoveOwnerId: undefined, updatedAt: message.createdAt });
+    }
+  }
+  return result;
 }
 
 async function postInvocationStatusMessage(
@@ -2677,6 +2690,25 @@ const operatorAttentionService = new BrokerOperatorAttentionService({
   warn: (message) => console.warn(message),
 });
 
+const permissionService = new BrokerPermissionService({
+  operatorId: operatorActorId,
+  createId: () => createRuntimeId("permission"),
+  record: recordCollaborationDurably,
+  read: id => { const record = runtime.collaborationRecord(id); return record?.kind === "question" ? record : undefined; },
+  flight: id => runtime.flightForInvocation(id),
+  transition: (id, state, requestId) => transitionInvocation(id, {
+    state, summary: requestId ? "Waiting on permission" : "Permission wait resolved; continuing live session.",
+    metadata: { permissionRequestId: requestId, waitingOnPermission: Boolean(requestId), nextMoveOwnerId: requestId ? operatorActorId : null },
+  }),
+  notify: (invocation, record, prompt) => operatorAttentionService.queueOperatorSignal({
+    signal: { kind: "need", blocking: true, replyExpectation: "required", question: prompt.text, requestKind: "permission" },
+    messageId: record.id, conversationId: invocation.conversationId!,
+    requesterId: invocation.targetAgentId, requesterNodeId: nodeId,
+    body: prompt.text, projectRoot: prompt.projectRoot, createdAt: record.createdAt,
+  }),
+});
+configureManagedPermissionHandler((invocation, prompt) => permissionService.wait(invocation, prompt));
+
 const unavailableTargetService = new BrokerUnavailableTargetService({
   nodeId,
   verifiedLaunchRoute: (agent, endpoint) => {
@@ -2740,6 +2772,17 @@ const deliveryAcceptanceService = new BrokerDeliveryAcceptanceService({
   acceptInvocation: acceptInvocationDurably,
   dispatchAcceptedInvocation,
   queueOperatorDeliveryIssue: (input) => operatorAttentionService.queueDeliveryIssue(input),
+  recordOperatorNeed: async (message, signal) => {
+    if (signal.kind !== "need" || runtime.collaborationRecord(`operator-question:${message.id}`)) return;
+    await recordCollaborationDurably({
+      id: `operator-question:${message.id}`, kind: "question", state: "open", acceptanceState: "none",
+      title: signal.requestKind === "permission" ? "Permission request" : signal.question,
+      summary: signal.question, createdById: message.actorId, askedById: message.actorId,
+      ownerId: operatorActorId, nextMoveOwnerId: operatorActorId, conversationId: message.conversationId,
+      createdAt: message.createdAt, updatedAt: message.createdAt,
+      metadata: { operatorNeedMessageId: message.id, requestKind: signal.requestKind ?? "question" },
+    });
+  },
   queueOperatorSignal: (input) => operatorAttentionService.queueOperatorSignal(input),
   warn: (message, detail) => console.warn(message, detail),
 });
@@ -2864,6 +2907,7 @@ const routeRequest = createBrokerHttpRouter({
     acknowledge: id => projection.acknowledgeQuarantine(id),
   },
   mcpEvents,
+  permissionService,
   meshApprovals: { share: meshApprovalShare, watch: meshApprovalWatch },
   encodedSnapshotBodies: process.env.OPENSCOUT_BROKER_ENCODED_SNAPSHOT === "1",
   onSnapshotFlushedBytes: memoryMaintenance ? (bytes) => memoryMaintenance.snapshotEncoded(bytes) : undefined,

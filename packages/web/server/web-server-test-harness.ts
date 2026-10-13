@@ -72,6 +72,9 @@ export const stubs = {
   queryInvocationsResult: [] as Array<Record<string, unknown>>,
   queryFlightRecordsResult: [] as Array<Record<string, unknown>>,
   decidePairingApprovalFailure: false,
+  permissionDecisions: [] as Array<Record<string, unknown>>,
+  permissionDecisionFailure: false,
+  permissionDecisionUnconfirmed: false,
   questionHistoryRecords: [] as any[],
   questionHistoryFailure: false,
   interruptPairingFailure: false,
@@ -184,6 +187,7 @@ mock.module("./db-queries.ts", () => ({
     return limit === undefined ? stubs.queryAgentsResult : stubs.queryAgentsResult.slice(0, limit);
   },
   queryActivity: () => [],
+  queryBrokerAttentionHints: () => stubs.brokerDiagnosticsResult,
   queryBrokerDiagnostics: () => stubs.brokerDiagnosticsResult,
   queryConversationDefinitionById: (conversationId: string) =>
     stubs.queryConversationDefinitionByIdImpl(conversationId),
@@ -312,6 +316,11 @@ export const chatMarkReadCalls: Array<Record<string, unknown>> = [];
 mock.module("./core/broker/service.ts", () => ({
   requestScoutHostWeb: async () => ({ status: 503, body: { error: "No test host transport" } }),
   loadScoutRemoteApprovals: async () => [],
+  decideScoutPermission: async (input: Record<string, unknown>) => {
+    stubs.permissionDecisions.push(input);
+    if (stubs.permissionDecisionUnconfirmed) throw Object.assign(new Error("Acknowledgement timed out"), { status: 502 });
+    if (stubs.permissionDecisionFailure) throw Object.assign(new Error("Permission request has no live waiting process"), { status: 409 });
+  },
   decideScoutRemoteApproval: async () => ({ ok: false, error: "not_watching" }),
   readScoutChatQuestionHistory: async (baseUrl: string, channelId: string, after: unknown) => {
     questionHistoryCalls.push({ baseUrl, channelId, after });
@@ -1036,6 +1045,9 @@ export function installWebServerTestHooks(): void {
     stubs.queryConversationDefinitionByIdImpl = () => null;
     stubs.scoutBrokerContextResult = null;
     stubs.conversationsScopeBrokerContextResult = undefined;
+    stubs.permissionDecisions = [];
+    stubs.permissionDecisionFailure = false;
+    stubs.permissionDecisionUnconfirmed = false;
     stubs.loadScoutBrokerContextGate = null;
     stubs.loadScoutBrokerContextCalls = 0;
     loadScoutBrokerContextOptions.length = 0;

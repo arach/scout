@@ -100,7 +100,9 @@ async function fetchApiText(path: string, init?: RequestInit): Promise<ApiTextRe
     } catch {
       /* plain text */
     }
-    throw new Error(message);
+    // The status rides on the error so callers can tell a refusal (4xx)
+    // from a delivery that may or may not have landed (5xx, network).
+    throw Object.assign(new Error(message), { status: res.status });
   }
   const text = await res.text();
   recordApiTiming({ method, path, ms: performance.now() - startedAt, bytes: text.length, ok: true });

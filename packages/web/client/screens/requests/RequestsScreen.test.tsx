@@ -53,3 +53,12 @@ test("a declared question offers its own options as one-tap answers", () => {
   expect(markup).toContain(">Needs work<");
   expect(markup).toContain("Open conversation");
 });
+
+test("managed permissions render backed decisions without a redesign", () => {
+  const markup = render([{ ...ask, id: "permission:p", sourceLabel: "Permission request", title: "Permission request",
+    permission: { requestId: "p", version: "v", sessionId: "s", projectRoot: "/p" },
+    actions: [{ kind: "approve", label: "Allow once", value: "once" }, { kind: "approve", label: "Allow for project", value: "project" }, { kind: "deny", label: "Deny", value: "deny" }],
+  }]);
+  for (const label of ["Allow once", "Allow for project", "Deny"]) expect(markup).toContain(label);
+  expect(markup).not.toContain("Needs you");
+});

@@ -1,3 +1,4 @@
+import { PermissionDeliveryUnconfirmedError } from "./broker-permission-service.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1488,4 +1489,29 @@ describe("invocation working and historical reads", () => {
     const result = await requestRouter(harness, "GET", "/v1/invocations/inv-old");
     expect(result.response.status).toBe(503); expect(result.body.retryable).toBe(true);
   });
+});
+
+test("permission decision route is machine-local and forwards the exact decision", async () => {
+  const decisions: unknown[][] = [];
+  const harness = createHarness({ permissionService: { decide: async (...args: unknown[]) => { decisions.push(args); } } as unknown as NonNullable<BrokerHttpRouterDeps["permissionService"]> });
+  const body = { requestId: "permission-1", version: "v", decision: "project" };
+  const result = await requestRouter(harness, "POST", "/v1/permissions/decide", { body });
+  expect(result.response.status).toBe(200); expect(decisions).toEqual([["permission-1", "v", "project"]]);
+  const remote = await requestRouter(harness, "POST", "/v1/permissions/decide", { body, transportContext: { transport: "remote" } });
+  expect(remote.response.status).toBe(403); expect(decisions).toHaveLength(1);
+  const invalid = await requestRouter(harness, "POST", "/v1/permissions/decide", { body: { ...body, decision: "allow-all" } });
+  expect(invalid.response.status).toBe(409); expect(decisions).toHaveLength(1);
+});
+
+test("permission decision conflicts do not become successful receipts", async () => {
+  const harness = createHarness({ permissionService: { decide: async () => { throw new Error("Permission request changed"); } } as unknown as NonNullable<BrokerHttpRouterDeps["permissionService"]> });
+  const result = await requestRouter(harness, "POST", "/v1/permissions/decide", { body: { requestId: "p", version: "v", decision: "once" } });
+  expect(result.response.status).toBe(409); expect(result.body).toEqual({ error: "Permission request changed", outcome: "refused" });
+});
+
+test("unconfirmed permission actuation is not a refused decision", async () => {
+  const harness = createHarness({ permissionService: { decide: async () => { throw new PermissionDeliveryUnconfirmedError("Acknowledgement timed out"); } } as unknown as NonNullable<BrokerHttpRouterDeps["permissionService"]> });
+  const result = await requestRouter(harness, "POST", "/v1/permissions/decide", { body: { requestId: "p", version: "v", decision: "once" } });
+  expect(result.response.status).toBe(502);
+  expect(result.body).toEqual({ error: "Acknowledgement timed out", outcome: "unconfirmed" });
 });

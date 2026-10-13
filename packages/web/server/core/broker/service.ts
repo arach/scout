@@ -4123,3 +4123,12 @@ export async function readScoutChatQuestionHistory(baseUrl: string, channelId: s
   }));
   return pages.flat();
 }
+
+export async function decideScoutPermission(input: { requestId: string; version: string; decision: "once" | "project" | "deny" }): Promise<void> {
+  const broker = await loadScoutBrokerContext();
+  if (!broker) throw new Error("Local broker is unavailable");
+  const result = await brokerPostJson<{ ok?: boolean; error?: string; outcome?: string }>(broker.baseUrl, "/v1/permissions/decide", input, {
+    acceptErrorJson: (value): value is { error: string; outcome: string } => Boolean(value && typeof value === "object" && typeof (value as { error?: unknown }).error === "string" && ["refused", "unconfirmed"].includes(String((value as { outcome?: unknown }).outcome))),
+  });
+  if (result.error) throw Object.assign(new Error(result.error), { status: result.outcome === "refused" ? 409 : 502 });
+}

@@ -47,3 +47,12 @@ test("only declared kinds are requests", () => {
   const declared = kinds.filter((kind) => isDeclaredRequest({ id: `x:${kind}`, kind } as never));
   expect(declared).toEqual(["approval", "question", "configuration"]);
 });
+
+test("declared permission decisions retain the exact native scopes", () => {
+  const permission = item("permission:p", { sourceLabel: "Permission request",
+    permission: { requestId: "p", version: "v", sessionId: "s", projectRoot: "/p" },
+    actions: [{ kind: "approve", label: "Allow once", value: "once" }, { kind: "approve", label: "Allow for project", value: "project" }, { kind: "deny", label: "Deny", value: "deny" }],
+  });
+  expect(isDeclaredRequest(permission)).toBe(true); expect(requestKind(permission)).toBe("Permission request");
+  expect(requestActions(permission).map(action => action.value)).toEqual(["once", "project", "deny"]);
+});

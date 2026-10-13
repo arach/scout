@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   collapseTailDisplayRows,
+  tailSummaryLabel,
   filterTailEventsForDisplay,
   isTailNoiseEvent,
   observeKindFromTailEvent,
@@ -411,5 +412,23 @@ describe("collapseTailDisplayRows", () => {
     expect(collapsed[0]?.repeatCount).toBe(2);
     expect(collapsed[0]?.event.ts).toBe(2);
     expect(collapsed[1]?.repeatCount).toBe(1);
+  });
+});
+
+
+describe("completed command outcomes", () => {
+  test("labels failed Codex commands with their exit code and command", () => {
+    const e = event({ source: "codex", summary: "item_completed", raw: { payload: { item: { type: "CommandExecution", status: "completed", exit_code: 2, command: ["/bin/zsh", "-lc", "bun test"] } } } });
+    expect(tailSummaryLabel(e)).toBe("command failed · exit 2 · bun test");
+  });
+  test("keeps successful commands and unrelated records distinct", () => {
+    expect(tailSummaryLabel(event({ source: "codex", summary: "item_completed", raw: { payload: { item: { type: "CommandExecution", exit_code: 0, command: ["git", "status"] } } } }))).toBe("command done · git status");
+    expect(tailSummaryLabel(event({ source: "claude", summary: "item_completed" }))).toBe("item_completed");
+    expect(tailSummaryLabel(event({ source: "codex", summary: "item_completed", raw: {} }))).toBe("item_completed");
+  });
+  test("recognizes a nonzero tool exit without misclassifying zero or no errors", () => {
+    for (const [preview, outcome] of [["exit code 2", "error"], ["exit code 0", "success"], ["no errors", "success"]] as const) {
+      expect(observeToolFieldsFromTailEvent(event({ source: "claude", kind: "tool", summary: `git status -> res: ${preview}` })).result?.outcome).toBe(outcome);
+    }
   });
 });

@@ -117,6 +117,10 @@ export type CodexAppServerSessionOptions = {
   clientInfo?: CodexAppServerClientInfo;
   /** Called with each agent-message delta as the active turn streams. */
   onDelta?: (delta: string) => void;
+  /** Owner callback for native requests; never resumes or forks a thread. */
+  onPermissionRequest?: (request: { id: string | number; method: string; params?: Record<string, unknown> }, controls: {
+    isCurrent: () => boolean; respond: (result: Record<string, unknown>) => void;
+  }) => Promise<boolean>;
   /** Optional owner lifetime; checked before launching or starting a turn. */
   signal?: AbortSignal;
   /** Bounds startup/handshake only; never limits a running inference turn. */
@@ -1536,7 +1540,36 @@ export class CodexAppServerTransport {
     pending.resolve(message.result);
   }
 
+  private readonly pendingPermissions = new Map<string | number, string>();
+
   private handleServerRequest(message: CodexAppServerServerRequest): void {
+    const callback = this.options.onPermissionRequest;
+    if (callback && this.connection?.mode !== "attached"
+      && (message.method === "item/commandExecution/requestApproval" || message.method === "item/fileChange/requestApproval")
+      && message.params?.threadId === this.threadId && typeof message.params?.turnId === "string") {
+      const turnId = message.params.turnId;
+      this.pendingPermissions.set(message.id, turnId);
+      this.nativeControlBlocked = true;
+      const isCurrent = () => this.isAlive() && this.pendingPermissions.get(message.id) === turnId;
+      const respond = (result: Record<string, unknown>) => {
+        if (!isCurrent()) throw new Error("Codex approval request is no longer live");
+        this.writeMessage({ id: message.id, result });
+        this.pendingPermissions.delete(message.id);
+        this.nativeControlBlocked = this.pendingPermissions.size > 0;
+      };
+      void callback(message, { isCurrent, respond }).then(handled => {
+        if (!handled && isCurrent()) {
+          this.pendingPermissions.delete(message.id);
+          this.writeMessage({ id: message.id, error: buildUnsupportedServerRequestError(message) });
+        }
+      }).catch(error => {
+        if (isCurrent()) {
+          this.pendingPermissions.delete(message.id);
+          this.writeMessage({ id: message.id, error: { code: -32000, message: error instanceof Error ? error.message : String(error) } });
+        }
+      });
+      return;
+    }
     this.nativeControlBlocked = true;
     this.writeMessage({
       id: message.id,
@@ -1546,6 +1579,12 @@ export class CodexAppServerTransport {
 
   private handleNotification(message: CodexAppServerNotification): void {
     const method = message.method;
+    if (method === "turn/completed" && message.params?.threadId === this.threadId) {
+      const params = message.params ?? {};
+      const turn = params.turn as { id?: string } | undefined;
+      for (const [id, turnId] of this.pendingPermissions) if (turnId === turn?.id) this.pendingPermissions.delete(id);
+      this.nativeControlBlocked = this.pendingPermissions.size > 0;
+    }
     const params = message.params ?? {};
 
     if (method === "thread/started" || method === "thread/name/updated") {

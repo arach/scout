@@ -46,7 +46,7 @@ export type { HeartrateBucket } from "../shared/api/common.ts";
 export { queryAgentById, queryAgents } from "./db/agents.ts";
 export { queryRecentMessages } from "./db/messages.ts";
 export { queryActivity, queryHeartrate } from "./db/activity.ts";
-export { queryBrokerDiagnostics } from "./db/broker.ts";
+export { queryBrokerAttentionHints, queryBrokerDiagnostics } from "./db/broker.ts";
 export {
   queryRuns,
   queryFlights,

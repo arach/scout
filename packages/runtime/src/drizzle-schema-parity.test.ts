@@ -8,6 +8,7 @@ import {
   DURABLE_ACTIONS_DUE_AT_INDEX_SQL,
 } from "./drizzle-schema.js";
 import { CONTROL_PLANE_SQLITE_SCHEMA } from "./schema.js";
+import { WEB_READ_INDEXES_SQL } from "./web-read-indexes.js";
 
 // Phase 0 gate: prove the DDL generated from the declarative Drizzle schema
 // (`drizzle-schema.ts`) is structurally identical to the canonical raw SQL
@@ -32,6 +33,7 @@ import { CONTROL_PLANE_SQLITE_SCHEMA } from "./schema.js";
 // (COALESCE/json_extract) contains commas and the migration renderer splits on
 // every comma. We drop the mangled statement and apply the escape-hatch DDL.
 const EXPRESSION_INDEX_NAME = "idx_durable_actions_kind_due_at_updated_at";
+const REQUESTER_RECENCY_INDEX_NAME = "idx_invocations_requester_recency";
 
 /**
  * Lowercase everything outside single-quoted string literals so SQL keywords
@@ -218,6 +220,9 @@ beforeAll(async () => {
   rawDb = new Database(":memory:");
   rawDb.exec("PRAGMA foreign_keys = ON;");
   rawDb.exec(CONTROL_PLANE_SQLITE_SCHEMA);
+  // These two invocation indexes are installed after legacy column repairs,
+  // rather than in the raw schema that must also open pre-status tables.
+  rawDb.exec(WEB_READ_INDEXES_SQL);
 
   // DB B — DDL generated from the declarative Drizzle schema.
   const current = await generateSQLiteDrizzleJson(
@@ -230,12 +235,23 @@ beforeAll(async () => {
   drizzleDb.exec("PRAGMA foreign_keys = ON;");
   const tableStmts = generatedStatements.filter((s) => /CREATE TABLE/i.test(s));
   const indexStmts = generatedStatements.filter(
-    (s) => !/CREATE TABLE/i.test(s) && !s.includes(EXPRESSION_INDEX_NAME),
+    (s) => !/CREATE TABLE/i.test(s)
+      && !s.includes(EXPRESSION_INDEX_NAME)
+      && !s.includes(REQUESTER_RECENCY_INDEX_NAME),
   );
   for (const stmt of tableStmts) drizzleDb.exec(stmt);
   for (const stmt of indexStmts) drizzleDb.exec(stmt);
   // Apply the escape-hatch index drizzle-kit cannot render.
   drizzleDb.exec(DURABLE_ACTIONS_DUE_AT_INDEX_SQL);
+  // drizzle-kit's renderer also quotes comma-separated COALESCE arguments as
+  // separate column names. Render this index from the declarative snapshot,
+  // not the raw-schema constant, so the strict parity comparisons still catch
+  // expression, column, uniqueness, predicate, and ordering drift.
+  const recency = current.tables.invocations!.indexes[REQUESTER_RECENCY_INDEX_NAME]!;
+  expect(recency.columns).toHaveLength(2);
+  const requesterColumn = recency.columns[0]!.replaceAll('"', '""');
+  drizzleDb.exec(`CREATE ${recency.isUnique ? "UNIQUE " : ""}INDEX ${REQUESTER_RECENCY_INDEX_NAME}
+    ON invocations ("${requesterColumn}", ${recency.columns[1]})${recency.where ? ` WHERE ${recency.where}` : ""};`);
 });
 
 describe("control-plane schema parity: raw SQL vs Drizzle", () => {
@@ -359,4 +375,19 @@ describe("control-plane schema parity: raw SQL vs checked-in migrations", () => 
   test("structural index descriptor sets match in both directions", () => {
     expect(indexDescriptors(baselineDb)).toEqual(indexDescriptors(rawDb));
   });
+});
+
+
+test("forward web-read migration tolerates indexes already installed by a pilot repair", () => {
+  const database = new Database(":memory:");
+  try {
+    expect(applyControlPlaneDrizzleMigrations(database)).toBe(true);
+    const indexes = indexDescriptors(database);
+    // Simulate the previous managed lineage with the same indexes already
+    // installed by its idempotent repair or historical local migration.
+    database.exec("DELETE FROM __drizzle_migrations WHERE created_at = 1791900000000");
+    expect(applyControlPlaneDrizzleMigrations(database)).toBe(true);
+    expect(indexDescriptors(database)).toEqual(indexes);
+    expect(database.query("SELECT COUNT(*) AS count FROM __drizzle_migrations WHERE created_at = 1791900000000").get()).toEqual({ count: 1 });
+  } finally { database.close(); }
 });

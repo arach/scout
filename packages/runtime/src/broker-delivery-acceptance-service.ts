@@ -183,6 +183,7 @@ export type BrokerDeliveryAcceptanceServiceOptions = {
   acceptInvocation: (invocation: InvocationRequest, message?: MessageRecord, workItem?: DeliveryWorkItemResolution["pendingCreation"]) => Promise<FlightRecord>;
   dispatchAcceptedInvocation: (invocation: InvocationRequest) => Promise<void>;
   queueOperatorDeliveryIssue: (input: OperatorDeliveryIssueInput) => void;
+  recordOperatorNeed?: (message: MessageRecord, signal: NonNullable<ScoutDeliverRequest["operatorSignal"]>) => Promise<void>;
   queueOperatorSignal: (input: {
     signal: NonNullable<ScoutDeliverRequest["operatorSignal"]>;
     messageId: string;
@@ -665,6 +666,7 @@ export class BrokerDeliveryAcceptanceService {
       };
       await this.options.postConversationMessage(message);
       if (operatorSignal) {
+        if (operatorSignal.kind === "need") await this.options.recordOperatorNeed?.(message, operatorSignal);
         const requesterAgent = snapshot.agents[requesterId];
         const requesterActor = snapshot.actors[requesterId];
         const requesterEndpoint = Object.values(snapshot.endpoints)

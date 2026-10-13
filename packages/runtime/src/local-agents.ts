@@ -1,3 +1,5 @@
+import { hasManagedPermissionContext } from "./managed-permission.js";
+import { parseTmuxPermission, waitForTmuxPermission } from "./tmux-permission.js";
 import { SUPPORTED_LOCAL_AGENT_HARNESSES } from "./local-agent-harnesses.js";
 import { boundedLogPipeCommand } from "@openscout/agent-sessions/local/bounded-log";
 import { randomUUID } from "node:crypto";
@@ -3780,6 +3782,13 @@ export async function sendTmuxPrompt(
   prompt: string,
   strategy?: TmuxDispatchStrategy,
 ): Promise<TmuxPromptDispatchResult> {
+  if (hasManagedPermissionContext()) {
+    const before = await captureTmuxPaneTail(sessionName, 80);
+    if (parseTmuxPermission(before)) {
+      const cwd = (await execSystemFile("tmux", ["display-message", "-p", "-t", sessionName, "#{pane_current_path}"], { timeoutMs: 2_000 })).stdout.trim();
+      await handleManagedTmuxPermission(sessionName, cwd, before);
+    }
+  }
   const effectiveStrategy = strategy ?? buildTmuxDispatchStrategy("claude", prompt);
   const bufferName = `openscout-prompt-${randomUUID()}`;
   let bufferOwned = true;
@@ -3869,6 +3878,13 @@ async function dispatchVerifiedAfter(
     // real session loss.
     return true;
   }
+  if (hasManagedPermissionContext()) {
+    const fullTail = await captureTmuxPaneTail(sessionName, 80);
+    if (parseTmuxPermission(fullTail)) {
+      const cwd = (await execSystemFile("tmux", ["display-message", "-p", "-t", sessionName, "#{pane_current_path}"], { timeoutMs: 2_000 })).stdout.trim();
+      if (await handleManagedTmuxPermission(sessionName, cwd, fullTail)) return true;
+    }
+  }
   return strategy.verify(paneTail);
 }
 
@@ -3897,14 +3913,16 @@ export async function waitForReadyComposer(options: {
   isAlive: () => boolean;
   captureTail: () => Promise<string>;
   isReady: (paneTail: string) => boolean;
-  /** A dialog the harness will never leave on its own; fail at once, naming it. */
+  /** Handles a declared live permission wait without spending the boot budget. */
+  onBlockingDialog?: (paneTail: string) => Promise<boolean>;
+  /** A dialog the harness will never leave on its own. */
   blockingDialog?: (paneTail: string) => string | null;
   sleep: (ms: number) => Promise<void>;
   now?: () => number;
 }): Promise<void> {
   const now = options.now ?? Date.now;
   const startedAt = now();
-  const ceiling = startedAt + options.ceilingMs;
+  let ceiling = startedAt + options.ceilingMs;
   let deadline = Math.min(startedAt + options.timeoutMs, ceiling);
   let paneTail = "";
   let previousTail: string | undefined;
@@ -3916,6 +3934,14 @@ export async function waitForReadyComposer(options: {
     paneTail = await options.captureTail();
     const blocked = options.blockingDialog?.(paneTail);
     if (blocked) {
+      const pausedAt = now();
+      if (await options.onBlockingDialog?.(paneTail)) {
+        const pausedMs = now() - pausedAt;
+        ceiling += pausedMs;
+        deadline += pausedMs;
+        previousTail = undefined;
+        continue;
+      }
       throw new Error(`tmux session ${options.sessionName}: ${blocked}`);
     }
     if (options.isReady(paneTail)) {
@@ -3941,7 +3967,21 @@ export async function waitForReadyComposer(options: {
   );
 }
 
-async function waitForTmuxHarnessReady(sessionName: string, harness: AgentHarness): Promise<void> {
+async function handleManagedTmuxPermission(sessionId: string, projectRoot: string, text?: string): Promise<boolean> {
+  if (!hasManagedPermissionContext()) return false;
+  const observed = text ?? await captureTmuxPaneTail(sessionId, 80);
+  if (!parseTmuxPermission(observed, projectRoot)) return false;
+  const target = (await execSystemFile("tmux", ["display-message", "-p", "-t", sessionId, "#{pane_id}"], { timeoutMs: 2_000 })).stdout.trim();
+  if (!/^%\d+$/.test(target)) throw new Error("Could not bind permission to a live tmux pane");
+  return waitForTmuxPermission({ sessionId, projectRoot,
+    text: observed,
+    capture: () => captureTmuxPaneTail(target, 80),
+    alive: () => isLocalAgentSessionAliveAsync(sessionId),
+    send: keys => execSystemFile("tmux", ["send-keys", "-t", target, ...keys], { timeoutMs: 2_000 }).then(() => undefined),
+  });
+}
+
+async function waitForTmuxHarnessReady(sessionName: string, harness: AgentHarness, projectRoot: string): Promise<void> {
   if (harness !== "claude" && harness !== "grok") {
     return;
   }
@@ -3956,6 +3996,7 @@ async function waitForTmuxHarnessReady(sessionName: string, harness: AgentHarnes
     captureTail: () => captureTmuxPaneTail(sessionName, TMUX_READY_TAIL_LINES),
     isReady: tmuxPaneTailShowsReadyComposer,
     blockingDialog: tmuxPaneTailBlockingHarnessDialog,
+    onBlockingDialog: text => handleManagedTmuxPermission(sessionName, projectRoot, text),
     sleep: tmuxDispatchSleep,
   });
 }
@@ -4781,7 +4822,7 @@ async function ensureLocalAgentOnlineOnce(agentName: string, record: LocalAgentR
   }
 
   try {
-    await waitForTmuxHarnessReady(normalizedRecord.tmuxSession, normalizeLocalAgentHarness(normalizedRecord.harness));
+    await waitForTmuxHarnessReady(normalizedRecord.tmuxSession, normalizeLocalAgentHarness(normalizedRecord.harness), projectPath);
   } catch (error) {
     await killAgentSession(normalizedRecord.tmuxSession);
     throw error;
@@ -6455,6 +6496,8 @@ export async function invokeLocalAgentEndpoint(
     timeoutSeconds,
     // A harness that quit can never reply. Without this the requester timeout
     // parks the flight as "still working" forever.
+    permissionWait: onlineRecord.transport === "tmux" && onlineRecord.harness === "claude"
+      ? () => handleManagedTmuxPermission(onlineRecord.tmuxSession, onlineRecord.cwd) : undefined,
     exitedError: onlineRecord.transport === "tmux" && onlineRecord.tmuxSession
       ? async () => await isLocalAgentSessionAliveAsync(onlineRecord.tmuxSession)
         ? null
@@ -6471,13 +6514,18 @@ async function waitForLocalAgentReply(input: {
   askedAt: number;
   timeoutSeconds: number;
   exitedError?: () => Promise<string | null>;
+  permissionWait?: () => Promise<boolean>;
 }): Promise<string> {
-  const deadline = Date.now() + input.timeoutSeconds * 1000;
+  let deadline = Date.now() + input.timeoutSeconds * 1000;
   let nextLivenessCheckAt = Date.now() + TMUX_REPLY_LIVENESS_INTERVAL_MS;
   while (Date.now() <= deadline) {
     const output = localAgentReplyFromSnapshot(await readBrokerReplySnapshot(), input);
     if (output !== null) return output;
 
+    if (input.permissionWait) {
+      const pausedAt = Date.now();
+      if (await input.permissionWait()) deadline += Date.now() - pausedAt;
+    }
     if (input.exitedError && Date.now() >= nextLivenessCheckAt) {
       nextLivenessCheckAt = Date.now() + TMUX_REPLY_LIVENESS_INTERVAL_MS;
       const exited = await input.exitedError();

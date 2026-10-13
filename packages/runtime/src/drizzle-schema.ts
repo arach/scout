@@ -347,6 +347,7 @@ export const messagesTable = sqliteTable("messages", {
     sql`CASE WHEN created_at > 0 AND created_at < 1000000000000 THEN created_at * 1000 ELSE created_at END DESC`,
     desc(table.id),
   ),
+  index("idx_messages_epoch_id").on(sql`CASE WHEN created_at IS NULL THEN NULL WHEN CAST(created_at AS REAL) < 1000000000000 THEN CAST(CAST(created_at AS REAL) * 1000 AS INTEGER) ELSE CAST(created_at AS INTEGER) END DESC`, table.id),
   index("idx_messages_created_at").on(desc(table.createdAt)),
   index("idx_messages_actor_created_at").on(table.actorId, desc(table.createdAt)),
   index("idx_messages_origin_node_id").on(table.originNodeId),
@@ -586,6 +587,8 @@ export const invocationsTable = sqliteTable("invocations", {
   flightMetadataJson: text("flight_metadata_json"),
   executionResolutionJson: text("execution_resolution_json"),
 }, (table) => [
+  index("idx_invocations_state").on(table.state),
+  index("idx_invocations_requester_recency").on(table.requesterId, sql`COALESCE(completed_at, started_at, created_at) DESC`),
   index("idx_invocations_target_created_at").on(table.targetAgentId, table.createdAt),
   index("idx_invocations_requester_created_at").on(table.requesterId, desc(table.createdAt)),
   index("idx_invocations_conversation_created_at").on(table.conversationId, desc(table.createdAt)),
@@ -648,6 +651,7 @@ export const deliveriesTable = sqliteTable("deliveries", {
   createdAt: integer("created_at").notNull().default(epochMsNow),
 }, (table) => [
   index("idx_deliveries_status_transport").on(table.status, table.transport),
+  index("idx_deliveries_failure_epoch_id").on(sql`CASE WHEN created_at IS NULL THEN NULL WHEN CAST(created_at AS REAL) < 1000000000000 THEN CAST(CAST(created_at AS REAL) * 1000 AS INTEGER) ELSE CAST(created_at AS INTEGER) END DESC`, table.id).where(sql`status IN ('failed', 'cancelled')`),
   index("idx_deliveries_created_at").on(desc(table.createdAt)),
   index("idx_deliveries_target_status_created_id").on(table.targetId, table.status, table.createdAt, table.id),
   index("idx_deliveries_target_node_id").on(table.targetNodeId),
@@ -664,6 +668,7 @@ export const deliveryAttemptsTable = sqliteTable("delivery_attempts", {
   metadataJson: text("metadata_json"),
   createdAt: integer("created_at").notNull(),
 }, (table) => [
+  index("idx_delivery_attempts_epoch_id").on(sql`CASE WHEN created_at IS NULL THEN NULL WHEN CAST(created_at AS REAL) < 1000000000000 THEN CAST(CAST(created_at AS REAL) * 1000 AS INTEGER) ELSE CAST(created_at AS INTEGER) END DESC`, table.id),
   index("idx_delivery_attempts_created_at").on(desc(table.createdAt)),
 ]);
 
@@ -909,6 +914,7 @@ export const scoutDispatchesTable = sqliteTable("scout_dispatches", {
   dispatchedAt: integer("dispatched_at").notNull(),
   payloadJson: text("payload_json").notNull(),
 }, (table) => [
+  index("idx_dispatches_epoch_id").on(sql`CASE WHEN dispatched_at IS NULL THEN NULL WHEN CAST(dispatched_at AS REAL) < 1000000000000 THEN CAST(CAST(dispatched_at AS REAL) * 1000 AS INTEGER) ELSE CAST(dispatched_at AS INTEGER) END DESC`, table.id),
   index("idx_scout_dispatches_dispatched_at").on(desc(table.dispatchedAt)),
   index("idx_scout_dispatches_conversation_ts").on(table.conversationId, desc(table.dispatchedAt)),
 ]);
@@ -935,6 +941,7 @@ export const activityItemsTable = sqliteTable("activity_items", {
   index("idx_activity_items_agent_ts").on(table.agentId, desc(table.ts)),
   index("idx_activity_items_actor_ts").on(table.actorId, desc(table.ts)),
   index("idx_activity_items_conversation_ts").on(table.conversationId, desc(table.ts)),
+  index("idx_activity_items_epoch").on(sql`CASE WHEN ts IS NULL THEN NULL WHEN CAST(ts AS REAL) < 1000000000000 THEN CAST(CAST(ts AS REAL) * 1000 AS INTEGER) ELSE CAST(ts AS INTEGER) END DESC`),
   index("idx_activity_items_ts").on(desc(table.ts)),
   index("idx_activity_items_workspace_ts").on(table.workspaceRoot, desc(table.ts)),
   index("idx_activity_items_kind_ts").on(table.kind, desc(table.ts)),

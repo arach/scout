@@ -1,3 +1,4 @@
+import { failedDelivery } from "../../client/screens/requests/request-delivery.ts";
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -20,6 +21,18 @@ await loadWebServerUnderTest();
 installWebServerTestHooks();
 
 describe("createOpenScoutWebServer: attention routes", () => {
+  test("shares a full attention refresh across concurrent and back-to-back polls", async () => {
+    const server = await createOpenScoutWebServer({
+      currentDirectory: "/tmp/openscout", assetMode: "static", staticRoot: makeStaticRoot(),
+    });
+    const before = stubs.getPairingStateCalls;
+    const url = "http://localhost/api/operator-attention";
+    const responses = await Promise.all(Array.from({ length: 5 }, () => server.app.request(url)));
+    expect(responses.every((response) => response.status === 200)).toBe(true);
+    expect((await server.app.request(url)).status).toBe(200);
+    expect(stubs.getPairingStateCalls - before).toBe(1);
+  });
+
   test("suggests the current Scout MCP ask permission only for the current tool", async () => {
     stubs.brokerDiagnosticsResult = makeBrokerDiagnostics({
       totals: {
@@ -484,4 +497,91 @@ describe("createOpenScoutWebServer: attention routes", () => {
       expect(audit[0]?.grant).toBe("session:default:w1:p2");
     });
   });
+});
+
+describe("managed permission decisions", () => {
+  test("existing API forwards exact request/version/scope to the broker", async () => {
+    const server = await createOpenScoutWebServer({ currentDirectory: "/tmp/openscout", assetMode: "static", staticRoot: makeStaticRoot() });
+    for (const decision of ["once", "project", "deny"]) {
+      const response = await server.app.request("http://localhost/api/operator-attention/permissions/decide", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ requestId: "permission-1", version: "fingerprint", decision }),
+      });
+      expect(response.status).toBe(200);
+    }
+    expect(stubs.permissionDecisions.map(value => value.decision)).toEqual(["once", "project", "deny"]);
+  });
+  test("malformed and dead-session decisions never report success", async () => {
+    const server = await createOpenScoutWebServer({ currentDirectory: "/tmp/openscout", assetMode: "static", staticRoot: makeStaticRoot() });
+    const post = (body: unknown) => server.app.request("http://localhost/api/operator-attention/permissions/decide", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    expect((await post({ requestId: "p", version: "v", decision: "all" })).status).toBe(400);
+    expect(stubs.permissionDecisions).toHaveLength(0);
+    stubs.permissionDecisionFailure = true;
+    const response = await post({ requestId: "p", version: "v", decision: "once" });
+    expect(response.status).toBe(409); expect(await response.json()).toEqual({ error: "Permission request has no live waiting process" });
+  });
+});
+
+test("durable managed permissions project exact prompt, flight and project with backed scopes", async () => {
+  stubs.scoutBrokerContextResult = { baseUrl: "http://broker.test", node: { id: "node-1" }, snapshot: {
+    actors: { agent: { id: "agent", displayName: "Claude" } }, agents: {}, conversations: {}, flights: {}, messages: {}, endpoints: {},
+    collaborationRecords: { p: { id: "p", kind: "question", state: "open", acceptanceState: "none", title: "Permission request",
+      summary: "Exact permission prompt", createdById: "agent", ownerId: "operator", nextMoveOwnerId: "operator", conversationId: "chn-test",
+      createdAt: Date.now(), updatedAt: Date.now(), metadata: { permissionRequest: { sessionId: "tmux-1", projectRoot: "/tmp/project", flightId: "flt-1", version: "v1", decisions: ["once", "project", "deny"] } },
+    } },
+  } };
+  const server = await createOpenScoutWebServer({ currentDirectory: "/tmp/openscout", assetMode: "static", staticRoot: makeStaticRoot() });
+  const response = await server.app.request("http://localhost/api/operator-attention");
+  expect(response.status).toBe(200);
+  const body = await response.json() as { items: Array<{ id: string; permission?: unknown; summary: string; actions: Array<{ label: string }> }> };
+  const item = body.items.find(item => item.id === "permission:p");
+  expect(item?.summary).toBe("Exact permission prompt");
+  expect(item?.permission).toEqual({ requestId: "p", version: "v1", sessionId: "tmux-1", projectRoot: "/tmp/project", flightId: "flt-1" });
+  expect(item?.actions.map(action => action.label)).toEqual(["Allow once", "Allow for project", "Deny", "Open conversation"]);
+});
+
+
+test("a cold broker snapshot does not duplicate a managed permission as an unactionable fleet question", async () => {
+  stubs.scoutBrokerContextResult = null;
+  stubs.queryFleetResult = {
+    generatedAt: Date.now(), totals: { active: 0, recentCompleted: 0, needsAttention: 1, activity: 0 },
+    activeAsks: [], recentCompleted: [], activity: [],
+    needsAttention: [{ recordId: "permission-cold-test", kind: "question", title: "Permission request", state: "open", acceptanceState: "none", agentId: "test", updatedAt: Date.now(), conversationId: "chn-test" }],
+  };
+  const server = await createOpenScoutWebServer({ currentDirectory: "/tmp/openscout", assetMode: "static", staticRoot: makeStaticRoot() });
+  const response = await server.app.request("http://localhost/api/operator-attention");
+  const body = await response.json() as { items: Array<{ id: string }> };
+  expect(body.items.some(item => item.id === "question:permission-cold-test")).toBe(false);
+});
+
+test("unconfirmed broker actuation remains unconfirmed in the client delivery model", async () => {
+  stubs.permissionDecisionUnconfirmed = true;
+  const server = await createOpenScoutWebServer({ currentDirectory: "/tmp/openscout", assetMode: "static", staticRoot: makeStaticRoot() });
+  const response = await server.app.request("http://localhost/api/operator-attention/permissions/decide", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ requestId: "p", version: "v", decision: "once" }) });
+  expect(response.status).toBe(502);
+  const body = await response.json() as { error: string };
+  expect(failedDelivery("Allow once", Object.assign(new Error(body.error), { status: response.status }), "Failed").state).toBe("unconfirmed");
+});
+
+
+test("an invalidated old capture cannot overwrite the postdecision attention cache", async () => {
+  const attention = await import("../core/attention/operator-attention-state.ts");
+  attention.invalidateAgentAttentionSnapshot();
+  stubs.queryAgentsResult = [{ id: "agent-race", name: "Claude", harness: "claude", transport: "tmux", state: "waiting", terminalSurface: { backend: "tmux", sessionName: "pane-race" } }];
+  let started!: () => void;
+  const capturing = new Promise<void>(resolve => { started = resolve; });
+  let release!: (value: { body: string }) => void;
+  let calls = 0;
+  const capture = (async () => {
+    if (++calls === 1) { started(); return new Promise(resolve => { release = resolve; }); }
+    return { body: "ready" };
+  }) as Parameters<typeof attention.queryAgentAttentionSnapshot>[1];
+  const old = attention.queryAgentAttentionSnapshot(null, capture);
+  await capturing;
+  attention.invalidateAgentAttentionSnapshot();
+  const fresh = await attention.queryAgentAttentionSnapshot(null, capture);
+  expect(fresh.hostItems).toHaveLength(0);
+  release({ body: "Bash command\nls\nPermission rule Bash requires confirmation for this command.\nDo you want to proceed?\n1. Yes\n2. No\nEsc to cancel · Tab to amend" });
+  expect((await old).hostItems).toHaveLength(1);
+  expect(await attention.queryAgentAttentionSnapshot(null, capture)).toBe(fresh);
+  expect(calls).toBe(2);
 });

@@ -1,3 +1,4 @@
+import { WEB_READ_INDEXES_SQL } from "./web-read-indexes.js";
 import { INTEGRATION_SLACK_EVENTS_SCHEMA } from "./integration-slack-events.js";
 import { INTEGRATION_SLACK_DELIVERY_SCHEMA } from "./integration-slack-delivery.js";
 import { INTEGRATION_WORKER_SQLITE_SCHEMA } from "./integration-worker-leases.js";
@@ -495,6 +496,11 @@ WHERE latest.invocation_id = inv.id
         database.exec("CREATE INDEX IF NOT EXISTS idx_events_ts_id ON events (ts, id)");
       }
     },
+  },
+  {
+    id: "web-read-ordering-indexes",
+    description: "Indexes normalized history ordering and active invocation reads without scanning payload history.",
+    apply(database) { database.exec(WEB_READ_INDEXES_SQL); },
   },
 ];
 

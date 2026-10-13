@@ -385,6 +385,7 @@ export type OperatorAttentionItem = {
   updatedAt: number;
   severity: "critical" | "warning" | "info";
   sourceLabel: string;
+  permission?: { requestId: string; version: string; sessionId: string; projectRoot: string; flightId?: string };
   approval?: PairingApprovalRequest;
   /** A declared question's offered answers; one is sent as the operator's reply. */
   answer?: { conversationId: string; replyToMessageId: string; options: string[] };

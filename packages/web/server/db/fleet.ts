@@ -260,7 +260,15 @@ function fleetStatusLabel(status: WebFleetAskStatus): string {
 export function queryFleetAskRows(requesterIds: string[], limit: number): FleetAskRow[] {
   const requesterClause = sqlPlaceholders(requesterIds.length);
   return db().prepare(
-    `SELECT
+    `WITH recent_invocations AS MATERIALIZED (
+       SELECT id FROM invocations
+       WHERE requester_id IN (${requesterClause})
+         AND NOT (COALESCE(state, '') = 'failed'
+           AND COALESCE(error, '') LIKE 'Stale running flight reconciled:%')
+       ORDER BY COALESCE(completed_at, started_at, created_at) DESC
+       LIMIT ?
+     )
+     SELECT
        inv.id AS invocation_id,
        inv.requester_id,
        inv.target_agent_id,
@@ -303,7 +311,8 @@ export function queryFleetAskRows(requesterIds: string[], limit: number): FleetA
        cr.state AS work_state,
        cr.next_move_owner_id,
        cr.updated_at AS work_updated_at
-     FROM invocations inv
+     FROM recent_invocations recent
+     JOIN invocations inv ON inv.id = recent.id
      LEFT JOIN actors ac ON ac.id = inv.target_agent_id
      LEFT JOIN activity_items latest_ai ON latest_ai.id = (
        SELECT ai.id
@@ -329,13 +338,7 @@ export function queryFleetAskRows(requesterIds: string[], limit: number): FleetA
        LIMIT 1
      )
      LEFT JOIN collaboration_records cr ON cr.id = inv.collaboration_record_id
-     WHERE inv.requester_id IN (${requesterClause})
-       AND NOT (
-         COALESCE(inv.state, '') = 'failed'
-         AND COALESCE(inv.error, '') LIKE 'Stale running flight reconciled:%'
-       )
-     ORDER BY COALESCE(inv.completed_at, inv.started_at, inv.created_at) DESC
-     LIMIT ?`,
+     ORDER BY COALESCE(inv.completed_at, inv.started_at, inv.created_at) DESC`,
   ).all(...requesterIds, limit) as Array<FleetAskRow>;
 }
 
@@ -474,9 +477,11 @@ export function queryFleetAttentionRows(requesterIds: string[], limit: number): 
          cr.state,
          cr.acceptance_state,
          cr.updated_at,
-         cr.owner_id AS agent_id,
+         CASE WHEN (json_extract(cr.detail_json, '$.metadata.permissionRequest') IS NOT NULL OR json_extract(cr.detail_json, '$.metadata.operatorNeedMessageId') IS NOT NULL)
+           THEN cr.created_by_id ELSE cr.owner_id END AS agent_id,
          ROW_NUMBER() OVER (
-           PARTITION BY cr.title, cr.owner_id
+           PARTITION BY CASE WHEN (json_extract(cr.detail_json, '$.metadata.permissionRequest') IS NOT NULL OR json_extract(cr.detail_json, '$.metadata.operatorNeedMessageId') IS NOT NULL)
+             THEN cr.id ELSE cr.title END, cr.owner_id
            ORDER BY cr.updated_at DESC, cr.id DESC
          ) AS duplicate_rank
        FROM collaboration_records cr
@@ -569,7 +574,7 @@ export function queryFleet(opts?: {
     acceptanceState: row.acceptance_state,
     updatedAt: normalizeTimestampMs(row.updated_at) ?? Date.now(),
   }));
-  const activity = queryFleetActivity({
+  const activity = activityLimit === 0 ? [] : queryFleetActivity({
     limit: activityLimit,
     lookbackMs: opts?.activityLookbackMs,
   });

@@ -11,6 +11,7 @@ import {
   queryAgentById,
   queryAgents,
   queryBrokerDiagnostics,
+  queryBrokerAttentionHints,
   queryFleet,
   queryFleetAttentionRows,
   queryFlightRecordById,
@@ -30,6 +31,8 @@ import {
   queryWorkItemById,
   queryWorkItems,
 } from "./db-queries.ts";
+import { db } from "./db/internal/db.ts";
+import { queryAgentFlightPhases } from "./db/internal/sql-helpers.ts";
 import { RECENT_ENDPOINT_AGENT_IDS_SQL } from "./db/agents.ts";
 import { SQLiteControlPlaneStore } from "../../runtime/src/sqlite-store.ts";
 import { directChannelNaturalKey } from "../../protocol/src/channel-identity.ts";
@@ -4801,5 +4804,85 @@ describe("web db query work items", () => {
     } finally {
       store.close();
     }
+  });
+});
+
+test("permission requests retain separate rows and point attention at the waiting agent", () => {
+  const store = createSeededStore(); const now = Date.now();
+  try {
+    for (const id of ["permission-a", "permission-b"]) store.recordCollaborationRecord({
+      id, kind: "question", title: "Permission request", summary: "Exact prompt", state: "open", acceptanceState: "none",
+      createdById: "agent-1", askedById: "agent-1", ownerId: "operator", nextMoveOwnerId: "operator",
+      createdAt: now, updatedAt: now, metadata: { permissionRequest: { sessionId: id, version: "v", projectRoot: "/p" } },
+    });
+    const rows = queryFleetAttentionRows(["operator"], 20).filter(row => row.record_id.startsWith("permission-"));
+    expect(rows.map(row => row.record_id).sort()).toEqual(["permission-a", "permission-b"]);
+    expect(rows.map(row => row.agent_id)).toEqual(["agent-1", "agent-1"]);
+  } finally { store.close(); }
+});
+
+describe("web polling query plans", () => {
+  test("attention and active flights use read indexes and avoid unused history", () => {
+    const store = createSeededStore();
+    const reader = db();
+    const prepare = reader.prepare.bind(reader);
+    const queries: Array<{ sql: string; params: unknown[] }> = [];
+    const originalPrepare = Database.prototype.prepare;
+    const spy = spyOn(Database.prototype, "prepare").mockImplementation((function(this: Database, sql: string) {
+      const statement = originalPrepare.call(this, sql);
+      return new Proxy(statement, {
+        get(target, property) {
+          const value = Reflect.get(target, property);
+          if (property === "all" || property === "get") return (...params: unknown[]) => {
+            queries.push({ sql, params });
+            return value.apply(target, params);
+          };
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    }) as typeof reader.prepare);
+    try {
+      queryBrokerAttentionHints();
+      queryAgentFlightPhases();
+      expect(queries).toHaveLength(4);
+      for (const { sql } of queries.slice(0, 3)) expect(sql).not.toContain("JOIN invocations");
+      expect(queries.some(({ sql }) => /COUNT\(|delivery_attempts/.test(sql))).toBe(false);
+      const plans = queries.map(({ sql, params }) => prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...params as any[])
+        .map((row: any) => row.detail).join("\n"));
+      expect(plans[0]).toContain("idx_dispatches_epoch_id");
+      expect(plans[1]).toContain("idx_deliveries_failure_epoch_id");
+      expect(plans[2]).toContain("idx_messages_epoch_id");
+      expect(plans[3]).toContain("idx_invocations_state");
+      for (const plan of plans) expect(plan).not.toContain("TEMP B-TREE");
+      queries.length = 0;
+      queryFleet({ limit: 2, activityLimit: 0 });
+      expect(queries[0]!.sql).toContain("AS MATERIALIZED");
+      expect(queries.some(({ sql }) => /FROM activity_items ai\s+LEFT JOIN/.test(sql))).toBe(false);
+    } finally {
+      spy.mockRestore();
+      store.close();
+    }
+  });
+
+  test("attention still reads during mixed-version startup before the failure index exists", () => {
+    const store = createSeededStore();
+    try {
+      store.writerDb.exec("DROP INDEX idx_deliveries_failure_epoch_id");
+      expect(() => queryBrokerAttentionHints()).not.toThrow();
+    } finally { store.close(); }
+  });
+
+  test("attention hints are recent and sort mixed seconds/milliseconds with stable ties", () => {
+    const store = createSeededStore();
+    const now = Math.floor(Date.now() / 1_000) * 1_000;
+    try {
+      for (const [id, createdAt] of [["hint-a", now / 1_000], ["hint-b", now], ["hint-old", now - 2 * 86_400_000]] as const) {
+        store.recordMessage({ id, conversationId: "c.conv-1", actorId: "agent-1", originNodeId: "node-1",
+          class: "agent", body: "Permission needed", visibility: "private", policy: "durable", createdAt });
+      }
+      const hints = queryBrokerAttentionHints({ limit: 2 });
+      expect(hints.dialogue.map(({ id }) => id)).toEqual(["hint-a", "hint-b"]);
+      expect(hints.dialogue.map(({ ts }) => ts)).toEqual([now, now]);
+    } finally { store.close(); }
   });
 });
