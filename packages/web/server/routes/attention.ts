@@ -1,13 +1,14 @@
 import type { Hono } from "hono";
+import { createPollingReadCache, pollingReadFailureResponse } from "../polling-read-cache.ts";
 import { decideScoutWebPairingApproval } from "../pairing.ts";
 import { queryFlightRecordById } from "../db-queries.ts";
-import { decideScoutRemoteApproval, loadScoutBrokerContext, upsertScoutConversation, upsertScoutFlight } from "../core/broker/service.ts";
+import { decideScoutPermission, decideScoutRemoteApproval, loadScoutBrokerContext, upsertScoutConversation, upsertScoutFlight } from "../core/broker/service.ts";
 import type { OpenScoutWebShellState } from "../runtime-summary.ts";
 import { defaultCaptureTmuxPane } from "../tmux-pane-capture.ts";
-import { dismissCollaborationAttention, buildOperatorAttentionState, parseRemoteApprovalSessionId } from "../core/attention/operator-attention-state.ts";
+import { dismissCollaborationAttention, invalidateAgentAttentionSnapshot, buildOperatorAttentionState, parseRemoteApprovalSessionId } from "../core/attention/operator-attention-state.ts";
 import type { CreateOpenScoutWebServerOptions } from "../web-server-options.ts";
 import type { CachedSnapshot } from "../server-core.ts";
-import { approvalDecisionBody } from "../../shared/api/attention.ts";
+import { permissionDecisionBody, approvalDecisionBody } from "../../shared/api/attention.ts";
 import { readJsonBody } from "../request-body.ts";
 
 async function dismissFlightAttention(input: {
@@ -71,12 +72,29 @@ export type AttentionRouteDeps = {
 export function mountAttentionRoutes(app: Hono, deps: AttentionRouteDeps) {
   const { currentDirectory, options, shellStateCache } = deps;
 
-  app.get("/api/operator-attention", async (c) =>
-    c.json(await buildOperatorAttentionState(
-      currentDirectory,
-      options.captureTmuxPane ?? defaultCaptureTmuxPane,
-    )),
-  );
+  const attentionReads = createPollingReadCache<Awaited<ReturnType<typeof buildOperatorAttentionState>>>({
+    ttlMs: 2_000, maxEntries: 1, maxConcurrent: 1,
+  });
+  const readAttention = () => attentionReads.get("attention", () => buildOperatorAttentionState(
+    currentDirectory, options.captureTmuxPane ?? defaultCaptureTmuxPane,
+  ));
+  app.get("/api/operator-attention", async (c) => {
+    try {
+      return c.json(await readAttention());
+    } catch (error) {
+      return pollingReadFailureResponse(error);
+    }
+  });
+  app.post("/api/operator-attention/permissions/decide", async (c) => {
+    const parsed = await readJsonBody(c, permissionDecisionBody);
+    if (!parsed.ok) return parsed.response;
+    try { await decideScoutPermission(parsed.body); }
+    catch (error) { return c.json({ error: error instanceof Error ? error.message : String(error) }, (error as { status?: number })?.status === 409 ? 409 : 502); }
+    invalidateAgentAttentionSnapshot();
+    shellStateCache.invalidate();
+    attentionReads.invalidate("attention");
+    return c.json(await buildOperatorAttentionState(currentDirectory, options.captureTmuxPane ?? defaultCaptureTmuxPane));
+  });
   app.post("/api/operator-attention/approvals/decide", async (c) => {
     const parsed = await readJsonBody(c, approvalDecisionBody);
     if (!parsed.ok) return parsed.response;
@@ -104,6 +122,7 @@ export function mountAttentionRoutes(app: Hono, deps: AttentionRouteDeps) {
       if (!result.ok) {
         return c.json({ error: remoteDecideMessage(result.error) }, 409);
       }
+      attentionReads.invalidate("attention");
       shellStateCache.invalidate();
       return c.json(await buildOperatorAttentionState(
         currentDirectory,
@@ -121,6 +140,7 @@ export function mountAttentionRoutes(app: Hono, deps: AttentionRouteDeps) {
       },
       currentDirectory,
     );
+    attentionReads.invalidate("attention");
     shellStateCache.invalidate();
     return c.json(await buildOperatorAttentionState(
       currentDirectory,
@@ -162,6 +182,7 @@ export function mountAttentionRoutes(app: Hono, deps: AttentionRouteDeps) {
     } else if (!flightId && recordKind && recordId) {
       await dismissCollaborationAttention({ recordKind, recordId, itemUpdatedAt });
     }
+    attentionReads.invalidate("attention");
     return c.json(await buildOperatorAttentionState(
       currentDirectory,
       options.captureTmuxPane ?? defaultCaptureTmuxPane,

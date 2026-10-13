@@ -439,6 +439,25 @@ describe("runScoutdServiceCommand shell-out", () => {
     }
   });
 
+  test("preserves cached web recovery from native health bodies without another probe", async () => {
+    const scoutd = writeExecutable(join(mkdtempSync(join(tmpdir(), "openscout-scoutd-web-")), "scoutd"));
+    const services = { web: { state: "running", managed: true, healthy: true, recovery: {
+      state: "healthy", checkedAt: 10, lastHealthyAt: 10, consecutiveFailures: 0, automaticRestarts: 1, lastRecovery: null,
+    } } };
+    for (const fields of [{ body: JSON.stringify({ ok: true, services }) }, { services }]) {
+      const result = await withEnv({ OPENSCOUT_SCOUTD_BIN: scoutd }, () =>
+        runScoutdServiceCommand("status", config, 45_000, async () => JSON.stringify({
+          health: { reachable: true, ok: true, ...fields },
+        })));
+      expect(result.health.services).toEqual(services);
+    }
+    for (const body of ["not JSON", "null", JSON.stringify({ services: [] })]) {
+      const result = await withEnv({ OPENSCOUT_SCOUTD_BIN: scoutd }, () =>
+        runScoutdServiceCommand("status", config, 45_000, async () => JSON.stringify({ health: { reachable: true, ok: true, body } })));
+      expect(result.health.services).toBeUndefined();
+    }
+  });
+
   test("parses scoutd JSON into the normalized status shape", async () => {
     const status = {
       label: "app.openscout",

@@ -1,3 +1,4 @@
+import { bindManagedPermissionRequester } from "./managed-permission.js";
 import type { RuntimeEnv } from "./portable-types.js";
 import { lstat, mkdir, readFile, symlink } from "node:fs/promises";
 import { join } from "node:path";
@@ -1119,7 +1120,11 @@ function withManagedCodexEnvironment<T extends SessionRequestOptions>(options: T
 async function prepareManagedCodexAuthentication(options: SessionRequestOptions): Promise<void> {
   const codexHome = options.env?.CODEX_HOME?.trim();
   const authSource = options.env?.OPENSCOUT_CODEX_AUTH_SOURCE?.trim();
-  if (!codexHome || !authSource || options.env?.OPENAI_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim()) return;
+  if (!codexHome) return;
+  await mkdir(codexHome, { recursive: true });
+  // An ambient key may belong to another tool/provider. An explicit operator
+  // auth source is authoritative unless this launch explicitly chooses API auth.
+  if (!authSource || options.env?.OPENAI_API_KEY?.trim()) return;
 
   const authTarget = join(codexHome, "auth.json");
   try {
@@ -1154,7 +1159,25 @@ async function withPreparedManagedCodexEnvironment<T extends SessionRequestOptio
   // environment never reaches it.
   if (options.connection?.mode === "attach") return options;
   await prepareManagedCodexAuthentication(options);
-  return withManagedCodexEnvironment(options);
+  const requestPermission = bindManagedPermissionRequester();
+  return withManagedCodexEnvironment({ ...options,
+    onPermissionRequest: async (request, controls) => {
+      const params = request.params ?? {};
+      const available = params.availableDecisions;
+      const once = !Array.isArray(available) || available.includes("accept");
+      const deny = !Array.isArray(available) || available.includes("decline") ? "decline"
+        : available.includes("cancel") ? "cancel" : null;
+      if (!once || !deny) return false;
+      return requestPermission({
+        sessionId: String(params.threadId), projectRoot: options.cwd,
+        text: JSON.stringify({ method: request.method, ...params }, null, 2),
+        version: `${params.threadId}:${params.turnId}:${request.id}`,
+        // Codex offers acceptForSession, not a project-wide grant. Do not relabel it.
+        decisions: ["once", "deny"], decisionLabels: { deny: deny === "cancel" ? "Cancel" : "Deny" }, isCurrent: async () => controls.isCurrent(),
+        answer: async decision => { controls.respond({ decision: decision === "once" ? "accept" : deny }); },
+      });
+    },
+  });
 }
 
 export async function ensureCodexAppServerAgentOnline(options: SessionRequestOptions): Promise<{

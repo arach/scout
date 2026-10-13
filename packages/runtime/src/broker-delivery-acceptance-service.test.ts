@@ -166,6 +166,7 @@ function createHarness(input: {
     requesterId: string;
     requesterNodeId: string;
   }> = [];
+  const operatorNeeds: MessageRecord[] = [];
   const localAgentSyncReasons: string[] = [];
   let idCounter = 0;
 
@@ -274,6 +275,7 @@ function createHarness(input: {
       dispatchedInvocations.push(invocation);
     },
     queueOperatorDeliveryIssue: (issue) => operatorIssues.push(issue),
+    recordOperatorNeed: async message => { operatorNeeds.push(message); },
     queueOperatorSignal: (signal) => operatorSignals.push(signal),
     now: () => input.now ?? 10_000,
   });
@@ -287,6 +289,7 @@ function createHarness(input: {
     localAgentSyncReasons,
     operatorIssues,
     operatorSignals,
+    operatorNeeds,
     postedMessages,
     recordedDispatches,
     recordedWorkItemPayloads,
@@ -1338,4 +1341,13 @@ test("exact-session delivery retains its disabled published runtime as continuat
     caller: { actorId: "operator", nodeId: "node-1" }, execution: { harness: "codex", model: "gpt-6-astra", reasoningEffort: "high" } });
   expect(result.kind).toBe("delivery");
   expect(harness.acceptedInvocations[0]?.execution).toMatchObject({ model: "gpt-6-astra", reasoningEffort: "high", session: "existing", targetSessionId: "retained-session" });
+});
+
+test("operator permission is durably recorded before its push is queued", async () => {
+  const harness = createHarness({ isOperatorTarget: () => true });
+  await harness.service.accept({ id: "deliver-permission", body: "May I run the deploy?", intent: "tell", targetLabel: "@operator",
+    caller: { actorId: "agent-1", nodeId: "node-1" }, operatorSignal: { kind: "need", blocking: true, replyExpectation: "required", question: "May I run the deploy?", requestKind: "permission" } });
+  expect(harness.operatorNeeds).toHaveLength(1);
+  expect(harness.operatorNeeds[0]?.metadata?.operatorSignal).toMatchObject({ requestKind: "permission" });
+  expect(harness.operatorSignals).toHaveLength(1);
 });

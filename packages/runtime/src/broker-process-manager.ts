@@ -900,6 +900,15 @@ function readNativeStorageStatus(health: Record<string, unknown>): ScoutBrokerSt
   return { journal: journal as ScoutBrokerStorageStatus["journal"] };
 }
 
+function readNativeChildServices(health: Record<string, unknown>): ScoutBrokerChildServiceSnapshots | undefined {
+  if (isRecord(health.services)) return health.services as ScoutBrokerChildServiceSnapshots;
+  if (typeof health.body !== "string") return undefined;
+  try {
+    const services = JSON.parse(health.body)?.services;
+    return isRecord(services) ? services as ScoutBrokerChildServiceSnapshots : undefined;
+  } catch { return undefined; }
+}
+
 function normalizeNativeServiceStatus(input: NativeServiceStatus, config: BrokerServiceConfig): BrokerServiceStatus {
   const healthRecord = isRecord(input.health) ? input.health : {};
   const healthReachable = readBoolean(healthRecord.reachable) ?? readBoolean(input.reachable) ?? false;
@@ -959,9 +968,7 @@ function normalizeNativeServiceStatus(input: NativeServiceStatus, config: Broker
       ...(isRecord(healthRecord.build)
         ? { build: healthRecord.build as ScoutBrokerBuildIdentity }
         : {}),
-      ...(isRecord(healthRecord.services)
-        ? { services: healthRecord.services as ScoutBrokerChildServiceSnapshots }
-        : {}),
+      services: readNativeChildServices(healthRecord),
       storage: readNativeStorageStatus(healthRecord),
       error: healthError,
     },

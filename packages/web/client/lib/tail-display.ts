@@ -225,7 +225,7 @@ const CLAUDE_TOOL_CALL = /^([A-Za-z][\w-]*)(?:\s+([\s\S]+))?$/;
 export const TOOL_COMBINED_RESULT = /^([\s\S]+?)\s+->\s+res:\s*([\s\S]+)$/;
 // Conservative failure signals only — a free-text preview like "0 errors" or
 // "no errors" is a SUCCESS, so we never flag the bare word "error(s)".
-const CLAUDE_RESULT_ERROR = /\b(?:failed|failure|exception|fatal|denied|traceback)\b|error:/i;
+const CLAUDE_RESULT_ERROR = /\b(?:failed|failure|exception|fatal|denied|traceback)\b|error:|^\s*exit code [1-9]/i;
 
 export function parseToolCombinedResult(summary: string): { command: string; preview: string } | null {
   const match = summary.trim().match(TOOL_COMBINED_RESULT);
@@ -532,3 +532,30 @@ export const TAIL_KIND_LABEL: Record<TailEventKind, string> = {
   system: "SYS",
   other: "EVT",
 };
+
+function rawRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+/**
+ * Codex logs a finished shell step as `item_completed`, with the command's
+ * outcome inside (`item.status: "failed"`, `exit_code`). The issue classifier
+ * reads that outcome, so a failed command is flagged; the row should then say
+ * "command failed", not "item_completed" beside an error mark.
+ */
+export function tailSummaryLabel(event: TailEvent): string {
+  const summary = event.summary;
+  if (event.source !== "codex" || summary.trim() !== "item_completed") return summary;
+  const item = rawRecord(rawRecord(rawRecord(event.raw)?.payload)?.item);
+  if (!item || item.type !== "CommandExecution") return summary;
+  const command = Array.isArray(item.command) && item.command.every((part) => typeof part === "string")
+    ? (item.command.length >= 3 && /(?:^|\/)(?:ba|z|da)?sh$/.test(String(item.command[0])) ? String(item.command[2]) : item.command.join(" "))
+    : "";
+  const head = command.replace(/\s+/g, " ").trim();
+  const exit = typeof item.exit_code === "number" ? item.exit_code : null;
+  const failed = item.status === "failed" || (exit !== null && exit !== 0);
+  const outcome = failed
+    ? exit !== null && exit !== 0 ? `command failed · exit ${exit}` : "command failed"
+    : "command done";
+  return head ? `${outcome} · ${head}` : outcome;
+}

@@ -199,6 +199,119 @@ function targetErrorUrl(target: MeshForwardTarget): string {
 /* ── Tests ── */
 
 describe("peer-delivery outbox worker", () => {
+  test("forwards past 500 historical and not-yet-due peer deliveries", async () => {
+    const invocation = makeInvocation("fresh-inv", "remote-session");
+    const peer = makeNode("peer", "https://mini.tailnet.test.:43110");
+    const h = makeHarness({ invocation, peer });
+    h.setForward(async () => ({ ok: true, flight: {
+      id: "remote-flight", invocationId: invocation.id, requesterId: invocation.requesterId,
+      targetAgentId: invocation.targetAgentId, state: "running",
+    } }));
+    for (let i = 0; i < 600; i++) {
+      h.deliveries.set(`old-${i}`, {
+        id: `old-${i}`, targetId: "old", targetKind: "agent", transport: "peer_broker",
+        reason: "invocation", policy: "must_ack", status: i % 2 ? "peer_acked" : "deferred",
+        metadata: { nextAttemptAt: 100000 },
+      });
+    }
+    const worker = createPeerDeliveryWorker(h.deps);
+    const delivery = await worker.enqueue(invocation, peer);
+    await worker.tick();
+    expect(h.deliveries.get(delivery.id)?.status).toBe("peer_acked");
+    expect(h.attempts.get(delivery.id)).toHaveLength(1);
+    worker.stop();
+  });
+
+  test("a large eligible backlog is drained with bounded forwarding concurrency", async () => {
+    const invocation = makeInvocation("batch", "remote-session");
+    const peer = makeNode("peer", "http://peer:43110");
+    const h = makeHarness({ invocation, peer });
+    h.deps.invocationFor = id => ({ ...invocation, id });
+    let active = 0, peak = 0, sent = 0;
+    h.deps.forward = async (_target, bundle) => {
+      active++; peak = Math.max(peak, active);
+      await Bun.sleep(1);
+      active--; sent++;
+      return { ok: true, flight: { id: `flight-${bundle.invocation.id}`,
+        invocationId: bundle.invocation.id, requesterId: invocation.requesterId,
+        targetAgentId: invocation.targetAgentId, state: "running" } };
+    };
+    for (let i = 0; i < 40; i++) h.deliveries.set(`batch-${i}`, {
+      id: `batch-${i}`, invocationId: `batch-inv-${i}`, targetId: invocation.targetAgentId,
+      targetNodeId: peer.id, targetKind: "agent", transport: "peer_broker", reason: "invocation",
+      policy: "must_ack", status: "accepted",
+    });
+    const worker = createPeerDeliveryWorker(h.deps);
+    await worker.tick();
+    expect(sent).toBe(40);
+    expect(peak).toBeLessThanOrEqual(16);
+    expect([...h.deliveries.values()].every(d => d.status === "peer_acked")).toBe(true);
+    worker.stop();
+  });
+
+  test("recovery reuses the peer outbox identity without resetting its retry budget", async () => {
+    const invocation = makeInvocation("retry-inv", "remote-session");
+    const peer = makeNode("peer", "http://peer:43110");
+    const h = makeHarness({ invocation, peer });
+    h.setForward(async () => { throw new PeerUnreachableError("offline"); });
+    const worker = createPeerDeliveryWorker(h.deps);
+    const delivery = await worker.enqueue(invocation, peer);
+    await worker.tick();
+    h.setNow(100);
+    const recovered = await worker.enqueue(invocation, peer);
+    await worker.tick();
+    expect(recovered.id).toBe(delivery.id);
+    expect(h.deliveries.size).toBe(1);
+    expect(h.attempts.get(delivery.id)).toHaveLength(1);
+    expect(h.deliveries.get(delivery.id)?.metadata?.firstAttemptQueuedAt).toBe(0);
+    worker.stop();
+  });
+
+  test("concurrent recovery enqueues share one durable peer receipt", async () => {
+    const invocation = makeInvocation("concurrent-inv", "remote-session");
+    const peer = makeNode("peer", "http://peer:43110");
+    const h = makeHarness({ invocation, peer });
+    const write = h.deps.recordDelivery;
+    h.deps.recordDelivery = async (delivery) => { await Bun.sleep(1); await write(delivery); };
+    const worker = createPeerDeliveryWorker(h.deps);
+    const [a, b] = await Promise.all([worker.enqueue(invocation, peer), worker.enqueue(invocation, peer)]);
+    await worker.tick();
+    expect(a.id).toBe(b.id);
+    expect(h.deliveries.size).toBe(1);
+    worker.stop();
+  });
+
+  test("cancelled flights never forward their pending peer deliveries", async () => {
+    const invocation = makeInvocation("cancelled-inv", "remote-session");
+    const peer = makeNode("peer", "http://peer:43110");
+    const h = makeHarness({ invocation, peer });
+    h.flights.push({ id: "closed", invocationId: invocation.id, requesterId: invocation.requesterId,
+      targetAgentId: invocation.targetAgentId, state: "cancelled" });
+    const worker = createPeerDeliveryWorker(h.deps);
+    const delivery = await worker.enqueue(invocation, peer);
+    await worker.tick();
+    expect(h.deliveries.get(delivery.id)?.status).toBe("cancelled");
+    expect(h.attempts.size).toBe(0);
+    worker.stop();
+  });
+
+  test("legacy duplicate receipts are retired without another peer send", async () => {
+    const invocation = makeInvocation("legacy-inv", "remote-session");
+    const peer = makeNode("peer", "http://peer:43110");
+    const h = makeHarness({ invocation, peer });
+    const canonical: DeliveryIntent = { id: "original", invocationId: invocation.id,
+      targetId: invocation.targetAgentId, targetNodeId: peer.id, targetKind: "agent",
+      transport: "peer_broker", reason: "invocation", policy: "must_ack", status: "peer_acked" };
+    h.deliveries.set(canonical.id, canonical);
+    h.deliveries.set("duplicate", { ...canonical, id: "duplicate", status: "accepted" });
+    const worker = createPeerDeliveryWorker(h.deps);
+    await worker.tick();
+    expect(h.deliveries.get("duplicate")?.status).toBe("cancelled");
+    expect(h.deliveries.get("duplicate")?.metadata?.supersededPeerDeliveryId).toBe("original");
+    expect(h.attempts.size).toBe(0);
+    worker.stop();
+  });
+
   test("on success, marks delivery peer_acked and records the returned flight", async () => {
     const invocation = makeInvocation("inv-1", "scout.main.mini");
     const agent = makeAgent("scout.main.mini", "mini-node");

@@ -74,3 +74,23 @@ export function compileCodexPermissionProfile(
       };
   }
 }
+
+/** A fresh isolated session must retain its card's permission boundary. */
+export function isolatedCodexPermissionMetadata(
+  harness: string,
+  base: { harness?: string; metadata?: Record<string, unknown> } | null,
+  requested?: ScoutPermissionProfile,
+): Record<string, unknown> {
+  if (harness !== "codex") return {};
+  if (requested) {
+    const posture = compileCodexPermissionProfile(requested);
+    return { permissionProfile: posture.profile, approvalPolicy: posture.approvalPolicy,
+      sandbox: posture.sandbox, permissionEnforcement: posture.enforcement };
+  }
+  if (base?.harness !== "codex") return {};
+  const inherited: Record<string, unknown> = {};
+  for (const key of ["permissionProfile", "approvalPolicy", "sandbox", "permissionEnforcement"]) {
+    if (base.metadata?.[key] !== undefined) inherited[key] = base.metadata[key];
+  }
+  return inherited;
+}

@@ -126,8 +126,9 @@ Implemented now:
 Not done yet:
 
 - Answering `question` items from the iOS Inbox.
-- Host-level capture beyond the managed Claude tmux permission-confirmation
-  path, including Codex, non-tmux Claude, and MCP permission prompts.
+- Host-level capture beyond managed Claude tmux and owned Codex command/file
+  approval requests, including non-tmux Claude, attached foreign Codex, ACP
+  attention bridging, and MCP client permission prompts.
 - General desktop/web notification sinks for session attention beyond the
   optional Linux broker-event observer.
 - Cross-device read/dismiss/decision synchronization beyond the current inbox item refresh. Current non-approval dismiss is intentionally local-only.
@@ -189,3 +190,52 @@ The session inbox can continue projecting lightweight items, but durable host an
    - host permissions call host-specific grant/deny callbacks.
    - work/review items call collaboration update APIs.
 6. Add stale sweeps for `waiting`, `review`, and unresolved host permissions.
+
+## Managed permission requests
+
+Scout-driven Claude tmux and owned Codex app-server invocations have a broker
+permission bridge. `BrokerPermissionService` writes a durable `question` record
+with `metadata.permissionRequest`, containing the exact visible prompt or native
+request parameters, project root, live session, invocation, flight, version and
+available decisions. The flight is `waiting` with `waitingOnPermission: true`.
+The existing operator-signal push path carries the prompt through its sealed
+paired-device notification; APNs alert text and custom payload remain generic.
+
+`POST /api/operator-attention/permissions/decide` forwards
+`{ requestId, version, decision: "once" | "project" | "deny" }` to the
+machine-local broker route `POST /v1/permissions/decide`. The broker owns the
+pending live callback, records an actuation attempt, rejects duplicate/stale
+answers, and sends only to that process. The Requests page and Scoutbot share
+this API through `useRequestActions`. No background resume, fork, or project hook
+is installed. A broker restart loses the live callback: surviving records cannot
+be actuated and return a conflict requiring the operator to open the session.
+
+Permission scope is not invented:
+
+- Claude folder trust offers **Allow for project** and **Deny**. Claude persists
+  trust itself; presenting that choice as **Allow once** would be misleading.
+- Claude tool dialogs offer **Allow once** and **Deny**; **Allow for project** is
+  exposed only when the live native menu explicitly offers project/folder/
+  directory-scoped permission (including the exact project path). Switching to auto mode is not a project grant.
+- Codex command/file approval requests offer **Allow once** and **Deny**.
+  `acceptForSession` is not relabeled as a project grant. Scout does not write a
+  persistent Codex policy amendment in this bridge.
+
+### Capture and answer map
+
+| Harness / surface | Detection and current boundary | Live answer path |
+| --- | --- | --- |
+| Claude folder trust, managed tmux | `local-agents.ts`: `waitForReadyComposer`, `tmuxPaneTailBlockingHarnessDialog`; `tmux-permission.ts`: `parseTmuxPermission`. Human wait does not spend the boot deadline. | Re-read the bound pane, select the visible trust/exit choice, `tmux send-keys`; confirm the prompt leaves before continuing startup. |
+| Claude tool approvals, managed tmux | `parseTmuxPermission` uses `continuation/dialog.ts`; capture during dispatch verification and reply polling. Unparsed dialogs stay native. | Revalidate the visible dialog fingerprint, send its offered choice to the bound live pane, verify disappearance. |
+| Claude, Herdr | Web `herdr-host-attention.ts` and `herdr-continuation.ts` already parse blocked panes. Not ingested by this broker permission bridge. | Existing `herdr-permission-answer.ts`: `answerHerdrPermission`, audited/revalidated `herdr agent send-keys`; currently a separate path. |
+| Claude stream JSON / pairing adapter | Runtime `claude-stream-json.ts` observes result `permission_denials`; Claude adapter spec declares no normalized approval decision channel. Not an interactive permission bridge. | Needs a native bidirectional control channel; cannot turn a terminal denial/result into a live grant. |
+| Codex, Scout-owned app-server | Agent-sessions `local/transports/codex-app-server.ts`: `handleServerRequest`, runtime `codex-app-server.ts`: bound `onPermissionRequest`. Command/file approval requests are held instead of receiving an unsupported-request error. | Reply to the same JSON-RPC request id on the existing stdio transport; bind thread/turn/request identity. Attached foreign app-servers are excluded. |
+| ACP: Grok / OpenCode / Kimi / Devin / Cursor | Agent-sessions `adapters/acp/adapter.ts`: `handlePermissionRequest` supports interactive, safe-reject, and auto-approve policies. Kimi/Devin broker invocations currently auto-approve; Cursor safe-rejects. Grok/OpenCode use adapter defaults. No new bridge in this slice. | Adapter `decide` answers `session/request_permission` on the existing ACP process. Policy changes and attention ingestion remain separate work. |
+| Grok tmux and Claude Ghostty / unowned terminals | `local-agents.ts` checks Grok composer readiness and delivers to attached terminals, but has no permission parser for these surfaces. This bridge does not inject hooks or scrape arbitrary foreign sessions. | Native host input; a future explicit host integration must bind a live prompt before sending keys. |
+| Pi RPC and unowned terminal/client prompts | No permission request ingress in `pi-rpc.ts`; unowned MCP client prompts remain invisible to the server. | Native host UI or an explicit host-owned integration; no hooks injected into foreign sessions. |
+
+`scout operator --question/--permission` now also writes a collaboration question
+linked to its durable message. The existing declared-message Requests projection
+and offered-answer reply path remain; a threaded operator reply closes the
+collaboration record. This manual question is not authority to grant a native
+harness permission and does not manufacture a waiting flight.

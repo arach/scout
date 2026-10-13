@@ -88,7 +88,7 @@ describe("BrokerWebControlService", () => {
   test("reports child service snapshots without probing web health", () => {
     const service = new BrokerWebControlService({
       brokerControlUrl: "http://127.0.0.1:4321",
-      env: { OPENSCOUT_WEB_PORT: "4321" },
+      env: { OPENSCOUT_WEB_AUTH_TOKEN: "test-web-token", OPENSCOUT_WEB_PORT: "4321" },
       healthCheck: async () => false,
       resolveWebPort: () => 4321,
     });
@@ -105,7 +105,7 @@ describe("BrokerWebControlService", () => {
   test("refuses to restart a healthy web server the broker does not own", async () => {
     const service = new BrokerWebControlService({
       brokerControlUrl: "http://127.0.0.1:4321",
-      env: { OPENSCOUT_WEB_PORT: "4321" },
+      env: { OPENSCOUT_WEB_AUTH_TOKEN: "test-web-token", OPENSCOUT_WEB_PORT: "4321" },
       healthCheck: async () => true,
       resolveWebPort: () => 4321,
     });
@@ -128,6 +128,8 @@ describe("BrokerWebControlService", () => {
       brokerControlUrl: "http://127.0.0.1:4321",
       tailnetWebHosts: ["tailnet.example.test"],
       env: {
+        OPENSCOUT_WEB_AUTH_TOKEN: "test-web-token",
+        OPENSCOUT_WEB_LAN_SCOPE: "pairing",
         OPENSCOUT_WEB_PORT: "4321",
         OPENSCOUT_SETUP_CWD: "/repo",
         OPENSCOUT_WEB_TRUSTED_HOSTS: "scout.local",
@@ -188,7 +190,7 @@ describe("BrokerWebControlService", () => {
     let healthChecks = 0;
     const service = new BrokerWebControlService({
       brokerControlUrl: "http://127.0.0.1:4321",
-      env: { OPENSCOUT_WEB_PORT: "4321" },
+      env: { OPENSCOUT_WEB_AUTH_TOKEN: "test-web-token", OPENSCOUT_WEB_PORT: "4321" },
       healthCheck: async () => {
         healthChecks += 1;
         return healthChecks >= 2;
@@ -228,7 +230,7 @@ describe("BrokerWebControlService", () => {
     let healthChecks = 0;
     const service = new BrokerWebControlService({
       brokerControlUrl: "http://127.0.0.1:4321",
-      env: { OPENSCOUT_WEB_PORT: "4321" },
+      env: { OPENSCOUT_WEB_AUTH_TOKEN: "test-web-token", OPENSCOUT_WEB_PORT: "4321" },
       healthCheck: async () => {
         healthChecks += 1;
         return healthChecks >= 2;
@@ -255,7 +257,7 @@ describe("BrokerWebControlService", () => {
     let spawnCount = 0;
     const service = new BrokerWebControlService({
       brokerControlUrl: "http://127.0.0.1:4321",
-      env: { OPENSCOUT_WEB_PORT: "4321" },
+      env: { OPENSCOUT_WEB_AUTH_TOKEN: "test-web-token", OPENSCOUT_WEB_PORT: "4321" },
       healthCheck: () => new Promise<boolean>((resolve) => {
         resolveHealthCheck = resolve;
       }),
@@ -282,7 +284,7 @@ describe("BrokerWebControlService", () => {
     let healthy = false;
     const service = new BrokerWebControlService({
       brokerControlUrl: "http://127.0.0.1:4321",
-      env: { OPENSCOUT_WEB_PORT: "4321" },
+      env: { OPENSCOUT_WEB_AUTH_TOKEN: "test-web-token", OPENSCOUT_WEB_PORT: "4321" },
       healthCheck: async () => healthy,
       spawnProcess() {
         return children[spawnCount++]!;
@@ -310,5 +312,159 @@ describe("BrokerWebControlService", () => {
     expect(restarted.ok).toBe(true);
     expect(spawnCount).toBe(2);
     expect(restarted.pid).toBe(1002);
+  });
+});
+
+function monitoredService(options: { startupHealthy?: boolean; healthMaxRestarts?: number } = {}) {
+  let now = 100_000;
+  const children: FakeChildProcess[] = [];
+  const responsive = new Map<number, boolean>();
+  const signals: Array<{ pid: number; signal: string }> = [];
+  const events: string[] = [];
+  let probes = 0;
+  const service = new BrokerWebControlService({
+    brokerControlUrl: "http://127.0.0.1:4321",
+    env: { OPENSCOUT_WEB_AUTH_TOKEN: "test-token", OPENSCOUT_WEB_PORT: "4321", OPENSCOUT_WEB_LAN_SCOPE: "pairing" },
+    now: () => now,
+    healthMonitorIntervalMs: 0,
+    healthMaxRestarts: options.healthMaxRestarts,
+    startPollTimeoutMs: 0,
+    stopTimeoutMs: 0,
+    healthCheck: async () => {
+      probes += 1;
+      const child = children.at(-1);
+      return Boolean(child && child.exitCode === null && responsive.get(child.pid!));
+    },
+    spawnProcess() {
+      const child = fakeChild(2000 + children.length);
+      responsive.set(child.pid!, children.length > 0 || options.startupHealthy !== false);
+      child.kill = (signal) => {
+        signals.push({ pid: child.pid!, signal: String(signal) });
+        if (signal === "SIGKILL") child.emitExit();
+        return true;
+      };
+      children.push(child);
+      return child;
+    },
+    resolveEntry: () => "/repo/packages/web/server/index.ts",
+    resolveBun: () => ({ path: "/usr/local/bin/bun" }),
+    resolveLogPath: () => "/dev/null",
+    log: (event) => events.push(event),
+    warn: (event) => events.push(event),
+  });
+  return {
+    service, children, signals, events,
+    probes: () => probes,
+    advance: (ms: number) => { now += ms; },
+    setHealthy: (value: boolean) => responsive.set(children.at(-1)!.pid!, value),
+    async failThree() {
+      this.setHealthy(false);
+      for (let n = 0; n < 3; n++) {
+        this.advance(10_000);
+        await service.checkManagedHealth();
+      }
+    },
+  };
+}
+
+describe("managed web health recovery", () => {
+  test("one delayed probe is quiet and a later success resets suspicion", async () => {
+    const rig = monitoredService();
+    try {
+      await rig.service.startIfNeeded();
+      await rig.service.checkManagedHealth();
+      rig.setHealthy(false);
+      rig.advance(10_000);
+      await rig.service.checkManagedHealth();
+      expect(rig.service.recoveryStatus().state).toBe("suspect");
+      expect(rig.service.readChildServiceSnapshots().web?.healthy).toBeNull();
+      expect(rig.signals).toHaveLength(0);
+      rig.setHealthy(true);
+      rig.advance(10_000);
+      await rig.service.checkManagedHealth();
+      expect(rig.service.recoveryStatus()).toMatchObject({ state: "healthy", consecutiveFailures: 0, automaticRestarts: 0 });
+      expect(rig.events.filter((event) => event.includes("scout-web-health"))).toHaveLength(0);
+      const before = rig.probes();
+      expect(rig.service.readChildServiceSnapshots().web?.healthy).toBe(true);
+      expect(rig.probes()).toBe(before);
+    } finally { await rig.service.stop(); }
+  });
+
+  test("repeated failures force the stuck owned child out before one replacement", async () => {
+    const rig = monitoredService();
+    try {
+      await rig.service.startIfNeeded();
+      await rig.service.checkManagedHealth();
+      await rig.failThree();
+      expect(rig.signals).toEqual([{ pid: 2000, signal: "SIGTERM" }, { pid: 2000, signal: "SIGKILL" }]);
+      expect(rig.children).toHaveLength(2);
+      expect(rig.children[0]!.exitCode).not.toBeNull();
+      expect(rig.service.recoveryStatus()).toMatchObject({ state: "healthy", automaticRestarts: 1,
+        lastRecovery: { startedAt: 130_000, recoveredAt: 130_000, previousPid: 2000, replacementPid: 2001 } });
+      expect(rig.events.filter((event) => event.includes("exited unexpectedly"))).toHaveLength(0);
+    } finally { await rig.service.stop(); }
+  });
+
+  test("startup grace and interrupted observation do not trigger recovery", async () => {
+    const rig = monitoredService({ startupHealthy: false });
+    try {
+      await rig.service.startIfNeeded();
+      await rig.failThree();
+      expect(rig.signals).toHaveLength(0);
+      rig.advance(40_000);
+      await rig.service.checkManagedHealth();
+      expect(rig.service.recoveryStatus().consecutiveFailures).toBe(1);
+      rig.advance(60_000); // parent asleep / unable to observe
+      await rig.service.checkManagedHealth();
+      expect(rig.service.recoveryStatus().consecutiveFailures).toBe(1);
+      expect(rig.signals).toHaveLength(0);
+    } finally { await rig.service.stop(); }
+  });
+
+  test("repeated interruptions pause recovery until an explicit restart", async () => {
+    const rig = monitoredService({ healthMaxRestarts: 1 });
+    try {
+      await rig.service.startIfNeeded();
+      await rig.service.checkManagedHealth();
+      await rig.failThree();
+      await rig.service.checkManagedHealth();
+      await rig.failThree();
+      expect(rig.service.recoveryStatus()).toMatchObject({ state: "paused", automaticRestarts: 1 });
+      expect(rig.children).toHaveLength(2);
+      await rig.failThree();
+      expect(rig.events.filter((event) => event.includes("recovery paused"))).toHaveLength(1);
+      await rig.service.restartIfManaged();
+      await rig.service.checkManagedHealth();
+      await rig.failThree();
+      expect(rig.service.recoveryStatus().automaticRestarts).toBe(2);
+    } finally { await rig.service.stop(); }
+  });
+
+  test("concurrent manual restart and start share the replacement and stop disables monitoring", async () => {
+    const rig = monitoredService();
+    await rig.service.startIfNeeded();
+    const [one, two, three] = await Promise.all([
+      rig.service.restartIfManaged(), rig.service.restartIfManaged(), rig.service.startIfNeeded(),
+    ]);
+    expect(rig.children).toHaveLength(2);
+    expect([one.pid, two.pid, three.pid]).toEqual([2001, 2001, 2001]);
+    await rig.service.stop();
+    const before = rig.probes();
+    await rig.service.checkManagedHealth();
+    expect(rig.probes()).toBe(before);
+    expect((await rig.service.restartIfManaged()).ok).toBe(false);
+    expect(rig.children).toHaveLength(2);
+  });
+
+  test("unowned services are never monitored or killed", async () => {
+    let probes = 0;
+    const service = new BrokerWebControlService({
+      brokerControlUrl: "http://localhost:4321",
+      env: { OPENSCOUT_WEB_AUTH_TOKEN: "test-token", OPENSCOUT_WEB_PORT: "4321" },
+      healthCheck: async () => { probes++; return false; },
+    });
+    await service.checkManagedHealth();
+    expect(probes).toBe(0);
+    expect(service.recoveryStatus().automaticRestarts).toBe(0);
   });
 });

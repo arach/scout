@@ -1,3 +1,4 @@
+import { withManagedPermissionContext } from "./managed-permission.js";
 import { redactSecrets } from "@openscout/agent-sessions/secret-redaction";
 import { isCodexAppServerControlError } from "@openscout/agent-sessions/local";
 import { readRuntimeMessage } from "./broker-message-records.js";
@@ -253,7 +254,7 @@ export class BrokerLocalInvocationService {
     }
 
     const task = Promise.resolve()
-      .then(() => this.execute(invocation))
+      .then(() => withManagedPermissionContext(invocation, () => this.execute(invocation)))
       .catch((error) => {
         this.options.error?.(`[openscout-runtime] local invocation ${invocation.id} crashed:`, error);
       })

@@ -949,6 +949,11 @@ CREATE INDEX IF NOT EXISTS idx_messages_conversation_created_at
   ON messages (conversation_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_messages_conversation_epoch_id
   ON messages (conversation_id, CASE WHEN created_at > 0 AND created_at < 1000000000000 THEN created_at * 1000 ELSE created_at END DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_epoch_id ON messages (CASE WHEN created_at IS NULL THEN NULL WHEN CAST(created_at AS REAL) < 1000000000000 THEN CAST(CAST(created_at AS REAL) * 1000 AS INTEGER) ELSE CAST(created_at AS INTEGER) END DESC, id);
+CREATE INDEX IF NOT EXISTS idx_deliveries_failure_epoch_id ON deliveries (CASE WHEN created_at IS NULL THEN NULL WHEN CAST(created_at AS REAL) < 1000000000000 THEN CAST(CAST(created_at AS REAL) * 1000 AS INTEGER) ELSE CAST(created_at AS INTEGER) END DESC, id) WHERE status IN ('failed', 'cancelled');
+CREATE INDEX IF NOT EXISTS idx_dispatches_epoch_id ON scout_dispatches (CASE WHEN dispatched_at IS NULL THEN NULL WHEN CAST(dispatched_at AS REAL) < 1000000000000 THEN CAST(CAST(dispatched_at AS REAL) * 1000 AS INTEGER) ELSE CAST(dispatched_at AS INTEGER) END DESC, id);
+CREATE INDEX IF NOT EXISTS idx_delivery_attempts_epoch_id ON delivery_attempts (CASE WHEN created_at IS NULL THEN NULL WHEN CAST(created_at AS REAL) < 1000000000000 THEN CAST(CAST(created_at AS REAL) * 1000 AS INTEGER) ELSE CAST(created_at AS INTEGER) END DESC, id);
+CREATE INDEX IF NOT EXISTS idx_activity_items_epoch ON activity_items (CASE WHEN ts IS NULL THEN NULL WHEN CAST(ts AS REAL) < 1000000000000 THEN CAST(CAST(ts AS REAL) * 1000 AS INTEGER) ELSE CAST(ts AS INTEGER) END DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_created_at
   ON messages (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_actor_created_at

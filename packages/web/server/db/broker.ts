@@ -228,6 +228,7 @@ function queryMessageRows(options: {
   since?: number | null;
   sortIdExpression: string;
   likelyBrokerRoutedOnly?: boolean;
+  includeMetadata?: boolean;
 }): MessageRow[] {
   const tsExpression = sqlTimestampMsExpression("m.created_at");
   const predicates: string[] = [];
@@ -263,12 +264,12 @@ function queryMessageRows(options: {
          ac.display_name AS actor_name,
          m.body,
          m.class,
-         m.metadata_json,
+         ${options.includeMetadata === false ? "NULL AS metadata_json" : "m.metadata_json"},
          m.created_at
        FROM messages m
        LEFT JOIN actors ac ON ac.id = m.actor_id
        ${whereClause(predicates)}
-       ORDER BY ts DESC, sort_id ASC
+       ORDER BY ts DESC, m.id ASC
        LIMIT ?`,
     )
     .all(...params) as MessageRow[];
@@ -362,7 +363,7 @@ function countRoutedMessagesSince(since: number): number {
   return count;
 }
 
-function queryDispatchRows(limit: number, cursor: BrokerCursor | null, since?: number): DispatchRow[] {
+function queryDispatchRows(limit: number, cursor: BrokerCursor | null, since?: number, includeEvidence = true): DispatchRow[] {
   const tsExpression = sqlTimestampMsExpression("sd.dispatched_at");
   const sortIdExpression = "'dispatch:' || sd.id";
   const predicates: string[] = [];
@@ -392,14 +393,14 @@ function queryDispatchRows(limit: number, cursor: BrokerCursor | null, since?: n
          sd.requester_id,
          ac.display_name AS actor_name,
          sd.dispatched_at,
-         sd.payload_json,
-         inv.execution_json AS invocation_execution_json,
-         inv.execution_resolution_json AS invocation_execution_resolution_json
+         ${includeEvidence ? "sd.payload_json" : "NULL AS payload_json"},
+         ${includeEvidence ? "inv.execution_json" : "NULL"} AS invocation_execution_json,
+         ${includeEvidence ? "inv.execution_resolution_json" : "NULL"} AS invocation_execution_resolution_json
        FROM scout_dispatches sd
        LEFT JOIN actors ac ON ac.id = sd.requester_id
-       LEFT JOIN invocations inv ON inv.id = sd.invocation_id
+       ${includeEvidence ? "LEFT JOIN invocations inv ON inv.id = sd.invocation_id" : ""}
        ${whereClause(predicates)}
-       ORDER BY ts DESC, sort_id ASC
+       ORDER BY ts DESC, sd.id ASC
        LIMIT ?`,
     )
     .all(...params) as DispatchRow[];
@@ -466,11 +467,12 @@ export function dispatchEvidenceFromPayload(payloadJson: string | null): Record<
   return evidence;
 }
 
-function queryFailedDeliveryRows(limit: number, cursor: BrokerCursor | null, since?: number): DeliveryRow[] {
+function queryFailedDeliveryRows(limit: number, cursor: BrokerCursor | null, since?: number, includeEvidence = true): DeliveryRow[] {
   const tsExpression = sqlTimestampMsExpression("d.created_at");
   const sortIdExpression = "'delivery:' || d.id";
-  const predicates: string[] = [`d.status IN (${FAILED_DELIVERY_STATUSES.map(() => "?").join(", ")})`];
-  const params: SQLQueryBindings[] = [...FAILED_DELIVERY_STATUSES];
+  // Literal fixed statuses let SQLite prove the partial index predicate.
+  const predicates: string[] = ["d.status IN ('failed', 'cancelled')"];
+  const params: SQLQueryBindings[] = [];
   if (typeof since === "number") {
     predicates.push(`${tsExpression} >= ?`);
     params.push(since);
@@ -482,9 +484,7 @@ function queryFailedDeliveryRows(limit: number, cursor: BrokerCursor | null, sin
   }
   params.push(limit);
 
-  return db()
-    .prepare(
-      `SELECT
+  const sql = `SELECT
          d.id,
          ${sortIdExpression} AS sort_id,
          ${tsExpression} AS ts,
@@ -492,28 +492,37 @@ function queryFailedDeliveryRows(limit: number, cursor: BrokerCursor | null, sin
          m.actor_id AS message_actor_id,
          sender.display_name AS message_actor_name,
          m.body AS message_body,
-         m.metadata_json AS message_metadata_json,
+         ${includeEvidence ? "m.metadata_json" : "NULL"} AS message_metadata_json,
          d.invocation_id,
          d.target_id,
          d.transport,
          d.reason,
          d.status,
          d.created_at,
-         d.metadata_json,
-         inv.execution_json AS invocation_execution_json,
-         inv.execution_resolution_json AS invocation_execution_resolution_json,
+         ${includeEvidence ? "d.metadata_json" : "NULL AS metadata_json"},
+         ${includeEvidence ? "inv.execution_json" : "NULL"} AS invocation_execution_json,
+         ${includeEvidence ? "inv.execution_resolution_json" : "NULL"} AS invocation_execution_resolution_json,
          m.conversation_id,
          ac.display_name AS actor_name
-       FROM deliveries d
+       FROM deliveries d INDEXED BY idx_deliveries_failure_epoch_id
        LEFT JOIN messages m ON m.id = d.message_id
        LEFT JOIN actors sender ON sender.id = m.actor_id
        LEFT JOIN actors ac ON ac.id = d.target_id
-       LEFT JOIN invocations inv ON inv.id = d.invocation_id
+       ${includeEvidence ? "LEFT JOIN invocations inv ON inv.id = d.invocation_id" : ""}
        ${whereClause(predicates)}
-       ORDER BY ts DESC, sort_id ASC
-       LIMIT ?`,
-    )
-    .all(...params) as DeliveryRow[];
+       ORDER BY ts DESC, d.id ASC
+       LIMIT ?`;
+  // The status index otherwise wins SQLite's estimate and sorts every old
+  // failure, including message payload joins, before LIMIT. Use ordered reads.
+  let statement;
+  try {
+    statement = db().prepare(sql);
+  } catch (error) {
+    // Mixed-version startup: the broker may not yet have installed the index.
+    if (!(error instanceof Error) || !error.message.includes("idx_deliveries_failure_epoch_id")) throw error;
+    statement = db().prepare(sql.replace(" INDEXED BY idx_deliveries_failure_epoch_id", ""));
+  }
+  return statement.all(...params) as DeliveryRow[];
 }
 
 function failedDeliveryFromRow(row: DeliveryRow): WebBrokerRouteAttempt {
@@ -617,7 +626,7 @@ function queryDeliveryAttemptRows(limit: number, cursor: BrokerCursor | null, si
        LEFT JOIN actors ac ON ac.id = d.target_id
        LEFT JOIN invocations inv ON inv.id = d.invocation_id
        ${whereClause(predicates)}
-       ORDER BY ts DESC, sort_id ASC
+       ORDER BY ts DESC, da.id ASC
        LIMIT ?`,
     )
     .all(...params) as DeliveryAttemptRow[];
@@ -650,6 +659,19 @@ function deliveryAttemptFromRow(row: DeliveryAttemptRow): WebBrokerRouteAttempt 
         null,
       ),
     },
+  };
+}
+
+/** The attention poll needs configuration hints, not a complete diagnostics ledger. */
+export function queryBrokerAttentionHints(opts: { limit?: number; windowMs?: number } = {}): Pick<
+  WebBrokerDiagnostics, "failedQueries" | "failedDeliveries" | "dialogue"
+> {
+  const limit = opts.limit ?? 160;
+  const since = Date.now() - (opts.windowMs ?? DEFAULT_BROKER_WINDOW_MS);
+  return {
+    failedQueries: queryDispatchRows(limit, null, since, false).map(failedQueryFromRow),
+    failedDeliveries: queryFailedDeliveryRows(limit, null, since, false).map(failedDeliveryFromRow),
+    dialogue: queryMessageRows({ limit, since, sortIdExpression: "m.id", includeMetadata: false }).map(dialogueItemFromRow),
   };
 }
 

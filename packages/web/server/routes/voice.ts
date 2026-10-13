@@ -1,3 +1,4 @@
+import { markScoutApiExpectedWait } from "../server-core.ts";
 import type { AmbientVoiceController } from "../ambient-voice-controller.ts";
 import { finalizeLiveSession } from "../live-finalization.ts";
 import type { ScoutbotUsageStore } from "../scoutbot-usage.ts";
@@ -455,6 +456,7 @@ export function mountScoutVoiceRoutes(app: Hono, deps: ScoutVoiceRouteDeps = {})
     const timeoutMs = parseOptionalPositiveInt(c.req.query("timeoutMs"), 25_000) ?? 25_000;
     const instanceId = c.req.query("instanceId")?.trim();
     try {
+      markScoutApiExpectedWait(c.req.raw, timeoutMs);
       return c.json(await awaitScoutVoiceHostCommand(hostId, timeoutMs, instanceId, c.req.raw.signal));
     } catch (error) {
       return jsonScoutVoiceSessionError(error);

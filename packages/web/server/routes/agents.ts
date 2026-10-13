@@ -9,6 +9,7 @@ import {
 } from "@openscout/protocol";
 import { collectOccupiedDefinitionIdsFromBrokerSnapshot, resolveProjectProvisionalAgentName } from "@openscout/runtime";
 import { coalesce } from "../server-core.ts";
+import { createPollingReadCache, pollingReadFailureResponse } from "../polling-read-cache.ts";
 import { resolveTerminalSurface } from "../core/terminal-surfaces.ts";
 import { cachedRepoKeysByRoot } from "../core/repo-identity.ts";
 import {
@@ -1167,59 +1168,27 @@ export function mountAgentRoutes(app: Hono, deps: AgentRouteDeps) {
   // route for the same actor on ~1.2s cadences. Coalesce identical requests
   // through one short-lived build so concurrent and back-to-back polls share
   // a single computation instead of each queueing a full observe scan.
-  const observeResponseCache = new Map<
-    string,
-    { at: number; promise: Promise<{ body: unknown; status: 200 | 404 }> }
-  >();
-  const OBSERVE_RESPONSE_TTL_MS = 900;
-  const OBSERVE_RESPONSE_CACHE_LIMIT = 32;
+  const observeResponseCache = createPollingReadCache<{ body: unknown; status: 200 | 404 }>({ ttlMs: 900 });
   app.get("/api/agents/:id/observe", async (c) => {
     const id = c.req.param("id");
     const sessionId = c.req.query("sessionId") ?? null;
     const cacheKey = `${id}\u0000${sessionId ?? ""}`;
-    const now = Date.now();
-    let entry = observeResponseCache.get(cacheKey);
-    if (!entry || now - entry.at > OBSERVE_RESPONSE_TTL_MS) {
-      for (const [key, cached] of observeResponseCache) {
-        if (now - cached.at > OBSERVE_RESPONSE_TTL_MS) observeResponseCache.delete(key);
-      }
-      while (observeResponseCache.size >= OBSERVE_RESPONSE_CACHE_LIMIT) {
-        const oldestKey = observeResponseCache.keys().next().value;
-        if (typeof oldestKey !== "string") break;
-        observeResponseCache.delete(oldestKey);
-      }
-      entry = {
-        at: now,
-        promise: (async (): Promise<{ body: unknown; status: 200 | 404 }> => {
-          const payload = await loadAgentObservePayload(id, { sessionId });
-          if (payload) {
-            return { body: payload, status: 200 };
-          }
-          // A conversation's counterpart can be a per-session actor rather
-          // than a roster agent. Resolve it through the session-ref loader
-          // instead of burning a slow scan into a 404. The session-ref
-          // payload's agentId may be null; the native decoder requires a
-          // string, so echo the requested id back.
-          for (const ref of [sessionId, id]) {
-            if (!ref?.trim()) continue;
-            const fallback = await loadSessionRefObservePayload(ref);
-            if (fallback) {
-              return { body: { ...fallback, agentId: fallback.agentId ?? id }, status: 200 };
-            }
-          }
-          return { body: { error: "not found" }, status: 404 };
-        })(),
-      };
-      observeResponseCache.set(cacheKey, entry);
-      const failed = entry;
-      entry.promise.catch(() => {
-        if (observeResponseCache.get(cacheKey) === failed) {
-          observeResponseCache.delete(cacheKey);
+    try {
+      const result = await observeResponseCache.get(cacheKey, async () => {
+        const payload = await loadAgentObservePayload(id, { sessionId });
+        if (payload) return { body: payload, status: 200 };
+        // Per-session counterparts need their exact session-ref fallback.
+        for (const ref of [sessionId, id]) {
+          if (!ref?.trim()) continue;
+          const fallback = await loadSessionRefObservePayload(ref);
+          if (fallback) return { body: { ...fallback, agentId: fallback.agentId ?? id }, status: 200 };
         }
+        return { body: { error: "not found" }, status: 404 };
       });
+      return c.json(result.body as Record<string, unknown>, result.status);
+    } catch (error) {
+      return pollingReadFailureResponse(error);
     }
-    const result = await entry.promise;
-    return c.json(result.body as Record<string, unknown>, result.status);
   });
   app.get("/api/agents/:agentId/config", async (c) => {
     const agentId = c.req.param("agentId");

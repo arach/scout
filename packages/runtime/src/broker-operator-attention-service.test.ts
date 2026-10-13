@@ -313,3 +313,14 @@ describe("BrokerOperatorAttentionService", () => {
     ]);
   });
 });
+
+test("permission push carries the exact request only through the existing paired notification", async () => {
+  const harness = createHarness();
+  const prompt = "Accessing workspace: /private/project\nYes, I trust this folder";
+  await harness.service.sendOperatorSignalAlert({ signal: { kind: "need", blocking: true, replyExpectation: "required", requestKind: "permission", question: prompt },
+    messageId: "permission-1", conversationId: "chn-permission", requesterId: "agent", requesterNodeId: "node", body: prompt });
+  const { notification, ...alert } = harness.alerts[0]!;
+  expect(notification?.note).toBe(prompt); expect(alert.urgency).toBe("interrupt");
+  expect(JSON.stringify(alert)).not.toContain("/private/project");
+  expect(alert.payload).toMatchObject({ itemId: "permission-1", conversationId: "chn-permission" });
+});

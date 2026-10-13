@@ -606,6 +606,27 @@ describe("createOpenScoutWebServer: agents routes", () => {
     expect(stubs.loadAgentObservePayloadCalls).toBe(1);
   });
 
+  test("observe stays single-flight when a refresh exceeds the old 900ms TTL", async () => {
+    let finish!: (value: unknown) => void;
+    stubs.agentObservePayloadResult = new Promise((resolve) => { finish = resolve; });
+    const server = await createOpenScoutWebServer({
+      currentDirectory: "/tmp/openscout", assetMode: "static", staticRoot: makeStaticRoot(),
+    });
+    const url = "http://localhost/api/agents/slow-agent/observe";
+    const first = server.app.request(url);
+    let second: ReturnType<typeof server.app.request> | undefined;
+    try {
+      await Bun.sleep(950);
+      second = server.app.request(url);
+      await Bun.sleep(10);
+      expect(stubs.loadAgentObservePayloadCalls).toBe(1);
+    } finally {
+      finish({ agentId: "slow-agent" });
+      const responses = await Promise.all([first, second].filter(Boolean));
+      expect(responses.every((response) => response?.status === 200)).toBe(true);
+    }
+  });
+
   test("bounds the observe response cache", async () => {
     stubs.agentObservePayloadResult = {
       agentId: "agent",

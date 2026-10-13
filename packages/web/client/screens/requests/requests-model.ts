@@ -36,11 +36,11 @@ export function requestKind(item: OperatorAttentionItem): string {
   return "Ask";
 }
 
-/** No invented answer/permission decision buttons: only backed approval decisions and source links. */
+/** Only decisions declared by a backed approval or permission record, plus source links. */
 export function requestActions(item: OperatorAttentionItem): OperatorAttentionAction[] {
   return item.actions.filter((action) => {
     if (action.kind === "open") return Boolean(action.route);
-    return item.kind === "approval" && Boolean(item.approval)
+    return (Boolean(item.permission) || (item.kind === "approval" && Boolean(item.approval)))
       && (action.kind === "approve" || action.kind === "deny");
   });
 }

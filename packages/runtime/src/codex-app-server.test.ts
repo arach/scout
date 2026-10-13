@@ -1,3 +1,5 @@
+import { configureManagedPermissionHandler, withManagedPermissionContext } from "./managed-permission.js";
+import type { InvocationRequest } from "@openscout/protocol";
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -27,6 +29,7 @@ const originalCodexBin = process.env.OPENSCOUT_CODEX_BIN;
 const originalOpenAIAPIKey = process.env.OPENAI_API_KEY;
 
 afterEach(() => {
+  configureManagedPermissionHandler(undefined);
   if (originalOpenAIAPIKey === undefined) {
     delete process.env.OPENAI_API_KEY;
   } else {
@@ -561,7 +564,7 @@ for await (const line of rl) {
   return executablePath;
 }
 
-function writeDynamicToolFakeCodexExecutable(baseDirectory: string): {
+function writeDynamicToolFakeCodexExecutable(baseDirectory: string, serverMethod = "item/tool/call", decisions?: string[]): {
   executablePath: string;
   responsePath: string;
 } {
@@ -606,8 +609,9 @@ for await (const line of rl) {
     console.log(JSON.stringify({ method: "turn/started", params: { threadId: activeThreadId, turn: { id: "turn-1", status: "inProgress", items: [] } } }));
     console.log(JSON.stringify({
       id: "server-request-1",
-      method: "item/tool/call",
+      method: ${JSON.stringify(serverMethod)},
       params: {
+        availableDecisions: ${JSON.stringify(decisions) ?? "undefined"},
         threadId: activeThreadId,
         turnId: "turn-1",
         callId: "call-1",
@@ -1703,8 +1707,8 @@ describe("ensureCodexAppServerAgentOnline", () => {
   });
 
   test("passes launch args through to the spawned app-server process", async () => {
-    // Exercise managed auth-file setup regardless of the operator's API-key environment.
-    delete process.env.OPENAI_API_KEY;
+    // An unrelated inherited key must not suppress the selected operator sign-in.
+    process.env.OPENAI_API_KEY = "unrelated-test-provider-key";
     const tempRoot = mkdtempSync(join(tmpdir(), "openscout-codex-launch-args-test-"));
     tempPaths.add(tempRoot);
     const runtimeDirectory = join(tempRoot, "runtime");
@@ -2107,6 +2111,49 @@ describe("ensureCodexAppServerAgentOnline", () => {
     expect((snapshot?.turns.at(-1)?.blocks.at(-1)?.block as { text?: string } | undefined)?.text).toBe("Late completion reply");
 
     await shutdownCodexAppServerAgent(options);
+  });
+
+  test.each(["item/commandExecution/requestApproval", "item/fileChange/requestApproval"])("routes %s into a managed permission and responds on the same app-server", async method => {
+    const tempRoot = mkdtempSync(join(tmpdir(), "openscout-codex-approval-test-")); tempPaths.add(tempRoot);
+    const { executablePath, responsePath } = writeDynamicToolFakeCodexExecutable(tempRoot, method);
+    process.env.OPENSCOUT_CODEX_BIN = executablePath;
+    const options = { agentName: "approval-agent", sessionId: "approval-session", cwd: process.cwd(), systemPrompt: "test",
+      runtimeDirectory: join(tempRoot, "runtime"), logsDirectory: join(tempRoot, "logs"), threadId: "thread-approval", requireExistingThread: true };
+    const requests: string[] = [];
+    configureManagedPermissionHandler(async (invocation, prompt) => {
+      expect(invocation.id).toBe("inv-approval"); expect(prompt.sessionId).toBe("thread-approval");
+      expect(prompt.decisions).toEqual(["once", "deny"]); expect(await prompt.isCurrent()).toBe(true);
+      requests.push(prompt.text); await prompt.answer("once"); expect(await prompt.isCurrent()).toBe(false);
+    });
+    try {
+      const result = await withManagedPermissionContext({ id: "inv-approval" } as InvocationRequest,
+        () => invokeCodexAppServerAgent({ ...options, prompt: "approval test", timeoutMs: 5_000 }));
+      expect(result.output).toBe("Recovered after tool rejection"); expect(requests).toHaveLength(1);
+      expect(requests[0]).toContain(method);
+      expect(JSON.parse(readFileSync(responsePath, "utf8"))).toEqual({ id: "server-request-1", result: { decision: "accept" } });
+    } finally { await shutdownCodexAppServerAgent(options); }
+  });
+
+  test.each(["decline", "cancel"])("preserves native negative decision %s", async nativeDecision => {
+    const method = "item/commandExecution/requestApproval";
+    const tempRoot = mkdtempSync(join(tmpdir(), "openscout-codex-approval-test-")); tempPaths.add(tempRoot);
+    const { executablePath, responsePath } = writeDynamicToolFakeCodexExecutable(tempRoot, method, ["accept", nativeDecision]);
+    process.env.OPENSCOUT_CODEX_BIN = executablePath;
+    const options = { agentName: "approval-agent", sessionId: "approval-session", cwd: process.cwd(), systemPrompt: "test",
+      runtimeDirectory: join(tempRoot, "runtime"), logsDirectory: join(tempRoot, "logs"), threadId: "thread-approval", requireExistingThread: true };
+    const requests: string[] = [];
+    configureManagedPermissionHandler(async (invocation, prompt) => {
+      expect(invocation.id).toBe("inv-approval"); expect(prompt.sessionId).toBe("thread-approval");
+      expect(prompt.decisions).toEqual(["once", "deny"]); expect(await prompt.isCurrent()).toBe(true);
+      requests.push(prompt.text); expect(prompt.decisionLabels?.deny).toBe(nativeDecision === "cancel" ? "Cancel" : "Deny"); await prompt.answer("deny"); expect(await prompt.isCurrent()).toBe(false);
+    });
+    try {
+      const result = await withManagedPermissionContext({ id: "inv-approval" } as InvocationRequest,
+        () => invokeCodexAppServerAgent({ ...options, prompt: "approval test", timeoutMs: 5_000 }));
+      expect(result.output).toBe("Recovered after tool rejection"); expect(requests).toHaveLength(1);
+      expect(requests[0]).toContain(method);
+      expect(JSON.parse(readFileSync(responsePath, "utf8"))).toEqual({ id: "server-request-1", result: { decision: nativeDecision } });
+    } finally { await shutdownCodexAppServerAgent(options); }
   });
 
   test("rejects unsupported dynamic tool calls with a valid JSON-RPC error", async () => {

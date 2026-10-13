@@ -635,6 +635,8 @@ export type ScoutApiTiming = {
   path: string;
   status: number;
   ms: number;
+  /** Deliberate long-poll wait, kept separate from request latency. */
+  expectedWaitMs?: number;
   /** Wall-clock completion time (epoch ms). */
   at: number;
 };
@@ -653,6 +655,19 @@ const SCOUT_API_SLOW_THRESHOLD_MS = 500;
 // polling traffic don't flood the supervised log.
 const SCOUT_API_LOG_ALL = process.env.SCOUT_PERF_LOG_API === "1";
 const scoutApiTimings: ScoutApiTiming[] = [];
+const expectedApiWaits = new WeakMap<Request, number>();
+
+/** Only a server route may declare an intentional wait; clients cannot mute diagnostics. */
+export function markScoutApiExpectedWait(request: Request, milliseconds: number): void {
+  if (Number.isFinite(milliseconds) && milliseconds > 0) {
+    expectedApiWaits.set(request, Math.min(milliseconds, 60_000));
+  }
+}
+
+export function isSlowScoutApiResponse(request: Request, status: number, elapsedMs: number): boolean {
+  const expected = status >= 200 && status < 300 ? expectedApiWaits.get(request) ?? 0 : 0;
+  return elapsedMs > expected + SCOUT_API_SLOW_THRESHOLD_MS;
+}
 
 function recordScoutApiTiming(entry: ScoutApiTiming): void {
   scoutApiTimings.push(entry);
@@ -779,9 +794,10 @@ export function installScoutApiMiddleware(
         path: loggedPath,
         status,
         ms: roundMs(ms),
+        ...(expectedApiWaits.has(c.req.raw) ? { expectedWaitMs: expectedApiWaits.get(c.req.raw) } : {}),
         at: Date.now(),
       });
-      if (ms > SCOUT_API_SLOW_THRESHOLD_MS) {
+      if (isSlowScoutApiResponse(c.req.raw, status, ms)) {
         console.warn("[scout-perf] slow api", c.req.method, loggedPath, status, `${Math.round(ms)}ms`);
       } else if (SCOUT_API_LOG_ALL) {
         console.log("[scout-perf] api", c.req.method, loggedPath, status, `${Math.round(ms)}ms`);

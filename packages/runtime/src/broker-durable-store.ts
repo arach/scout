@@ -1,4 +1,5 @@
 import type { BrokerMemoryMaintenance } from "./broker-memory-maintenance.js";
+import { setImmediate } from "node:timers/promises";
 import type {
   ThreadEventEnvelope,
 } from "@openscout/protocol";
@@ -164,9 +165,13 @@ export class BrokerDurableStore {
     // journal + in-memory acknowledgement path used by UI mutations.
     const next = this.projectionWriteQueue
       .catch(() => {})
-      .then(() => this.projectionWritesAbandoned
-        ? undefined
-        : this.projectEntries(entries));
+      .then(async () => {
+        // SQLite is synchronous even behind applyEntries(): a microtask alone
+        // runs it before the commit caller can acknowledge the durable write.
+        // Give command continuations and socket I/O a turn between batches.
+        await setImmediate();
+        if (!this.projectionWritesAbandoned) await this.projectEntries(entries);
+      });
     this.projectionWriteQueue = next.then(() => {}, () => {});
   };
 

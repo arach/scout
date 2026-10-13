@@ -2,7 +2,7 @@ import { isAllowedHostWebRequest, type HostWebRequest, type HostWebResponse } fr
 import type { RuntimeChildProcessLike, RuntimeEnv, RuntimeHttpRequestLike, RuntimeSpawnFunction } from "./portable-types.js";
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, openSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -15,6 +15,15 @@ import {
   resolveRepoEntrypoint,
 } from "./tool-resolution.js";
 
+export type WebRecoveryStatus = {
+  state: "checking" | "healthy" | "suspect" | "recovering" | "unavailable" | "paused";
+  checkedAt: number | null;
+  lastHealthyAt: number | null;
+  consecutiveFailures: number;
+  automaticRestarts: number;
+  lastRecovery: { startedAt: number; recoveredAt: number | null; previousPid: number | null; replacementPid: number | null; method: "automatic" | "manual" } | null;
+};
+
 export type WebControlStatus = {
   ok: boolean;
   running: boolean;
@@ -24,6 +33,7 @@ export type WebControlStatus = {
   port: number;
   pid: number | null;
   error: string | null;
+  recovery?: WebRecoveryStatus;
 };
 
 export type WebStartContext = {
@@ -58,6 +68,13 @@ export type BrokerWebControlServiceOptions = {
   respawnMaxFailures?: number;
   respawnFailureWindowMs?: number;
   stopTimeoutMs?: number;
+  /** Zero disables the timer for callers that drive checkManagedHealth themselves. */
+  healthMonitorIntervalMs?: number;
+  healthStartupGraceMs?: number;
+  healthFailureDurationMs?: number;
+  healthRestartWindowMs?: number;
+  healthMaxRestarts?: number;
+  now?: () => number;
   log?: (message: string, detail?: unknown) => void;
   warn?: (message: string) => void;
   error?: (message: string, detail?: unknown) => void;
@@ -192,6 +209,120 @@ export class BrokerWebControlService {
   private webStartInFlight: Promise<WebControlStatus> | null = null;
   private webRestartInFlight: Promise<WebControlStatus> | null = null;
   private stopping = false;
+  private readonly intentionalStops = new Set<RuntimeChildProcessLike>();
+  private monitorTimer: ReturnType<typeof setTimeout> | null = null;
+  private monitorInFlight = false;
+  private childStartedAt = 0;
+  private webStartContext: WebStartContext = {};
+  private childWasHealthy = false;
+  private firstHealthFailureAt: number | null = null;
+  private readonly healthRestarts: number[] = [];
+  private recovery: WebRecoveryStatus = {
+    state: "checking", checkedAt: null, lastHealthyAt: null, consecutiveFailures: 0,
+    automaticRestarts: 0, lastRecovery: null,
+  };
+
+  private now(): number { return (this.options.now ?? Date.now)(); }
+
+  /** Cached evidence only: broker status never waits for a nested HTTP probe. */
+  recoveryStatus(): WebRecoveryStatus {
+    return { ...this.recovery, lastRecovery: this.recovery.lastRecovery ? { ...this.recovery.lastRecovery } : null };
+  }
+
+  private recoveryDetail(): string {
+    switch (this.recovery.state) {
+      case "healthy": return this.recovery.lastRecovery?.recoveredAt
+        ? (this.recovery.lastRecovery.method === "manual"
+          ? "Web is responding after a manual restart."
+          : "Web is responding; a previous interruption recovered automatically.")
+        : "Web is responding to its authenticated health probe.";
+      case "suspect": return "Web is slow to respond; checking again before attempting recovery.";
+      case "recovering": return "Web is being restarted automatically after repeated health failures.";
+      case "paused": return "Web recovery is paused after repeated interruptions. Inspect diagnostics, then restart Web to retry.";
+      case "unavailable": return "Web is not responding; automatic recovery has not yet restored service.";
+      default: return "Waiting for a web health observation.";
+    }
+  }
+
+  private scheduleHealthMonitor(): void {
+    if (this.monitorTimer) clearTimeout(this.monitorTimer);
+    const interval = this.options.healthMonitorIntervalMs ?? 10_000;
+    if (this.stopping || interval <= 0 || !isChildProcessRunning(this.webServerProcess)) return;
+    this.monitorTimer = setTimeout(() => {
+      this.monitorTimer = null;
+      void this.checkManagedHealth().catch(() => {
+        // A monitor error is uncertainty, not permission to kill a child.
+      }).finally(() => this.scheduleHealthMonitor());
+    }, interval);
+    this.monitorTimer.unref?.();
+  }
+
+  /** Only the exact child owned by this broker can be recovered. */
+  async checkManagedHealth(): Promise<void> {
+    const child = this.webServerProcess;
+    if (this.stopping || this.monitorInFlight || this.webRestartInFlight || this.webStartInFlight
+      || !isChildProcessRunning(child)) return;
+    this.monitorInFlight = true;
+    try {
+      const healthy = await this.isHealthy();
+      if (this.stopping || this.webServerProcess !== child || this.webRestartInFlight) return;
+      const now = this.now();
+      // Sleep or a stalled parent interrupts observation; do not turn that gap
+      // into evidence of consecutive child failures.
+      const interval = this.options.healthMonitorIntervalMs || 10_000;
+      if (this.recovery.checkedAt !== null && now - this.recovery.checkedAt > interval * 3) {
+        this.firstHealthFailureAt = null;
+        this.recovery.consecutiveFailures = 0;
+      }
+      this.recovery.checkedAt = now;
+      if (healthy) {
+        this.childWasHealthy = true;
+        this.recovery.lastHealthyAt = now;
+        this.recovery.consecutiveFailures = 0;
+        this.firstHealthFailureAt = null;
+        this.recovery.state = "healthy";
+        const incident = this.recovery.lastRecovery;
+        if (incident && incident.recoveredAt === null) {
+          incident.recoveredAt = now;
+          incident.replacementPid = child.pid ?? null;
+          this.options.log?.("[scout-web-health] recovered", this.recoveryStatus());
+        }
+        return;
+      }
+      if (!this.childWasHealthy && now - this.childStartedAt < (this.options.healthStartupGraceMs ?? 60_000)) return;
+      this.firstHealthFailureAt ??= now;
+      this.recovery.consecutiveFailures += 1;
+      if (this.recovery.state === "paused") return;
+      this.recovery.state = "suspect";
+      if (this.recovery.consecutiveFailures < 3
+        || now - this.firstHealthFailureAt < (this.options.healthFailureDurationMs ?? 20_000)) return;
+      const window = this.options.healthRestartWindowMs ?? 10 * 60_000;
+      while (this.healthRestarts.length && now - this.healthRestarts[0]! > window) this.healthRestarts.shift();
+      if (this.healthRestarts.length >= (this.options.healthMaxRestarts ?? 2)) {
+        this.recovery.state = "paused";
+        this.options.warn?.("[scout-web-health] Automatic recovery paused after repeated interruptions; inspect diagnostics and restart Web to retry.");
+        return;
+      }
+      this.healthRestarts.push(now);
+      this.recovery.automaticRestarts += 1;
+      this.recovery.state = "recovering";
+      this.recovery.lastRecovery = { startedAt: now, recoveredAt: null, previousPid: child.pid ?? null, replacementPid: null, method: "automatic" };
+      this.options.log?.("[scout-web-health] recovering", this.recoveryStatus());
+      const result = await this.restartIfManaged(this.webStartContext, true);
+      if (this.stopping) return;
+      this.recovery.state = result.running ? "healthy" : "unavailable";
+      if (result.running) {
+        this.childWasHealthy = true;
+        this.recovery.checkedAt = this.now();
+        this.recovery.lastHealthyAt = this.now();
+        this.recovery.lastRecovery!.recoveredAt = this.now();
+        this.recovery.lastRecovery!.replacementPid = result.pid;
+        this.options.log?.("[scout-web-health] recovered", this.recoveryStatus());
+      }
+    } finally {
+      this.monitorInFlight = false;
+    }
+  }
 
   constructor(private readonly options: BrokerWebControlServiceOptions) {
     this.env = options.env ?? process.env;
@@ -266,6 +397,7 @@ export class BrokerWebControlService {
       port: this.port(),
       pid: managed ? this.webServerProcess?.pid ?? null : null,
       error,
+      recovery: this.recoveryStatus(),
     };
   }
 
@@ -280,6 +412,7 @@ export class BrokerWebControlService {
       port: this.port(),
       pid: managed ? this.webServerProcess?.pid ?? null : null,
       error: error instanceof Error ? error.message : String(error),
+      recovery: this.recoveryStatus(),
     };
   }
 
@@ -289,16 +422,17 @@ export class BrokerWebControlService {
       web: {
         managed: true,
         managedBy: "broker",
-        state: this.webStartInFlight ? "starting" : webRunning ? "running" : "stopped",
+        state: this.webStartInFlight || this.webRestartInFlight ? "starting" : webRunning ? (this.recovery.state === "paused" || this.recovery.state === "unavailable" ? "unavailable" : "running") : "stopped",
         pid: this.webServerProcess?.pid ?? null,
         port: this.port(),
         url: this.url(),
-        healthy: null,
-        detail: this.webStartInFlight
-          ? "web startup is in flight"
-          : webRunning
-            ? "web child process is active; broker /health does not probe /api/health"
-            : "web child has not been started by this broker",
+        healthy: webRunning && this.recovery.checkedAt !== null
+          && this.now() - this.recovery.checkedAt <= (this.options.healthMonitorIntervalMs || 10_000) * 3
+          ? this.recovery.state === "healthy" ? true
+            : this.recovery.state === "unavailable" || this.recovery.state === "paused" ? false : null
+          : null,
+        detail: webRunning ? this.recoveryDetail() : "web child has not been started by this broker",
+        recovery: this.recoveryStatus(),
       },
       terminalRelay: {
         managed: true,
@@ -327,10 +461,11 @@ export class BrokerWebControlService {
     return scoutWebControlCorsHeaders(request, this.trustedHosts);
   }
 
-  async startIfNeeded(context: WebStartContext = {}): Promise<WebControlStatus> {
+  async startIfNeeded(context: WebStartContext = {}, fromRestart = false): Promise<WebControlStatus> {
     if (this.stopping) {
       return this.failureStatus("Scout web cannot start while the broker is stopping.");
     }
+    if (this.webRestartInFlight && !fromRestart) return this.webRestartInFlight;
     if (this.webStartInFlight) {
       return this.webStartInFlight;
     }
@@ -373,12 +508,22 @@ export class BrokerWebControlService {
    * terminal or a previous broker, and killing it would violate process
    * ownership.
    */
-  async restartIfManaged(context: WebStartContext = {}): Promise<WebControlStatus> {
+  async restartIfManaged(context: WebStartContext = {}, automatic = false): Promise<WebControlStatus> {
     if (this.webRestartInFlight) {
       return this.webRestartInFlight;
     }
 
+    if (this.stopping) return this.failureStatus("Scout web cannot restart while the broker is stopping.");
+    context = { ...this.webStartContext, ...context };
+    if (!automatic) {
+      if (this.recovery.lastRecovery?.recoveredAt === null) this.recovery.lastRecovery.method = "manual";
+      this.healthRestarts.length = 0;
+      this.recovery.state = "checking";
+    }
     this.webRestartInFlight = (async () => {
+      // A concurrent start owns its startup boundary; never race it for the port.
+      if (this.webStartInFlight) await this.webStartInFlight;
+      if (this.stopping) return this.failureStatus("Scout web cannot restart while the broker is stopping.");
       const child = this.webServerProcess;
       if (!isChildProcessRunning(child)) {
         if (await this.isHealthy()) {
@@ -388,50 +533,16 @@ export class BrokerWebControlService {
             error: "Scout web is running outside broker management and cannot be restarted safely. Stop that process, then run `scout server start`.",
           };
         }
-        return this.startIfNeeded(context);
+        return this.startIfNeeded(context, true);
       }
 
-      let signalled = false;
-      try {
-        signalled = child.kill("SIGTERM");
-      } catch (error) {
-        return {
-          ...await this.status(),
-          ok: false,
-          error: `Could not signal the broker-managed Scout web process: ${error instanceof Error ? error.message : String(error)}`,
-        };
-      }
-      if (!signalled) {
-        return {
-          ...await this.status(),
-          ok: false,
-          error: "Could not signal the broker-managed Scout web process to stop.",
-        };
-      }
-
-      // Clear the handle only after signalling succeeds, so the child exit
-      // listener cannot schedule an independent respawn alongside this restart.
-      this.webServerProcess = null;
-
-      const deadline = Date.now() + this.startPollTimeoutMs;
-      while (Date.now() < deadline) {
-        // Wait for the owned process itself to exit, not merely for its health
-        // route to turn false. The Bun server drains after SIGTERM while it
-        // still owns the port; spawning on health failure alone races the
-        // replacement into EADDRINUSE.
-        if (!isChildProcessRunning(child)) {
-          return this.startIfNeeded(context);
-        }
-        await this.sleep(this.startPollIntervalMs);
-      }
+      await this.terminateOwnedChild(child);
       if (isChildProcessRunning(child)) {
-        this.webServerProcess = child;
+        return this.failureStatus("Timed out stopping the broker-managed Scout web process; no replacement was started.");
       }
-      return {
-        ...await this.status(),
-        ok: false,
-        error: "Timed out waiting for the broker-managed Scout web process to stop.",
-      };
+      if (this.webServerProcess === child) this.webServerProcess = null;
+      return this.startIfNeeded(context, true);
+
     })().finally(() => {
       this.webRestartInFlight = null;
     });
@@ -446,10 +557,23 @@ export class BrokerWebControlService {
    */
   async stop(): Promise<void> {
     this.stopping = true;
+    if (this.monitorTimer) clearTimeout(this.monitorTimer);
+    this.monitorTimer = null;
     const child = this.webServerProcess;
-    if (!isChildProcessRunning(child)) {
-      return;
+    if (isChildProcessRunning(child)) await this.terminateOwnedChild(child);
+    if (!isChildProcessRunning(child) && this.webServerProcess === child) this.webServerProcess = null;
+  }
+
+  private async terminateOwnedChild(child: RuntimeChildProcessLike): Promise<void> {
+    this.intentionalStops.add(child);
+    try {
+      await this.signalAndWaitForChild(child);
+    } finally {
+      this.intentionalStops.delete(child);
     }
+  }
+
+  private async signalAndWaitForChild(child: RuntimeChildProcessLike): Promise<void> {
     try {
       child.kill("SIGTERM");
     } catch (error) {
@@ -558,7 +682,6 @@ export class BrokerWebControlService {
       throw new Error("Unable to locate Bun for Scout web startup.");
     }
 
-    const logFd = openSync(this.resolveLogPath(), "a");
     const trustedHosts = appendCsvValues(this.env.OPENSCOUT_WEB_TRUSTED_HOSTS, [
       ...this.tailnetWebHosts,
       context.trustedHost,
@@ -606,22 +729,28 @@ export class BrokerWebControlService {
       brokerInternalUrl: env.OPENSCOUT_BROKER_INTERNAL_URL,
       trustedHost: context.trustedHost,
     });
-    const child = this.spawnImpl(
-      bun.path,
-      ["run", entry],
-      {
-        argv0: this.webProcessName,
-        env,
-        stdio: ["ignore", logFd, logFd],
-      },
-    );
+    const logFd = openSync(this.resolveLogPath(), "a");
+    let child: RuntimeChildProcessLike;
+    try {
+      child = this.spawnImpl(
+        bun.path,
+        ["run", entry],
+        {
+          argv0: this.webProcessName,
+          env,
+          stdio: ["ignore", logFd, logFd],
+        },
+      );
+    } finally {
+      closeSync(logFd);
+    }
     child.once("exit", (code, signal) => {
       if (this.webServerProcess !== child) {
         // Either we already replaced this handle, or shutdown nulled it intentionally.
         return;
       }
       this.webServerProcess = null;
-      if (this.stopping) {
+      if (this.stopping || this.webRestartInFlight || this.intentionalStops.has(child)) {
         return;
       }
       // Track failures within a sliding window so a broken entrypoint doesn't
@@ -654,6 +783,15 @@ export class BrokerWebControlService {
         });
       }, delay).unref?.();
     });
+    this.webStartContext = { ...context };
+    this.childStartedAt = this.now();
+    if (this.recovery.state !== "recovering") this.recovery.state = "checking";
+    this.childWasHealthy = false;
+    this.firstHealthFailureAt = null;
+    this.recovery.consecutiveFailures = 0;
+    this.recovery.checkedAt = null;
+    // The caller installs the handle before the first timer fires.
+    queueMicrotask(() => this.scheduleHealthMonitor());
     child.unref();
     return child;
   }
