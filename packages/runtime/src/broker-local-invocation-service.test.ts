@@ -1154,6 +1154,28 @@ describe("BrokerLocalInvocationService", () => {
     expect(harness.service.hasActiveInvocation(invocation.id)).toBe(false);
   });
 
+  test("advertises queue support only for serial direct adapters on this authority", () => {
+    const harness = createHarness();
+    for (const transport of ["claude_stream_json", "pi_rpc", "grok_acp", "kimi_acp", "cursor_acp", "opencode_acp", "devin_acp"] as const) {
+      expect(harness.service.supportsQueuedEndpoint(testEndpoint({ transport, state: "active" }))).toBe(true);
+      expect(harness.service.supportsQueuedEndpoint(testEndpoint({ transport, nodeId: "remote" }))).toBe(false);
+    }
+    for (const transport of ["tmux", "ghostty", "pairing_bridge", "mcp_poll", "a2a_http", "claude_channel"] as const) {
+      expect(harness.service.supportsQueuedEndpoint(testEndpoint({ transport }))).toBe(false);
+    }
+  });
+
+  test("does not advertise Codex queue support for unresolved native turns", () => {
+    const harness = createHarness();
+    for (const sessionBacked of [false, true]) {
+      expect(harness.service.supportsQueuedEndpoint(testEndpoint({
+        transport: "codex_app_server",
+        state: "active",
+        metadata: { sessionBacked },
+      }))).toBe(false);
+    }
+  });
+
   test("serializes different invocations for the same local route", async () => {
     const endpoint = testEndpoint();
     const firstGate = deferred();

@@ -1,3 +1,4 @@
+import { knowledgeIndexEnabled, KNOWLEDGE_INDEX_OFF } from "../knowledge/settings.js";
 import { RoutingChunks } from "./chunks.js";
 import { RoutingStore, ROUTE_EXTRACTOR_VERSION } from "./store.js";
 import { decay, ftsQuery, scoreRouteName, words } from "./text.js";
@@ -69,8 +70,16 @@ function fuse(targets: RouteTarget[], signals: Partial<Record<RouteSignal, Map<s
   return [...result.values()].sort((a, b) => b.score - a.score || a.target.id.localeCompare(b.target.id)).slice(0, 20);
 }
 
+export function disabledRouteResult(query: string): RouteResult {
+  return { outcome: "none", query, topic: query.trim(), reason: KNOWLEDGE_INDEX_OFF, candidates: [], coverage: {
+    localOnly: true, machines: [], selectedMachineIds: [], peerDigests: [], indexedAt: null, ageMs: null,
+    targets: 0, scopedTargets: 0, signals: [], chunksIndexedAt: null, warnings: [KNOWLEDGE_INDEX_OFF],
+  } };
+}
+
 export function resolveRoute(store: RoutingStore, query: string, options: RouteOptions = {}, chunks?: RoutingChunks): RouteResult {
   if (query.length > 32_768) throw new Error("Routing query exceeds 32768 characters");
+  if (!knowledgeIndexEnabled()) return disabledRouteResult(query);
   const now = options.now ?? Date.now();
   const signals = options.signals ?? SIGNALS;
   const machines = options.machines ?? store.meta<RouteMachine[]>("machines", []);
@@ -172,6 +181,7 @@ export function resolveRoute(store: RoutingStore, query: string, options: RouteO
 }
 
 export function routingStatus(store: RoutingStore) {
+  if (!knowledgeIndexEnabled()) return { enabled: false, message: KNOWLEDGE_INDEX_OFF };
   const targets = store.targets();
   return {
     path: store.path, targets: targets.length,

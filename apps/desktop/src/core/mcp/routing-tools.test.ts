@@ -30,3 +30,21 @@ test("MCP where/check share advisory reads, validate inputs and expose no old na
     expect(calls).toHaveLength(2);
   } finally { store.close(); await client.close(); await server.close(); }
 });
+
+test("MCP where reports opt-out without opening a routing database", async () => {
+  const { mkdtempSync, rmSync, existsSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os"); const { join } = await import("node:path");
+  const root = mkdtempSync(join(tmpdir(), "scout-mcp-where-off-"));
+  const previousSupport = process.env.OPENSCOUT_SUPPORT_DIRECTORY, previousControl = process.env.OPENSCOUT_CONTROL_HOME;
+  process.env.OPENSCOUT_SUPPORT_DIRECTORY = join(root, "support"); process.env.OPENSCOUT_CONTROL_HOME = join(root, "control");
+  try {
+    const { routingToolDependencies } = await import("./routing-tools.ts");
+    const result = routingToolDependencies("http://127.0.0.1:1").where("cached topic", {});
+    expect(result.outcome).toBe("none"); expect(result.candidates).toEqual([]);
+    expect(result.reason).toContain("Settings › System"); expect(existsSync(join(root, "control"))).toBe(false);
+  } finally {
+    if (previousSupport === undefined) delete process.env.OPENSCOUT_SUPPORT_DIRECTORY; else process.env.OPENSCOUT_SUPPORT_DIRECTORY = previousSupport;
+    if (previousControl === undefined) delete process.env.OPENSCOUT_CONTROL_HOME; else process.env.OPENSCOUT_CONTROL_HOME = previousControl;
+    rmSync(root, { recursive: true, force: true });
+  }
+});

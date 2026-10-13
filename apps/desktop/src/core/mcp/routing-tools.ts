@@ -1,11 +1,13 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod/v4";
-import { RoutingStore, resolveRoute, type RouteOptions } from "@openscout/runtime/routing";
+import { RoutingStore, resolveRoute, disabledRouteResult, type RouteOptions } from "@openscout/runtime/routing";
+import { knowledgeIndexEnabled } from "@openscout/runtime/knowledge";
 import { loadScoutCheck, parseCheckSince, type ScoutCheckOptions } from "../mesh/check.ts";
 
 export function routingToolDependencies(brokerUrl: string) {
   return {
     where: (topic: string, options: RouteOptions) => {
+      if (!knowledgeIndexEnabled()) return disabledRouteResult(topic);
       const store = new RoutingStore();
       try { return resolveRoute(store, topic, options); }
       finally { store.close(); }

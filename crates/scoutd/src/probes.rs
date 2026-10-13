@@ -956,13 +956,28 @@ impl ProbeEngine {
             command_args.extend(["-c".to_string(), cwd]);
         }
         command_args.push(command);
-        self.run_exec_command_json(
+        // If this starts the tmux server, the server's global env is this
+        // process's env: start it without scoutd's instance/service env.
+        let limits = ExecVerbLimits::tmux_new_session();
+        let timeout = requested_timeout(args, limits.default_timeout, limits.max_timeout)?;
+        match run_capped_command_full(
             &self.options.tmux_bin,
-            command_args,
+            &command_args,
             None,
-            args,
-            ExecVerbLimits::tmux_new_session(),
-        )
+            None,
+            &[],
+            TMUX_SERVER_STRIPPED_ENV_KEYS,
+            timeout,
+            limits.max_stdout_bytes,
+            limits.max_stderr_bytes,
+        ) {
+            Ok(output) => Ok(json!({
+                "stdout": output.stdout,
+                "stderr": output.stderr,
+                "exitCode": 0,
+            })),
+            Err(error) => Err(command_failure_to_exec(error, &self.options.tmux_bin)),
+        }
     }
 
     fn exec_tailscale_cert(&self, args: &Map<String, Value>) -> Result<Value, ProbeFailure> {
@@ -3847,12 +3862,90 @@ fn run_capped_command_with_input(
     )
 }
 
+/// Instance-derived env (packages/runtime/src/instance.ts
+/// OPENSCOUT_USER_SPAWN_STRIPPED_ENV_KEYS). A tmux server keeps the env of the
+/// process that started it as its global env for every later pane, so scoutd
+/// never hands it its own service env (explicit prod instance, ports, labels).
+pub(crate) const TMUX_SERVER_STRIPPED_ENV_KEYS: &[&str] = &[
+    "OPENSCOUT_INSTANCE",
+    "OPENSCOUT_INSTANCE_EXPLICIT",
+    "OPENSCOUT_INSTANCE_ROOT",
+    "OPENSCOUT_INSTANCE_PORT_BASE",
+    "OPENSCOUT_INSTANCE_MESH",
+    "OPENSCOUT_HOME",
+    "OPENSCOUT_CONTROL_HOME",
+    "OPENSCOUT_SUPPORT_DIRECTORY",
+    "OPENSCOUT_RELAY_HUB",
+    "OPENSCOUT_SCOUT_HOME",
+    "OPENSCOUT_PAIRING_HOME",
+    "OPENSCOUT_PAIRING_DIR",
+    "SCOUT_PAIRING_HOME",
+    "OPENSCOUT_BROKER_SOCKET_PATH",
+    "OPENSCOUT_APP_SOCKET",
+    "OPENSCOUT_PROBES_SOCKET",
+    "OPENSCOUT_BROKER_PORT",
+    "OPENSCOUT_LISTENING_PORT",
+    "OPENSCOUT_WEB_PORT",
+    "SCOUT_WEB_PORT",
+    "OPENSCOUT_WEB_TERMINAL_RELAY_PORT",
+    "OPENSCOUT_PAIRING_PORT",
+    "SCOUT_PAIRING_PORT",
+    "OPENSCOUT_JETSTREAM_PORT",
+    "OPENSCOUT_JETSTREAM_MONITOR_PORT",
+    "OPENSCOUT_NODE_NAME",
+    "OPENSCOUT_NODE_QUALIFIER",
+    "OPENSCOUT_NODE_ID",
+    "OPENSCOUT_SERVICE_LABEL",
+    "OPENSCOUT_BROKER_SERVICE_LABEL",
+    "OPENSCOUT_BROKER_SERVICE_MODE",
+    "OPENSCOUT_PARENT_PID",
+    "OPENSCOUT_BROKER_HOST",
+    "OPENSCOUT_BROKER_URL",
+    "OPENSCOUT_BROKER_INTERNAL_URL",
+    "OPENSCOUT_ADVERTISE_SCOPE",
+    "OPENSCOUT_NETWORK_DISCOVERY_ENABLED",
+    "OPENSCOUT_MESH_RENDEZVOUS_URL",
+    "OPENSCOUT_MESH_SEEDS",
+    "OPENSCOUT_MESH_DISCOVERY_INTERVAL_MS",
+    "OPENSCOUT_RUNTIME_PACKAGE_DIR",
+    "OPENSCOUT_CHAT_HOME",
+    "OPENSCOUT_ZELLIJ_SOCKET_DIR",
+    "OPENSCOUT_JETSTREAM_HOME",
+    "OPENSCOUT_PAIRING_RUNTIME_STATE_PATH",
+    "OPENSCOUT_CLIENT_INSTANCE",
+];
+
 fn run_capped_command_with_input_and_env(
     command: &str,
     args: &[String],
     stdin: Option<&[u8]>,
     cwd: Option<&Path>,
     envs: &[(&str, &str)],
+    timeout: Duration,
+    max_stdout_bytes: usize,
+    max_stderr_bytes: usize,
+) -> Result<CommandResult, CommandFailure> {
+    run_capped_command_full(
+        command,
+        args,
+        stdin,
+        cwd,
+        envs,
+        &[],
+        timeout,
+        max_stdout_bytes,
+        max_stderr_bytes,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_capped_command_full(
+    command: &str,
+    args: &[String],
+    stdin: Option<&[u8]>,
+    cwd: Option<&Path>,
+    envs: &[(&str, &str)],
+    env_removes: &[&str],
     timeout: Duration,
     max_stdout_bytes: usize,
     max_stderr_bytes: usize,
@@ -3872,6 +3965,9 @@ fn run_capped_command_with_input_and_env(
     }
     for (key, value) in envs {
         command_builder.env(key, value);
+    }
+    for key in env_removes {
+        command_builder.env_remove(key);
     }
     let mut child = command_builder.spawn().map_err(|error| CommandFailure {
         code: error
@@ -4862,6 +4958,65 @@ exit 0
             "send-keys\n-t\nscout-test\nC-c\n"
         );
 
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn tmux_server_env_removal_drops_instance_keys_and_keeps_the_rest() {
+        // The env scoutd itself carries is simulated by `envs`; the removal
+        // list is applied after it, as for the tmux.newSession verb.
+        let output = super::run_capped_command_full(
+            "sh",
+            &["-c".to_string(), "env".to_string()],
+            None,
+            None,
+            &[
+                ("OPENSCOUT_INSTANCE", "prod"),
+                ("OPENSCOUT_CLIENT_INSTANCE", "dev-leak-test"),
+                ("OPENSCOUT_BROKER_PORT", "43110"),
+                ("SCOUT_KEEP_ME", "1"),
+            ],
+            super::TMUX_SERVER_STRIPPED_ENV_KEYS,
+            Duration::from_secs(5),
+            64 * 1024,
+            64 * 1024,
+        )
+        .expect("env runs");
+        assert!(!output.stdout.contains("OPENSCOUT_INSTANCE="));
+        assert!(!output.stdout.contains("OPENSCOUT_CLIENT_INSTANCE="));
+        assert!(!output.stdout.contains("OPENSCOUT_BROKER_PORT="));
+        assert!(output.stdout.contains("SCOUT_KEEP_ME=1"));
+    }
+
+    #[test]
+    fn exec_tmux_new_session_runs_through_the_env_stripping_path() {
+        let dir = unique_temp_dir("scoutd-exec-new-session-env");
+        let socket_path = dir.join("probes.sock");
+        let argv_path = dir.join("argv.txt");
+        let tmux = dir.join("tmux");
+        write_executable(
+            &tmux,
+            &format!(
+                r#"#!/bin/sh
+printf '%s\n' "$@" > {}
+exit 0
+"#,
+                shell_quote(&argv_path.to_string_lossy())
+            ),
+        );
+        let mut options = base_options(socket_path.clone());
+        options.tmux_bin = tmux.to_string_lossy().to_string();
+        start_test_server(options);
+
+        let response = request(
+            &socket_path,
+            r#"{"schema":"openscout.exec.request/v1","verb":"tmux.newSession","args":{"sessionName":"scout-env","detached":true,"command":"sh","timeoutMs":2000}}"#,
+        );
+        assert_eq!(response.get("ok").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            fs::read_to_string(&argv_path).unwrap(),
+            "new-session\n-d\n-s\nscout-env\nsh\n"
+        );
         let _ = fs::remove_dir_all(dir);
     }
 

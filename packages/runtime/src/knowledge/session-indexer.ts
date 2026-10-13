@@ -1,3 +1,5 @@
+import { stripHarnessBoilerplate, stripHarnessValue } from "./boilerplate.js";
+import { knowledgeIndexEnabled, KNOWLEDGE_INDEX_OFF } from "./settings.js";
 import { createHash } from "node:crypto";
 import {
   createReadStream,
@@ -59,6 +61,8 @@ export interface IndexedSessionKnowledgeSummary {
 }
 
 export interface IndexRecentSessionKnowledgeResult {
+  enabled?: boolean;
+  message?: string;
   job: KnowledgeIndexJob;
   days: number;
   hours?: number;
@@ -118,8 +122,8 @@ type ExtractedDocument = {
   facets?: KnowledgeFacets;
 };
 
-const EXTRACTOR_VERSION = "session-qmd-v3";
-const CHUNK_POLICY_VERSION = "session-qmd-record-window-v1";
+const EXTRACTOR_VERSION = "session-qmd-v4";
+const CHUNK_POLICY_VERSION = "session-qmd-record-window-v2";
 const EVENT_WINDOW_RECORDS = 350;
 const EVENT_CHUNK_RECORDS = 50;
 const DEFAULT_DAYS = 3;
@@ -275,7 +279,13 @@ async function parseJsonl(file: SessionFile): Promise<ParseResult> {
         return;
       }
       const record = normalizeRecord(value as Record<string, unknown>, index, lineOffset, file.harness);
-      records.push(record);
+      if (record.text !== undefined) record.text = stripHarnessBoilerplate(record.text);
+      if (record.tool) record.tool.input = stripHarnessValue(record.tool.input);
+      if (record.result) record.result.output = stripHarnessValue(record.result.output);
+      if (record.meta) record.meta = stripHarnessValue(record.meta) as Record<string, unknown>;
+      // Keep source record numbers/offsets, but omit harness instructions from
+      // every derived document, facet, title and FTS entry.
+      if (record.kind !== "system_record" && !(record.text === "" && ["user_turn", "assistant_turn"].includes(record.kind))) records.push(record);
       cwd ??= inferCwd(record);
       sessionId ??= inferSessionId(record, file);
       index++;
@@ -302,7 +312,7 @@ async function parseJsonl(file: SessionFile): Promise<ParseResult> {
   return {
     harness: file.harness,
     records,
-    scannedLines: records.length,
+    scannedLines: index,
     bytesRead: offset,
     contentHash: `sha256:${hash.digest("hex")}`,
     cwd,
@@ -691,7 +701,7 @@ function titleFor(file: SessionFile, parse: ParseResult, project: string): strin
   if (file.harness === "kimi") {
     const stateTitle = readKimiSessionState(file.path).title;
     if (stateTitle) {
-      return `${capitalize(file.harness)} ${project} ${date} - ${trimOneLine(stateTitle, 82)}`;
+      return `${capitalize(file.harness)} ${project} ${date} - ${trimOneLine(stripHarnessBoilerplate(stateTitle), 82)}`;
     }
   }
   const firstUser = parse.records.find((record) => record.kind === "user_turn" && record.text?.trim());
@@ -742,12 +752,12 @@ function uniqueFacetValues(values: Array<string | undefined>): string[] {
   for (const value of values) {
     const trimmed = value?.trim();
     if (!trimmed) continue;
-    const key = trimmed.toLowerCase();
+    const key = trimmed; // Facet equality is exact; case-distinct source paths must survive.
     if (seen.has(key)) continue;
     seen.add(key);
     result.push(trimmed);
   }
-  return result.slice(0, 100);
+  return result;
 }
 
 function touchedPaths(records: NormalizedRecord[]): string[] {
@@ -1001,17 +1011,12 @@ function splitMarkdownSections(content: string): string[] {
   return chunks;
 }
 
-function writeQmdCollection(
+function qmdCollectionFiles(
   collection: KnowledgeCollection,
   documents: ExtractedDocument[],
   parse: ParseResult,
   file: SessionFile,
-): void {
-  const outDir = collection.qmdPath;
-  const tmpDir = `${outDir}.tmp-${process.pid}`;
-  rmSync(tmpDir, { recursive: true, force: true });
-  mkdirSync(tmpDir, { recursive: true });
-
+): Record<string, string> {
   const manifest = {
     schema: "openscout.knowledge.collection/v1",
     collectionId: collection.id,
@@ -1052,14 +1057,10 @@ function writeQmdCollection(
     status: collection.status,
   };
 
-  writeFileSync(join(tmpDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-  for (const document of documents) {
-    writeFileSync(join(tmpDir, document.path), document.content, "utf8");
-  }
-
-  rmSync(outDir, { recursive: true, force: true });
-  mkdirSync(join(outDir, ".."), { recursive: true });
-  renameSync(tmpDir, outDir);
+  return {
+    "manifest.json": `${JSON.stringify(manifest, null, 2)}\n`,
+    ...Object.fromEntries(documents.map((document) => [document.path, document.content])),
+  };
 }
 
 function collectionContentHash(file: SessionFile, parse: ParseResult): string {
@@ -1104,6 +1105,7 @@ async function storeSessionCollection(
     source: "sessions",
     transcriptPath: file.path,
     sessionId: parse.sessionId ?? "",
+    ...recordFacets(parse.records),
   };
   const now = Date.now();
   const collection: KnowledgeCollection = {
@@ -1121,7 +1123,8 @@ async function storeSessionCollection(
     facets,
   };
   const existing = store.getCollection(id);
-  if (!force && existing?.status === "ready" && existing.contentHash === collection.contentHash) {
+  if (!force && existing?.status === "ready" && existing.contentHash === collection.contentHash
+    && existing.extractorVersion === EXTRACTOR_VERSION && existing.chunkPolicyVersion === CHUNK_POLICY_VERSION) {
     return {
       collectionId: id,
       title,
@@ -1139,15 +1142,8 @@ async function storeSessionCollection(
   }
 
   const documents = await buildDocuments(parse, file, project, title);
-  writeQmdCollection(collection, documents, parse, file);
-
-  store.deleteCollection(id);
-  // Publish as "building" with no content hash first; the ready row carrying
-  // the final hash lands only after every chunk batch below has committed.
-  // If the process dies mid-index the leftover row can never satisfy the
-  // hash skip above, so the next run re-indexes instead of trusting it.
-  store.upsertCollection({ ...collection, status: "building", contentHash: "" });
-
+  const storedDocuments: KnowledgeDocument[] = [];
+  const storedEntries: Array<{chunk: KnowledgeChunk; title: string}> = [];
   let chunks = 0;
   for (const extracted of documents) {
     const doc: KnowledgeDocument = {
@@ -1158,11 +1154,10 @@ async function storeSessionCollection(
       origin: "mechanical",
       contentHash: hashText(extracted.content),
     };
-    store.upsertDocument(doc);
+    storedDocuments.push(doc);
     const entries = chunkDocument(extracted).map((chunk, ordinal) => {
       const chunkFacets: KnowledgeFacets = {
-        ...facets,
-        ...(extracted.facets ?? { documentKind: extracted.kind }),
+        documentKind: extracted.kind,
       };
       const knowledgeChunk: KnowledgeChunk = {
         id: deterministicKnowledgeChunkId({
@@ -1186,12 +1181,15 @@ async function storeSessionCollection(
       chunks++;
       return { chunk: knowledgeChunk, title: `${title} / ${extracted.path}` };
     });
-    store.upsertChunks(entries);
+    storedEntries.push(...entries);
     // Big transcripts produce hundreds of documents; keep the process responsive.
     await yieldToEventLoop();
   }
 
-  store.upsertCollection({ ...collection, updatedAt: Date.now() });
+  // Recheck after yielding during extraction: turning the setting off prevents
+  // the next collection commit, not merely the next indexing job.
+  if (!knowledgeIndexEnabled()) throw new Error(KNOWLEDGE_INDEX_OFF);
+  store.replaceCollection(collection, storedDocuments, storedEntries, qmdCollectionFiles(collection, documents, parse, file));
 
   return {
     collectionId: id,
@@ -1212,118 +1210,128 @@ export async function indexRecentSessionKnowledge(
   input: IndexRecentSessionKnowledgeInput = {},
 ): Promise<IndexRecentSessionKnowledgeResult> {
   const lookback = resolveLookbackMs(input);
+  if (!knowledgeIndexEnabled()) return {
+    enabled: false, message: KNOWLEDGE_INDEX_OFF,
+    job: { id: "index-off", source: "sessions", state: "cancelled", leaseGeneration: 0, progress: {}, createdAt: Date.now(), updatedAt: Date.now() },
+    days: lookback.days, hours: lookback.hours, discovered: 0, indexed: 0, failed: 0, sessions: [],
+  };
   const limit = clampPositiveInt(input.limit, DEFAULT_LIMIT, 1000);
   const harnessFilter = normalizeHarnessFilter(input.harness);
   const store = new SQLiteKnowledgeStore();
-  const job = store.createIndexJob({
-    source: "sessions",
-    days: lookback.days,
-    force: input.force,
-    mode: "foreground",
-  });
-  const leaseGeneration = job.leaseGeneration + 1;
-  const files = discoverRecentSessionFiles(lookback.cutoffMs, limit, harnessFilter);
-  const sessions: IndexedSessionKnowledgeSummary[] = [];
-  let indexed = 0;
-  let failed = 0;
-
   try {
-    store.updateIndexJob({
-      id: job.id,
-      state: "running",
-      leaseOwner: "session-indexer",
-      leaseGeneration,
-      progress: { discovered: files.length, extracted: 0, indexed: 0, failed: 0 },
+    const job = store.createIndexJob({
+      source: "sessions",
+      days: lookback.days,
+      force: input.force,
+      mode: "foreground",
     });
-    for (const file of files) {
-      try {
-        const parse = await parseJsonl(file);
-        const summary = await storeSessionCollection(store, file, parse, input.force === true);
-        sessions.push(summary);
-        indexed++;
-      } catch (error) {
-        failed++;
-        sessions.push({
-          collectionId: `failed/${file.harness}/${stableId(file.path)}`,
-          title: basename(file.path),
-          harness: file.harness,
-          project: projectName(null, file.path),
-          transcriptPath: file.path,
-          qmdPath: "",
-          records: 0,
-          documents: 0,
-          chunks: 0,
-          bytes: file.size,
-          mtimeMs: file.mtimeMs,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
+    const leaseGeneration = job.leaseGeneration + 1;
+    const files = discoverRecentSessionFiles(lookback.cutoffMs, limit, harnessFilter);
+    const sessions: IndexedSessionKnowledgeSummary[] = [];
+    let indexed = 0;
+    let failed = 0;
+
+    try {
       store.updateIndexJob({
         id: job.id,
         state: "running",
         leaseOwner: "session-indexer",
         leaseGeneration,
-        progress: { discovered: files.length, extracted: indexed + failed, indexed, failed },
+        progress: { discovered: files.length, extracted: 0, indexed: 0, failed: 0 },
       });
-      await yieldToEventLoop();
-    }
-    const completedAt = Date.now();
-    const completed = store.updateIndexJob({
-      id: job.id,
-      state: "completed",
-      completedAt,
-      progress: { discovered: files.length, extracted: indexed + failed, indexed, failed },
-    }) ?? job;
-
-    // Record what was SCANNED (root harnesses), not only what yielded files.
-    // Empty-in-window roots still get a discovered=0 claim so later queries
-    // don't prompt a no-op re-warm for a harness that was already walked.
-    const lookbackMs = completedAt - lookback.cutoffMs;
-    const scannedHarnesses = harnessFilter
-      ? [...harnessFilter]
-      : [...new Set(sessionRoots(null).map((entry) => entry.harness))];
-    for (const harness of scannedHarnesses) {
-      const forHarnessFiles = files.filter((file) => file.harness === harness);
-      const forHarnessSessions = sessions.filter((session) => session.harness === harness);
-      store.recordWarmSpan({
-        source: "sessions",
-        harness,
-        lookbackMs,
-        cutoffMs: lookback.cutoffMs,
+      for (const file of [...files].reverse()) {
+        if (!knowledgeIndexEnabled()) break;
+        try {
+          const parse = await parseJsonl(file);
+          const summary = await storeSessionCollection(store, file, parse, input.force === true);
+          sessions.push(summary);
+          indexed++;
+        } catch (error) {
+          failed++;
+          sessions.push({
+            collectionId: `failed/${file.harness}/${stableId(file.path)}`,
+            title: basename(file.path),
+            harness: file.harness,
+            project: projectName(null, file.path),
+            transcriptPath: file.path,
+            qmdPath: "",
+            records: 0,
+            documents: 0,
+            chunks: 0,
+            bytes: file.size,
+            mtimeMs: file.mtimeMs,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        store.updateIndexJob({
+          id: job.id,
+          state: "running",
+          leaseOwner: "session-indexer",
+          leaseGeneration,
+          progress: { discovered: files.length, extracted: indexed + failed, indexed, failed },
+        });
+        await yieldToEventLoop();
+      }
+      const completedAt = Date.now();
+      const completed = store.updateIndexJob({
+        id: job.id,
+        state: "completed",
         completedAt,
-        jobId: completed.id,
-        discovered: forHarnessFiles.length,
-        indexed: forHarnessSessions.filter((session) => !session.error).length,
-        failed: forHarnessSessions.filter((session) => Boolean(session.error)).length,
-      });
-    }
+        progress: { discovered: files.length, extracted: indexed + failed, indexed, failed },
+      }) ?? job;
 
-    return {
-      job: completed,
-      days: lookback.days,
-      hours: lookback.hours,
-      discovered: files.length,
-      indexed,
-      failed,
-      sessions,
-    };
-  } catch (error) {
-    const failedJob = store.updateIndexJob({
-      id: job.id,
-      state: "failed",
-      completedAt: Date.now(),
-      error: error instanceof Error ? error.message : String(error),
-      progress: { discovered: files.length, extracted: indexed + failed, indexed, failed },
-    }) ?? job;
-    return {
-      job: failedJob,
-      days: lookback.days,
-      hours: lookback.hours,
-      discovered: files.length,
-      indexed,
-      failed: failed + 1,
-      sessions,
-    };
+      // Record what was SCANNED (root harnesses), not only what yielded files.
+      // Empty-in-window roots still get a discovered=0 claim so later queries
+      // don't prompt a no-op re-warm for a harness that was already walked.
+      const lookbackMs = completedAt - lookback.cutoffMs;
+      const scannedHarnesses = harnessFilter
+        ? [...harnessFilter]
+        : [...new Set(sessionRoots(null).map((entry) => entry.harness))];
+      const complete = knowledgeIndexEnabled() && failed === 0 && sessions.length === files.length
+        && sessions.every(session => store.getCollection(session.collectionId)?.status === "ready");
+      for (const harness of complete ? scannedHarnesses : []) {
+        const forHarnessFiles = files.filter((file) => file.harness === harness);
+        const forHarnessSessions = sessions.filter((session) => session.harness === harness);
+        store.recordWarmSpan({
+          source: "sessions",
+          harness,
+          lookbackMs,
+          cutoffMs: lookback.cutoffMs,
+          completedAt,
+          jobId: completed.id,
+          discovered: forHarnessFiles.length,
+          indexed: forHarnessSessions.filter((session) => !session.error).length,
+          failed: forHarnessSessions.filter((session) => Boolean(session.error)).length,
+        });
+      }
+
+      return {
+        job: completed,
+        days: lookback.days,
+        hours: lookback.hours,
+        discovered: files.length,
+        indexed,
+        failed,
+        sessions,
+      };
+    } catch (error) {
+      const failedJob = store.updateIndexJob({
+        id: job.id,
+        state: "failed",
+        completedAt: Date.now(),
+        error: error instanceof Error ? error.message : String(error),
+        progress: { discovered: files.length, extracted: indexed + failed, indexed, failed },
+      }) ?? job;
+      return {
+        job: failedJob,
+        days: lookback.days,
+        hours: lookback.hours,
+        discovered: files.length,
+        indexed,
+        failed: failed + 1,
+        sessions,
+      };
+    }
   } finally {
     store.close();
   }
@@ -1645,7 +1653,7 @@ export async function scanRecentSessionKnowledge(
           continue;
         }
         if (record.kind === "system_record" || record.kind === "unknown" || record.kind === "session_meta") continue;
-        const text = record.text ?? summarizeRecord(record);
+        const text = stripHarnessBoilerplate(record.text ?? summarizeRecord(record));
         const haystack = text.toLowerCase();
         if (!terms.every((term) => haystack.includes(term))) continue;
         matches.push({ record, text, byte: line.byte, bytes: Buffer.byteLength(line.text, "utf8"), phrase: haystack.includes(phrase) });

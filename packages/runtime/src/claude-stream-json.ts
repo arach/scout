@@ -1,7 +1,8 @@
+import { appendBoundedLog } from "@openscout/agent-sessions/local/bounded-log";
 import type { RuntimeTimer } from "./portable-types.js";
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { appendFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -918,7 +919,7 @@ class ClaudeStreamJsonSession {
       output = await waitForRequesterResult(turn.outputPromise, timeoutMs, this.options.agentName);
     } catch (error) {
       if (allowStaleResumeRetry && this.resumedSessionId && isMissingClaudeConversationError(error)) {
-        await appendFile(
+        await appendBoundedLog(
           this.stderrLogPath,
           `[openscout] Claude resume id ${this.resumedSessionId} was stale for ${this.options.agentName}; resetting and retrying once.\n`,
         ).catch(() => undefined);
@@ -1106,7 +1107,7 @@ class ClaudeStreamJsonSession {
       if (this.process !== child) {
         return;
       }
-      void appendFile(this.stdoutLogPath, redactSecrets(chunk)).catch(() => undefined);
+      void appendBoundedLog(this.stdoutLogPath, redactSecrets(chunk)).catch(() => undefined);
       this.lineBuffer += chunk;
       const lines = this.lineBuffer.split("\n");
       this.lineBuffer = lines.pop() ?? "";
@@ -1119,7 +1120,7 @@ class ClaudeStreamJsonSession {
       }
     });
     child.stderr.on("data", (chunk: string) => {
-      void appendFile(this.stderrLogPath, redactSecrets(chunk)).catch(() => undefined);
+      void appendBoundedLog(this.stderrLogPath, redactSecrets(chunk)).catch(() => undefined);
     });
 
     child.on("close", (code: number | null) => {
@@ -1159,7 +1160,7 @@ class ClaudeStreamJsonSession {
           async (error) => {
             const message = `[openscout] failed to record Claude session ${nextSessionId} in catalog for ${agentName}: ${errorMessage(error)}`;
             console.error(`[openscout-runtime] ${message}`);
-            await appendFile(stderrLogPath, `${message}\n`).catch(() => undefined);
+            await appendBoundedLog(stderrLogPath, `${message}\n`).catch(() => undefined);
           },
         );
       }

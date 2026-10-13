@@ -462,13 +462,13 @@ describe("BrokerDurableRecordStore", () => {
     expect(isEndpointLastSeenHeartbeat(previous, changed)).toBe(false);
   });
 
-  test("refreshes endpoint heartbeat updates without appending journal entries", async () => {
+  test("persists endpoint heartbeat rows for replay without emitting control events", async () => {
     const { runtime, appended, records } = createTestRecordStore();
     await runtime.upsertEndpoint(testEndpoint({ metadata: { source: "test", lastSeenAt: 1 } }));
 
     await records.upsertEndpoint(testEndpoint({ metadata: { source: "test", lastSeenAt: 2 } }));
 
-    expect(appended).toEqual([]);
+    expect(appended.flat().map(entry => entry.kind)).toEqual(["agent.endpoint.upsert"]);
     expect(runtime.peek().endpoints["endpoint-1"]?.metadata?.lastSeenAt).toBe(2);
   });
 
@@ -1180,5 +1180,74 @@ describe("stale whole-record roster fencing", () => {
     expect(runtime.isRetiredActor("a")).toBe(false);
     await records.upsertConversation({ ...room, participantIds: ["a", "b", "op"] });
     expect(runtime.peek().conversations["room"]?.participantIds).toEqual(["a", "b", "op"]);
+  });
+});
+
+describe("registry liveness is durable state, not event history", () => {
+  test("identical/liveness upserts emit no events; substantive changes emit one per changed kind", async () => {
+    const { runtime, records, durableStore } = createTestRecordStore();
+    const node = { ...testNode(), meshId: "mesh-1", advertiseScope: "local" as const, registeredAt: 1,
+      meshEntrypoints: [{ kind: "http" as const, url: "http://node.test", lastSeenAt: 1 }] };
+    const agent = { ...testAgent(), metadata: { source: "test", lastSeenAt: 1 } };
+    const actor = { id: "person", kind: "person" as const, displayName: "Person", metadata: { lastSeenAt: 1 } };
+    const endpoint = testEndpoint({ metadata: { source: "scout-channel", startedAt: 1, lastSeenAt: 1 } });
+    await records.upsertNode(node); await records.upsertActor(actor); await records.upsertAgent(agent); await records.upsertEndpoint(endpoint);
+    const count = runtime.recentEvents().length;
+    await records.upsertNode(node); await records.upsertActor(actor); await records.upsertAgent(agent); await records.upsertEndpoint(endpoint);
+    await records.upsertNode({ ...node, lastSeenAt: 2, meshEntrypoints: [{ ...node.meshEntrypoints[0]!, lastSeenAt: 2 }] });
+    await records.upsertActor({ ...actor, metadata: { lastSeenAt: 2 } });
+    await records.upsertAgent({ ...agent, metadata: { source: "test", lastSeenAt: 2 } });
+    await records.upsertEndpoint({ ...endpoint, metadata: { source: "scout-channel", startedAt: 2, lastSeenAt: 2 } });
+    expect(runtime.recentEvents()).toHaveLength(count);
+    for (const [mutate, kind] of [
+      [() => records.upsertNode({ ...node, meshEntrypoints: [{ ...node.meshEntrypoints[0]!, url: "http://changed.test" }] }), "node.upserted"],
+      [() => records.upsertActor({ ...actor, displayName: "Renamed" }), "actor.registered"],
+      [() => records.upsertAgent({ ...agent, capabilities: ["new-capability"] }), "agent.registered"],
+      [() => records.upsertEndpoint({ ...endpoint, state: "idle" }), "agent.endpoint.upserted"],
+    ] as const) {
+      const before = runtime.recentEvents().filter(e => e.kind === kind).length;
+      await mutate();
+      expect(runtime.recentEvents().filter(e => e.kind === kind)).toHaveLength(before + 1);
+    }
+    await durableStore.flushProjectedEntries();
+  });
+
+  test("restart and fresh SQLite projection retain latest liveness without heartbeat events", async () => {
+    const root = mkdtempSync(join(tmpdir(), "openscout-liveness-replay-")); tempRoots.add(root);
+    const journalPath = join(root, "journal");
+    const journal = new FileBackedBrokerJournal(journalPath); await journal.load();
+    const runtime = createInMemoryControlRuntime({}, { localNodeId: "node-1" });
+    const durableStore = new BrokerDurableStore({ journal, projection: { async applyEntries() { return []; } }, threadEvents: { publish() {} } });
+    const records = new BrokerDurableRecordStore({ runtime, durableStore, knownInvocations: new Map() });
+    const node = { ...testNode(), meshId: "mesh-1", advertiseScope: "local" as const, registeredAt: 1,
+      card: { nodeId: "node-1", label: "test", publicKey: "key", keyId: "key-id", fingerprint: "fp", version: "test", capabilities: [], endpoints: [], issuedAt: 1, expiresAt: 1001, nonce: "n1", signature: "s1" } };
+    const agent = { ...testAgent(), metadata: { source: "test", lastSeenAt: 1 } };
+    const endpoint = testEndpoint({ metadata: { source: "test", lastSeenAt: 1, lastFailedAt: 1, lastError: "offline" } });
+    await records.upsertNode(node); await records.upsertAgent(agent); await records.upsertEndpoint(endpoint);
+    const initialEvents = runtime.recentEvents().length;
+    await records.upsertNode({ ...node, lastSeenAt: 900, card: { ...node.card, issuedAt: 900, expiresAt: 1900, nonce: "n2", signature: "s2" } });
+    await records.upsertAgent({ ...agent, metadata: { source: "test", lastSeenAt: 900 } });
+    await records.upsertEndpoint({ ...endpoint, metadata: { source: "test", lastSeenAt: 900, lastFailedAt: 900, lastError: "offline" } });
+    expect(runtime.recentEvents()).toHaveLength(initialEvents);
+    const reloaded = new FileBackedBrokerJournal(journalPath); await reloaded.load();
+    const canonical = runtime.snapshot();
+    for (const key of ["nodes", "actors", "agents", "endpoints"] as const) {
+      expect(JSON.parse(JSON.stringify(reloaded.snapshot()[key]))).toEqual(JSON.parse(JSON.stringify(canonical[key])));
+    }
+    let sqlite!: SQLiteControlPlaneStore;
+    const projection = new RecoverableSQLiteProjection(join(root, "replayed.sqlite"), reloaded, {
+      createStore(path) { sqlite = new SQLiteControlPlaneStore(path); return sqlite; },
+    });
+    try {
+      await projection.warm(); await projection.flush();
+      const snapshot = sqlite.loadSnapshot();
+      expect(snapshot.nodes["node-1"]?.lastSeenAt).toBe(900);
+      expect((reloaded.snapshot().nodes["node-1"] as typeof node)?.card?.signature).toBe("s2");
+      expect(snapshot.endpoints["endpoint-1"]?.metadata?.lastFailedAt).toBe(900);
+      expect(snapshot.actors["agent-1"]?.metadata?.lastSeenAt).toBe(900);
+      expect(snapshot.agents["agent-1"]?.metadata?.lastSeenAt).toBe(900);
+      expect(snapshot.endpoints["endpoint-1"]?.metadata?.lastSeenAt).toBe(900);
+      expect(sqlite.writerDb.query("SELECT COUNT(*) AS n FROM events").get()).toEqual({ n: 0 });
+    } finally { projection.close(); }
   });
 });

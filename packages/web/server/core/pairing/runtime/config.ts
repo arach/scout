@@ -2,8 +2,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
-import { loadLocalConfig } from "@openscout/runtime/local-config";
+import { loadLocalConfig, resolvePairingPort } from "@openscout/runtime/local-config";
 import { readOpenScoutNetworkSettingsSync } from "@openscout/runtime/open-scout-network";
+import { resolveOpenScoutPairingHome } from "@openscout/runtime/support-paths";
 
 export type PairingSessionConfig = {
   adapter: string;
@@ -41,7 +42,7 @@ export type PairingPaths = {
 export const PAIRING_QR_TTL_MS = 5 * 60 * 1000;
 
 export function pairingPaths(): PairingPaths {
-  const rootDir = path.join(homedir(), ".scout/pairing");
+  const rootDir = resolveOpenScoutPairingHome();
   return {
     rootDir,
     configPath: path.join(rootDir, "config.json"),
@@ -100,7 +101,7 @@ export function resolvedPairingConfig(env: NodeJS.ProcessEnv = process.env) {
       ? relay.trim()
       : null,
     secure: config.secure !== false,
-    port: parseEnvPort(env) ?? localConfigPort ?? filePort ?? 43130,
+    port: parseEnvPort(env) ?? localConfigPort ?? filePort ?? resolvePairingPort(),
     workspaceRoot: typeof config.workspace?.root === "string" && config.workspace.root.trim().length > 0
       ? config.workspace.root.trim()
       : null,

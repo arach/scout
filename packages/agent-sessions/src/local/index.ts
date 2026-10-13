@@ -73,6 +73,7 @@ export type {
   CodexAppServerTurnStartResult,
   CodexAppServerTurnResult,
 } from "./transports/codex-app-server.js";
+import { scoutStateHome } from "../scout-state-paths.js";
 
 export type LocalAgentHarness = "codex" | "pi" | "grok" | "grok-acp" | "kimi" | "cursor" | "opencode" | "devin" | "openclaw";
 export type LocalAgentResolvedHarness = "codex" | "pi" | "grok" | "kimi" | "cursor" | "opencode" | "devin" | "openclaw";
@@ -623,7 +624,7 @@ function codexLocalSessionPaths(sessionId: string): {
   runtimeDirectory: string;
   logsDirectory: string;
 } {
-  const root = join(homedir(), ".scout", "local", "codex", safeCodexSessionSegment(sessionId));
+  const root = join(scoutStateHome(), "local", "codex", safeCodexSessionSegment(sessionId));
   return {
     runtimeDirectory: join(root, "runtime"),
     logsDirectory: join(root, "logs"),

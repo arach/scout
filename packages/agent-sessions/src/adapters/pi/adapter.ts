@@ -34,6 +34,7 @@ import {
   type HarnessProcess,
 } from "../../runtime/process.js";
 import { redactSecrets, registerSecretValue } from "../../secret-redaction.js";
+import { SCOUT_USER_SPAWN_STRIPPED_ENV_KEYS, scoutUserSpawnEnvironment } from "../../scout-state-paths.js";
 
 const BASE_PROCESS_ENV_KEYS = [
   "PATH",
@@ -236,6 +237,13 @@ export function buildPiProcessEnv(
 
   for (const key of BASE_PROCESS_ENV_KEYS) {
     copyFirstValue(env, key, [key], sources);
+  }
+  // The allow-list carries no instance env; add what any user-facing spawn
+  // gets: the client pointer and, from a prod spawner, its genuine overrides.
+  const spawnEnv = scoutUserSpawnEnvironment({ ...(sourceEnv as NodeJS.ProcessEnv), ...(config.env ?? {}) });
+  for (const key of SCOUT_USER_SPAWN_STRIPPED_ENV_KEYS) {
+    const value = spawnEnv[key];
+    if (typeof value === "string") env[key] = value;
   }
 
   const provider = selectedProvider(config.options);

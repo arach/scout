@@ -177,6 +177,9 @@ export interface KnowledgeIndexJob {
 }
 
 export interface KnowledgeStatus {
+  enabled?: boolean;
+  message?: string;
+  storage?: { sqliteBytes: number; walBytes: number; qmdBytes: number; totalBytes: number; maxBytes: number };
   generatedAt: number;
   paths: {
     knowledgeRoot: string;
@@ -221,6 +224,8 @@ export type KnowledgeCoverageRequest = {
 };
 
 export type KnowledgeCoverage =
+  | { kind: "index_off"; suggestion: string }
+  | { kind: "bounded"; suggestion: string }
   | {
     kind: "empty_index";
     suggestion: string;

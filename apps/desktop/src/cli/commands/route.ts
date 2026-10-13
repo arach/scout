@@ -1,3 +1,4 @@
+import { knowledgeIndexEnabled, KNOWLEDGE_INDEX_OFF } from "@openscout/runtime/knowledge";
 import { RoutingStore, readRoutingBrokerSource, refreshRoutingIndex, resolveRoute, routingStatus, type RouteKind, type RouteResult } from "@openscout/runtime/routing";
 import { resolveScoutBrokerUrl } from "../../core/broker/service.ts";
 import type { ScoutCommandContext } from "../context.ts";
@@ -68,6 +69,7 @@ export function renderRouteResult(result: RouteResult, explain = false): string 
 export async function runRouteCommand(context: ScoutCommandContext, args: string[]): Promise<void> {
   if (args[0] !== "--" && args.some((arg) => arg === "--help" || arg === "-h")) { context.output.writeText(ROUTE_HELP); return; }
   const { command, query, options } = parseRouteCommand(args);
+  if (!knowledgeIndexEnabled()) { context.output.writeValue({ enabled: false, message: KNOWLEDGE_INDEX_OFF }, r => r.message); return; }
   const store = new RoutingStore();
   try {
     if (command === "index") {

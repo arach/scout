@@ -10,12 +10,20 @@ import { indexRecentSessionKnowledge, SQLiteKnowledgeStore } from "@openscout/ru
  */
 async function main() {
   const raw = JSON.parse(process.argv[2] ?? "{}") as {
+    maintenance?: boolean;
     days?: number;
     hours?: number;
     limit?: number;
     force?: boolean;
     harness?: string | string[];
   };
+  if (raw.maintenance) {
+    // Existing large caches are trimmed even while indexing is off. The store
+    // owns the lock, oldest-first eviction, migration and free-space checks.
+    try { const store = new SQLiteKnowledgeStore(); store.close(); }
+    catch (error) { console.warn("[knowledge] storage maintenance:", error instanceof Error ? error.message : String(error)); process.exitCode = 1; }
+    return;
+  }
   const input = {
     days: typeof raw.days === "number" ? raw.days : undefined,
     hours: typeof raw.hours === "number" ? raw.hours : undefined,

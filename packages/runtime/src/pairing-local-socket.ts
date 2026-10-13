@@ -17,6 +17,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { tryLoadIdentity, bytesToHex } from "./pairing-security/identity.js";
 import { SecureTransport } from "./pairing-security/transport.js";
+import { resolveOpenScoutPairingHome } from "./support-paths.js";
 
 export interface PairingLocalChannel {
   readonly secure: boolean;
@@ -45,7 +46,7 @@ export type PairingBridgeMode = "secure" | "plaintext";
 
 /** The mode the local bridge is configured for, by the bridge's own rule. */
 export function configuredPairingBridgeMode(): PairingBridgeMode {
-  const configPath = join(homedir(), ".scout/pairing/config.json");
+  const configPath = join(resolveOpenScoutPairingHome(), "config.json");
   if (!existsSync(configPath)) return "secure";
   try {
     const config = JSON.parse(readFileSync(configPath, "utf8")) as { secure?: unknown } | null;

@@ -75,6 +75,7 @@ import {
 import { SCOUTBOT_REASONING_EFFORT } from "../scoutbot/role.ts";
 import { scoutbotAskActionBody, scoutbotBriefBody, scoutbotChatBody, scoutbotConfigBody, scoutbotPrewarmBody } from "../../shared/api/scoutbot.ts";
 import { readJsonBody } from "../request-body.ts";
+import { buildUserSpawnEnvironment } from "@openscout/runtime/instance";
 
 export type WebTailRuntime = {
   getTailDiscovery: typeof getTailDiscovery;
@@ -784,7 +785,8 @@ async function resolveScoutbotCredentialState(
 function buildScoutbotCodexProcessEnv(currentDirectory: string): NodeJS.ProcessEnv {
   const cwd = currentDirectory.trim();
   return {
-    ...process.env,
+    // An agent is a user-facing spawn: client pointer, no service instance env.
+    ...(buildUserSpawnEnvironment(process.env) as NodeJS.ProcessEnv),
     OPENSCOUT_AGENT: "scoutbot-assistant",
     OPENSCOUT_SETUP_CWD: cwd,
     OPENSCOUT_MANAGED_AGENT: "1",

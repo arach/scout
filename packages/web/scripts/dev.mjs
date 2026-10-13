@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
-import { execFileSync, spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { spawn } from "node:child_process";
 import { lookup } from "node:dns/promises";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
@@ -15,21 +14,18 @@ import {
   renderScoutAsciiMarkHtml,
   renderScoutAsciiMarkScript,
 } from "@openscout/runtime/scout-ascii-mark";
+// Imported from source on purpose: dependency-free, erasable TypeScript that
+// Node runs with type stripping, so a fresh checkout needs no runtime build.
+import {
+  assertOpenScoutInstanceIsolation,
+  describeOpenScoutInstance,
+} from "../../runtime/src/instance.ts";
+import {
+  DEFAULT_PORTS,
+  resolveDevInstanceSetup,
+} from "./dev-instance.mjs";
 
-const DEFAULT_PORTS = {
-  broker: 43110,
-  web: 43120,
-  vite: 43122,
-  pairing: 43130,
-};
 const DEFAULT_SCOUT_WEB_DOMAIN = "scout.local";
-const WORKTREE_PORT_BASES = {
-  web: 43200,
-  vite: 43900,
-  pairing: 44600,
-};
-const WORKTREE_PORT_RANGE = 700;
-
 function parseFlags(argv) {
   const flags = {};
   const args = argv.slice(2);
@@ -75,67 +71,6 @@ function parseFlags(argv) {
   return flags;
 }
 
-function safeGit(args, cwd) {
-  try {
-    return execFileSync("git", args, {
-      cwd,
-      encoding: "utf8",
-    }).trim() || null;
-  } catch {
-    return null;
-  }
-}
-
-function resolveGitContext(cwd) {
-  const worktreeRoot = safeGit(["rev-parse", "--show-toplevel"], cwd);
-  const commonGitDir = safeGit(["rev-parse", "--git-common-dir"], cwd);
-  if (!worktreeRoot || !commonGitDir) {
-    return null;
-  }
-  const commonRoot = resolve(cwd, commonGitDir, "..");
-  return {
-    worktreeRoot: resolve(worktreeRoot),
-    commonRoot,
-    isWorktree: resolve(worktreeRoot) !== commonRoot,
-  };
-}
-
-function worktreeSlot(input) {
-  return createHash("sha256").update(input).digest().readUInt16BE(0) % WORKTREE_PORT_RANGE;
-}
-
-function resolvePortDefaults(packageDir) {
-  const gitContext = resolveGitContext(packageDir);
-  if (!gitContext) {
-    return {
-      gitContext: null,
-      brokerPort: DEFAULT_PORTS.broker,
-      webPort: DEFAULT_PORTS.web,
-      vitePort: DEFAULT_PORTS.vite,
-      pairingPort: DEFAULT_PORTS.pairing,
-    };
-  }
-
-  if (!gitContext.isWorktree) {
-    return {
-      gitContext,
-      brokerPort: DEFAULT_PORTS.broker,
-      webPort: DEFAULT_PORTS.web,
-      vitePort: DEFAULT_PORTS.vite,
-      pairingPort: DEFAULT_PORTS.pairing,
-    };
-  }
-
-  const slot = worktreeSlot(gitContext.worktreeRoot);
-  return {
-    gitContext,
-    brokerPort: DEFAULT_PORTS.broker,
-    webPort: WORKTREE_PORT_BASES.web + slot,
-    vitePort: WORKTREE_PORT_BASES.vite + slot,
-    pairingPort: WORKTREE_PORT_BASES.pairing + slot,
-  };
-}
-
 function resolveDevStateRoot(gitContext) {
   return resolve(
     gitContext?.commonRoot || resolve(packageDirectory, "..", ".."),
@@ -144,7 +79,8 @@ function resolveDevStateRoot(gitContext) {
 }
 
 function resolveDevLocalEdgeRoot() {
-  return resolve(homedir(), ".scout", "local-edge");
+  const scoutHome = process.env.OPENSCOUT_SCOUT_HOME?.trim();
+  return scoutHome ? resolve(scoutHome, "local-edge") : resolve(homedir(), ".scout", "local-edge");
 }
 
 function loopbackHost(hostname) {
@@ -777,8 +713,12 @@ Options:
   -h, --help           Show this help
 
 Notes:
-  Main checkout prefers 43120/43122/43130.
-  Extra git worktrees prefer isolated port bands automatically.
+  A checkout runs as its own OpenScout instance: OPENSCOUT_INSTANCE=dev for the
+  main checkout, dev-<folder> for a linked worktree. Each instance has its own
+  port block (dev: broker 24400, web 24410, vite 24412, pairing 24420-24422),
+  directories (~/.openscout/instances/<name>) and node identity, and stays off
+  the mesh. OPENSCOUT_INSTANCE=prod restores the legacy shared layout
+  (43120/43122/43130, worktrees in isolated bands).
   If a preferred port is busy, dev mode increments until it finds an open one.
   Local edge mode requires Caddy and macOS dns-sd.
 
@@ -804,7 +744,21 @@ if (!existsSync(viteBin)) {
   process.exit(1);
 }
 
-const portDefaults = resolvePortDefaults(packageDirectory);
+const devSetup = resolveDevInstanceSetup({ packageDirectory, flags, env: process.env });
+if (devSetup.error) {
+  console.error(devSetup.error);
+  process.exit(1);
+}
+const {
+  explicitEnv,
+  checkoutInstanceDefault,
+  instance,
+  portDefaults,
+  brokerPort,
+  brokerUrl,
+  explicitWebPort,
+  explicitPairingPort,
+} = devSetup;
 const routes = resolveOpenScoutWebRoutes(process.env);
 const publicHost = flags.host
   || process.env.OPENSCOUT_WEB_HOST?.trim()
@@ -825,17 +779,6 @@ const edgePublicOrigin = edgeEnabled
   : null;
 const edgeHmrScheme = preferredEdgeScheme(edgeScheme);
 const edgeHmrClientPort = edgeHmrScheme === "https" ? 443 : 80;
-const brokerPort = parsePort(process.env.OPENSCOUT_BROKER_PORT)
-  ?? portDefaults.brokerPort
-  ?? DEFAULT_PORTS.broker;
-const brokerUrl = process.env.OPENSCOUT_BROKER_URL?.trim()
-  || `http://127.0.0.1:${portLabel(brokerPort)}`;
-const explicitWebPort = parsePort(flags.port)
-  ?? parsePort(process.env.OPENSCOUT_WEB_PORT)
-  ?? parsePort(process.env.SCOUT_WEB_PORT);
-const explicitPairingPort = parsePort(flags.pairingPort)
-  ?? parsePort(process.env.OPENSCOUT_PAIRING_PORT)
-  ?? parsePort(process.env.SCOUT_PAIRING_PORT);
 const configuredViteUrl = process.env.OPENSCOUT_WEB_VITE_URL?.trim() || null;
 const defaultViteUrl = configuredViteUrl
   || `http://${internalHost}:${portLabel(portDefaults.vitePort)}`;
@@ -912,16 +855,27 @@ if (process.env.OPENSCOUT_WEB_ADVERTISED_HOST?.trim()) {
   env.OPENSCOUT_WEB_ADVERTISED_HOST = process.env.OPENSCOUT_WEB_ADVERTISED_HOST.trim();
 }
 
-if (portDefaults.gitContext?.isWorktree && !process.env.OPENSCOUT_PAIRING_HOME?.trim()) {
+if (instance.isProd && portDefaults.gitContext?.isWorktree && !explicitEnv.OPENSCOUT_PAIRING_HOME?.trim()) {
   env.OPENSCOUT_PAIRING_HOME = resolve(
     portDefaults.gitContext.worktreeRoot,
     ".openscout/pairing",
   );
 }
+if (!instance.isProd) {
+  env.OPENSCOUT_BROKER_PORT = portLabel(brokerPort);
+}
 
-const modeLabel = portDefaults.gitContext?.isWorktree
+// A non-prod instance never binds prod's ports or writes prod's state.
+try {
+  assertOpenScoutInstanceIsolation("bun run dev", { env });
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+}
+
+const modeLabel = `${portDefaults.gitContext?.isWorktree
   ? `worktree ${portDefaults.gitContext.worktreeRoot}`
-  : "main checkout";
+  : "main checkout"}, instance ${describeOpenScoutInstance(instance)}${checkoutInstanceDefault ? " (checkout default)" : ""}`;
 const openUrl = `http://${advertisedHost}:${portLabel(bunPort)}`;
 const portalUrl = `http://${portalHost}:${portLabel(bunPort)}`;
 const edgeSchemeLabel = edgePublicOrigin?.startsWith("https:") ? "https" : "http";

@@ -23,6 +23,7 @@ export type ScoutCommandName =
   | "env"
   | "flight"
   | "init"
+  | "instance"
   | "inbox"
   | "install"
   | "integration"
@@ -105,6 +106,8 @@ export async function loadScoutCommandHandler(name: ScoutCommandName): Promise<S
       return (await import("./doctor.ts")).runDoctorCommand;
     case "env":
       return (await import("./env.ts")).runEnvCommand;
+    case "instance":
+      return (await import("./instance.ts")).runInstanceCommand;
     case "flight":
       return (await import("./flight.ts")).runFlightCommand;
     case "init":

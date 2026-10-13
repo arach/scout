@@ -5,6 +5,7 @@
 import { createConnection } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { resolveOpenScoutHomeForEnv } from "@openscout/runtime/support-paths";
 
 export type ScoutAppReply =
   | { ok: true; [field: string]: unknown }
@@ -13,7 +14,7 @@ export type ScoutAppReply =
 export function scoutAppSocketPath(env: NodeJS.ProcessEnv = process.env): string {
   const explicit = env.OPENSCOUT_APP_SOCKET?.trim();
   if (explicit) return explicit;
-  return join(env.OPENSCOUT_HOME?.trim() || join(homedir(), ".openscout"), "run", "scout-app.sock");
+  return join(resolveOpenScoutHomeForEnv(env), "run", "scout-app.sock");
 }
 
 export function askScoutApp(

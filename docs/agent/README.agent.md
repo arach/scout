@@ -41,6 +41,7 @@ Start at [`INDEX.agent.md`](./INDEX.agent.md) for subsystem specs written for ag
 | Harness sessions | `docs/agent/runtime-sessions.agent.md` |
 | Pairing / mobile bridge | `docs/agent/pairing-runtime.agent.md` |
 | scoutd / local services | `docs/agent/scoutd.agent.md` |
+| Instances (dev vs prod isolation) | `docs/agent/instances.agent.md` |
 
 ## Must-Read Docs
 
@@ -149,6 +150,17 @@ known target.
   lifecycle can emit `post_ask_summary` for an assigned requester or target when
   a work/mission id is available; MCP role/log tools and soft prompt-injection
   wiring are not landed yet.
+
+## Dev Instances
+
+A checkout is not the installed Scout. Running from source (`bun run dev`,
+`bun packages/runtime/src/broker-daemon.ts`, the pairing controller) defaults
+to `OPENSCOUT_INSTANCE=dev` (main checkout) or `dev-<folder>` (linked
+worktree): own root `~/.openscout/instances/<name>`, own port block (dev:
+broker 24400, web 24410, pairing 24420–24422), own node identity, mesh off.
+Talk to it with `scout --instance dev …`; plain `scout` talks to prod. Never
+hard-code `~/.openscout`, `~/.scout` or 431xx in new code: use the resolvers
+in `packages/runtime/src/support-paths.ts`. See `instances.agent.md`.
 
 ## Common Checks
 

@@ -1,3 +1,4 @@
+import { appendBoundedLog } from "../bounded-log.js";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -25,6 +26,7 @@ export {
   type CodexAppServerConnectionConfig,
   type CodexAppServerConnectionMode,
 } from "./codex-app-server-connection.js";
+import { scoutUserSpawnEnvironment } from "../../scout-state-paths.js";
 
 export type CodexAppServerApprovalPolicy = "untrusted" | "on-request" | "on-failure" | "never";
 export type CodexAppServerSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
@@ -959,6 +961,7 @@ export class CodexAppServerTransport {
     this.stdoutLogPath = join(options.logsDirectory, "stdout.log");
     this.stderrLogPath = join(options.logsDirectory, "stderr.log");
     this.wireLog = new CodexWireLog({
+      append: appendBoundedLog,
       setPaused: (paused) => this.connection?.setReadingPaused(paused),
       onError: (error) => console.warn(`[openscout] Codex wire-log persistence failed; input paused: ${error.message}`),
     });
@@ -1257,7 +1260,8 @@ export class CodexAppServerTransport {
     }
 
     signal.throwIfAborted();
-    const env = this.options.processEnv ?? mergeEnvironmentOverrides(process.env, this.options.env);
+    // A harness session is a user-facing spawn: no service instance env.
+    const env = this.options.processEnv ?? mergeEnvironmentOverrides(scoutUserSpawnEnvironment(process.env), this.options.env);
     const connectionConfig = this.connectionConfig;
     let connection: CodexAppServerConnection | undefined;
     const handlers = this.connectionHandlers(() => connection);

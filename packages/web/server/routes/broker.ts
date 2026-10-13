@@ -1,5 +1,6 @@
+import { createHmac } from "node:crypto";
 import type { Hono } from "hono";
-import { createCachedSnapshot } from "../server-core.ts";
+import { authenticatedScoutWebCookieToken, createCachedSnapshot, isAuthenticatedScoutRequest } from "../server-core.ts";
 import { queryActivity, queryBrokerDiagnostics, queryHeartrate } from "../db-queries.ts";
 import {
   brokerDiagnosticsNeedsFullSnapshot,
@@ -177,6 +178,8 @@ function brokerDispatchReviewPrompt(input: {
 export type BrokerRouteDeps = {
   currentDirectory: string;
   scoutbot: ScoutbotWebServices;
+  authToken?: string;
+  validateSession?: (token: string) => boolean;
 };
 
 export function mountBrokerRoutes(app: Hono, deps: BrokerRouteDeps) {
@@ -255,7 +258,18 @@ export function mountBrokerRoutes(app: Hono, deps: BrokerRouteDeps) {
   // Liveness only, for status chrome that must not pull a snapshot to know it.
   app.get("/api/broker/health", async (c) => {
     const health = await readScoutBrokerHealth(resolveScoutBrokerUrl(), { timeoutMs: 1_000 });
-    return c.json({ reachable: health.reachable, ok: health.ok, error: health.error ?? null });
+    // A configured server secret alone is not request identity. Scope local
+    // progress to the validated browser session (or bearer) and observed node.
+    const cookie = authenticatedScoutWebCookieToken(c.req.raw, deps.authToken, deps.validateSession);
+    const bearerRequest = new Request(c.req.url, {
+      headers: { authorization: c.req.header("authorization") ?? "" },
+    });
+    const credential = cookie ?? (isAuthenticatedScoutRequest(bearerRequest, deps.authToken)
+      ? deps.authToken?.trim() : null);
+    const persistenceIdentity = health.ok && health.nodeId && credential && deps.authToken?.trim()
+      ? createHmac("sha256", deps.authToken.trim()).update(JSON.stringify(["first-task", health.nodeId, credential])).digest("hex")
+      : null;
+    return c.json({ reachable: health.reachable, ok: health.ok, error: health.error ?? null, persistenceIdentity });
   });
   app.get("/api/broker", async (c) => {
     const cursor = c.req.query("cursor") ?? null;

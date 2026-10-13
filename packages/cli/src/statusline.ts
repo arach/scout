@@ -1,4 +1,10 @@
-import { runStatuslineCommand } from "../../../apps/desktop/src/cli/commands/statusline.ts";
+// Must stay first: the Claude statusline targets the prod instance unless
+// asked otherwise (`scout --instance <name>` or OPENSCOUT_STATUSLINE_INSTANCE).
+import { applyOpenScoutInstanceEnvironment, selectStatuslineOpenScoutInstance } from "@openscout/runtime/instance";
+selectStatuslineOpenScoutInstance(process.env);
+applyOpenScoutInstanceEnvironment(process.env);
+// Load the command only after the instance env is settled.
+const { runStatuslineCommand } = await import("../../../apps/desktop/src/cli/commands/statusline.ts");
 
 try {
   const args = process.argv[2] === "statusline"

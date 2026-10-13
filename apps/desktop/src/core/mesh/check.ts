@@ -1,5 +1,6 @@
+import { knowledgeIndexEnabled } from "@openscout/runtime/knowledge";
 import { basename } from "node:path";
-import { RoutingStore, parseRouteQuery, resolveRoute, ROUTE_CLOSE_RATIO, type RouteCandidate, type RouteResult } from "@openscout/runtime/routing";
+import { RoutingStore, disabledRouteResult, parseRouteQuery, resolveRoute, ROUTE_CLOSE_RATIO, type RouteCandidate, type RouteResult } from "@openscout/runtime/routing";
 import { loadScoutMachineInventory, loadScoutRecent, type ScoutRecentDeps, type ScoutRecentOptions, type ScoutRecentReport } from "./recent.ts";
 import { resolveScoutMachines } from "./machine-selector.ts";
 
@@ -15,6 +16,7 @@ export type ScoutCheckDeps = ScoutRecentDeps & {
 export async function loadScoutCheck(options: ScoutCheckOptions = {}, deps: ScoutCheckDeps = {}): Promise<ScoutCheckReport> {
   const recent = deps.recent ?? loadScoutRecent;
   if (!options.topic?.trim()) return recent({ machine: options.machine, since: options.since }, deps);
+  if (!knowledgeIndexEnabled()) return { routing: disabledRouteResult(options.topic), activity: [] };
   const inventory = await loadScoutMachineInventory(deps);
   const nodes = Object.values({ ...inventory.knownNodes, [inventory.localNode.id]: inventory.localNode });
   if (options.machine) resolveScoutMachines(nodes, options.machine); // fail unknown explicit machines

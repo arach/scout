@@ -7,8 +7,14 @@ import type {
   ScoutRuntimesReport,
   ScoutSetupReport,
 } from "../../core/setup/service.ts";
+import { deriveOpenScoutInstanceLayout } from "@openscout/runtime/instance";
 
 type LocalEdgeDependencyReport = ScoutSetupReport["localEdge"];
+
+function renderInstanceLine(): string {
+  const layout = deriveOpenScoutInstanceLayout();
+  return `Instance: ${layout.name}${layout.root ? ` (root ${layout.root})` : ""}`;
+}
 
 function renderBrokerHealthTransportLines(
   broker: ScoutDoctorReport["broker"] | ScoutSetupReport["broker"],
@@ -26,6 +32,7 @@ function renderBrokerHealthTransportLines(
 export function renderScoutDoctorStreamingLead(input: { repoRoot: string; currentDirectory: string }): string {
   return [
     "Scout doctor",
+    renderInstanceLine(),
     `Repo root: ${input.repoRoot}`,
     `Context root: ${input.currentDirectory}`,
     "",
@@ -301,6 +308,7 @@ export function renderScoutDoctorReport(report: ScoutDoctorReport): string {
   const roots = report.setup.settings.discovery.workspaceRoots;
   const lines = [
     "Scout doctor",
+    renderInstanceLine(),
     `Repo root: ${report.repoRoot}`,
     `Context root: ${report.currentDirectory}`,
     `Support directory: ${report.setup.supportDirectory}`,

@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { namedChannelNaturalKey } from "@openscout/protocol";
+import { namedChannelNaturalKey, type AgentEndpoint, type FlightRecord, type ScoutDeliverResponse } from "@openscout/protocol";
 
 import {
   createBrokerDaemonTestHarness,
@@ -11,8 +11,137 @@ import {
 } from "./test-helpers/broker-daemon-harness.test";
 
 const broker = createBrokerDaemonTestHarness();
+type ContinuationReceipt = Extract<ScoutDeliverResponse, { kind: "delivery" }>;
+type ContinuationNativeEvent = {
+  event: string;
+  pid: number;
+  sessionId?: string;
+  marker?: string;
+  overlap?: boolean;
+  duringHeldIdle?: boolean;
+};
 
 describe("broker daemon delivery routing", () => {
+  test("accepts exact continuation while completed flight awaits endpoint idle persistence", async () => {
+    const home = mkdtempSync(join(tmpdir(), "scout-continuation-gap-"));
+    const gate = join(home, "idle-held");
+    const release = join(home, "release-idle");
+    const nativeLog = join(home, "native.jsonl");
+    const fixture = join(home, "fixture-acp");
+    const preload = join(home, "hold-idle.ts");
+    mkdirSync(join(home, "project"));
+    writeFileSync(nativeLog, "");
+    writeFileSync(fixture, `#!/usr/bin/env bun
+  import {appendFileSync,existsSync} from "node:fs";
+  import {createInterface} from "node:readline";
+  let active=0;
+  const nativeSessionId="native-continuation-"+process.pid;
+  const log=x=>appendFileSync(${JSON.stringify(nativeLog)},JSON.stringify({pid:process.pid,...x})+"\\n");
+  log({event:"process:start"});
+  createInterface({input:process.stdin}).on("line",async line=>{
+   const {id,method,params={}}=JSON.parse(line);
+   const reply=result=>console.log(JSON.stringify({jsonrpc:"2.0",id,result}));
+   if(method==="initialize"){log({event:method});return reply({protocolVersion:1,agentCapabilities:{sessionCapabilities:{resume:{}}},agentInfo:{name:"fixture",version:"1"},authMethods:[{id:"xai.api_key"}]});}
+   if(method==="session/new"){log({event:method,sessionId:nativeSessionId});return reply({sessionId:nativeSessionId,models:{currentModelId:"grok-4.6"}});}
+   if(method==="session/resume")log({event:method,sessionId:params.sessionId});
+   if(method!=="session/prompt")return reply({});
+   const text=params.prompt.map(part=>part.text??"").join("\\n");
+   const marker=text.includes("continuation-second")?"second":"first";
+   log({event:"prompt",sessionId:params.sessionId,marker,overlap:active++>0,duringHeldIdle:existsSync(${JSON.stringify(gate)})&&!existsSync(${JSON.stringify(release)})});
+   await Bun.sleep(30);
+   console.log(JSON.stringify({jsonrpc:"2.0",method:"session/update",params:{sessionId:params.sessionId,update:{sessionUpdate:"agent_message_chunk",content:{type:"text",text:"reply-"+marker}}}}));
+   active--;log({event:"completed",sessionId:params.sessionId,marker});reply({stopReason:"end_turn"});
+  });
+  `);
+    chmodSync(fixture, 0o700);
+    // Delay only this test's first endpoint-idle write, after its completed flight
+    // is already visible. There is no production hook, delay or timing guess.
+    writeFileSync(preload, `
+  import {existsSync,writeFileSync} from "node:fs";
+  import {BrokerLocalInvocationService} from ${JSON.stringify(join(import.meta.dir, "broker-local-invocation-service.ts"))};
+  const execute=BrokerLocalInvocationService.prototype.execute;
+  let installed=false,held=false;
+  BrokerLocalInvocationService.prototype.execute=function(invocation){
+   if(!installed){
+    installed=true;
+    const persist=this.options.persistEndpoint;
+    this.options.persistEndpoint=async endpoint=>{
+     if(!held&&endpoint.state==="idle"&&this.options.runtime.flightForInvocation(endpoint.metadata?.lastInvocationId)?.state==="completed"){
+      held=true;writeFileSync(${JSON.stringify(gate)},"held");
+      const deadline=Date.now()+10000;
+      while(!existsSync(${JSON.stringify(release)})){
+       if(Date.now()>deadline)throw new Error("test idle gate expired");
+       await Bun.sleep(5);
+      }
+     }
+     return persist(endpoint);
+    };
+   }
+   return execute.call(this,invocation);
+  };
+  `);
+    broker.writeRelayAgentRegistry(join(home, "support"), {});
+    const harness = await broker.startBroker({ controlHome: home, preload, env: {
+      HOME: home, OPENSCOUT_HOME: join(home, "scout-home"), GROK_CLI_BIN: fixture,
+      SCOUT_XAI_API_KEY: "owned-test-fixture", OPENSCOUT_CORE_AGENTS: "",
+      OPENSCOUT_LOCAL_AGENT_SYNC_INTERVAL_MS: "0", OPENSCOUT_RUNTIME_CATALOG_REFRESH_MS: "86400000",
+    } });
+    await broker.seedBasicConversation(harness);
+    await broker.postJson(harness.baseUrl, "/v1/agents", {
+      id: "fixture-agent", kind: "agent", definitionId: "fixture-agent", displayName: "Fixture Agent",
+      agentClass: "general", capabilities: ["chat", "invoke"], wakePolicy: "on_demand",
+      homeNodeId: harness.nodeId, authorityNodeId: harness.nodeId, advertiseScope: "local",
+    });
+    await broker.postJson(harness.baseUrl, "/v1/endpoints", {
+      id: "fixture-endpoint", agentId: "fixture-agent", nodeId: harness.nodeId, harness: "grok",
+      transport: "grok_acp", state: "idle", sessionId: "fixture-session", cwd: join(home, "project"),
+      projectRoot: join(home, "project"), metadata: { model: "grok-4.6" },
+    });
+    const payload = (key: string) => ({ requestId: key,
+      caller: { actorId: "operator", nodeId: harness.nodeId, currentDirectory: join(home, "project") },
+      target: { kind: "session_id", sessionId: "fixture-session" }, intent: "consult", ensureAwake: true,
+      execution: { session: "existing", targetSessionId: "fixture-session" }, body: key,
+    });
+    try {
+      const first = await broker.postJson<ContinuationReceipt>(harness.baseUrl, "/v1/deliver", payload("continuation-first"));
+      expect(first.accepted).toBe(true);
+      await broker.waitFor(async () => existsSync(gate), value => value, { intervalMs: 10, attempts: 500 });
+      expect(existsSync(gate)).toBe(true);
+      const held = await broker.getJson<{ endpoints: Record<string, AgentEndpoint>; flights: Record<string, FlightRecord> }>(harness.baseUrl, "/v1/snapshot");
+      expect(held.flights[first.flight!.id]?.state).toBe("completed");
+      expect(held.endpoints["fixture-endpoint"]?.state).toBe("active");
+
+      const second = await broker.postJson<ContinuationReceipt>(harness.baseUrl, "/v1/deliver", payload("continuation-second"));
+      expect(second.accepted).toBe(true);
+      expect(second.targetSessionId).toBe("fixture-session");
+      expect(second.flight?.state).toBe("queued");
+      const replay = await broker.postJson<ContinuationReceipt>(harness.baseUrl, "/v1/deliver", payload("continuation-second"));
+      expect(replay.flight?.id).toBe(second.flight?.id);
+      expect(readFileSync(nativeLog, "utf8").trim().split("\n").map(line => JSON.parse(line) as ContinuationNativeEvent)
+        .filter(event => event.event === "prompt").map(event => event.marker)).toEqual(["first"]);
+
+      writeFileSync(release, "released");
+      const done = await broker.waitFor(() => broker.getJson<{ flight: FlightRecord }>(harness.baseUrl,
+        "/v1/invocations/" + second.flight!.invocationId), value => value.flight.state === "completed", { intervalMs: 10 });
+      expect(done.flight.state).toBe("completed");
+      expect(done.flight.output).toBe("reply-second");
+      const events = readFileSync(nativeLog, "utf8").trim().split("\n").map(line => JSON.parse(line) as ContinuationNativeEvent);
+      const prompts = events.filter(event => event.event === "prompt");
+      expect(prompts.map(event => event.marker)).toEqual(["first", "second"]);
+      expect(events.filter(event => event.event === "process:start")).toHaveLength(1);
+      expect(events.filter(event => event.event === "initialize")).toHaveLength(1);
+      const sessions = events.filter(event => event.event === "session/new");
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0]!.sessionId).toBe(`native-continuation-${sessions[0]!.pid}`);
+      expect(events.filter(event => event.event === "session/resume")).toHaveLength(0);
+      expect(new Set(events.map(event => event.pid)).size).toBe(1);
+      expect(prompts.map(event => event.sessionId)).toEqual([sessions[0]!.sessionId, sessions[0]!.sessionId]);
+      expect(events.some(event => event.overlap || event.duringHeldIdle)).toBe(false);
+    } finally {
+      writeFileSync(release, "released");
+    }
+  }, 20_000);
+
   test("accepts broker-owned delivery for a known receiving target", async () => {
     const harness = await broker.startBroker();
 
@@ -213,11 +342,12 @@ describe("broker daemon delivery routing", () => {
       secondHarness.baseUrl,
       `/v1/deliveries?messageId=${encodeURIComponent(response.message?.id ?? "")}&targetId=durable-ghost`,
     );
-    expect(deliveries).toContainEqual(expect.objectContaining({
-      messageId: response.message?.id,
-      targetId: "durable-ghost",
-      status: "pending",
-    }));
+    // Recovery may already have resumed this durable delivery by the time the
+    // API read completes; both states retain the original delivery identity.
+    const recovered = deliveries.find(delivery => delivery.messageId === response.message?.id
+      && delivery.targetId === "durable-ghost");
+    expect(recovered).toBeDefined();
+    expect(["pending", "running"]).toContain(recovered!.status);
   }, 20_000);
 
   test("routes operator and message refs as replies instead of failed deliveries", async () => {

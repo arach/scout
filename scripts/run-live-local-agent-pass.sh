@@ -159,6 +159,9 @@ TMP_ROOT="${OPENSCOUT_LIVE_PASS_ROOT:-$(mktemp -d "${TMPDIR:-/tmp}/openscout-liv
 CLAUDE_WORKTREE="${OPENSCOUT_LIVE_CLAUDE_WORKTREE:-$(mktemp -d "${TMPDIR:-/tmp}/openscout-live-claude-wt.XXXXXX")}"
 DEFAULT_NODE_QUALIFIER="e2e-pass-$("$BUN_BIN" -e 'console.log(Math.random().toString(36).slice(2, 8))')"
 
+# Pin the instance: this checkout broker uses the explicit temp dirs/ports
+# below (prod honours overrides); unpinned it would take the dev default.
+export OPENSCOUT_INSTANCE="${OPENSCOUT_INSTANCE:-prod}"
 export OPENSCOUT_SUPPORT_DIRECTORY="$TMP_ROOT/support"
 export OPENSCOUT_CONTROL_HOME="$TMP_ROOT/control"
 export OPENSCOUT_RELAY_HUB="$TMP_ROOT/relay"

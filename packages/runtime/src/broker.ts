@@ -23,6 +23,7 @@ import {
   assertValidCollaborationRecord,
 } from "@openscout/protocol";
 
+import { registrySubstanceChanged } from "./registry-liveness.js";
 import { planMessageDeliveries, type DeliveryRoute } from "./planner.js";
 import { captureMessageRecords, asyncMessageRecordView, readMessageRecord } from "./broker-message-records.js";
 import { applyHistoryRotationEviction } from "./history-rotation.js";
@@ -383,8 +384,10 @@ export class InMemoryControlRuntime implements ControlRuntime {
   }
 
   async upsertNode(node: NodeDefinition): Promise<void> {
+    const changed = registrySubstanceChanged("node", this.registry.nodes[node.id], node);
     this.registry.nodes[node.id] = node;
     markRoutingRegistryVersion(this.registry);
+    if (!changed) return;
     this.emit({
       id: createRuntimeId("evt"),
       kind: "node.upserted",
@@ -396,6 +399,7 @@ export class InMemoryControlRuntime implements ControlRuntime {
   }
 
   async upsertActor(actor: RuntimeActorIdentity): Promise<void> {
+    const previous = this.registry.actors[actor.id];
     // Re-registration revives the identity — clear the tombstone.
     this.retiredActorIds.delete(actor.id);
     this.registry.actors[actor.id] = {
@@ -410,6 +414,7 @@ export class InMemoryControlRuntime implements ControlRuntime {
       createdAt: actor.createdAt ?? this.registry.actors[actor.id]?.createdAt ?? Date.now(),
     };
     markRoutingRegistryVersion(this.registry);
+    if (!registrySubstanceChanged("actor", previous, this.registry.actors[actor.id]!)) return;
     this.emit({
       id: createRuntimeId("evt"),
       kind: "actor.registered",
@@ -421,6 +426,7 @@ export class InMemoryControlRuntime implements ControlRuntime {
   }
 
   async upsertAgent(agent: RuntimeAgentDefinition): Promise<void> {
+    const changed = registrySubstanceChanged("agent", this.registry.agents[agent.id], agent);
     // Agent registration synthesizes the actor identity — it revives the id.
     this.retiredActorIds.delete(agent.id);
     if (!this.registry.actors[agent.id]) {
@@ -436,6 +442,7 @@ export class InMemoryControlRuntime implements ControlRuntime {
     }
     this.registry.agents[agent.id] = agent;
     markRoutingRegistryVersion(this.registry);
+    if (!changed) return;
     this.emit({
       id: createRuntimeId("evt"),
       kind: "agent.registered",
@@ -488,8 +495,10 @@ export class InMemoryControlRuntime implements ControlRuntime {
       advertiseScope: "local" as const,
       metadata: input.metadata,
     };
+    const changed = registrySubstanceChanged("agent", this.registry.agents[input.id], partial);
     this.registry.agents[input.id] = partial;
     markRoutingRegistryVersion(this.registry);
+    if (!changed) return;
     this.emit({
       id: createRuntimeId("evt"),
       kind: "agent.registered",
@@ -508,6 +517,7 @@ export class InMemoryControlRuntime implements ControlRuntime {
     this.registry.endpoints[endpoint.id] = endpoint;
     markRoutingRegistryVersion(this.registry);
     this.indexEndpoint(endpoint);
+    if (!registrySubstanceChanged("endpoint", previous, endpoint)) return;
     this.emit({
       id: createRuntimeId("evt"),
       kind: "agent.endpoint.upserted",

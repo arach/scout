@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { resolveOpenScoutHomeForEnv } from "@openscout/runtime/support-paths";
 
 /**
  * Graceful stop/restart: before the supervised tree comes down, wait for the
@@ -49,7 +50,7 @@ export function resolveControlPlaneDbPath(env: NodeJS.ProcessEnv): string {
   const explicitPath = env.OPENSCOUT_CONTROL_PLANE_DB?.trim();
   if (explicitPath) return explicitPath;
   const controlHome = env.OPENSCOUT_CONTROL_HOME?.trim()
-    || join(env.HOME?.trim() || homedir(), ".openscout", "control-plane");
+    || join(resolveOpenScoutHomeForEnv(env), "control-plane");
   return join(controlHome, "control-plane.sqlite");
 }
 

@@ -72,6 +72,8 @@ export function defaultServiceAdapterForPlatform(
   }
 
   if (platform === "darwin") return "macos-scoutd";
+  // Linux keeps the foreground broker by default (as before). The systemd
+  // user unit is opt-in only: OPENSCOUT_SERVICE_ADAPTER=systemd-user.
   if (platform === "linux") return "headless-foreground";
   if (platform === "win32") return "windows-service";
   return "headless-foreground";

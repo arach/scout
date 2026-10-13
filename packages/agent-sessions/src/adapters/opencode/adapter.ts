@@ -35,6 +35,7 @@ import {
   spawnHarnessProcess,
   type HarnessProcess,
 } from "../../runtime/process.js";
+import { scoutUserSpawnEnvironment } from "../../scout-state-paths.js";
 
 // ---------------------------------------------------------------------------
 // Adapter
@@ -68,7 +69,7 @@ export class OpenCodeAdapter extends BaseAdapter {
 
     const child = await spawnHarnessProcess("opencode", args, {
       cwd: this.config.cwd,
-      env: { ...process.env, ...this.config.env },
+      env: { ...scoutUserSpawnEnvironment(process.env), ...this.config.env },
     });
     this.serverProcess = child;
     child.drainStdout();

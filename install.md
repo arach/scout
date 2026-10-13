@@ -26,30 +26,85 @@ scout setup
 scout doctor
 ```
 
-On Linux, `setup` saves configuration but does not install a system service.
-On a fresh machine it exits nonzero and reports that the broker is not ready.
-The default is the foreground adapter: no `OPENSCOUT_SERVICE_ADAPTER` override
-is needed, and the bundled macOS `scoutd` is never executed on Linux. Keep the
-broker running in a separate supervised process, then rerun setup and doctor
-from another shell:
+### Linux and headless servers
+
+The packaged `scoutd` supervisor is macOS-only and is never executed on Linux.
+Linux uses the foreground broker by default:
 
 ```bash
-scout setup
+bun add -g @openscout/scout
+scout setup --source-root ~/dev
 openscout-runtime broker
 ```
 
+On a fresh machine, setup saves configuration and exits successfully with
+“Scout is set up. Start the broker to finish.” This foreground handoff does
+not mean the broker is running or ready; actual setup failures still exit
+nonzero. Keep `openscout-runtime broker` running in that shell (or under your
+process manager, as your user with Bun on PATH), then rerun
+`scout setup --source-root ~/dev` and `scout doctor --json` from another
+shell to verify broker health and agent readiness.
+
+#### Optional: run the broker as a systemd user unit
+
+On a machine with a systemd user manager you can have Scout install and run
+the broker as a user unit instead (the `linux-systemd-user` adapter). It is
+opt-in, and only through the adapter env; without it every command keeps the
+foreground lifecycle.
+
 ```bash
-scout setup
-scout doctor
+export OPENSCOUT_SERVICE_ADAPTER=systemd-user
+scout setup --source-root ~/dev          # installs, enables and starts the unit
+openscout-runtime service status         # or: systemctl --user status scout.service
 ```
 
-Installation is successful when `scout --version` prints a version and
-`scout doctor` reports no blocking setup error. `setup` owns the supported
-machine bootstrap. On Linux, the documented foreground broker is the supported
-lifecycle boundary; use your normal process manager to keep it alive. Run it
-as your user with Bun on PATH. A healthy externally managed broker makes setup
-succeed; doctor marks the native supervisor as not applicable. Verify boot
-persistence separately through your process manager.
+Keep `OPENSCOUT_SERVICE_ADAPTER=systemd-user` in the environment you run
+`scout setup`, `scout doctor` and `openscout-runtime service …` from so they
+manage and report the unit.
+
+The unit is `~/.config/systemd/user/scout.service` (`scout-<instance>.service`
+for a non-prod `OPENSCOUT_INSTANCE`). It runs the installed package's
+`openscout-runtime broker` with Bun's global bin on `PATH`
+(`$BUN_INSTALL/bin`, else `bun pm bin -g`: `~/.cache/.bun/bin` when Bun comes
+from mise, `~/.bun/bin` otherwise) and `Restart=on-failure`:
+
+```ini
+[Unit]
+Description=Scout broker (installed @openscout/scout)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=PATH=%h/.cache/.bun/bin:%h/.local/share/mise/shims:%h/.local/bin:/usr/local/bin:/usr/bin
+ExecStart=%h/.cache/.bun/bin/openscout-runtime broker
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+```
+
+A unit that runs Scout from a source checkout also carries
+`Environment=OPENSCOUT_INSTANCE=<name>` (including `prod`), so the broker
+never takes the checkout's dev default. An existing unit with this shape is
+adopted as-is, including any `Environment=` lines you added (for example
+`OPENSCOUT_ADVERTISE_SCOPE=mesh`, or quoted values). Scout does not repoint,
+stop or uninstall a unit that runs a different Scout runtime (another install
+or a checkout) unless you rerun with `OPENSCOUT_ALLOW_SHARED_SERVICE_REPOINT=1`.
+`start` fails, with a `journalctl --user -u <unit>` hint, when the broker does
+not become healthy, and status warns when lingering is off; to keep the broker
+running after you log out, enable lingering once:
+`loginctl enable-linger "$USER"`.
+
+Doctor reports broker reachability and marks the native supervisor as not
+applicable on Linux. Native app installation, launchd, and the macOS menu
+helper commands do not apply to Linux.
+
+To run a development checkout beside this install, see [Dev instances](docs/dev-instances.md): a checkout runs as `OPENSCOUT_INSTANCE=dev` with its own
+directories, ports (broker 24400) and `scout-dev.service`, and never touches
+`scout.service`.
+
 
 ## Verify identity and routing
 

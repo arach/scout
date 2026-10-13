@@ -18,6 +18,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { execSystemFile } from "@openscout/runtime/system-probes";
+import { buildUserSpawnEnvironment } from "@openscout/runtime/instance";
 
 export type LocalTerminalAppKind =
   | "terminal"
@@ -197,7 +198,9 @@ export async function openLocalTerminalAttach(
   if (argv.length === 0) {
     throw new Error("the terminal surface has no attach command");
   }
-  const env = options.env ?? process.env;
+  // A GUI terminal the operator types into: a user-facing spawn, without the
+  // web server's instance env (only the client pointer).
+  const env = buildUserSpawnEnvironment(options.env ?? process.env) as NodeJS.ProcessEnv;
   const app = options.app !== undefined ? options.app : preferredLocalTerminalApp(env);
   if (!app) {
     throw new Error(

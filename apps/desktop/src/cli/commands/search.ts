@@ -1,5 +1,6 @@
 import {
   indexRecentSessionKnowledge,
+  knowledgeIndexEnabled, KNOWLEDGE_INDEX_OFF, disabledKnowledgeStatus,
   SQLiteKnowledgeStore,
   type KnowledgeCoverage,
   type KnowledgeSearchHit,
@@ -87,6 +88,7 @@ function formatWarmSpan(span: KnowledgeWarmSpan): string {
 }
 
 function formatStatus(status: KnowledgeStatus): string {
+  if (status.enabled === false) return status.message ?? KNOWLEDGE_INDEX_OFF;
   const lines = [
     "Knowledge search status",
     `  collections: ${status.readyCollections}/${status.collections} ready`,
@@ -118,6 +120,7 @@ function formatStatus(status: KnowledgeStatus): string {
 }
 
 function formatCoverageNote(coverage: KnowledgeCoverage): string[] {
+  if (coverage.kind === "index_off" || coverage.kind === "bounded") return [coverage.suggestion];
   if (coverage.kind === "empty_index") {
     return [
       "Coverage: empty index (never warmed).",
@@ -184,6 +187,7 @@ function facetValue(facets: KnowledgeSearchHit["facets"], key: string): string |
 }
 
 async function runStatus(context: ScoutCommandContext): Promise<void> {
+  if (!knowledgeIndexEnabled()) { context.output.writeValue(disabledKnowledgeStatus(), formatStatus); return; }
   // Read path: never open a writable connection (no DDL / FTS migration on status).
   const store = new SQLiteKnowledgeStore(undefined, undefined, { readonly: true });
   try {
@@ -239,6 +243,7 @@ async function runIndex(context: ScoutCommandContext, args: string[]): Promise<v
     throw new ScoutCliError(`unsupported search source: ${source} (only sessions is implemented)`);
   }
 
+  if (!knowledgeIndexEnabled()) { context.output.writeValue({ enabled: false, message: KNOWLEDGE_INDEX_OFF }, r => r.message); return; }
   context.stderr(
     `indexing sessions${harness.length ? ` harness=${harness.join(",")}` : ""}${
       hours != null ? ` hours=${hours}` : ` days=${days ?? 3}`
@@ -354,6 +359,10 @@ async function runQuery(context: ScoutCommandContext, args: string[]): Promise<v
   else if (days != null) lookbackMs = days * 24 * 60 * 60 * 1000;
 
   // Read path: never open a writable connection (no DDL / FTS migration on query).
+  if (!knowledgeIndexEnabled()) {
+    context.output.writeValue({ q, hits: [], hitCount: 0, coverage: { kind: "index_off", suggestion: KNOWLEDGE_INDEX_OFF } }, () => KNOWLEDGE_INDEX_OFF);
+    return;
+  }
   const store = new SQLiteKnowledgeStore(undefined, undefined, { readonly: true });
   try {
     const status = store.status();

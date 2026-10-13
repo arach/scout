@@ -518,7 +518,7 @@ export function pairingRelayRuntimeReady(snapshot, isAlive = processIsAlive) {
 }
 
 function readPairingRuntimeSnapshot() {
-  const path = join(homedir(), ".scout", "pairing", "runtime.json");
+  const path = join(process.env.OPENSCOUT_PAIRING_HOME?.trim() || join(homedir(), ".scout", "pairing"), "runtime.json");
   try {
     return { path, snapshot: JSON.parse(readFileSync(path, "utf8")) };
   } catch {

@@ -5,9 +5,67 @@ import {
   renderOpenScoutCaddyfile,
   resolveOpenScoutLocalEdgeConfig,
   resolveOpenScoutLocalEdgeDiscoveryHosts,
+  resolveOpenScoutLocalEdgeAdvertisements,
+  createLocalEdgeAdvertisementOwner,
+  shouldStartOpenScoutLocalEdge,
 } from "./local-edge.ts";
 
 describe("OpenScout local edge", () => {
+  test("named instances cannot claim the shared edge even when explicitly enabled", () => {
+    for (const enabled of [undefined, "0", "1"]) {
+      expect(shouldStartOpenScoutLocalEdge({ isProd: false, platform: "darwin", enabled })).toBe(false);
+    }
+    expect(shouldStartOpenScoutLocalEdge({ isProd: true, platform: "darwin" })).toBe(true);
+    expect(shouldStartOpenScoutLocalEdge({ isProd: true, platform: "darwin", enabled: "0" })).toBe(false);
+    expect(shouldStartOpenScoutLocalEdge({ isProd: true, platform: "linux" })).toBe(false);
+  });
+  test("repeated address changes replace only owned advertisements and shutdown releases them", () => {
+    let serial = 0;
+    const active = new Set<number>();
+    const owner = createLocalEdgeAdvertisementOwner({
+      start: () => { const id = ++serial; active.add(id); return id; },
+      stop: (id: number) => { expect(active.delete(id)).toBe(true); },
+    });
+    const first = [{ host: "air.scout.local", address: "192.168.18.11" }];
+    owner.update(first, ["http", "https"]);
+    expect(active.size).toBe(2);
+    owner.update(first, ["http", "https"]);
+    expect(serial).toBe(2);
+    for (let i = 2; i < 8; i++) {
+      owner.update([{ host: "air.scout.local", address: `192.168.18.${i}` }], ["http", "https"]);
+      expect(active.size).toBe(2);
+    }
+    owner.update([], ["http", "https"]);
+    expect(active.size).toBe(0);
+    owner.update(first, ["http", "https"]);
+    owner.stop();
+    expect(active.size).toBe(0);
+  });
+  test("LAN-only advertises the owner's physical address and withdraws it offline", () => {
+    const config = { portalHost: "scout.local", nodeHost: "air.scout.local", lanOnly: true };
+    const networks = [{ name: "en0", address: "192.168.18.11", cidr: "192.168.18.11/24", netmask: "255.255.255.0", family: "IPv4" as const }];
+    expect(resolveOpenScoutLocalEdgeAdvertisements(config, networks)).toEqual([
+      { host: "scout.local", address: "127.0.0.1" },
+      { host: "air.scout.local", address: "192.168.18.11" },
+      { host: "chat.scout.local", address: "127.0.0.1" },
+    ]);
+    expect(resolveOpenScoutLocalEdgeAdvertisements(config, [])).toEqual([
+      { host: "scout.local", address: "127.0.0.1" },
+      { host: "chat.scout.local", address: "127.0.0.1" },
+    ]);
+    const moved = [{ ...networks[0]!, address: "10.1.0.2", cidr: "10.1.0.2/24" }];
+    expect(resolveOpenScoutLocalEdgeAdvertisements(config, moved)[1]?.address).toBe("10.1.0.2");
+    const selfAssigned = { ...networks[0]!, address: "169.254.1.2", cidr: "169.254.1.2/16" };
+    expect(resolveOpenScoutLocalEdgeAdvertisements(config, [selfAssigned, ...moved])[1]?.address).toBe("10.1.0.2");
+  });
+
+  test("LAN-only node HTTP redirects to its own HTTPS preserving the request URI", () => {
+    const config = resolveOpenScoutLocalEdgeConfig({ nodeHost: "air.scout.local", lanOnly: true, scheme: "both" });
+    const output = renderOpenScoutCaddyfile(config);
+    expect(output).toContain("http://air.scout.local {\n  redir https://air.scout.local{uri} 308\n}");
+    expect(output).toContain("\nair.scout.local {\n  tls internal");
+    expect(output).toContain("http://scout.local {");
+  });
   test("advertises the chat doorway explicitly because mDNS has no wildcard", () => {
     expect(resolveOpenScoutLocalEdgeDiscoveryHosts({
       portalHost: "scout.local", nodeHost: "m1.scout.local",
@@ -174,4 +232,30 @@ describe("OpenScout local edge", () => {
       ),
     ).toContain("reverse_proxy 127.0.0.1:4311 {");
   });
+});
+
+
+test("LAN mDNS preserves platform support without advertising remote loopback IPv6", () => {
+  const input = { name: "Scout LAN", host: "node.scout.local", address: "192.168.50.20", port: 443, scheme: "https" as const };
+  const linux = buildOpenScoutLocalEdgeMdnsCommands(input, "linux");
+  expect(linux).toHaveLength(2);
+  expect(linux[0]?.args).toEqual(["-a", "-R", "node.scout.local", "192.168.50.20"]);
+  expect(linux.flatMap(c => c.args)).not.toContain("::1");
+  expect(buildOpenScoutLocalEdgeMdnsCommands(input, "darwin")[0]?.args).toContain("192.168.50.20");
+});
+
+test("advertisement ownership withdraws every Linux publisher when the LAN disappears", () => {
+  const stopped: string[] = [];
+  const owner = createLocalEdgeAdvertisementOwner({
+    start: (ad, scheme) => buildOpenScoutLocalEdgeMdnsCommands({ ...ad, name: ad.host, port: 443, scheme }, "linux").map(c => c.args.join(" ")),
+    stop: children => stopped.push(...children),
+  });
+  const ads = [{ host: "node.scout.local", address: "192.168.50.20" }];
+  owner.update(ads, ["https"]);
+  owner.update(ads, ["https"]);
+  expect(stopped).toEqual([]);
+  owner.update([], ["https"]);
+  expect(stopped).toHaveLength(2);
+  owner.stop();
+  expect(stopped).toHaveLength(2);
 });

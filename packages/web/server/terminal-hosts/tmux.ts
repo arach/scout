@@ -13,6 +13,8 @@ import type {
   TerminalHostControlResult,
   TerminalHostSession,
 } from "./types.ts";
+import { wrapUserSpawnPaneCommand } from "@openscout/runtime/terminal-environment";
+import { buildMultiplexerServerEnvironment } from "@openscout/runtime/instance";
 
 const TMUX_TIMEOUT_MS = 2_000;
 /** A `--version` shell-out can take seconds on a loaded machine; a host must
@@ -82,8 +84,10 @@ export const tmuxTerminalHost: TerminalHostAdapter = {
         "-s",
         input.sessionName,
         ...(input.cwd ? ["-c", input.cwd] : []),
-        ...(resumeCommand ? [resumeCommand] : []),
-      ], { timeoutMs: 5_000, env: context.env });
+        // Panes get the tmux server's global env: unset instance keys there,
+        // and start the server (if this creates it) without them.
+        wrapUserSpawnPaneCommand(resumeCommand, context.env ?? process.env),
+      ], { timeoutMs: 5_000, env: buildMultiplexerServerEnvironment(context.env ?? process.env) as NodeJS.ProcessEnv });
       return { created: true, resumed: resumeCommand ? true : null };
     } catch (error) {
       return { created: false, reason: errorReason(error) };

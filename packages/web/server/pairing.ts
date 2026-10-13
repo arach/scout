@@ -29,11 +29,13 @@ import {
   resolveScoutPairingSupervisorPaths,
   updateScoutPairingSupervisorIntent,
 } from "@openscout/runtime/pairing-supervisor";
-import { loadLocalConfig } from "@openscout/runtime/local-config";
+import { loadLocalConfig, resolvePairingPort } from "@openscout/runtime/local-config";
 import { openPairingLocalChannel } from "@openscout/runtime/pairing-local-socket";
 import { resolveBunExecutable as resolveResolvedBunExecutable } from "@openscout/runtime/tool-resolution";
 
 import { coalesce } from "./server-core.ts";
+import { resolveOpenScoutPairingHome } from "@openscout/runtime/support-paths";
+import { selectInstanceAwareEntrypoint } from "@openscout/runtime/instance";
 
 export const SCOUT_PAIRING_HOME_DIRECTORY = ".scout/pairing";
 export const SCOUT_PAIRING_CONFIG_FILE = "config.json";
@@ -230,9 +232,7 @@ const SCOUT_PAIRING_BRIDGE_CONNECT_TIMEOUT_MS = 1_500;
 const SCOUT_PAIRING_BRIDGE_REQUEST_TIMEOUT_MS = 2_500;
 
 function resolveScoutPairingHomeDirectory(): string {
-  const configured = process.env.OPENSCOUT_PAIRING_HOME?.trim()
-    || process.env.SCOUT_PAIRING_HOME?.trim();
-  return configured || join(homedir(), SCOUT_PAIRING_HOME_DIRECTORY);
+  return resolveOpenScoutPairingHome();
 }
 
 export function resolveScoutPairingPaths(): ScoutPairingPaths {
@@ -450,7 +450,7 @@ function resolveScoutPairingConfig(): ScoutPairingResolvedConfig {
     secure: config.secure !== false,
     port: (Number.isFinite(portFromEnv) && portFromEnv > 0)
       ? portFromEnv
-      : portFromLocalConfig ?? portFromPairingFile ?? SCOUT_PAIRING_DEFAULT_PORT,
+      : portFromLocalConfig ?? portFromPairingFile ?? resolvePairingPort(),
     workspaceRoot: typeof config.workspace?.root === "string" && config.workspace.root.trim().length > 0
       ? config.workspace.root.trim()
       : null,
@@ -760,13 +760,15 @@ function resolveScoutPairingRuntimeScriptPath(): string {
     join(resolveOpenScoutWebServerDirectory(), SCOUT_PAIRING_RUNTIME_SCRIPT),
   ];
 
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-  }
+  // A non-prod OPENSCOUT_INSTANCE skips a stale pre-instance build: it would
+  // run with prod's ~/.scout/pairing and ports.
+  const selected = selectInstanceAwareEntrypoint(candidates);
+  if (selected) return selected;
 
-  throw new Error("Unable to locate the Scout pairing runtime controller entrypoint.");
+  throw new Error(
+    "Unable to locate an instance-aware Scout pairing runtime controller entrypoint"
+      + " (rebuild, or run from source, for a non-prod OPENSCOUT_INSTANCE).",
+  );
 }
 
 function resolveOpenScoutWebServerDirectory(moduleUrl: string | URL = import.meta.url): string {

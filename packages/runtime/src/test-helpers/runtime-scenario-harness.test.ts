@@ -208,6 +208,9 @@ export class RuntimeScenarioHarness {
         // here outlives a SIGKILLed runner exactly as one spawned by
         // broker-daemon-harness did. `afterEach` never runs on SIGKILL.
         OPENSCOUT_PARENT_PID: String(process.pid),
+        // A supervisor pins the instance on what it launches; unpinned, a
+        // broker run from this checkout would take the dev default.
+        OPENSCOUT_INSTANCE: "prod",
         ...input.env,
       },
       stdout: "pipe",

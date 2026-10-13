@@ -10,6 +10,7 @@ import {
   type EventInventoryAdapter,
   type SemanticEventKind,
 } from "../event-inventory.js";
+import { isScoutPairingPath, scoutPairingAdapterRoot } from "../../scout-state-paths.js";
 
 function normalizedPath(filePath: string): string {
   return filePath.replace(/\\/g, "/").toLowerCase();
@@ -112,12 +113,12 @@ export const claudeCodeEventInventoryAdapter: EventInventoryAdapter = {
     return [
       join(home, ".claude", "projects"),
       join(home, ".claude", "history.jsonl"),
-      join(home, ".scout", "pairing", "claude"),
+      scoutPairingAdapterRoot(home, "claude"),
     ];
   },
   matchesFile(filePath) {
     const path = normalizedPath(filePath);
-    return path.includes("/.claude/") || path.includes("/.scout/pairing/claude/");
+    return path.includes("/.claude/") || isScoutPairingPath(path, "claude/");
   },
   extract(record) {
     const type = stringValue(record.type);

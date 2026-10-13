@@ -7,6 +7,7 @@ import type { RepoPullRequestLoadOptions, RepoPullRequestSnapshot } from "./rout
 import type { WebTailRuntime } from "./routes/scoutbot.ts";
 import type { ScoutbotCodexAssistantInvoker } from "./scoutbot-assistant.ts";
 import type { HerdrContinuationOptions } from "./core/attention/herdr-continuation-host.ts";
+import type { resolveScoutLanNetworks } from "@openscout/runtime/lan-network";
 
 export type TerminalRunRequest = {
   command: string;
@@ -49,6 +50,10 @@ export type CreateOpenScoutWebServerOptions = {
   resolvePeerAddress?: (c: Context) => string | undefined;
   /** Network exposure policy. Defaults to OPENSCOUT_WEB_LAN_SCOPE. */
   lanAccessScope?: ScoutWebLanAccessScope;
+  /** Restrict all HTTP and upgrade traffic to this host and its physical LAN. */
+  lanOnly?: boolean;
+  /** Resolve current physical-interface subnets. Injectable for deterministic tests. */
+  lanNetworks?: () => ReturnType<typeof resolveScoutLanNetworks>;
   runTerminalCommand?: (request: TerminalRunRequest) => Promise<void>;
   destroyTerminalRelaySession?: (sessionId: string) => Promise<boolean>;
   destroyTerminalRelaySurface?: (backend: "tmux" | "zellij" | "herdr", sessionName: string) => Promise<number>;

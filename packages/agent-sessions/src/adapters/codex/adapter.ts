@@ -18,6 +18,7 @@ import {
   createCodexEventNormalizer,
 } from "./normalizer.js";
 import { CodexObservedTopologyTracker } from "./topology.js";
+import { scoutPairingHome } from "../../scout-state-paths.js";
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) {
@@ -45,7 +46,7 @@ export class CodexAdapter extends BaseAdapter {
 
   constructor(config: AdapterConfig) {
     super(config);
-    const runtimeRoot = join(homedir(), ".scout/pairing", "codex", this.session.id);
+    const runtimeRoot = join(scoutPairingHome(), "codex", this.session.id);
     this.observedTopology = new CodexObservedTopologyTracker({
       cwd: config.cwd ?? process.cwd(),
       homeDir: config.env?.HOME,
@@ -131,7 +132,7 @@ export class CodexAdapter extends BaseAdapter {
   }
 
   private get codexOptions(): CodexAppServerSessionOptions {
-    const runtimeRoot = join(homedir(), ".scout/pairing", "codex", this.session.id);
+    const runtimeRoot = join(scoutPairingHome(), "codex", this.session.id);
     const configuredThreadId = this.config.options?.["threadId"] as string | undefined;
     const requireExistingThread = this.config.options?.["requireExistingThread"] as boolean | undefined;
     const rawLaunchArgs = this.config.options?.["launchArgs"];

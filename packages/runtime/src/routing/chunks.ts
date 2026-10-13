@@ -1,3 +1,4 @@
+import { knowledgeIndexEnabled } from "../knowledge/settings.js";
 import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { openRuntimeSqliteDatabase, type ControlPlaneSqliteDatabase } from "../sqlite-adapter.js";
@@ -15,8 +16,8 @@ export class RoutingChunks {
   private db: ControlPlaneSqliteDatabase | null;
   private keysReady = false;
   private cachedKeys?: RouteChunkKey[];
-  constructor(readonly path = resolveOpenScoutKnowledgePaths().sqlitePath) {
-    this.db = existsSync(path) ? openRuntimeSqliteDatabase(path, { readonly: true }) : null;
+  constructor(readonly path = resolveOpenScoutKnowledgePaths().sqlitePath, enabled = knowledgeIndexEnabled()) {
+    this.db = enabled && existsSync(path) ? openRuntimeSqliteDatabase(path, { readonly: true }) : null;
   }
   close(): void { this.db?.close?.(); }
   collections(): RouteCollection[] {

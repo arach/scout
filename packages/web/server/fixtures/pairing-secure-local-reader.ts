@@ -7,6 +7,7 @@ import { createScoutPairingBridgeClient } from "../pairing.ts";
 import { startBridgeServerTRPC } from "../core/pairing/runtime/bridge/server-trpc.ts";
 import { bytesToHex, generateKeyPair, loadOrCreateIdentity, SecureTransport } from "../core/pairing/runtime/security/index.ts";
 import type { Bridge } from "../core/pairing/runtime/bridge/bridge.ts";
+import { resolveOpenScoutPairingHome } from "@openscout/runtime/support-paths";
 
 const identity = loadOrCreateIdentity();
 const bridge = {
@@ -41,10 +42,10 @@ const strangerCloseCode = await new Promise<number>((resolve) => {
 });
 
 server.stop();
-const trustedPeersWritten = existsSync(join(homedir(), ".scout/pairing/trusted-peers.json"));
+const trustedPeersWritten = existsSync(join(resolveOpenScoutPairingHome(), "trusted-peers.json"));
 
 // Even when this key is already on the paired list, neither side rewrites it.
-const peersFile = join(homedir(), ".scout/pairing/trusted-peers.json");
+const peersFile = join(resolveOpenScoutPairingHome(), "trusted-peers.json");
 const seeded = JSON.stringify([{ publicKey: bytesToHex(identity.publicKey), pairedAt: "2026-01-01T00:00:00.000Z" }]);
 writeFileSync(peersFile, seeded);
 const seededServer = startBridgeServerTRPC({ bridge, port, secure: true, identity });

@@ -395,6 +395,46 @@ describe("setup inventory", () => {
     expect(existsSync(resolveClaudeStatuslineDelegatePath())).toBe(false);
   });
 
+  test("a dev instance's setup leaves Claude's statusline pointing at the installed prod instance", async () => {
+    const home = join(tmpdir(), `openscout-claude-statusline-dev-instance-test-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    const settingsPath = join(home, ".claude", "settings.json");
+    // Prod's wrapper (installed @openscout/scout), still live.
+    const prodWrapper = join(home, ".local", "share", "openscout", "runtime", "statusline", "claude-statusline.sh");
+    const originalInstance = process.env.OPENSCOUT_INSTANCE;
+    const originalStatuslineInstance = process.env.OPENSCOUT_STATUSLINE_INSTANCE;
+
+    testDirectories.add(home);
+    process.env.HOME = home;
+    process.env.OPENSCOUT_INSTANCE = "dev";
+    delete process.env.OPENSCOUT_STATUSLINE_INSTANCE;
+    process.env.OPENSCOUT_SUPPORT_DIRECTORY = join(home, ".openscout", "instances", "dev", "support");
+    mkdirSync(join(home, ".claude"), { recursive: true });
+    mkdirSync(join(prodWrapper, ".."), { recursive: true });
+    writeFileSync(prodWrapper, "#!/bin/sh\n", "utf8");
+    const prodSettings = JSON.stringify({
+      statusLine: { type: "command", command: `'${prodWrapper}'`, padding: 0 },
+    }, null, 2);
+    writeFileSync(settingsPath, prodSettings, "utf8");
+
+    try {
+      const report = await installClaudeStatuslineTool();
+      expect(report).toEqual(expect.objectContaining({ status: "skipped", reason: "non-prod-instance" }));
+      expect(readFileSync(settingsPath, "utf8")).toBe(prodSettings);
+      expect(existsSync(report.wrapperPath)).toBe(false);
+
+      // Even with no prod statusline yet, a dev instance does not claim it.
+      rmSync(settingsPath);
+      const fresh = await installClaudeStatuslineTool();
+      expect(fresh).toEqual(expect.objectContaining({ status: "skipped", reason: "non-prod-instance" }));
+      expect(existsSync(settingsPath)).toBe(false);
+    } finally {
+      if (originalInstance === undefined) delete process.env.OPENSCOUT_INSTANCE;
+      else process.env.OPENSCOUT_INSTANCE = originalInstance;
+      if (originalStatuslineInstance === undefined) delete process.env.OPENSCOUT_STATUSLINE_INSTANCE;
+      else process.env.OPENSCOUT_STATUSLINE_INSTANCE = originalStatuslineInstance;
+    }
+  });
+
   test("reclaims Claude's statusline from a deleted install's wrapper without adopting it as a delegate", async () => {
     const home = join(tmpdir(), `openscout-claude-statusline-reclaim-test-${Date.now()}-${Math.random().toString(16).slice(2)}`);
     const settingsPath = join(home, ".claude", "settings.json");

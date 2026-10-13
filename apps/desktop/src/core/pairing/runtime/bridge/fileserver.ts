@@ -16,6 +16,7 @@ import {
   type WebHandoffScope,
 } from "./web-handoff.ts";
 import { serveArtifactPresentation } from "./artifact-presentation.ts";
+import { resolveOpenScoutPairingHome } from "@openscout/runtime/support-paths";
 
 // Allowed roots — file requests must resolve under one of these.
 const ALLOWED_ROOTS = [homedir(), "/tmp"];
@@ -23,7 +24,9 @@ const LOOPBACK_PEERS = new BlockList();
 LOOPBACK_PEERS.addSubnet("127.0.0.0", 8, "ipv4");
 LOOPBACK_PEERS.addAddress("::1", "ipv6");
 LOOPBACK_PEERS.addSubnet("::ffff:127.0.0.0", 104, "ipv6");
-const PAIRING_ATTACHMENT_ROOT = join(homedir(), ".scout", "pairing", "attachments");
+function pairingAttachmentRoot(): string {
+  return join(resolveOpenScoutPairingHome(), "attachments");
+}
 const PAIRING_ATTACHMENT_TTL_MS = 6 * 60 * 60 * 1000;
 const PAIRING_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
 const PAIRING_ATTACHMENT_PATH_PREFIX = "/attachments/";
@@ -87,11 +90,11 @@ export function storePairingAttachmentBlob(
     throw new Error(`attachment exceeds ${PAIRING_ATTACHMENT_MAX_BYTES} bytes`);
   }
 
-  mkdirSync(PAIRING_ATTACHMENT_ROOT, { recursive: true, mode: 0o700 });
+  mkdirSync(pairingAttachmentRoot(), { recursive: true, mode: 0o700 });
   purgeExpiredPairingAttachments(options.now);
 
   const id = `att-${randomUUID()}`;
-  const path = join(PAIRING_ATTACHMENT_ROOT, id);
+  const path = join(pairingAttachmentRoot(), id);
   writeFileSync(path, data, { mode: 0o600 });
 
   const now = options.now ?? Date.now();
@@ -174,7 +177,7 @@ function resolvePairingAttachment(id: string, now: number): StoredPairingAttachm
 }
 
 function attachmentSidecarPath(id: string): string {
-  return join(PAIRING_ATTACHMENT_ROOT, `${id}.json`);
+  return join(pairingAttachmentRoot(), `${id}.json`);
 }
 
 function writeAttachmentSidecar(entry: StoredPairingAttachment): void {
@@ -210,7 +213,7 @@ function readAttachmentSidecar(id: string): StoredPairingAttachment | null {
     }
     return {
       id,
-      path: join(PAIRING_ATTACHMENT_ROOT, id),
+      path: join(pairingAttachmentRoot(), id),
       mediaType,
       fileName: sanitizeAttachmentFileName(raw.fileName),
       size: typeof raw.size === "number" ? raw.size : 0,
@@ -223,7 +226,7 @@ function readAttachmentSidecar(id: string): StoredPairingAttachment | null {
 
 function forgetPairingAttachment(id: string): void {
   attachmentBlobs.delete(id);
-  for (const path of [join(PAIRING_ATTACHMENT_ROOT, id), attachmentSidecarPath(id)]) {
+  for (const path of [join(pairingAttachmentRoot(), id), attachmentSidecarPath(id)]) {
     try {
       unlinkSync(path);
     } catch {
@@ -289,12 +292,24 @@ function isInsideRoot(root: string, candidate: string): boolean {
   return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
-function isAllowedHomeRelativePath(rel: string): boolean {
+function isAllowedHomeRelativePath(rel: string, pairingRel: string): boolean {
   if (!rel.startsWith(".")) return true;
+  const pairingAllowed = pairingRel.length > 0 && !pairingRel.startsWith("..") && !isAbsolute(pairingRel);
   return rel === ".claude"
     || rel.startsWith(`.claude${sep}`)
-    || rel === join(".scout", "pairing")
-    || rel.startsWith(`${join(".scout", "pairing")}${sep}`);
+    || (pairingAllowed && (rel === pairingRel || rel.startsWith(`${pairingRel}${sep}`)));
+}
+
+/** This instance's pairing home relative to $HOME (`.scout/pairing` for prod). */
+function pairingHomeRelativePath(canonicalHome: string): string {
+  const pairingHome = resolveOpenScoutPairingHome();
+  let canonical = pairingHome;
+  try {
+    canonical = realpathSync(pairingHome);
+  } catch {
+    // Not created yet: compare the configured path.
+  }
+  return relative(canonicalHome, canonical);
 }
 
 function resolveAllowedFile(filePath: string): AllowedFileResolution {
@@ -311,7 +326,7 @@ function resolveAllowedFile(filePath: string): AllowedFileResolution {
   for (const configuredRoot of ALLOWED_ROOTS) {
     const root = realpathSync(configuredRoot);
     if (!isInsideRoot(root, candidate)) continue;
-    if (root === canonicalHome && !isAllowedHomeRelativePath(relative(root, candidate))) {
+    if (root === canonicalHome && !isAllowedHomeRelativePath(relative(root, candidate), pairingHomeRelativePath(canonicalHome))) {
       return { status: "forbidden" };
     }
     try {

@@ -11,8 +11,11 @@ import {
 
 import { pairingLog } from "./log";
 import { startRelay, type RelayOptions } from "./relay/relay";
+import { resolveOpenScoutPairingHome } from "@openscout/runtime/support-paths";
 
-const PAIRING_DIR = join(homedir(), ".scout/pairing");
+function pairingDir(): string {
+  return resolveOpenScoutPairingHome();
+}
 
 export interface TLSPair {
   cert: string;
@@ -46,12 +49,12 @@ export type RelayEndpointResolutionOptions = {
 };
 
 async function findStoredTailscaleCert(hostname: string): Promise<TLSPair | null> {
-  if (!existsSync(PAIRING_DIR)) {
+  if (!existsSync(pairingDir())) {
     return null;
   }
 
-  const certPath = join(PAIRING_DIR, `${hostname}.crt`);
-  const keyPath = join(PAIRING_DIR, `${hostname}.key`);
+  const certPath = join(pairingDir(), `${hostname}.crt`);
+  const keyPath = join(pairingDir(), `${hostname}.key`);
   if (!existsSync(certPath) || !existsSync(keyPath)) {
     return null;
   }
@@ -157,10 +160,10 @@ export function resolveRelayEndpointForTailscaleStatus(
 }
 
 async function generateTailscaleCerts(hostname: string): Promise<TLSPair | null> {
-  mkdirSync(PAIRING_DIR, { recursive: true });
+  mkdirSync(pairingDir(), { recursive: true });
 
-  const certPath = join(PAIRING_DIR, `${hostname}.crt`);
-  const keyPath = join(PAIRING_DIR, `${hostname}.key`);
+  const certPath = join(pairingDir(), `${hostname}.crt`);
+  const keyPath = join(pairingDir(), `${hostname}.key`);
 
   try {
     pairingLog.info("relay", "generating tailscale TLS cert", { hostname });

@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { parseScoutArgv, preflightLifecycle, QUICK_LINKS } from "./lifecycle-preflight.mjs";
+import { applyInstanceFlag, parseScoutArgv, preflightLifecycle, QUICK_LINKS } from "./lifecycle-preflight.mjs";
 
 const binDir = dirname(fileURLToPath(import.meta.url));
 const bunDistEntry = resolve(binDir, "../dist/main.mjs");
@@ -19,6 +19,12 @@ if (!process.env.SCOUT_APP_VERSION && packageVersion) {
   process.env.SCOUT_APP_VERSION = packageVersion;
 }
 
+try {
+  applyInstanceFlag(process);
+} catch (error) {
+  console.error(error.message);
+  process.exit(1);
+}
 await main();
 
 // Persistent transports retain their natural lifecycle. Inspection commands

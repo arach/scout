@@ -15,7 +15,32 @@ import type {
 import { requestScoutBrokerJsonWithTrace } from "./broker-api.js";
 import { CONTROL_PLANE_SCHEMA_VERSION } from "./schema-version.js";
 import { openControlPlaneSqliteDatabase } from "./sqlite-adapter.js";
-import { defaultOpenScoutSupportDirectory, resolveOpenScoutSupportPaths } from "./support-paths.js";
+import {
+  defaultOpenScoutControlHome,
+  defaultOpenScoutSupportDirectory,
+  resolveOpenScoutSupportPaths,
+} from "./support-paths.js";
+import {
+  applyOpenScoutInstanceEnvironment,
+  assertOpenScoutInstanceIsolation,
+  deriveOpenScoutInstanceLayout,
+  openScoutInstanceMeshRefusal,
+  resolveOpenScoutInstanceName,
+} from "./instance.js";
+import {
+  assertSystemctlOk,
+  assertSystemdUnitOwnership,
+  buildSystemdUserUnitSpec,
+  systemdUserLingerWarning,
+  readSystemdUserUnitState,
+  removeSystemdUserUnit,
+  renderSystemdUserUnit,
+  runSystemctlUser,
+  systemdUserUnitDirectory,
+  writeSystemdUserUnit,
+  withOperatorUnitEnvironment,
+  type SystemctlRunner,
+} from "./systemd-user-service.js";
 import {
   openScoutNetworkDiscoveryEnabled,
 } from "./open-scout-network.js";
@@ -122,6 +147,8 @@ export type BrokerRuntimeFreshness = {
 
 export type BrokerServiceStatus = {
   serviceAdapter?: RuntimeServiceAdapterKind;
+  /** OPENSCOUT_INSTANCE this status describes (`prod` unless isolated). */
+  instance?: string;
   label: string;
   mode: BrokerServiceMode;
   launchAgentPath: string;
@@ -143,6 +170,8 @@ export type BrokerServiceStatus = {
   health: BrokerHealthSnapshot;
   runtimeFreshness?: BrokerRuntimeFreshness;
   lastLogLine: string | null;
+  /** Non-fatal service advisories (for example systemd lingering off). */
+  warnings?: string[];
 };
 
 export type BrokerServiceCommand = "install" | "start" | "stop" | "restart" | "uninstall" | "status";
@@ -213,6 +242,8 @@ export function resolveAdvertiseScope(
   env: RuntimeEnv = process.env,
   readPersisted: PersistedAdvertiseScopeReader | null = null,
 ): BrokerAdvertiseScope {
+  // A non-prod OPENSCOUT_INSTANCE stays local unless explicitly opted in.
+  if (openScoutInstanceMeshRefusal(env)) return "local";
   // Persisted bind posture wins over env so a reboot restores the announced
   // scope (docs/proposals/mesh-trust-cone.md §11.5). Env remains the boot
   // default when nothing has been persisted.
@@ -581,15 +612,12 @@ function resolveBrokerServiceLabel(mode: BrokerServiceMode): string {
     return explicit;
   }
 
-  switch (mode) {
-    case "prod":
-      return "app.openscout";
-    case "custom":
-      return "app.openscout.custom";
-    case "dev":
-    default:
-      return "app.openscout";
+  // A non-prod OPENSCOUT_INSTANCE owns its own label (app.openscout.<name>).
+  const layout = deriveOpenScoutInstanceLayout();
+  if (!layout.isProd) {
+    return layout.serviceLabel;
   }
+  return mode === "custom" ? "app.openscout.custom" : layout.serviceLabel;
 }
 
 export function resolveBrokerServiceConfig(): BrokerServiceConfig {
@@ -597,17 +625,15 @@ export function resolveBrokerServiceConfig(): BrokerServiceConfig {
   const label = resolveBrokerServiceLabel(mode);
   const serviceAdapter = resolveBrokerServiceAdapter();
   const uid = typeof process.getuid === "function" ? process.getuid() : Number.parseInt(process.env.UID ?? "0", 10);
-  // Resolve paths but reject anything under /tmp — remote-install sessions
-  // set env vars to transient tmp dirs that don't survive reboots. The
-  // replacement is the platform default, same as an unset support env.
+  // Explicit OPENSCOUT_SUPPORT_DIRECTORY / OPENSCOUT_CONTROL_HOME always win
+  // for the running process (the broker socket and journal must land where
+  // the caller said). Only the *persisted* service definition swaps transient
+  // /tmp paths for durable defaults: see persistentBrokerServiceConfig.
   const supportPaths = resolveOpenScoutSupportPaths();
-  const defaultSupportDir = defaultOpenScoutSupportDirectory();
-  const supportDirectory = isTmpPath(supportPaths.supportDirectory) ? defaultSupportDir : supportPaths.supportDirectory;
+  const supportDirectory = supportPaths.supportDirectory;
   const runtimeDirectory = join(supportDirectory, "runtime");
   const logsDirectory = join(supportDirectory, "logs", "broker");
-  const controlHome = isTmpPath(supportPaths.controlHome)
-    ? join(homedir(), ".openscout", "control-plane")
-    : supportPaths.controlHome;
+  const controlHome = supportPaths.controlHome;
   const advertiseScope = resolveAdvertiseScope(
     process.env,
     () => readPersistedAdvertiseScope(supportDirectory),
@@ -615,8 +641,8 @@ export function resolveBrokerServiceConfig(): BrokerServiceConfig {
   const brokerHost = resolveBrokerHost(advertiseScope);
   const brokerPort = Number.parseInt(process.env.OPENSCOUT_BROKER_PORT ?? String(resolveBrokerPort()), 10);
   const brokerUrl = resolveBrokerUrl(brokerHost, brokerPort, advertiseScope);
-  const brokerSocketPath = process.env.OPENSCOUT_BROKER_SOCKET_PATH
-    ?? buildDefaultBrokerSocketPath(runtimeDirectory);
+  const brokerSocketPath = process.env.OPENSCOUT_BROKER_SOCKET_PATH?.trim()
+    || buildDefaultBrokerSocketPath(runtimeDirectory);
   const launchAgentPath = join(homedir(), "Library", "LaunchAgents", `${label}.plist`);
 
   return {
@@ -642,6 +668,34 @@ export function resolveBrokerServiceConfig(): BrokerServiceConfig {
     brokerSocketPath,
     advertiseScope,
     coreAgents: readCoreAgentsSync(),
+  };
+}
+
+/**
+ * The config a persistent service (launchd plist, systemd unit) should carry.
+ * Remote-install sessions point OPENSCOUT_SUPPORT_DIRECTORY / CONTROL_HOME at
+ * transient /tmp dirs that do not survive a reboot; a service definition gets
+ * the durable instance defaults instead. The running process keeps honouring
+ * its explicit env (resolveBrokerServiceConfig).
+ */
+export function persistentBrokerServiceConfig(config: BrokerServiceConfig): BrokerServiceConfig {
+  const supportTransient = isTmpPath(config.supportDirectory);
+  const controlTransient = isTmpPath(config.controlHome);
+  if (!supportTransient && !controlTransient) return config;
+  const supportDirectory = supportTransient ? defaultOpenScoutSupportDirectory() : config.supportDirectory;
+  const runtimeDirectory = join(supportDirectory, "runtime");
+  const logsDirectory = join(supportDirectory, "logs", "broker");
+  return {
+    ...config,
+    supportDirectory,
+    runtimeDirectory,
+    logsDirectory,
+    stdoutLogPath: join(logsDirectory, "stdout.log"),
+    stderrLogPath: join(logsDirectory, "stderr.log"),
+    controlHome: controlTransient ? defaultOpenScoutControlHome() : config.controlHome,
+    brokerSocketPath: isTmpPath(config.brokerSocketPath)
+      ? buildDefaultBrokerSocketPath(runtimeDirectory)
+      : config.brokerSocketPath,
   };
 }
 
@@ -758,10 +812,13 @@ export function resolveScoutdCommand(config: BrokerServiceConfig = resolveBroker
   return null;
 }
 
-function nativeServiceEnvironment(config: BrokerServiceConfig, scoutdPath: string): RuntimeEnv {
+function nativeServiceEnvironment(serviceConfig: BrokerServiceConfig, scoutdPath: string): RuntimeEnv {
+  const config = persistentBrokerServiceConfig(serviceConfig);
   const env: RuntimeEnv = {
     ...process.env,
     OPENSCOUT_SCOUTD_BIN: scoutdPath,
+    // Pinned on every service child: checkout code never takes a dev default.
+    OPENSCOUT_INSTANCE: resolveOpenScoutInstanceName(),
     OPENSCOUT_RUNTIME_PACKAGE_DIR: config.runtimePackageDir,
     OPENSCOUT_SUPPORT_DIRECTORY: config.supportDirectory,
     OPENSCOUT_CONTROL_HOME: config.controlHome,
@@ -1248,7 +1305,181 @@ export async function runHeadlessForegroundServiceCommand(
   }
 }
 
+export type SystemdUserServiceDeps = {
+  systemctl?: SystemctlRunner;
+  healthTimeoutMs?: number;
+  lingerWarning?: () => string | null;
+  readHealth?: HeadlessBrokerHealthReader;
+  env?: RuntimeEnv;
+  home?: string;
+  bunGlobalBinDirectory?: string | null;
+};
+
+/** Render the broker's systemd --user unit (path + contents) for this process's instance. */
+export function renderBrokerSystemdUserUnit(
+  config: BrokerServiceConfig = resolveBrokerServiceConfig(),
+  deps: Pick<SystemdUserServiceDeps, "env" | "home" | "bunGlobalBinDirectory"> = {},
+): { unitName: string; unitPath: string; contents: string } {
+  const env = deps.env ?? process.env;
+  const home = deps.home ?? homedir();
+  const persistent = persistentBrokerServiceConfig(config);
+  const baseSpec = buildSystemdUserUnitSpec({
+    env,
+    home,
+    runtimePackageDir: persistent.runtimePackageDir,
+    bunExecutable: persistent.bunExecutable,
+    bunGlobalBinDirectory: deps.bunGlobalBinDirectory,
+  });
+  const unitPath = join(systemdUserUnitDirectory(env, home), baseSpec.unitName);
+  // Keep Environment= lines the operator added to an existing unit.
+  const spec = withOperatorUnitEnvironment(baseSpec, unitPath);
+  return {
+    unitName: spec.unitName,
+    unitPath,
+    contents: renderSystemdUserUnit(spec, home),
+  };
+}
+
+export async function runSystemdUserServiceCommand(
+  command: BrokerServiceCommand,
+  config: BrokerServiceConfig,
+  deps: SystemdUserServiceDeps = {},
+): Promise<BrokerServiceStatus> {
+  const env = deps.env ?? process.env;
+  const systemctl = deps.systemctl ?? runSystemctlUser;
+  const rendered = renderBrokerSystemdUserUnit(config, deps);
+  const { unitName, unitPath } = rendered;
+
+  if (command !== "status") {
+    // A non-prod instance must never install, start, stop or remove prod's
+    // unit, nor run on prod's ports or directories.
+    assertOpenScoutInstanceIsolation(`the ${unitName} service`, {
+      env,
+      home: deps.home,
+      extraPorts: [{ label: "broker port", port: config.brokerPort }],
+      extraPaths: [
+        { label: "support directory", value: config.supportDirectory },
+        { label: "control home", value: config.controlHome },
+        { label: "broker socket", value: config.brokerSocketPath },
+      ],
+    });
+  }
+
+  if (SCHEMA_GUARDED_SERVICE_COMMANDS.has(command)) {
+    assertBrokerServiceSchemaCompatible(config);
+  }
+
+  const install = (): "written" | "unchanged" => {
+    const outcome = writeSystemdUserUnit(unitPath, rendered.contents, env);
+    if (outcome === "written") {
+      assertSystemctlOk(systemctl(["daemon-reload"]), "daemon-reload");
+    }
+    assertSystemctlOk(systemctl(["enable", unitName]), `enable ${unitName}`);
+    return outcome;
+  };
+  const isActive = () => {
+    const active = readSystemdUserUnitState(unitName, systemctl).activeState;
+    return active === "active" || active === "activating" || active === "reloading";
+  };
+
+  switch (command) {
+    case "install":
+      install();
+      break;
+    case "start": {
+      // A running unit whose definition just changed must restart to pick it up.
+      const outcome = install();
+      const verb = outcome === "written" && isActive() ? "restart" : "start";
+      assertSystemctlOk(systemctl([verb, unitName]), `${verb} ${unitName}`);
+      break;
+    }
+    case "restart":
+      install();
+      assertSystemctlOk(systemctl(["restart", unitName]), `restart ${unitName}`);
+      break;
+    case "stop":
+      assertSystemdUnitOwnership(unitPath, rendered.contents, env, "stop");
+      assertSystemctlOk(systemctl(["stop", unitName]), `stop ${unitName}`);
+      break;
+    case "uninstall":
+      assertSystemdUnitOwnership(unitPath, rendered.contents, env, "uninstall");
+      systemctl(["stop", unitName]);
+      systemctl(["disable", unitName]);
+      if (removeSystemdUserUnit(unitPath)) {
+        assertSystemctlOk(systemctl(["daemon-reload"]), "daemon-reload");
+      }
+      break;
+    case "status":
+      break;
+  }
+
+  if (command === "start" || command === "restart") {
+    const healthy = await waitForSystemdBrokerHealth(
+      config,
+      deps.readHealth ?? readHeadlessBrokerHealth,
+      deps.healthTimeoutMs,
+    );
+    if (!healthy) {
+      // A crash-looping unit must not report "started".
+      const failed = readSystemdUserUnitState(unitName, systemctl);
+      throw new Error(
+        `${unitName} did not become healthy on ${config.brokerUrl} `
+          + `(state ${[failed.activeState, failed.subState].filter(Boolean).join("/") || "unknown"}`
+          + `${failed.execMainStatus !== null ? `, last exit ${failed.execMainStatus}` : ""}). `
+          + `See \`journalctl --user -u ${unitName} -n 50\`.`,
+      );
+    }
+  }
+
+  const state = readSystemdUserUnitState(unitName, systemctl);
+  const headless = await runHeadlessForegroundServiceCommand("status", config, deps.readHealth);
+  const installed = existsSync(unitPath);
+  const lingerWarning = installed
+    ? (deps.lingerWarning ? deps.lingerWarning() : systemdUserLingerWarning(undefined, env))
+    : null;
+  return {
+    ...headless,
+    ...(lingerWarning ? { warnings: [lingerWarning] } : {}),
+    serviceAdapter: "linux-systemd-user",
+    instance: resolveOpenScoutInstanceName(env),
+    launchAgentPath: unitPath,
+    bootoutCommand: `systemctl --user stop ${unitName}`,
+    installed,
+    loaded: state.activeState === "active" || state.activeState === "activating" || state.activeState === "reloading",
+    pid: state.mainPid,
+    launchdState: [state.activeState, state.subState].filter(Boolean).join("/") || null,
+    lastExitStatus: state.execMainStatus,
+    usesLaunchAgent: installed,
+  };
+}
+
+async function waitForSystemdBrokerHealth(
+  config: BrokerServiceConfig,
+  readHealth: HeadlessBrokerHealthReader,
+  timeoutMs = 20_000,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const { health } = await readHealth(config);
+      if (health.ok) return true;
+    } catch {
+      // still starting
+    }
+    await new Promise((resolveSleep) => setTimeout(resolveSleep, 250));
+  }
+  return false;
+}
+
 async function runBrokerServiceCommand(
+  command: BrokerServiceCommand,
+  config: BrokerServiceConfig,
+): Promise<BrokerServiceStatus> {
+  const status = await runBrokerServiceAdapterCommand(command, config);
+  return { ...status, instance: status.instance ?? resolveOpenScoutInstanceName() };
+}
+
+async function runBrokerServiceAdapterCommand(
   command: BrokerServiceCommand,
   config: BrokerServiceConfig,
 ): Promise<BrokerServiceStatus> {
@@ -1259,10 +1490,7 @@ async function runBrokerServiceCommand(
     case "headless-foreground":
       return await runHeadlessForegroundServiceCommand(command, config);
     case "linux-systemd-user":
-      throw new Error(
-        "The linux-systemd-user service adapter is not implemented yet. "
-        + "Use OPENSCOUT_SERVICE_ADAPTER=headless-foreground and run `openscout-runtime broker` under your process manager.",
-      );
+      return await runSystemdUserServiceCommand(command, config);
     case "windows-service":
       throw new Error(
         "The windows-service adapter is not implemented yet. "
@@ -1296,7 +1524,9 @@ export async function uninstallBrokerService(config: BrokerServiceConfig = resol
 }
 
 async function main() {
+  applyOpenScoutInstanceEnvironment(process.env);
   const command = (process.argv[2] ?? "status") as BrokerServiceCommand | string;
+
   const json = process.argv.includes("--json");
   const config = resolveBrokerServiceConfig();
 
@@ -1335,6 +1565,7 @@ async function main() {
 
 function formatBrokerServiceStatus(status: BrokerServiceStatus): string {
   const lines = [
+    `instance: ${status.instance ?? resolveOpenScoutInstanceName()}`,
     `service adapter: ${status.serviceAdapter ?? "unknown"}`,
     `label: ${status.label}`,
     `mode: ${status.mode}`,
@@ -1370,6 +1601,9 @@ function formatBrokerServiceStatus(status: BrokerServiceStatus): string {
 
   if (status.lastLogLine) {
     lines.push(`last log: ${status.lastLogLine}`);
+  }
+  for (const warning of status.warnings ?? []) {
+    lines.push(`warning: ${warning}`);
   }
 
   return lines.join("\n");

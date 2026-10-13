@@ -29,11 +29,52 @@ describe("createOpenScoutWebServer: broker routes", () => {
       reachable: false,
       ok: false,
       error: "connect ECONNREFUSED",
+      persistenceIdentity: null,
     });
 
     stubs.scoutBrokerHealthResult = makeOfflineBrokerHealth({ reachable: true, ok: true, error: null });
     const online = await server.app.request("http://localhost/api/broker/health");
-    await expect(online.json()).resolves.toEqual({ reachable: true, ok: true, error: null });
+    await expect(online.json()).resolves.toEqual({ reachable: true, ok: true, error: null, persistenceIdentity: null });
+  });
+
+  test("persistence authority requires authenticated credential and observed node, and changes with either", async () => {
+    stubs.scoutBrokerHealthResult = makeOfflineBrokerHealth({ reachable: true, ok: true, nodeId: "broker-a", error: null });
+    async function identity(token: string) {
+      const server = await createOpenScoutWebServer({ currentDirectory: "/tmp/openscout", assetMode: "static", staticRoot: makeStaticRoot(), authToken: token });
+      const response = await server.app.request("http://localhost/api/broker/health", { headers: { authorization: `Bearer ${token}` } });
+      expect(response.status).toBe(200);
+      return (await response.json() as { persistenceIdentity: string | null }).persistenceIdentity;
+    }
+    const a = await identity("operator-a");
+    expect(a).toBeTruthy();
+    expect(await identity("operator-a")).toBe(a);
+    expect(await identity("operator-b")).not.toBe(a);
+    stubs.scoutBrokerHealthResult = makeOfflineBrokerHealth({ reachable: true, ok: true, nodeId: "broker-b", error: null });
+    expect(await identity("operator-a")).not.toBe(a);
+    stubs.scoutBrokerHealthResult = makeOfflineBrokerHealth({ reachable: true, ok: true, nodeId: null, error: null });
+    expect(await identity("operator-a")).toBeNull();
+  });
+
+  test("first-task persistence separates validated browser sessions and rejects missing credentials", async () => {
+    stubs.scoutBrokerHealthResult = makeOfflineBrokerHealth({ reachable: true, ok: true, nodeId: "broker-a", error: null });
+    const server = await createOpenScoutWebServer({
+      currentDirectory: "/tmp/openscout", assetMode: "static", staticRoot: makeStaticRoot(), authToken: "operator-a",
+      sessions: { mint: () => "session-a", validate: token => ["session-a", "session-b"].includes(token) },
+    });
+    async function identity(cookie?: string) {
+      const response = await server.app.request("http://localhost/api/broker/health", {
+        headers: cookie ? { cookie: `openscout_web_session=${cookie}` } : {},
+      });
+      if (response.status === 401) return null;
+      expect(response.status).toBe(200);
+      return (await response.json() as { persistenceIdentity: string | null }).persistenceIdentity;
+    }
+    const a = await identity("session-a");
+    expect(a).toBeTruthy();
+    expect(await identity("session-a")).toBe(a);
+    expect(await identity("session-b")).not.toBe(a);
+    expect(await identity()).toBeNull();
+    expect(await identity("revoked")).toBeNull();
   });
 
   test("serves broker diagnostics", async () => {

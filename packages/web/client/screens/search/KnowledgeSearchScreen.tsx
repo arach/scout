@@ -358,6 +358,7 @@ export function KnowledgeSearchScreen({
   );
 
   const applyStatus = useCallback((next: KnowledgeStatus) => {
+    if (next.enabled === false) setHits([]);
     setStatus(next);
     setStatusLoaded(true);
     updateKnowledgeSearchSnapshot({ status: next });
@@ -428,7 +429,7 @@ export function KnowledgeSearchScreen({
       // status still reports an indexed corpus, or a run is already going;
       // keep re-indexing when the recency window lapsed (new transcripts must
       // become searchable), the index is missing, or status was unavailable.
-      if (freshStatus?.indexing) return;
+      if (freshStatus?.enabled !== true || freshStatus.indexing) return;
       const { indexedAt } = getKnowledgeSearchSnapshot();
       const recentlyIndexed = indexedAt !== null
         && Date.now() - indexedAt < KNOWLEDGE_SEARCH_REINDEX_TTL_MS;
@@ -583,7 +584,7 @@ export function KnowledgeSearchScreen({
     ? formatClockTimestamp(status.generatedAt) || "just now"
     : "—";
 
-  const footStatus = isBusy
+  const footStatus = status?.enabled === false ? "Search index is off · enable Local search index in Settings › System" : isBusy
     ? activeJob && (activeJob.progress.discovered ?? 0) > 0
       ? `Indexing sessions in the background · ${formatCount(activeJob.progress.indexed ?? 0)} of ${formatCount(activeJob.progress.discovered ?? 0)}`
       : hasIndex
@@ -609,11 +610,13 @@ export function KnowledgeSearchScreen({
           </div>
         </header>
 
+        {status?.enabled === false ? <p role="status">{status.message}</p> : null}
         <form className="ks-search-form" onSubmit={onSubmit} role="search">
           <SearchIcon size={17} strokeWidth={1.75} aria-hidden="true" />
           <input
             value={filters.query}
             onChange={(event) => updateFilters({ query: event.target.value })}
+            disabled={status?.enabled === false}
             placeholder="Search topics, files, decisions, agents…"
             className="ks-search-input"
             spellCheck={false}
@@ -936,7 +939,7 @@ export function KnowledgeSearchScreen({
             type="button"
             className="ks-text-action"
             onClick={() => void refreshIndex(true)}
-            disabled={isBusy}
+            disabled={isBusy || status?.enabled === false}
           >
             {isBusy ? "Indexing…" : "Update index"}
           </button>

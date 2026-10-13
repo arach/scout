@@ -1,10 +1,25 @@
-import { describe, expect, test } from "bun:test";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { beforeEach, afterEach, describe, expect, test } from "bun:test";
 import type { NodeDefinition } from "@openscout/protocol";
 import { RoutingStore, resolveRoute, type RouteTarget } from "@openscout/runtime/routing";
 import { loadScoutCheck, type ScoutCheckDeps } from "./check.ts";
 import { renderScoutCheck } from "../../cli/commands/recent.ts";
 import type { ScoutRecentOptions, ScoutRecentReport } from "./recent.ts";
 
+let support: string;
+let previousSupport: string | undefined;
+beforeEach(() => {
+  previousSupport = process.env.OPENSCOUT_SUPPORT_DIRECTORY;
+  support = mkdtempSync(join(tmpdir(), "scout-check-test-"));
+  process.env.OPENSCOUT_SUPPORT_DIRECTORY = support;
+  writeFileSync(join(support, "settings.json"), JSON.stringify({ knowledgeIndexEnabled: true }));
+});
+afterEach(() => {
+  rmSync(support, { recursive: true, force: true });
+  if (previousSupport === undefined) delete process.env.OPENSCOUT_SUPPORT_DIRECTORY; else process.env.OPENSCOUT_SUPPORT_DIRECTORY = previousSupport;
+});
 const node = { id: "mini-id", name: "mini", hostName: "arts-mini.local" } as NodeDefinition;
 const empty: ScoutRecentReport = { since: null, scope: "live fixture", machines: [] };
 function fixture(names: string[][] = [["hex"]]) {
@@ -87,4 +102,14 @@ test("a stale indexed node produces a per-candidate failure without discarding g
     expect(result.activity[0]?.live.machines[0]).toMatchObject({ status: "unavailable", error: "Unknown machine from stale routing index" });
     expect(result.activity[1]?.live).toBe(empty);
   } finally { store.close(); }
+});
+
+test("disabled topic check does not open cached routing or probe live machines", async () => {
+  writeFileSync(join(support, "settings.json"), "{}");
+  const result = await loadScoutCheck({ topic: "cached topic" }, {
+    resolve: () => { throw new Error("must not resolve"); },
+    readLocal: async () => { throw new Error("must not probe"); },
+  });
+  expect(result).toMatchObject({ activity: [], routing: { outcome: "none", candidates: [] } });
+  expect("routing" in result && result.routing.reason).toContain("index is off");
 });

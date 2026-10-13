@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod/v4";
-import { SQLiteKnowledgeStore, type KnowledgeCoverage, type KnowledgeSearchHit, type KnowledgeWarmSpan } from "@openscout/runtime";
+import { knowledgeIndexEnabled, KNOWLEDGE_INDEX_OFF, SQLiteKnowledgeStore, type KnowledgeCoverage, type KnowledgeSearchHit, type KnowledgeWarmSpan } from "@openscout/runtime";
 import { terminalSurfaceIdForSurface, type TerminalSessionRecord } from "@openscout/protocol";
 
 import { readScoutWebJson } from "../../cli/web-api.ts";
@@ -44,7 +44,9 @@ export function sessionDiscoveryDependencies(
   return {
     webOrigin,
     // A missing index remains missing. Read-only open never initializes schema or indexes transcripts.
-    openStore: () => new SQLiteKnowledgeStore(undefined, undefined, { readonly: true }),
+    openStore: () => knowledgeIndexEnabled()
+      ? new SQLiteKnowledgeStore(undefined, undefined, { readonly: true })
+      : { assessCoverage: () => ({ kind: "index_off", suggestion: KNOWLEDGE_INDEX_OFF }), searchLexical: () => [], close() {} },
     readInventory: async () => {
       const [sessions, terminals, herdr] = await Promise.allSettled([
         read<ObservedSession[]>("/api/sessions"),
@@ -208,7 +210,7 @@ export function registerSessionDiscoveryTools(server: McpServer, deps: SessionDi
         }
       }
       coverage = summarizeCoverage(coverage);
-      const hits = coverage.kind === "warmed" ? store.searchLexical({ q: query, sourceKinds: ["sessions"], facets: { ...(harness ? { harness } : {}), ...(project ? { project } : {}) }, sourceUpdatedAfterMs: now - searchedMs, limit }) : [];
+      const hits = (coverage.kind === "warmed" || coverage.kind === "bounded") ? store.searchLexical({ q: query, sourceKinds: ["sessions"], facets: { ...(harness ? { harness } : {}), ...(project ? { project } : {}) }, sourceUpdatedAfterMs: now - searchedMs, limit }) : [];
       let inventory: Awaited<ReturnType<SessionDiscoveryDependencies["readInventory"]>> | null = null;
       if (hits.length) { try { inventory = await deps.readInventory(); } catch { /* Search still works; never infer liveness from index hits. */ } }
       const results = hits.slice(0, limit).map((hit) => {

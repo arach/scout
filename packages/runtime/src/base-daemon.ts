@@ -1,3 +1,5 @@
+// Must stay the first import: materializes OPENSCOUT_INSTANCE before any module reads paths/ports.
+import { openScoutInstanceBootstrap } from "./instance-bootstrap.js";
 import { createRoomListeningSupervisor } from "./room-listening-supervisor.js";
 import type { RuntimeErrnoError } from "./portable-types.js";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -26,6 +28,7 @@ import {
 } from "./tool-resolution.js";
 import {
   DEFAULT_SCOUT_WEB_PORTAL_HOST,
+  loadLocalConfig,
   resolveConfiguredScoutWebHostname,
   resolveScoutWebNamedHostname,
   resolveWebPort,
@@ -34,10 +37,13 @@ import {
   renderOpenScoutCaddyfile,
   resolveOpenScoutLocalEdgeConfig,
   buildOpenScoutLocalEdgeMdnsCommands,
-  resolveOpenScoutLocalEdgeDiscoveryHosts,
+  resolveOpenScoutLocalEdgeAdvertisements,
+  createLocalEdgeAdvertisementOwner,
+  shouldStartOpenScoutLocalEdge,
   type OpenScoutLocalEdgeConfig,
   type OpenScoutLocalEdgeScheme,
 } from "./local-edge.js";
+import { resolveScoutLanNetworks } from "./lan-network.js";
 import {
   NatsJetStreamSidecar,
   resolveJetStreamConfig,
@@ -57,6 +63,8 @@ import {
 } from "./mesh-bridge-supervisor.js";
 import { openScoutNetworkServiceEnvironment } from "./open-scout-network.js";
 import { readTailscaleSelfWebHostsSync } from "./tailscale.js";
+import { resolveOpenScoutLocalEdgeDirectory } from "./support-paths.js";
+import { selectInstanceAwareEntrypoint } from "./instance.js";
 
 const RESTART_MIN_DELAY_MS = 1_000;
 const RESTART_MAX_DELAY_MS = 30_000;
@@ -89,7 +97,15 @@ process.title = PROCESS_NAME;
 let shuttingDown = false;
 let brokerProcess: ChildProcess | null = null;
 let caddyProcess: ChildProcess | null = null;
-let mdnsProcesses: ChildProcess[] = [];
+let edgeLanWatchTimer: ReturnType<typeof setInterval> | null = null;
+let edgeLanOnly = false;
+const edgeAdvertisements = createLocalEdgeAdvertisementOwner({
+  start: ({ host, address }, scheme) => spawnMdnsProxy({
+    name: `Scout ${host} ${scheme.toUpperCase()}`,
+    host, address, scheme, port: scheme === "https" ? 443 : 80,
+  }),
+  stop: (children: ChildProcess[]) => { for (const child of children) if (!child.killed) child.kill("SIGTERM"); },
+});
 let brokerRestartDelayMs = RESTART_MIN_DELAY_MS;
 let edgeRestartDelayMs = RESTART_MIN_DELAY_MS;
 let baseKeepAlive: ReturnType<typeof setInterval> | null = null;
@@ -324,15 +340,17 @@ function forwardedProtoForEdgeScheme(scheme: OpenScoutLocalEdgeScheme): "http" |
 }
 
 function resolveEdgeConfig(): OpenScoutLocalEdgeConfig {
+  const lanOnly = loadLocalConfig().webLanOnly === true;
   const portalHost = process.env.OPENSCOUT_WEB_PORTAL_HOST?.trim() || DEFAULT_SCOUT_WEB_PORTAL_HOST;
   const nodeHost = process.env.OPENSCOUT_WEB_ADVERTISED_HOST?.trim()
     || (process.env.OPENSCOUT_WEB_LOCAL_NAME?.trim()
       ? resolveScoutWebNamedHostname(process.env.OPENSCOUT_WEB_LOCAL_NAME)
       : resolveConfiguredScoutWebHostname());
   return resolveOpenScoutLocalEdgeConfig({
+    lanOnly,
     portalHost,
     nodeHost,
-    scheme: resolveEdgeScheme(),
+    scheme: lanOnly ? "both" : resolveEdgeScheme(),
     brokerPort: config.brokerPort,
     webPort: Number.parseInt(process.env.OPENSCOUT_WEB_PORT ?? "", 10) || resolveWebPort(),
     viteDevUrl: process.env.OPENSCOUT_WEB_VITE_URL,
@@ -346,7 +364,7 @@ function resolveEdgeConfig(): OpenScoutLocalEdgeConfig {
 }
 
 function resolveLocalEdgeCaddyfilePath(): string {
-  const dir = join(homedir(), ".scout", "local-edge");
+  const dir = resolveOpenScoutLocalEdgeDirectory();
   ensureDirectory(dir);
   return join(dir, "Caddyfile");
 }
@@ -360,6 +378,7 @@ function spawnMdnsProxy(input: {
   host: string;
   port: number;
   scheme: "http" | "https";
+  address: string;
 }): ChildProcess[] {
   return buildOpenScoutLocalEdgeMdnsCommands(input).map(({ command, args }) => {
     const child = spawn(command, args, {
@@ -428,12 +447,7 @@ async function startJetStreamSidecar(): Promise<void> {
 }
 
 function stopEdgeProcesses(): void {
-  for (const processRef of mdnsProcesses) {
-    if (!processRef.killed) {
-      processRef.kill("SIGTERM");
-    }
-  }
-  mdnsProcesses = [];
+  edgeAdvertisements.stop();
   if (caddyProcess && !caddyProcess.killed) {
     caddyProcess.kill("SIGTERM");
   }
@@ -441,7 +455,11 @@ function stopEdgeProcesses(): void {
 }
 
 function startLocalEdge(): void {
-  if (process.env.OPENSCOUT_BASE_EDGE_ENABLED === "0" || process.platform !== "darwin") {
+  if (!shouldStartOpenScoutLocalEdge({
+    isProd: openScoutInstanceBootstrap.layout.isProd,
+    platform: process.platform,
+    enabled: process.env.OPENSCOUT_BASE_EDGE_ENABLED,
+  })) {
     return;
   }
   if (shuttingDown || caddyProcess) {
@@ -449,6 +467,8 @@ function startLocalEdge(): void {
   }
 
   const edgeConfig = resolveEdgeConfig();
+  const advertisements = resolveOpenScoutLocalEdgeAdvertisements(edgeConfig);
+  edgeLanOnly = edgeConfig.lanOnly === true;
   const schemes = edgeConfig.scheme === "both" ? ["http", "https"] as const : [edgeConfig.scheme] as const;
   const caddyfilePath = resolveLocalEdgeCaddyfilePath();
   // Keep operator-owned routes across regenerated Scout configs. Other local
@@ -457,18 +477,24 @@ function startLocalEdge(): void {
   ensureDirectory(sitesDirectory);
   writeFileSync(caddyfilePath, renderOpenScoutCaddyfile(edgeConfig, join(sitesDirectory, "*.caddy")), "utf8");
 
-  mdnsProcesses = schemes.flatMap((scheme) => {
-    const edgePort = scheme === "https" ? 443 : 80;
-    const suffix = scheme.toUpperCase();
-    return resolveOpenScoutLocalEdgeDiscoveryHosts(edgeConfig).flatMap((host) =>
-      spawnMdnsProxy({
-        name: host === edgeConfig.portalHost ? `Scout Local ${suffix}` : `Scout ${host} ${suffix}`,
-        host,
-        port: edgePort,
-        scheme,
-      }),
-    );
-  });
+  edgeAdvertisements.update(advertisements, schemes);
+
+  if (!edgeLanWatchTimer) {
+    // DHCP and interface loss refresh only the owned mDNS children. Changing
+    // the explicit mode also regenerates routes, once the old edge exits.
+    edgeLanWatchTimer = setInterval(() => {
+      if (shuttingDown || !caddyProcess) return;
+      const current = resolveEdgeConfig();
+      if ((current.lanOnly === true) !== edgeLanOnly) {
+        edgeRestartDelayMs = RESTART_MIN_DELAY_MS;
+        stopEdgeProcesses();
+        return;
+      }
+      const currentSchemes = current.scheme === "both" ? ["http", "https"] as const : [current.scheme];
+      edgeAdvertisements.update(resolveOpenScoutLocalEdgeAdvertisements(current, resolveScoutLanNetworks()), currentSchemes);
+    }, 5_000);
+    edgeLanWatchTimer.unref();
+  }
 
   caddyProcess = spawn(resolveCaddyExecutable(), [
     "run",
@@ -636,8 +662,21 @@ function resolvePairingControllerCommand(): PairingControllerCommand | null {
     join(homedir(), ".bun", "install", "global", "node_modules", "@openscout", "scout", "dist", "pairing-runtime-controller.mjs"),
     join(homedir(), ".bun", "node_modules", "@openscout", "scout", "dist", "pairing-runtime-controller.mjs"),
   ].filter((candidate): candidate is string => Boolean(candidate));
-  const entrypoint = candidates.find((candidate) => existsSync(candidate));
-  if (!entrypoint) return null;
+  // A non-prod instance never runs a stale pre-instance build (it would use
+  // prod's ~/.scout/pairing and ports) nor prod's globally installed copy.
+  const instanceCandidates = openScoutInstanceBootstrap.layout.isProd
+    ? candidates
+    : candidates.filter((candidate) => !candidate.includes("/.bun/") || candidate === explicit);
+  const entrypoint = selectInstanceAwareEntrypoint(instanceCandidates);
+  if (!entrypoint) {
+    if (!openScoutInstanceBootstrap.layout.isProd) {
+      warn("pairing controller skipped: no instance-aware entrypoint", {
+        instance: openScoutInstanceBootstrap.layout.name,
+        hint: "Rebuild packages/web or run from source; pre-instance builds would use prod's pairing state.",
+      });
+    }
+    return null;
+  }
 
   if (explicit === entrypoint && !/\.(?:[cm]?js|ts)$/.test(entrypoint)) {
     return { command: entrypoint, args: [], cwd: setupCwd };
@@ -1041,6 +1080,10 @@ async function shutdown(exitCode = 0): Promise<void> {
   if (baseKeepAlive) {
     clearInterval(baseKeepAlive);
     baseKeepAlive = null;
+  }
+  if (edgeLanWatchTimer) {
+    clearInterval(edgeLanWatchTimer);
+    edgeLanWatchTimer = null;
   }
   if (parentWatcher) {
     clearInterval(parentWatcher);

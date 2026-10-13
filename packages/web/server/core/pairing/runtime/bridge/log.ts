@@ -14,25 +14,31 @@
 
 import { appendFileSync, mkdirSync, renameSync, statSync } from "fs";
 import { join } from "path";
-import { homedir } from "os";
+import { resolveOpenScoutPairingHome } from "@openscout/runtime/support-paths";
 
-const LOG_DIR = join(homedir(), ".scout/pairing");
-const LOG_FILE = join(LOG_DIR, "bridge.log");
 const MAX_LOG_BYTES = 10 * 1024 * 1024;
 const ROTATE_CHECK_EVERY = 500;
+let logDirectoryReady: string | null = null;
 
-mkdirSync(LOG_DIR, { recursive: true });
+function logFile(): string {
+  const dir = resolveOpenScoutPairingHome();
+  if (logDirectoryReady !== dir) {
+    mkdirSync(dir, { recursive: true });
+    logDirectoryReady = dir;
+  }
+  return join(dir, "bridge.log");
+}
 
 type Level = "debug" | "info" | "warn" | "error";
 
 const debugEnabled = process.env.OPENSCOUT_BRIDGE_LOG_LEVEL === "debug";
 let writesSinceRotateCheck = ROTATE_CHECK_EVERY;
 
-function rotateIfLarge(): void {
+function rotateIfLarge(file: string): void {
   if (++writesSinceRotateCheck < ROTATE_CHECK_EVERY) return;
   writesSinceRotateCheck = 0;
   try {
-    if (statSync(LOG_FILE).size > MAX_LOG_BYTES) renameSync(LOG_FILE, `${LOG_FILE}.1`);
+    if (statSync(file).size > MAX_LOG_BYTES) renameSync(file, `${file}.1`);
   } catch { /* missing file or race with another writer */ }
 }
 
@@ -47,8 +53,9 @@ function write(level: Level, category: string, message: string, data?: unknown):
     ? `${prefix} ⚠ ${body}\n`
     : `${prefix} ${body}\n`;
   try {
-    rotateIfLarge();
-    appendFileSync(LOG_FILE, line);
+    const file = logFile();
+    rotateIfLarge(file);
+    appendFileSync(file, line);
   } catch { /* don't crash on log failure */ }
 }
 
@@ -57,6 +64,8 @@ export const log = {
   info:  (cat: string, msg: string, data?: unknown) => write("info",  cat, msg, data),
   warn:  (cat: string, msg: string, data?: unknown) => write("warn",  cat, msg, data),
   error: (cat: string, msg: string, data?: unknown) => write("error", cat, msg, data),
-  /** Path to the log file, for display at startup. */
-  path: LOG_FILE,
+  /** Path to the log file, for display at startup (resolved lazily, no mkdir at import). */
+  get path(): string {
+    return join(resolveOpenScoutPairingHome(), "bridge.log");
+  },
 };

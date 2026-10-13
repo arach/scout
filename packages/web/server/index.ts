@@ -1,9 +1,13 @@
+// Must stay the first import: materializes OPENSCOUT_INSTANCE before any module reads paths/ports.
+import { openScoutInstanceBootstrap } from "@openscout/runtime/instance-bootstrap";
+import { startKnowledgeStorageMaintenance } from "./routes/knowledge.ts";
 import { existsSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureProviderTelemetryBootstrap } from "@openscout/runtime";
 import { resolveWebAuthToken, resolveWebPort } from "@openscout/runtime/local-config";
+import { describeOpenScoutInstance, enforceOpenScoutInstanceIsolation } from "@openscout/runtime/instance";
 import { resolveOpenScoutSetupContextRoot } from "@openscout/runtime/setup";
 import { readBundledScoutVersion, resolveInstalledWebFullClient } from "@openscout/runtime/web-full-client";
 import { resolveOpenScoutWebRoutes } from "../shared/runtime-config.js";
@@ -12,14 +16,14 @@ import {
 } from "./create-openscout-web-server.ts";
 import { resolveScoutBrokerUrl } from "./core/broker/service.ts";
 import {
+  authenticatedScoutWebCookieToken,
+  clearLegacyScoutWebAuthCookie,
   isAuthenticatedScoutRequest,
   isAuthorizedScoutWebSocketRequest,
   isForwardedHttpsScoutRequest,
   isSameMacScoutRequest,
-  isScoutWebRequestAllowedFromPeer,
   isTrustedScoutApiRequest,
   createScoutRequestPeerAddressRegistry,
-  resolveScoutWebLanAccessScope,
   resolveScoutWebBindHost,
   scoutWebAuthCookie,
   shouldIssueFrontDoorScoutWebCredential,
@@ -50,8 +54,14 @@ const port = Number.parseInt(
     ?? String(resolveWebPort()),
   10,
 );
+// A non-prod OPENSCOUT_INSTANCE must not bind prod's web port or write prod's state.
+enforceOpenScoutInstanceIsolation("the web server", {
+  extraPorts: Number.isInteger(port) ? [{ label: "web port", port }] : [],
+});
+if (!openScoutInstanceBootstrap.layout.isProd) {
+  console.log(`[openscout-web] instance ${describeOpenScoutInstance(openScoutInstanceBootstrap.layout)}`);
+}
 const hostname = resolveScoutWebBindHost(process.env);
-const lanAccessScope = resolveScoutWebLanAccessScope(process.env);
 const webAuthToken = resolveWebAuthToken(process.env);
 const webSessions = createScoutWebSessionStore();
 const currentDirectory = resolveOpenScoutSetupContextRoot({
@@ -226,7 +236,7 @@ try {
       const url = new URL(req.url);
       const peerAddress = server.requestIP(req)?.address;
 
-      if (!isScoutWebRequestAllowedFromPeer(req, peerAddress, lanAccessScope)) {
+      if (!web.isRequestAllowed(req, peerAddress)) {
         return new Response("Not Found", { status: 404 });
       }
 
@@ -354,15 +364,23 @@ try {
         : req;
       requestPeerAddresses.remember(honoRequest, peerAddress);
       const response = await honoFetch(honoRequest, server);
-      if (!bootstrapEligible || response.status >= 400) return response;
+      if (url.pathname !== routes.bootstrapScriptPath || response.status >= 400) return response;
 
       const headers = new Headers(response.headers);
       // Front-door browsers get a minted, revocable session. Loopback clients
       // keep the operator-token cookie: CLI helpers fetch bootstrap on every
       // uncredentialed call, and minting there would churn the session store.
       const secure = isForwardedHttpsScoutRequest(req);
+      const legacyCookie = clearLegacyScoutWebAuthCookie(req.headers.get("host"), secure);
+      if (legacyCookie) headers.append("set-cookie", legacyCookie);
       try {
-        headers.append("set-cookie", frontDoorEligible
+        // Migrate a previously shared cookie even if it already authenticated
+        // bootstrap. Each portal/chat/host origin gets its own cookie; an
+        // unauthenticated remote browser still receives no credential.
+        const existingCookie = authenticatedScoutWebCookieToken(req, webAuthToken, webSessions.validate);
+        if (existingCookie) {
+          headers.append("set-cookie", scoutWebAuthCookie(existingCookie, secure, SCOUT_WEB_SESSION_MAX_AGE_SECONDS));
+        } else if (bootstrapEligible) headers.append("set-cookie", frontDoorEligible
           ? scoutWebAuthCookie(
               webSessions.mint({ label: "front-door" }),
               secure,
@@ -448,3 +466,5 @@ setTimeout(() => void startScoutbotRunner(), 10_000).unref?.();
 if (providerTelemetryBootstrapEnabled) {
   setTimeout(() => void bootstrapProviderTelemetry(), 30_000).unref?.();
 }
+
+startKnowledgeStorageMaintenance();

@@ -12,6 +12,8 @@ import type {
   TerminalHostControlResult,
   TerminalHostSession,
 } from "./types.ts";
+import { resolveOpenScoutHomeForEnv } from "@openscout/runtime/support-paths";
+import { buildUserSpawnEnvironment } from "@openscout/runtime/instance";
 
 const ZELLIJ_TIMEOUT_MS = 2_000;
 
@@ -29,7 +31,7 @@ const CTRL_D = "4";
 export function resolveZellijSocketDir(env: NodeJS.ProcessEnv = process.env): string {
   return env.ZELLIJ_SOCKET_DIR?.trim()
     || env.OPENSCOUT_ZELLIJ_SOCKET_DIR?.trim()
-    || join(env.HOME?.trim() || homedir(), ".openscout", "zellij-sockets");
+    || join(resolveOpenScoutHomeForEnv(env), "zellij-sockets");
 }
 
 function zellijEnv(context: TerminalHostContext): NodeJS.ProcessEnv {
@@ -102,9 +104,10 @@ export const zellijTerminalHost: TerminalHostAdapter = {
 
   async create(input, context = {}) {
     try {
+      // A zellij session is its own server: it keeps the creating client's env.
       await execSystemFile("zellij", ["attach", "--create-background", input.sessionName], {
         timeoutMs: 5_000,
-        env: zellijEnv(context),
+        env: buildUserSpawnEnvironment(zellijEnv(context)) as NodeJS.ProcessEnv,
       });
       // `attach --create-background` takes no command, and typing one into the
       // new session with `action write-chars` would be Scout guessing at a

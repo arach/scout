@@ -14,3 +14,5 @@ export function parseAppCommand(args: string[]): ScoutAppCommand;
 export function parseUpCommandOptions(args: string[]): ScoutUpOptions;
 export function parseSetupCommandOptions(args: string[], defaultCurrentDirectory: string): ScoutSetupOptions;
 export function preflightLifecycle(argv: string[], currentDirectory?: string): string | null;
+export function extractInstanceFlag(argv: string[]): { argv: string[]; instance: string | null };
+export function applyInstanceFlag(processLike?: { argv: string[]; env: Record<string, string | undefined> }): string | null;

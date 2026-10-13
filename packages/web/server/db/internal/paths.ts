@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { localAgentLogsDirectory } from "@openscout/runtime/support-paths";
 
 import { metadataString } from "./parse.ts";
+import { resolveOpenScoutPairingHome } from "@openscout/runtime/support-paths";
 
 /* ── Compact home paths (~/...) ── */
 
@@ -29,7 +30,7 @@ export function pairingHarnessLogPath(
   if (!normalizedAdapter || !normalizedSessionId) {
     return null;
   }
-  return join(HOME, ".scout", "pairing", normalizedAdapter, normalizedSessionId, "logs", "stdout.log");
+  return join(resolveOpenScoutPairingHome(), normalizedAdapter, normalizedSessionId, "logs", "stdout.log");
 }
 
 export function localAgentHarnessLogPath(agentId: string): string {

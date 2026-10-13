@@ -115,6 +115,15 @@ const OPTIONAL_LAUNCH_ENV_KEYS: &[&str] = &[
     "OPENSCOUT_RUNTIME_BUILD_PIN_REASON",
     "OPENSCOUT_HOME",
     "OPENSCOUT_PROBES_SOCKET",
+    // Instance isolation (packages/runtime/src/instance.ts): a non-prod
+    // instance's launchd service must keep its root and port block.
+    // OPENSCOUT_INSTANCE itself is always pinned (see launch_instance()).
+    "OPENSCOUT_INSTANCE_ROOT",
+    "OPENSCOUT_INSTANCE_PORT_BASE",
+    "OPENSCOUT_INSTANCE_MESH",
+    "OPENSCOUT_SCOUT_HOME",
+    "OPENSCOUT_PAIRING_HOME",
+    "OPENSCOUT_RELAY_HUB",
 ];
 
 unsafe extern "C" {
@@ -1188,10 +1197,30 @@ fn install_signal_handlers() {
     }
 }
 
+/// The OpenScout instance every child scoutd launches runs as. Always set
+/// explicitly (prod by default): run from a source checkout with
+/// OPENSCOUT_INSTANCE unset, the broker and pairing controller would take the
+/// checkout's dev default.
+fn launch_instance(optional_env: impl Fn(&str) -> Option<String>) -> String {
+    optional_env("OPENSCOUT_INSTANCE").unwrap_or_else(|| "prod".to_string())
+}
+
 fn spawn_base_process(config: &Config) -> Result<Child, String> {
     prepare_child_logs_for_spawn(config)?;
     let stdout_log = open_child_log(&config.stdout_log_path)?;
     let stderr_log = open_child_log(&config.stderr_log_path)?;
+    let mut command = base_process_command(config, env_nonempty);
+    command
+        .stdout(Stdio::from(stdout_log))
+        .stderr(Stdio::from(stderr_log));
+    command
+        .spawn()
+        .map_err(|error| format!("failed to start Bun base: {error}"))
+}
+
+/// The `scout-base` command (args + env) without its log redirection, so the
+/// pinned env is testable.
+fn base_process_command(config: &Config, optional_env: impl Fn(&str) -> Option<String>) -> Command {
     let mut command = Command::new(&config.bun_executable);
     command
         // openscout-runtime.mjs now runs base-daemon in-process (no second bun
@@ -1201,6 +1230,7 @@ fn spawn_base_process(config: &Config) -> Result<Child, String> {
         .arg("base")
         .current_dir(&config.runtime_package_dir)
         .env("OPENSCOUT_PARENT_PID", std::process::id().to_string())
+        .env("OPENSCOUT_INSTANCE", launch_instance(&optional_env))
         .env(
             "OPENSCOUT_SUPPORT_DIRECTORY",
             config.support_directory.to_string_lossy().to_string(),
@@ -1223,25 +1253,20 @@ fn spawn_base_process(config: &Config) -> Result<Child, String> {
         )
         .env("OPENSCOUT_BROKER_SERVICE_MODE", &config.service_mode)
         .env("OPENSCOUT_BROKER_SERVICE_LABEL", &config.label)
-        .env("OPENSCOUT_SERVICE_LABEL", &config.label)
-        .stdout(Stdio::from(stdout_log))
-        .stderr(Stdio::from(stderr_log));
+        .env("OPENSCOUT_SERVICE_LABEL", &config.label);
 
     for &key in OPTIONAL_LAUNCH_ENV_KEYS {
-        if let Some(value) = env_nonempty(key) {
+        if let Some(value) = optional_env(key) {
             command.env(key, value);
         }
     }
     for (key, value) in push_relay_child_environment() {
         command.env(key, value);
     }
-    if let Some(core_agents) = env_nonempty("OPENSCOUT_CORE_AGENTS") {
+    if let Some(core_agents) = optional_env("OPENSCOUT_CORE_AGENTS") {
         command.env("OPENSCOUT_CORE_AGENTS", core_agents);
     }
-
     command
-        .spawn()
-        .map_err(|error| format!("failed to start Bun base: {error}"))
 }
 
 fn spawn_probe_process(config: &Config) -> Result<Child, String> {
@@ -2652,9 +2677,9 @@ fn launch_agent_owner_compatible(
         .unwrap_or_else(|| "unknown owner".to_string());
     Err(format!(
         "refusing to repoint shared Scout service {label} from {current_owner} to {candidate}. \
-The machine-wide service must have one stable owner. Use an isolated OPENSCOUT_SERVICE_LABEL, \
-OPENSCOUT_CONTROL_HOME, and port set for a worktree. For an intentional one-time ownership \
-transfer, rerun with {override_key}=1.",
+The machine-wide service must have one stable owner. Run a checkout or worktree as its own \
+instance instead (OPENSCOUT_INSTANCE=dev, or dev-<name>): it derives an isolated service label, \
+homes and port set. For an intentional one-time ownership transfer, rerun with {override_key}=1.",
         label = config.label,
         candidate = config.runtime_package_dir.display(),
         override_key = ALLOW_SHARED_SERVICE_REPOINT_ENV,
@@ -2763,6 +2788,7 @@ fn render_launch_agent_plist_with_optional_env(
         ("OPENSCOUT_BROKER_SERVICE_MODE", config.service_mode.clone()),
         ("OPENSCOUT_BROKER_SERVICE_LABEL", config.label.clone()),
         ("OPENSCOUT_SERVICE_LABEL", config.label.clone()),
+        ("OPENSCOUT_INSTANCE", launch_instance(&optional_env)),
         (
             "HOME",
             home_dir()
@@ -4547,6 +4573,49 @@ mod tests {
         assert!(plist.contains(&format!(
             "<key>ExitTimeOut</key>\n  <integer>{LAUNCHD_EXIT_TIMEOUT_SECONDS}</integer>",
         )));
+    }
+
+    #[test]
+    fn base_process_spawn_always_pins_the_instance() {
+        let config = test_config(
+            "/checkout/packages/runtime",
+            "/checkout/packages/runtime/bin/scoutd",
+            SHARED_SERVICE_LABEL,
+        );
+        let instance_of = |command: &std::process::Command| {
+            command
+                .get_envs()
+                .find(|(key, _)| *key == std::ffi::OsStr::new("OPENSCOUT_INSTANCE"))
+                .and_then(|(_, value)| value.map(|value| value.to_string_lossy().to_string()))
+        };
+        let unset = super::base_process_command(&config, |_| None);
+        assert_eq!(instance_of(&unset).as_deref(), Some("prod"));
+        let dev = super::base_process_command(&config, |key| match key {
+            "OPENSCOUT_INSTANCE" => Some("dev".into()),
+            _ => None,
+        });
+        assert_eq!(instance_of(&dev).as_deref(), Some("dev"));
+    }
+
+    #[test]
+    fn launch_agent_always_pins_the_instance() {
+        let config = test_config(
+            "/checkout/packages/runtime",
+            "/checkout/packages/runtime/bin/scoutd",
+            SHARED_SERVICE_LABEL,
+        );
+        let default_plist = super::render_launch_agent_plist_with_optional_env(&config, |_| None);
+        assert!(default_plist.contains("<key>OPENSCOUT_INSTANCE</key>\n    <string>prod</string>"));
+        let dev_plist =
+            super::render_launch_agent_plist_with_optional_env(&config, |key| match key {
+                "OPENSCOUT_INSTANCE" => Some("dev".into()),
+                _ => None,
+            });
+        assert!(dev_plist.contains("<key>OPENSCOUT_INSTANCE</key>\n    <string>dev</string>"));
+        assert_eq!(
+            dev_plist.matches("<key>OPENSCOUT_INSTANCE</key>").count(),
+            1
+        );
     }
 
     #[test]

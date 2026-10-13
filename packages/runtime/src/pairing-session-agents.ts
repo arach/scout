@@ -11,8 +11,9 @@ import { normalizeAgentSelectorSegment } from "@openscout/protocol";
 
 import { buildLocalAgentDirectInvocationPrompt } from "./local-agents.js";
 import { openPairingLocalChannel } from "./pairing-local-socket.js";
+import { resolveOpenScoutPairingHomeForEnv } from "./support-paths.js";
+import { resolvePairingPort } from "./local-config.js";
 
-const DEFAULT_PAIRING_PORT = 43_130;
 const PAIRING_CONNECT_TIMEOUT_MS = 1_500;
 const PAIRING_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_PAIRING_POLL_INTERVAL_MS = 350;
@@ -236,8 +237,7 @@ function pairingPaths(): {
   configPath: string;
   runtimeStatePath: string;
 } {
-  const home = process.env.HOME?.trim() || homedir();
-  const rootDir = join(home, ".scout", "pairing");
+  const rootDir = resolveOpenScoutPairingHomeForEnv(process.env);
   return {
     configPath: join(rootDir, "config.json"),
     runtimeStatePath: join(rootDir, "runtime.json"),
@@ -280,7 +280,9 @@ function resolvePairingBridgePort(options: PairingSessionDiscoveryOptions = {}):
   const config = readJsonFile<PairingConfig>(configPath);
   return Number.isFinite(config?.port) && (config?.port ?? 0) > 0
     ? Number(config?.port)
-    : DEFAULT_PAIRING_PORT;
+    // Env (OPENSCOUT_PAIRING_PORT, set per instance), ~/.openscout/config.json,
+    // then this OPENSCOUT_INSTANCE's default: never prod's 43130 from a dev instance.
+    : resolvePairingPort();
 }
 
 async function createPairingBridgeClient(port: number): Promise<PairingBridgeClient> {
