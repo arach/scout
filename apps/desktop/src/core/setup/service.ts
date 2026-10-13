@@ -50,6 +50,7 @@ import {
   type ScoutTerminalPtyReport,
 } from "./terminal-pty-dependencies.ts";
 import { readScoutCapabilityMatrix, readScoutRuntimeCatalog } from "../broker/service.ts";
+import { resolveOpenScoutLocalEdgeDirectory } from "@openscout/runtime/support-paths";
 
 export type ScoutLocalEdgeDoctorReport = {
   state: "ready" | "degraded" | "missing";
@@ -199,7 +200,7 @@ export async function loadScoutLocalEdgeDoctorReport(env: NodeJS.ProcessEnv): Pr
     state,
     portalHost,
     nodeHost: localEdgeConfig.nodeHost,
-    caddyfilePath: join(homedir(), ".scout", "local-edge", "Caddyfile"),
+    caddyfilePath: join(resolveOpenScoutLocalEdgeDirectory(), "Caddyfile"),
     dependency,
     dns: {
       portal: portalDns,

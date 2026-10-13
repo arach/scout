@@ -84,7 +84,7 @@ import {
   readTmuxSessionExists,
   readZellijSessionExists,
 } from '@openscout/runtime/system-probes';
-import { buildInteractiveTerminalEnvironment } from '@openscout/runtime/terminal-environment';
+import { buildInteractiveTerminalEnvironment, wrapUserSpawnPaneCommand } from '@openscout/runtime/terminal-environment';
 import { randomBytes, timingSafeEqual } from 'crypto';
 import { existsSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { dirname as pathDirname, resolve as pathResolve, sep as pathSep } from 'path';
@@ -114,6 +114,7 @@ import {
   prepareZellijSocketDir,
 } from './terminal-relay-zellij';
 import { resolveCodexExecutableInventory } from '@openscout/agent-sessions/codex-executable';
+import { buildMultiplexerServerEnvironment } from "@openscout/runtime/instance";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -622,8 +623,9 @@ async function spawnTmuxSession(
       '-x', String(cols),
       '-y', String(rows),
       '-c', cwd,
-      shellCmd,
-    ], { env: env as NodeJS.ProcessEnv, timeoutMs: 5_000 });
+      // The pane gets the tmux server's global env: unset instance keys there.
+      wrapUserSpawnPaneCommand(shellCmd, process.env),
+    ], { env: buildMultiplexerServerEnvironment(env) as NodeJS.ProcessEnv, timeoutMs: 5_000 });
     invalidateTmuxSessions({ env: env as NodeJS.ProcessEnv, reason: 'terminal-relay.new-session' });
     console.log(`[relay] Created tmux session: ${tmuxName}`);
     if (muxTtlMs() > 0) trackCreatedMuxSession('tmux', tmuxName);

@@ -38,6 +38,7 @@ import {
   sealedAgentNotification,
   type AgentNotification,
 } from "@openscout/protocol";
+import { resolveOpenScoutPairingHome } from "./support-paths.js";
 
 export const SEALED_PUSH_VERSION = 1;
 const SALT = Buffer.from("openscout.push.v1", "utf8");
@@ -123,9 +124,9 @@ export function openPushContent(input: {
 // Pairing keys on disk
 // ---------------------------------------------------------------------------
 
-/** ~/.scout/pairing, where the pairing bridge keeps its keys. */
+/** This instance's pairing home (~/.scout/pairing for prod), where the pairing bridge keeps its keys. */
 export function defaultPairingDir(): string {
-  return process.env.OPENSCOUT_PAIRING_DIR?.trim() || join(homedir(), ".scout", "pairing");
+  return resolveOpenScoutPairingHome();
 }
 
 function hexBytes(value: unknown): Uint8Array | null {

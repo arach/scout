@@ -13,6 +13,7 @@ import { join } from "node:path";
 
 import { isLoopbackHost } from "./broker-process-manager.js";
 import { readOpenScoutNetworkSettingsSync } from "./open-scout-network.js";
+import { resolveOpenScoutPairingHomeForEnv } from "./support-paths.js";
 
 export interface MeshRendezvousPublishConfig {
   url: string;
@@ -190,7 +191,7 @@ export function readMobilePairingMeshEntrypoint(
   now: number = Date.now(),
 ): MobilePairingMeshEntrypoint | undefined {
   const runtimeStatePath = env.OPENSCOUT_PAIRING_RUNTIME_STATE_PATH
-    ?? join(env.HOME ?? homedir(), ".scout", "pairing", "runtime.json");
+    ?? join(resolveOpenScoutPairingHomeForEnv(env), "runtime.json");
   if (!existsSync(runtimeStatePath)) {
     return undefined;
   }

@@ -20,6 +20,7 @@ import {
   DEFAULT_BROKER_PORT,
   DEFAULT_BROKER_URL,
   resolveBundledRuntimeDirFromModuleDir,
+  persistentBrokerServiceConfig,
   resolveBrokerServiceConfig,
   resolveBrokerHost,
   resolveBrokerUrl,
@@ -498,6 +499,8 @@ describe("runScoutdServiceCommand shell-out", () => {
     const scoutd = writeExecutable(join(mkdtempSync(join(tmpdir(), "openscout-scoutd-json-")), "scoutd"));
     const result = await withEnv({
       OPENSCOUT_SCOUTD_BIN: scoutd,
+      // Unset, so the pin below is the code's default and not this test's env.
+      OPENSCOUT_INSTANCE: undefined,
     }, () => runScoutdServiceCommand("status", config, 45_000, async (
       scoutdPath,
       command,
@@ -507,6 +510,8 @@ describe("runScoutdServiceCommand shell-out", () => {
       expect(scoutdPath).toBe(scoutd);
       expect(command).toBe("status");
       expect(env.OPENSCOUT_SCOUTD_BIN).toBe(scoutd);
+      // scoutd (and the launchd plist it writes) always gets an explicit instance.
+      expect(env.OPENSCOUT_INSTANCE).toBe("prod");
       expect(timeoutMs).toBe(45_000);
       return JSON.stringify(status);
     }));
@@ -622,26 +627,67 @@ describe("runScoutdServiceCommand shell-out", () => {
   });
 });
 
-describe("tmp support directory fallback", () => {
-  test("a /tmp support directory falls back to the platform default", async () => {
+describe("tmp support directory handling", () => {
+  test("the running process honours an explicit /tmp support directory and control home", async () => {
+    // Regression: the broker used to swap these for the platform defaults, so
+    // its socket and journal landed in ~/.local/share/openscout and
+    // ~/.openscout/control-plane despite the overrides.
     await withEnv({
       OPENSCOUT_SUPPORT_DIRECTORY: "/tmp/openscout-remote-install",
+      OPENSCOUT_CONTROL_HOME: "/tmp/openscout-remote-install/control-plane",
+      OPENSCOUT_BROKER_SOCKET_PATH: undefined,
       XDG_DATA_HOME: undefined,
     }, () => withPlatform("linux", () => {
       const serviceConfig = resolveBrokerServiceConfig();
+      expect(serviceConfig.supportDirectory).toBe("/tmp/openscout-remote-install");
+      expect(serviceConfig.controlHome).toBe("/tmp/openscout-remote-install/control-plane");
+      expect(serviceConfig.brokerSocketPath).toBe("/tmp/openscout-remote-install/runtime/broker.sock");
+    }));
+  });
+
+  test("a persisted service definition swaps transient /tmp paths for durable defaults", async () => {
+    await withEnv({
+      OPENSCOUT_SUPPORT_DIRECTORY: "/tmp/openscout-remote-install",
+      OPENSCOUT_CONTROL_HOME: "/tmp/openscout-remote-install/control-plane",
+      OPENSCOUT_BROKER_SOCKET_PATH: undefined,
+      OPENSCOUT_INSTANCE: undefined,
+      XDG_DATA_HOME: undefined,
+    }, () => withPlatform("linux", () => {
+      const persistent = persistentBrokerServiceConfig(resolveBrokerServiceConfig());
       const supportDirectory = join(homedir(), ".local", "share", "openscout");
-      expect(serviceConfig.supportDirectory).toBe(supportDirectory);
-      expect(serviceConfig.runtimeDirectory).toBe(join(supportDirectory, "runtime"));
-      expect(serviceConfig.logsDirectory).toBe(join(supportDirectory, "logs", "broker"));
+      expect(persistent.supportDirectory).toBe(supportDirectory);
+      expect(persistent.runtimeDirectory).toBe(join(supportDirectory, "runtime"));
+      expect(persistent.logsDirectory).toBe(join(supportDirectory, "logs", "broker"));
+      expect(persistent.brokerSocketPath).toBe(join(supportDirectory, "runtime", "broker.sock"));
+      expect(persistent.controlHome).toBe(join(homedir(), ".openscout", "control-plane"));
     }));
 
     await withEnv({
       OPENSCOUT_SUPPORT_DIRECTORY: "/tmp/openscout-remote-install",
+      OPENSCOUT_INSTANCE: undefined,
       XDG_DATA_HOME: "/var/lib/openscout-should-not-apply",
     }, () => withPlatform("darwin", () => {
-      expect(resolveBrokerServiceConfig().supportDirectory)
+      expect(persistentBrokerServiceConfig(resolveBrokerServiceConfig()).supportDirectory)
         .toBe(join(homedir(), "Library", "Application Support", "OpenScout"));
     }));
+  });
+
+  test("a non-prod instance derives its own label, socket and control home", async () => {
+    await withEnv({
+      OPENSCOUT_INSTANCE: "dev",
+      OPENSCOUT_SUPPORT_DIRECTORY: undefined,
+      OPENSCOUT_CONTROL_HOME: undefined,
+      OPENSCOUT_BROKER_SOCKET_PATH: undefined,
+      OPENSCOUT_SERVICE_LABEL: undefined,
+      OPENSCOUT_BROKER_SERVICE_LABEL: undefined,
+    }, () => {
+      const serviceConfig = resolveBrokerServiceConfig();
+      const root = join(homedir(), ".openscout", "instances", "dev");
+      expect(serviceConfig.label).toBe("app.openscout.dev");
+      expect(serviceConfig.supportDirectory).toBe(join(root, "support"));
+      expect(serviceConfig.controlHome).toBe(join(root, "control-plane"));
+      expect(serviceConfig.brokerSocketPath).toBe(join(root, "support", "runtime", "broker.sock"));
+    });
   });
 });
 

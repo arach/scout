@@ -1,3 +1,9 @@
+import {
+  buildUserSpawnEnvironment,
+  OPENSCOUT_USER_SPAWN_STRIPPED_ENV_KEYS,
+  userSpawnPaneAssignments,
+} from "./instance.js";
+
 /**
  * Claude exports these markers to commands that run inside an active session.
  * They describe the PARENT harness, not a fresh terminal OpenScout launched,
@@ -57,6 +63,15 @@ export const INHERITED_MULTIPLEXER_PANE_ENV_KEYS = [
   "ZELLIJ_PANE_ID",
 ] as const;
 
+/**
+ * Instance-derived env a Scout service holds (OPENSCOUT_INSTANCE, homes,
+ * dirs, ports, broker URL, labels, parent pid, service mode, mesh posture).
+ * A terminal or agent the service launches starts clean: inside a checkout
+ * its `bun run dev` takes the checkout default, elsewhere prod applies, and
+ * OPENSCOUT_CLIENT_INSTANCE alone tells its `scout` which broker to reach.
+ */
+export const INHERITED_INSTANCE_ENV_KEYS = OPENSCOUT_USER_SPAWN_STRIPPED_ENV_KEYS;
+
 /** Every identity a fresh top-level terminal must not inherit. */
 export const INHERITED_TERMINAL_IDENTITY_ENV_KEYS = [
   ...INHERITED_CLAUDE_SESSION_ENV_KEYS,
@@ -77,8 +92,9 @@ export function buildInteractiveTerminalEnvironment(
   base: NodeJS.ProcessEnv = process.env,
   overrides: NodeJS.ProcessEnv = {},
 ): NodeJS.ProcessEnv {
+  // User-facing spawn: drop instance-derived env, keep only the client pointer.
   const env: NodeJS.ProcessEnv = {
-    ...base,
+    ...(buildUserSpawnEnvironment(base) as NodeJS.ProcessEnv),
     ...overrides,
     COLORTERM: overrides.COLORTERM || base.COLORTERM || "truecolor",
     FORCE_COLOR: overrides.FORCE_COLOR || base.FORCE_COLOR || "1",
@@ -104,11 +120,53 @@ export function buildInteractiveTerminalEnvironment(
  * describe the real pane the agent is in. Stripping it is the client-side
  * job — see {@link INHERITED_MULTIPLEXER_PANE_ENV_KEYS}.
  */
-export function buildInteractiveTerminalShellDirectives(): string[] {
+export function buildInteractiveTerminalShellDirectives(base: NodeJS.ProcessEnv = process.env): string[] {
+  // A long-lived tmux server hands panes its own global env, which may carry
+  // instance keys from whatever process first started it: unset them here, at
+  // the final process boundary, then set only the client pointer (plus a prod
+  // spawner's genuine overrides).
   return [
     "unset NO_COLOR",
     `unset ${INHERITED_CLAUDE_SESSION_ENV_KEYS.join(" ")}`,
+    `unset ${INHERITED_INSTANCE_ENV_KEYS.join(" ")}`,
+    ...userSpawnPaneAssignments(base).map(([key, value]) => `export ${key}=${shellQuoteWord(value)}`),
     'export COLORTERM="${COLORTERM:-truecolor}"',
     'export FORCE_COLOR="${FORCE_COLOR:-1}"',
   ];
+}
+
+function shellQuoteWord(value: string): string {
+  return /^[A-Za-z0-9_./:@%+=,-]+$/.test(value) ? value : `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * Inside a tmux pane, run what tmux itself would have run for a session with
+ * no command: the user's `default-command` (through the default shell), else
+ * `default-shell` as a login shell. Keeps their tmux config in charge while
+ * the env prefix fixes the instance keys.
+ */
+const TMUX_DEFAULT_PANE_PROGRAM = [
+  'dc=$(tmux show-options -gv default-command 2>/dev/null)',
+  'ds=$(tmux show-options -gv default-shell 2>/dev/null)',
+  'ds=${ds:-${SHELL:-/bin/sh}}',
+  'if [ -n "$dc" ]; then exec "$ds" -c "$dc"; fi',
+  // tmux runs default-shell as a login shell; -l is the portable spelling.
+  'exec "$ds" -l',
+].join("; ");
+
+/**
+ * The command for a tmux pane Scout starts. Panes inherit the tmux server's
+ * global env, not the client's: a server first started with instance keys
+ * would leak them into every pane (`-e KEY=` only sets them empty). Run the
+ * pane through `env -u` for every instance key, then set the client pointer
+ * (and a prod spawner's genuine overrides). `command` null keeps tmux's own
+ * default-command / default-shell behaviour.
+ */
+export function wrapUserSpawnPaneCommand(command: string | null, base: NodeJS.ProcessEnv = process.env): string {
+  const unsets = INHERITED_INSTANCE_ENV_KEYS.map((key) => `-u ${key}`).join(" ");
+  const assignments = userSpawnPaneAssignments(base).map(([key, value]) => `${key}=${shellQuoteWord(value)}`).join(" ");
+  const target = command && command.trim()
+    ? `sh -c ${shellQuoteWord(command)}`
+    : `sh -c ${shellQuoteWord(TMUX_DEFAULT_PANE_PROGRAM)}`;
+  return `env ${unsets} ${assignments} ${target}`;
 }

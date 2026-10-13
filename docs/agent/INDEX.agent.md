@@ -16,6 +16,7 @@ Not governance docs. Not proposals. Compressed ontology + invariants.
 | [runtime-sessions.agent.md](./runtime-sessions.agent.md) | agent/session/endpoint lifecycle |
 | [pairing-runtime.agent.md](./pairing-runtime.agent.md) | mobile bridge, QR, relay (not broker) |
 | [scoutd.agent.md](./scoutd.agent.md) | launchd, supervise, doctor |
+| [instances.agent.md](./instances.agent.md) | `OPENSCOUT_INSTANCE`: dev/worktree isolation from prod, rails, systemd unit |
 | [integration-contract.agent.md](./integration-contract.agent.md) | external agent minimum contract |
 
 ## Read order by task
@@ -27,6 +28,7 @@ Not governance docs. Not proposals. Compressed ontology + invariants.
 | start/wake/attach harness | `runtime-sessions.agent.md` → `broker.agent.md` |
 | mobile pair / QR | `pairing-runtime.agent.md` |
 | local service broken | `scoutd.agent.md` |
+| run a checkout beside the installed Scout | `instances.agent.md` |
 | new harness adapter | `integration-contract.agent.md` → `runtime-sessions.agent.md` |
 
 ## Format

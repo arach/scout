@@ -32,6 +32,117 @@ await loadWebServerUnderTest();
 installWebServerTestHooks();
 
 describe("createOpenScoutWebServer", () => {
+  test("remote operator navigation signs in before mounting the app and preserves its destination", async () => {
+    let peerAddress = "192.168.18.42";
+    let sessionValid = true;
+    const server = await createOpenScoutWebServer({
+      currentDirectory: "/tmp/openscout", assetMode: "static", staticRoot: makeStaticRoot(),
+      backgroundServices: false, lanAccessScope: "full",
+      authToken: "operator-key", sessions: { mint: () => "browser-session", validate: (token) => sessionValid && token === "browser-session" },
+      trustedHosts: ["air.scout.local"], resolvePeerAddress: () => peerAddress,
+    });
+    const url = "http://air.scout.local/ops/tail?session=abc&mode=takeover";
+    const documentHeaders = { accept: "text/html,application/xhtml+xml;q=0.9" };
+    try {
+      for (const method of ["GET", "HEAD"]) {
+        for (const cookie of [undefined, "openscout_web_session=expired"]) {
+          const response = await server.app.request(url, { method, headers: { ...documentHeaders, ...(cookie ? { cookie } : {}) } });
+          expect(response.status).toBe(302);
+          expect(response.headers.get("cache-control")).toBe("no-store");
+          expect(new URL(response.headers.get("location")!, url).searchParams.get("next")).toBe("/ops/tail?session=abc&mode=takeover");
+        }
+      }
+      expect((await server.app.request(url, { headers: { "sec-fetch-dest": "document" } })).status).toBe(302);
+      const signedIn = { ...documentHeaders, cookie: "openscout_web_session=browser-session" };
+      expect((await server.app.request(url, { headers: signedIn })).status).toBe(200);
+      sessionValid = false;
+      expect((await server.app.request(url, { headers: signedIn })).status).toBe(302);
+      expect((await server.app.request(url, { headers: { ...documentHeaders, authorization: "Bearer operator-key" } })).status).toBe(200);
+      expect((await server.app.request("http://air.scout.local/login", { headers: documentHeaders })).status).toBe(200);
+      for (const path of ["/chat", "/chat/?channel=room", "/invite/invitation-token", "/invite/invitation-token/"]) {
+        expect((await server.app.request(`http://air.scout.local${path}`, { headers: documentHeaders })).status).toBe(200);
+      }
+      for (const path of ["/chat/ops", "/invite/token/ops"]) {
+        expect((await server.app.request(`http://air.scout.local${path}`, { headers: documentHeaders })).status).toBe(302);
+      }
+      expect((await server.app.request("http://air.scout.local/api/build", { headers: documentHeaders })).status).toBe(401);
+      // Asset requests retain their ordinary static response, not a login page.
+      expect((await server.app.request(url, { headers: { accept: "*/*", "sec-fetch-dest": "script" } })).status).toBe(200);
+      peerAddress = "127.0.0.1";
+      expect((await server.app.request(url, { headers: documentHeaders })).status).toBe(200);
+      // Caddy's loopback socket does not make a remote browser same-machine.
+      expect((await server.app.request(url, { headers: { ...documentHeaders, "x-forwarded-for": "192.168.18.42" } })).status).toBe(302);
+    } finally { await server.stop(); }
+  });
+
+  test("LAN-only gates HTML, APIs, and upgrades before authentication or routing", async () => {
+    let peerAddress = "192.168.18.42";
+    const server = await createOpenScoutWebServer({
+      currentDirectory: "/tmp/openscout", assetMode: "static", staticRoot: makeStaticRoot(),
+      backgroundServices: false, lanOnly: true, lanAccessScope: "full",
+      advertisedHost: "air.scout.local", portalHost: "scout.local", trustedHosts: ["air.scout.local"],
+      authToken: "test-lan-only-operator-token",
+      resolvePeerAddress: () => peerAddress,
+      lanNetworks: () => [{ name: "en0", address: "192.168.18.11", netmask: "255.255.255.0", cidr: "192.168.18.11/24", family: "IPv4" }],
+    });
+    try {
+      expect((await server.app.request("http://air.scout.local/")).status).toBe(200);
+      // The LAN boundary does not authorize protected API calls.
+      expect((await server.app.request("http://air.scout.local/api/agents", { headers: { authorization: "Bearer wrong" } })).status).toBe(401);
+      for (const headers of [{}, { "x-forwarded-proto": "https" }]) {
+        expect((await server.app.request("http://air.scout.local/api/login", {
+          method: "POST", headers: { origin: "http://air.scout.local", "content-type": "application/json", ...headers },
+          body: JSON.stringify({ token: "test-lan-only-operator-token" }),
+        })).status).toBe(404);
+        for (const method of ["GET", "HEAD"]) {
+          expect((await server.app.request("http://air.scout.local/login", { method, headers })).status).toBe(404);
+        }
+      }
+      // An absolute HTTPS request target on Bun's plaintext port still has an
+      // https: request.url; that client-controlled scheme is not TLS evidence.
+      expect(server.isRequestAllowed(new Request("https://air.scout.local/api/login", { method: "POST" }), peerAddress)).toBe(false);
+      expect(server.isRequestAllowed(new Request("https://air.scout.local/login"), peerAddress)).toBe(false);
+      for (const peer of ["100.64.1.42", "192.168.19.42", "203.0.113.5"]) {
+        peerAddress = peer;
+        for (const path of ["/", "/api/health", "/pair", "/api/terminal/ws"]) {
+          const request = new Request(`http://air.scout.local${path}`, { headers: { "x-forwarded-for": "192.168.18.42" } });
+          expect(server.isRequestAllowed(request, peer)).toBe(false);
+          expect((await server.app.request(request)).status).toBe(404);
+        }
+        expect(server.isRequestAllowed(new Request("http://air.scout.local/api/terminal/ws", { headers: { upgrade: "websocket" } }), peer)).toBe(false);
+      }
+      peerAddress = "127.0.0.1";
+      expect((await server.app.request("http://air.scout.local/login", { headers: { host: "air.scout.local", "x-forwarded-for": "192.168.18.42", "x-forwarded-proto": "https" } })).status).toBe(200);
+      expect((await server.app.request("http://air.scout.local/", { headers: { "x-forwarded-for": "192.168.18.42", "x-forwarded-proto": "https" } })).status).toBe(200);
+      expect((await server.app.request("http://air.scout.local/", { headers: { "x-forwarded-for": "100.64.1.42" } })).status).toBe(404);
+      expect((await server.app.request("http://air.scout.local/api/login", {
+        method: "POST", headers: { host: "air.scout.local", origin: "https://air.scout.local", "content-type": "application/json", "x-forwarded-for": "192.168.18.42", "x-forwarded-proto": "https" },
+        body: JSON.stringify({ token: "test-lan-only-operator-token" }),
+      })).status).toBe(200);
+    } finally { await server.stop(); }
+  });
+
+  test("LAN-only never proxies a foreign local hostname through any available route", async () => {
+    const calls: string[] = [];
+    const server = await createOpenScoutWebServer({
+      currentDirectory: "/tmp/openscout", assetMode: "static", staticRoot: makeStaticRoot(),
+      backgroundServices: false, lanOnly: true, lanAccessScope: "full",
+      advertisedHost: "air.scout.local", portalHost: "scout.local", resolvePeerAddress: () => "127.0.0.1",
+      portalMachines: async () => [makePortalPeerMachine({ name: "mini", scoutNodeId: "node-mini", capabilities: ["scout-web", "scout-broker"], routes: [{ kind: "tailnet", host: "100.64.1.42", lastSeenAt: Date.now() }] })],
+      portalFetch: (async (input: unknown) => { calls.push(String(input)); return new Response("unexpected proxy"); }) as typeof fetch,
+    });
+    try {
+      for (const host of ["mini.scout.local", "unknown.scout.local"]) {
+        expect((await server.app.request(`http://${host}/`, { headers: { host } })).status).toBe(404);
+        expect(server.isRequestAllowed(new Request(`http://${host}/api/terminal/ws`, { headers: { host, upgrade: "websocket" } }), "127.0.0.1")).toBe(false);
+        expect(await server.resolvePortalPeerUpstream(host)).toBeNull();
+      }
+      expect(calls).toEqual([]);
+      expect((await server.app.request("http://air.scout.local/")).status).toBe(200);
+      expect(server.isRequestAllowed(new Request("http://chat.scout.local/"), "127.0.0.1")).toBe(true);
+    } finally { await server.stop(); }
+  });
+
   test("serves /api/build from warmed git.buildInfo without rerunning the probe", async () => {
     const repo = mkdtempSync(join(tmpdir(), "openscout-web-build-info-"));
     testDirectories.add(repo);

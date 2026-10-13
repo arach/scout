@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { beforeEach, afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,6 +18,13 @@ import type { RouteTarget } from "./types.js";
 
 const NOW = 1_800_000_000_000;
 const cleanup: (() => void)[] = [];
+beforeEach(() => {
+  const previous = process.env.OPENSCOUT_SUPPORT_DIRECTORY;
+  const support = temp();
+  process.env.OPENSCOUT_SUPPORT_DIRECTORY = support;
+  writeFileSync(join(support, "settings.json"), JSON.stringify({ knowledgeIndexEnabled: true }));
+  cleanup.push(() => { if (previous === undefined) delete process.env.OPENSCOUT_SUPPORT_DIRECTORY; else process.env.OPENSCOUT_SUPPORT_DIRECTORY = previous; });
+});
 afterEach(() => { for (const fn of cleanup.splice(0).reverse()) fn(); });
 function temp() { const p = mkdtempSync(join(tmpdir(), "scout-routing-test-")); cleanup.push(() => rmSync(p, { recursive: true, force: true })); return p; }
 function store() { const s = new RoutingStore(":memory:"); cleanup.push(() => s.close()); return s; }
@@ -50,7 +57,7 @@ function chunksFixture(entries: { collection: string; text: string; time?: numbe
     db.query("INSERT INTO chunks_fts(rowid,chunk_id,collection_id,body) VALUES (?,?,?,?)").run(ftsRowidForChunk(String(i)), String(i), entry.collection, entry.text);
   });
   db.exec("COMMIT"); db.close?.();
-  const reader = new RoutingChunks(path); cleanup.push(() => reader.close());
+  const reader = new RoutingChunks(path, true); cleanup.push(() => reader.close());
   return { reader, path };
 }
 
@@ -319,4 +326,14 @@ test("old fingerprint versions request explicit refresh, never rebuild during a 
   const result = resolveRoute(s, "known");
   expect(result.coverage.warnings.some((w) => w.includes("run scout where index"))).toBe(true);
   expect(s.meta("extractor", "")).toBe("routing-p1-v4");
+});
+
+test("index off suppresses cached exact/fingerprint routing and refresh mutations", () => {
+  const s = store(); doc(s, target("/repo/needle"), "needle");
+  writeFileSync(join(process.env.OPENSCOUT_SUPPORT_DIRECTORY!, "settings.json"), "{}");
+  const result = resolveRoute(s, "needle");
+  expect(result.outcome).toBe("none"); expect(result.candidates).toEqual([]);
+  expect(result.reason).toContain("Settings › System");
+  expect(refreshRoutingIndex(s, { node: { id: "mini", name: "mini" }, snapshot: snapshot("/new") }).mode).toBe("off");
+  expect(s.targets()).toHaveLength(1);
 });

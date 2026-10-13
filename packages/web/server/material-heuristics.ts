@@ -4,6 +4,7 @@ import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { createRequire } from "node:module";
 
 import type { WorkMaterialKind } from "./work-materials.ts";
+import { resolveOpenScoutHome } from "@openscout/runtime/support-paths";
 
 const require = createRequire(import.meta.url);
 const picomatch = require("picomatch") as (
@@ -89,7 +90,7 @@ let globalCache: HeuristicsConfig | null = null;
 let globalWatcher: FSWatcher | null = null;
 
 function globalHeuristicsPath(): string {
-  return join(process.env.HOME ?? homedir(), ".openscout", "heuristics.json");
+  return join(resolveOpenScoutHome(), "heuristics.json");
 }
 
 function normalizePathForGlob(path: string): string {

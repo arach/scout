@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { defineProbeFamily, type ProbeCtx } from "./registry.js";
 import { execProbeFile, ProbeCommandError } from "./exec.js";
 import { runWithScoutdFallback } from "./scoutd-client.js";
+import { resolveOpenScoutHomeForEnv } from "../support-paths.js";
 
 const TMUX_TTL_MS = 5_000;
 const TMUX_TIMEOUT_MS = 1_500;
@@ -108,7 +109,7 @@ function tmuxSocketArgs(key: string): string[] {
 function zellijSocketDirFromEnv(env: RuntimeEnv): string {
   return env.ZELLIJ_SOCKET_DIR?.trim()
     || env.OPENSCOUT_ZELLIJ_SOCKET_DIR?.trim()
-    || join(env.HOME?.trim() || homedir(), ".openscout", "zellij-sockets");
+    || join(resolveOpenScoutHomeForEnv(env), "zellij-sockets");
 }
 
 export function zellijSocketKey(input?: string | { env?: RuntimeEnv; socketDir?: string | null } | null): string {

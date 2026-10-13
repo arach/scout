@@ -6,6 +6,7 @@ import { mkdir, readFile, writeFile, rename, chmod, rm } from "node:fs/promises"
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ScoutCommandContext } from "../context.ts";
+import { resolveOpenScoutHomeForEnv } from "@openscout/runtime/support-paths";
 
 type Membership = { origin: string; channelId: string; title: string; space: string; spaceTitle?: string; token: string; actorId: string; sessionId?: string; cursor?: string | null };
 type State = { active?: string; rooms: Record<string, Membership>; attempts: Record<string, string> };
@@ -243,7 +244,7 @@ export async function runChatCommand(context: ScoutCommandContext, args: string[
   }
   if (command === "enroll" && (!flags.agent || values.length)) throw new Error("Usage: chat enroll --agent <durable-agent-id> [--channel <id>]");
   const scope = createHash("sha256").update(`${context.cwd}\n${currentChatSession(context.env) ?? "shell"}`).digest("hex");
-  const directory = join(context.env.OPENSCOUT_CHAT_HOME ?? join(homedir(), ".openscout", "chat"), scope);
+  const directory = join(context.env.OPENSCOUT_CHAT_HOME ?? join(resolveOpenScoutHomeForEnv(context.env), "chat"), scope);
   await mkdir(directory, { recursive: true, mode: 0o700 });
   await chmod(directory, 0o700);
   const file = join(directory, "membership.json");

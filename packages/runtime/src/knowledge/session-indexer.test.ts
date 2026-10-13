@@ -36,6 +36,8 @@ function restoreEnv(key: string, value: string | undefined): void {
 function tempRoot(prefix: string): string {
   const root = mkdtempSync(join(tmpdir(), prefix));
   roots.add(root);
+  mkdirSync(join(root, "support"), { recursive: true });
+  writeFileSync(join(root, "support", "settings.json"), JSON.stringify({ knowledgeIndexEnabled: true }));
   return root;
 }
 
@@ -352,4 +354,38 @@ describe("basic scan lifecycle", () => {
     } finally { create.mockRestore(); }
   });
 
+});
+
+test("re-extracts stale versions, strips turn/tool boilerplate and preserves every collection path", async () => {
+  const root = tempRoot("scout-knowledge-content-");
+  process.env.OPENSCOUT_SUPPORT_DIRECTORY = join(root, "support");
+  process.env.OPENSCOUT_CONTROL_HOME = join(root, "control");
+  const sessions = join(root, "codex"); mkdirSync(sessions);
+  process.env.OPENSCOUT_TAIL_CODEX_SESSIONS_ROOT = sessions;
+  const lines = [
+    { type: "session_meta", payload: { id: "content-fixture", cwd: "/repo/fixture" } },
+    { type: "event_msg", payload: { type: "user_message", message: "<recommended_plugins>boilerplateunique</recommended_plugins>\nFix meaningful regression" } },
+    { type: "function_call_output", payload: { output: "<system-reminder>reminderunique</system-reminder>usefulresultunique" } },
+    ...["Case.ts", "case.ts"].map(name => ({ type: "function_call", payload: { name: "Read", arguments: JSON.stringify({ file_path: `/repo/fixture/${name}` }) } })),
+    ...Array.from({ length: 125 }, (_, i) => ({ type: "function_call", payload: { name: "Read", arguments: JSON.stringify({ file_path: `/repo/fixture/path-${i}.ts` }) } })),
+  ];
+  writeFileSync(join(sessions, "content-fixture.jsonl"), lines.map(line => JSON.stringify(line)).join("\n"));
+  const first = await indexRecentSessionKnowledge({ harness: "codex", hours: 1 });
+  expect(first.failed).toBe(0); expect(first.indexed).toBe(1);
+  const store = new SQLiteKnowledgeStore();
+  try {
+    const collection = store.getCollection(first.sessions[0]!.collectionId)!;
+    expect(collection.title).toContain("Fix meaningful regression"); expect(collection.title).not.toContain("boilerplateunique");
+    expect(collection.facets.touchedPath).toHaveLength(127);
+    expect(collection.facets.touchedPath).toContain("/repo/fixture/Case.ts");
+    expect(collection.facets.touchedPath).toContain("/repo/fixture/case.ts");
+    expect(store.searchLexical({ q: "usefulresultunique", facets: { touchedPath: "/repo/fixture/path-124.ts" } }).length).toBeGreaterThan(0);
+    expect(store.searchLexical({ q: "boilerplateunique" })).toEqual([]);
+    expect(store.searchLexical({ q: "reminderunique" })).toEqual([]);
+    store.upsertCollection({ ...collection, extractorVersion: "session-qmd-v3", chunkPolicyVersion: "session-qmd-record-window-v1" });
+  } finally { store.close(); }
+  const second = await indexRecentSessionKnowledge({ harness: "codex", hours: 1 });
+  expect(second.failed).toBe(0); expect(second.sessions[0]?.skipped).not.toBe(true);
+  const reader = new SQLiteKnowledgeStore(undefined, undefined, { readonly: true });
+  try { expect(reader.getCollection(first.sessions[0]!.collectionId)?.extractorVersion).toBe("session-qmd-v4"); } finally { reader.close(); }
 });

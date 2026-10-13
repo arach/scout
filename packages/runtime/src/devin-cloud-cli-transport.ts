@@ -6,6 +6,7 @@ import {
   ExternalSessionTransportError, normalizeDevinSessionId,
   type ExternalSessionConnection, type ExternalSessionTransport,
 } from "./external-session-transport.js";
+import { buildUserSpawnEnvironment } from "./instance.js";
 
 type Observation = { nativeSessionId: string; state: string };
 
@@ -15,10 +16,12 @@ export function devinCloudCliTransport(
   env: NodeJS.ProcessEnv = process.env,
 ): ExternalSessionTransport {
   const executable = env.OPENSCOUT_DEVIN_CLI_BIN || "devin";
+  // The Devin CLI is a harness the operator drives: a user-facing spawn.
+  const childEnv = buildUserSpawnEnvironment(env) as NodeJS.ProcessEnv;
   const inspect = async (nativeId: string): Promise<Observation> => {
     const id = normalizeDevinSessionId(nativeId);
     return new Promise((resolve, reject) => {
-      const child = spawn(executable, ["acp", "--cloud"], { env, stdio: ["pipe", "pipe", "ignore"] });
+      const child = spawn(executable, ["acp", "--cloud"], { env: childEnv, stdio: ["pipe", "pipe", "ignore"] });
       let done = false;
       let buffer = "";
       const kill = () => {
@@ -80,7 +83,7 @@ export function devinCloudCliTransport(
         const path = join(directory, "prompt.txt");
         await writeFile(path, body, { mode: 0o600 });
         await new Promise<void>((resolve, reject) => {
-          const child = spawn(executable, ["--cloud", "--resume", observed.nativeSessionId, "--prompt-file", path, "--print"], { env, stdio: "ignore" });
+          const child = spawn(executable, ["--cloud", "--resume", observed.nativeSessionId, "--prompt-file", path, "--print"], { env: childEnv, stdio: "ignore" });
           let expired = false;
           let escalation: ReturnType<typeof setTimeout> | undefined;
           const timer = setTimeout(() => {

@@ -2146,6 +2146,32 @@ function SecureAddressRow() {
   );
 }
 
+function LocalSearchSetting() {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    void api<{ enabled: boolean }>("/api/knowledge/settings").then(value => { if (active) setEnabled(value.enabled); })
+      .catch(() => { if (active) setError("Could not read the search setting. Reopen Settings to retry."); });
+    return () => { active = false; };
+  }, []);
+  const save = async (value: boolean) => {
+    setSaving(true); setError(null);
+    try {
+      const next = await api<{ enabled: boolean }>("/api/knowledge/settings", { method: "PUT", body: JSON.stringify({ enabled: value }) });
+      setEnabled(next.enabled);
+    } catch { setError("Could not save the search setting. Try again."); }
+    finally { setSaving(false); }
+  };
+  return <Section label="Local storage">
+    <Row title="Local search index" detail="Index harness sessions for Search and scout where. Off by default. Uses at most 256 MiB for the database, WAL and QMD files combined; oldest sessions leave the index first. Original transcripts are not deleted.">
+      <Toggle label="Local search index" on={enabled === true} disabled={enabled === null || saving} onChange={value => void save(value)} />
+    </Row>
+    {error ? <Note error>{error}</Note> : null}
+  </Section>;
+}
+
 function SystemPage({ host }: { host: Host }) {
   const { snapshot, loading, load } = useSnapshot();
   const { state: copyState, copy } = useCopy();
@@ -2166,6 +2192,7 @@ function SystemPage({ host }: { host: Host }) {
 
   return (
     <>
+      <LocalSearchSetting />
       <Section label="Running" mac note={snapshot ? `As of ${snapshot.collectedAt.toLocaleTimeString()}.` : undefined}>
         <Row title="Broker" detail={<span className="sq-mono">{mesh?.brokerUrl ?? "—"}{mesh?.health.error ? ` · ${mesh.health.error}` : ""}</span>}>
           {!mesh ? <Status>{loading ? "Checking" : "Unknown"}</Status>

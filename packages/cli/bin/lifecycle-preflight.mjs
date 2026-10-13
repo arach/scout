@@ -12,6 +12,55 @@ export const QUICK_LINKS = [
   "Troubleshooting: scout doctor",
 ].join("\n");
 
+/**
+ * Pull the global `--instance <name>` / `--instance=<name>` flag out of argv
+ * (it selects which OpenScout instance the CLI talks to; same as
+ * OPENSCOUT_INSTANCE). Only flags before the first `--` are considered.
+ * Returns the remaining argv and the requested instance, if any.
+ */
+export function extractInstanceFlag(argv) {
+  const rest = [];
+  let instance = null;
+  let passthrough = false;
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (passthrough || token === "--") {
+      passthrough = true;
+      rest.push(token);
+      continue;
+    }
+    if (token === "--instance") {
+      const value = argv[index + 1];
+      if (value === undefined || value.startsWith("-")) {
+        throw new Error("missing value for --instance (for example: scout --instance dev status)");
+      }
+      instance = value;
+      index += 1;
+      continue;
+    }
+    if (token.startsWith("--instance=")) {
+      instance = token.slice("--instance=".length);
+      if (!instance) throw new Error("missing value for --instance (for example: scout --instance=dev status)");
+      continue;
+    }
+    rest.push(token);
+  }
+  return { argv: rest, instance };
+}
+
+/** Apply `--instance` to process.argv/process.env in place. Returns the instance name or null. */
+export function applyInstanceFlag(processLike = process) {
+  const { argv, instance } = extractInstanceFlag(processLike.argv.slice(2));
+  processLike.argv = [...processLike.argv.slice(0, 2), ...argv];
+  if (instance !== null) {
+    processLike.env.OPENSCOUT_INSTANCE = instance;
+    // Marks an explicit choice so surfaces that default to prod (the Claude
+    // statusline) honour it across the Bun re-exec.
+    processLike.env.OPENSCOUT_INSTANCE_EXPLICIT = "1";
+  }
+  return instance;
+}
+
 export function parseScoutArgv(argv) {
   let command = null;
   let helpRequested = false;

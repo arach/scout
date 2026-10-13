@@ -11,6 +11,7 @@ import {
   type EventInventoryAdapter,
   type SemanticEventKind,
 } from "../event-inventory.js";
+import { isScoutPairingPath, scoutPairingAdapterRoot } from "../../scout-state-paths.js";
 
 const CODEX_ADAPTER_ID = "codex";
 
@@ -232,14 +233,14 @@ export const codexEventInventoryAdapter: EventInventoryAdapter = {
       join(home, ".codex", "sessions"),
       join(home, ".codex", "archived_sessions"),
       join(home, ".openai-codex", "sessions"),
-      join(home, ".scout", "pairing", "codex"),
+      scoutPairingAdapterRoot(home, "codex"),
     ];
   },
   matchesFile(filePath) {
     const path = normalizedPath(filePath);
     return path.includes("/.codex/")
       || path.includes("/.openai-codex/")
-      || path.includes("/.scout/pairing/codex/");
+      || isScoutPairingPath(path, "codex/");
   },
   extract(record) {
     const appServerEntries = extractFromAppServer(record);

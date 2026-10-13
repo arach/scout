@@ -1,3 +1,4 @@
+import { writeOpenScoutSettings } from "@openscout/runtime/setup";
 import type { Hono } from "hono";
 import { createReadStream, existsSync, statSync } from "node:fs";
 import {
@@ -10,6 +11,7 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import {
+  knowledgeIndexEnabled, KNOWLEDGE_INDEX_OFF, disabledKnowledgeStatus, KNOWLEDGE_MAX_BYTES,
   resolveOpenScoutKnowledgePaths,
   scanRecentSessionKnowledge,
   SQLiteKnowledgeStore,
@@ -65,6 +67,8 @@ type SessionKnowledgeIndexOutcome = {
   result?: unknown;
   status?: unknown;
   error?: string;
+  enabled?: boolean;
+  message?: string;
 };
 
 type SessionKnowledgeIndexInput = {
@@ -121,6 +125,7 @@ function spawnKnowledgeIndexChild(scriptPath: string, input: SessionKnowledgeInd
 export function createSessionKnowledgeIndexer(deps: {
   childPath?: () => string | null;
   spawn?: typeof spawnKnowledgeIndexChild;
+  enabled?: () => boolean;
 } = {}) {
   let active: {
     input: SessionKnowledgeIndexInput;
@@ -134,6 +139,7 @@ export function createSessionKnowledgeIndexer(deps: {
   }
 
   function start(input: SessionKnowledgeIndexInput): Promise<SessionKnowledgeIndexOutcome> {
+    if (!(deps.enabled ?? knowledgeIndexEnabled)()) return Promise.resolve({ ok: true, enabled: false, message: KNOWLEDGE_INDEX_OFF, status: disabledKnowledgeStatus() });
     if (active) {
       return sameSessionKnowledgeIndexInput(active.input, input)
         ? active.promise
@@ -471,7 +477,16 @@ export function mountKnowledgeRoutes(app: Hono, deps: KnowledgeRouteDeps) {
   const { currentDirectory } = deps;
   const indexer = deps.sessionIndexer ?? sessionKnowledgeIndexer;
 
+  app.get("/api/knowledge/settings", (c) => c.json({ enabled: knowledgeIndexEnabled(), maxBytes: KNOWLEDGE_MAX_BYTES }));
+  app.put("/api/knowledge/settings", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    if (typeof body.enabled !== "boolean") return c.json({ error: "enabled must be a boolean" }, 400);
+    await writeOpenScoutSettings({ knowledgeIndexEnabled: body.enabled }, { currentDirectory });
+    return c.json({ enabled: knowledgeIndexEnabled(), maxBytes: KNOWLEDGE_MAX_BYTES });
+  });
+
   app.get("/api/knowledge/status", (c) => {
+    if (!knowledgeIndexEnabled()) return c.json({ ...disabledKnowledgeStatus(), indexing: null, lastIndex: null });
     const store = new SQLiteKnowledgeStore(undefined, undefined, { readonly: true });
     try {
       return c.json({ ...store.status(), ...indexer.state() });
@@ -485,6 +500,7 @@ export function mountKnowledgeRoutes(app: Hono, deps: KnowledgeRouteDeps) {
   // time-boxed scan of the newest transcripts ("basic" mode) so search works
   // from the first second.
   app.get("/api/knowledge/search", async (c) => {
+    if (!knowledgeIndexEnabled()) return c.json({ q: c.req.query("q") ?? "", mode: "off", hits: [], message: KNOWLEDGE_INDEX_OFF, status: disabledKnowledgeStatus() });
     const q = c.req.query("q") ?? "";
     const limit = parseOptionalPositiveInt(c.req.query("limit"), 30) ?? 30;
     const primitives = parseKnowledgeSearchParams(c.req.url);
@@ -546,6 +562,7 @@ export function mountKnowledgeRoutes(app: Hono, deps: KnowledgeRouteDeps) {
   });
 
   app.get("/api/knowledge/search-primitives", (c) => {
+    if (!knowledgeIndexEnabled()) return c.json({ facets: [], message: KNOWLEDGE_INDEX_OFF, status: disabledKnowledgeStatus() });
     const keys = new URL(c.req.url, "http://localhost").searchParams.getAll("key");
     const limit = parseOptionalPositiveInt(c.req.query("limit"), 200) ?? 200;
     const store = new SQLiteKnowledgeStore(undefined, undefined, { readonly: true });
@@ -593,6 +610,7 @@ export function mountKnowledgeRoutes(app: Hono, deps: KnowledgeRouteDeps) {
   });
 
   app.post("/api/knowledge/sessions/index", async (c) => {
+    if (!knowledgeIndexEnabled()) return c.json({ ok: true, enabled: false, message: KNOWLEDGE_INDEX_OFF, status: disabledKnowledgeStatus() });
     const body = (await c.req.json().catch(() => ({}))) as {
       days?: unknown;
       hours?: unknown;
@@ -644,4 +662,14 @@ export function mountKnowledgeRoutes(app: Hono, deps: KnowledgeRouteDeps) {
     }
     return c.json({ result: outcome.result, status: outcome.status });
   });
+}
+
+/** Run once on web startup, including existing opt-out installs. No transcript
+ * discovery, job creation or server-event-loop SQLite work. */
+export function startKnowledgeStorageMaintenance(): void {
+  const path = knowledgeIndexChildPath();
+  if (!path) return;
+  const child = Bun.spawn([process.execPath, path, JSON.stringify({ maintenance: true })], { stdout: "ignore", stderr: "inherit", env: process.env });
+  const timer = setTimeout(() => child.kill(), SESSION_KNOWLEDGE_INDEX_TIMEOUT_MS);
+  void child.exited.finally(() => clearTimeout(timer));
 }

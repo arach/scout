@@ -38,7 +38,7 @@ import {
   staleLocalEndpointReason,
   type InvocationStatusPatch,
 } from "./broker-local-invocation-helpers.js";
-import { isBrokerRunnableLocalAgentTransport } from "./local-agent-transports.js";
+import { isBrokerRunnableLocalAgentTransport, isDirectLocalAgentTransport } from "./local-agent-transports.js";
 import { SCOUT_MESSAGE_ATTACHMENTS_CONTEXT_KEY } from "./local-agents.js";
 import type { PairingInvocationResult } from "./pairing-session-agents.js";
 import type { RuntimeSnapshot } from "./scout-dispatcher.js";
@@ -228,6 +228,20 @@ export class BrokerLocalInvocationService {
   readonly #activeEndpointTasks = new Map<string, Promise<void>>();
 
   constructor(private readonly options: BrokerLocalInvocationServiceOptions) {}
+
+  /**
+   * Direct local adapters execute on this service's canonical endpoint lane.
+   * Availability may admit the next command while the prior completed flight
+   * still awaits its idle endpoint write; execution remains serialized below.
+   * Codex is excluded: an uncertain submission can release this lane while its
+   * native turn remains unresolved, so it cannot yet promise queued execution.
+   * Terminal transports, remote endpoints and other adapters do not inherit it.
+   */
+  supportsQueuedEndpoint(endpoint: AgentEndpoint): boolean {
+    return endpoint.nodeId === this.options.nodeId
+      && endpoint.transport !== "codex_app_server"
+      && isDirectLocalAgentTransport(endpoint.transport);
+  }
 
   hasActiveInvocation(invocationId: string): boolean {
     return this.options.activeInvocationTasks.has(invocationId);

@@ -43,6 +43,7 @@ import {
   spawnHarnessProcess,
   type HarnessProcess,
 } from "../../runtime/process.js";
+import { scoutUserSpawnEnvironment } from "../../scout-state-paths.js";
 
 interface ClaudeResumeContext {
   cwd: string;
@@ -127,7 +128,7 @@ export class ClaudeCodeAdapter extends BaseAdapter {
       args.push("--resume", resumeId);
     }
 
-    const env = { ...process.env, ...this.config.env };
+    const env = { ...scoutUserSpawnEnvironment(process.env), ...this.config.env };
     const claudeExecutable = resolveExecutableFromPath("claude", env);
 
     const child = await spawnHarnessProcess(claudeExecutable, args, {

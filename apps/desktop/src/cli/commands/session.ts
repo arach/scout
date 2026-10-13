@@ -42,6 +42,9 @@ import {
   resolveScoutSenderId,
 } from "../../core/broker/service.ts";
 import { askScoutApp } from "../scout-app-socket.ts";
+import { resolveOpenScoutHomeForEnv } from "@openscout/runtime/support-paths";
+import { wrapUserSpawnPaneCommand } from "@openscout/runtime/terminal-environment";
+import { buildMultiplexerServerEnvironment, buildUserSpawnEnvironment } from "@openscout/runtime/instance";
 
 const SESSION_HELP = `scout session — actions on a harness session
 
@@ -726,7 +729,7 @@ function resolveControlPlaneDbPath(context: ScoutCommandContext): string {
   }
 
   const controlHome = context.env.OPENSCOUT_CONTROL_HOME?.trim()
-    || join(context.env.HOME?.trim() || homedir(), ".openscout", "control-plane");
+    || join(resolveOpenScoutHomeForEnv(context.env), "control-plane");
   return join(controlHome, "control-plane.sqlite");
 }
 
@@ -904,7 +907,7 @@ function assertZellijAvailable(context: ScoutCommandContext): void {
 
 function resolveZellijSocketDir(context: ScoutCommandContext): string {
   const configured = context.env.ZELLIJ_SOCKET_DIR?.trim() || context.env.OPENSCOUT_ZELLIJ_SOCKET_DIR?.trim();
-  return configured || join(context.env.HOME?.trim() || homedir(), ".openscout", "zellij-sockets");
+  return configured || join(resolveOpenScoutHomeForEnv(context.env), "zellij-sockets");
 }
 
 function zellijEnv(context: ScoutCommandContext): NodeJS.ProcessEnv {
@@ -914,8 +917,10 @@ function zellijEnv(context: ScoutCommandContext): NodeJS.ProcessEnv {
   } catch {
     return context.env;
   }
+  // A zellij session is its own server and keeps the creating client's env:
+  // no instance keys (only the client pointer) in what Scout launches.
   return {
-    ...context.env,
+    ...(buildUserSpawnEnvironment(context.env) as NodeJS.ProcessEnv),
     ZELLIJ_SOCKET_DIR: socketDir,
   };
 }
@@ -961,9 +966,10 @@ function createTmuxSession(
     "-c",
     input.cwd,
     ...Object.entries(input.env ?? {}).flatMap(([key, value]) => ["-e", `${key}=${value}`]),
-    input.resumeCommand,
+    // Panes get the tmux server's global env: unset instance keys there.
+    wrapUserSpawnPaneCommand(input.resumeCommand, context.env),
   ], {
-    env: context.env,
+    env: buildMultiplexerServerEnvironment(context.env) as NodeJS.ProcessEnv,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -1191,7 +1197,11 @@ async function runSessionForkAction(context: ScoutCommandContext, args: string[]
 
   // Inherit stdio: the forked session is interactive (a TUI), and lands the
   // operator straight in it. The source session is never modified.
-  const result = spawnSync("codex", codexArgs, { stdio: "inherit", env: context.env });
+  // An interactive harness the operator drives: a user-facing spawn.
+  const result = spawnSync("codex", codexArgs, {
+    stdio: "inherit",
+    env: buildUserSpawnEnvironment(context.env) as NodeJS.ProcessEnv,
+  });
   if (result.error) {
     const detail =
       (result.error as NodeJS.ErrnoException).code === "ENOENT"

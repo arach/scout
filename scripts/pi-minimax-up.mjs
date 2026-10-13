@@ -1,5 +1,8 @@
 #!/usr/bin/env bun
 
+// Must stay the first import: materializes OPENSCOUT_INSTANCE (pairing home,
+// ports) before the runtime modules below read them.
+import { openScoutInstanceBootstrap } from "../packages/runtime/src/instance-bootstrap.ts";
 import { execFileSync, spawn } from "node:child_process";
 import {
   appendFileSync,
@@ -197,7 +200,8 @@ function normalizeAlias(value) {
 }
 
 function pairingPaths() {
-  const rootDir = join(homedir(), ".scout", "pairing");
+  // The bootstrap set OPENSCOUT_PAIRING_HOME for a non-prod instance.
+  const rootDir = process.env.OPENSCOUT_PAIRING_HOME?.trim() || join(homedir(), ".scout", "pairing");
   return {
     rootDir,
     configPath: join(rootDir, "config.json"),
@@ -389,7 +393,10 @@ async function startPairingRuntimeController(options) {
 
 async function waitForPairingHealth(timeoutMs) {
   const config = readJsonFile(pairingPaths().configPath, {});
-  const port = Number.isFinite(config.port) && config.port > 0 ? Number(config.port) : 43130;
+  const envPort = Number.parseInt(process.env.OPENSCOUT_PAIRING_PORT ?? "", 10);
+  const port = Number.isFinite(config.port) && config.port > 0
+    ? Number(config.port)
+    : Number.isInteger(envPort) && envPort > 0 ? envPort : openScoutInstanceBootstrap.layout.ports.pairingBridge;
   const url = `http://127.0.0.1:${port}/health`;
   const deadline = Date.now() + timeoutMs;
   let lastError = "";

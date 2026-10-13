@@ -2,6 +2,7 @@ import { existsSync, readFileSync, statSync, writeFileSync, mkdirSync } from "no
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { assertTestIsolatedUserData, resolveOpenScoutSupportPaths } from "./support-paths.js";
+import { resolveOpenScoutHome } from "./support-paths.js";
 
 export type InterruptThreshold = "always" | "blocking-only" | "batched" | "never";
 
@@ -67,7 +68,7 @@ export type RuntimePresetConfig = {
 };
 
 function userConfigPath(): string {
-  return join(process.env.OPENSCOUT_HOME ?? join(homedir(), ".openscout"), "user.json");
+  return join(resolveOpenScoutHome(), "user.json");
 }
 
 /**

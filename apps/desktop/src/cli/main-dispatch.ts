@@ -17,6 +17,7 @@ import {
 import { brokerUpdateDebugEnabled, ensureBrokerUptodate } from "./broker-update.ts";
 import { runNativeScoutdJson } from "./scoutd.ts";
 import { SCOUT_APP_VERSION } from "../shared/product.ts";
+import { resolveOpenScoutScoutHome } from "@openscout/runtime/support-paths";
 
 async function main() {
   const input = parseScoutArgv(process.argv.slice(2));
@@ -144,7 +145,7 @@ function readCurrentCliMtime(): number | null {
 }
 
 function cliMtimeCheckpointPath(): string {
-  return join(homedir(), ".scout", "cli-mtime");
+  return join(resolveOpenScoutScoutHome(), "cli-mtime");
 }
 
 try {

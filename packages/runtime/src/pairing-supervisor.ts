@@ -8,6 +8,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { resolveOpenScoutPairingHomeForEnv } from "./support-paths.js";
 
 export const SCOUT_PAIRING_SUPERVISOR_INTENT_FILE = "supervisor.json";
 export const SCOUT_PAIRING_RUNTIME_PID_FILE = "runtime.pid";
@@ -36,9 +37,7 @@ type PairingIntentRecord = {
 export function resolveScoutPairingSupervisorPaths(
   env: NodeJS.ProcessEnv = process.env,
 ): ScoutPairingSupervisorPaths {
-  const configuredRoot = env.OPENSCOUT_PAIRING_HOME?.trim()
-    || env.SCOUT_PAIRING_HOME?.trim();
-  const rootDir = configuredRoot || join(homedir(), ".scout", "pairing");
+  const rootDir = resolveOpenScoutPairingHomeForEnv(env);
   return {
     rootDir,
     intentPath: join(rootDir, SCOUT_PAIRING_SUPERVISOR_INTENT_FILE),

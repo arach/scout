@@ -1,7 +1,11 @@
-import { DEFAULT_BROKER_URL } from "./broker-process-manager.js";
+// Must stay the first import: materializes OPENSCOUT_INSTANCE before any module reads paths/ports.
+import "./instance-bootstrap.js";
+import { resolveBrokerControlUrl } from "./local-config.js";
 
+// This instance's own broker (instance-aware port), never a constant 43110:
+// a dev `openscout-runtime discover` must not drive prod's broker.
 function resolveBrokerUrl(): string {
-  return (process.env.OPENSCOUT_BROKER_URL ?? DEFAULT_BROKER_URL).replace(/\/$/, "");
+  return (process.env.OPENSCOUT_BROKER_URL ?? resolveBrokerControlUrl()).replace(/\/$/, "");
 }
 
 function collectSeeds(argv: string[]): string[] {

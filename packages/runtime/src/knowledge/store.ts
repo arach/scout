@@ -1,8 +1,10 @@
-import { existsSync, mkdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, lstatSync, writeFileSync, renameSync, statSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 
 import { Database } from "bun:sqlite";
+import { acquireKnowledgeWriter, KnowledgeStorageBudget, knowledgeStorageUsage, removeCollectionQmd, directoryBytes, fileBytes } from "./storage-budget.js";
+import { knowledgeIndexEnabled } from "./settings.js";
 import { ftsRowidForChunk } from "./chunk-fts-rowid.js";
 
 import { resolveOpenScoutKnowledgePaths, type OpenScoutKnowledgePaths } from "./paths.js";
@@ -60,6 +62,7 @@ type ChunkRow = {
   ownership: KnowledgeChunk["ownership"];
   source_refs_json: string;
   facets_json: string;
+  collection_facets_json?: string;
   title?: string;
   rank?: number;
 };
@@ -93,6 +96,8 @@ type WarmSpanRow = {
 const KNOWLEDGE_SQLITE_SCHEMA = `
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS storage_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 
 CREATE TABLE IF NOT EXISTS collections (
   id TEXT PRIMARY KEY,
@@ -313,7 +318,7 @@ function chunkFromRow(row: ChunkRow): KnowledgeChunk {
     origin: row.origin,
     ownership: row.ownership,
     sourceRefs: parseJson<KnowledgeSourceRef[]>(row.source_refs_json, []),
-    facets: parseJson<KnowledgeFacets>(row.facets_json, {}),
+    facets: { ...parseJson<KnowledgeFacets>(row.collection_facets_json, {}), ...parseJson<KnowledgeFacets>(row.facets_json, {}) },
   };
 }
 
@@ -494,25 +499,163 @@ function openReadonlyKnowledgeDatabase(sqlitePath: string): Database {
 }
 
 export class SQLiteKnowledgeStore {
-  private readonly db: Database;
+  private readonly db!: Database;
   private readonly paths: OpenScoutKnowledgePaths;
+  private budget?: KnowledgeStorageBudget;
+  private releaseWriter?: () => void;
+  private insideWrite = false;
+  private evictionsSinceMerge = 0;
+  private hasStorageState = false;
+  private evictedDuringBootstrap = false;
 
-  constructor(dbPath?: string, paths?: OpenScoutKnowledgePaths, options?: { readonly?: boolean }) {
+  constructor(dbPath?: string, paths?: OpenScoutKnowledgePaths, options?: { readonly?: boolean; maxBytes?: number; freeDiskBytes?: () => number }) {
     const resolvedPaths = paths ?? resolveOpenScoutKnowledgePaths();
     const sqlitePath = dbPath ?? resolvedPaths.sqlitePath;
     this.paths = { ...resolvedPaths, sqlitePath };
     if (options?.readonly) {
       this.db = openReadonlyKnowledgeDatabase(sqlitePath);
+      this.hasStorageState = Boolean(this.db.query("SELECT 1 FROM sqlite_master WHERE name='storage_state'").get());
       return;
     }
-    mkdirSync(dirname(sqlitePath), { recursive: true });
-    mkdirSync(this.paths.qmdRoot, { recursive: true });
-    this.db = new Database(sqlitePath, { create: true });
-    this.db.exec("PRAGMA busy_timeout = 5000;");
-    this.db.exec("PRAGMA journal_mode = WAL;");
-    this.db.exec("PRAGMA synchronous = NORMAL;");
-    this.db.exec(KNOWLEDGE_SQLITE_SCHEMA);
-    this.migrateFtsRowids();
+    const inheritedUsage = knowledgeStorageUsage(this.paths); // Reject symlinks before any mutation.
+    this.releaseWriter = acquireKnowledgeWriter(this.paths);
+    try {
+      mkdirSync(this.paths.qmdRoot, { recursive: true });
+      this.db = new Database(sqlitePath, { create: true });
+      this.db.exec("PRAGMA busy_timeout = 1000; PRAGMA auto_vacuum = INCREMENTAL;");
+      this.db.exec("PRAGMA synchronous = NORMAL; PRAGMA cache_size = -65536;");
+      const existingSchema = this.db.query("SELECT 1 FROM sqlite_master WHERE name='collections'").get();
+      if (!existingSchema) this.db.exec(KNOWLEDGE_SQLITE_SCHEMA); // Fixed-size, empty bootstrap only.
+      else this.db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
+      this.hasStorageState = Boolean(this.db.query("SELECT 1 FROM sqlite_master WHERE name='storage_state'").get());
+      this.budget = new KnowledgeStorageBudget(this.db, this.paths, (id) => this.evictOldest(id), options);
+      this.removeOrphanQmd();
+      if (inheritedUsage.totalBytes > this.budget.maxBytes) {
+        // An inherited oversized cache is a repair, not an admitted indexing
+        // job. Bootstrap the small FK lookup index before pruning: otherwise
+        // each document deletion scans all legacy chunk bodies. New/within-cap
+        // stores admit this index below under the ordinary physical reservation.
+        this.db.exec("CREATE INDEX IF NOT EXISTS idx_chunks_document ON chunks(document_id)");
+      }
+      this.budget.prepare();
+      // Existing caches admit all schema upgrades, including storage_state,
+      // only after repair/reservation. Do not let DDL create its own exception.
+      this.writeBounded(() => {
+        this.db.exec(KNOWLEDGE_SQLITE_SCHEMA);
+        if (this.evictedDuringBootstrap) this.db.exec("INSERT OR REPLACE INTO storage_state VALUES ('retention_evicted', '1')");
+      });
+      this.hasStorageState = true;
+      // Admission includes migration indexes, not only later content inserts.
+      this.writeBounded(() => this.db.exec("CREATE INDEX IF NOT EXISTS idx_chunks_document ON chunks(document_id)"));
+      this.writeBounded(() => this.migrateFtsRowids());
+      this.migrateCollectionFacets();
+    } catch (error) {
+      this.db!?.close();
+      this.releaseWriter();
+      throw error;
+    }
+  }
+
+  private writeBounded<T>(action: () => T, extraQmdBytes = 0, protectedId?: string): T {
+    if (!this.budget) throw new Error("Knowledge store is read-only");
+    return this.budget.run(() => {
+      this.insideWrite = true;
+      try { return action(); } finally { this.insideWrite = false; }
+    }, extraQmdBytes, protectedId);
+  }
+
+  private evictOldest(protectedId?: string): number | false {
+    const row = this.db.query("SELECT id FROM collections WHERE id != ?1 ORDER BY updated_at, id LIMIT 1")
+      .get(protectedId ?? "") as { id: string } | null;
+    if (!row) return false;
+    const qmd = this.getCollection(row.id)!.qmdPath;
+    const removedBytes = directoryBytes(qmd);
+    (this.db as SQLiteTransactionalDatabase).transaction(() => {
+      this.deleteCollectionRows(row.id, false);
+      this.evictedDuringBootstrap = true;
+      if (this.hasStorageState) this.db.exec("INSERT OR REPLACE INTO storage_state VALUES ('retention_evicted', '1')");
+      // A scanned window is no longer complete after capacity eviction.
+      if (this.db.query("SELECT 1 FROM sqlite_master WHERE name='warm_spans'").get()) this.db.exec("DELETE FROM warm_spans");
+      // FTS deletes leave tombstones. Merge them before admitting another large
+      // insert; otherwise an empty corpus can still consume the entire budget.
+      // Batch this on a legacy oversized file to avoid quadratic rebuild work.
+      if (++this.evictionsSinceMerge >= 32 || fileBytes(this.paths.sqlitePath) <= this.budget!.maxBytes) {
+        this.db.exec("INSERT INTO chunks_fts(chunks_fts) VALUES ('optimize')");
+        this.evictionsSinceMerge = 0;
+      }
+    })();
+    removeCollectionQmd(this.paths, qmd);
+    return removedBytes;
+  }
+
+  private removeOrphanQmd(): void {
+    const known = new Set((this.db.query("SELECT qmd_path FROM collections").all() as { qmd_path: string }[]).map(r => r.qmd_path));
+    const walk = (path: string) => {
+      for (const name of readdirSync(path)) {
+        const child = join(path, name);
+        const stat = lstatSync(child);
+        if (stat.isSymbolicLink()) continue;
+        if (!stat.isDirectory()) continue;
+        if (name.includes(".tmp-") || (existsSync(join(child, "manifest.json")) && !known.has(child))) {
+          removeCollectionQmd(this.paths, child);
+        } else if (!known.has(child)) walk(child);
+      }
+    };
+    walk(this.paths.qmdRoot);
+  }
+
+  /** Shared session facets are collection facts, not repeated per-chunk facts.
+   * Migrate retained legacy rows too, before a future explicit re-extraction. */
+  private migrateCollectionFacets(): void {
+    const version = (this.db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
+    if (version >= 3) return;
+    const keys = ["harness", "project", "projectPath", "source", "sessionId", "transcriptPath", "touchedPath", "recordKind", "recordTag", "toolName"];
+    for (const row of this.db.query("SELECT id FROM collections WHERE kind='sessions'").all() as { id: string }[]) {
+      if (!this.getCollection(row.id)) continue;
+      this.writeBounded(() => {
+        const collection = this.getCollection(row.id)!;
+        const facets = { ...collection.facets };
+        for (const key of keys) {
+          const values = this.db.query("SELECT DISTINCT value FROM facets WHERE collection_id=? AND key=? ORDER BY value").all(row.id, key) as { value: string }[];
+          if (values.length) facets[key] = values.length === 1 ? values[0]!.value : values.map(v => v.value);
+        }
+        this.upsertCollection({ ...collection, facets });
+        const list = keys.map(k => `'${k}'`).join(",");
+        this.db.query(`DELETE FROM facets WHERE collection_id=? AND chunk_id IS NOT NULL AND key IN (${list})`).run(row.id);
+        this.db.query(`UPDATE chunks SET facets_json=json_remove(facets_json, ${keys.map(k => `'$.${k}'`).join(",")}) WHERE collection_id=?`).run(row.id);
+      }, 0, row.id);
+    }
+    this.writeBounded(() => this.db.exec("PRAGMA user_version = 3"));
+    this.budget!.reclaim();
+  }
+
+  /** Reserve all QMD bytes and worst-case WAL before inserting a whole collection.
+   * Publishing QMD is synchronous while this job holds the cross-process lock. */
+  replaceCollection(collection: KnowledgeCollection, documents: KnowledgeDocument[], entries: Array<{chunk: KnowledgeChunk; title?: string}>, files: Record<string, string>): void {
+    const bytes = Object.values(files).reduce((sum, text) => sum + Buffer.byteLength(text), 0);
+    this.writeBounded(() => {
+      // Rows are transactional; QMD stays untouched until a successful commit.
+      this.deleteCollectionRows(collection.id, false);
+      this.upsertCollection({ ...collection, status: "building", contentHash: "" });
+      for (const document of documents) this.upsertDocument(document);
+      this.upsertChunks(entries);
+    }, bytes, collection.id);
+    removeCollectionQmd(this.paths, collection.qmdPath);
+    const temporary = `${collection.qmdPath}.tmp-${process.pid}`;
+    removeCollectionQmd(this.paths, temporary);
+    mkdirSync(temporary, { recursive: true });
+    try {
+      for (const [name, text] of Object.entries(files)) {
+        if (name.includes("/") || name.includes("\\") || name === "..") throw new Error("Invalid QMD document name");
+        writeFileSync(join(temporary, name), text);
+      }
+      renameSync(temporary, collection.qmdPath);
+      this.upsertCollection(collection);
+    } catch (error) {
+      removeCollectionQmd(this.paths, temporary);
+      this.deleteCollection(collection.id);
+      throw error;
+    }
   }
 
   /**
@@ -556,10 +699,11 @@ export class SQLiteKnowledgeStore {
   }
 
   close(): void {
-    this.db.close();
+    try { this.db.close(); } finally { this.releaseWriter?.(); this.releaseWriter = undefined; }
   }
 
   upsertCollection(collection: KnowledgeCollection): void {
+    if (!this.insideWrite) return this.writeBounded(() => this.upsertCollection(collection), 0, collection.id);
     this.db.query(
       `INSERT INTO collections (
         id, kind, title, source_refs_json, qmd_path, status, content_hash,
@@ -603,19 +747,30 @@ export class SQLiteKnowledgeStore {
   }
 
   deleteCollection(id: string): void {
+    this.writeBounded(() => this.deleteCollectionRows(id));
+  }
+
+  private deleteCollectionRows(id: string, removeQmd = true): void {
+    const collection = this.getCollection(id);
+    if (collection && removeQmd) removeCollectionQmd(this.paths, collection.qmdPath);
     (this.db as SQLiteTransactionalDatabase).transaction(() => {
       const chunkRows = this.db.query(
         "SELECT id FROM chunks WHERE collection_id = ?1",
       ).all(id) as Array<{ id: string }>;
+      const version = (this.db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
+      if (version < 2) this.db.query("DELETE FROM chunks_fts WHERE collection_id=?").run(id);
+      // Free ordinary content/facet pages first: FTS tombstones/segment merges
+      // may need scratch pages even though the operation is a deletion.
+      this.db.query("DELETE FROM collections WHERE id = ?1").run(id);
       const deleteFts = this.db.query("DELETE FROM chunks_fts WHERE rowid = ?1");
       for (const row of chunkRows) {
         deleteFts.run(ftsRowidForChunk(row.id));
       }
-      this.db.query("DELETE FROM collections WHERE id = ?1").run(id);
     })();
   }
 
   upsertDocument(document: KnowledgeDocument): void {
+    if (!this.insideWrite) return this.writeBounded(() => this.upsertDocument(document), 0, document.collectionId);
     this.db.query(
       `INSERT INTO documents (id, collection_id, path, kind, origin, content_hash, metadata_json)
        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
@@ -642,6 +797,7 @@ export class SQLiteKnowledgeStore {
   }
 
   upsertChunks(entries: Array<{ chunk: KnowledgeChunk; title?: string }>): void {
+    if (!this.insideWrite) return this.writeBounded(() => this.upsertChunks(entries), 0, entries[0]?.chunk.collectionId);
     if (entries.length === 0) return;
     const now = nowMs();
     (this.db as SQLiteTransactionalDatabase).transaction(() => {
@@ -783,6 +939,7 @@ export class SQLiteKnowledgeStore {
       SELECT
         c.*,
         col.title AS title,
+        col.facets_json AS collection_facets_json,
         bm25(chunks_fts) AS rank
       FROM chunks_fts
       JOIN chunks c ON c.id = chunks_fts.chunk_id
@@ -816,7 +973,7 @@ export class SQLiteKnowledgeStore {
     }
 
     const sql = `
-      SELECT key, value, COUNT(DISTINCT COALESCE(chunk_id, collection_id)) AS count
+      SELECT key, value, COUNT(DISTINCT collection_id) AS count
       FROM facets
       ${clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : ""}
       GROUP BY key, value
@@ -828,6 +985,8 @@ export class SQLiteKnowledgeStore {
   }
 
   createIndexJob(request: KnowledgeIndexRequest, id = `knowledge-job-${randomUUID()}`): KnowledgeIndexJob {
+    if (!this.insideWrite) return this.writeBounded(() => this.createIndexJob(request, id));
+    this.db.exec("DELETE FROM index_jobs WHERE id NOT IN (SELECT id FROM index_jobs ORDER BY updated_at DESC LIMIT 99)");
     const now = nowMs();
     // A job whose indexer died (SIGKILL/OOM/timeout) never leaves the active
     // states on its own; fail stale ones for this source so they neither
@@ -862,6 +1021,7 @@ export class SQLiteKnowledgeStore {
     error?: string | null;
     completedAt?: number | null;
   }): KnowledgeIndexJob | null {
+    if (!this.insideWrite) return this.writeBounded(() => this.updateIndexJob(input));
     const existing = this.getIndexJob(input.id);
     if (!existing) return null;
     const next: KnowledgeIndexJob = {
@@ -924,6 +1084,8 @@ export class SQLiteKnowledgeStore {
   }
 
   recordWarmSpan(span: Omit<KnowledgeWarmSpan, "id"> & { id?: string }): KnowledgeWarmSpan {
+    if (!this.insideWrite) return this.writeBounded(() => this.recordWarmSpan(span));
+    this.db.exec("DELETE FROM warm_spans WHERE id NOT IN (SELECT id FROM warm_spans ORDER BY completed_at DESC LIMIT 199)");
     const full: KnowledgeWarmSpan = {
       id: span.id ?? `warm-${randomUUID()}`,
       source: span.source,
@@ -992,6 +1154,12 @@ export class SQLiteKnowledgeStore {
         suggestion: warmSuggestion({ source, harness: harnesses, lookbackMs }),
       };
     }
+
+    try {
+      if (chunks > 0 && this.hasStorageState && this.db.query("SELECT 1 FROM storage_state WHERE key='retention_evicted'").get()) {
+        return { kind: "bounded", suggestion: "Searching retained history only. Oldest collections were evicted to keep the local index within 256 MiB; no matches does not cover evicted history." };
+      }
+    } catch { /* legacy read-only schema */ }
 
     const spans = this.listWarmSpans(200).filter((span) => span.source === source);
     const coversHarness = (span: KnowledgeWarmSpan, harness: string): boolean =>
@@ -1108,6 +1276,8 @@ export class SQLiteKnowledgeStore {
       sqliteBytes = 0;
     }
     return {
+      enabled: knowledgeIndexEnabled(),
+      storage: knowledgeStorageUsage(this.paths),
       generatedAt: nowMs(),
       paths: {
         knowledgeRoot: this.paths.knowledgeRoot,

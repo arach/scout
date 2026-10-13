@@ -13,6 +13,7 @@ import {
   type OpenScoutUserConfig,
   type ProvisionalAgentNamesMode,
 } from "./user-config.js";
+import { resolveOpenScoutHome } from "./support-paths.js";
 
 export type ProvisionalAgentNamePoolSource =
   | "default"
@@ -30,7 +31,7 @@ export type ResolvedProvisionalAgentNamePool = {
 };
 
 export function openScoutHome(): string {
-  return process.env.OPENSCOUT_HOME ?? join(homedir(), ".openscout");
+  return resolveOpenScoutHome();
 }
 
 /** Default drop-in location for a custom name pool JSON file. */

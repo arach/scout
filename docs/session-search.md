@@ -1,7 +1,8 @@
 # Session search
 
 Search **observed harness sessions** (Codex, Claude Code, and Kimi) after an
-**explicit warm-up**. This is not broker chat history and does not import
+**opt-in and warm-up**. The index is off by default, including on existing
+installs. This is not broker chat history and does not import
 transcripts into Scout messages.
 
 ## When to use it
@@ -39,11 +40,17 @@ discoverable does not imply its harness history is indexed.
 
 ## Contract
 
-1. **Explicit index only** — no ambient background indexing.
+1. **Opt-in first** — turn on **Local search index** in **Settings › System**,
+   or set `knowledgeIndexEnabled: true` in OpenScout `settings.json`. Missing or
+   malformed settings mean off. CLI/MCP queries never enable it. Once enabled,
+   the web Search page can refresh in the background.
 2. Warm a **time span** (and optional harness), then query.
 3. Query does **not** auto-index. If coverage is missing, Scout says so and
    suggests the warm-up command.
 4. Hits are **derived** (QMD + FTS). Raw JSONL/wire files remain authority.
+5. Database + WAL + QMD sidecars share a **256 MiB** cap. Oldest collections
+   are evicted whole; coverage reports retained history, not a complete span.
+   See [Local storage](./local-storage.md) for upgrade and disk-headroom rules.
 
 ## Commands
 
@@ -77,6 +84,8 @@ scout search query "iOS build" --harness kimi --json
 
 | Message | Meaning |
 | --- | --- |
+| index off | Enable Local search index in Settings › System; no query or warm-up is run |
+| bounded / retained history | Capacity eviction removed older collections; results cover retained history only |
 | empty / not warmed | That source×harness×window was not explicitly indexed; run the suggested `index` command |
 | warmed, no matches | Span was indexed; query simply had no FTS hits |
 | warmed (stale) | Covered, but last warm is old relative to the lookback — re-index if you need fresher files |
@@ -99,7 +108,7 @@ When the operator asks about prior agent work across sessions (what was built,
 which session ran a command, where a harness instance lived):
 
 1. `scout search status` — is anything warmed?
-2. If not covered: `scout search index --source sessions --harness <id> --hours N`
+2. If off, ask the operator to enable it. If enabled but not covered: `scout search index --source sessions --harness <id> --hours N`
 3. `scout search query "…" --harness <id> --hours N`
 4. Report session id, project/cwd, and source path from hits — do not invent peers.
 

@@ -125,7 +125,8 @@ export function createBrokerDaemonTestHarness() {
     if (localAdminKey) { writeFileSync(adminKeyFile, localAdminKey, { mode: 0o600 }); adminKeys.set(baseUrl, localAdminKey); }
     const derivedNodeId = `node-${basename(controlHome).toLowerCase().replace(/[^a-z0-9-]+/g, "-")}`;
     const child = Bun.spawn({
-      cmd: ["bun", "run", ...(input.preload ? ["--preload", input.preload] : []), "src/broker-daemon.ts"],
+      cmd: ["bun", "run", "--preload", join(import.meta.dir, "broker-storage-preload.ts"),
+        ...(input.preload ? ["--preload", input.preload] : []), "src/broker-daemon.ts"],
       cwd: runtimeDir,
       env: {
         ...process.env,
@@ -145,6 +146,9 @@ export function createBrokerDaemonTestHarness() {
         // leaked broker exits on its own within ~2s. `afterEach` cleanup never runs when the
         // runner is SIGKILLed, which once stranded 26 live test brokers for four days.
         OPENSCOUT_PARENT_PID: String(process.pid),
+        // A supervisor pins the instance on what it launches; unpinned, a
+        // broker run from this checkout would take the dev default.
+        OPENSCOUT_INSTANCE: "prod",
         ...input.env,
         ...(localAdminKey ? { OPENSCOUT_LOCAL_ADMIN_KEY_FILE: adminKeyFile } : {}),
       },

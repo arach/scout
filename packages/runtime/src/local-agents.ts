@@ -1,4 +1,5 @@
 import { SUPPORTED_LOCAL_AGENT_HARNESSES } from "./local-agent-harnesses.js";
+import { boundedLogPipeCommand } from "@openscout/agent-sessions/local/bounded-log";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
@@ -159,6 +160,7 @@ import {
   isAttachedLiveTerminalEndpointAliveSnapshot,
   sendGhosttyPrompt,
 } from "./live-terminal-session.js";
+import { buildMultiplexerServerEnvironment } from "./instance.js";
 
 const MODULE_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const OPENSCOUT_REPO_ROOT = resolve(MODULE_DIRECTORY, "..", "..", "..");
@@ -4682,7 +4684,10 @@ async function ensureLocalAgentOnlineOnce(agentName: string, record: LocalAgentR
         buildTmuxLaunchShellCommand(launchScript),
       ],
       {
-        env: buildInteractiveTerminalEnvironment(),
+        // If this starts the tmux server, its env becomes every later pane's
+        // global env: no instance keys there (the launch script sets the
+        // client pointer inside this pane).
+        env: buildMultiplexerServerEnvironment(buildInteractiveTerminalEnvironment()) as NodeJS.ProcessEnv,
         timeoutMs: 5_000,
         maxStdoutBytes: 64 * 1024,
         maxStderrBytes: 64 * 1024,
@@ -4727,7 +4732,7 @@ async function ensureLocalAgentOnlineOnce(agentName: string, record: LocalAgentR
     try {
       await execSystemFile(
         "tmux",
-        ["pipe-pane", "-o", "-t", paneId, `cat >> ${JSON.stringify(stdoutLogFile)}`],
+        ["pipe-pane", "-o", "-t", paneId, boundedLogPipeCommand(stdoutLogFile)],
         { timeoutMs: 2_000 },
       );
     } catch (error) {

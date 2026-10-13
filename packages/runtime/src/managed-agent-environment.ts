@@ -1,4 +1,5 @@
 import type { RuntimeEnv } from "./portable-types.js";
+import { buildUserSpawnEnvironment } from "./instance.js";
 type ManagedAgentEnvironmentOptions = {
   agentName: string;
   currentDirectory: string;
@@ -23,9 +24,9 @@ export function buildManagedAgentEnvironment(
     baseEnv?: RuntimeEnv;
   },
 ): RuntimeEnv {
-  const env: RuntimeEnv = {
-    ...(options.baseEnv ?? process.env),
-  };
+  // Agents are user-facing spawns: no instance-derived env, only the client
+  // pointer to the broker that launched them (OPENSCOUT_CLIENT_INSTANCE).
+  const env: RuntimeEnv = buildUserSpawnEnvironment(options.baseEnv ?? process.env);
 
   for (const [key, value] of managedAgentEnvironmentEntries(options)) {
     env[key] = value;

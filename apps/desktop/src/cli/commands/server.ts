@@ -34,6 +34,7 @@ import {
 import { loadScoutBrokerContext, resolveScoutBrokerUrl } from "../../core/broker/service.ts";
 import type { ScoutCommandContext } from "../context.ts";
 import { ScoutCliError } from "../errors.ts";
+import { resolveOpenScoutLocalEdgeDirectory, resolveOpenScoutScoutHome } from "@openscout/runtime/support-paths";
 
 type ScoutServerMode = "openscout-web";
 type ScoutServerAction = "start" | "restart" | "open" | "caddyfile" | "edge" | "trust";
@@ -704,13 +705,13 @@ async function openBrowser(url: string): Promise<void> {
 }
 
 function resolveScoutWebServerLogPath(): string {
-  const dir = join(homedir(), ".scout", "logs");
+  const dir = join(resolveOpenScoutScoutHome(), "logs");
   mkdirSync(dir, { recursive: true });
   return join(dir, "web-server.log");
 }
 
 function resolveScoutLocalEdgeCaddyfilePath(): string {
-  const dir = join(homedir(), ".scout", "local-edge");
+  const dir = resolveOpenScoutLocalEdgeDirectory();
   mkdirSync(dir, { recursive: true });
   return join(dir, "Caddyfile");
 }

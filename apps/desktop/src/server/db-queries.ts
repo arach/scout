@@ -11,6 +11,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { EPOCH_MILLISECONDS_FLOOR } from "@openscout/protocol";
+import { resolveOpenScoutSupportPaths } from "@openscout/runtime/support-paths";
 
 /* ── Types (match what the client expects) ── */
 
@@ -80,9 +81,7 @@ export type WebWorkItem = {
 /* ── DB path ── */
 
 function resolveDbPath(): string {
-  const controlHome =
-    process.env.OPENSCOUT_CONTROL_HOME ??
-    join(homedir(), ".openscout", "control-plane");
+  const controlHome = resolveOpenScoutSupportPaths().controlHome;
   return join(controlHome, "control-plane.sqlite");
 }
 

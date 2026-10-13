@@ -42,6 +42,7 @@ import {
 import { assertTestIsolatedUserData, defaultOpenScoutSupportDirectory, ensureOpenScoutCleanSlateSync, resolveOpenScoutSupportPaths } from "./support-paths.js";
 import type { RuntimePresetConfig } from "./user-config.js";
 import { collectUserLevelProjectRootHints, encodeClaudeProjectsSlug } from "./user-project-hints.js";
+import { isProdOpenScoutInstance, resolveOpenScoutInstanceName } from "./instance.js";
 
 export type RelayRuntimeTransport = "claude_stream_json" | "codex_app_server" | "pi_rpc" | "grok_acp" | "kimi_acp" | "cursor_acp" | "opencode_acp" | "devin_acp" | "tmux" | "cursor_exec";
 export type TelegramBridgeMode = "auto" | "webhook" | "polling";
@@ -191,6 +192,8 @@ export type Scene = {
 export type OpenScoutVoicePlayback = "browser" | "host";
 
 export type OpenScoutSettings = {
+  /** Opt-in local transcript search; DB, WAL and QMD stay within 256 MiB. */
+  knowledgeIndexEnabled?: boolean;
   version: 1;
   profile: {
     operatorName: string;
@@ -369,6 +372,7 @@ export type SetupResult = {
 };
 
 export type UpdateOpenScoutSettingsInput = {
+  knowledgeIndexEnabled?: boolean;
   profile?: Partial<OpenScoutSettings["profile"]>;
   onboarding?: Partial<OpenScoutSettings["onboarding"]>;
   node?: Partial<OpenScoutSettings["node"]>;
@@ -1222,6 +1226,7 @@ function isConfiguredRelayAgentOverride(
 function defaultSettings(): OpenScoutSettings {
   const seededBotToken = resolveTelegramConfigSeedValue("TELEGRAM_BOT_TOKEN");
   return {
+    knowledgeIndexEnabled: false,
     version: SETTINGS_VERSION,
     profile: {
       operatorName: DEFAULT_OPERATOR_NAME,
@@ -1777,6 +1782,7 @@ async function normalizeSettingsRecord(
   );
 
   return {
+    knowledgeIndexEnabled: candidate.knowledgeIndexEnabled === true,
     version: SETTINGS_VERSION,
     profile: {
       operatorName: String(profile.operatorName ?? oldOperatorName ?? base.profile.operatorName).trim() || base.profile.operatorName,
@@ -2214,7 +2220,7 @@ export async function installScoutSkillToHarnesses(): Promise<ScoutSkillInstallR
 export type ClaudeStatuslineInstallReport = {
   status: "installed" | "skipped" | "error";
   /** Why a skipped install left Claude's settings alone. */
-  reason?: "owned-by-other-install" | "isolated-support-directory" | "scout-cli-not-found";
+  reason?: "owned-by-other-install" | "isolated-support-directory" | "scout-cli-not-found" | "non-prod-instance";
   settingsPath: string;
   wrapperPath: string;
   delegatePath: string;
@@ -2289,6 +2295,25 @@ export async function installClaudeStatuslineTool(): Promise<ClaudeStatuslineIns
   const wrapperPath = resolveClaudeStatuslineWrapperPath();
   const delegatePath = resolveClaudeStatuslineDelegatePath();
   const command = shellQuote(wrapperPath);
+
+  // ~/.claude/settings.json has one statusLine per login, and it belongs to
+  // the prod instance. A dev/worktree OPENSCOUT_INSTANCE never claims it
+  // unless the operator points the statusline at that instance explicitly
+  // (OPENSCOUT_STATUSLINE_INSTANCE=<name>).
+  const instance = resolveOpenScoutInstanceName();
+  if (
+    !isProdOpenScoutInstance(instance)
+    && normalizeOptionalString(process.env.OPENSCOUT_STATUSLINE_INSTANCE)?.toLowerCase() !== instance
+  ) {
+    return {
+      status: "skipped",
+      reason: "non-prod-instance",
+      settingsPath,
+      wrapperPath,
+      delegatePath,
+      command,
+    };
+  }
 
   // An isolated (temp) support directory must not rewire the real
   // ~/.claude/settings.json: the wrapper vanishes with the temp directory.

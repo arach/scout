@@ -1,3 +1,4 @@
+import { KNOWLEDGE_INDEX_OFF, knowledgeIndexEnabled } from "../knowledge/settings.js";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { AgentDefinition, NodeDefinition, RouteAliasBinding } from "@openscout/protocol";
@@ -52,6 +53,7 @@ export function mineRoutingGold(snapshot: RoutingSnapshot, nodeId: string): Rout
 }
 
 export function refreshRoutingIndex(store: RoutingStore, input: RoutingRefreshInput) {
+  if (!knowledgeIndexEnabled()) return { enabled: false, message: KNOWLEDGE_INDEX_OFF, targets: 0, targetsChanged: 0, sourcesChanged: 0, chunkCollectionsRead: 0, warnings: [KNOWLEDGE_INDEX_OFF], mode: "off", durationMs: 0 };
   const now = input.now ?? Date.now();
   const started = performance.now();
   const chunks = input.chunks ?? new RoutingChunks();
@@ -136,6 +138,7 @@ export function refreshRoutingIndex(store: RoutingStore, input: RoutingRefreshIn
         if (target) addPrompt(`broker:message:${message.id}`, message.body, message.createdAt, target);
       }
 
+      if (!chunks.available()) warnings.push("Session chunks are not built yet; run scout search index, then scout where index.");
       const collections = chunks.collections();
       const knownCollections = new Set(collections.map((c) => `chunks:${c.id}`));
       store.removeSources("chunks:", knownCollections);
@@ -160,6 +163,8 @@ export function refreshRoutingIndex(store: RoutingStore, input: RoutingRefreshIn
         const time = refs[0]?.anchor?.mtimeMs ?? 0; // transcript mtime, never index time
         store.putChunkKeys(collection.id, chunks.keys(collection.id));
         const terms: RouteTerm[] = [];
+        const collectionPaths = (JSON.parse(collection.facets_json) as { touchedPath?: string | string[] }).touchedPath;
+        if (collectionPaths) terms.push(...extractPathTerms([collectionPaths].flat(), "stable", time), ...extractPathTerms([collectionPaths].flat(), "recent", time));
         for (const chunk of chunks.chunks(collection.id)) {
           if (excludedTexts.some((q) => chunk.text.toLowerCase().includes(q))) continue;
           const chunkFacets = JSON.parse(chunk.facets_json) as { documentKind?: string; touchedPath?: string | string[] };

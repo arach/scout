@@ -266,6 +266,62 @@
     "owner": "runtime"
   },
   {
+    "path": "packages/runtime/src/broker-daemon-instance.test.ts",
+    "symbol": "Bun.spawn",
+    "category": "test",
+    "reason": "starts a broker from source against a scratch busy port to prove an explicit prod instance is refused there",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/instance.test.ts",
+    "symbol": "Bun.spawnSync",
+    "category": "test",
+    "reason": "runs a forking sh wrapper to prove a pinned instance survives it",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/instance.test.ts",
+    "symbol": "Bun.spawn",
+    "category": "test",
+    "reason": "claims ledger blocks from concurrent processes to prove the lock",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/terminal-environment.test.ts",
+    "symbol": "Bun.spawnSync",
+    "category": "test",
+    "reason": "drives a private tmux server (own -S socket) to prove panes do not inherit instance env",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/systemd-user-service.test.ts",
+    "symbol": "node:child_process",
+    "category": "test",
+    "reason": "unit-render test runs `systemd-analyze verify` on a temp unit when available",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/systemd-user-service.test.ts",
+    "symbol": "spawnSync",
+    "category": "test",
+    "reason": "unit-render test runs `systemd-analyze verify` on a temp unit when available",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/systemd-user-service.ts",
+    "symbol": "node:child_process",
+    "category": "process-lifecycle",
+    "reason": "linux-systemd-user service adapter: drives systemctl --user for the broker unit",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/systemd-user-service.ts",
+    "symbol": "spawnSync",
+    "category": "process-lifecycle",
+    "reason": "one-shot, time-bounded systemctl --user install/start/stop/show and `bun pm bin -g` lookups during setup/service commands, which must be ordered and observed synchronously",
+    "owner": "runtime"
+  },
+  {
     "path": "packages/runtime/src/broker-web-control-service.test.ts",
     "symbol": "node:child_process",
     "category": "test",
@@ -915,5 +971,12 @@
     "category": "test",
     "reason": "isolated real Node SQLite contract probe with a 5s SIGKILL deadline and awaited owned-child cleanup",
     "owner": "tests"
+  },
+  {
+    "path": "packages/agent-sessions/src/local/bounded-log.test.ts",
+    "symbol": "spawnSync",
+    "category": "test",
+    "reason": "isolated fixture processes validate shell quoting and bounded log pipes under Bun, Node, and bundled source; never runs on a server request path",
+    "owner": "agent-sessions"
   }
 ]

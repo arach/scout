@@ -16,11 +16,24 @@ import {
   renderScoutDoctorStreamingLead,
   renderScoutDoctorTailAfterStream,
 } from "../../ui/terminal/setup.ts";
+import { deriveOpenScoutInstanceLayout } from "@openscout/runtime/instance";
+import { resolveBrokerControlUrl } from "@openscout/runtime/local-config";
 
 const DOCTOR_JSON_SCHEMA = "scout.doctor.v1" as const;
 
 function writeDoctorJsonLine(context: ScoutCommandContext, payload: Record<string, unknown>): void {
-  context.output.writeText(`${JSON.stringify({ schema: DOCTOR_JSON_SCHEMA, ...payload })}\n`);
+  context.output.writeText(`${JSON.stringify({ schema: DOCTOR_JSON_SCHEMA, instance: doctorInstanceSummary(), ...payload })}\n`);
+}
+
+/** Which OpenScout instance (OPENSCOUT_INSTANCE / --instance) doctor is checking. */
+function doctorInstanceSummary(): { name: string; brokerUrl: string; root: string | null } {
+  const layout = deriveOpenScoutInstanceLayout();
+  return { name: layout.name, brokerUrl: resolveBrokerControlUrl(), root: layout.root };
+}
+
+function renderDoctorInstanceLine(): string {
+  const instance = doctorInstanceSummary();
+  return `Instance: ${instance.name} (broker ${instance.brokerUrl}${instance.root ? `, root ${instance.root}` : ""})`;
 }
 
 export function renderDoctorCommandHelp(): string {
@@ -46,6 +59,7 @@ export async function runDoctorCommand(context: ScoutCommandContext, args: strin
   const outputJson = context.output.mode === "json" || options.json;
   if (!outputJson && !options.detail && !options.fix) {
     context.output.writeText("Scout doctor — checking local readiness (6s per check)…");
+    context.output.writeText(renderDoctorInstanceLine());
     const checks = await Promise.all(DOCTOR_CHECK_NAMES.map(async name => {
       const check = await runDoctorCheck(name, { cwd: options.currentDirectory, env: context.env });
       context.output.writeText(renderDoctorCheck(check));

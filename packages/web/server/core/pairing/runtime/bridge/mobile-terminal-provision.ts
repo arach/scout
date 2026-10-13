@@ -36,6 +36,12 @@ import {
   authorizedMobileTerminalSessionName,
   provisionedMobileTerminalSessionName,
 } from "./mobile-terminal-session.ts";
+import { wrapUserSpawnPaneCommand } from "@openscout/runtime/terminal-environment";
+import { buildMultiplexerServerEnvironment } from "@openscout/runtime/instance";
+
+function shellQuoteArg(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
 
 export interface MobileTerminalProvisionResult {
   host: string;
@@ -226,8 +232,9 @@ async function ensureMobileTmuxSession(sessionName: string): Promise<void> {
   try {
     await execSystemFile("zsh", [
       "-lc",
-      `tmux has-session -t ${sessionName} 2>/dev/null || tmux new-session -d -s ${sessionName}`,
+      `tmux has-session -t ${sessionName} 2>/dev/null || tmux new-session -d -s ${sessionName} ${shellQuoteArg(wrapUserSpawnPaneCommand(null, process.env))}`,
     ], {
+      env: buildMultiplexerServerEnvironment(process.env) as NodeJS.ProcessEnv,
       timeoutMs: 8_000,
       maxStdoutBytes: 64 * 1024,
       maxStderrBytes: 64 * 1024,

@@ -14,6 +14,7 @@ import {
 } from "./mesh-forwarding.js";
 import { collectCurrentMeshPeerNodes } from "./mesh-peer-filter.js";
 import type { RuntimeRegistrySnapshot } from "./registry.js";
+import { openScoutInstanceMeshRefusal } from "./instance.js";
 
 export type BrokerMeshDiscoveryRuntime = {
   snapshot(): RuntimeRegistrySnapshot;
@@ -141,6 +142,12 @@ export class BrokerMeshDiscoveryService {
   }
 
   discoverPeers(seeds: string[] = []): Promise<MeshDiscoveryResult> {
+    // Every discovery path (startup, interval, POST /v1/mesh/discover) obeys
+    // the instance mesh fence: a non-prod instance stays off the mesh.
+    const instanceRefusal = openScoutInstanceMeshRefusal();
+    if (instanceRefusal) {
+      return Promise.reject(new Error(instanceRefusal));
+    }
     if (this.discoveryInFlight) {
       if (seeds.length === 0) {
         return this.discoveryInFlight;

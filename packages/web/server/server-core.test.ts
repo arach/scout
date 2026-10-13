@@ -6,10 +6,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  authenticatedScoutWebCookieToken,
+  clearLegacyScoutWebAuthCookie,
   createScoutRequestPeerAddressRegistry,
   installScoutApiMiddleware,
   isAuthorizedScoutWebSocketRequest,
   isScoutWebRequestAllowedFromPeer,
+  isScoutWebLanOnlyRequest,
   registerScoutWebAssets,
   resolveScoutWebBindHost,
   resolveScoutWebLanAccessScope,
@@ -21,6 +24,7 @@ import {
   shouldIssueLocalScoutWebCredential,
 } from "./server-core.ts";
 import { createScoutWebSessionStore } from "./web-sessions.ts";
+import { resolveScoutLanNetworks } from "@openscout/runtime/lan-network";
 
 const testDirectories = new Set<string>();
 const TEST_AUTH_TOKEN = "test-openscout-web-token";
@@ -288,6 +292,56 @@ describe("pairing-only LAN access", () => {
       "127.0.0.1",
       "pairing",
     )).toBe(true);
+  });
+});
+
+describe("LAN-only request boundary", () => {
+  const address = (value: string, cidr: string, internal = false) => ({
+    address: value, cidr, family: "IPv4" as const, netmask: "255.255.255.0", mac: "00:00:00:00:00:00", internal,
+  });
+  const networks = resolveScoutLanNetworks({
+    en0: [address("192.168.18.11", "192.168.18.11/24")],
+    utun4: [address("100.64.1.10", "100.64.1.10/10")],
+    tailscale0: [address("100.64.1.10", "100.64.1.10/10")],
+    lo0: [address("127.0.0.1", "127.0.0.1/8", true)],
+  });
+  const allowed = (peer: string | undefined, headers: HeadersInit = {}) =>
+    isScoutWebLanOnlyRequest(new Request("http://air.scout.local/", { headers }), peer, networks);
+
+  test("admits this machine and physical LAN, not VPN, public, other subnets, or unknown peers", () => {
+    for (const peer of ["127.0.0.1", "::1", "192.168.18.42", "::ffff:192.168.18.42"]) {
+      expect(allowed(peer)).toBe(true);
+    }
+    for (const peer of [undefined, "100.64.1.42", "192.168.19.42", "203.0.113.5"]) {
+      expect(allowed(peer)).toBe(false);
+    }
+  });
+
+  test("classifies direct peers using their socket regardless of forged forwarding headers", () => {
+    const headers = { "x-forwarded-for": "127.0.0.1", "x-real-ip": "192.168.18.11", forwarded: "for=127.0.0.1" };
+    expect(allowed("100.64.1.42", headers)).toBe(false);
+    expect(allowed("203.0.113.5", headers)).toBe(false);
+    expect(allowed("192.168.18.42", headers)).toBe(true);
+  });
+
+  test("resolves a single Caddy hop without mistaking a remote browser for loopback", () => {
+    expect(allowed("127.0.0.1", { "x-forwarded-for": "192.168.18.42", "x-forwarded-proto": "https", "x-forwarded-host": "air.scout.local" })).toBe(true);
+    expect(allowed("127.0.0.1", { "x-forwarded-for": "::ffff:192.168.18.42", "x-real-ip": "192.168.18.42" })).toBe(true);
+    expect(allowed("127.0.0.1", { "x-forwarded-for": "100.64.1.42" })).toBe(false);
+    expect(allowed("127.0.0.1", { "x-forwarded-for": "203.0.113.5" })).toBe(false);
+  });
+
+  test("fails closed on ambiguous, multi-hop, or unknown forwarded shapes", () => {
+    for (const headers of [
+      { "x-forwarded-for": "192.168.18.42, 127.0.0.1" },
+      { "x-forwarded-for": "192.168.18.42", "x-real-ip": "100.64.1.42" },
+      { "x-forwarded-for": "192.168.18.42", forwarded: "for=192.168.18.42" },
+      { "x-forwarded-for": "not-an-address" },
+      { "x-real-ip": "192.168.18.42" },
+      { "x-forwarded-proto": "https" },
+      { "x-forwarded-for": "192.168.18.42", "x-forwarded-proto": "https,http" },
+      { "x-forwarded-for": "192.168.18.42", "x-forwarded-server": "another-proxy" },
+    ]) expect(allowed("127.0.0.1", headers)).toBe(false);
   });
 });
 
@@ -629,9 +683,65 @@ describe("operator login endpoint", () => {
     expect(cookie).not.toContain("Secure");
   });
 
-  test("shares the session cookie across scout.local and chat.scout.local", () => {
-    expect(scoutWebAuthCookie("sws_x", false, 60, "chat.scout.local")).toContain("Domain=scout.local");
-    expect(scoutWebAuthCookie("sws_x", false, 60, "localhost")).not.toContain("Domain=");
+  test("issues host-only operator cookies on every Scout origin", () => {
+    for (const host of ["scout.local", "chat.scout.local", "air.scout.local", "mini.scout.local", "localhost"]) {
+      expect(scoutWebAuthCookie("sws_x", false, 60, host)).not.toContain("Domain=");
+    }
+  });
+
+  test("same-Mac portal and Chat bootstrap independently, and LAN clients cannot bootstrap either", () => {
+    for (const host of ["scout.local", "chat.scout.local"]) {
+      const request = new Request(`http://${host}/api/bootstrap.js`, { headers: { host } });
+      expect(shouldIssueLocalScoutWebCredential(request, "127.0.0.1")).toBe(true);
+      expect(shouldIssueLocalScoutWebCredential(request, "192.168.18.42")).toBe(false);
+      const legacy = clearLegacyScoutWebAuthCookie(host, false);
+      expect(legacy).toContain("Max-Age=0");
+      expect(legacy).toContain(`${SCOUT_WEB_AUTH_COOKIE}=;`);
+    }
+    expect(clearLegacyScoutWebAuthCookie("localhost", false)).toBeNull();
+  });
+
+  test("migrates only a valid existing cookie, never an arbitrary cookie beside a valid bearer", () => {
+    const sessions = createSessionAuthority();
+    const session = sessions.mint();
+    expect(authenticatedScoutWebCookieToken(new Request("http://air.scout.local", { headers: { cookie: `${SCOUT_WEB_AUTH_COOKIE}=${session}` } }), TEST_AUTH_TOKEN, sessions.validate)).toBe(session);
+    expect(authenticatedScoutWebCookieToken(new Request("http://air.scout.local", { headers: { authorization: `Bearer ${TEST_AUTH_TOKEN}`, cookie: `${SCOUT_WEB_AUTH_COOKIE}=untrusted` } }), TEST_AUTH_TOKEN, sessions.validate)).toBeNull();
+  });
+
+  test("login expires the legacy domain cookie before issuing the host-only cookie", async () => {
+    for (const host of ["scout.local", "air.scout.local", "chat.scout.local"]) {
+      const sessions = createSessionAuthority();
+      const app = createApp({ sessions, trustedHosts: [host], resolvePeerAddress: () => "192.168.18.42" });
+      const response = await app.request(`http://${host}/api/login`, {
+        ...loginRequest({ token: TEST_AUTH_TOKEN }),
+        headers: { host, origin: `http://${host}`, "content-type": "application/json" },
+      });
+      expect(response.status).toBe(200);
+      const cookies = response.headers.getSetCookie();
+      expect(cookies).toHaveLength(2);
+      expect(cookies[0]).toContain("Domain=scout.local");
+      expect(cookies[0]).toContain("Max-Age=0");
+      expect(cookies[0]).toContain(`${SCOUT_WEB_AUTH_COOKIE}=;`);
+      expect(cookies[1]).toContain(`${SCOUT_WEB_AUTH_COOKIE}=sws_test_0;`);
+      expect(cookies[1]).not.toContain("Domain=");
+    }
+  });
+
+  test("logout clears both cookie scopes and revokes the presented session", async () => {
+    const sessions = createSessionAuthority();
+    const host = "air.scout.local";
+    const app = createApp({ sessions, trustedHosts: [host], resolvePeerAddress: () => "192.168.18.42" });
+    const session = sessions.mint();
+    const response = await app.request(`http://${host}/api/logout`, {
+      method: "POST", headers: { host, origin: `http://${host}`, cookie: `${SCOUT_WEB_AUTH_COOKIE}=${session}` },
+    });
+    expect(response.status).toBe(200);
+    const cookies = response.headers.getSetCookie();
+    expect(cookies).toHaveLength(2);
+    expect(cookies[0]).toContain("Domain=scout.local");
+    expect(cookies[1]).not.toContain("Domain=");
+    for (const cookie of cookies) expect(cookie).toContain("Max-Age=0");
+    expect(sessions.revoked).toEqual([session]);
   });
 
   test("marks the cookie Secure behind a forwarded-HTTPS edge", async () => {

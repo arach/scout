@@ -8,7 +8,8 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-import { loadLocalConfig } from "@openscout/runtime/local-config";
+import { loadLocalConfig, resolvePairingPort } from "@openscout/runtime/local-config";
+import { resolveOpenScoutPairingHome } from "@openscout/runtime/support-paths";
 
 // ---------------------------------------------------------------------------
 // Schema
@@ -54,8 +55,8 @@ export interface PairingConfig {
 // Defaults
 // ---------------------------------------------------------------------------
 
-const DEFAULTS: PairingConfig = {
-  port: 43130,
+// The port default is per OPENSCOUT_INSTANCE (resolvePairingPort), not a constant.
+const DEFAULTS: Pick<PairingConfig, "secure"> = {
   secure: true,
 };
 
@@ -63,10 +64,9 @@ const DEFAULTS: PairingConfig = {
 // Config file path
 // ---------------------------------------------------------------------------
 
-const CONFIG_DIR = join(homedir(), ".scout/pairing");
-const CONFIG_FILE = join(CONFIG_DIR, "config.json");
-
-export { CONFIG_FILE };
+export function pairingConfigFile(): string {
+  return join(resolveOpenScoutPairingHome(), "config.json");
+}
 
 // ---------------------------------------------------------------------------
 // Loader
@@ -77,17 +77,17 @@ export { CONFIG_FILE };
  * fields. Returns the raw file values so CLI can overlay on top.
  */
 export function loadConfigFile(): Partial<PairingConfig> {
-  if (!existsSync(CONFIG_FILE)) {
+  if (!existsSync(pairingConfigFile())) {
     return {};
   }
 
   try {
-    const raw = readFileSync(CONFIG_FILE, "utf8");
+    const raw = readFileSync(pairingConfigFile(), "utf8");
     const parsed = JSON.parse(raw) as Partial<PairingConfig>;
     return parsed;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[config] failed to parse ${CONFIG_FILE}: ${msg}`);
+    console.warn(`[config] failed to parse ${pairingConfigFile()}: ${msg}`);
     return {};
   }
 }
@@ -145,7 +145,7 @@ export function resolveConfigLayers(
 ): ResolvedConfig {
   const filePort = isValidPort(file.port) ? file.port : undefined;
   return {
-    port: cli.port ?? parseEnvPort(env) ?? loadLocalConfig().ports?.pairing ?? filePort ?? DEFAULTS.port,
+    port: cli.port ?? parseEnvPort(env) ?? loadLocalConfig().ports?.pairing ?? filePort ?? resolvePairingPort(),
     secure: cli.secure ?? file.secure ?? DEFAULTS.secure ?? false,
     relay: cli.relay ?? file.relay,
     adapters: file.adapters,

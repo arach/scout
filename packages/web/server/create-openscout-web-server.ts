@@ -23,12 +23,15 @@ import {
   createCachedSnapshot,
   cookieValue,
   installScoutApiMiddleware,
+  isAuthenticatedScoutRequest,
   isLoopbackScoutAddress,
   isSameMacScoutRequest,
+  isScoutWebLanOnlyRequest,
   isScoutWebRequestAllowedFromPeer,
   registerScoutWebAssets,
   resolveScoutRequestPeerAddress,
   resolveScoutWebLanAccessScope,
+  SCOUT_WEB_LOGIN_API_PATH,
   SCOUT_WEB_LOGIN_PAGE_PATH,
 } from "./server-core.ts";
 import { renderScoutWebLoginPage } from "./web-login-page.ts";
@@ -87,6 +90,7 @@ import {
   type GitBuildInfo,
 } from "@openscout/runtime/system-probes";
 import {
+  loadLocalConfig,
   localConfigHome,
 } from "@openscout/runtime/local-config";
 import {
@@ -205,6 +209,8 @@ export type { ScoutWebAssetMode } from "./server-core.ts";
 
 export type OpenScoutWebServer = {
   app: Hono;
+  /** Shared HTTP/upgrade boundary, checked before any relay or route runs. */
+  isRequestAllowed: (request: Request, peerAddress: string | undefined) => boolean;
   warmupCaches: () => Promise<void>;
   /**
    * Start the Scoutbot runner that answers broker DMs. Clients that post to
@@ -1236,6 +1242,30 @@ export async function createOpenScoutWebServer(
   const shellTtl = options.shellStateCacheTtlMs ?? 15_000;
   const currentDirectory = options.currentDirectory;
   const lanAccessScope = options.lanAccessScope ?? resolveScoutWebLanAccessScope(process.env);
+  const lanOnly = options.lanOnly ?? (loadLocalConfig().webLanOnly === true);
+  const isRequestAllowed = (request: Request, peerAddress: string | undefined): boolean => {
+    if (lanOnly) {
+      if (!isScoutWebLanOnlyRequest(request, peerAddress, options.lanNetworks?.())) return false;
+      // The operator token must not cross the LAN over plaintext. The local
+      // TLS edge is the only proxy allowed to attest HTTPS; a direct client
+      // cannot enable login with X-Forwarded-Proto or an absolute HTTPS request
+      // target (Bun preserves that URL scheme even on its plaintext listener).
+      const pathname = new URL(request.url).pathname;
+      const isLogin = (request.method === "POST" && pathname === SCOUT_WEB_LOGIN_API_PATH)
+        || ((request.method === "GET" || request.method === "HEAD") && pathname === SCOUT_WEB_LOGIN_PAGE_PATH);
+      if (isLogin
+        && !isSameMacScoutRequest(request, peerAddress)
+        && !(peerAddress && isLoopbackScoutAddress(peerAddress) && request.headers.get("x-forwarded-proto") === "https")) return false;
+      const host = normalizeRequestHost(request.headers.get("host") ?? new URL(request.url).host);
+      const portalHost = options.portalHost?.trim().toLowerCase() ?? "scout.local";
+      // A local name names its actual owner. Never turn this host into a relay
+      // to a foreign machine, including a tailnet/cloud fallback.
+      if (host.endsWith(`.${portalHost}`)
+        && host !== options.advertisedHost?.trim().toLowerCase()
+        && !isReservedScoutServiceHost(host, portalHost)) return false;
+    }
+    return isScoutWebRequestAllowedFromPeer(request, peerAddress, lanAccessScope);
+  };
 
   // Approval-gated LAN pairing: a phone tapping an idle Mac registers a request
   // here; the Mac approves it before pair mode starts and the payload is served.
@@ -1263,7 +1293,7 @@ export async function createOpenScoutWebServer(
   const app = new Hono();
   app.use("*", async (c, next) => {
     const peerAddress = (options.resolvePeerAddress ?? resolveScoutRequestPeerAddress)(c);
-    if (!isScoutWebRequestAllowedFromPeer(c.req.raw, peerAddress, lanAccessScope)) {
+    if (!isRequestAllowed(c.req.raw, peerAddress)) {
       return c.text("Not Found", 404);
     }
     await next();
@@ -1283,6 +1313,7 @@ export async function createOpenScoutWebServer(
   const resolvePortalPeerUpstream = async (
     requestHost: string,
   ): Promise<ScoutPortalPeerResolution> => {
+    if (lanOnly) return null;
     const portalHost = options.portalHost?.trim().toLowerCase();
     const nodeHost = options.advertisedHost?.trim().toLowerCase();
     if (
@@ -1541,7 +1572,7 @@ export async function createOpenScoutWebServer(
   // broker-owned.
   const meshNodeStateStore = createMeshNodeStateStore();
 
-  mountBrokerRoutes(app, { currentDirectory, scoutbot });
+  mountBrokerRoutes(app, { currentDirectory, scoutbot, authToken: options.authToken, validateSession: options.sessions?.validate });
 
   mountFleetRoutes(app);
 
@@ -1719,6 +1750,28 @@ export async function createOpenScoutWebServer(
     return c.redirect("/chat", 302);
   });
 
+  // Login is server-rendered; Chat and invitation HTML share the SPA but have
+  // their own scoped API authorization. A remote operator browser must sign
+  // in before the SPA mounts; otherwise every panel reports a misleading
+  // degraded/unauthorized error. Same-machine bootstrap stays automatic.
+  app.use("*", async (c, next) => {
+    const request = c.req.raw;
+    const url = new URL(request.url);
+    const publicChatPage = url.pathname === "/chat" || url.pathname === "/chat/"
+      || /^\/invite\/[^/]+\/?$/.test(url.pathname);
+    const documentRequest = (request.method === "GET" || request.method === "HEAD")
+      && (request.headers.get("sec-fetch-dest") === "document"
+        || request.headers.get("accept")?.split(",").some((value) => value.split(";")[0]?.trim() === "text/html"));
+    const peerAddress = (options.resolvePeerAddress ?? resolveScoutRequestPeerAddress)(c);
+    if (documentRequest && !publicChatPage && options.authToken?.trim()
+      && !isSameMacScoutRequest(request, peerAddress)
+      && !isAuthenticatedScoutRequest(request, options.authToken, options.sessions?.validate)) {
+      c.header("cache-control", "no-store");
+      return c.redirect(`${SCOUT_WEB_LOGIN_PAGE_PATH}?next=${encodeURIComponent(url.pathname + url.search)}`, 302);
+    }
+    await next();
+  });
+
   await registerScoutWebAssets(app, {
     assetMode: options.assetMode,
     staticRoot: resolveStaticRoot(options.staticRoot),
@@ -1763,5 +1816,5 @@ export async function createOpenScoutWebServer(
     console.warn("[scoutbot] runner still inert after 20 attempts; broker DMs will go unanswered");
   };
 
-  return { app, warmupCaches, startScoutbotRunner, stop, resolvePortalPeerUpstream };
+  return { app, isRequestAllowed, warmupCaches, startScoutbotRunner, stop, resolvePortalPeerUpstream };
 }

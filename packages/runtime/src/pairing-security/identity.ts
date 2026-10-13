@@ -8,14 +8,23 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { generateKeyPair, type KeyPair } from "./noise.js";
+import { resolveOpenScoutPairingHome } from "../support-paths.js";
 
 // ---------------------------------------------------------------------------
 // Paths
 // ---------------------------------------------------------------------------
 
-const PAIRING_DIR = join(homedir(), ".scout/pairing");
-const IDENTITY_FILE = join(PAIRING_DIR, "identity.json");
-const TRUSTED_PEERS_FILE = join(PAIRING_DIR, "trusted-peers.json");
+// Per-instance: the bridge's Noise static key must never be shared between
+// OPENSCOUT_INSTANCEs, or a phone paired to prod would trust a dev bridge.
+function pairingDir(): string {
+  return resolveOpenScoutPairingHome();
+}
+function identityFile(): string {
+  return join(pairingDir(), "identity.json");
+}
+function trustedPeersFile(): string {
+  return join(pairingDir(), "trusted-peers.json");
+}
 
 // ---------------------------------------------------------------------------
 // Identity — the bridge's long-term key pair
@@ -28,14 +37,14 @@ export interface SerializedIdentity {
 }
 
 export function loadOrCreateIdentity(): KeyPair {
-  if (existsSync(IDENTITY_FILE)) {
+  if (existsSync(identityFile())) {
     return loadIdentity();
   }
   return createAndSaveIdentity();
 }
 
 function loadIdentity(): KeyPair {
-  const data: SerializedIdentity = JSON.parse(readFileSync(IDENTITY_FILE, "utf8"));
+  const data: SerializedIdentity = JSON.parse(readFileSync(identityFile(), "utf8"));
   return {
     publicKey: hexToBytes(data.publicKey),
     privateKey: hexToBytes(data.privateKey),
@@ -48,9 +57,9 @@ function loadIdentity(): KeyPair {
  * mint an identity merely by booting the web server.
  */
 export function tryLoadIdentityPublicKeyHex(): string | null {
-  if (!existsSync(IDENTITY_FILE)) return null;
+  if (!existsSync(identityFile())) return null;
   try {
-    const data: SerializedIdentity = JSON.parse(readFileSync(IDENTITY_FILE, "utf8"));
+    const data: SerializedIdentity = JSON.parse(readFileSync(identityFile(), "utf8"));
     return typeof data.publicKey === "string" && data.publicKey.length > 0
       ? data.publicKey
       : null;
@@ -65,7 +74,7 @@ export function tryLoadIdentityPublicKeyHex(): string | null {
  * they must never mint an identity.
  */
 export function tryLoadIdentity(): KeyPair | null {
-  if (!existsSync(IDENTITY_FILE)) return null;
+  if (!existsSync(identityFile())) return null;
   try {
     return loadIdentity();
   } catch {
@@ -75,7 +84,7 @@ export function tryLoadIdentity(): KeyPair | null {
 
 function createAndSaveIdentity(): KeyPair {
   const keyPair = generateKeyPair();
-  mkdirSync(PAIRING_DIR, { recursive: true });
+  mkdirSync(pairingDir(), { recursive: true });
 
   const data: SerializedIdentity = {
     publicKey: bytesToHex(keyPair.publicKey),
@@ -83,7 +92,7 @@ function createAndSaveIdentity(): KeyPair {
     createdAt: new Date().toISOString(),
   };
 
-  writeFileSync(IDENTITY_FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
+  writeFileSync(identityFile(), JSON.stringify(data, null, 2), { mode: 0o600 });
   return keyPair;
 }
 
@@ -99,16 +108,16 @@ export interface TrustedPeer {
 }
 
 export function loadTrustedPeers(): Map<string, TrustedPeer> {
-  if (!existsSync(TRUSTED_PEERS_FILE)) return new Map();
-  const data: TrustedPeer[] = JSON.parse(readFileSync(TRUSTED_PEERS_FILE, "utf8"));
+  if (!existsSync(trustedPeersFile())) return new Map();
+  const data: TrustedPeer[] = JSON.parse(readFileSync(trustedPeersFile(), "utf8"));
   return new Map(data.map((p) => [p.publicKey, p]));
 }
 
 export function saveTrustedPeer(peer: TrustedPeer): void {
   const peers = loadTrustedPeers();
   peers.set(peer.publicKey, peer);
-  mkdirSync(PAIRING_DIR, { recursive: true });
-  writeFileSync(TRUSTED_PEERS_FILE, JSON.stringify([...peers.values()], null, 2), { mode: 0o600 });
+  mkdirSync(pairingDir(), { recursive: true });
+  writeFileSync(trustedPeersFile(), JSON.stringify([...peers.values()], null, 2), { mode: 0o600 });
 }
 
 export function isTrustedPeer(publicKeyHex: string): boolean {

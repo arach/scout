@@ -7,13 +7,12 @@ import { Database } from "bun:sqlite";
 import { observeSqliteDatabase } from "@openscout/runtime/sqlite-adapter";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { resolveOpenScoutSupportPaths } from "@openscout/runtime/support-paths";
 
 /* ── DB path ── */
 
 export function resolveDbPath(): string {
-  const controlHome =
-    process.env.OPENSCOUT_CONTROL_HOME ??
-    join(homedir(), ".openscout", "control-plane");
+  const controlHome = resolveOpenScoutSupportPaths().controlHome;
   return join(controlHome, "control-plane.sqlite");
 }
 

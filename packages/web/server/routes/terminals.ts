@@ -58,6 +58,8 @@ import {
   terminalWorkspaceBody,
 } from "../../shared/api/terminals.ts";
 import { readJsonBody } from "../request-body.ts";
+import { wrapUserSpawnPaneCommand } from "@openscout/runtime/terminal-environment";
+import { buildMultiplexerServerEnvironment } from "@openscout/runtime/instance";
 
 /**
  * Reconcile saved workspaces against the live host inventory.
@@ -313,7 +315,8 @@ exec claude --resume ${shellQuote(transcript.sessionId)}
     } else if (detail) {
       await forceQuitClaudeInTmuxSurface(sessionName);
     }
-    const command = `bash -lc ${shellQuote(resumeScript)}`;
+    // Panes get the tmux server's global env: unset instance keys there.
+    const command = wrapUserSpawnPaneCommand(`bash -lc ${shellQuote(resumeScript)}`, process.env);
     if (detail) {
       await execSystemFile("tmux", [
         "respawn-pane",
@@ -323,7 +326,7 @@ exec claude --resume ${shellQuote(transcript.sessionId)}
         "-c",
         cwd,
         command,
-      ], { timeoutMs: 5_000 });
+      ], { timeoutMs: 5_000, env: buildMultiplexerServerEnvironment(process.env) as NodeJS.ProcessEnv });
     } else {
       await execSystemFile("tmux", [
         "new-session",

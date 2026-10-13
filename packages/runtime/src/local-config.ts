@@ -9,7 +9,8 @@ import { randomBytes } from "node:crypto";
 import { homedir, hostname as osHostname } from "node:os";
 import { dirname, join } from "node:path";
 
-import { assertTestIsolatedUserData, defaultOpenScoutSupportDirectory } from "./support-paths.js";
+import { assertTestIsolatedUserData, defaultOpenScoutSupportDirectory, resolveOpenScoutHome } from "./support-paths.js";
+import { deriveOpenScoutInstanceLayout } from "./instance.js";
 import { stripBonjourCollisionSuffix } from "./node-identity.js";
 
 export const LOCAL_CONFIG_VERSION = 1;
@@ -59,6 +60,8 @@ export type LocalConfig = {
    * here so enabling LAN/tailnet access does not mean editing a launchd plist.
    */
   webLanScope?: "full" | "pairing" | "chat";
+  /** Publish the node doorway on its physical LAN and reject remote web clients. */
+  webLanOnly?: boolean;
 };
 
 export const DEFAULT_LOCAL_CONFIG = {
@@ -139,7 +142,7 @@ export function resolveScoutWebVirtualHostname(hostname = osHostname()): string 
 }
 
 export function localConfigHome(): string {
-  return process.env.OPENSCOUT_HOME ?? join(homedir(), ".openscout");
+  return resolveOpenScoutHome();
 }
 
 export function localConfigPath(): string {
@@ -169,6 +172,7 @@ function validateLocalConfig(input: unknown): LocalConfig {
   if (raw.webLanScope === "full" || raw.webLanScope === "pairing" || raw.webLanScope === "chat") {
     out.webLanScope = raw.webLanScope;
   }
+  if (typeof raw.webLanOnly === "boolean") out.webLanOnly = raw.webLanOnly;
   if (raw.ports && typeof raw.ports === "object") {
     const ports = raw.ports as Record<string, unknown>;
     const p: LocalPortsConfig = {};
@@ -215,6 +219,17 @@ export function resolveEffectiveLocalConfig(): LocalConfig {
   };
 }
 
+/**
+ * Port defaults for the current OPENSCOUT_INSTANCE: prod keeps OPENSCOUT_PORTS,
+ * any other instance gets its own block. Env and ~/.openscout/config.json win.
+ */
+function instanceDefaultPorts(): { broker: number; web: number; pairing: number } {
+  // The layout reads the instance ledger (read-only): a claimed block wins
+  // over the raw hashed slot. Claims happen only in the bootstraps.
+  const ports = deriveOpenScoutInstanceLayout().ports;
+  return { broker: ports.broker, web: ports.web, pairing: ports.pairingBridge };
+}
+
 function localBrokerControlHost(host: string): string {
   const trimmed = host.trim();
   if (!trimmed || trimmed === "0.0.0.0" || trimmed === "::" || trimmed === "[::]") {
@@ -233,20 +248,20 @@ export function resolveBrokerControlUrl(
     return injected;
   }
   const host = config.host ?? DEFAULT_LOCAL_CONFIG.host;
-  const port = config.ports?.broker ?? DEFAULT_LOCAL_CONFIG.ports.broker;
+  const port = config.ports?.broker ?? instanceDefaultPorts().broker;
   return `http://${localBrokerControlHost(host)}:${port}`;
 }
 
 export function resolveBrokerPort(): number {
-  return resolveEffectiveLocalConfig().ports?.broker ?? DEFAULT_LOCAL_CONFIG.ports.broker;
+  return resolveEffectiveLocalConfig().ports?.broker ?? instanceDefaultPorts().broker;
 }
 
 export function resolveWebPort(): number {
-  return resolveEffectiveLocalConfig().ports?.web ?? DEFAULT_LOCAL_CONFIG.ports.web;
+  return resolveEffectiveLocalConfig().ports?.web ?? instanceDefaultPorts().web;
 }
 
 export function resolvePairingPort(): number {
-  return resolveEffectiveLocalConfig().ports?.pairing ?? DEFAULT_LOCAL_CONFIG.ports.pairing;
+  return resolveEffectiveLocalConfig().ports?.pairing ?? instanceDefaultPorts().pairing;
 }
 
 export function resolveHost(): string {

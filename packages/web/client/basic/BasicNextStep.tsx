@@ -6,6 +6,7 @@ import { useConversationList } from "../lib/use-conversation-list.ts";
 import { useScout } from "../scout/Provider.tsx";
 import { onboardingResumable, soloSetupGaps, type SoloSetupGap } from "../scout/takeover/onboarding-gate.ts";
 import { friendlyOnboardingError } from "../scout/takeover/onboarding-errors.ts";
+import { FirstTask } from "./FirstTask.tsx";
 import { basicDmConversations } from "./profile.ts";
 
 const GAP_LABEL: Record<SoloSetupGap, string> = {
@@ -55,10 +56,11 @@ export function BasicNextStep() {
     }
   };
 
-  if (!resumable && !firstTask && !proLine) return null;
+  if (!resumable && !setupDone && !proLine) return null;
 
   return (
-    <section className="sb-next" aria-label="Next step">
+    <>
+    {(resumable || proLine) && <section className="sb-next" aria-label="Next step">
       {resumable && onboarding ? (
         <div className="sb-next-row">
           <div className="sb-next-text">
@@ -68,16 +70,6 @@ export function BasicNextStep() {
           </div>
           <button type="button" className="btn btn--primary" disabled={busy} onClick={() => void resume()}>
             {busy ? "Opening" : "Resume setup"}
-          </button>
-        </div>
-      ) : firstTask ? (
-        <div className="sb-next-row">
-          <div className="sb-next-text">
-            <strong>Give an agent its first task</strong>
-            <span>Start a DM with an agent and say what you need. Its work shows up here and in Tail.</span>
-          </div>
-          <button type="button" className="btn" onClick={() => navigate({ view: "messages" })}>
-            New DM
           </button>
         </div>
       ) : null}
@@ -91,7 +83,9 @@ export function BasicNextStep() {
           </button>
         </div>
       ) : null}
-    </section>
+    </section>}
+    {setupDone && <FirstTask navigate={navigate} allowStart={firstTask} />}
+    </>
   );
 }
 

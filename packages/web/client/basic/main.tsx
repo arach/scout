@@ -34,6 +34,7 @@ import "../styles/primitives.css";
 import "../arc-tailwind.css";
 import "../app.css";
 import "./basic.css";
+import "./solo.css";
 
 const rootElement = document.getElementById("root");
 if (!rootElement) {

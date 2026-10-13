@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -144,9 +144,38 @@ function shouldPreferSourceEntry() {
   return process.env.OPENSCOUT_BROKER_SERVICE_MODE?.trim().toLowerCase() === "dev";
 }
 
+// A dist entry built before instance support would ignore OPENSCOUT_INSTANCE
+// (and a checkout's dev default) and run on prod's ports and directories.
+function distEntryIsStale(entry) {
+  try {
+    return !/instance(?:-checkout)?-bootstrap|\.\/instance\.js|OPENSCOUT_INSTANCE_MESH/.test(readFileSync(entry, "utf8"));
+  } catch {
+    return false;
+  }
+}
+
+// Only where the instance matters: an explicitly prod process (every
+// supervisor pins it) keeps today's dist behaviour, and an explicit
+// OPENSCOUT_RUNTIME_ENTRYPOINT=dist is honoured as asked.
+function instanceCheckApplies() {
+  const instance = process.env.OPENSCOUT_INSTANCE?.trim().toLowerCase();
+  if (instance === "prod" || instance === "production" || instance === "default") return false;
+  const preference = process.env.OPENSCOUT_RUNTIME_ENTRYPOINT?.trim().toLowerCase();
+  return preference !== "dist";
+}
+
 const distEntry = distMain[command];
 const sourceEntry = sourceMain[command];
-if (canRunTypeScriptSource() && shouldPreferSourceEntry() && existsSync(sourceEntry)) {
+const staleDist = instanceCheckApplies()
+  && existsSync(distEntry) && existsSync(sourceEntry) && distEntryIsStale(distEntry);
+if (staleDist && !canRunTypeScriptSource()) {
+  console.error(
+    `openscout-runtime: ${distEntry} predates instance support (OPENSCOUT_INSTANCE). `
+      + "Rebuild with `npm run build`, or run with Bun to use the source entry.",
+  );
+  process.exit(1);
+}
+if (canRunTypeScriptSource() && (shouldPreferSourceEntry() || staleDist) && existsSync(sourceEntry)) {
   await runEntrypoint(sourceEntry, args);
 } else if (existsSync(distEntry)) {
   await runEntrypoint(distEntry, args);

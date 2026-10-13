@@ -194,6 +194,12 @@
       "types": "./dist/adapters/openclaw-acp/index.d.ts",
       "import": "./dist/adapters/openclaw-acp/index.js",
       "default": "./dist/adapters/openclaw-acp/index.js"
+    },
+    "./local/bounded-log": {
+      "bun": "./src/local/bounded-log.ts",
+      "types": "./dist/local/bounded-log.d.ts",
+      "import": "./dist/local/bounded-log.js",
+      "default": "./dist/local/bounded-log.js"
     }
   },
   "types": "./dist/index.d.ts",

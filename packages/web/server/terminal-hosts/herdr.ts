@@ -20,6 +20,7 @@ import type {
   TerminalHostAdapter,
   TerminalHostSession,
 } from "./types.ts";
+import { buildUserSpawnEnvironment } from "@openscout/runtime/instance";
 
 const HERDR_TIMEOUT_MS = 2_000;
 
@@ -124,7 +125,12 @@ export const herdrTerminalHost: TerminalHostAdapter = {
       // spawned detached rather than awaited: awaiting it would hang until the
       // operator stopped the session.
       const [serverBin, ...serverArgs] = buildHerdrStartServerCommand(sessionName);
-      const spawnFailure = await spawnDetachedHerdrServer(serverBin!, serverArgs, env);
+      // The session server's env is every pane's env: a user-facing spawn.
+      const spawnFailure = await spawnDetachedHerdrServer(
+        serverBin!,
+        serverArgs,
+        buildUserSpawnEnvironment(env) as NodeJS.ProcessEnv,
+      );
       if (spawnFailure) {
         return {
           created: false,

@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 import type { ScoutWebSessionAuthority } from "./server-core.ts";
+import { defaultOpenScoutSupportDirectory } from "@openscout/runtime/support-paths";
 
 const SESSION_TOKEN_PREFIX = "sws_";
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -42,8 +43,10 @@ export function resolveScoutWebSessionStorePath(
   if (process.env.NODE_ENV === "test" && !env.OPENSCOUT_SUPPORT_DIRECTORY) {
     return null;
   }
-  const supportDirectory = env.OPENSCOUT_SUPPORT_DIRECTORY
-    ?? join(homedir(), "Library", "Application Support", "OpenScout");
+  // Platform- and instance-aware default (this used to hard-code the macOS
+  // path, so Linux wrote ~/Library/Application Support/OpenScout).
+  const supportDirectory = env.OPENSCOUT_SUPPORT_DIRECTORY?.trim()
+    || defaultOpenScoutSupportDirectory(env.HOME?.trim() || homedir());
   return join(supportDirectory, "runtime", "web-sessions.json");
 }
 

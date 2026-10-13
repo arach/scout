@@ -2,6 +2,8 @@ import type { ScoutCommandContext } from "../context.ts";
 import { defaultScoutContextDirectory } from "../context.ts";
 import { ScoutCliError } from "../errors.ts";
 import { readScoutBrokerSnapshotResult, resolveScoutSenderId, type ScoutBrokerSnapshot } from "../../core/broker/service.ts";
+import { deriveOpenScoutInstanceLayout } from "@openscout/runtime/instance";
+import { resolveBrokerControlUrl } from "@openscout/runtime/local-config";
 
 export type StatusOptions = {
   help: boolean;
@@ -181,17 +183,27 @@ export function selectWorkStatuses(rows: WorkStatus[], options: StatusOptions): 
     && (!options.nextActor || row.nextActor === options.nextActor));
 }
 
+/** Which OpenScout instance (OPENSCOUT_INSTANCE / --instance) and broker this CLI is talking to. */
+function currentInstanceSummary(): { name: string; brokerUrl: string; root: string | null } {
+  const layout = deriveOpenScoutInstanceLayout();
+  return { name: layout.name, brokerUrl: resolveBrokerControlUrl(), root: layout.root };
+}
+
+function renderInstanceLine(instance: { name: string; brokerUrl: string }): string {
+  return `Instance: ${instance.name} (broker ${instance.brokerUrl})`;
+}
+
 export async function runStatusCommand(context: ScoutCommandContext, args: string[]): Promise<void> {
   const options = parseStatusCommandOptions(args);
   if (options.help) { context.output.writeText(renderStatusCommandHelp()); return; }
   if (options.overview) {
     const value = {
-      scope: "orientation", currentDirectory: defaultScoutContextDirectory(context),
+      scope: "orientation", instance: currentInstanceSummary(), currentDirectory: defaultScoutContextDirectory(context),
       health: "not_checked",
       commands: { health: "scout doctor", agents: "scout who", work: "scout status --all", blocked: "scout status --all --blocked" },
     };
     context.output.writeValue(value, row => [
-      "Scout status", `Project context: ${row.currentDirectory}`,
+      "Scout status", renderInstanceLine(row.instance), `Project context: ${row.currentDirectory}`,
       "Health has not been checked. Run scout doctor for a live assessment.",
       "Agents: scout who", "Work: scout status <handle> or scout status --all",
       "Needs attention: scout status --all --blocked",
@@ -206,11 +218,12 @@ export async function runStatusCommand(context: ScoutCommandContext, args: strin
   const snapshot = snapshotResult.snapshot;
   const work = selectWorkStatuses(buildWorkStatuses(snapshot), options);
   const result = {
-    scope: "broker_snapshot", liveRemotePoll: false,
+    scope: "broker_snapshot", instance: currentInstanceSummary(), liveRemotePoll: false,
     coverage: "Broker-owned work only; native prompts must be captured. Remote machines are not polled.",
     work,
   };
   context.output.writeValue(result, value => [
+    renderInstanceLine(value.instance),
     "Scope: this broker's snapshot; remote machines are not polled.",
     ...(value.work.length ? value.work.map(row => [
       `${row.id} · ${row.kind} · ${row.blocked ? "blocked" : row.state} (${row.state})`,

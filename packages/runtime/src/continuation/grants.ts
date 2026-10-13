@@ -36,6 +36,7 @@ import { createHash } from "node:crypto";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 
 import { normalizeContinuationLevel, type ContinuationLevel } from "./policy.js";
+import { resolveOpenScoutHome } from "../support-paths.js";
 
 export type ContinuationGrant =
   | { scope: "project"; path: string; level: ContinuationLevel }
@@ -64,7 +65,7 @@ export type ResolvedContinuationGrant = {
 const EMPTY_POLICY: ContinuationPolicyFile = { allowModel: false, grants: [] };
 
 function continuationHome(): string {
-  return process.env.OPENSCOUT_HOME ?? join(homedir(), ".openscout");
+  return resolveOpenScoutHome();
 }
 
 export function continuationPolicyPath(): string {

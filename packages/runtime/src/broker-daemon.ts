@@ -1,3 +1,5 @@
+// Must stay the first import: materializes OPENSCOUT_INSTANCE before any module reads paths/ports.
+import { openScoutCheckoutInstanceDefault, openScoutInstanceBootstrap } from "./instance-checkout-bootstrap.js";
 import { requireProtectedAccessState, protectAccessDirectories, removeLocalAdminEnvironment } from "./mesh-access-startup.js";
 import { inspectMeshAccessIngressPosture } from "./mesh-access-ingress-posture.js";
 import { BrokerMcpEvents } from "./broker-mcp-events.js";
@@ -327,6 +329,11 @@ import {
 } from "./mesh-ingress-gate.js";
 import { SQLiteControlPlaneStore } from "./sqlite-store.js";
 import { loadOpenScoutRuntimeBuildIdentity } from "./build-info.js";
+import {
+  describeOpenScoutInstance,
+  enforceOpenScoutInstanceIsolation,
+  openScoutInstanceMeshRefusal,
+} from "./instance.js";
 
 const PROCESS_NAME = "scout-broker";
 
@@ -337,8 +344,9 @@ function createRuntimeId(prefix: string): string {
 }
 
 function resolveControlPlaneHome(): string {
-  return process.env.OPENSCOUT_CONTROL_HOME
-    ?? join(process.env.HOME ?? process.cwd(), ".openscout", "control-plane");
+  // Instance-aware: an unset OPENSCOUT_CONTROL_HOME resolves to the current
+  // OPENSCOUT_INSTANCE's control plane, never a hard-coded prod path.
+  return resolveOpenScoutSupportPaths().controlHome;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -359,7 +367,10 @@ const storageMonitor = new BrokerStorageMonitor(controlHome, {
   quarantineWal: { path: `${journalPath}.quarantine.sqlite-wal`, warningBytes: 64 * 1024 * 1024 },
 });
 const commandAdmission = new BrokerCommandAdmission({ pressure: () => storageMonitor.admissionPressure() });
-const port = Number.parseInt(process.env.OPENSCOUT_BROKER_PORT ?? String(DEFAULT_BROKER_PORT), 10);
+const port = Number.parseInt(
+  process.env.OPENSCOUT_BROKER_PORT?.trim() || String(openScoutInstanceBootstrap.layout.ports.broker),
+  10,
+);
 const supportDirectory = resolveOpenScoutSupportPaths().supportDirectory;
 // §11.5: persisted bind posture wins over env so reboot restores announce.
 const bootAdvertiseScope = resolveAdvertiseScope(
@@ -455,6 +466,24 @@ const startupBoundaryTestDelayMs = Number.parseInt(
 // Mesh trust cone rollout (docs/proposals/mesh-trust-cone.md §10): the ingress
 // gate verifies everything but only warns until OPENSCOUT_MESH_GATE=enforce.
 const meshGateMode = resolveMeshGateMode(process.env);
+// Instance isolation (OPENSCOUT_INSTANCE): a non-prod instance must never bind
+// prod's ports or write prod's directories. Checked before any state is touched.
+enforceOpenScoutInstanceIsolation("the broker", {
+  extraPorts: [{ label: "broker port", port }],
+  extraPaths: [
+    { label: "control home", value: controlHome },
+    { label: "support directory", value: supportDirectory },
+    { label: "broker socket", value: brokerSocketPath },
+  ],
+});
+console.log(
+  `[openscout-runtime] instance ${describeOpenScoutInstance(openScoutInstanceBootstrap.layout)}`
+    + (openScoutCheckoutInstanceDefault ? " (source-checkout default; set OPENSCOUT_INSTANCE=prod to override)" : ""),
+);
+const meshInstanceRefusal = openScoutInstanceMeshRefusal();
+if (meshInstanceRefusal) {
+  console.log(`[openscout-runtime] mesh off: ${meshInstanceRefusal}`);
+}
 const localAdminKey = readLocalAdminKey(process.env.OPENSCOUT_LOCAL_ADMIN_KEY_FILE);
 removeLocalAdminEnvironment(process.env);
 requireProtectedAccessState(dbPath, Boolean(localAdminKey));
@@ -463,6 +492,18 @@ preserveProtectedIngress(resolveOpenScoutSupportPaths().supportDirectory, localA
 
 ensureOpenScoutCleanSlateSync();
 const existingBroker = await probeExistingBroker();
+const expectedNodeId = process.env.OPENSCOUT_NODE_ID?.trim();
+if (existingBroker && !openScoutInstanceBootstrap.layout.isProd && expectedNodeId && existingBroker.nodeId !== expectedNodeId) {
+  // Another broker (another instance, or prod) answers on this instance's
+  // port: never mistake it for ourselves.
+  console.error(
+    `[openscout-runtime] refusing to start instance "${openScoutInstanceBootstrap.layout.name}": `
+      + `${brokerUrl} is already served by node ${existingBroker.nodeId}, not ${expectedNodeId}. `
+      + "Another OpenScout instance holds this port block; set OPENSCOUT_INSTANCE_PORT_BASE "
+      + "or stop the other instance.",
+  );
+  process.exit(1);
+}
 if (existingBroker) {
   console.log(`[openscout-runtime] broker already running on ${existingBroker.brokerUrl}`);
   console.log(`[openscout-runtime] node ${existingBroker.nodeId} in mesh ${existingBroker.meshId ?? "unknown"}`);
@@ -2651,7 +2692,9 @@ const unavailableTargetService = new BrokerUnavailableTargetService({
     return { projectRoot, harness: endpoint.harness };
   },
   isEndpointAlive: (endpoint) => localEndpointCanReceive(endpoint, isLocalAgentEndpointAlive),
-  supportsQueue: (endpoint) => endpoint.nodeId === nodeId && localEndpointSupportsQueue(endpoint),
+  supportsQueue: (endpoint) => endpoint.nodeId === nodeId && localEndpointSupportsQueue(
+    endpoint, candidate => localInvocationService.supportsQueuedEndpoint(candidate),
+  ),
   describeRemoteAuthorityIssue: (agent, authorityNode) =>
     meshForwardingService.describeRemoteAuthorityIssue(agent, authorityNode),
 });
@@ -3220,7 +3263,7 @@ try {
   await writeHostInfo().catch((error) => {
     console.warn("[openscout-runtime] failed to write .host-info:", error);
   });
-  const meshRendezvousConfig = resolveMeshRendezvousPublishConfig();
+  const meshRendezvousConfig = meshInstanceRefusal ? undefined : resolveMeshRendezvousPublishConfig();
   if (meshRendezvousConfig) {
     meshRendezvousPublisher = startMeshRendezvousPublisher(currentRendezvousNode, {
       config: meshRendezvousConfig,
@@ -3421,11 +3464,13 @@ setInterval(() => {
 
 // Background coordination must obey the same capability boundary as HTTP.
 if (startupTrafficGate.snapshot().mutationsAdmitted) {
-  meshDiscoveryService.discoverPeers().catch((error) => {
-    console.error("[openscout-runtime] initial mesh discovery failed:", error);
-  });
+  if (!meshInstanceRefusal) {
+    meshDiscoveryService.discoverPeers().catch((error) => {
+      console.error("[openscout-runtime] initial mesh discovery failed:", error);
+    });
+  }
 
-  if (Number.isFinite(discoveryIntervalMs) && discoveryIntervalMs > 0) {
+  if (!meshInstanceRefusal && Number.isFinite(discoveryIntervalMs) && discoveryIntervalMs > 0) {
     setInterval(() => {
       meshDiscoveryService.discoverPeers().catch((error) => {
         console.error("[openscout-runtime] periodic mesh discovery failed:", error);

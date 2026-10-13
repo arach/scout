@@ -1,4 +1,7 @@
 export type KnowledgeStatus = {
+  enabled?: boolean;
+  message?: string;
+  storage?: { sqliteBytes: number; walBytes: number; qmdBytes: number; totalBytes: number; maxBytes: number };
   generatedAt: number;
   paths: {
     knowledgeRoot: string;
@@ -66,7 +69,7 @@ export type KnowledgeHit = {
 export type SearchResponse = {
   q: string;
   /** "basic" = index-free scan of recent transcripts (no index yet, or still building). */
-  mode?: "index" | "basic";
+  mode?: "index" | "basic" | "off";
   hits: KnowledgeHit[];
   basic?: {
     scannedFiles: number;

@@ -84,3 +84,30 @@ test("wire log errors retain pending context, pause input, and reject flush with
   await expect(log.flush()).rejects.toThrow("ENOSPC");
   expect(attempts).toBe(1);
 });
+
+
+test("wire-log flush preserves ordered tail across bounded sink rotation", async () => {
+  const { mkdtemp, readFile, rm, stat } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { appendBoundedLog } = await import("../bounded-log.ts");
+  const dir = await mkdtemp(join(tmpdir(), "scout-wire-rotation-"));
+  const path = join(dir, "stdout.log");
+  const errors: Error[] = [];
+  const log = new CodexWireLog({
+    setPaused: () => {}, onError: error => errors.push(error),
+    append: (path, text) => appendBoundedLog(path, text, 8),
+  });
+  try {
+    log.append(path, "abcdefgh");
+    log.append(path, "ijklmnop");
+    log.append(path, "qrstuv");
+    await log.flush();
+    expect(await readFile(`${path}.1`, "utf8")).toBe("ijklmnop");
+    expect(await readFile(path, "utf8")).toBe("qrstuv");
+    expect((await stat(path)).size).toBeLessThanOrEqual(8);
+    expect((await stat(`${path}.1`)).size).toBeLessThanOrEqual(8);
+    expect(log.bufferedBytes).toBe(0);
+    expect(errors).toEqual([]);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});

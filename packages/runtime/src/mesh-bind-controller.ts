@@ -33,6 +33,7 @@ import {
   type NodeTlsIdentity,
 } from "./node-tls-identity.js";
 import type { RuntimeEnv } from "./portable-types.js";
+import { openScoutInstanceMeshRefusal } from "./instance.js";
 
 export {
   MESH_BIND_CONFIG_FILE,
@@ -321,6 +322,11 @@ export function createMeshBindController(deps: MeshBindControllerDeps): MeshBind
   }
 
   async function applyScopeInternal(next: BrokerAdvertiseScope): Promise<MeshBindState> {
+    // A non-prod OPENSCOUT_INSTANCE never binds the mesh unless opted in.
+    const instanceRefusal = next === "mesh" ? openScoutInstanceMeshRefusal() : null;
+    if (instanceRefusal) {
+      throw new Error(instanceRefusal);
+    }
     const previous = snapshot();
     try {
       const state = next === "mesh" ? await applyMesh() : await applyLocal();

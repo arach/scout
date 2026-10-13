@@ -10,6 +10,7 @@ import {
   type EventInventoryAdapter,
   type SemanticEventKind,
 } from "../event-inventory.js";
+import { isScoutPairingPath, scoutPairingAdapterRoot } from "../../scout-state-paths.js";
 
 function normalizedPath(filePath: string): string {
   return filePath.replace(/\\/g, "/").toLowerCase();
@@ -120,12 +121,12 @@ export const grokAcpEventInventoryAdapter: EventInventoryAdapter = {
   defaultRoots(home) {
     return [
       join(home, ".grok", "sessions"),
-      join(home, ".scout", "pairing", "grok-acp"),
+      scoutPairingAdapterRoot(home, "grok-acp"),
     ];
   },
   matchesFile(filePath) {
     const path = normalizedPath(filePath);
-    return path.includes("/.grok/") || path.includes("/.scout/pairing/grok");
+    return path.includes("/.grok/") || isScoutPairingPath(path, "grok");
   },
   extract(record, context) {
     const type = stringValue(record.type) ?? stringValue(record.event);

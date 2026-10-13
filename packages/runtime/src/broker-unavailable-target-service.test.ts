@@ -309,7 +309,7 @@ describe("transport-owned availability evidence", () => {
     }
   });
   test("live local owner queues admit busy work but dead processes remain unavailable", () => {
-    const candidate = endpoint({ transport: "codex_app_server", state: "active" });
+    const candidate = endpoint({ transport: "grok_acp", state: "active" });
     expect(localEndpointSupportsQueue(candidate)).toBe(true);
     for (const alive of [false, true]) {
       const availability = evaluateBrokerAvailability({ endpoint: candidate, authority: "node-local", authorityAvailable: true,
@@ -321,4 +321,20 @@ describe("transport-owned availability evidence", () => {
       expect(localEndpointSupportsQueue(endpoint({ transport: "http", address, metadata: { externalSession: true } }))).toBe(false);
     }
   });
+});
+
+
+test("direct queue safety preserves independent external mailbox and bridge queues", () => {
+  const denyDirect = () => false;
+  for (const transport of ["grok_acp", "codex_app_server"] as const) {
+    expect(localEndpointSupportsQueue(endpoint({ transport }), denyDirect)).toBe(false);
+  }
+  expect(localEndpointSupportsQueue(endpoint({ transport: "codex_app_server" }))).toBe(false);
+  for (const candidate of [
+    endpoint({ transport: "mcp_poll", metadata: { externalSession: true } }),
+    endpoint({ transport: "pairing_bridge" }),
+    endpoint({ transport: "http", state: "active", address: "https://provider.invalid/a2a" }),
+  ]) {
+    expect(localEndpointSupportsQueue(candidate, denyDirect)).toBe(true);
+  }
 });

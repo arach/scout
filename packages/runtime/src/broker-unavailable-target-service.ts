@@ -22,7 +22,7 @@ import {
 } from "./broker-endpoint-selection.js";
 import { isA2AHttpEndpoint } from "./a2a-http-endpoint.js";
 import { isExternalSessionEndpoint } from "./external-session-transport.js";
-import { isBrokerRunnableLocalAgentTransport } from "./local-agent-transports.js";
+import { isBrokerRunnableLocalAgentTransport, isDirectLocalAgentTransport } from "./local-agent-transports.js";
 import type { RuntimeRegistrySnapshot } from "./registry.js";
 
 /** Transport-owned receive evidence; a cloud/mailbox route is not a tmux process. */
@@ -35,7 +35,15 @@ export function localEndpointCanReceive(endpoint: AgentEndpoint, localProcessAli
 }
 
 /** These adapters execute behind the broker's endpoint-owner lane or durable mailbox. */
-export function localEndpointSupportsQueue(endpoint: AgentEndpoint): boolean {
+export function localEndpointSupportsQueue(
+  endpoint: AgentEndpoint,
+  directQueueSupported?: (endpoint: AgentEndpoint) => boolean,
+): boolean {
+  // Direct adapters own their serialization guarantees, including uncertain
+  // native turns. External mailbox and bridge routes retain their own queues.
+  if (isDirectLocalAgentTransport(endpoint.transport)) {
+    return directQueueSupported ? directQueueSupported(endpoint) : endpoint.transport !== "codex_app_server";
+  }
   if (isExternalSessionEndpoint(endpoint)) return endpoint.transport === "mcp_poll";
   return isBrokerRunnableLocalAgentTransport(endpoint.transport)
     || endpoint.transport === "pairing_bridge"

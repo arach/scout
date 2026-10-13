@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { isIP } from "node:net";
 import { networkInterfaces } from "node:os";
+import { isScoutLanAddress, resolveScoutLanNetworks } from "@openscout/runtime/lan-network";
 
 import type { Context, Hono } from "hono";
 import { getConnInfo, serveStatic } from "hono/bun";
@@ -120,29 +121,18 @@ export function isAuthenticatedScoutRequest(
   return Boolean(cookie && validateSession?.(cookie));
 }
 
-/**
- * Share the session across `scout.local` and `chat.scout.local`.
- * Host-only cookies made Chat look signed-in from cache while `/api/*` 401'd.
- */
-export function scoutCookieDomain(host: string | null | undefined): string | null {
-  const hostname = (host ?? "").split(":")[0]?.toLowerCase() ?? "";
-  if (hostname === "scout.local" || hostname.endsWith(".scout.local")) return "scout.local";
-  return null;
-}
-
+/** Each local hostname is a separate machine authority, never a cookie domain. */
 export function scoutWebAuthCookie(
   token: string,
   secure: boolean,
   maxAgeSeconds?: number,
-  host?: string | null,
+  _host?: string | null,
 ): string {
-  const domain = scoutCookieDomain(host);
   return [
     `${SCOUT_WEB_AUTH_COOKIE}=${encodeURIComponent(token)}`,
     "Path=/",
     "HttpOnly",
     "SameSite=Strict",
-    ...(domain ? [`Domain=${domain}`] : []),
     ...(maxAgeSeconds !== undefined ? [`Max-Age=${Math.floor(maxAgeSeconds)}`] : []),
     ...(secure ? ["Secure"] : []),
   ].join("; ");
@@ -150,6 +140,30 @@ export function scoutWebAuthCookie(
 
 export function clearScoutWebAuthCookie(secure: boolean): string {
   return scoutWebAuthCookie("", secure, 0);
+}
+
+/**
+ * Expire the old shared cookie before issuing a host-only replacement. On the
+ * apex host both cookies have the same storage key, so deletion must go first.
+ * This is the only Domain cookie we emit, and it never carries a credential.
+ */
+export function clearLegacyScoutWebAuthCookie(host: string | null | undefined, secure: boolean): string | null {
+  const hostname = (host ?? "").split(":")[0]?.trim().toLowerCase() ?? "";
+  if (hostname !== "scout.local" && !hostname.endsWith(".scout.local")) return null;
+  return `${clearScoutWebAuthCookie(secure)}; Domain=scout.local`;
+}
+
+/** Re-issue only a validated cookie when migrating an already signed-in browser. */
+export function authenticatedScoutWebCookieToken(
+  request: Request,
+  expectedToken: string | undefined,
+  validateSession?: (token: string) => boolean,
+): string | null {
+  const token = expectedToken?.trim();
+  const cookie = cookieValue(request, SCOUT_WEB_AUTH_COOKIE);
+  return token && cookie && (constantTimeTokenMatch(cookie, token) || validateSession?.(cookie))
+    ? cookie
+    : null;
 }
 
 /**
@@ -340,6 +354,39 @@ export function createScoutRequestPeerAddressRegistry() {
       return peers.get(c.req.raw) ?? resolveScoutRequestPeerAddress(c);
     },
   };
+}
+
+/**
+ * LAN-only is an additional network boundary, not an authentication mechanism.
+ * Direct clients are classified by their socket, ignoring spoofable headers.
+ * The loopback Caddy hop may supply one unambiguous client IP; no proxy chains
+ * or other forwarding formats are accepted. Networks contain physical LAN
+ * interfaces only, so a tailnet/private VPN address is not a LAN credential.
+ */
+export function isScoutWebLanOnlyRequest(
+  request: Request,
+  peerAddress: string | undefined,
+  networks: ReturnType<typeof resolveScoutLanNetworks> = resolveScoutLanNetworks(),
+): boolean {
+  if (!peerAddress) return false;
+  const peer = normalizeIpAddress(peerAddress);
+  if (!peer) return false;
+  if (!isLoopbackScoutAddress(peer)) return isScoutLanAddress(peer, networks);
+  if (request.headers.has("forwarded")) return false;
+  const forwardedFor = request.headers.get("x-forwarded-for");
+  const realIp = request.headers.get("x-real-ip");
+  if (forwardedFor === null) {
+    return realIp === null && ![...request.headers.keys()].some((name) => name.startsWith("x-forwarded-"));
+  }
+  const client = normalizeIpAddress(forwardedFor);
+  if (!client || forwardedFor.includes(",")) return false;
+  if (realIp !== null && normalizeIpAddress(realIp) !== client) return false;
+  for (const [name, value] of request.headers) {
+    if (!name.startsWith("x-forwarded-")) continue;
+    if (!["x-forwarded-for", "x-forwarded-proto", "x-forwarded-host"].includes(name) || value.includes(",")) return false;
+    if (name === "x-forwarded-proto" && value !== "http" && value !== "https") return false;
+  }
+  return isLoopbackScoutAddress(client) || isScoutLanAddress(client, networks);
 }
 
 /**
@@ -787,6 +834,8 @@ export function installScoutApiMiddleware(
     } catch {
       return c.json({ error: "session storage unavailable" }, 503);
     }
+    const legacyCookie = clearLegacyScoutWebAuthCookie(c.req.header("host"), isForwardedHttpsScoutRequest(c.req.raw));
+    if (legacyCookie) c.header("set-cookie", legacyCookie, { append: true });
     c.header(
       "set-cookie",
       scoutWebAuthCookie(
@@ -795,6 +844,7 @@ export function installScoutApiMiddleware(
         SCOUT_WEB_LOGIN_SESSION_MAX_AGE_SECONDS,
         c.req.header("host"),
       ),
+      { append: true },
     );
     return c.json({ ok: true });
   });
@@ -806,7 +856,10 @@ export function installScoutApiMiddleware(
     } catch {
       return c.json({ error: "session storage unavailable" }, 503);
     }
-    c.header("set-cookie", clearScoutWebAuthCookie(isForwardedHttpsScoutRequest(c.req.raw)));
+    const secure = isForwardedHttpsScoutRequest(c.req.raw);
+    const legacyCookie = clearLegacyScoutWebAuthCookie(c.req.header("host"), secure);
+    if (legacyCookie) c.header("set-cookie", legacyCookie, { append: true });
+    c.header("set-cookie", clearScoutWebAuthCookie(secure), { append: true });
     return c.json({ ok: true });
   });
 }

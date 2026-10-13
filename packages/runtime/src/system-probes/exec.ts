@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 
 import type { ProbeCtx } from "./registry.js";
 import { getScoutdProbeClient, ScoutdExecResponseError } from "./scoutd-client.js";
+import { buildMultiplexerServerEnvironment } from "../instance.js";
 
 export type ExecProbeFileOptions = {
   cwd?: string;
@@ -229,8 +230,14 @@ export type ExecSystemFileOptions = ExecProbeFileOptions & {
 export async function execSystemFile(
   file: string,
   args: readonly string[],
-  options: ExecSystemFileOptions,
+  rawOptions: ExecSystemFileOptions,
 ): Promise<ExecProbeFileResult> {
+  // `tmux new-session` may start the tmux server, whose env becomes every
+  // later pane's global env: never start it with instance keys, whoever the
+  // caller is (scoutd strips them on its side too).
+  const options = commandBasename(file) === "tmux" && startsTmuxServer(args)
+    ? { ...rawOptions, env: buildMultiplexerServerEnvironment(rawOptions.env ?? process.env) as NodeJS.ProcessEnv }
+    : rawOptions;
   const execVerb = mapExecSystemVerb(file, args, options);
   if (execVerb) {
     let scoutd;
@@ -326,6 +333,13 @@ function mapExecSystemVerb(
   if (command === "xdg-open") return mapXdgRevealVerb(args, options);
   if (command === "explorer.exe") return mapWindowsRevealVerb(args, options);
   return null;
+}
+
+/** tmux subcommands (and their aliases) that can start the server. */
+const TMUX_SERVER_STARTING_COMMANDS = new Set(["new-session", "new", "start-server", "start"]);
+
+function startsTmuxServer(args: readonly string[]): boolean {
+  return args.some((arg) => TMUX_SERVER_STARTING_COMMANDS.has(arg));
 }
 
 function commandBasename(file: string): string {

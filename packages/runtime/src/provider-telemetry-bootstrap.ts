@@ -32,7 +32,7 @@ export type ProviderTelemetryBootstrapReport = {
       | "already-installed"
       | "skipped"
       | "error";
-    reason?: "settings-missing" | "disabled" | "owned-by-other-install" | "isolated-support-directory" | "scout-cli-not-found";
+    reason?: "settings-missing" | "disabled" | "owned-by-other-install" | "isolated-support-directory" | "scout-cli-not-found" | "non-prod-instance";
     command?: string;
     previousCommand?: string;
     error?: string;

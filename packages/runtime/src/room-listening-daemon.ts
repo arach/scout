@@ -1,11 +1,14 @@
+// Must stay the first import: materializes OPENSCOUT_INSTANCE before any module reads paths/ports.
+import "./instance-bootstrap.js";
 import { openControlPlaneSqliteDatabase } from "./sqlite-adapter.js";
 import { join } from "node:path";
 import { mkdir, chmod, writeFile, unlink } from "node:fs/promises";
 import { createRoomListeningService, createRoomListeningHttpServer } from "./room-listening-service.js";
 import { OPENSCOUT_PORTS, resolveBrokerControlUrl } from "./local-config.js";
+import { resolveOpenScoutSupportPaths } from "./support-paths.js";
 
 process.title = "scout-listening";
-const controlHome = process.env.OPENSCOUT_CONTROL_HOME ?? join(process.env.HOME ?? process.cwd(), ".openscout", "control-plane");
+const controlHome = resolveOpenScoutSupportPaths().controlHome;
 const port = Number(process.env.OPENSCOUT_LISTENING_PORT ?? OPENSCOUT_PORTS.roomListening);
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid listening port");
 const home = join(controlHome, "chat-listening");

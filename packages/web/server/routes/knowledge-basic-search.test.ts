@@ -27,6 +27,8 @@ afterEach(() => {
 function useTempKnowledgeEnv(): string {
   const root = mkdtempSync(join(tmpdir(), "openscout-knowledge-basic-"));
   roots.push(root);
+  mkdirSync(join(root, "support"), { recursive: true });
+  writeFileSync(join(root, "support", "settings.json"), JSON.stringify({ knowledgeIndexEnabled: true }));
   process.env.OPENSCOUT_CONTROL_HOME = join(root, "control-plane");
   process.env.OPENSCOUT_SUPPORT_DIRECTORY = join(root, "support");
   process.env.OPENSCOUT_TAIL_CLAUDE_PROJECTS_ROOT = join(root, "claude");
@@ -101,7 +103,7 @@ test("background indexing returns at once and status follows the run", async () 
 for (const mode of ["missing-child", "spawn-throw"] as const) {
   test(`an immediate ${mode} failure releases its slot and permits either retry`, async () => {
     let attempts = 0;
-    const indexer = createSessionKnowledgeIndexer({
+    const indexer = createSessionKnowledgeIndexer({ enabled: () => true,
       childPath: () => { attempts++; return mode === "missing-child" ? null : "/fixture/child.mjs"; },
       spawn: () => { throw new Error("fixture spawn failure"); },
     });
@@ -125,7 +127,7 @@ test("background callers share one running child, reject other inputs, and retry
   let finish!: (code: number) => void;
   let stdout!: ReadableStreamDefaultController<Uint8Array>;
   let spawns = 0;
-  const indexer = createSessionKnowledgeIndexer({
+  const indexer = createSessionKnowledgeIndexer({ enabled: () => true,
     childPath: () => "/fixture/child.mjs",
     spawn: (() => {
       spawns++;
@@ -170,4 +172,22 @@ test("a disconnected search request forwards cancellation to basic discovery", a
   const response = await app.request(new Request("http://localhost/api/knowledge/search?q=before%20index", { signal: controller.signal }));
   expect(response.status).toBe(499);
   expect((await response.json()).error).toBe("query replaced by client");
+});
+
+test("existing settings default off; API and background indexing opt in through one setting", async () => {
+  const root = useTempKnowledgeEnv();
+  writeFileSync(join(root, "support", "settings.json"), JSON.stringify({ version: 1 }));
+  let spawns = 0;
+  const indexer = createSessionKnowledgeIndexer({ spawn: (() => { spawns++; throw new Error("must not spawn while off"); }) as NonNullable<Parameters<typeof createSessionKnowledgeIndexer>[0]>["spawn"] });
+  const app = new Hono(); mountKnowledgeRoutes(app, { currentDirectory: root, sessionIndexer: indexer });
+  for (const path of ["/api/knowledge/status", "/api/knowledge/search?q=Search", "/api/knowledge/search-primitives?q=Search"]) {
+    const response = await app.request(path); expect(response.status).toBe(200);
+    expect(JSON.stringify(await response.json())).toContain("index is off");
+  }
+  const start = await app.request("/api/knowledge/sessions/index", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ background: true }) });
+  expect(start.status).toBe(200); expect(spawns).toBe(0);
+  expect((await indexer.start({ days: 1, limit: 5, force: false })).enabled).toBe(false);
+  const save = await app.request("/api/knowledge/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: true }) });
+  expect(save.status).toBe(200);
+  expect((await (await app.request("/api/knowledge/settings")).json()).enabled).toBe(true);
 });

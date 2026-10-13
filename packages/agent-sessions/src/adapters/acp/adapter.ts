@@ -17,6 +17,7 @@ import type {
   Turn,
   TurnStatus,
 } from "../../protocol/primitives.js";
+import { scoutUserSpawnEnvironment } from "../../scout-state-paths.js";
 
 type JsonRpcId = string | number | null;
 
@@ -722,7 +723,7 @@ export class AcpAdapter extends BaseAdapter {
 
     const child = spawn(options.command, options.args, {
       cwd: options.cwd,
-      env: { ...process.env, ...(this.config.env ?? {}) },
+      env: { ...scoutUserSpawnEnvironment(process.env), ...(this.config.env ?? {}) },
       stdio: ["pipe", "pipe", "pipe"],
     });
 

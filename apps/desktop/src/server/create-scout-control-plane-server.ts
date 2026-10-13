@@ -36,6 +36,7 @@ import {
   resolveScoutSenderId,
   sendScoutMessage,
 } from "../core/broker/service.ts";
+import { resolveBrokerPort } from "@openscout/runtime/local-config";
 
 export type { ScoutWebAssetMode } from "./server-core.ts";
 
@@ -345,7 +346,7 @@ export function createScoutControlPlaneServer(
   // SSE: proxy broker event stream for live updates
   app.get("/api/events", async (c) => {
     const brokerHost = process.env.OPENSCOUT_BROKER_HOST ?? "127.0.0.1";
-    const brokerPort = process.env.OPENSCOUT_BROKER_PORT ?? "43110";
+    const brokerPort = process.env.OPENSCOUT_BROKER_PORT ?? String(resolveBrokerPort());
     const brokerUrl =
       process.env.OPENSCOUT_BROKER_URL ?? `http://${brokerHost}:${brokerPort}`;
     try {

@@ -12,6 +12,7 @@ import {
   renderScoutAsciiMarkHtml,
   renderScoutAsciiMarkScript,
 } from "./scout-ascii-mark.js";
+import { resolveScoutLanNetworks, type ScoutLanNetwork } from "./lan-network.js";
 
 export type OpenScoutLocalEdgeRouteMode = "default" | "vite-dev";
 
@@ -23,7 +24,18 @@ export type OpenScoutLocalEdgeRoute = {
 
 export type OpenScoutLocalEdgeScheme = "http" | "https" | "both";
 
+/** The local edge owns shared 80/443 listeners, Caddy state and mDNS names.
+ * Named instances use their own web port until an isolated edge exists. */
+export function shouldStartOpenScoutLocalEdge(input: {
+  isProd: boolean;
+  platform: NodeJS.Platform;
+  enabled?: string;
+}): boolean {
+  return input.isProd && input.platform === "darwin" && input.enabled !== "0";
+}
+
 export type OpenScoutLocalEdgeConfig = {
+  lanOnly?: boolean;
   portalHost: string;
   nodeHost: string;
   wildcardHost: string;
@@ -90,30 +102,71 @@ export type OpenScoutLocalEdgeMdnsCommand = { command: string; args: string[] };
 
 /**
  * Commands that advertise one local-edge host over mDNS as a proxy for
- * 127.0.0.1. macOS registers the host record and the service in one
+ * the selected address (loopback by default). macOS registers the host record and the service in one
  * `dns-sd -P`; Avahi needs the address records and the service published
  * separately. Other platforms have no supported publisher.
  */
 export function buildOpenScoutLocalEdgeMdnsCommands(
-  input: { name: string; host: string; port: number; scheme: "http" | "https" },
+  input: { name: string; host: string; port: number; scheme: "http" | "https"; address?: string },
   platform: NodeJS.Platform = process.platform,
 ): OpenScoutLocalEdgeMdnsCommand[] {
+  const address = input.address ?? "127.0.0.1";
   const type = input.scheme === "https" ? "_https._tcp" : "_http._tcp";
   if (platform === "darwin") {
     return [{
       command: "/usr/bin/dns-sd",
-      args: ["-P", input.name, type, "local", String(input.port), input.host, "127.0.0.1", "path=/"],
+      args: ["-P", input.name, type, "local", String(input.port), input.host, address, "path=/"],
     }];
   }
   if (platform === "linux") {
     return [
-      { command: "avahi-publish", args: ["-a", "-R", input.host, "127.0.0.1"] },
+      { command: "avahi-publish", args: ["-a", "-R", input.host, address] },
       // Without an AAAA answer every lookup waits out the resolver's IPv6 timeout.
-      { command: "avahi-publish", args: ["-a", "-R", input.host, "::1"] },
+      ...(address === "127.0.0.1" ? [{ command: "avahi-publish", args: ["-a", "-R", input.host, "::1"] }] : []),
       { command: "avahi-publish", args: ["-s", "-H", input.host, input.name, type, String(input.port), "path=/"] },
     ];
   }
   return [];
+}
+
+/** Each explicit mDNS name has one owner. LAN mode never advertises a remote
+ * machine's doorway as loopback, even while its physical interface is down. */
+export function resolveOpenScoutLocalEdgeAdvertisements(
+  config: Pick<OpenScoutLocalEdgeConfig, "portalHost" | "nodeHost" | "lanOnly">,
+  networks: readonly ScoutLanNetwork[] = resolveScoutLanNetworks(),
+): Array<{ host: string; address: string }> {
+  const ipv4 = networks.filter(n => n.family === "IPv4");
+  const lanAddress = (ipv4.find(n => !n.address.startsWith("169.254.")) ?? ipv4[0])?.address;
+  return resolveOpenScoutLocalEdgeDiscoveryHosts(config).flatMap(host => {
+    if (config.lanOnly && host === config.nodeHost && host !== config.portalHost) {
+      return lanAddress ? [{ host, address: lanAddress }] : [];
+    }
+    return [{ host, address: "127.0.0.1" }];
+  });
+}
+
+/** Own just the mDNS children. Readdressing never restarts Caddy or the broker. */
+export function createLocalEdgeAdvertisementOwner<T>(ops: {
+  start: (advertisement: { host: string; address: string }, scheme: "http" | "https") => T;
+  stop: (child: T) => void;
+}) {
+  let children: T[] = [];
+  let fingerprint = "";
+  const stop = () => {
+    for (const child of children) ops.stop(child);
+    children = [];
+    fingerprint = "";
+  };
+  return {
+    stop,
+    update(advertisements: Array<{ host: string; address: string }>, schemes: readonly ("http" | "https")[]) {
+      const next = JSON.stringify([advertisements, schemes]);
+      if (next === fingerprint) return;
+      stop();
+      children = schemes.flatMap(scheme => advertisements.map(ad => ops.start(ad, scheme)));
+      fingerprint = next;
+    },
+  };
 }
 
 function uniqRoutes(routes: OpenScoutLocalEdgeRoute[]): OpenScoutLocalEdgeRoute[] {
@@ -142,6 +195,7 @@ function formatCaddyHost(host: string): string {
 }
 
 export function resolveOpenScoutLocalEdgeConfig(input: {
+  lanOnly?: boolean;
   portalHost?: string;
   nodeHost?: string;
   scheme?: OpenScoutLocalEdgeScheme;
@@ -160,6 +214,7 @@ export function resolveOpenScoutLocalEdgeConfig(input: {
   const brokerUpstream = `127.0.0.1:${input.brokerPort ?? resolveBrokerPort()}`;
   const viteUpstream = resolveViteUpstream(input);
   return {
+    ...(input.lanOnly ? { lanOnly: true } : {}),
     portalHost,
     nodeHost,
     wildcardHost,
@@ -167,6 +222,7 @@ export function resolveOpenScoutLocalEdgeConfig(input: {
     brokerUpstream,
     routes: uniqRoutes([
       { host: portalHost, upstream },
+      ...(input.lanOnly && nodeHost !== portalHost ? [{ host: nodeHost, upstream }] : []),
       { host: wildcardHost, upstream },
       ...(viteUpstream
         ? [{
@@ -601,7 +657,9 @@ export function renderOpenScoutCaddyfile(config: OpenScoutLocalEdgeConfig, siteI
   const blocks = schemes
     .flatMap((scheme) =>
       config.routes.map((route) => (
-        route.mode === "vite-dev"
+        config.lanOnly && scheme === "http" && route.host === config.nodeHost
+          ? `http://${formatCaddyHost(route.host)} {\n  redir https://${formatCaddyHost(route.host)}{uri} 308\n}`
+          : route.mode === "vite-dev"
           ? renderCaddyViteDevRouteBlock(route, scheme)
           : renderCaddyDefaultRouteBlock(config, route, scheme, startPage)
       )),

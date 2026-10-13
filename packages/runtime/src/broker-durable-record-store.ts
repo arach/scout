@@ -272,7 +272,7 @@ export class BrokerDurableRecordStore {
 
       await this.options.durableStore.commitEntries(
         [
-          { kind: "actor.upsert", actor: stamped },
+          { kind: "actor.upsert", actor: actorIdentityForAgent(stamped) },
           { kind: "agent.upsert", agent: stamped },
         ],
         async (entries) => {
@@ -292,18 +292,10 @@ export class BrokerDurableRecordStore {
     if (isDeepStrictEqual(previous, endpoint)) {
       return;
     }
-    if (isEndpointLastSeenHeartbeat(previous, endpoint)) {
-      this.options.runtime.refreshEndpointSilently(endpoint);
-      return;
-    }
 
     await this.options.durableStore.runWrite(async () => {
       const current = this.options.runtime.peek().endpoints[endpoint.id];
       if (isDeepStrictEqual(current, endpoint)) {
-        return;
-      }
-      if (isEndpointLastSeenHeartbeat(current, endpoint)) {
-        this.options.runtime.refreshEndpointSilently(endpoint);
         return;
       }
 
