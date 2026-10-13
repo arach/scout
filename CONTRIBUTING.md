@@ -12,6 +12,19 @@ evidence proportionate to their risk.
 - Keep private OpenScout product code, assets, credentials, and internal release
   material out of this public repository.
 
+## Repository routing
+
+Use the public Scout checkout for public CLI, broker, protocol, baseline web,
+and reusable runtime work. Push a topic branch to your fork and open its pull
+request against `oscout/scout`. Keep private OpenScout product work in its
+private repository. See [the source boundary](./docs/public-source-boundary.md)
+for ownership details; inspect mixed changes before copying them across repos.
+
+Before editing, committing, or pushing, verify `pwd`,
+`git rev-parse --show-toplevel`, and `git remote -v`. A chat title or sidebar
+project placement does not prove the shell's working directory. Set the command
+working directory explicitly when the recorded chat directory is stale.
+
 ## Set up the repository
 
 ```bash

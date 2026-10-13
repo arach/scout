@@ -1,14 +1,21 @@
-# OpenScout Agent Context
+# Scout Agent Context
 
 Verified: 2026-07-21
 
 Purpose: dense context for coding agents working in this repo.
 
+## Repository routing
+
+This is the public Scout workspace. Public changes and pull requests belong in
+`oscout/scout`; private OpenScout product work stays in the private workspace.
+Read [CONTRIBUTING.md](../../CONTRIBUTING.md#repository-routing) for checkout,
+fork, and working-directory checks before making changes.
+
 ## Identity
 
 | Field | Value |
 |---|---|
-| Product | OpenScout |
+| Product | Scout |
 | Current status | v0.x active product codebase |
 | Trust posture | high-trust local developer pilots |
 | Not ready for | enterprise, compliance, untrusted multi-tenant runtime |

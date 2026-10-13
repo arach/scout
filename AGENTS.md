@@ -6,6 +6,7 @@
 
 **IMPORTANT:** Read these rules before making any changes:
 
+- Public Scout work belongs in the Scout checkout and pull requests target oscout/scout. Keep private OpenScout product code, assets, credentials, and internal material in the private workspace; inspect mixed changes before copying or publishing.
 - Use Bun for JavaScript and TypeScript workflows.
 - The broker is the canonical writer for Scout-owned coordination records.
 - External harness transcripts are observed source material; never bulk-import them as Scout messages.
