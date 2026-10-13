@@ -1,3 +1,5 @@
+import type { NodeDefinition, TrustedPeerRecord } from "@openscout/protocol";
+import { httpMeshUrlsForNode } from "./mesh-dial-order.js";
 import {
   loadOrCreateNodeIdentity,
   verifySignedNodeCard,
@@ -19,9 +21,8 @@ import {
  * For each peer base URL it fetches the peer's signed node card from the
  * public `GET /v1/node` endpoint, verifies it, caches the peer key ID with a
  * short TTL, and signs requests destined to that key ID. Peers that present
- * no card (older builds still returning a bare NodeDefinition, 404, or an
- * unreachable probe) are sent unsigned requests — today's behavior — so
- * mixed-version meshes keep working during rollout. A card-shaped payload
+ * no card (older builds still returning a bare NodeDefinition or 404) are sent
+ * unsigned requests — today's behavior — so mixed-version meshes keep working during rollout. A card-shaped payload
  * that fails verification is treated as a potential MITM and refused.
  *
  * P1.5 (§11.4) adds the trust-resolution seam. Callers supply what they expect
@@ -59,6 +60,14 @@ export class PeerCardVerificationError extends Error {
   }
 }
 
+/** A card could not be reached; no request was submitted to that candidate. */
+export class PeerCardUnavailableError extends Error {
+  override readonly name = "PeerCardUnavailableError";
+  constructor(readonly baseUrl: string, cause: unknown) {
+    super(`peer ${baseUrl} node card could not be fetched: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+  }
+}
+
 /**
  * §11.4/§11.8: a peer that has presented TLS must never be accepted on plain
  * HTTP, or with a card that has stopped attesting a TLS key, again.
@@ -74,6 +83,30 @@ export class PeerTlsDowngradeError extends Error {
 }
 
 export { PeerTlsPinError };
+
+export function isMeshPeerTrustError(error: unknown): boolean {
+  return error instanceof PeerCardVerificationError
+    || error instanceof PeerTlsDowngradeError
+    || error instanceof PeerTlsPinError;
+}
+
+/** Every advertised HTTP alias must prove the same enrolled identity and pin. */
+export function trustedMeshPeerForBrokerUrl(
+  baseUrl: string,
+  nodes: Iterable<NodeDefinition>,
+  peers: Iterable<TrustedPeerRecord>,
+): TrustedPeerRecord | undefined {
+  const normalized = normalizeBaseUrl(baseUrl);
+  const nodeIds = new Set(Array.from(nodes)
+    .filter((node) => httpMeshUrlsForNode(node).some((url) => normalizeBaseUrl(url) === normalized))
+    .map((node) => node.id));
+  const matches = Array.from(peers).filter((peer) => peer.nodeId && nodeIds.has(peer.nodeId));
+  const first = matches[0];
+  if (matches.some((peer) => peer.keyId !== first?.keyId || peer.tlsSpkiFingerprint !== first?.tlsSpkiFingerprint)) {
+    throw new PeerCardVerificationError(`peer URL ${normalized} belongs to conflicting trusted identities; refusing to send`, normalized);
+  }
+  return first;
+}
 
 export type MeshPeerFetch = (
   baseUrl: string,
@@ -289,7 +322,10 @@ export function createMeshPeerFetch(deps: MeshPeerClientDeps = {}): MeshPeerFetc
       if (error instanceof PeerTlsPinError || error instanceof PeerTlsDowngradeError) {
         throw error;
       }
-      return fallBackToLegacy(expectation, "its node card could not be fetched");
+      // A failed dial proves neither a legacy peer nor an invalid identity.
+      // Let routing try another authenticated alias without ever submitting
+      // an unsigned request to this unreachable candidate.
+      throw new PeerCardUnavailableError(baseUrl, error);
     }
 
     if (!response.ok) {
@@ -436,15 +472,14 @@ export function createMeshPeerFetch(deps: MeshPeerClientDeps = {}): MeshPeerFetc
         const recovered = await resolvePeer(expectation, init.signal ?? undefined);
         return await send(recovered);
       } catch (retryError) {
-        if (retryError instanceof PeerTlsPinError || retryError instanceof PeerTlsDowngradeError) {
-          throw new PeerTlsPinError(
-            `peer ${normalized} still does not prove the pinned TLS key after one re-fetch and retry (${retryError.message}); refusing to send — revoke and re-enroll this peer deliberately`,
-            normalized,
-            resolution.pin,
-            error.observedFingerprint,
-          );
-        }
-        throw retryError;
+        // Once the send observed a real pin failure, an unavailable recovery
+        // probe cannot turn it into mere unreachability and authorize fallback.
+        throw new PeerTlsPinError(
+          `peer ${normalized} still does not prove the pinned TLS key after one re-fetch and retry (${retryError instanceof Error ? retryError.message : String(retryError)}); refusing to send — revoke and re-enroll this peer deliberately`,
+          normalized,
+          resolution.pin,
+          error.observedFingerprint,
+        );
       }
     }
   };

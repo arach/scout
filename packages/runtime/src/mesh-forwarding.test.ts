@@ -373,6 +373,21 @@ describe("mesh forwarding", () => {
     expect(result).toEqual({ ok: true, duplicate: false });
   });
 
+  test("sends once to the proved tailnet route without trying an advertised dead LAN", async () => {
+    const tailnet = "https://100.119.71.19:43110";
+    const peer = makePeerNode({ brokerUrl: tailnet, meshEntrypoints: [{ kind: "http", url: "https://192.168.18.28:43110" }] });
+    const calls: string[] = [];
+    const result = await forwardMeshMessage(peer, makeBundle(), { peerFetch: async (url, path, init) => {
+      calls.push(url);
+      expect(url).toBe(tailnet);
+      expect(path).toBe("/v1/mesh/messages");
+      expect(init?.method).toBe("POST");
+      return Response.json({ ok: true, duplicate: false });
+    } });
+    expect(result).toEqual({ ok: true, duplicate: false });
+    expect(calls).toEqual([tailnet]);
+  });
+
   test("falls back to a later HTTP entrypoint when the first dial fails", async () => {
     const liveUrl = startJsonServer(async (request) => {
       const pathname = new URL(request.url).pathname;

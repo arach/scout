@@ -316,7 +316,7 @@ import {
   PEER_AUTH_MAX_SKEW_MS,
   PeerNonceCache,
 } from "./mesh-peer-auth.js";
-import { createMeshPeerFetch } from "./mesh-peer-client.js";
+import { createMeshPeerFetch, trustedMeshPeerForBrokerUrl } from "./mesh-peer-client.js";
 import {
   TrustEndpointRateLimiter,
   TrustEnrollmentService,
@@ -633,21 +633,18 @@ function effectiveGateMode() {
 /**
  * This daemon's own signed peer client for broker→broker sends (mesh trust
  * cone §5). Peers enrolled in trusted_peers — joined to snapshot nodes by
- * broker URL — are pinned to their enrolled key ID: a missing, unreachable,
- * or mismatched card refuses the send instead of falling back to unsigned.
+ * broker URL or advertised HTTP alias — are pinned to their enrolled key ID.
+ * Missing, unreachable, or mismatched cards never permit unsigned sends.
  * Peers with no enrolled key ID keep the legacy rollout fallback. The shared
  * `meshPeerFetch` singleton stays unwired (the store is keyed by key ID, not
  * base URL, so the join only exists here in the daemon).
  */
 function trustedPeerForBrokerBaseUrl(baseUrl: string) {
-  const normalized = baseUrl.replace(/\/$/, "");
-  const node = Object.values(runtime.snapshot().nodes).find(
-    (candidate) => candidate.brokerUrl?.replace(/\/$/, "") === normalized,
-  );
-  if (!node || !trustedPeerStore) {
-    return undefined;
-  }
-  return trustedPeerStore.listTrustedPeers().find((peer) => peer.nodeId === node.id);
+  return trustedPeerStore ? trustedMeshPeerForBrokerUrl(
+    baseUrl,
+    Object.values(runtime.snapshot().nodes),
+    trustedPeerStore.listTrustedPeers(),
+  ) : undefined;
 }
 
 const daemonMeshPeerFetch = createMeshPeerFetch({

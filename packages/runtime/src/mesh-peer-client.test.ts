@@ -1,3 +1,5 @@
+import type { NodeDefinition, TrustedPeerRecord } from "@openscout/protocol";
+import { forwardMeshMessage, type MeshMessageBundle } from "./mesh-forwarding.js";
 import { mkdtempSync } from "node:fs";
 import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
@@ -19,6 +21,8 @@ import {
 } from "./mesh-peer-auth.js";
 import {
   PeerCardVerificationError,
+  PeerCardUnavailableError,
+  trustedMeshPeerForBrokerUrl,
   PeerTlsDowngradeError,
   PeerTlsPinError,
   createMeshPeerFetch,
@@ -816,5 +820,126 @@ describe("mesh peer client — pinned TLS (§11.4)", () => {
     expect(attempts.filter((url) => url.endsWith("/v1/mesh/messages"))).toHaveLength(2);
     expect(requests).toHaveLength(0);
     real.close();
+  });
+});
+
+
+describe("authenticated mesh route fallback", () => {
+  test("a dead pinned route falls back with the same identity and one signed POST", async () => {
+    const local = freshIdentity();
+    const remote = freshIdentity();
+    const tls = await freshTlsIdentity();
+    const card = peerCard(remote, undefined, { spkiFingerprint: tls.spkiFingerprint });
+    const dead = startTlsPeerServer({ tlsIdentity: tls, card });
+    for (const server of servers) server.stop(true);
+    servers.clear();
+    const live = startTlsPeerServer({ tlsIdentity: tls, card });
+    const node: NodeDefinition = { id: "peer-node", meshId: "mesh", name: "Peer", advertiseScope: "mesh", registeredAt: 1, brokerUrl: dead.baseUrl, meshEntrypoints: [{ kind: "http", url: live.baseUrl }] };
+    const grant: TrustedPeerRecord = { keyId: card.keyId, publicKey: card.publicKey, fingerprint: card.fingerprint, nodeId: node.id, label: "Peer", tier: "control", grantedVia: "sas", grantedAt: 1, tlsSpkiFingerprint: tls.spkiFingerprint };
+    const resolve = (url: string) => trustedMeshPeerForBrokerUrl(url, [node], [grant]);
+    expect(resolve(live.baseUrl + "/")).toBe(grant);
+    const pinned = createPinnedHttpsClient();
+    const client = makeClient(local, { pinnedClient: pinned, expectedPeerKeyId: (url) => resolve(url)?.keyId, expectedPeerTlsPin: (url) => resolve(url)?.tlsSpkiFingerprint });
+    try {
+      const result = await forwardMeshMessage(node, {} as MeshMessageBundle, { peerFetch: client, timeoutMs: 500 });
+      expect(result).toEqual({ ok: true });
+      expect(dead.requests).toHaveLength(0);
+      expect(live.requests).toHaveLength(1);
+      const request = live.requests[0]!;
+      expect(request.method).toBe("POST");
+      expect(request.path).toBe("/v1/mesh/messages");
+      const payload = peerRequestSigningPayload({ method: "POST", path: request.path, bodySha256Hex: sha256Hex(request.body), destinationKeyId: card.keyId, ts: Number(request.headers.get(PEER_AUTH_HEADERS.ts)), nonce: request.headers.get(PEER_AUTH_HEADERS.nonce)! });
+      expect(verifyNodeSignature(local.publicKey, payload, request.headers.get(PEER_AUTH_HEADERS.signature)!)).toBe(true);
+    } finally { pinned.close(); }
+  });
+
+  test("a previously reachable pinned route can fail over after its card and TLS anchor are cached", async () => {
+    const local = freshIdentity();
+    const remote = freshIdentity();
+    const tls = await freshTlsIdentity();
+    const card = peerCard(remote, undefined, { spkiFingerprint: tls.spkiFingerprint });
+    const first = startTlsPeerServer({ tlsIdentity: tls, card });
+    const firstServer = [...servers][0]!;
+    const fallback = startTlsPeerServer({ tlsIdentity: tls, card });
+    const node: NodeDefinition = { id: "peer-node", meshId: "mesh", name: "Peer", advertiseScope: "mesh", registeredAt: 1, brokerUrl: first.baseUrl, meshEntrypoints: [{ kind: "http", url: fallback.baseUrl }] };
+    const grant: TrustedPeerRecord = { keyId: card.keyId, publicKey: card.publicKey, fingerprint: card.fingerprint, nodeId: node.id, label: "Peer", tier: "control", grantedVia: "sas", grantedAt: 1, tlsSpkiFingerprint: tls.spkiFingerprint };
+    const resolve = (url: string) => trustedMeshPeerForBrokerUrl(url, [node], [grant]);
+    const pinned = createPinnedHttpsClient();
+    const client = makeClient(local, { pinnedClient: pinned, expectedPeerKeyId: (url) => resolve(url)?.keyId, expectedPeerTlsPin: (url) => resolve(url)?.tlsSpkiFingerprint });
+    try {
+      await forwardMeshMessage(node, {} as MeshMessageBundle, { peerFetch: client, timeoutMs: 500 });
+      expect(first.requests).toHaveLength(1);
+      firstServer.stop(true);
+      servers.delete(firstServer);
+      await forwardMeshMessage(node, {} as MeshMessageBundle, { peerFetch: client, timeoutMs: 500 });
+      expect(first.requests).toHaveLength(1);
+      expect(fallback.requests).toHaveLength(1);
+      expect(fallback.requests[0]!.headers.get(PEER_AUTH_HEADERS.peer)).toBe(nodeKeyId(local.publicKey));
+    } finally { pinned.close(); }
+  });
+
+  test("an unavailable card never causes an unsigned mutation even without an enrollment", async () => {
+    const local = freshIdentity();
+    const calls: string[] = [];
+    const client = makeClient(local, { fetchImpl: (async (url) => { calls.push(String(url)); throw new Error("connection refused"); }) as typeof fetch });
+    await expect(postJson(client, "http://dead:43110", "/v1/mesh/messages", {})).rejects.toBeInstanceOf(PeerCardUnavailableError);
+    expect(calls).toEqual(["http://dead:43110/v1/node"]);
+  });
+
+  test("fallback aliases cannot bypass an actual enrolled key or TLS pin mismatch", async () => {
+    const local = freshIdentity();
+    const remote = freshIdentity();
+    const tls = await freshTlsIdentity();
+    const card = peerCard(remote, undefined, { spkiFingerprint: tls.spkiFingerprint });
+    const peer = startTlsPeerServer({ tlsIdentity: tls, card });
+    for (const wrongKey of [true, false]) {
+      const node: NodeDefinition = { id: "peer-node", meshId: "mesh", name: "Peer", advertiseScope: "mesh", registeredAt: 1, brokerUrl: peer.baseUrl, meshEntrypoints: [{ kind: "http", url: "https://must-not-try:43110" }] };
+      const grant: TrustedPeerRecord = { keyId: wrongKey ? "f".repeat(64) : card.keyId, publicKey: card.publicKey, fingerprint: card.fingerprint, nodeId: node.id, label: "Peer", tier: "control", grantedVia: "sas", grantedAt: 1, tlsSpkiFingerprint: wrongKey ? tls.spkiFingerprint : "f".repeat(64) };
+      const seen: string[] = [];
+      const resolve = (url: string) => { seen.push(url); return trustedMeshPeerForBrokerUrl(url, [node], [grant]); };
+      const pinned = createPinnedHttpsClient();
+      const client = makeClient(local, { pinnedClient: pinned, expectedPeerKeyId: (url) => resolve(url)?.keyId, expectedPeerTlsPin: (url) => resolve(url)?.tlsSpkiFingerprint });
+      try {
+        await expect(forwardMeshMessage(node, {} as MeshMessageBundle, { peerFetch: client, timeoutMs: 500 })).rejects.toBeInstanceOf(wrongKey ? PeerCardVerificationError : PeerTlsPinError);
+        expect(seen.every((url) => url === peer.baseUrl)).toBe(true);
+        expect(peer.requests).toHaveLength(0);
+      } finally { pinned.close(); }
+    }
+  });
+
+  test("an unavailable recovery probe cannot downgrade an observed pin mismatch into alias fallback", async () => {
+    const local = freshIdentity();
+    const card = peerCard(freshIdentity(), undefined, { spkiFingerprint: "a".repeat(64) });
+    const first = "https://192.168.18.28:43110";
+    const alternative = "https://100.119.71.19:43110";
+    const calls: string[] = [];
+    let cardReads = 0;
+    const client = makeClient(local, {
+      expectedPeerKeyId: () => card.keyId,
+      expectedPeerTlsPin: () => card.tls!.spkiFingerprint,
+      pinnedClient: {
+        async fetch(url) {
+          calls.push(url);
+          if (url.endsWith("/v1/node")) {
+            if (++cardReads === 1) return Response.json({ card });
+            throw new Error("recovery dial unavailable");
+          }
+          throw new PeerTlsPinError("served a different TLS key", first, card.tls!.spkiFingerprint, "b".repeat(64));
+        },
+        async probeFetch() { throw new Error("unpinned request forbidden"); },
+        invalidate() {}, close() {},
+      },
+    });
+    const node: NodeDefinition = { id: "peer-node", meshId: "mesh", name: "Peer", advertiseScope: "mesh", registeredAt: 1, brokerUrl: first, meshEntrypoints: [{ kind: "http", url: alternative }] };
+    await expect(forwardMeshMessage(node, {} as MeshMessageBundle, { peerFetch: client })).rejects.toBeInstanceOf(PeerTlsPinError);
+    expect(cardReads).toBe(2);
+    expect(calls).toEqual([`${first}/v1/node`, `${first}/v1/mesh/messages`, `${first}/v1/node`]);
+  });
+
+  test("an HTTP alias claimed by conflicting trusted identities fails closed", () => {
+    const url = "https://100.119.71.19:43110";
+    const nodes = ["one", "two"].map((id) => ({ id, meshId: "mesh", name: id, advertiseScope: "mesh" as const, registeredAt: 1, meshEntrypoints: [{ kind: "http" as const, url }] }));
+    const peers = nodes.map((node, index) => ({ nodeId: node.id, keyId: String(index).repeat(64) }) as TrustedPeerRecord);
+    expect(() => trustedMeshPeerForBrokerUrl(url, nodes, peers)).toThrow(PeerCardVerificationError);
   });
 });

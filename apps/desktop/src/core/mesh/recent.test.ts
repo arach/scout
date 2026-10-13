@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { NodeDefinition } from "@openscout/protocol";
+import { PeerCardVerificationError, PeerTlsPinError } from "@openscout/runtime/mesh-peer-client";
 import type { MeshNodeStateReport } from "@openscout/runtime/mesh-node-state";
 import { createScoutCommandContext } from "../../cli/context.ts";
 import { renderScoutRecent } from "../../ui/terminal/recent.ts";
@@ -193,6 +194,56 @@ describe("live recent", () => {
     const { deps } = fixture([{ ...archie, brokerUrl: undefined }]);
     expect((await loadScoutRecent({ machine: "archie" }, deps)).machines[0]).toMatchObject({ error: "no mesh broker URL advertised" });
   });
+  test("uses the previously reached tailnet route before an advertised dead LAN", async () => {
+    const tailnet = "https://100.119.71.19:43110";
+    const peer = { ...archie, brokerUrl: tailnet, meshEntrypoints: [{ kind: "http" as const, url: "https://192.168.18.28:43110" }] };
+    const { deps } = fixture([peer]);
+    const urls: string[] = [];
+    deps.peerFetch = async (url) => {
+      urls.push(url);
+      if (url !== tailnet) throw new Error("unreachable LAN must not precede the proved route");
+      return Response.json(state(archie));
+    };
+    expect((await loadScoutRecent({ machine: "archie" }, deps)).machines[0]?.status).toBe("ok");
+    expect(urls).toEqual([tailnet]);
+  });
+
+  test("a stalled preferred route leaves deadline for the authenticated fallback read", async () => {
+    const lan = "https://192.168.18.28:43110";
+    const tailnet = "https://100.119.71.19:43110";
+    for (const stalledBody of [false, true]) {
+      const peer = { ...archie, brokerUrl: lan, meshEntrypoints: [{ kind: "http" as const, url: tailnet }] };
+      const { deps } = fixture([peer]);
+      deps.timeoutMs = 120;
+      const signals: AbortSignal[] = [];
+      const urls: string[] = [];
+      deps.peerFetch = async (url, _path, init) => {
+        urls.push(url);
+        signals.push(init!.signal!);
+        if (url === lan) return stalledBody
+          ? new Response(new ReadableStream({ start() {} }))
+          : new Promise<Response>(() => {});
+        expect(signals[0]!.aborted).toBe(true);
+        return Response.json(state(archie));
+      };
+      const result = await loadScoutRecent({ machine: "archie" }, deps);
+      expect(result.machines[0]?.status).toBe("ok");
+      expect(urls).toEqual([lan, tailnet]);
+      expect(signals.every((signal) => signal.aborted)).toBe(true);
+    }
+  });
+
+  test("a real identity or pin rejection is not bypassed through another alias", async () => {
+    const peer = { ...archie, meshEntrypoints: [{ kind: "http" as const, url: "https://100.119.71.19:43110" }] };
+    for (const failure of [new PeerCardVerificationError("wrong enrolled key", archie.brokerUrl!), new PeerTlsPinError("wrong TLS key", archie.brokerUrl!, "f".repeat(64))]) {
+      const { deps } = fixture([peer]);
+      const urls: string[] = [];
+      deps.peerFetch = async (url) => { urls.push(url); throw failure; };
+      expect((await loadScoutRecent({ machine: "archie" }, deps)).machines[0]).toMatchObject({ status: "unavailable", error: failure.message });
+      expect(urls).toEqual([archie.brokerUrl!]);
+    }
+  });
+
   test("tries another advertised peer URL after a refusal without adding another machine", async () => {
     const peer = { ...archie, meshEntrypoints: [{ kind: "http" as const, url: "http://archie-other:43110" }] };
     const { deps } = fixture([peer]);

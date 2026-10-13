@@ -1,9 +1,8 @@
 /**
- * Mesh dial preference: LAN before Tailscale.
- *
- * Cards and bind lists advertise both paths. Same-house peers should hit the
- * RFC1918 / .local address first; Tailscale CGNAT and MagicDNS are the
- * fallback when LAN is unreachable.
+ * Mesh dial preference: preserve the selected broker route, then rank fallback
+ * addresses LAN before Tailscale. Discovery promotes the URL that actually
+ * answered from this observer; sorting it behind an advertised LAN address
+ * would discard that evidence. Cards and bind lists still rank unselected paths.
  */
 
 import type { NodeDefinition } from "@openscout/protocol";
@@ -52,7 +51,9 @@ export function httpMeshUrlsForNode(node: Pick<NodeDefinition, "brokerUrl" | "me
       urls.push(entrypoint.url);
     }
   }
-  return orderMeshDialUrls(urls);
+  const ordered = orderMeshDialUrls(urls);
+  const preferred = node.brokerUrl?.trim();
+  return preferred ? [preferred, ...ordered.filter((url) => url !== preferred)] : ordered;
 }
 
 function isPrivateLanIPv4(address: string): boolean {
