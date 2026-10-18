@@ -1,3 +1,6 @@
+import { flightCompletion, hasExplicitCompletion } from "@openscout/protocol";
+import { explicitReplyMatchesFlight } from "./broker-explicit-completion.js";
+import { isFinalReplyForInvocation } from "./broker-conversation-helpers.js";
 import { readMessageRecord } from "./broker-message-records.js";
 import { isDeepStrictEqual } from "node:util";
 
@@ -33,6 +36,8 @@ type FlightLifecycleRuntime = {
 };
 
 type FlightLifecycleJournal = {
+  getFlight?: (id: string) => FlightRecord | undefined;
+  getCurrentFlightForInvocation?: (invocationId: string) => FlightRecord | undefined;
   visitDeliveries(visitor: (delivery: DeliveryIntent) => void | Promise<void>, options?: { activeOnly?: boolean }): Promise<void>;
   listDeliveryAttempts?: (deliveryId: string) => DeliveryAttempt[];
 };
@@ -276,15 +281,43 @@ export class BrokerFlightLifecycleService {
     // Single chokepoint before journal/sqlite persistence, work-item promotion,
     // and mesh forwarding: scrub registered credentials from free-text fields.
     let flightToRecord = redactFlightRecordSecrets(
-      normalizeRecordedFlight(flight, invocation, this.now()),
+      flight,
     );
     let didRecordFlight = false;
     let previousFlight: FlightRecord | undefined;
     await this.options.durableStore.runWrite(async () => {
       // Recheck the caller's observation after acquiring the canonical writer.
       if (eligible && !eligible()) return;
-      const previous = this.options.runtime.snapshot().flights[flightToRecord.id];
+      const previous = this.options.journal.getFlight?.(flightToRecord.id) ?? this.options.runtime.snapshot().flights[flightToRecord.id];
       previousFlight = previous;
+      if (previous?.metadata?.completion !== undefined && (!invocation || !hasExplicitCompletion(invocation)
+        || previous.invocationId !== flightToRecord.invocationId || previous.targetAgentId !== flightToRecord.targetAgentId
+        || previous.requesterId !== flightToRecord.requesterId)) {
+        throw new Error("completion_flight_identity_mismatch");
+      }
+      if (invocation && hasExplicitCompletion(invocation)) {
+        if (!previous) throw new Error("completion_flight_unknown");
+        if (this.options.journal.getCurrentFlightForInvocation
+          && this.options.journal.getCurrentFlightForInvocation(invocation.id)?.id !== flightToRecord.id) return;
+        const completion = flightCompletion(previous);
+        if (!completion) throw new Error("completion_state_invalid");
+        // Adapter/status snapshots never own the contract revision or obligations.
+        flightToRecord = { ...flightToRecord, metadata: { ...flightToRecord.metadata, completion } };
+        if (flightToRecord.state === "completed" || (flightToRecord.state === "failed"
+          && ["empty_reply", "empty_completed_output"].includes(String(flightToRecord.metadata?.failureStage)))) {
+          const replyId = flightToRecord.metadata?.replyMessageId;
+          const reply = typeof replyId === "string" ? await readMessageRecord(this.options.runtime.snapshot().messages, replyId) : undefined;
+          if (!reply || !isFinalReplyForInvocation(reply, invocation)
+            || !explicitReplyMatchesFlight(reply, invocation, previous, this.options.runtime.snapshot().flights, this.options.journal.getFlight?.bind(this.options.journal))) {
+            if (flightToRecord.metadata?.completedByBrokerReply === true) return;
+            const { resultReply: _result, failureStage: _failure, ...metadata } = flightToRecord.metadata ?? {};
+            flightToRecord = { ...flightToRecord, state: "waiting", completedAt: undefined, output: undefined, error: undefined,
+              summary: "Execution ended; awaiting an explicit final reply.",
+              metadata: { ...metadata, completion: { ...completion, awaitingFinal: true } } };
+          }
+        }
+      }
+      flightToRecord = normalizeRecordedFlight(flightToRecord, invocation, this.now());
       // A delayed adapter/status update cannot erase an acknowledged reply
       // while its separate completion write is being recovered.
       if (previous?.metadata?.acceptedReply !== undefined) {

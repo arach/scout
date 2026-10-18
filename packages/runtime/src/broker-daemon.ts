@@ -1,5 +1,6 @@
 // Must stay the first import: materializes OPENSCOUT_INSTANCE before any module reads paths/ports.
 import { openScoutCheckoutInstanceDefault, openScoutInstanceBootstrap } from "./instance-checkout-bootstrap.js";
+import { flightCompletion, SCOUT_COMPLETION_CAPABILITY } from "@openscout/protocol";
 import { SCOUT_SESSION_INPUT_RECEIPTS_CAPABILITY } from "@openscout/protocol";
 import { deliverInPlace } from "./in-place/deliver.js";
 import { isolatedCodexPermissionMetadata } from "./permission-policy.js";
@@ -830,6 +831,9 @@ const controlStreams = new BrokerControlStreamService({
 const operatorActorId = "operator";
 const durableRecords = new BrokerDurableRecordStore({
   localNodeId: nodeId,
+  completionCurrentFlight: id => journal.getCurrentFlightForInvocation(id),
+  completionFlight: id => journal.getFlight(id),
+  completionInvocation: id => journal.getInvocation(id),
   runtime,
   durableStore,
   knownInvocations,
@@ -1226,7 +1230,7 @@ const localNode: NodeDefinition = {
   webHost: localWebHost,
   ...(localIrohEntrypoint ? { meshEntrypoints: [localIrohEntrypoint] } : {}),
   tailnetName,
-  capabilities: ["broker", "mesh", "local_runtime", SCOUT_SESSION_INPUT_RECEIPTS_CAPABILITY],
+  capabilities: [SCOUT_COMPLETION_CAPABILITY, "broker", "mesh", "local_runtime", SCOUT_SESSION_INPUT_RECEIPTS_CAPABILITY],
   registeredAt: Date.now(),
   lastSeenAt: Date.now(),
 };
@@ -1421,7 +1425,8 @@ const flightLifecycleService = new BrokerFlightLifecycleService({
   }),
   deliverTerminalReport: (flightId) => terminalReportDeliveryService.deliver(flightId),
   maybeForwardFlightToAuthority: (flight) => meshForwardingService.maybeForwardFlightToAuthority(flight),
-  isInvocationActive: (invocationId) => replyCompletionRecovery.isPending(invocationId)
+  isInvocationActive: (invocationId) => flightCompletion(runtime.flightForInvocation(invocationId))?.awaitingFinal === true
+    || replyCompletionRecovery.isPending(invocationId)
     || localInvocationService.hasActiveInvocation(invocationId) || externalSessionService.hasPendingInvocation(invocationId),
   onTerminalFlight: async ({ flight, invocation }) => {
     if (invocation) void externalSessionService.forwardResult(invocation, flight)
@@ -1976,6 +1981,8 @@ const messageService = new BrokerMessageService({
     const flight = { ...current, metadata: { ...current.metadata, acceptedReply: receipt } };
     await commitDurableEntries({ kind: "flight.record", flight }, async () => { await runtime.upsertFlight(flight); });
   }),
+  completionCurrentFlight: id => journal.getCurrentFlightForInvocation(id),
+  completionFlight: id => journal.getFlight(id),
   authorizeReplyCompletion: (invocation, reply) => externalSessionService.authorizesReplyCompletion(invocation, reply),
   activeLocalEndpointForAgent: (agentId) => localEndpointResolver.activeLocalEndpointForAgent(agentId),
 });
@@ -2727,7 +2734,8 @@ const dispatchRecoveryService = new BrokerDispatchRecoveryService({
   dispatchJobs: () => journal.listRecoverableInvocationDispatchJobs({ limit: 5000 }),
   dispatchJobForInvocation: (invocationId) => journal.getInvocationDispatchJobForInvocation(invocationId),
   invocationFor: (invocationId) => knownInvocations.get(invocationId),
-  isInvocationActive: (invocationId) => replyCompletionRecovery.isPending(invocationId)
+  isInvocationActive: (invocationId) => flightCompletion(runtime.flightForInvocation(invocationId))?.awaitingFinal === true
+    || replyCompletionRecovery.isPending(invocationId)
     || localInvocationService.hasActiveInvocation(invocationId) || externalSessionService.hasPendingInvocation(invocationId),
   runDispatchJob: (job, invocation) => invocationDispatchService.runDispatchJob(job, invocation),
   requeueDispatchJob: (job, invocation, flight) => invocationDispatchService.requeueDispatchJob(job, invocation, flight),
