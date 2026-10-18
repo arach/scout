@@ -225,6 +225,7 @@ import { BrokerManagedSessionService } from "./broker-managed-session-service.js
 import { BrokerManagedSessionHttpService } from "./broker-managed-session-http-service.js";
 import { BrokerLocalEndpointResolver } from "./broker-local-endpoint-resolver.js";
 import { BrokerLocalInvocationService } from "./broker-local-invocation-service.js";
+import { BrokerTerminalReportDeliveryService, prepareTerminalReport, matchesPendingTerminalReport } from "./broker-terminal-report-delivery-service.js";
 import { BrokerInvocationResultDeliveryService, matchesPendingInvocationResultReply } from "./broker-invocation-result-delivery-service.js";
 import {
   buildCardlessSessionEndpoint,
@@ -1404,6 +1405,10 @@ const flightLifecycleService = new BrokerFlightLifecycleService({
   updateDeliveryStatus: updateDeliveryStatusDurably,
   updateDeliveryStatusIf: deliveryStore.updateDeliveryStatusIf,
   promoteInvocationFlightToWork,
+  prepareTerminalReport: (flight, invocation) => prepareTerminalReport(flight, invocation, {
+    nodeId, systemActorId: systemActor.id, conversation: (id) => runtime.conversation(id), now: Date.now,
+  }),
+  deliverTerminalReport: (flightId) => terminalReportDeliveryService.deliver(flightId),
   maybeForwardFlightToAuthority: (flight) => meshForwardingService.maybeForwardFlightToAuthority(flight),
   isInvocationActive: (invocationId) => replyCompletionRecovery.isPending(invocationId)
     || localInvocationService.hasActiveInvocation(invocationId) || externalSessionService.hasPendingInvocation(invocationId),
@@ -2005,6 +2010,36 @@ const externalSessionService = new BrokerExternalSessionService({
   postMessage: postConversationMessage,
 });
 
+const terminalReportDeliveryService = new BrokerTerminalReportDeliveryService({
+  nodeId,
+  flightById: (id) => journal.getFlight(id),
+  quarantineRecord: (entry, reason) => projection.quarantineRecord(entry, reason),
+  postMessage: postConversationMessage,
+  markDelivered: (flightId, expected) => durableStore.runWrite(async () => {
+    const current = journal.getFlight(flightId);
+    if (!current || !matchesPendingTerminalReport(current, expected)) return false;
+    const flight: FlightRecord = { ...current, metadata: { ...current.metadata,
+      terminalReport: { ...expected, status: "delivered", deliveredAt: Date.now() },
+    } };
+    await durableStore.commitEntries({ kind: "flight.record", flight, preserveCurrent: true }, async () => {
+      await runtime.upsertFlight(flight, { preserveCurrent: true });
+    });
+    return true;
+  }),
+  warn: (message, error) => console.warn(message, error),
+});
+let terminalReportRecoveryFlights: Iterator<FlightRecord> | undefined;
+function recoverTerminalReports(): void {
+  terminalReportRecoveryFlights ??= journal.pendingTerminalReports();
+  let scanned = 0;
+  while (scanned < 256 && terminalReportDeliveryService.availableCapacity > 0) {
+    const next = terminalReportRecoveryFlights.next();
+    if (next.done) { terminalReportRecoveryFlights = undefined; break; }
+    scanned++;
+    void terminalReportDeliveryService.deliver(next.value.id);
+  }
+}
+
 const invocationResultDeliveryService = new BrokerInvocationResultDeliveryService({
   flightForInvocation: (id) => runtime.flightForInvocation(id),
   quarantineRecord: (entry, reason) => projection.quarantineRecord(entry, reason),
@@ -2529,6 +2564,15 @@ async function postInvocationStatusMessage(
     error?: string;
   },
 ): Promise<void> {
+  // Terminal reports are already journaled with the outcome. Every legacy
+  // failure callsite joins that outbox; it must not mint a second status message.
+  if (flight.id) {
+    const current = runtime.flight(flight.id);
+    if (current?.state === "failed" || current?.state === "cancelled") {
+      await terminalReportDeliveryService.deliver(current.id);
+      return;
+    }
+  }
   await messageService.postInvocationStatusMessage(invocation, flight);
 }
 
@@ -3473,6 +3517,7 @@ const otlpReceiver = localAdminKey ? undefined : await startBrokerOtlpReceiver(c
 setTimeout(() => {
   if (!startupTrafficGate.snapshot().mutationsAdmitted) return;
   recoverInvocationResultReplies();
+  recoverTerminalReports();
   // Reconcile persisted external attempts without repeating a provider send.
   void externalSessionService.recover([...knownInvocations.values()])
     .then((failed) => { if (failed.length) console.error("[openscout-runtime] external session recovery incomplete", failed); })
@@ -3596,6 +3641,7 @@ if (startupTrafficGate.snapshot().mutationsAdmitted) {
   // missed. Deferrals gate per-invocation cadence inside the recovery service.
   setInterval(() => {
     recoverInvocationResultReplies();
+    recoverTerminalReports();
     replyCompletionRecovery.recover()
       .then(() => dispatchRecoveryService.recoverQueuedFlights({ reason: "queued_retry_sweep" })).catch((error) => {
       console.error("[openscout-runtime] queued dispatch retry sweep failed:", error);
