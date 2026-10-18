@@ -50,9 +50,12 @@ function flightRotationTimestamp(flight: { completedAt?: number; startedAt?: num
   return flight.completedAt ?? flight.startedAt ?? 0;
 }
 
+function pendingFlightReports(flight: FlightRecord): Array<{ message?: { id?: string; replyToMessageId?: string } }> {
+  return [flight.metadata?.resultReply, flight.metadata?.terminalReport].filter((intent) =>
+    intent && typeof intent === "object" && (intent as { status?: unknown }).status === "pending") as Array<{ message?: { id?: string; replyToMessageId?: string } }>;
+}
 function hasPendingResultReply(flight: FlightRecord): boolean {
-  const reply = flight.metadata?.resultReply;
-  return Boolean(reply && typeof reply === "object" && (reply as { status?: unknown }).status === "pending");
+  return pendingFlightReports(flight).length > 0;
 }
 
 const TERMINAL_DELIVERY_STATUSES = new Set<DeliveryStatus>([
@@ -174,8 +177,7 @@ export function planHistoryRotation(
     if (!isTerminalFlightState(flight.state) || hasPendingResultReply(flight)) {
       protectedInvocationIds.add(flight.invocationId);
     }
-    if (hasPendingResultReply(flight)) {
-      const message = (flight.metadata!.resultReply as { message?: { id?: string; replyToMessageId?: string } }).message;
+    for (const { message } of pendingFlightReports(flight)) {
       if (message?.id) protectedMessageIds.add(message.id);
       if (message?.replyToMessageId) protectedMessageIds.add(message.replyToMessageId);
     }

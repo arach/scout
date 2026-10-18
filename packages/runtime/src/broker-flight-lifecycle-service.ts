@@ -70,6 +70,9 @@ export type BrokerFlightLifecycleServiceOptions = {
   ) => Promise<void>;
   maybeForwardFlightToAuthority: (flight: FlightRecord) => Promise<void>;
   isInvocationActive: (invocationId: string) => boolean;
+  /** Runs inside the writer; the report intent commits with terminal truth. */
+  prepareTerminalReport?: (flight: FlightRecord, invocation: InvocationRequest | undefined) => FlightRecord;
+  deliverTerminalReport?: (flightId: string) => Promise<unknown>;
   /**
    * Role lifecycle (e.g. orchestrator post_ask_summary). Fire-and-forget safe;
    * failures should be warned, not thrown into flight recording.
@@ -290,10 +293,17 @@ export class BrokerFlightLifecycleService {
       if (previous && isTerminalFlightState(previous.state)) {
         // Terminal enrichment must not erase/reopen a durable reply intent.
         // Only the result outbox's compare-and-write marks it delivered.
-        flightToRecord = { ...flightToRecord, metadata: {
+        flightToRecord = { ...flightToRecord,
+          // Preserve the first report's human-readable terminal payload.
+          ...(previous.metadata?.terminalReport ? { summary: previous.summary } : {}),
+          metadata: {
           ...previous.metadata, ...flightToRecord.metadata,
           ...(previous.metadata?.resultReply ? { resultReply: previous.metadata.resultReply } : {}),
+          ...(previous.metadata?.terminalReport ? { terminalReport: previous.metadata.terminalReport } : {}),
         } };
+      }
+      if (!previous?.metadata?.terminalReport) {
+        flightToRecord = this.options.prepareTerminalReport?.(flightToRecord, invocation) ?? flightToRecord;
       }
       if (previous && isDuplicateFlightUpdate(previous, flightToRecord)) {
         return;
@@ -317,6 +327,13 @@ export class BrokerFlightLifecycleService {
     });
     if (!didRecordFlight) return;
 
+    // Start delivery before unrelated endpoint/work bookkeeping can fail. The
+    // durable intent remains recoverable even when this process stops here.
+    if (flightToRecord.metadata?.terminalReport) {
+      void this.options.deliverTerminalReport?.(flightToRecord.id).catch((error) => {
+        this.options.warn?.(`[openscout-runtime] terminal report pending ${flightToRecord.id}:`, error);
+      });
+    }
     await this.reconcileMessageDeliveriesForFlight(flightToRecord, invocation);
     if (invocation && isTerminalFlightState(flightToRecord.state)) {
       try {
