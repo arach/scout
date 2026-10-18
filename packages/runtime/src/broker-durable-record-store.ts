@@ -75,6 +75,9 @@ type RuntimeRecordStore = {
 
 export type BrokerDurableRecordStoreOptions = {
   localNodeId?: string;
+  completionCurrentFlight?: (invocationId: string) => FlightRecord | undefined;
+  completionFlight?: (id: string) => FlightRecord | undefined;
+  completionInvocation?: (id: string) => InvocationRequest | undefined;
   runtime: RuntimeRecordStore;
   durableStore: DurableStore;
   knownInvocations: Map<string, InvocationRequest>;
@@ -648,7 +651,14 @@ export class BrokerDurableRecordStore {
           return { deliveries: [], entries: [], duplicate: existing };
         }
       }
-      assertExplicitReplyAdmission(message, this.options.runtime.peek());
+      const replySnapshot = this.options.runtime.peek();
+      const replyIdentity = message.metadata?.completionReply as { flightId?: string; invocationId?: string } | undefined;
+      const durableReplyFlight = replyIdentity?.flightId ? this.options.completionFlight?.(replyIdentity.flightId) : undefined;
+      if (replyIdentity && (this.options.completionCurrentFlight ?? this.options.runtime.flightForInvocation?.bind(this.options.runtime))?.(replyIdentity.invocationId ?? "")?.id !== replyIdentity.flightId) {
+        throw new Error("completion_flight_not_current");
+      }
+      assertExplicitReplyAdmission(message, durableReplyFlight ? { ...replySnapshot,
+        flights: { ...replySnapshot.flights, [durableReplyFlight.id]: durableReplyFlight } } : replySnapshot, this.options.completionFlight);
       const deliveries = this.options.runtime.planMessage(message, {
         localOnly: options.localOnly,
       });
@@ -680,10 +690,16 @@ export class BrokerDurableRecordStore {
     } = {},
   ): Promise<{ flight: FlightRecord; dispatchJob?: BrokerInvocationDispatchJob; entries: BrokerJournalEntry[] }> => {
     return this.options.durableStore.runWrite(async () => {
-      const snapshot = this.options.runtime.peek();
-      const existing = snapshot.invocations[invocation.id];
+      const runtimeSnapshot = this.options.runtime.peek();
+      const relatedParentId = (invocation.metadata?.completionRelation as { parentFlightId?: string } | undefined)?.parentFlightId;
+      const durableParent = relatedParentId ? this.options.completionFlight?.(relatedParentId) : undefined;
+      const snapshot = durableParent ? { ...runtimeSnapshot, flights: { ...runtimeSnapshot.flights, [durableParent.id]: durableParent } } : runtimeSnapshot;
+      const existing = this.options.completionInvocation?.(invocation.id) ?? snapshot.invocations[invocation.id];
       if (existing) {
-        const existingFlight = Object.values(snapshot.flights).find(candidate => candidate.invocationId === invocation.id);
+        const acceptedFlightId = existing.metadata?.completionAcceptedFlightId;
+        const existingFlight = typeof acceptedFlightId === "string"
+          ? this.options.completionFlight?.(acceptedFlightId) ?? snapshot.flights[acceptedFlightId]
+          : Object.values(snapshot.flights).find(candidate => candidate.invocationId === invocation.id);
         if (!existingFlight || !isIdempotentInvocationRetry(existing, invocation)) {
           throw new Error(`invocation id ${invocation.id} is already assigned to a different record`);
         }
@@ -705,13 +721,17 @@ export class BrokerDurableRecordStore {
       const completion = prepareCompletionAdmission(invocation, flight, snapshot, this.options.localNodeId);
       flight = completion.flight;
       if (completion.parent && (!this.options.runtime.upsertFlight
-        || this.options.runtime.flightForInvocation?.(completion.parent.invocationId)?.id !== completion.parent.id)) {
+        || (this.options.completionCurrentFlight ?? this.options.runtime.flightForInvocation?.bind(this.options.runtime))?.(completion.parent.invocationId)?.id !== completion.parent.id)) {
         throw new Error("completion_parent_not_current");
       }
       // A reused client message can predate this request and retain its original
       // ID/metadata. The invocation is always the canonical acceptance witness,
       // even when this writer also owns the message's conversation.
       const receiptMessage = options.receiptMessage ?? options.message;
+      if (invocation.metadata?.completion || invocation.metadata?.completionRelation) invocation = { ...invocation, metadata: {
+        ...invocation.metadata, completionAcceptedFlightId: flight.id,
+        ...(invocation.metadata?.completion ? { completionFlightId: flight.id } : {}),
+      } };
       const recordedInvocation = receiptMessage ? {
         ...invocation, metadata: { ...invocation.metadata,
           acceptedDeliveryReceipt: messageWithAcceptedFlight(receiptMessage, flight) },

@@ -533,6 +533,7 @@ export class FileBackedBrokerJournal {
    * markers alone cannot describe what earlier ones evicted. */
   private appliedRotations: AppliedHistoryRotation[] = [];
   private readonly pendingResultFlights = new Map<string, FlightRecord>();
+  private readonly currentFlightIds = new Map<string, string>();
   private readonly pendingTerminalReportFlights = new Map<string, FlightRecord>();
   private readonly pendingWorkPromotionFlights = new Map<string, FlightRecord>();
   private readonly dispatchJobIdsByInvocation = new Map<string, Set<string>>();
@@ -783,6 +784,7 @@ export class FileBackedBrokerJournal {
     const latestIndexByKey = new Map<string, number>();
     const latestEncodedBytesByKey = new Map<string, number>();
     const lastFlightById = new Map<string, FlightRecord>();
+    const scannedCurrentFlightIds = new Map<string, string>();
     const countsByKind: BrokerJournalLoadReport["countsByKind"] = {};
     let estimatedReclaimBytes = 0;
 
@@ -803,7 +805,9 @@ export class FileBackedBrokerJournal {
       }
       if (entry.kind === "flight.record") {
         const previous = lastFlightById.get(entry.flight.id);
-        if (previous && sameValue(previous, entry.flight)) {
+        const changesCurrent = !entry.preserveCurrent && scannedCurrentFlightIds.get(entry.flight.invocationId) !== entry.flight.id;
+        if (!entry.preserveCurrent) scannedCurrentFlightIds.set(entry.flight.invocationId, entry.flight.id);
+        if (previous && !changesCurrent && sameValue(previous, entry.flight)) {
           estimatedReclaimBytes += encodedLineBytes;
         }
         lastFlightById.set(entry.flight.id, entry.flight);
@@ -1374,6 +1378,15 @@ export class FileBackedBrokerJournal {
     return this.state.snapshot.collaborationRecords[recordId];
   }
 
+  getCurrentFlightForInvocation(invocationId: string): FlightRecord | undefined {
+    const id = this.currentFlightIds.get(invocationId);
+    return id ? this.state.snapshot.flights[id] : undefined;
+  }
+
+  getInvocation(invocationId: string): InvocationRequest | undefined {
+    return this.state.snapshot.invocations[invocationId];
+  }
+
   getFlight(flightId: string): FlightRecord | undefined {
     return this.state.snapshot.flights[flightId];
   }
@@ -1739,6 +1752,7 @@ export class FileBackedBrokerJournal {
       pendingBytes = 0;
     };
     const lastFlightById = new Map<string, FlightRecord>();
+    const compactedCurrentFlightIds = new Map<string, string>();
     // Every history.rotate marker applied during the scan kept its eviction
     // sets in `appliedRotations`. A record line is dropped when ANY rotation
     // after it doomed the record — the marker itself survives via the shared
@@ -1777,7 +1791,9 @@ export class FileBackedBrokerJournal {
         if (entry.kind === "flight.record" && live?.dedupeFlights !== false) {
           const previous = lastFlightById.get(entry.flight.id);
           lastFlightById.set(entry.flight.id, entry.flight);
-          if (previous && sameValue(previous, entry.flight)) {
+          const changesCurrent = !entry.preserveCurrent && compactedCurrentFlightIds.get(entry.flight.invocationId) !== entry.flight.id;
+          if (!entry.preserveCurrent) compactedCurrentFlightIds.set(entry.flight.invocationId, entry.flight.id);
+          if (previous && !changesCurrent && sameValue(previous, entry.flight)) {
             return;
           }
         } else {
@@ -1844,6 +1860,7 @@ export class FileBackedBrokerJournal {
     // Duplicate selection only mutates entity/flight maps. Copy each touched
     // map once; message-only batches must not clone all historical messages.
     const nextSnapshot = { ...this.state.snapshot };
+    let nextCurrentFlightIds: Map<string, string> | undefined;
     const copied = new Set<keyof RuntimeRegistrySnapshot>();
     const copy = <K extends keyof RuntimeRegistrySnapshot>(key: K): void => {
       if (copied.has(key)) return;
@@ -1853,7 +1870,7 @@ export class FileBackedBrokerJournal {
     const retained: BrokerJournalEntry[] = [];
 
     for (const entry of entries) {
-      if (!this.shouldAppendEntry(entry, nextSnapshot)) {
+      if (!this.shouldAppendEntry(entry, nextSnapshot, nextCurrentFlightIds ?? this.currentFlightIds)) {
         continue;
       }
       retained.push(entry);
@@ -1867,7 +1884,13 @@ export class FileBackedBrokerJournal {
         case "agent.endpoint.delete": copy("endpoints"); break;
         case "conversation.upsert": copy("conversations"); break;
         case "binding.upsert": copy("bindings"); break;
-        case "flight.record": copy("flights"); break;
+        case "flight.record":
+          copy("flights");
+          if (!entry.preserveCurrent) {
+            nextCurrentFlightIds ??= new Map(this.currentFlightIds);
+            nextCurrentFlightIds.set(entry.flight.invocationId, entry.flight.id);
+          }
+          break;
         case "history.rotate":
           // The rotation deletes from the maps it touches — copy them so the
           // dedupe check cannot evict live records from the real snapshot.
@@ -1885,9 +1908,11 @@ export class FileBackedBrokerJournal {
   private shouldAppendEntry(
     entry: BrokerJournalEntry,
     snapshot: RuntimeRegistrySnapshot,
+    currentFlightIds: ReadonlyMap<string, string>,
   ): boolean {
     if (entry.kind === "flight.record") {
-      return !sameValue(snapshot.flights[entry.flight.id], entry.flight);
+      return (!entry.preserveCurrent && currentFlightIds.get(entry.flight.invocationId) !== entry.flight.id)
+        || !sameValue(snapshot.flights[entry.flight.id], entry.flight);
     }
 
     if (!isDedupableEntry(entry)) {
@@ -2048,6 +2073,7 @@ export class FileBackedBrokerJournal {
         return;
       case "flight.record":
         this.state.snapshot.flights[entry.flight.id] = entry.flight;
+        if (!entry.preserveCurrent) this.currentFlightIds.set(entry.flight.invocationId, entry.flight.id);
         this.updateDispatchJobsForFlight(entry.flight.id);
         this.updatePeerMirrorsForFlight(entry.flight.id);
         if ((entry.flight.metadata?.terminalReport as { status?: unknown } | undefined)?.status === "pending") {
@@ -2191,6 +2217,7 @@ export class FileBackedBrokerJournal {
       this.updateDispatchJobsForFlight(flightId);
       this.pendingWorkPromotionFlights.delete(flightId);
     }
+    for (const invocationId of evicted.invocationIds) this.currentFlightIds.delete(invocationId);
 
     for (const deliveryId of evicted.deliveryIds) {
       const flightId = this.state.deliveries.get(deliveryId)?.metadata?.peerFlightId;

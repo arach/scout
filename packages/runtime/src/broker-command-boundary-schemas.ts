@@ -239,7 +239,9 @@ export function brokerInvocationRequestSchemaFor(
   targetSessionId: nonEmptyString.nullish(),
   targetLabel: nonEmptyString.nullish(),
   routePolicy: scoutRoutePolicySchema.nullish(),
-}).passthrough();
+}).passthrough().refine(payload => payload.metadata?.completion === undefined
+  && payload.metadata?.completionRelation === undefined && payload.metadata?.completionLocalNodeId === undefined,
+  "completion contracts must enter through ask /v1/deliver");
 }
 
 /** Boundary schema validated against the bundled catalog; request paths that
