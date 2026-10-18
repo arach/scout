@@ -1,3 +1,4 @@
+import { explicitReplyMatchesFlight } from "./broker-explicit-completion.js";
 import { isIdempotentMessageRetry } from "./broker-message-idempotency.js";
 import { isDeepStrictEqual } from "node:util";
 import { canonicalMessageRecord } from "./message-record-canonical.js";
@@ -272,7 +273,8 @@ export class BrokerMessageService {
   private completionFlight(invocation: InvocationRequest, reply: MessageRecord): FlightRecord | undefined {
     if (!this.authorizedFinalReply(invocation, reply)) return undefined;
     const flight = this.deps.runtime.flightForInvocation(invocation.id);
-    if (!flight || !isWorkingFlightState(flight.state)) return undefined;
+    if (!flight || !isWorkingFlightState(flight.state)
+      || !explicitReplyMatchesFlight(reply, invocation, flight, this.deps.runtime.snapshot().flights)) return undefined;
     const startedAt = flight.startedAt ?? invocation.createdAt;
     if (reply.createdAt < Math.max(0, startedAt - 5_000)) return undefined;
     const accepted = acceptedInvocationReply(flight, invocation);

@@ -1,3 +1,4 @@
+import { assertExplicitReplyAdmission, prepareCompletionAdmission } from "./broker-explicit-completion.js";
 import { messageWithAcceptedFlight } from "./broker-delivery-receipt-recovery.js";
 import { ChatQuestionError, transitionChatQuestion } from "./chat-question-transition.js";
 import { clearOperatorTitle, markOperatorTitled } from "./conversation-title.js";
@@ -66,6 +67,8 @@ type RuntimeRecordStore = {
   planMessage(message: MessageRecord, options?: { localOnly?: boolean }): DeliveryIntent[];
   correctMessage(message: MessageRecord): Promise<void>;
   commitMessage(message: MessageRecord, deliveries: DeliveryIntent[]): Promise<void>;
+  upsertFlight?(flight: FlightRecord, options?: { preserveCurrent?: boolean }): Promise<void>;
+  flightForInvocation?(invocationId: string): FlightRecord | undefined;
   planInvocation(invocation: InvocationRequest): FlightRecord;
   commitInvocation(invocation: InvocationRequest, flight: FlightRecord): Promise<void>;
 };
@@ -645,6 +648,7 @@ export class BrokerDurableRecordStore {
           return { deliveries: [], entries: [], duplicate: existing };
         }
       }
+      assertExplicitReplyAdmission(message, this.options.runtime.peek());
       const deliveries = this.options.runtime.planMessage(message, {
         localOnly: options.localOnly,
       });
@@ -698,6 +702,12 @@ export class BrokerDurableRecordStore {
           status: "not_submitted", checkedAt: Math.max(flight.startedAt ?? invocation.createdAt, dispatchJob.createdAt),
         } },
       };
+      const completion = prepareCompletionAdmission(invocation, flight, snapshot, this.options.localNodeId);
+      flight = completion.flight;
+      if (completion.parent && (!this.options.runtime.upsertFlight
+        || this.options.runtime.flightForInvocation?.(completion.parent.invocationId)?.id !== completion.parent.id)) {
+        throw new Error("completion_parent_not_current");
+      }
       // A reused client message can predate this request and retain its original
       // ID/metadata. The invocation is always the canonical acceptance witness,
       // even when this writer also owns the message's conversation.
@@ -730,6 +740,7 @@ export class BrokerDurableRecordStore {
           { kind: "message.record" as const, message },
           { kind: "deliveries.record" as const, deliveries },
         ] : []),
+        ...(completion.parent ? [{ kind: "flight.record" as const, flight: completion.parent, preserveCurrent: true }] : []),
         { kind: "invocation.record", invocation: recordedInvocation },
         ...(dispatchJob ? [{ kind: "invocation.dispatch_job.record" as const, job: dispatchJob }] : []),
         { kind: "flight.record", flight },
@@ -745,6 +756,7 @@ export class BrokerDurableRecordStore {
             const recorded = committed.find(entry => entry.kind === "message.record");
             await this.options.runtime.commitMessage(recorded?.kind === "message.record" ? recorded.message : message, deliveries);
           }
+          if (completion.parent) await this.options.runtime.upsertFlight!(completion.parent, { preserveCurrent: true });
           await this.options.runtime.commitInvocation(recordedInvocation, flight);
           this.options.knownInvocations.set(invocation.id, recordedInvocation);
         },
