@@ -52,10 +52,10 @@ export type MobileAskSessionDeps = {
 
 const REFUSAL_MESSAGES: Record<string, string> = {
   empty_body: "Type a reply before sending.",
-  request_id_required: "This reply needs a stable request id before it can be sent.",
+  request_id_required: "Update the app on this device before sending this reply.",
   session_input_unsupported: "Update Scout on this Mac before sending replies into open sessions.",
-  delivery_unconfirmed: "Scout could not confirm whether this reply was submitted. Keep this reply and retry with the same request id.",
-  request_outcome_unknown: "This reply may have been submitted. Keep its request id while Scout reconciles the outcome; do not send it as a new reply.",
+  delivery_unconfirmed: "Scout could not confirm whether this reply was submitted. Keep this reply and retry it here.",
+  request_outcome_unknown: "This reply may have been submitted. Keep this reply while Scout checks the outcome; do not send a new copy.",
   broker_unavailable: "Scout isn't running on this Mac, so nothing was sent.",
   session_unknown: "Scout couldn't find this session on this Mac.",
   session_ambiguous_harness: "More than one kind of session uses this id, so nothing was sent.",
@@ -68,7 +68,7 @@ const REFUSAL_MESSAGES: Record<string, string> = {
   session_wake_failed: "Scout couldn't start this session, so nothing was sent.",
   session_fork_unroutable: "Scout couldn't start a copy of this session, so nothing was sent.",
   session_blocked: "This session is waiting on a prompt in its terminal. Answer that first, then send again.",
-  in_place_failed: "Scout could not confirm whether input reached this session. Keep the same request id.",
+  in_place_failed: "Scout could not confirm whether input reached this session. Keep this reply; do not send a new copy.",
   scout_app_unavailable: "This session is open in the ChatGPT app. Open the Scout app on this Mac to send into it; nothing was sent.",
   scout_app_accessibility: "This session is open in the ChatGPT app. Turn on Scout › Settings › System › Send replies into open apps; nothing was sent.",
   delivery_failed: "Scout couldn't deliver this reply.",
