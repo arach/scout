@@ -330,7 +330,8 @@ export function messageVisibilityForConversation(conversation?: ConversationDefi
   }
 }
 
-export function messageAnswersInvocation(message: MessageRecord, invocation: InvocationRequest): boolean {
+/** Legacy replies are final; explicit progress/final semantics belong here. */
+export function isFinalReplyForInvocation(message: MessageRecord, invocation: InvocationRequest): boolean {
   if (invocation.action === "wake") {
     return false;
   }
@@ -343,6 +344,8 @@ export function messageAnswersInvocation(message: MessageRecord, invocation: Inv
     && message.replyToMessageId === invocation.messageId
     && message.body.trim().length > 0;
 }
+
+export const messageAnswersInvocation = isFinalReplyForInvocation;
 
 export function completedFlightFromBrokerReply(
   invocation: InvocationRequest,

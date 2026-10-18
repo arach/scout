@@ -265,7 +265,7 @@ function normalizeRecordedFlight(
 export class BrokerFlightLifecycleService {
   constructor(private readonly options: BrokerFlightLifecycleServiceOptions) {}
 
-  readonly recordFlight = async (flight: FlightRecord): Promise<void> => {
+  readonly recordFlight = async (flight: FlightRecord, eligible?: () => boolean): Promise<void> => {
     const invocation = this.options.invocationFor(flight.invocationId)
       ?? this.options.runtime.snapshot().invocations[flight.invocationId];
     // Single chokepoint before journal/sqlite persistence, work-item promotion,
@@ -276,8 +276,17 @@ export class BrokerFlightLifecycleService {
     let didRecordFlight = false;
     let previousFlight: FlightRecord | undefined;
     await this.options.durableStore.runWrite(async () => {
+      // Recheck the caller's observation after acquiring the canonical writer.
+      if (eligible && !eligible()) return;
       const previous = this.options.runtime.snapshot().flights[flightToRecord.id];
       previousFlight = previous;
+      // A delayed adapter/status update cannot erase an acknowledged reply
+      // while its separate completion write is being recovered.
+      if (previous?.metadata?.acceptedReply !== undefined) {
+        flightToRecord = { ...flightToRecord, metadata: {
+          ...flightToRecord.metadata, acceptedReply: previous.metadata.acceptedReply,
+        } };
+      }
       if (previous && isTerminalFlightState(previous.state)) {
         // Terminal enrichment must not erase/reopen a durable reply intent.
         // Only the result outbox's compare-and-write marks it delivered.
