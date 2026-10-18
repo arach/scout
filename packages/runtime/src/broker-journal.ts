@@ -1416,7 +1416,11 @@ export class FileBackedBrokerJournal {
       && flight.targetAgentId === delivery.targetId
       && (!invocation || flight.requesterId === invocation.requesterId)
       && (flight.state === "completed" || flight.state === "failed" || flight.state === "cancelled");
-    if (delivery.transport === "peer_broker" && delivery.status === "peer_acked" && delivery.invocationId && !terminal) {
+    const pendingAcknowledgement = delivery.metadata?.peerAcknowledgement;
+    const submission = delivery.metadata?.peerSubmission as { version?: number; status?: string } | undefined;
+    const uncertainSubmission = delivery.status === "sent" && submission?.version === 1 && submission.status === "unknown";
+    if (delivery.transport === "peer_broker" && delivery.invocationId
+      && ((delivery.status === "peer_acked" && (!terminal || pendingAcknowledgement)) || (uncertainSubmission && !terminal))) {
       this.pendingPeerMirrors.set(delivery.id, delivery);
       if (typeof flightId === "string") {
         const ids = this.peerMirrorDeliveryIdsByFlight.get(flightId) ?? new Set<string>();
