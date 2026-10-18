@@ -176,14 +176,20 @@ export class BrokerDeliveryStore {
         }
       }
 
+      const metadata = input.metadata ? { ...input.metadata } : undefined;
+      if (metadata) {
+        delete metadata.leaseGeneration;
+        if (previous?.metadata?.leaseGeneration !== undefined) {
+          metadata.leaseGeneration = previous.metadata.leaseGeneration;
+        }
+      }
+
       await this.options.durableStore.commitEntries(
         {
           kind: "delivery.status.update",
           deliveryId: input.deliveryId,
           status: input.status,
-          metadata: previous?.metadata?.leaseGeneration !== undefined && input.metadata
-            ? { ...input.metadata, leaseGeneration: previous.metadata.leaseGeneration }
-            : input.metadata,
+          metadata,
           leaseOwner: input.leaseOwner,
           leaseExpiresAt: input.leaseExpiresAt,
         },

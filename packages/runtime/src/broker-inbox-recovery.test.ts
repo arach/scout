@@ -96,4 +96,15 @@ describe("durable inbox claim recovery", () => {
     expect(h.warnings).toHaveLength(1);
     await h.durableStore.flushProjectedEntries();
   });
+
+  test("legacy NACK metadata cannot create a poisoned generation that blocks the next claim", async () => {
+    const h = await fixture();
+    await h.store.recordDelivery(delivery({ status: "leased", leaseOwner: "old-client", leaseExpiresAt: 1_500 }));
+    expect((await h.service.nackInboxItem({ itemId: "item", leaseOwner: "old-client", metadata: { leaseGeneration: 0 } })).status).toBe(200);
+    expect(h.journal.getDelivery("item")?.metadata?.leaseGeneration).toBeUndefined();
+    const next = (await h.service.claimInboxItem(claim)).claimed!;
+    expect(next.leaseGeneration).toBe(1);
+    expect((await h.service.acknowledgeInboxItem({ itemId: next.id, leaseOwner: next.leaseOwner, leaseGeneration: next.leaseGeneration })).status).toBe(200);
+    await h.durableStore.flushProjectedEntries();
+  });
 });
