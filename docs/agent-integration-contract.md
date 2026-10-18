@@ -430,3 +430,24 @@ and assistant records; launch arguments alone do not prove harness acceptance.
 Pi's native session id is linked to the stable Scout session, not substituted
 for it. The broker remains the writer of the final reply and flight result;
 Pi's complete transcript remains harness-owned.
+
+## Inbox claims and retry deadlines
+
+Inbox delivery consumers claim through `POST /v1/inbox/claim`. A successful
+claim returns `leaseOwner`, `leaseExpiresAt`, and `leaseGeneration`. Echo the
+owner **and generation** in `POST /v1/inbox/ack` or `POST /v1/inbox/nack`.
+A worker name alone does not identify an attempt: reclaiming an expired item,
+even with the same owner, advances its generation. Missing, stale, or expired
+claim credentials return a conflict and leave the current lease intact.
+
+Generation is retained in the delivery's durable metadata after ACK/NACK and
+across broker restart. Outstanding leases written before generation support
+may use the legacy owner-only acknowledgement with a broker diagnostic. Every
+new claim requires its returned generation, so consumers must echo that field
+when upgrading. Metadata supplied with an acknowledgement cannot change it.
+
+A NACK with `retryAfterMs` records a deferred delivery and `nextAttemptAt`.
+Claim checks that deadline under the broker writer; an inbox listing or stream
+event is only a candidate, not permission to execute. Deferred records without
+a deadline retain their legacy claimability. This rule applies to inbox claims;
+peer delivery keeps its separate retry and peer-online policy.
