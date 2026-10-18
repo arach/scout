@@ -3551,7 +3551,9 @@ function buildScoutReplyContextPrompt(context: ScoutReplyContext | null): string
     "<!-- SCOUT BROKER REPLY MODE -->",
     "> **Reply mode:** You are answering a Scout ask.",
     ...replyInstruction,
-    "> Only use Scout tools if you need to ask or delegate to another agent.",
+    context?.completion
+      ? "> Use Scout replies for progress and final completion, and `ask` for delegated work."
+      : "> Only use Scout tools if you need to ask or delegate to another agent.",
     "",
     "<!-- SCOUT SESSION SEARCH -->",
     "> For past harness work (what Codex/Claude/Kimi sessions said or ran), prefer `scout search` over grepping `~/.codex`, `~/.claude`, or `~/.kimi-code` by hand.",

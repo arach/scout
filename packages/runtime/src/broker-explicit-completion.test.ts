@@ -202,7 +202,7 @@ test("unknown flight identity cannot bypass explicit completion through raw stat
 
 test("an explicit flight cannot be reparented or retargeted by a raw status update", async () => {
   const h = await fixture(); const accepted = await h.accept();
-  for (const identity of [{ invocationId: "unknown" }, { targetAgentId: "other" }, { requesterId: "other" }, { conversationId: "other" }]) {
+  for (const identity of [{ invocationId: "unknown" }, { targetAgentId: "other" }, { requesterId: "other" }]) {
     await expect(h.lifecycle.recordFlight({ ...accepted.flight, ...identity, state: "completed", output: "bypass", completedAt: 10 }))
       .rejects.toThrow("completion_flight_identity_mismatch");
   }

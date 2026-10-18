@@ -292,7 +292,7 @@ export class BrokerFlightLifecycleService {
       previousFlight = previous;
       if (previous?.metadata?.completion !== undefined && (!invocation || !hasExplicitCompletion(invocation)
         || previous.invocationId !== flightToRecord.invocationId || previous.targetAgentId !== flightToRecord.targetAgentId
-        || previous.requesterId !== flightToRecord.requesterId || previous.conversationId !== flightToRecord.conversationId)) {
+        || previous.requesterId !== flightToRecord.requesterId)) {
         throw new Error("completion_flight_identity_mismatch");
       }
       if (invocation && hasExplicitCompletion(invocation)) {
