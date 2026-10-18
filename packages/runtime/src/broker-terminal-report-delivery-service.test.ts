@@ -42,7 +42,7 @@ async function fixture() {
   const messages = new Map<string, MessageRecord>();
   let outbox: BrokerTerminalReportDeliveryService;
   function resetOutbox() {
-    outbox = new BrokerTerminalReportDeliveryService({ nodeId: "node", flightById: id => runtime.flight(id),
+    outbox = new BrokerTerminalReportDeliveryService({ nodeId: "node", flightById: id => journal.getFlight(id),
       async postMessage(message) {
         posts++; if (postFails) throw new Error("post unavailable");
         const previous = messages.get(message.id);
@@ -51,7 +51,7 @@ async function fixture() {
       },
       markDelivered: (id, expected) => runWrite(async () => {
         if (ackFails) throw new Error("crash before ack");
-        const current = runtime.flight(id);
+        const current = journal.getFlight(id);
         if (!current || !matchesPendingTerminalReport(current, expected)) return false;
         const flight = { ...current, metadata: { ...current.metadata, terminalReport: { ...expected, status: "delivered" } } };
         await commit({ kind: "flight.record", flight, preserveCurrent: true }, async () => runtime.upsertFlight(flight, { preserveCurrent: true }));
@@ -146,12 +146,12 @@ test("only the requester broker creates reports; successful replies retain their
 test("malformed reports are held without blocking valid work and copied remote reports are not delivered locally", async () => {
   const h = await fixture(); await h.lifecycle.recordFlight(terminal());
   const good = h.runtime.flight("f1")!;
-  await h.runtime.upsertFlight({ ...good, error: "changed after intent" });
+  await h.journal.appendEntries({ kind: "flight.record", flight: { ...good, error: "changed after intent" } });
   expect(await h.outbox.deliver("f1")).toBe("stale");
   const intent = pendingTerminalReport(good)!;
-  await h.runtime.upsertFlight({ ...good, metadata: { terminalReport: { ...intent, message: { ...intent.message, originNodeId: "remote" } } } });
+  await h.journal.appendEntries({ kind: "flight.record", flight: { ...good, metadata: { terminalReport: { ...intent, message: { ...intent.message, originNodeId: "remote" } } } } });
   expect(await h.outbox.deliver("f1")).toBe("stale"); expect(h.posts).toBe(0);
-  await h.runtime.upsertFlight(good); expect(await h.outbox.deliver("f1")).toBe("delivered");
+  await h.journal.appendEntries({ kind: "flight.record", flight: good }); expect(await h.outbox.deliver("f1")).toBe("delivered");
 });
 
 test("report workers deduplicate and bound queued flight identities", async () => {
@@ -181,4 +181,18 @@ test("acknowledgement only consumes the exact report that was posted", async () 
   });
   expect(await service.deliver(flight.id)).toBe("stale");
   expect(pendingTerminalReport(flight)).not.toEqual(expected);
+});
+
+
+test("report acknowledgement preserves other durable effects when runtime apply lagged the journal", async () => {
+  const h = await fixture(); await h.lifecycle.recordFlight(terminal());
+  const current = h.journal.getFlight("f1")!;
+  // Model another writer's successful journal append followed by failed runtime apply.
+  await h.journal.appendEntries({ kind: "flight.record", preserveCurrent: true, flight: { ...current,
+    metadata: { ...current.metadata, workPromotion: { version: 1, status: "applied" } } } });
+  expect(h.runtime.flight("f1")?.metadata?.workPromotion).toBeUndefined();
+  expect(await h.outbox.deliver("f1")).toBe("delivered");
+  expect(h.journal.getFlight("f1")?.metadata?.workPromotion).toEqual({ version: 1, status: "applied" });
+  await h.reopen();
+  expect(h.runtime.flight("f1")?.metadata?.workPromotion).toEqual({ version: 1, status: "applied" });
 });

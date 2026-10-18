@@ -1369,6 +1369,10 @@ export class FileBackedBrokerJournal {
     return this.pendingTerminalReportFlights.values();
   }
 
+  getFlight(flightId: string): FlightRecord | undefined {
+    return this.state.snapshot.flights[flightId];
+  }
+
   pendingInvocationResultFlights(): IterableIterator<FlightRecord> {
     return this.pendingResultFlights.values();
   }

@@ -2012,11 +2012,11 @@ const externalSessionService = new BrokerExternalSessionService({
 
 const terminalReportDeliveryService = new BrokerTerminalReportDeliveryService({
   nodeId,
-  flightById: (id) => runtime.flight(id),
+  flightById: (id) => journal.getFlight(id),
   quarantineRecord: (entry, reason) => projection.quarantineRecord(entry, reason),
   postMessage: postConversationMessage,
   markDelivered: (flightId, expected) => durableStore.runWrite(async () => {
-    const current = runtime.flight(flightId);
+    const current = journal.getFlight(flightId);
     if (!current || !matchesPendingTerminalReport(current, expected)) return false;
     const flight: FlightRecord = { ...current, metadata: { ...current.metadata,
       terminalReport: { ...expected, status: "delivered", deliveredAt: Date.now() },
