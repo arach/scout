@@ -37,6 +37,7 @@ import {
   type MessageAttachment,
   type MessageReactionRecord,
   type MessageRecord,
+  type ScoutDeliverRequest,
   type ScoutDeliverResponse,
   type ScoutDispatchRecord,
   type ScoutProjectAgentSpec,
@@ -742,6 +743,21 @@ function deliveryRequestId(clientMessageId: string | null | undefined, createdAt
   return `deliver-client-${digest}`;
 }
 
+function deliveryRequestIdentity(
+  clientMessageId: string | null | undefined,
+  createdAt: number,
+  suppliedCreatedAt?: number,
+): Pick<ScoutDeliverRequest, "id" | "requestId" | "createdAt"> {
+  const id = deliveryRequestId(clientMessageId, createdAt);
+  // The receipt fingerprints the entire command. Let the broker assign the
+  // acceptance time when the caller did not retain one with its retry key.
+  if (clientMessageId?.trim()) {
+    return { id, requestId: id, ...(suppliedCreatedAt !== undefined ? { createdAt: suppliedCreatedAt } : {}) };
+  }
+  // A generated key cannot identify a later retry; do not reserve a receipt.
+  return { id, createdAt };
+}
+
 function stableBrokerRecordId(
   prefix: "m" | "inv",
   clientMessageId: string | null | undefined,
@@ -989,7 +1005,7 @@ function isScoutDeliverResponse(value: unknown): value is ScoutDeliverResponse {
 
 async function brokerPostDeliver(
   baseUrl: string,
-  body: unknown,
+  body: ScoutDeliverRequest,
 ): Promise<ScoutDeliverResponse> {
   return brokerPostJson<ScoutDeliverResponse>(
     baseUrl,
@@ -2467,6 +2483,7 @@ export type OutgoingAttachmentInput = {
  */
 export function normalizeOutgoingAttachments(
   attachments: OutgoingAttachmentInput[] | undefined,
+  clientMessageId?: string | null,
 ): MessageAttachment[] | undefined {
   if (!attachments?.length) {
     return undefined;
@@ -2479,10 +2496,16 @@ export function normalizeOutgoingAttachments(
     if (!mediaType || (!url && !blobKey)) {
       continue;
     }
+    const fileName = attachment.fileName?.trim() || undefined;
+    const generatedId = clientMessageId?.trim()
+      ? `att-client-${createHash("sha256").update(JSON.stringify([
+        clientMessageId.trim(), normalized.length, mediaType, fileName, url || undefined, blobKey || undefined,
+      ])).digest("hex").slice(0, 32)}`
+      : `att-${randomUUID()}`;
     normalized.push({
-      id: attachment.id?.trim() || `att-${randomUUID()}`,
+      id: attachment.id?.trim() || generatedId,
       mediaType,
-      fileName: attachment.fileName?.trim() || undefined,
+      fileName,
       url: url || undefined,
       blobKey: blobKey || undefined,
     });
@@ -2528,16 +2551,15 @@ export async function sendScoutMessage(input: {
 
   if (explicitTargetCandidates.length === 1 && selectors.length === 0) {
     const delivery = await brokerPostDeliver(broker.baseUrl, {
-      id: `deliver-${createdAtMs.toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      ...deliveryRequestIdentity(input.clientMessageId, createdAtMs, input.createdAtMs),
       requesterId: senderId,
       requesterNodeId: broker.node.id,
       targetAgentId: explicitTargetCandidates[0],
       body: input.body,
-      attachments: normalizeOutgoingAttachments(input.attachments),
+      attachments: normalizeOutgoingAttachments(input.attachments, input.clientMessageId),
       intent: "tell",
       channel: input.channel,
       speechText: input.shouldSpeak ? stripScoutAgentSelectorLabels(input.body) : undefined,
-      createdAt: createdAtMs,
       messageMetadata: {
         source: "scout-cli",
         ...clientMessageMetadata(input.clientMessageId),
@@ -2568,15 +2590,15 @@ export async function sendScoutMessage(input: {
   ) {
     const targetLabel = selectors[0]!.label;
     const delivery = await brokerPostDeliver(broker.baseUrl, {
-      id: `deliver-${createdAtMs.toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      ...deliveryRequestIdentity(input.clientMessageId, createdAtMs, input.createdAtMs),
       requesterId: senderId,
       requesterNodeId: broker.node.id,
       targetLabel,
       body: input.body,
+      attachments: normalizeOutgoingAttachments(input.attachments, input.clientMessageId),
       intent: "tell",
       channel: input.channel,
       speechText: input.shouldSpeak ? stripScoutAgentSelectorLabels(input.body) : undefined,
-      createdAt: createdAtMs,
       messageMetadata: {
         source: "scout-cli",
         ...clientMessageMetadata(input.clientMessageId),
@@ -3313,16 +3335,14 @@ export async function sendScoutDirectMessage(input: {
   const broker = await requireScoutBrokerContext();
   const createdAt = Date.now();
   const source = input.source?.trim() || "scout-mobile";
-  const attachments = normalizeOutgoingAttachments(input.attachments);
+  const attachments = normalizeOutgoingAttachments(input.attachments, input.clientMessageId);
   // The mobile bridge deliberately accepts attachment-only posts. `/v1/deliver`
   // requires a non-empty body because consult deliveries also become invocation
   // tasks, so give a valid attachment-only send an explicit task instead of
   // letting the broker reject it after the upload succeeded.
   const body = input.body.trim() || (attachments?.length ? "Review the attached message." : "");
   const delivery = await brokerPostDeliver(broker.baseUrl, {
-    // A retry after a lost bridge acknowledgement must address the same broker
-    // transaction. The runtime pairs this stable id with clientMessageId.
-    id: deliveryRequestId(input.clientMessageId, createdAt),
+    ...deliveryRequestIdentity(input.clientMessageId, createdAt),
     requesterId: OPERATOR_ID,
     requesterNodeId: broker.node.id,
     targetAgentId: input.agentId,
@@ -3339,7 +3359,6 @@ export async function sendScoutDirectMessage(input: {
       session: "new",
     },
     ensureAwake: true,
-    createdAt,
     messageMetadata: {
       source,
       destinationKind: "direct",
@@ -3493,14 +3512,14 @@ export async function askScoutQuestion(input: {
   const createdAt = input.createdAtMs ?? Date.now();
   const source = input.source?.trim() || "scout-cli";
   const delivery = await brokerPostDeliver(broker.baseUrl, {
-    id: deliveryRequestId(input.clientMessageId, createdAt),
+    ...deliveryRequestIdentity(input.clientMessageId, createdAt, input.createdAtMs),
     requesterId: senderId,
     requesterNodeId: broker.node.id,
     ...(input.target ? { target: input.target } : {}),
     targetLabel: renderedTarget,
     targetAgentId: explicitTargetAgentId,
     body: messageBody,
-    attachments: normalizeOutgoingAttachments(input.attachments),
+    attachments: normalizeOutgoingAttachments(input.attachments, input.clientMessageId),
     intent: "consult",
     channel: input.channel,
     speechText: input.shouldSpeak ? stripScoutAgentSelectorLabels(messageBody) : undefined,
@@ -3523,7 +3542,6 @@ export async function askScoutQuestion(input: {
     },
     ...(input.projectAgent ? { projectAgent: input.projectAgent } : {}),
     ensureAwake: true,
-    createdAt,
     messageMetadata: {
       source,
       ...clientMessageMetadata(input.clientMessageId),

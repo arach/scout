@@ -1,13 +1,14 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { FlightRecord, InvocationRequest } from "@openscout/protocol";
+import type { FlightRecord, InvocationRequest, ScoutDeliverRequest } from "@openscout/protocol";
 import { closeDb } from "../../db/internal/db.ts";
 import { SQLiteControlPlaneStore } from "../../../../runtime/src/sqlite-store.ts";
 import { ControlPlaneHistoryStore } from "../../../../runtime/src/control-plane-history-store.ts";
 import { emptyHistoryRotationPlan } from "../../../../runtime/src/history-rotation.ts";
+import { BrokerRequestReceipts } from "../../../../runtime/src/broker-request-receipts.ts";
 
 import {
   LOCAL_CONFIG_VERSION,
@@ -2621,4 +2622,135 @@ test("retained question history queries both terminal states with broker scope a
     expect(url.pathname).toBe("/v1/collaboration/records");
     expect(Object.fromEntries(url.searchParams)).toMatchObject({ conversationId: "room/a", kind: "question", includeThreads: "true", orderByCreatedAt: "true", afterCreatedAt: "123", afterId: "q+2", limit: "51" });
   }
+});
+
+describe("web delivery request receipts", () => {
+  function receiptBroker() {
+    const home = useIsolatedOpenScoutHome();
+    // Exercise the real durable receipt ledger against the payload emitted by
+    // the web service. Only HTTP and the downstream execution are simulated.
+    const directory = join(home, "receipts");
+    let ledger = new BrokerRequestReceipts(directory);
+    let executions = 0;
+    let loseNextResponse = false;
+    const commands: ScoutDeliverRequest[] = [];
+    globalThis.fetch = (async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const path = new URL(request.url).pathname;
+      if (path === "/health") return jsonResponse({ ok: true, nodeId: "node-1", meshId: "mesh-1" });
+      if (path === "/v1/node") return jsonResponse({ id: "node-1" });
+      if (path === "/v1/snapshot") return jsonResponse({
+        actors: { operator: { id: "operator", kind: "person", displayName: "Operator" } },
+        agents: { kepler: { id: "kepler", kind: "agent", handle: "kepler", displayName: "Kepler", authorityNodeId: "node-1", state: "idle" } },
+        endpoints: {}, conversations: {}, messages: {}, flights: {},
+      });
+      if (path !== "/v1/deliver") throw new Error(`unexpected receipt test request: ${path}`);
+      const command = await request.json() as ScoutDeliverRequest;
+      commands.push(command);
+      const execute = async () => {
+        executions++;
+        return {
+          kind: "delivery", accepted: true, routeKind: "dm", targetAgentId: "kepler",
+          conversation: { id: "conversation", kind: "direct", participantIds: [command.requesterId, "kepler"] },
+          message: { id: `message-${executions}`, body: command.body },
+          flight: { id: `flight-${executions}`, invocationId: `invocation-${executions}`, state: "queued" },
+        };
+      };
+      let result: unknown;
+      try {
+        result = command.requestId
+          ? await ledger.run(command.requesterId!, command.requestId, "deliver", command, execute)
+          : await execute();
+      } catch (error) {
+        return jsonResponse({ error: error instanceof Error ? error.message : String(error) }, 400);
+      }
+      if (loseNextResponse) {
+        loseNextResponse = false;
+        throw new Error("response lost after durable acceptance");
+      }
+      return jsonResponse(result, 202);
+    }) as typeof fetch;
+    return {
+      home, directory, commands,
+      executions: () => executions,
+      restart: () => { ledger = new BrokerRequestReceipts(directory); },
+      loseResponse: () => { loseNextResponse = true; },
+    };
+  }
+
+  const attachment = { mediaType: "image/png", fileName: "evidence.png", blobKey: "blob-original" };
+  const routes = {
+    direct: (home: string, key?: string) => sendScoutDirectMessage({ agentId: "kepler", body: "Inspect this", attachments: [attachment], clientMessageId: key, currentDirectory: home }),
+    ask: (home: string, key?: string) => askScoutQuestion({ senderId: "operator", targetAgentId: "kepler", body: "Inspect this", attachments: [attachment], clientMessageId: key, currentDirectory: home }),
+    explicitMessage: (home: string, key?: string) => sendScoutMessage({ senderId: "operator", explicitTargetAgentIds: ["kepler"], body: "Inspect this", attachments: [attachment], clientMessageId: key, currentDirectory: home }),
+    selectedMessage: (home: string, key?: string) => sendScoutMessage({ senderId: "operator", body: "@kepler Inspect this", attachments: [attachment], clientMessageId: key, currentDirectory: home }),
+  };
+
+  for (const [name, send] of Object.entries(routes)) {
+    test(`${name} shares one receipt across concurrent retries, restart, and clock changes`, async () => {
+      const broker = receiptBroker();
+      let now = 100_000;
+      Date.now = () => now;
+      const first = await Promise.all([send(broker.home, "retained-client-key"), send(broker.home, "retained-client-key")]);
+      expect(broker.executions()).toBe(1);
+      expect(first[0]).toEqual(first[1]);
+      broker.restart();
+      now += 60_000;
+      expect(await send(broker.home, "retained-client-key")).toEqual(first[0]);
+      expect(broker.executions()).toBe(1);
+      expect(broker.commands).toHaveLength(3);
+      expect(broker.commands[0]?.requestId).toMatch(/^deliver-client-/);
+      expect(broker.commands.every(command => command.createdAt === undefined)).toBe(true);
+      expect(broker.commands[0]?.attachments?.[0]?.id).toMatch(/^att-client-/);
+      expect(broker.commands[1]).toEqual(broker.commands[0]);
+      expect(broker.commands[2]).toEqual(broker.commands[0]);
+    });
+
+    test(`${name} does not reserve a receipt for an unkeyed send`, async () => {
+      const broker = receiptBroker();
+      await send(broker.home);
+      await send(broker.home);
+      expect(broker.executions()).toBe(2);
+      expect(broker.commands.every(command => command.requestId === undefined && typeof command.createdAt === "number")).toBe(true);
+      expect(existsSync(broker.directory)).toBe(false);
+    });
+  }
+
+  test("a lost response replays the accepted result after restart without another execution", async () => {
+    const broker = receiptBroker();
+    broker.loseResponse();
+    await expect(routes.direct(broker.home, "lost-response")).rejects.toThrow("response lost");
+    expect(broker.executions()).toBe(1);
+    broker.restart();
+    expect(await routes.direct(broker.home, "lost-response")).toMatchObject({ messageId: "message-1", flight: { id: "flight-1" } });
+    expect(broker.executions()).toBe(1);
+  });
+
+  test("same-key body, target, attachment, and execution changes remain conflicts", async () => {
+    const broker = receiptBroker();
+    const input = { agentId: "kepler", body: "Inspect this", attachments: [attachment], clientMessageId: "semantic-key" };
+    await sendScoutDirectMessage(input);
+    for (const change of [
+      { body: "Do something else" },
+      { agentId: "another-agent" },
+      { attachments: [{ ...attachment, blobKey: "different-content" }] },
+      { executionModel: "different-model" },
+    ]) {
+      await expect(sendScoutDirectMessage({ ...input, ...change })).rejects.toThrow("different content");
+    }
+    expect(broker.executions()).toBe(1);
+  });
+
+  test("retained caller timestamps and explicit attachment IDs survive keyed asks", async () => {
+    const broker = receiptBroker();
+    const input = { senderId: "operator", targetAgentId: "kepler", body: "Inspect this", clientMessageId: "retained-fields", createdAtMs: 12_345,
+      attachments: [{ ...attachment, id: "uploaded-attachment" }], currentDirectory: broker.home };
+    await askScoutQuestion(input);
+    broker.restart();
+    await askScoutQuestion(input);
+    expect(broker.commands[0]).toMatchObject({ createdAt: 12_345, attachments: [{ id: "uploaded-attachment" }] });
+    expect(broker.executions()).toBe(1);
+    await expect(askScoutQuestion({ ...input, createdAtMs: 12_346 })).rejects.toThrow("different content");
+    expect(broker.executions()).toBe(1);
+  });
 });
