@@ -8,6 +8,36 @@ import { innermostProcessHost, parseProcessHostEnv, processHostLocations } from 
 
 const SESSION = "4cc36bba-a893-461f-a5b1-79c1f6b7e088";
 
+test("strict session input refuses wrong or unobserved Herdr harness identity before any prompt", async () => {
+  let prompts = 0;
+  for (const observation of [{ harness: "claude", sessionKind: "id" }, { harness: "codex", sessionKind: "name" }, {}]) {
+    const result = await deliverInPlace({ sessionId: SESSION, harness: "codex", body: "input", requireExactHarness: true }, noHosts({
+      findHerdrPane: async (_sessionId, harness) => {
+        expect(harness).toBe("codex");
+        return { session: "herdr", paneId: "p1", status: "idle", ...observation };
+      },
+      promptHerdr: async () => { prompts++; },
+    }));
+    expect(result).toEqual({ ok: false, code: "session_runtime_unobserved" });
+  }
+  expect(prompts).toBe(0);
+});
+
+test("strict session input accepts a correlated Herdr native id and harness, and refuses ambiguous observations", async () => {
+  let prompts = 0;
+  const input = { sessionId: SESSION, harness: "codex", body: "input", requireExactHarness: true };
+  const result = await deliverInPlace(input, noHosts({
+    findHerdrPane: async () => ({ session: "herdr", paneId: "p1", status: "idle", harness: "codex", sessionKind: "id" }),
+    promptHerdr: async () => { prompts++; },
+  }));
+  expect(result).toMatchObject({ ok: true, via: "herdr" });
+  expect(prompts).toBe(1);
+  expect(await deliverInPlace(input, noHosts({ findHerdrPane: async () => { throw new Error("session_ambiguous: two panes"); } })))
+    .toEqual({ ok: false, code: "session_ambiguous" });
+  expect(await deliverInPlace(input, noHosts({ findHerdrPane: async () => { throw new Error("probe timed out"); } })))
+    .toEqual({ ok: false, code: "session_runtime_unobserved" });
+});
+
 function claudeRecord(overrides: Partial<ClaudeSessionRecord> = {}): ClaudeSessionRecord {
   return {
     pid: 77085,

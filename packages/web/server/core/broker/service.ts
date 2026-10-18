@@ -7,6 +7,7 @@ import {
   buildScoutReturnAddress as buildScoutReturnAddressRecord,
   SCOUT_SESSION_INPUT_RECEIPTS_CAPABILITY,
   type ScoutSessionInputReceipt,
+  type ScoutDeliverHttpRequest,
   conversationNaturalKey,
   conversationsWithNaturalKey,
   type ActorIdentity,
@@ -1010,10 +1011,13 @@ async function brokerPostDeliver(
   baseUrl: string,
   body: ScoutDeliverRequest,
 ): Promise<ScoutDeliverResponse> {
+  const wireBody: ScoutDeliverHttpRequest = body.sessionDelivery
+    ? { ...body, intent: "session_input" }
+    : body;
   return brokerPostJson<ScoutDeliverResponse>(
     baseUrl,
     scoutBrokerPaths.v1.deliver,
-    body,
+    wireBody,
     { acceptErrorJson: isScoutDeliverResponse },
   );
 }

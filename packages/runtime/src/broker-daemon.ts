@@ -2763,7 +2763,7 @@ const unavailableTargetService = new BrokerUnavailableTargetService({
 
 const requestReceipts = new BrokerRequestReceipts();
 const deliveryAcceptanceService = new BrokerDeliveryAcceptanceService({
-  submitSessionInput: deliverInPlace,
+  submitSessionInput: input => deliverInPlace({ ...input, requireExactHarness: true }),
   upsertSessionInputActor: upsertActorDurably,
   commandAdmission,
   readAcceptedMessage: async id => await runtime.readMessage(id) ?? (await projection.readMessages([id])).get(id),

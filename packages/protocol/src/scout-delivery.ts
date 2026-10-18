@@ -152,6 +152,13 @@ export interface ScoutDeliverRequest {
   operatorSignal?: ScoutOperatorSignal;
 }
 
+/** HTTP intent discriminant fences older brokers before any session-input side effect.
+ * The current boundary normalizes session_input to the consult command above.
+ */
+export type ScoutDeliverHttpRequest = Omit<ScoutDeliverRequest, "intent"> & {
+  intent: ScoutDeliverIntent | "session_input";
+};
+
 export interface ScoutDeliveryReceipt {
   requestId: ScoutId;
   routeKind: ScoutDeliverRouteKind;
