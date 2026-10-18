@@ -1437,9 +1437,9 @@ const mobileRouter = t.router({
     }),
 
   // Reply to a harness session Scout did not start (one the phone saw in the
-  // tail). Exact-session ask with fork-if-live: a session still open in the
-  // operator's terminal is continued as a new Scout-owned fork, never resumed
-  // in a second process. Expected refusals return { ok: false }, not errors.
+  // tail). The broker reserves a stable request receipt before live input;
+  // only an explicit not-live result permits exact-session resume. Expected
+  // refusals and unknown outcomes return { ok: false }, not replacement asks.
   askSession: procedure
     .input(mobileAskSessionInputSchema)
     .mutation(async ({ input }) => {

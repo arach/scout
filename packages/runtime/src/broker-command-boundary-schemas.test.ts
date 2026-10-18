@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { brokerInvocationRequestSchema, brokerInvocationRequestSchemaFor } from "./broker-command-boundary-schemas.js";
+import { brokerDeliverRequestSchema, brokerInvocationRequestSchema, brokerInvocationRequestSchemaFor } from "./broker-command-boundary-schemas.js";
 
 import { parseScoutRuntimeSpec, SCOUT_RUNTIME_CATALOG } from "@openscout/protocol";
 
@@ -15,6 +15,15 @@ const baseInvocation = {
   stream: false,
   createdAt: 1_700_000_000_000,
 };
+
+test("session-input wire intent is required and normalizes to the existing consult command", () => {
+  const payload = { requestId: "mobile-1", body: "continue", intent: "session_input", sessionDelivery: "in_place_or_resume",
+    target: { kind: "session_id", sessionId: "native", harness: "claude" } };
+  expect(brokerDeliverRequestSchema.parse(payload)).toEqual({ ...payload, intent: "consult" });
+  expect(brokerDeliverRequestSchema.safeParse({ ...payload, intent: "consult" }).success).toBe(false);
+  expect(brokerDeliverRequestSchema.safeParse({ ...payload, sessionDelivery: undefined }).success).toBe(false);
+  expect(brokerDeliverRequestSchema.safeParse({ body: "ordinary", intent: "consult" }).success).toBe(true);
+});
 
 describe("brokerInvocationRequestSchema execution.turnBudgetMs", () => {
   test("accepts an execution turn budget up to the 6 h bound", () => {

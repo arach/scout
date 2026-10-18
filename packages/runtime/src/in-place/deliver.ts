@@ -62,12 +62,14 @@ export type InPlaceDelivery =
   /** Live in an app only the Scout app can reach, and the Scout app can't right now. */
   | { ok: false; code: "scout_app_unavailable" | "scout_app_accessibility"; via: InPlaceVia; location: string }
   /** No live place holds this session. */
-  | { ok: false; code: "not_live" };
+  | { ok: false; code: "not_live" }
+  /** Exact session identity could not be established before any input. */
+  | { ok: false; code: "session_runtime_unobserved" | "session_ambiguous" };
 
-export type HerdrPaneMatch = { session: string; paneId: string; status: string | null };
+export type HerdrPaneMatch = { session: string; paneId: string; status: string | null; harness?: string; sessionKind?: string };
 
 export type DeliverInPlaceDeps = {
-  findHerdrPane?: (sessionId: string) => Promise<HerdrPaneMatch | null>;
+  findHerdrPane?: (sessionId: string, harness?: string | null) => Promise<HerdrPaneMatch | null>;
   promptHerdr?: (match: HerdrPaneMatch, body: string) => Promise<void>;
   findClaudeRecord?: (sessionId: string) => Promise<ClaudeSessionRecord | null>;
   /** Pids of processes holding a Codex thread, other than the ChatGPT app. */
@@ -129,7 +131,7 @@ type Candidates = {
 };
 
 export async function deliverInPlace(
-  input: { sessionId: string; harness?: string | null; body: string },
+  input: { sessionId: string; harness?: string | null; body: string; requireExactHarness?: boolean },
   deps: DeliverInPlaceDeps = {},
 ): Promise<InPlaceDelivery> {
   const { sessionId, body } = input;
@@ -138,7 +140,16 @@ export async function deliverInPlace(
   const candidates: Candidates = { herdr: null, orca: null, tmux: null, terminalPid: null };
 
   // Herdr names the session itself when its integration is installed.
-  candidates.herdr = await (deps.findHerdrPane ?? findHerdrPaneForSession)(sessionId).catch(() => null);
+  if (input.requireExactHarness && !harness) return { ok: false, code: "session_runtime_unobserved" };
+  try {
+    candidates.herdr = await (deps.findHerdrPane ?? findHerdrPaneForSession)(sessionId, input.requireExactHarness ? harness : undefined);
+  } catch (error) {
+    if (input.requireExactHarness) return { ok: false, code: errorText(error).startsWith("session_ambiguous:") ? "session_ambiguous" : "session_runtime_unobserved" };
+  }
+  if (input.requireExactHarness && candidates.herdr
+    && (candidates.herdr.harness !== harness || candidates.herdr.sessionKind !== "id")) {
+    return { ok: false, code: "session_runtime_unobserved" };
+  }
 
   // The process holding the session, and the panes its environment names.
   const pids: number[] = [];
@@ -272,7 +283,8 @@ async function promptOrcaCandidate(
   }
 }
 
-export async function findHerdrPaneForSession(sessionId: string): Promise<HerdrPaneMatch | null> {
+export async function findHerdrPaneForSession(sessionId: string, harness?: string | null): Promise<HerdrPaneMatch | null> {
+  const matches: HerdrPaneMatch[] = [];
   const sessions = await readHerdrSessions({ maxAgeMs: 0 });
   for (const session of sessions) {
     if (!session.running) continue;
@@ -282,13 +294,20 @@ export async function findHerdrPaneForSession(sessionId: string): Promise<HerdrP
       for (const tab of workspace.tabs) {
         for (const pane of tab.panes) {
           if (pane.agentSession?.value === sessionId) {
-            return { session: session.name, paneId: pane.paneId, status: pane.agentStatus ?? null };
+            const match = { session: session.name, paneId: pane.paneId, status: pane.agentStatus ?? null,
+              harness: pane.agentSession.agent, sessionKind: pane.agentSession.kind };
+            if (!harness) return match;
+            matches.push(match);
           }
         }
       }
     }
   }
-  return null;
+  const exact = matches.filter(match => match.harness === harness && match.sessionKind === "id");
+  if (exact.length > 1) throw new Error("session_ambiguous: multiple Herdr panes report this native session and harness");
+  // Return an unmatched observation for strict callers to refuse; absence of
+  // matching identity must not be confused with proof that nothing is live.
+  return exact[0] ?? matches[0] ?? null;
 }
 
 async function locateProcessHost(pid: number): Promise<ProcessHostLocation | null> {

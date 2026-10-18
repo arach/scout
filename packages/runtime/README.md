@@ -153,6 +153,41 @@ OPENSCOUT_CONFORMANCE=1 bun test packages/runtime/src/system-probes.test.ts --te
 
 CI runs that conformance suite, but casual `bun test` does not need Cargo.
 
+## Replies to live harness sessions
+
+Operator clients use the existing `POST /v1/deliver` command with the wire intent
+`session_input`,
+an exact native Claude or Codex session target, a stable requester-scoped
+`requestId`, and `sessionDelivery: "in_place_or_resume"`. Before submitting,
+clients must freshly read `/v1/node` and require the
+`session-input-receipts/1` capability. Older brokers may ignore unknown request
+fields, so clients must fail closed when that capability is absent. The new
+wire intent also makes an older broker reject the request if a broker is
+replaced between the capability read and submission. The current boundary
+normalizes it to consult intent before the existing durable command executes.
+
+The broker durably reserves the request before submitting input. Only an
+explicit `not_live` result continues ordinary exact-session acceptance inside
+that same request. This fallback relies on live-host probes and the normal
+exact-session resolver's live-owner checks. An unobserved or ambiguous Herdr
+identity is a refusal, not evidence that the session is no longer live.
+A successful live submission returns
+`receipt.inputSubmitted` with `state: "submitted"`, the native session, harness,
+and transport location. It has no execution flight and does not prove that the
+agent completed the work. The canonical message is recorded without scheduling
+another transport delivery.
+
+Concurrent retries and retries after a lost response use the same request id
+and unchanged payload. A persisted canonical submission witness can recover the
+original receipt after restart. If the process fails after input may have been
+submitted but before that witness exists, the request remains
+`request_outcome_unknown`; it is never automatically submitted or resumed again.
+Clients retain the original id and draft while reconciling this outcome.
+
+This option accepts plain text and exact local session continuation. Attachments,
+work items, remote targets, project launches, and runtime overrides are rejected
+before submission. Ordinary asks retain their existing delivery behavior.
+
 ## Local development
 
 From the repo root:

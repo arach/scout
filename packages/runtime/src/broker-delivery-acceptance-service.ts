@@ -1,3 +1,4 @@
+import { acceptSessionInput, recoverSessionInputDelivery, validateSessionInputRequest, type SessionInputDeliveryOptions } from "./broker-session-input-delivery.js";
 import { BrokerCommandAdmission } from "./broker-storage-pressure.js";
 import { acceptedDeliveryResponse, deliveryRequestMessageId, deliveryRequestInvocationId, recoverAcceptedInvocation, recoverAcceptedDelivery, type DeliveryAcceptanceEnvelope } from "./broker-delivery-receipt-recovery.js";
 import { readMessageRecord } from "./broker-message-records.js";
@@ -83,7 +84,7 @@ type ChannelAttentionPointerInput = {
   collaborationRecordId?: string;
 };
 
-export type BrokerDeliveryAcceptanceServiceOptions = {
+export type BrokerDeliveryAcceptanceServiceOptions = SessionInputDeliveryOptions & {
   nodeId: string;
   operatorActorId: string;
   requestReceipts?: BrokerRequestReceipts;
@@ -329,6 +330,10 @@ export class BrokerDeliveryAcceptanceService {
     options: { signal?: AbortSignal; receiptReserved?: boolean; admissionReserved?: boolean } = {},
   ): Promise<ScoutDeliverResponse> {
     throwIfAborted(options.signal);
+    validateSessionInputRequest(payload);
+    if (payload.sessionDelivery && (!this.options.requestReceipts || !this.options.submitSessionInput || !this.options.upsertSessionInputActor)) {
+      throw new Error("session_input_unsupported: broker requires durable session input receipts");
+    }
     const admission = this.options.commandAdmission ?? this.defaultAdmission;
     if (options.receiptReserved) {
       const release = options.admissionReserved ? undefined : admission.reserve(payload);
@@ -366,7 +371,7 @@ export class BrokerDeliveryAcceptanceService {
     const message = this.options.readAcceptedMessage
       ? await this.options.readAcceptedMessage(id)
       : await readMessageRecord(this.options.runtimeSnapshot().messages, id);
-    return recoverAcceptedDelivery(message, requesterId, requestId);
+    return recoverSessionInputDelivery(message, requesterId, requestId) ?? recoverAcceptedDelivery(message, requesterId, requestId);
   }
 
   private async acceptCommand(
@@ -381,6 +386,10 @@ export class BrokerDeliveryAcceptanceService {
       operatorActorId: this.options.operatorActorId,
       nodeId: this.options.nodeId,
     });
+    if (payload.sessionDelivery) {
+      const submitted = await acceptSessionInput(payload, { requesterId, requesterNodeId, createdAt }, this.options);
+      if (submitted) return submitted;
+    }
     const initialSnapshot = this.options.runtimeSnapshot();
     const clientMessageId = this.options.metadataStringValue(
       payload.messageMetadata,

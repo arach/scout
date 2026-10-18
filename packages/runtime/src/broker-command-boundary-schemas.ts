@@ -197,9 +197,15 @@ export const brokerOperatorSignalSchema: z.ZodType<ScoutOperatorSignal> =
 
 export const brokerDeliverRequestSchema: z.ZodType<ScoutDeliverRequest> = z.object({
   body: trimmedNonEmptyString,
-  intent: z.enum(["tell", "consult"]),
+  // A previous broker rejects this new discriminant instead of ignoring the
+  // option and silently starting ordinary consult execution.
+  intent: z.enum(["tell", "consult", "session_input"]),
   operatorSignal: brokerOperatorSignalSchema.optional(),
-}).passthrough();
+  sessionDelivery: z.literal("in_place_or_resume").optional(),
+}).passthrough().refine(
+  payload => (payload.intent === "session_input") === (payload.sessionDelivery === "in_place_or_resume"),
+  "session input requires its versioned wire intent and delivery option",
+).transform(payload => ({ ...payload, intent: payload.intent === "session_input" ? "consult" as const : payload.intent }));
 
 export function brokerInvocationRequestSchemaFor(
   runtimeCatalog?: ScoutOwnedRuntimeCatalog,
