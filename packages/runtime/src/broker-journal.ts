@@ -534,6 +534,7 @@ export class FileBackedBrokerJournal {
   private appliedRotations: AppliedHistoryRotation[] = [];
   private readonly pendingResultFlights = new Map<string, FlightRecord>();
   private readonly pendingTerminalReportFlights = new Map<string, FlightRecord>();
+  private readonly pendingWorkPromotionFlights = new Map<string, FlightRecord>();
   private readonly dispatchJobIdsByInvocation = new Map<string, Set<string>>();
   private readonly dispatchJobIdsByFlight = new Map<string, Set<string>>();
   private readonly recoverableDispatchJobs = new Map<string, BrokerInvocationDispatchJob>();
@@ -1369,8 +1370,27 @@ export class FileBackedBrokerJournal {
     return this.pendingTerminalReportFlights.values();
   }
 
+  getCollaborationRecord(recordId: string): CollaborationRecord | undefined {
+    return this.state.snapshot.collaborationRecords[recordId];
+  }
+
   getFlight(flightId: string): FlightRecord | undefined {
     return this.state.snapshot.flights[flightId];
+  }
+
+  /** Fair bounded pages; completed history and repeated failures cannot starve pending work. */
+  listPendingWorkPromotionFlights(limit = 256): FlightRecord[] {
+    const page: FlightRecord[] = [];
+    const count = Math.min(this.pendingWorkPromotionFlights.size, Math.max(0, Math.min(256, Math.floor(limit))));
+    for (let index = 0; index < count; index++) {
+      const next = this.pendingWorkPromotionFlights.entries().next().value;
+      if (!next) break;
+      const [id, flight] = next;
+      page.push(flight);
+      this.pendingWorkPromotionFlights.delete(id);
+      this.pendingWorkPromotionFlights.set(id, flight);
+    }
+    return page;
   }
 
   pendingInvocationResultFlights(): IterableIterator<FlightRecord> {
@@ -2035,6 +2055,11 @@ export class FileBackedBrokerJournal {
         } else {
           this.pendingTerminalReportFlights.delete(entry.flight.id);
         }
+        if ((entry.flight.metadata?.workPromotion as { status?: unknown } | undefined)?.status === "pending") {
+          this.pendingWorkPromotionFlights.set(entry.flight.id, entry.flight);
+        } else {
+          this.pendingWorkPromotionFlights.delete(entry.flight.id);
+        }
         if ((entry.flight.metadata?.resultReply as { status?: unknown } | undefined)?.status === "pending") {
           this.pendingResultFlights.set(entry.flight.invocationId, entry.flight);
         } else {
@@ -2162,7 +2187,10 @@ export class FileBackedBrokerJournal {
       : planHistoryRotation(this.state.snapshot, entry.cutoff, this.historyRotationContext());
     applyHistoryRotationEviction(this.state.snapshot, evicted);
     for (const jobId of entry.evicted?.dispatchJobIds ?? []) this.removeDispatchJob(jobId);
-    for (const flightId of evicted.flightIds) this.updateDispatchJobsForFlight(flightId);
+    for (const flightId of evicted.flightIds) {
+      this.updateDispatchJobsForFlight(flightId);
+      this.pendingWorkPromotionFlights.delete(flightId);
+    }
 
     for (const deliveryId of evicted.deliveryIds) {
       const flightId = this.state.deliveries.get(deliveryId)?.metadata?.peerFlightId;

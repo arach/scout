@@ -58,6 +58,11 @@ function hasPendingResultReply(flight: FlightRecord): boolean {
   return pendingFlightReports(flight).length > 0;
 }
 
+function hasPendingWorkPromotion(flight: FlightRecord): boolean {
+  const intent = flight.metadata?.workPromotion;
+  return Boolean(intent && typeof intent === "object" && (intent as { status?: unknown }).status === "pending");
+}
+
 const TERMINAL_DELIVERY_STATUSES = new Set<DeliveryStatus>([
   "completed",
   "failed",
@@ -174,7 +179,7 @@ export function planHistoryRotation(
     const list = flightsByInvocation.get(flight.invocationId) ?? [];
     list.push(flight);
     flightsByInvocation.set(flight.invocationId, list);
-    if (!isTerminalFlightState(flight.state) || hasPendingResultReply(flight)) {
+    if (!isTerminalFlightState(flight.state) || hasPendingResultReply(flight) || hasPendingWorkPromotion(flight)) {
       protectedInvocationIds.add(flight.invocationId);
     }
     for (const { message } of pendingFlightReports(flight)) {
@@ -223,7 +228,7 @@ export function planHistoryRotation(
 
   for (const flight of Object.values(snapshot.flights)) {
     if (!isTerminalFlightState(flight.state)) continue;
-    if (hasPendingResultReply(flight)) continue;
+    if (hasPendingResultReply(flight) || hasPendingWorkPromotion(flight)) continue;
     if (flightRotationTimestamp(flight) >= cutoff) continue;
     // A terminal flight is evictable only when its invocation is leaving
     // too (or is already gone). Keeping it while the invocation survives

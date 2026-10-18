@@ -926,11 +926,21 @@ const durableActionHttpService = new BrokerDurableActionHttpService({
 const workItemStore = new BrokerWorkItemStore({
   runtime,
   durableStore,
+  durableFlight: (flightId) => journal.getFlight(flightId),
+  durableWorkItem: (workId) => journal.getCollaborationRecord(workId),
   createId: createRuntimeId,
+  warn: (message, error) => console.warn(message, error),
 });
 const recordDeliveryWorkItemIfNeeded = workItemStore.recordDeliveryWorkItemIfNeeded;
 const deliveryWorkItemResolutionForTell = workItemStore.deliveryWorkItemResolutionForTell;
 const promoteInvocationFlightToWork = workItemStore.promoteInvocationFlightToWork;
+let workPromotionRecovery: Promise<void> | undefined;
+function recoverTerminalWorkPromotions(): void {
+  if (workPromotionRecovery) return;
+  workPromotionRecovery = workItemStore.recoverTerminalWorkPromotions(journal.listPendingWorkPromotionFlights())
+    .catch((error) => console.warn("[openscout-runtime] work promotion recovery failed:", error))
+    .finally(() => { workPromotionRecovery = undefined; });
+}
 const wakeLocalSessionForBroker = (input: ExactSessionWakeInput): Promise<LocalSessionWakeResult> =>
   wakeLocalHarnessSession({
     nodeId,
@@ -1404,6 +1414,7 @@ const flightLifecycleService = new BrokerFlightLifecycleService({
   invocationFor: (invocationId) => knownInvocations.get(invocationId),
   updateDeliveryStatus: updateDeliveryStatusDurably,
   updateDeliveryStatusIf: deliveryStore.updateDeliveryStatusIf,
+  prepareWorkPromotion: workItemStore.prepareTerminalWorkPromotion,
   promoteInvocationFlightToWork,
   prepareTerminalReport: (flight, invocation) => prepareTerminalReport(flight, invocation, {
     nodeId, systemActorId: systemActor.id, conversation: (id) => runtime.conversation(id), now: Date.now,
@@ -3518,6 +3529,7 @@ setTimeout(() => {
   if (!startupTrafficGate.snapshot().mutationsAdmitted) return;
   recoverInvocationResultReplies();
   recoverTerminalReports();
+  recoverTerminalWorkPromotions();
   // Reconcile persisted external attempts without repeating a provider send.
   void externalSessionService.recover([...knownInvocations.values()])
     .then((failed) => { if (failed.length) console.error("[openscout-runtime] external session recovery incomplete", failed); })
@@ -3642,6 +3654,7 @@ if (startupTrafficGate.snapshot().mutationsAdmitted) {
   setInterval(() => {
     recoverInvocationResultReplies();
     recoverTerminalReports();
+    recoverTerminalWorkPromotions();
     replyCompletionRecovery.recover()
       .then(() => dispatchRecoveryService.recoverQueuedFlights({ reason: "queued_retry_sweep" })).catch((error) => {
       console.error("[openscout-runtime] queued dispatch retry sweep failed:", error);

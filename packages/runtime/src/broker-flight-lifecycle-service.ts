@@ -63,6 +63,8 @@ export type BrokerFlightLifecycleServiceOptions = {
     input: Parameters<BrokerFlightLifecycleServiceOptions["updateDeliveryStatus"]>[0],
     eligible: (current: DeliveryIntent) => boolean | Promise<boolean>,
   ) => Promise<boolean>;
+  /** Pure preparation inside the terminal-flight writer; application runs after commit. */
+  prepareWorkPromotion?: (flight: FlightRecord, invocation: InvocationRequest | undefined, previous?: FlightRecord) => FlightRecord;
   promoteInvocationFlightToWork: (
     invocation: InvocationRequest,
     flight: FlightRecord,
@@ -305,6 +307,7 @@ export class BrokerFlightLifecycleService {
       if (!previous?.metadata?.terminalReport) {
         flightToRecord = this.options.prepareTerminalReport?.(flightToRecord, invocation) ?? flightToRecord;
       }
+      flightToRecord = this.options.prepareWorkPromotion?.(flightToRecord, invocation, previous) ?? flightToRecord;
       if (previous && isDuplicateFlightUpdate(previous, flightToRecord)) {
         return;
       }
