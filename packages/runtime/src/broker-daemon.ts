@@ -267,6 +267,7 @@ import { BrokerMeshHttpService } from "./broker-mesh-http-service.js";
 import { fetchPeerAgents } from "./mesh-forwarding.js";
 import { BrokerConversationService } from "./broker-conversation-service.js";
 import { BrokerMessageService } from "./broker-message-service.js";
+import { BrokerReplyCompletionRecovery } from "./broker-reply-completion-recovery.js";
 import { BrokerInvocationDispatchService } from "./broker-invocation-dispatch-service.js";
 import { BrokerCommandService } from "./broker-command-service.js";
 import { BrokerChannelInviteService } from "./broker-channel-invite-service.js";
@@ -279,6 +280,7 @@ import {
   buildBrokerReturnAddressForActor,
   isLocalScoutProductTarget,
   isOperatorDeliveryTarget,
+  isFinalReplyForInvocation,
   messageRefCandidateForRouteTarget,
   messageVisibilityForConversation,
   metadataStringValue,
@@ -290,6 +292,7 @@ import {
   applyInvocationStatusPatch,
   isReconciledStaleFlightActivityItem,
   isTerminalFlightState,
+  isWorkingFlightState,
   staleLocalEndpointReason,
   type InvocationStatusPatch,
 } from "./broker-local-invocation-helpers.js";
@@ -1400,7 +1403,8 @@ const flightLifecycleService = new BrokerFlightLifecycleService({
   updateDeliveryStatusIf: deliveryStore.updateDeliveryStatusIf,
   promoteInvocationFlightToWork,
   maybeForwardFlightToAuthority: (flight) => meshForwardingService.maybeForwardFlightToAuthority(flight),
-  isInvocationActive: (invocationId) => localInvocationService.hasActiveInvocation(invocationId) || externalSessionService.hasPendingInvocation(invocationId),
+  isInvocationActive: (invocationId) => replyCompletionRecovery.isPending(invocationId)
+    || localInvocationService.hasActiveInvocation(invocationId) || externalSessionService.hasPendingInvocation(invocationId),
   onTerminalFlight: async ({ flight, invocation }) => {
     if (invocation) void externalSessionService.forwardResult(invocation, flight)
       .catch((error) => console.error("[openscout-runtime] external result delivery failed", error));
@@ -1942,8 +1946,30 @@ const messageService = new BrokerMessageService({
   applyProjectedEntries,
   reconcileStaleLocalDeliveries,
   persistFlight,
+  persistAcceptedReply: (invocation, receipt) => runDurableWrite(async () => {
+    const current = runtime.flightForInvocation(invocation.id);
+    if (!current || !isWorkingFlightState(current.state)
+      || !isFinalReplyForInvocation(receipt.message, invocation)
+      || !externalSessionService.authorizesReplyCompletion(invocation, receipt.message)) return;
+    if (current.metadata?.acceptedReply !== undefined) return;
+    // Store only the authority acknowledgement, not a local message or delivery.
+    // Its exact reply survives a subsequent completion-write failure/restart.
+    const flight = { ...current, metadata: { ...current.metadata, acceptedReply: receipt } };
+    await commitDurableEntries({ kind: "flight.record", flight }, async () => { await runtime.upsertFlight(flight); });
+  }),
   authorizeReplyCompletion: (invocation, reply) => externalSessionService.authorizesReplyCompletion(invocation, reply),
   activeLocalEndpointForAgent: (agentId) => localEndpointResolver.activeLocalEndpointForAgent(agentId),
+});
+
+const replyCompletionRecovery = new BrokerReplyCompletionRecovery({
+  flights: function* () {
+    for (const flight of Object.values(runtime.peek().flights)) {
+      if (isWorkingFlightState(flight.state)) yield flight;
+    }
+  },
+  invocation: (id) => knownInvocations.get(id),
+  recoverReply: (invocation) => messageService.recoverInvocationReply(invocation),
+  warn: (id, error) => console.warn(`[openscout-runtime] accepted reply recovery held ${id}:`, error),
 });
 
 const externalSessionService = new BrokerExternalSessionService({
@@ -2643,7 +2669,8 @@ const dispatchRecoveryService = new BrokerDispatchRecoveryService({
   dispatchJobs: () => journal.listRecoverableInvocationDispatchJobs({ limit: 5000 }),
   dispatchJobForInvocation: (invocationId) => journal.getInvocationDispatchJobForInvocation(invocationId),
   invocationFor: (invocationId) => knownInvocations.get(invocationId),
-  isInvocationActive: (invocationId) => localInvocationService.hasActiveInvocation(invocationId) || externalSessionService.hasPendingInvocation(invocationId),
+  isInvocationActive: (invocationId) => replyCompletionRecovery.isPending(invocationId)
+    || localInvocationService.hasActiveInvocation(invocationId) || externalSessionService.hasPendingInvocation(invocationId),
   runDispatchJob: (job, invocation) => invocationDispatchService.runDispatchJob(job, invocation),
   requeueDispatchJob: (job, invocation, flight) => invocationDispatchService.requeueDispatchJob(job, invocation, flight),
   dispatchAcceptedInvocation: (invocation) => invocationDispatchService.dispatchAcceptedInvocation(invocation),
@@ -3445,12 +3472,13 @@ setTimeout(() => {
   void externalSessionService.recover([...knownInvocations.values()])
     .then((failed) => { if (failed.length) console.error("[openscout-runtime] external session recovery incomplete", failed); })
     .catch((error) => console.error("[openscout-runtime] external session recovery failed", error));
-  bootstrapRegisteredLocalAgents()
+  replyCompletionRecovery.recover()
+    .then(() => bootstrapRegisteredLocalAgents())
     .then(() => dispatchRecoveryService.recoverQueuedFlights({ reason: "startup" }))
     .catch((error) => {
       console.error("[openscout-runtime] local agent bootstrap or dispatch recovery failed:", error);
     });
-  reconcileStaleWorkingFlights().catch((error) => {
+  replyCompletionRecovery.recover().then(() => reconcileStaleWorkingFlights()).catch((error) => {
     console.error("[openscout-runtime] stale flight reconciliation failed:", error);
   });
   reconcileStaleLocalDeliveries().catch((error) => {
@@ -3563,7 +3591,8 @@ if (startupTrafficGate.snapshot().mutationsAdmitted) {
   // missed. Deferrals gate per-invocation cadence inside the recovery service.
   setInterval(() => {
     recoverInvocationResultReplies();
-    dispatchRecoveryService.recoverQueuedFlights({ reason: "queued_retry_sweep" }).catch((error) => {
+    replyCompletionRecovery.recover()
+      .then(() => dispatchRecoveryService.recoverQueuedFlights({ reason: "queued_retry_sweep" })).catch((error) => {
       console.error("[openscout-runtime] queued dispatch retry sweep failed:", error);
     });
   }, 60_000).unref();

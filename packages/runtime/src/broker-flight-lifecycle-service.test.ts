@@ -244,6 +244,16 @@ function createHarness(input: {
 }
 
 describe("broker flight lifecycle helpers", () => {
+  test("delayed working metadata cannot erase or replace an authority-accepted reply", async () => {
+    const acceptedReply = { version: 1, authorityNodeId: "peer", message: { id: "reply-original", body: "done" } };
+    const running = testFlight({ metadata: { acceptedReply } });
+    const harness = createHarness({ snapshot: testSnapshot({ flights: { [running.id]: running } }) });
+    await harness.service.recordFlight({ ...running, metadata: { requesterTimedOut: true } });
+    expect(harness.committedFlights.at(-1)?.metadata?.acceptedReply).toEqual(acceptedReply);
+    await harness.service.recordFlight({ ...running, metadata: { requesterTimedOut: true, acceptedReply: { message: { id: "replacement" } } } });
+    expect(harness.committedFlights).toHaveLength(1);
+  });
+
   test("classifies terminal downgrades and delivery statuses", () => {
     expect(shouldIgnoreFlightUpdate(
       testFlight({ state: "completed" }),

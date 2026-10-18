@@ -278,6 +278,13 @@ export class BrokerFlightLifecycleService {
     await this.options.durableStore.runWrite(async () => {
       const previous = this.options.runtime.snapshot().flights[flightToRecord.id];
       previousFlight = previous;
+      // A delayed adapter/status update cannot erase an acknowledged reply
+      // while its separate completion write is being recovered.
+      if (previous?.metadata?.acceptedReply !== undefined) {
+        flightToRecord = { ...flightToRecord, metadata: {
+          ...flightToRecord.metadata, acceptedReply: previous.metadata.acceptedReply,
+        } };
+      }
       if (previous && isTerminalFlightState(previous.state)) {
         // Terminal enrichment must not erase/reopen a durable reply intent.
         // Only the result outbox's compare-and-write marks it delivered.
