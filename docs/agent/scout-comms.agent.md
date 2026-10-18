@@ -320,3 +320,11 @@ Draft needs no Accessibility grant and does not need Scout.app. Default
 confirmation, not merely a click. Do not submit into a running turn to reply.
 When no broker reply context exists, obtain an explicit requester session id;
 never infer a return address from quoted or arbitrary transcript text.
+
+### Cancel a queued reply
+
+Before drafting a reply that was already queued for app release, cancel its
+flight to avoid a duplicate later: `scout flight cancel <flight-id>` or MCP
+`flight_cancel { flightId }`. The broker refuses once submission has started.
+Only `state: cancelled` confirms cancellation; completed/failed means it already
+finished, and an error means do not assume the queued reply was removed.
