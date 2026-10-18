@@ -45,11 +45,14 @@ async function fixture() {
     localNode: () => ({ ...peer, id: "origin" }), localNodeId: "origin",
     nodeFor: () => peer, agentFor: () => undefined,
     invocationFor: id => journal.snapshot().invocations[id],
-    flightForInvocation: id => Object.values(journal.snapshot().flights).find(value => value.invocationId === id),
+    flightForInvocation: id => Object.values(journal.snapshot().flights).findLast(value => value.invocationId === id),
     recordDelivery: async delivery => { await journal.appendEntries({ kind: "deliveries.record", deliveries: [delivery] }); },
     updateDeliveryStatus: async input => { await journal.appendEntries({ kind: "delivery.status.update", ...input }); },
     recordDeliveryAttempt: async attempt => { await journal.appendEntries({ kind: "delivery.attempt.record", attempt }); },
-    recordFlight: async value => { await journal.appendEntries({ kind: "flight.record", flight: value }); },
+    recordFlight: async (value, eligible) => {
+      if (eligible && !eligible()) return;
+      await journal.appendEntries({ kind: "flight.record", flight: value });
+    },
     failInvocation: async () => { failures++; },
     forward: async () => { forwards++; return { ok: true, flight }; },
     peerFetch: async () => { observations++; return new Response(null, { status: 204 }); },
@@ -161,6 +164,69 @@ test("peer ACK without a flight still becomes acknowledged and starts observatio
   expect(f.journal().getDelivery(delivery.id)?.status).toBe("peer_acked");
   expect(f.journal().listDeliveryAttempts(delivery.id).map(attempt => attempt.status)).toEqual(["acknowledged"]);
   expect(f.counts()).toMatchObject({ failures: 0, observations: 1 });
+});
+
+for (const field of ["invocationId", "requesterId", "targetAgentId"] as const) {
+  test(`uncorrelated ACK ${field} never pins or records the wrong flight`, async () => {
+    const f = await fixture();
+    logs.push(spyOn(console, "warn").mockImplementation(() => {}));
+    f.deps.forward = async () => ({ ok: true, flight: { ...f.flight, [field]: "unrelated" } });
+    f.deps.peerFetch = async () => new Response(`event: snapshot\ndata: ${JSON.stringify({ invocationId: f.invocation.id, flight: f.flight })}\n\n`);
+    const worker = f.start();
+    const delivery = await worker.enqueue(f.invocation, f.peer);
+    await worker.tick();
+    await Bun.sleep(20);
+    expect(f.journal().getDelivery(delivery.id)).toMatchObject({ status: "peer_acked", metadata: { peerFlightId: null } });
+    expect(f.journal().snapshot().flights[f.flight.id]).toEqual(f.flight);
+    expect(f.counts().failures).toBe(0);
+  });
+}
+
+for (const replacement of ["same_flight", "new_flight", "cancelled"] as const) {
+  test(`delayed ACK cannot replace ${replacement} after restart or inside the writer`, async () => {
+    const f = await fixture();
+    logs.push(spyOn(console, "error").mockImplementation(() => {}));
+    const origin: FlightRecord = { ...f.flight, id: "origin-flight", state: "queued", startedAt: 0 };
+    await f.deps.recordFlight(origin);
+    const recordFlight = f.deps.recordFlight;
+    f.deps.recordFlight = async () => { throw new Error("completion disk failure"); };
+    const first = f.start();
+    const delivery = await first.enqueue(f.invocation, f.peer);
+    await first.tick();
+    expect(f.journal().getDelivery(delivery.id)?.metadata?.peerAcknowledgement).toMatchObject({ previousFlight: origin });
+    await f.reopen();
+    const newer: FlightRecord = { ...f.flight, id: replacement === "new_flight" ? "new-flight" : f.flight.id,
+      state: replacement === "cancelled" ? "cancelled" : "running", summary: "newer observation", startedAt: 20 };
+    // This simulates another writer winning after recovery submits its write.
+    f.deps.recordFlight = async (value, eligible) => {
+      await recordFlight(newer);
+      await recordFlight(value, eligible);
+    };
+    const recovered = f.start();
+    await recovered.tick();
+    expect(f.deps.flightForInvocation?.(f.invocation.id)).toEqual(newer);
+    expect(f.journal().getDelivery(delivery.id)?.metadata?.peerAcknowledgement).toBeNull();
+    expect(f.counts()).toMatchObject({ forwards: 1, failures: 0 });
+  });
+}
+
+test("ACK recovery may replace its unchanged origin placeholder after restart", async () => {
+  const f = await fixture();
+  logs.push(spyOn(console, "error").mockImplementation(() => {}));
+  const origin: FlightRecord = { ...f.flight, id: "origin-flight", state: "queued", startedAt: 0 };
+  await f.deps.recordFlight(origin);
+  const recordFlight = f.deps.recordFlight;
+  f.deps.recordFlight = async () => { throw new Error("flight disk failure"); };
+  const first = f.start();
+  const delivery = await first.enqueue(f.invocation, f.peer);
+  await first.tick();
+  await f.reopen();
+  f.deps.recordFlight = recordFlight;
+  const recovered = f.start();
+  await recovered.tick();
+  expect(f.deps.flightForInvocation?.(f.invocation.id)).toEqual(f.flight);
+  expect(f.journal().getDelivery(delivery.id)?.metadata?.peerAcknowledgement).toBeNull();
+  expect(f.counts()).toMatchObject({ forwards: 1, failures: 0 });
 });
 
 test("exhausted unacknowledged request remains unknown across restart and peer-online hints", async () => {

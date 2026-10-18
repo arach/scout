@@ -164,7 +164,8 @@ function makeHarness(opts: {
       list.push({ attempt: attempt.attempt, status: attempt.status, metadata: attempt.metadata });
       attempts.set(attempt.deliveryId, list);
     },
-    recordFlight: async (flight) => {
+    recordFlight: async (flight, eligible) => {
+      if (eligible && !eligible()) return;
       flights.push(flight);
     },
     failInvocation: async (inv, detail) => {

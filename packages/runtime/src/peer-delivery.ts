@@ -24,6 +24,7 @@ import type {
   NodeDefinition,
 } from "@openscout/protocol";
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { MAX_SSE_FRAME_BYTES } from "./broker-control-stream-service.js";
 
 import type { FileBackedBrokerJournal } from "./broker-journal.js";
@@ -106,8 +107,8 @@ export interface PeerDeliveryDeps {
     createdAt: number;
     metadata?: Record<string, unknown>;
   }) => Promise<void>;
-  /** Persist the receiver-returned flight (after a successful peer ACK). */
-  recordFlight: (flight: FlightRecord) => Promise<void>;
+  /** Persist the receiver-returned flight; evaluate eligibility inside the durable writer. */
+  recordFlight: (flight: FlightRecord, eligible?: () => boolean) => Promise<void>;
   /** Mark the originator-side flight as failed (terminal). */
   failInvocation: (invocation: InvocationRequest, detail: string) => Promise<void>;
   /**
@@ -178,7 +179,19 @@ type PeerAcknowledgement = {
   version: 1;
   attempt: DeliveryAttempt;
   flight?: FlightRecord;
+  /** Exact origin observation before submission; compare again inside the writer. */
+  previousFlight?: FlightRecord | null;
 };
+
+function flightMatchesInvocation(value: unknown, invocation: InvocationRequest): value is FlightRecord {
+  if (!value || typeof value !== "object") return false;
+  const flight = value as FlightRecord;
+  return typeof flight.id === "string" && flight.id.length > 0
+    && flight.invocationId === invocation.id && flight.targetAgentId === invocation.targetAgentId
+    && flight.requesterId === invocation.requesterId
+    && ["queued", "waking", "running", "waiting", "completed", "failed", "cancelled"].includes(flight.state)
+    && (flight.startedAt === undefined || (typeof flight.startedAt === "number" && Number.isFinite(flight.startedAt)));
+}
 
 function pendingAcknowledgement(delivery: DeliveryIntent): PeerAcknowledgement | undefined {
   const value = delivery.metadata?.peerAcknowledgement as PeerAcknowledgement | undefined;
@@ -233,8 +246,9 @@ function startStatusMirror(args: {
   peerUrl: string;
   invocation: InvocationRequest;
   expectedFlightId?: string;
+  originFlightId?: string;
   emit?: (event: ControlEvent) => void;
-  recordFlight: (flight: FlightRecord) => Promise<void>;
+  recordFlight: (flight: FlightRecord, eligible?: () => boolean) => Promise<void>;
   currentFlight?: () => FlightRecord | undefined;
   peerFetch: MeshPeerFetch;
   durationMs: number;
@@ -252,20 +266,17 @@ function startStatusMirror(args: {
     `${prefix}/invocations/${encodeURIComponent(args.invocation.id)}/stream`;
 
   const matchingFlight = (value: unknown): value is FlightRecord => {
-    if (!value || typeof value !== "object") return false;
-    const flight = value as FlightRecord;
-    return typeof flight.id === "string" && (!args.expectedFlightId || flight.id === args.expectedFlightId)
-      && flight.invocationId === args.invocation.id
-      && flight.targetAgentId === args.invocation.targetAgentId
-      && flight.requesterId === args.invocation.requesterId
-      && ["queued", "waking", "running", "waiting", "completed", "failed", "cancelled"].includes(flight.state)
-      && typeof flight.startedAt === "number" && Number.isFinite(flight.startedAt);
+    return flightMatchesInvocation(value, args.invocation)
+      && (!args.expectedFlightId || value.id === args.expectedFlightId);
   };
   const mirrorFlight = async (flight: FlightRecord, event?: Extract<ControlEvent, { kind: "flight.updated" }>) => {
     const before = args.currentFlight?.();
-    if (matchingFlight(before) && TERMINAL_FLIGHT_STATES.has(before.state)) return true;
-    await args.recordFlight(flight);
+    if (flightMatchesInvocation(before, args.invocation)
+      && (TERMINAL_FLIGHT_STATES.has(before.state)
+        || (before.id !== flight.id && before.id !== args.originFlightId))) return true;
+    await args.recordFlight(flight, () => isDeepStrictEqual(args.currentFlight?.(), before));
     const current = args.currentFlight?.();
+    if (current && !matchingFlight(current)) return true;
     const recorded = matchingFlight(current) ? current : flight;
     args.emit?.(event ? { ...event, payload: { ...event.payload, flight: recorded } } : {
       id: createId("evt"), kind: "flight.updated", ts: Date.now(), actorId: "system", payload: { flight: recorded },
@@ -396,30 +407,34 @@ export function createPeerDeliveryWorker(
     if (statusMirrors.has(deliveryId)) return;
     if ((mirrorRetries.get(deliveryId)?.nextAt ?? 0) > now()) return;
     const expectedFlightId = readString(delivery.metadata, "peerFlightId");
+    const originFlightId = readString(delivery.metadata, "peerOriginFlightId");
     const flight = deps.flightForInvocation?.(invocation.id);
-    if (flight && flight.id === expectedFlightId && flight.invocationId === invocation.id
-      && flight.targetAgentId === invocation.targetAgentId && flight.requesterId === invocation.requesterId
-      && TERMINAL_FLIGHT_STATES.has(flight.state)) return;
+    if (flightMatchesInvocation(flight, invocation)
+      && (TERMINAL_FLIGHT_STATES.has(flight.state)
+        || (expectedFlightId && flight.id !== expectedFlightId && flight.id !== originFlightId))) return;
     const handle = startStatusMirror({
       peerUrl,
       invocation,
       expectedFlightId,
+      originFlightId,
       emit: deps.emit,
-      recordFlight: async (flight) => {
+      recordFlight: async (flight, eligible) => {
+        if (eligible && !eligible()) return;
+        const previousFlight = deps.flightForInvocation?.(invocation.id) ?? null;
         const current = deps.journal.getDelivery(deliveryId);
         // A correlated authority snapshot resolves an interrupted/lost ACK;
         // observation is never a second invocation submission.
         if (current?.status === "sent") {
           await transition(current, { status: "peer_acked", metadata: {
             peerAckedAt: now(), peerFlightId: flight.id, peerSubmission: null,
-            peerAcknowledgement: { version: 1, flight, attempt: {
+            peerAcknowledgement: { version: 1, flight, previousFlight, attempt: {
               id: `peer-observed-${deliveryId}`, deliveryId, attempt: deps.journal.listDeliveryAttempts(deliveryId).length + 1,
               status: "acknowledged", createdAt: now(), metadata: { source: "authority_observation" },
             } } satisfies PeerAcknowledgement,
           }, leaseOwner: null, leaseExpiresAt: null });
           await recoverAcknowledgement(deps.journal.getDelivery(deliveryId)!);
         } else {
-          await deps.recordFlight(flight);
+          await deps.recordFlight(flight, eligible);
         }
       },
       currentFlight: () => deps.flightForInvocation?.(invocation.id),
@@ -454,16 +469,23 @@ export function createPeerDeliveryWorker(
     if (!deps.journal.listDeliveryAttempts(delivery.id).some(attempt => attempt.id === pending.attempt.id)) {
       await deps.recordDeliveryAttempt(pending.attempt);
     }
-    if (pending.flight) {
-      const current = deps.flightForInvocation?.(pending.flight.invocationId);
-      // Never replay an old running ACK over a later terminal observation.
-      if (!current || current.id !== pending.flight.id || current.targetAgentId !== pending.flight.targetAgentId
-        || current.requesterId !== pending.flight.requesterId || !TERMINAL_FLIGHT_STATES.has(current.state)) {
-        await deps.recordFlight(pending.flight);
-      }
+    const invocation = delivery.invocationId ? deps.invocationFor(delivery.invocationId) : undefined;
+    const validFlight = invocation && flightMatchesInvocation(pending.flight, invocation) ? pending.flight : undefined;
+    if (pending.flight && !validFlight) {
+      console.warn(`[openscout-runtime] peer-delivery: ignored uncorrelated ACK flight for ${delivery.id}`);
+    }
+    if (validFlight) {
+      // The returned ACK is an earlier observation, not a later authority
+      // snapshot. Never replace an observation made since submission, even
+      // for the same flight ID. The writer repeats this comparison atomically.
+      await deps.recordFlight(validFlight, () => {
+        const current = deps.flightForInvocation?.(invocation!.id);
+        return isDeepStrictEqual(current ?? null, pending.previousFlight ?? null)
+          && !(current && TERMINAL_FLIGHT_STATES.has(current.state));
+      });
     }
     await deps.updateDeliveryStatus({ deliveryId: delivery.id, status: "peer_acked",
-      metadata: { peerAcknowledgement: null }, leaseOwner: null, leaseExpiresAt: null });
+      metadata: { peerAcknowledgement: null, ...(pending.flight && !validFlight ? { peerFlightId: null } : {}) }, leaseOwner: null, leaseExpiresAt: null });
   }
 
   async function enqueue(invocation: InvocationRequest, peer: NodeDefinition): Promise<DeliveryIntent> {
@@ -632,6 +654,7 @@ export function createPeerDeliveryWorker(
       });
 
       let result: Awaited<ReturnType<typeof forward>>;
+      let previousFlight: FlightRecord | null = null;
       try {
         // async: carries the request message so the executor can resolve `--ref msg-…` replies
         const bundle = await buildMeshInvocationBundleAsync(deps.snapshot(), deps.localNode(), invocation);
@@ -650,6 +673,7 @@ export function createPeerDeliveryWorker(
           await closeIfTerminal();
           return;
         }
+        previousFlight = beforeForward ?? null;
         result = await forward(peerTarget, bundle);
       } catch (error) {
         const reason = pickFailureReason(error);
@@ -725,11 +749,15 @@ export function createPeerDeliveryWorker(
       // This is deliberately outside the transport catch. Nothing after the
       // peer's ACK may become a transport failure or another executor attempt.
       try {
+        const acknowledgedFlight = flightMatchesInvocation(result.flight, invocation) ? result.flight : undefined;
+        if (result.flight && !acknowledgedFlight) {
+          console.warn(`[openscout-runtime] peer-delivery: ignored uncorrelated ACK flight for ${delivery.id}`);
+        }
         await transition(deps.journal.getDelivery(delivery.id) ?? delivery, {
           status: "peer_acked",
           metadata: {
-            peerAckedAt: now(), peerFlightId: result.flight?.id, peerSubmission: null,
-            peerAcknowledgement: { version: 1, flight: result.flight, attempt: {
+            peerAckedAt: now(), peerFlightId: acknowledgedFlight?.id ?? null, peerOriginFlightId: previousFlight?.id ?? null, peerSubmission: null,
+            peerAcknowledgement: { version: 1, flight: acknowledgedFlight, previousFlight, attempt: {
               id: `peer-ack-${delivery.id}-${attemptNumber}`, deliveryId: delivery.id, attempt: attemptNumber,
               status: "acknowledged", createdAt: now(), metadata: {
                 peerBrokerUrl: peerUrl, peerTransport: typeof peerTarget === "string" ? "http" : "node_entrypoint",
@@ -771,7 +799,7 @@ export function createPeerDeliveryWorker(
       }
       const peer = delivery.targetNodeId ? deps.nodeFor(delivery.targetNodeId) : undefined;
       const peerUrl = peer?.brokerUrl ?? readString(delivery.metadata, "peerBrokerUrl");
-      if (peerUrl) ensureStatusMirror(delivery, peerUrl, invocation);
+      if (peerUrl) ensureStatusMirror(deps.journal.getDelivery(delivery.id) ?? delivery, peerUrl, invocation);
     }
     const candidates = deps.journal
       .listPendingPeerForwardDeliveries({ limit: 500 })
