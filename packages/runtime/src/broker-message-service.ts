@@ -1,5 +1,6 @@
 import { isIdempotentMessageRetry } from "./broker-message-idempotency.js";
 import { isDeepStrictEqual } from "node:util";
+import { canonicalMessageRecord } from "./message-record-canonical.js";
 import { selectMessageRecordsAsync, readMessageRecord } from "./broker-message-records.js";
 import type {
   AgentDefinition,
@@ -58,9 +59,9 @@ export type BrokerMessageServiceDeps = {
   ) => Promise<{ deliveries: DeliveryIntent[]; entries: BrokerJournalEntry[]; duplicate?: MessageRecord }>;
   applyProjectedEntries: (entries: BrokerJournalEntry[]) => Promise<void>;
   reconcileStaleLocalDeliveries: () => Promise<void>;
-  persistFlight: (flight: FlightRecord) => Promise<void>;
+  persistFlight: (flight: FlightRecord, eligible?: () => boolean) => Promise<void>;
   /** Local checkpoint after remote authority acceptance; never a local message/fanout. */
-  persistAcceptedReply: (invocation: InvocationRequest, receipt: AcceptedInvocationReply) => Promise<void>;
+  persistAcceptedReply: (invocation: InvocationRequest, receipt: AcceptedInvocationReply, eligible: () => boolean) => Promise<void>;
   authorizeReplyCompletion?: (invocation: InvocationRequest, reply: MessageRecord) => boolean;
   activeLocalEndpointForAgent: (agentId: string) => unknown;
 };
@@ -122,8 +123,7 @@ export class BrokerMessageService {
           throw new Error(`message id ${message.id} is already assigned to a different record`);
         }
       }
-      await this.checkpointAcceptedReplies(receipt.message, receipt.authorityNodeId);
-      await this.completeInvocationsForBrokerReply(receipt.message);
+      await this.checkpointAndCompleteAcceptedReplies(receipt.message, receipt.authorityNodeId);
       return { ok: true, message: receipt.message, deliveries: [], forwarded: true,
         authorityNodeId: receipt.authorityNodeId, duplicate: true };
     }
@@ -131,16 +131,25 @@ export class BrokerMessageService {
     const authority = this.deps.mesh.authorityNodeForConversation(message.conversationId);
     if (authority) {
       const forwarded = await this.deps.mesh.forwardConversationMessageToAuthority(message);
-      await this.checkpointAcceptedReplies(message, forwarded.authorityNodeId);
-      // The authority owns the message. Once it acknowledges that durable
-      // reply, the executor must also settle its local flight; otherwise its
-      // tmux waiter and the requester's status mirror remain running forever.
-      await this.completeInvocationsForBrokerReply(message);
+      const accepted = forwarded.message;
+      if (accepted !== undefined) {
+        if (!accepted || accepted.id !== message.id || !Number.isFinite(accepted.createdAt)
+          || !(isIdempotentMessageRetry(canonicalMessageRecord(accepted), canonicalMessageRecord(message))
+            || isDeepStrictEqual(canonicalMessageRecord(accepted), canonicalMessageRecord(message)))) {
+          throw new Error(`authority ${forwarded.authorityNodeId} returned a conflicting canonical message for ${message.id}`);
+        }
+        // A retry's timestamp/provenance is not proof of what the authority stored.
+        await this.checkpointAndCompleteAcceptedReplies(accepted, forwarded.authorityNodeId);
+      } else if (Object.values(this.deps.runtime.snapshot().invocations)
+        .some((invocation) => this.completionFlight(invocation, message))) {
+        // Older peers can acknowledge delivery, but cannot prove final completion.
+        throw new Error(`authority ${forwarded.authorityNodeId} acknowledged ${message.id} without a canonical message; completion recovery held`);
+      }
       return {
         ok: true,
-        message,
-        deliveries: forwarded.deliveries ?? [],
         ...forwarded,
+        message: accepted ?? message,
+        deliveries: forwarded.deliveries ?? [],
       };
     }
 
@@ -229,18 +238,19 @@ export class BrokerMessageService {
   readonly completeInvocationForBrokerReply = async (
     invocation: InvocationRequest,
     reply: MessageRecord,
+    expectedFlightId?: string,
   ): Promise<boolean> => {
     const flight = this.completionFlight(invocation, reply);
-    if (!flight) return false;
+    if (!flight || (expectedFlightId !== undefined && flight.id !== expectedFlightId)) return false;
 
     await this.deps.persistFlight(completedFlightFromBrokerReply(
       invocation,
       flight,
       reply,
       this.deps.runtime.agent(invocation.targetAgentId)?.displayName,
-    ));
+    ), () => this.completionFlight(invocation, reply)?.id === flight.id);
     const completed = this.deps.runtime.flightForInvocation(invocation.id);
-    return completed?.state === "completed" && completed.metadata?.replyMessageId === reply.id;
+    return completed?.id === flight.id && completed.state === "completed" && completed.metadata?.replyMessageId === reply.id;
   };
 
   /** Called for active flights only; accepted-message reads never resubmit work. */
@@ -251,7 +261,7 @@ export class BrokerMessageService {
     const reply = receipt?.message ?? await this.existingBrokerReplyForInvocation(
       invocation, invocation.targetAgentId, flight.startedAt ?? invocation.createdAt,
     );
-    return reply ? this.completeInvocationForBrokerReply(invocation, reply) : false;
+    return reply ? this.completeInvocationForBrokerReply(invocation, reply, flight.id) : false;
   };
 
   private authorizedFinalReply(invocation: InvocationRequest, reply: MessageRecord): boolean {
@@ -271,10 +281,13 @@ export class BrokerMessageService {
     return flight;
   }
 
-  private async checkpointAcceptedReplies(message: MessageRecord, authorityNodeId: string): Promise<void> {
+  private async checkpointAndCompleteAcceptedReplies(message: MessageRecord, authorityNodeId: string): Promise<void> {
     for (const invocation of Object.values(this.deps.runtime.snapshot().invocations)) {
-      if (!this.completionFlight(invocation, message)) continue;
-      await this.deps.persistAcceptedReply(invocation, { version: 1, authorityNodeId, message });
+      const flight = this.completionFlight(invocation, message);
+      if (!flight) continue;
+      await this.deps.persistAcceptedReply(invocation, { version: 1, authorityNodeId, message },
+        () => this.completionFlight(invocation, message)?.id === flight.id);
+      await this.completeInvocationForBrokerReply(invocation, message, flight.id);
     }
   }
 

@@ -265,7 +265,7 @@ function normalizeRecordedFlight(
 export class BrokerFlightLifecycleService {
   constructor(private readonly options: BrokerFlightLifecycleServiceOptions) {}
 
-  readonly recordFlight = async (flight: FlightRecord): Promise<void> => {
+  readonly recordFlight = async (flight: FlightRecord, eligible?: () => boolean): Promise<void> => {
     const invocation = this.options.invocationFor(flight.invocationId)
       ?? this.options.runtime.snapshot().invocations[flight.invocationId];
     // Single chokepoint before journal/sqlite persistence, work-item promotion,
@@ -276,6 +276,8 @@ export class BrokerFlightLifecycleService {
     let didRecordFlight = false;
     let previousFlight: FlightRecord | undefined;
     await this.options.durableStore.runWrite(async () => {
+      // Recheck the caller's observation after acquiring the canonical writer.
+      if (eligible && !eligible()) return;
       const previous = this.options.runtime.snapshot().flights[flightToRecord.id];
       previousFlight = previous;
       // A delayed adapter/status update cannot erase an acknowledged reply

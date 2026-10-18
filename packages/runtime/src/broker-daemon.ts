@@ -1451,16 +1451,16 @@ const flightLifecycleService = new BrokerFlightLifecycleService({
   },
 });
 
-async function recordFlightDurably(flight: FlightRecord): Promise<void> {
-  await flightLifecycleService.recordFlight(flight);
+async function recordFlightDurably(flight: FlightRecord, eligible?: () => boolean): Promise<void> {
+  await flightLifecycleService.recordFlight(flight, eligible);
 }
 
 async function reconcileStaleLocalDeliveries(): Promise<void> {
   await flightLifecycleService.reconcileStaleLocalDeliveries();
 }
 
-async function persistFlight(flight: FlightRecord): Promise<void> {
-  await recordFlightDurably(flight);
+async function persistFlight(flight: FlightRecord, eligible?: () => boolean): Promise<void> {
+  await recordFlightDurably(flight, eligible);
 }
 
 // Phase 3 write collapse: status changes are expressed as patches against the
@@ -1946,7 +1946,8 @@ const messageService = new BrokerMessageService({
   applyProjectedEntries,
   reconcileStaleLocalDeliveries,
   persistFlight,
-  persistAcceptedReply: (invocation, receipt) => runDurableWrite(async () => {
+  persistAcceptedReply: (invocation, receipt, eligible) => runDurableWrite(async () => {
+    if (!eligible()) return;
     const current = runtime.flightForInvocation(invocation.id);
     if (!current || !isWorkingFlightState(current.state)
       || !isFinalReplyForInvocation(receipt.message, invocation)

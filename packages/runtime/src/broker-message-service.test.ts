@@ -133,6 +133,7 @@ function createHarness(input: {
   mesh?: Partial<BrokerMessageMesh>;
   recordDuplicate?: MessageRecord;
   beforePersistFlight?: (flight: FlightRecord) => void | Promise<void>;
+  beforePersistAcceptedReply?: () => void | Promise<void>;
   authorizeReplyCompletion?: (invocation: InvocationRequest, reply: MessageRecord) => boolean;
   activeLocalEndpointForAgent?: (agentId: string) => unknown;
 } = {}) {
@@ -156,8 +157,8 @@ function createHarness(input: {
 
   const mesh: BrokerMessageMesh = {
     authorityNodeForConversation: () => null,
-    async forwardConversationMessageToAuthority() {
-      return { forwarded: true, authorityNodeId: "node-peer" };
+    async forwardConversationMessageToAuthority(nextMessage) {
+      return { forwarded: true, authorityNodeId: "node-peer", message: nextMessage };
     },
     async forwardPeerBrokerDeliveries(nextMessage, deliveries) {
       forwardedPeerDeliveries.push({ message: nextMessage, deliveries });
@@ -194,14 +195,17 @@ function createHarness(input: {
     async reconcileStaleLocalDeliveries() {
       reconcileCount += 1;
     },
-    async persistFlight(nextFlight) {
+    async persistFlight(nextFlight, eligible) {
       await input.beforePersistFlight?.(nextFlight);
+      if (eligible && !eligible()) return;
       const previous = flights[nextFlight.invocationId];
       if (previous && shouldIgnoreFlightUpdate(previous, nextFlight)) return;
       persistedFlights.push(nextFlight);
       flights[nextFlight.invocationId] = nextFlight;
     },
-    async persistAcceptedReply(nextInvocation, receipt) {
+    async persistAcceptedReply(nextInvocation, receipt, eligible) {
+      await input.beforePersistAcceptedReply?.();
+      if (!eligible()) return;
       const current = flights[nextInvocation.id];
       if (current?.metadata?.acceptedReply !== undefined) return;
       flights[nextInvocation.id] = { ...current!, metadata: { ...current?.metadata, acceptedReply: receipt } };
@@ -293,6 +297,39 @@ describe("BrokerMessageService", () => {
     expect(harness.persistedFlights).toHaveLength(0);
   });
 
+  test("a newer current flight wins over an already prepared completion", async () => {
+    const flights = { "invocation-1": flight() };
+    const newer = flight({ id: "flight-2", startedAt: 115 });
+    const harness = createHarness({ flights, invocations: { "invocation-1": invocation() }, messages: { "msg-1": message() },
+      beforePersistFlight: () => { flights["invocation-1"] = newer; },
+    });
+    expect(await harness.service.recoverInvocationReply(invocation())).toBe(false);
+    expect(flights["invocation-1"]).toBe(newer);
+    expect(harness.persistedFlights).toEqual([]);
+  });
+
+  test("reply authorization is rechecked inside the completion writer", async () => {
+    let authorized = true;
+    const harness = createHarness({ flights: { "invocation-1": flight() }, invocations: { "invocation-1": invocation() },
+      messages: { "msg-1": message() }, authorizeReplyCompletion: () => authorized,
+      beforePersistFlight: () => { authorized = false; },
+    });
+    expect(await harness.service.recoverInvocationReply(invocation())).toBe(false);
+    expect(harness.persistedFlights).toEqual([]);
+  });
+
+  test("a newer flight cannot inherit a receipt queued for an earlier flight", async () => {
+    const flights = { "invocation-1": flight() };
+    const newer = flight({ id: "flight-2", startedAt: 115 });
+    const harness = createHarness({ flights, invocations: { "invocation-1": invocation() },
+      beforePersistAcceptedReply: () => { flights["invocation-1"] = newer; },
+      mesh: { authorityNodeForConversation: () => ({ conversation: conversation(), authorityNode: node() }) },
+    });
+    await harness.service.postConversationMessage(message());
+    expect(flights["invocation-1"]).toBe(newer);
+    expect(harness.persistedFlights).toEqual([]);
+  });
+
   test("malformed authority receipt holds recovery instead of treating accepted work as missing", async () => {
     const harness = createHarness({ invocations: { "invocation-1": invocation() }, flights: {
       "invocation-1": flight({ metadata: { acceptedReply: { version: 1, authorityNodeId: "peer", message: { id: "broken" } } } }),
@@ -307,7 +344,7 @@ describe("BrokerMessageService", () => {
     const first = createHarness({ invocations: { "invocation-1": invocation() }, flights: { "invocation-1": flight() },
       beforePersistFlight: () => { throw new Error("completion storage unavailable"); },
       mesh: { authorityNodeForConversation: () => ({ conversation: conversation(), authorityNode: node() }),
-        forwardConversationMessageToAuthority: async () => { forwards++; return { forwarded: true, authorityNodeId: "node-peer" }; } },
+        forwardConversationMessageToAuthority: async () => { forwards++; return { forwarded: true, authorityNodeId: "node-peer", message: stored }; } },
     });
     await expect(first.service.postConversationMessage(stored)).rejects.toThrow("completion storage unavailable");
     expect(first.messages).toEqual({});
@@ -322,6 +359,50 @@ describe("BrokerMessageService", () => {
     expect(forwards).toBe(1);
   });
 
+  test.each([false, true])("a lost authority ACK retry preserves the original reply receipt (newer flight: %s)", async (newerFlight) => {
+    const original = message({ metadata: { clientMessageId: "stable-reply", source: "authority-original" } });
+    let sends = 0;
+    const harness = createHarness({ invocations: { "invocation-1": invocation() }, flights: { "invocation-1": flight() },
+      mesh: { authorityNodeForConversation: () => ({ conversation: conversation(), authorityNode: node() }),
+        forwardConversationMessageToAuthority: async () => {
+          if (++sends === 1) throw new Error("authority committed; ACK lost");
+          return { forwarded: true, authorityNodeId: "node-peer", duplicate: true, message: original };
+        } },
+    });
+    await expect(harness.service.postConversationMessage(original)).rejects.toThrow("ACK lost");
+    if (newerFlight) harness.flights["invocation-1"] = flight({ id: "flight-2", startedAt: 20_000 });
+    const result = await harness.service.postConversationMessage({ ...original, createdAt: 25_000,
+      metadata: { clientMessageId: "stable-reply", source: "retry-changed" } });
+    expect(result.message).toEqual(original);
+    if (newerFlight) {
+      expect(harness.flights["invocation-1"]).toMatchObject({ id: "flight-2", state: "running" });
+      expect(harness.flights["invocation-1"]?.metadata?.acceptedReply).toBeUndefined();
+      expect(harness.persistedFlights).toEqual([]);
+    } else {
+      expect(harness.flights["invocation-1"]).toMatchObject({ state: "completed", completedAt: original.createdAt,
+        metadata: { replySource: "authority-original", acceptedReply: { message: original } } });
+    }
+    expect(harness.recordedMessages).toEqual([]);
+    expect(harness.forwardedPeerDeliveries).toEqual([]);
+  });
+
+  test.each(["missing", "wrong-id", "wrong-body", "invalid-timestamp"])("unsafe authority ACK %s cannot checkpoint or complete a reply", async (kind) => {
+    const original = message({ metadata: { clientMessageId: "stable-reply" } });
+    const accepted = kind === "missing" ? undefined : { ...original,
+      ...(kind === "wrong-id" ? { id: "other" } : {}),
+      ...(kind === "wrong-body" ? { body: "other" } : {}),
+      ...(kind === "invalid-timestamp" ? { createdAt: Number.NaN } : {}),
+    };
+    const harness = createHarness({ invocations: { "invocation-1": invocation() }, flights: { "invocation-1": flight() },
+      mesh: { authorityNodeForConversation: () => ({ conversation: conversation(), authorityNode: node() }),
+        forwardConversationMessageToAuthority: async () => ({ forwarded: true, authorityNodeId: "node-peer", message: accepted }),
+      },
+    });
+    await expect(harness.service.postConversationMessage(original)).rejects.toThrow("canonical message");
+    expect(harness.persistedFlights).toEqual([]);
+    expect(harness.flights["invocation-1"]?.metadata?.acceptedReply).toBeUndefined();
+  });
+
   test("settles the executor flight only after the remote authority accepts its reply", async () => {
     const nextInvocation = invocation({ requesterNodeId: "node-peer" });
     const nextFlight = flight();
@@ -334,7 +415,7 @@ describe("BrokerMessageService", () => {
         async forwardConversationMessageToAuthority() {
           if (!accepted) expect(harness.persistedFlights).toEqual([]);
           if (!accepted) throw new Error("peer unavailable");
-          return { forwarded: true, authorityNodeId: "node-peer" };
+          return { forwarded: true, authorityNodeId: "node-peer", message: message() };
         },
       },
     });
