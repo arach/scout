@@ -18,6 +18,7 @@ import { verifySlackWorkerCredentials } from "./slack-worker-process.js";
 import { BrokerIntegrationSetupService } from "./broker-integration-setup.js";
 import { GuestGrantStore } from "./guest-access.js";
 import { BrokerExternalSessionService } from "./broker-external-session-service.js";
+import { BrokerT3Service } from "./t3/broker-service.js";
 import { externalSessionConnections, devinSessionTransport } from "./external-session-transport.js";
 import { BrokerMessageHistory } from "./broker-message-history.js";
 import { startBrokerOtlpReceiver } from "./otlp/broker-lifecycle.js";
@@ -1427,8 +1428,11 @@ const flightLifecycleService = new BrokerFlightLifecycleService({
   maybeForwardFlightToAuthority: (flight) => meshForwardingService.maybeForwardFlightToAuthority(flight),
   isInvocationActive: (invocationId) => flightCompletion(runtime.flightForInvocation(invocationId))?.awaitingFinal === true
     || replyCompletionRecovery.isPending(invocationId)
-    || localInvocationService.hasActiveInvocation(invocationId) || externalSessionService.hasPendingInvocation(invocationId),
+    || localInvocationService.hasActiveInvocation(invocationId) || externalSessionService.hasPendingInvocation(invocationId)
+    || t3Service.hasPendingInvocation(invocationId),
   onTerminalFlight: async ({ flight, invocation }) => {
+    if (invocation && flight.state === "cancelled") void t3Service.cancel(invocation)
+      .catch(error => console.error("[openscout-runtime] T3 cancellation unconfirmed", error));
     if (invocation) void externalSessionService.forwardResult(invocation, flight)
       .catch((error) => console.error("[openscout-runtime] external result delivery failed", error));
     // Role lifecycle (orchestrator post_ask_summary, etc.). Best-effort; never
@@ -1974,7 +1978,8 @@ const messageService = new BrokerMessageService({
     const current = runtime.flightForInvocation(invocation.id);
     if (!current || !isWorkingFlightState(current.state)
       || !isFinalReplyForInvocation(receipt.message, invocation)
-      || !externalSessionService.authorizesReplyCompletion(invocation, receipt.message)) return;
+      || !externalSessionService.authorizesReplyCompletion(invocation, receipt.message)
+      || !t3Service.authorizesReplyCompletion(invocation, receipt.message)) return;
     if (current.metadata?.acceptedReply !== undefined) return;
     // Store only the authority acknowledgement, not a local message or delivery.
     // Its exact reply survives a subsequent completion-write failure/restart.
@@ -1983,7 +1988,7 @@ const messageService = new BrokerMessageService({
   }),
   completionCurrentFlight: id => journal.getCurrentFlightForInvocation(id),
   completionFlight: id => journal.getFlight(id),
-  authorizeReplyCompletion: (invocation, reply) => externalSessionService.authorizesReplyCompletion(invocation, reply),
+  authorizeReplyCompletion: (invocation, reply) => externalSessionService.authorizesReplyCompletion(invocation, reply) && t3Service.authorizesReplyCompletion(invocation, reply),
   activeLocalEndpointForAgent: (agentId) => localEndpointResolver.activeLocalEndpointForAgent(agentId),
 });
 
@@ -2026,6 +2031,22 @@ const externalSessionService = new BrokerExternalSessionService({
   flight: (id) => runtime.flightForInvocation(id),
   recordFlight: recordFlightDurably,
   postMessage: postConversationMessage,
+});
+
+const t3Service = new BrokerT3Service({
+  nodeId,
+  endpoints: () => Object.values(runtime.snapshot().endpoints),
+  persistEndpoint,
+  persistActor: upsertActorDurably,
+  recordWork: recordCollaborationDurably,
+  work: id => runtime.collaborationRecord(id),
+  delivery: id => journal.getDelivery(id),
+  recordDelivery: recordDeliveryDurably,
+  mutateDelivery: deliveryStore.mutateDelivery,
+  flight: id => runtime.flightForInvocation(id),
+  recordFlight: recordFlightDurably,
+  postMessage: postConversationMessage,
+  deliver: request => deliveryAcceptanceService.accept(request),
 });
 
 const terminalReportDeliveryService = new BrokerTerminalReportDeliveryService({
@@ -2718,6 +2739,14 @@ const invocationDispatchService = new BrokerInvocationDispatchService({
     await peerDelivery.enqueue(invocation, authorityNode);
   },
   launchLocalInvocation: (invocation) => {
+    const t3Endpoint = t3Service.endpointFor(invocation);
+    if (t3Endpoint) {
+      void t3Service.dispatch(invocation, t3Endpoint).catch(async error => {
+        const code = error instanceof Error && /^t3_[a-zA-Z0-9_]+$/.test(error.message) ? error.message : "t3_dispatch_rejected";
+        await transitionInvocation(invocation.id, { state: "failed", error: code, completedAt: Date.now() });
+      }).catch(error => console.error("[openscout-runtime] T3 dispatch failed", error));
+      return;
+    }
     const endpoint = externalSessionService.endpointFor(invocation);
     if (!endpoint) { localInvocationService.launch(invocation); return; }
     void externalSessionService.dispatch(invocation, endpoint).catch(async (error) => {
@@ -2736,7 +2765,8 @@ const dispatchRecoveryService = new BrokerDispatchRecoveryService({
   invocationFor: (invocationId) => knownInvocations.get(invocationId),
   isInvocationActive: (invocationId) => flightCompletion(runtime.flightForInvocation(invocationId))?.awaitingFinal === true
     || replyCompletionRecovery.isPending(invocationId)
-    || localInvocationService.hasActiveInvocation(invocationId) || externalSessionService.hasPendingInvocation(invocationId),
+    || localInvocationService.hasActiveInvocation(invocationId) || externalSessionService.hasPendingInvocation(invocationId)
+    || t3Service.hasPendingInvocation(invocationId),
   runDispatchJob: (job, invocation) => invocationDispatchService.runDispatchJob(job, invocation),
   requeueDispatchJob: (job, invocation, flight) => invocationDispatchService.requeueDispatchJob(job, invocation, flight),
   dispatchAcceptedInvocation: (invocation) => invocationDispatchService.dispatchAcceptedInvocation(invocation),
@@ -3056,6 +3086,7 @@ const routeRequest = createBrokerHttpRouter({
   deliveryAcceptanceService,
   rendezvousService,
   externalSessionService,
+  t3Service,
   routeAliasService,
   integrationSetupService,
   integrationSlackDelivery,
@@ -3543,7 +3574,10 @@ setTimeout(() => {
     .then((failed) => { if (failed.length) console.error("[openscout-runtime] external session recovery incomplete", failed); })
     .catch((error) => console.error("[openscout-runtime] external session recovery failed", error));
   replyCompletionRecovery.recover()
-    .then(() => bootstrapRegisteredLocalAgents())
+    .then(() => {
+      t3Service.recover(knownInvocations.values());
+      return bootstrapRegisteredLocalAgents();
+    })
     .then(() => dispatchRecoveryService.recoverQueuedFlights({ reason: "startup" }))
     .catch((error) => {
       console.error("[openscout-runtime] local agent bootstrap or dispatch recovery failed:", error);
