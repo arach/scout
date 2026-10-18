@@ -96,6 +96,19 @@ export type ScoutDeliverRejectReason =
   | "invalid_target"
   | "missing_target";
 
+/** Advertised by /v1/node before clients may request live session input. */
+export const SCOUT_SESSION_INPUT_RECEIPTS_CAPABILITY = "session-input-receipts/1";
+
+/** Input submission is not an invocation or proof of execution completion. */
+export interface ScoutSessionInputReceipt {
+  kind: "in_place";
+  state: "submitted";
+  sessionId: ScoutId;
+  harness: "claude" | "codex";
+  via: "herdr" | "orca" | "tmux" | "lattices" | "scout-app";
+  location: string;
+}
+
 export interface ScoutDeliverRequest {
   /** Caller-supplied, requester-scoped idempotency key. */
   requestId?: string;
@@ -106,6 +119,8 @@ export interface ScoutDeliverRequest {
   body: string;
   attachments?: MessageAttachment[];
   intent: ScoutDeliverIntent;
+  /** Operator reply to an exact native session; requires the advertised capability and requestId. */
+  sessionDelivery?: "in_place_or_resume";
   target?: ScoutRouteTarget;
   targetLabel?: string;
   targetAgentId?: ScoutId;
@@ -157,6 +172,7 @@ export interface ScoutDeliveryReceipt {
   executionResolution?: ScoutExecutionResolution;
   acceptedAt: number;
   aliasResolution?: RouteAliasResolutionProof;
+  inputSubmitted?: ScoutSessionInputReceipt;
 }
 
 export interface ScoutDeliveryRemediationAction {

@@ -1,5 +1,7 @@
 // Must stay the first import: materializes OPENSCOUT_INSTANCE before any module reads paths/ports.
 import { openScoutCheckoutInstanceDefault, openScoutInstanceBootstrap } from "./instance-checkout-bootstrap.js";
+import { SCOUT_SESSION_INPUT_RECEIPTS_CAPABILITY } from "@openscout/protocol";
+import { deliverInPlace } from "./in-place/deliver.js";
 import { isolatedCodexPermissionMetadata } from "./permission-policy.js";
 import { BrokerPermissionService } from "./broker-permission-service.js";
 import { configureManagedPermissionHandler } from "./managed-permission.js";
@@ -1213,7 +1215,7 @@ const localNode: NodeDefinition = {
   webHost: localWebHost,
   ...(localIrohEntrypoint ? { meshEntrypoints: [localIrohEntrypoint] } : {}),
   tailnetName,
-  capabilities: ["broker", "mesh", "local_runtime"],
+  capabilities: ["broker", "mesh", "local_runtime", SCOUT_SESSION_INPUT_RECEIPTS_CAPABILITY],
   registeredAt: Date.now(),
   lastSeenAt: Date.now(),
 };
@@ -2761,6 +2763,8 @@ const unavailableTargetService = new BrokerUnavailableTargetService({
 
 const requestReceipts = new BrokerRequestReceipts();
 const deliveryAcceptanceService = new BrokerDeliveryAcceptanceService({
+  submitSessionInput: deliverInPlace,
+  upsertSessionInputActor: upsertActorDurably,
   commandAdmission,
   readAcceptedMessage: async id => await runtime.readMessage(id) ?? (await projection.readMessages([id])).get(id),
   readAcceptedInvocation: async id => knownInvocations.get(id) ?? (await projection.readInvocations([id])).get(id),

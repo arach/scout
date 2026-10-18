@@ -5,6 +5,8 @@ import { basename, join, resolve } from "node:path";
 
 import {
   buildScoutReturnAddress as buildScoutReturnAddressRecord,
+  SCOUT_SESSION_INPUT_RECEIPTS_CAPABILITY,
+  type ScoutSessionInputReceipt,
   conversationNaturalKey,
   conversationsWithNaturalKey,
   type ActorIdentity,
@@ -301,6 +303,7 @@ export type ScoutFlightRecord = {
 
 export type ScoutAskResult = {
   usedBroker: boolean;
+  inputSubmitted?: ScoutSessionInputReceipt;
   flight?: ScoutFlightRecord;
   conversationId?: string;
   messageId?: string;
@@ -3455,6 +3458,7 @@ export async function askScoutQuestion(input: {
   targetAgentId?: string;
   target?: ScoutRouteTarget;
   body: string;
+  sessionDelivery?: "in_place_or_resume";
   channel?: string;
   shouldSpeak?: boolean;
   createdAtMs?: number;
@@ -3481,6 +3485,16 @@ export async function askScoutQuestion(input: {
   if (!broker) {
     return { usedBroker: false, unresolvedTarget: renderedTarget };
   }
+  if (input.sessionDelivery) {
+    if (!input.clientMessageId?.trim()) throw new Error("request_id_required: session input requires a stable client message id");
+    // A context can be retained for 90 seconds while a broker is replaced.
+    // Never authorize this option from that stale capability snapshot.
+    const currentNode = await brokerReadJson<ScoutBrokerNodeRecord>(broker.baseUrl, scoutBrokerPaths.v1.node,
+      { signal: boundedBrokerSignal(undefined, BROKER_CONTEXT_TIMEOUT_MS) });
+    if (currentNode.id !== broker.node.id || !currentNode.capabilities?.includes(SCOUT_SESSION_INPUT_RECEIPTS_CAPABILITY)) {
+      throw new Error("session_input_unsupported: update the broker before submitting live session replies");
+    }
+  }
   const currentDirectory = input.currentDirectory ?? process.cwd();
   const senderId = await resolveConversationActorId(
     broker.baseUrl,
@@ -3504,7 +3518,7 @@ export async function askScoutQuestion(input: {
       currentDirectory,
     );
   }
-  const messageBody = normalizedTargetLabel && input.body.trim().startsWith(normalizedTargetLabel)
+  const messageBody = input.sessionDelivery ? input.body.trim() : normalizedTargetLabel && input.body.trim().startsWith(normalizedTargetLabel)
     ? input.body.trim()
     : normalizedTargetLabel
     ? `${normalizedTargetLabel} ${input.body.trim()}`
@@ -3521,6 +3535,7 @@ export async function askScoutQuestion(input: {
     body: messageBody,
     attachments: normalizeOutgoingAttachments(input.attachments, input.clientMessageId),
     intent: "consult",
+    ...(input.sessionDelivery ? { sessionDelivery: input.sessionDelivery } : {}),
     channel: input.channel,
     speechText: input.shouldSpeak ? stripScoutAgentSelectorLabels(messageBody) : undefined,
     execution: {
@@ -3529,7 +3544,7 @@ export async function askScoutQuestion(input: {
       ...(input.executionReasoningEffort?.trim()
         ? { reasoningEffort: input.executionReasoningEffort.trim() }
         : {}),
-      session: input.executionSession ?? defaultScoutAskExecutionSession(input.target),
+      session: input.executionSession ?? (input.sessionDelivery ? "existing" : defaultScoutAskExecutionSession(input.target)),
       ...(input.executionTargetSessionId?.trim()
         ? { targetSessionId: input.executionTargetSessionId.trim() }
         : {}),
@@ -3564,6 +3579,7 @@ export async function askScoutQuestion(input: {
   return {
     usedBroker: true,
     flight: delivery.flight,
+    ...(delivery.receipt?.inputSubmitted ? { inputSubmitted: delivery.receipt.inputSubmitted } : {}),
     conversationId: delivery.conversation.id,
     messageId: delivery.message.id,
     targetAgentId: delivery.targetAgentId,

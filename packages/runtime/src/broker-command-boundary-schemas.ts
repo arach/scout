@@ -199,6 +199,7 @@ export const brokerDeliverRequestSchema: z.ZodType<ScoutDeliverRequest> = z.obje
   body: trimmedNonEmptyString,
   intent: z.enum(["tell", "consult"]),
   operatorSignal: brokerOperatorSignalSchema.optional(),
+  sessionDelivery: z.literal("in_place_or_resume").optional(),
 }).passthrough();
 
 export function brokerInvocationRequestSchemaFor(
