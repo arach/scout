@@ -1,0 +1,27 @@
+{
+  "description": "Signed node card from runtime buildSignedNodeCard. Deterministic test key; never use outside tests.",
+  "verifiedAt": 1800000000001,
+  "card": {
+    "nodeId": "mini-7f3k",
+    "label": "Mini ✓ café \"quoted\"",
+    "publicKey": "MCowBQYDK2VwAyEAJUO5L/EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0=",
+    "keyId": "788de5096f8b530eef97a4015cffb7cfeb260c23795b846bf8112682a93b1101",
+    "fingerprint": "osc1:pcg6-kclp",
+    "version": "0.2.107",
+    "capabilities": [
+      "agents",
+      "invoke"
+    ],
+    "endpoints": [
+      "https://100.64.0.7:43111",
+      "https://mini.tail0000.ts.net:43111"
+    ],
+    "issuedAt": 1800000000000,
+    "expiresAt": 1800086400000,
+    "nonce": "oRFe756OWtoQbiTewoSIMg==",
+    "tls": {
+      "spkiFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "signature": "2uicPr3KxahVqeXM86JryadgzQthy1yVpDr+tUVE/bCFKFZjCaJxMVQGa07Z/dnqOGcicIaq+7qbu5ZaFBmFDQ=="
+  }
+}

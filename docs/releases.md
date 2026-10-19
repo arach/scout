@@ -1,5 +1,32 @@
 # Public package releases
 
+## Standalone Scout Tailscale client
+
+`packages/scout-tailscale` is a separately versioned MIT Python client. Its
+pilot wheels are distributed only through this repository's GitHub releases,
+using tags such as `scout-tailscale-v0.3.1`. They do not change Scout's shared
+npm/native version, publish to PyPI, or claim GitHub Latest.
+
+Review and merge the client, license, tests and version before publishing.
+Use a clean checkout at freshly fetched canonical `oscout/scout` main. Run the
+Python tests against this checkout's runtime fixture, build the wheel once,
+inspect its contents and license, and fresh-install those exact bytes in an
+isolated environment. Retain the wheel outside the source tree along with
+`SHA256SUMS` (the wheel's digest) and `receipt.json` recording its version,
+canonical source commit, filename, SHA-256 and build/test commands.
+
+Create the dedicated tag at that reviewed main commit. Publish a GitHub
+prerelease with the retained wheel, checksums and receipt, using
+`gh release create --repo oscout/scout --verify-tag --prerelease --latest=false`.
+Do not rebuild on a publication retry, overwrite an existing asset, move a
+published tag, or invoke the npm publisher for this client. A retry must first
+compare existing remote assets to the retained bytes.
+
+Verify the public tag's commit and download all release assets anonymously.
+Compare their hashes to the retained artifacts, fresh-install the downloaded
+wheel, and confirm its version. A wheel release does not establish a real
+owner-approved connection or completed agent reply; report those separately.
+
 Beginning with `0.2.91`, Scout's complete supported public npm set is released
 from this repository. npm accepted only `@openscout/protocol@0.2.88` during the
 local authority cutover; the strict partial-set guard stopped that attempt, and
