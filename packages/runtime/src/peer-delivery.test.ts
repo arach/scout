@@ -592,9 +592,22 @@ test("healthy HTTP backpressure delivers a complete 3 MiB terminal snapshot to t
   const invocation = makeInvocation("large-snapshot", "remote-agent");
   const flight = { ...recoveredFlight(invocation), output: "x".repeat(3 * 1024 * 1024) };
   let acceptedForLiveFanout: boolean | undefined;
+  let acceptedLaterFrame: boolean | undefined;
+  let endedAfterBackpressure = false;
+  let forwardedWrites = 0;
   const server = createServer((_request, response) => {
     response.writeHead(200, { "content-type": "text/event-stream" });
+    // Forward real HTTP bytes, but deterministically signal accepted-buffer
+    // backpressure: one 3 MiB write need not cross every platform's high-water mark.
+    const write = response.write.bind(response);
+    response.write = ((...args: Parameters<typeof response.write>) => {
+      forwardedWrites++;
+      write(...args);
+      return false;
+    }) as typeof response.write;
     acceptedForLiveFanout = writeSseFrame(response, "snapshot", { invocationId: invocation.id, flight });
+    endedAfterBackpressure = response.writableEnded;
+    acceptedLaterFrame = writeSseFrame(response, "later", { ignored: true });
     if (acceptedForLiveFanout) response.end();
   });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -613,7 +626,10 @@ test("healthy HTTP backpressure delivers a complete 3 MiB terminal snapshot to t
     await Promise.race([done, new Promise<never>((_, reject) => {
       deadline = setTimeout(() => reject(new Error("large snapshot was not delivered")), 2_000); deadline.unref();
     })]);
-    expect(acceptedForLiveFanout).toBe(false); // Node high-water mark, not a failed delivery.
+    expect(acceptedForLiveFanout).toBe(false); // Backpressure stops fan-out, not delivery of accepted bytes.
+    expect(endedAfterBackpressure).toBe(true); // The production drain path must end, not destroy, the stream.
+    expect(acceptedLaterFrame).toBe(false);
+    expect(forwardedWrites).toBe(1);
     expect(harness.flights).toHaveLength(1);
     expect(harness.flights[0]!.output).toBe(flight.output);
     expect(harness.flights[0]!.state).toBe("completed");
