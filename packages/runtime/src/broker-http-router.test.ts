@@ -1534,3 +1534,19 @@ test("explicit reply endpoint requires typed identity and stable requestId befor
   expect((await requestRouter(h, "POST", "/v1/messages/reply", { body })).response.status).toBe(200);
   expect(posted[0].id).toStartWith("msg.request."); expect(posted[0].metadata.completionReply.kind).toBe("progress");
 });
+
+describe("local mesh diagnostics route", () => {
+  test("returns explicit unavailability and refuses remote or ungated callers", async () => {
+    const harness = createHarness();
+    expect((await requestRouter(harness, "GET", "/v1/mesh/diagnostics")).response.status).toBe(403);
+    expect((await requestRouter(harness, "GET", "/v1/mesh/diagnostics", { transportContext: { transport: "remote" } })).response.status).toBe(403);
+    expect((await requestRouter(harness, "GET", "/v1/mesh/diagnostics", { transportContext: { transport: "loopback" } })).response.status).toBe(503);
+  });
+  test("uses only the runtime read model; never snapshots the registry", async () => {
+    const model = { generatedAt: 10, tailscale: { unavailable: true } };
+    const harness = createHarness({ readMeshDiagnostics: () => model as never });
+    harness.deps.runtime.snapshot = () => { throw new Error("must not snapshot"); };
+    const result = await requestRouter(harness, "GET", "/v1/mesh/diagnostics", { transportContext: { transport: "loopback" } });
+    expect(result.response.status).toBe(200); expect(result.body).toEqual(model);
+  });
+});
