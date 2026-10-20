@@ -10,7 +10,8 @@ export function canonicalRequest(value: unknown): string {
   return JSON.stringify(value) ?? "null";
 }
 /** Only operation owners may raise this, after proving that NO local or remote
- * effect occurred. Transport errors alone are never proof. */
+ * effect occurred. Transport errors alone are never proof. Each new throw site
+ * must explain why no local or remote effect can have occurred there. */
 export class RetryablePreEffectFailure extends Error {
   override readonly name = "RetryablePreEffectFailure";
 }
