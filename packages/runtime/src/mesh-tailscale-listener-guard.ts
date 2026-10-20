@@ -46,6 +46,7 @@ export function matchTailscaleRuntimeTargets(text: string, own: OwnListeners,
       if (!(tcp ? ["tcp:"] : ["http:", "https:", "https+insecure:"]).includes(url.protocol) || url.username || url.password) return;
       const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
       const loopback = host === "localhost" || host === "localhost." || host === "::1" ||
+        host === "0.0.0.0" || host === "::" ||
         /^127(?:\.\d{1,3}){3}$/.test(host) || /^::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}$/.test(host);
       const port = url.port ? Number(url.port) : url.protocol === "http:" ? 80 : ["https:", "https+insecure:"].includes(url.protocol) ? 443 : NaN;
       if (loopback && port === own.port) matches.add("tcp");

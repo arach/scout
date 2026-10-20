@@ -136,3 +136,17 @@ test("unavailable transports have their own advisory outcome", async () => {
   const guard = createTailscaleListenerGuard(own, { read: async () => ({ ok: false, stdout: "", source: "cli", unavailable: true }) });
   await guard.refresh(); expect(guard.report().outcome).toBe("unavailable"); expect(guard.isGuarded("tcp")).toBe(false); guard.stop();
 });
+
+for (const host of ["0.0.0.0", "[::]"]) for (const kind of ["Proxy", "TCPForward"] as const) {
+  test(`${kind} to unspecified address ${host} guards only the runtime port`, async () => {
+    const config = (port: number) => JSON.stringify(kind === "Proxy"
+      ? { Web: { "fixture:443": { Handlers: { "/": { Proxy: `http://${host}:${port}` } } } } }
+      : { TCP: { "443": { TCPForward: `${host}:${port}` } } });
+    let stdout = config(own.port);
+    const guard = createTailscaleListenerGuard(own, { canonicalize, read: async () => ({ ok: true, stdout, source: "cli" }) });
+    try {
+      await guard.refresh(); expect(guard.isGuarded("tcp")).toBe(true); expect(guard.isGuarded("unix")).toBe(false);
+      stdout = config(43120); await guard.refresh(); expect(guard.isGuarded("tcp")).toBe(false);
+    } finally { guard.stop(); }
+  });
+}

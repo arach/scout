@@ -20,8 +20,10 @@ HTTP-upgrade compatibility layer; no upgrade is accepted on a guarded listener.
 The parser examines `TCP[*].TCPForward`, `Web[*].Handlers[*].Proxy`, and the
 same mappings inside foreground/service configs. It matches actual loopback
 TCP ports (including localhost, IPv6 and mapped loopback aliases), or a
-canonical owned Unix socket path. Socket symlinks and parent-directory aliases
-are resolved. Remote hosts, other ports, other sockets, arbitrary strings
+canonical owned Unix socket path. Unspecified target addresses `0.0.0.0` and
+`::` also match the owned TCP port because connections to them can reach local
+listeners on macOS and Linux. They do not match the web app or any other port.
+Socket symlinks and parent-directory aliases are resolved. Remote hosts, other ports, other sockets, arbitrary strings
 containing a port, and `AllowFunnel` alone do not match. The receiving server
 binds listener identity; client headers cannot select it. A TLS peer-facing
 address does not become the loopback listener just because its port is equal.
