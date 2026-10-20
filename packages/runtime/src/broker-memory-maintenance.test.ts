@@ -56,7 +56,13 @@ test('journal charges exact encoded UTF-8 bytes for large Unicode payloads and s
  const entry=message('large','😀é\ud800'.repeat(200000));const bytes=Buffer.byteLength(JSON.stringify(entry)+'\n');
  const m=new BrokerMemoryMaintenance({liveWorkRecords:100000,liveWorkBytes:bytes,collect:()=>{calls++;}});
  const journal=new FileBackedBrokerJournal(join(root,'journal.jsonl'),{memoryMaintenance:m});await journal.load();
- try{await journal.appendEntries(entry);expect(calls).toBe(1);expect((await readFile(join(root,'journal.jsonl'))).length).toBe(bytes);
+ try{await journal.appendEntries(entry);expect(calls).toBe(1);
+ const physical=await readFile(join(root,'journal.jsonl'));const headerEnd=physical.indexOf(10)+1;
+ expect(headerEnd).toBeGreaterThan(0);
+ expect(JSON.parse(physical.subarray(0,headerEnd).toString('utf8'))).toMatchObject({kind:'journal.generation',version:1});
+ expect(physical.length).toBe(headerEnd+bytes);
+ expect(physical.subarray(headerEnd)).toEqual(Buffer.from(JSON.stringify(entry)+'\n'));
+
  const node:BrokerJournalEntry={kind:'node.upsert',node:{id:'n',meshId:'m',name:'Node',advertiseScope:'local',registeredAt:1}};
  await journal.appendEntries(node);const before=calls;expect(await journal.appendEntries(node)).toEqual([]);expect(calls).toBe(before);
  }finally{journal.close();}

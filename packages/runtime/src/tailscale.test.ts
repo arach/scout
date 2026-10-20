@@ -178,8 +178,16 @@ JSON
 fi
 exit 64
 `);
+    // First-launch validation of a new executable is not the status reader's
+    // stderr-capture contract. Warm only this owned fixture, outside its unchanged
+    // 1500ms production timeout, and prove the fixture really emits the warning.
+    const fixture = spawnSync(tailscale, ["status", "--json"], { encoding: "utf8" });
+    expect(fixture.status).toBe(0);
+    expect(fixture.stderr).toContain("client version");
     const env = {
       ...process.env,
+      OPENSCOUT_TAILSCALE_AUTO_HOSTS: "1",
+      OPENSCOUT_TAILSCALE_STATUS_TIMEOUT_MS: undefined,
       OPENSCOUT_TAILSCALE_BIN: tailscale,
     };
     delete env.OPENSCOUT_TAILSCALE_STATUS_JSON;

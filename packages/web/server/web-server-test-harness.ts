@@ -46,6 +46,14 @@ export { isolatedTestHome };
 export const originalFetch = globalThis.fetch;
 export const originalHome = process.env.HOME;
 export const originalOpenScoutHome = process.env.OPENSCOUT_HOME;
+const originalHarnessHomes = Object.fromEntries(["SCOUT_HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR"]
+  .map(key => [key, process.env[key]]));
+function restoreHarnessHomes(): void {
+  for (const [key, value] of Object.entries(originalHarnessHomes)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+}
 export const originalSupportDirectory = process.env.OPENSCOUT_SUPPORT_DIRECTORY;
 export const originalControlHome = process.env.OPENSCOUT_CONTROL_HOME;
 export const originalRelayHub = process.env.OPENSCOUT_RELAY_HUB;
@@ -54,6 +62,7 @@ export const originalOperatorName = process.env.OPENSCOUT_OPERATOR_NAME;
 export const originalOpenAIKey = process.env.OPENAI_API_KEY;
 export const originalOpenAIModel = process.env.OPENAI_MODEL;
 export const originalScoutbotAssistantModel = process.env.OPENSCOUT_SCOUTBOT_ASSISTANT_MODEL;
+const originalScoutbotProcess = process.env.OPENSCOUT_SCOUTBOT_PROCESS;
 export const originalProbesSocket = process.env.OPENSCOUT_PROBES_SOCKET;
 export const sendScoutMessageCalls: Array<Record<string, unknown>> = [];
 export const sendScoutConversationMessageCalls: Array<Record<string, unknown>> = [];
@@ -552,6 +561,10 @@ export function useIsolatedOpenScoutHome(): string {
   const home = mkdtempSync(join(tmpdir(), "openscout-web-server-"));
   testDirectories.add(home);
   process.env.HOME = home;
+  delete process.env.SCOUT_HOME;
+  process.env.OPENSCOUT_HOME = join(home, ".openscout");
+  process.env.CODEX_HOME = join(home, ".codex");
+  process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
   process.env.OPENSCOUT_SUPPORT_DIRECTORY = join(home, "Library", "Application Support", "OpenScout");
   process.env.OPENSCOUT_CONTROL_HOME = join(home, ".openscout", "control-plane");
   process.env.OPENSCOUT_RELAY_HUB = join(home, ".openscout", "relay");
@@ -991,6 +1004,9 @@ export function installWebServerTestHooks(): void {
     chatMarkReadCalls.length = 0;
     globalThis.fetch = originalFetch;
     process.env.HOME = originalHome;
+    restoreHarnessHomes();
+    // Route fixtures bootstrap their own runner, not the managed process of the launching service.
+    delete process.env.OPENSCOUT_SCOUTBOT_PROCESS;
     if (originalOpenScoutHome === undefined) {
       delete process.env.OPENSCOUT_HOME;
     } else {
@@ -1138,6 +1154,9 @@ export function installWebServerTestHooks(): void {
 
   afterEach(() => {
     process.env.HOME = originalHome;
+    if (originalScoutbotProcess === undefined) delete process.env.OPENSCOUT_SCOUTBOT_PROCESS;
+    else process.env.OPENSCOUT_SCOUTBOT_PROCESS = originalScoutbotProcess;
+    restoreHarnessHomes();
     if (originalOpenScoutHome === undefined) {
       delete process.env.OPENSCOUT_HOME;
     } else {
