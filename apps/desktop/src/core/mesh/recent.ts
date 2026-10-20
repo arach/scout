@@ -223,8 +223,15 @@ export async function loadMachineNodeStates(
   const peerFetch = deps.peerFetch ?? createMeshPeerFetch({ log: () => {} });
   const { localNode, knownNodes } = await loadScoutMachineInventory(deps);
   const nodes = Object.values({ ...knownNodes, [localNode.id]: localNode });
-  const selected = (options.machine ? resolveScoutMachines(nodes, options.machine) : Object.values(visibleMeshNodes(Object.fromEntries(nodes.map(node => [node.id, node])), { localNodeId: localNode.id, all: options.all })))
-    .filter((node) => !options.nodeIds || options.nodeIds.includes(node.id));
+  // A machine named explicitly is always probed; otherwise dormant hosts and
+  // duplicate records of one host are left out of the 3s-per-host fan-out.
+  const candidates = options.machine
+    ? resolveScoutMachines(nodes, options.machine)
+    : Object.values(visibleMeshNodes(
+      Object.fromEntries(nodes.map((node) => [node.id, node])),
+      { localNodeId: localNode.id, all: options.all },
+    ));
+  const selected = candidates.filter((node) => !options.nodeIds || options.nodeIds.includes(node.id));
   const query = new URLSearchParams();
   if (options.projectRoot) query.set("projectRoot", options.projectRoot);
   if (options.agentId) query.set("agentId", options.agentId);
@@ -232,7 +239,8 @@ export async function loadMachineNodeStates(
   const machines = await Promise.all(selected.map(async (node): Promise<ScoutMachineNodeState> => {
     const identity = { node, nodeId: node.id, nodeName: node.name ?? null, local: node.id === localNode.id };
     if (!options.machine && !identity.local && isDormantMeshNode(node)) {
-      return { ...identity, status: "unavailable", error: `dormant; last seen ${Math.floor((Date.now() - (node.lastSeenAt ?? node.registeredAt ?? 0)) / 86400000)} days ago; run scout mesh ping ${node.name ?? node.id} to probe explicitly` };
+      const days = Math.floor((Date.now() - (node.lastSeenAt ?? node.registeredAt ?? 0)) / 86_400_000);
+      return { ...identity, status: "unavailable", error: `dormant: last seen ${days} days ago; probe it with scout hosts ${node.name ?? node.id}` };
     }
     try {
       const report = await withinDeadline(timeoutMs, async (signal) => {

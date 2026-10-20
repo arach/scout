@@ -282,6 +282,7 @@ test("dormant nodes are hidden and --all never probes them; explicit names still
   const all = await loadMachineNodeStates({ all: true }, deps);
   expect(all.machines).toHaveLength(2);
   expect(all.machines[1]).toMatchObject({ status: "unavailable" });
+  expect(all.machines[1]?.error).toBe(`dormant: last seen 13 days ago; probe it with scout hosts ${dormant.name ?? dormant.id}`);
   expect(calls.some(call => call.startsWith(dormant.brokerUrl!))).toBe(false);
   await loadMachineNodeStates({ machine: dormant.id }, deps);
   expect(calls.some(call => call.startsWith(dormant.brokerUrl!))).toBe(true);

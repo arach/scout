@@ -34,6 +34,9 @@ Subcommands:
   scout mesh discover     Probe for remote mesh nodes
   scout mesh ping <node>  Ping a specific node by ID, name, or URL
 
+  Hosts unseen for 7 days are dormant: hidden from status, doctor and nodes.
+  Add --all to include them. A dormant host still answers to its name.
+
 Join / leave:
   scout mesh join         Announce, discover peers, and sync their agents
   scout mesh leave        Withdraw mesh announcement (stay local-only)
