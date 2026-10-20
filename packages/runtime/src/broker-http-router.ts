@@ -1,3 +1,7 @@
+import { MeshFeedback, MeshFeedbackError } from "./mesh-feedback.js";
+import { MeshBridgeManagement, MeshBridgeManagementError } from "./mesh-bridge-management.js";
+import { MeshPingError, type createMeshPing } from "./mesh-ping.js";
+import type { MeshDiagnostics } from "./mesh-diagnostics.js";
 import { completionReply } from "@openscout/protocol";
 import { PermissionDeliveryUnconfirmedError, type BrokerPermissionService } from "./broker-permission-service.js";
 import { BrokerBusyError } from "./broker-storage-pressure.js";
@@ -334,6 +338,10 @@ export type BrokerHttpRouterDeps = {
    * the roster is durable by definition and cannot be served from memory.
    */
   machines?: BrokerMachineService;
+  meshFeedback?: MeshFeedback;
+  meshBridge?: MeshBridgeManagement;
+  readMeshDiagnostics?: () => MeshDiagnostics;
+  meshPing?: ReturnType<typeof createMeshPing>;
   /**
    * P1.5 restart-free bind flip (docs/proposals/mesh-trust-cone.md §11.5).
    * When absent, POST /v1/mesh/bind 404s.
@@ -533,6 +541,76 @@ export function createBrokerHttpRouter(
 
   if (url.pathname.startsWith("/v1/mesh/approvals/") || url.pathname.startsWith("/v1/approvals/remote")) {
     if (await handleBrokerMeshApprovalsRoute(request, response, url, method, deps.meshApprovals ?? {})) return;
+  }
+  if (method === "GET" && url.pathname === "/v1/mesh/diagnostics") {
+    const context = request.transportContext;
+    if (!context || context.transport === "remote" || context.guest || context.scoped) {
+      json(response, 403, { error: "local_only" }); return;
+    }
+    if (!deps.readMeshDiagnostics) { json(response, 503, { error: "mesh_diagnostics_unavailable" }); return; }
+    try { json(response, 200, deps.readMeshDiagnostics()); }
+    catch { json(response, 503, { error: "mesh_diagnostics_unavailable" }); }
+    return;
+  }
+  if (method === "POST" && url.pathname === "/v1/mesh/ping") {
+    const context = request.transportContext;
+    if (!context || context.transport === "remote" || context.guest || context.scoped) {
+      json(response, 403, { error: "local_only" }); return;
+    }
+    if (!deps.meshPing) { json(response, 503, { error: "mesh_ping_unavailable" }); return; }
+    const body = await readRequestBody<unknown>(request, { maxBytes: 1024 }).catch(() => null);
+    const input = body as { target?: unknown } | null;
+    if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).length !== 1
+      || typeof input.target !== "string" || !input.target.trim() || input.target.length > 512) {
+      json(response, 400, { error: "invalid_mesh_ping" }); return;
+    }
+    try { json(response, 200, await deps.meshPing(input.target.trim())); }
+    catch (error) { json(response, error instanceof MeshPingError ? error.status : 502,
+      { error: error instanceof MeshPingError ? error.code : "mesh_ping_failed" }); }
+    return;
+  }
+  if ((method === "GET" && url.pathname === "/v1/mesh/bridge")
+    || (method === "POST" && url.pathname === "/v1/mesh/bridge/config")
+    || (method === "POST" && url.pathname === "/v1/mesh/bridge/control")) {
+    const context = request.transportContext;
+    if (!context || context.transport === "remote" || context.guest || context.scoped) {
+      json(response, 403, { error: "local_only" }); return;
+    }
+    if (!deps.meshBridge) { json(response, 503, { error: "bridge_management_unavailable" }); return; }
+    try {
+      if (method === "GET") { json(response, 200, deps.meshBridge.read()); return; }
+      const body = await readRequestBody<unknown>(request, { maxBytes: 64 * 1024 }).catch(() => null);
+      if (url.pathname.endsWith("/config")) { json(response, 200, await deps.meshBridge.configure(body)); return; }
+      if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 1 || !("action" in body)) {
+        json(response, 400, { error: "invalid_bridge_action" }); return;
+      }
+      json(response, 200, await deps.meshBridge.control(body.action));
+    } catch (error) {
+      json(response, error instanceof MeshBridgeManagementError ? error.status : 503,
+        { error: error instanceof MeshBridgeManagementError ? error.code : "bridge_management_unavailable" });
+    }
+    return;
+  }
+  if (method === "POST" && (url.pathname === "/v1/diagnostics/reports/collect"
+    || url.pathname === "/v1/diagnostics/reports/upload"
+    || url.pathname === "/v1/mesh/bridge/feedback/collect"
+    || url.pathname === "/v1/mesh/bridge/feedback/upload")) {
+    const context = request.transportContext;
+    if (!context || context.transport === "remote" || context.guest || context.scoped) {
+      json(response, 403, { error: "local_bridge_required" }); return;
+    }
+    if (!deps.meshFeedback) { json(response, 503, { error: "feedback_unavailable" }); return; }
+    try {
+      const body = await readRequestBody<unknown>(request, { maxBytes: 16 * 1024 }).catch(() => null);
+      const bridge = url.pathname.startsWith("/v1/mesh/bridge/");
+      const result = url.pathname.endsWith("/collect")
+        ? await deps.meshFeedback.collect(body, bridge) : await deps.meshFeedback.upload(body, bridge);
+      json(response, 200, result);
+    } catch (error) {
+      json(response, error instanceof MeshFeedbackError ? error.status : 503,
+        { error: error instanceof MeshFeedbackError ? error.code : "feedback_unavailable" });
+    }
+    return;
   }
   if (guest && await handleBrokerGuestRoute(request, response, url, method, guest)) return;
   const denyRemoteMutation = (): boolean => {
@@ -1112,6 +1190,20 @@ export function createBrokerHttpRouter(
       if (!keyId) {
         badRequest(response, "keyId must be the full 64-char lowercase SHA-256 hex key ID");
         return;
+      }
+      // Withdraw approval consent first, through the same runtime-owned writer.
+      // If this write fails, do not report a completed trust revocation. If the
+      // later trust write fails, sharing stays withdrawn (the safe direction).
+      const approvals = deps.meshApprovals?.config;
+      if (approvals) {
+        try {
+          const config = approvals.read();
+          const share = config.share.filter(peerKeyId => peerKeyId !== keyId);
+          if (share.length !== config.share.length) approvals.write({ ...config, share });
+        } catch {
+          json(response, 503, { error: "approvals_config_unavailable" });
+          return;
+        }
       }
       if (!meshTrust.peers.revokeTrustedPeer(keyId, Date.now())) {
         json(response, 404, {

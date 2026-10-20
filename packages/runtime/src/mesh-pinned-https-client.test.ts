@@ -254,6 +254,12 @@ try {
   result.mismatch = error instanceof PeerTlsPinError ? "PeerTlsPinError" : String(error && error.name);
   result.mismatchObserved = error.observedFingerprint;
 }
+const capped = createPinnedHttpsClient({ maxResponseBytes: 1 });
+try {
+  await capped.fetch(${JSON.stringify(`${baseUrl}/v1/node`)}, { spkiFingerprint: ${JSON.stringify(identity.spkiFingerprint)} });
+  result.responseCap = "UNBOUNDED";
+} catch (error) { result.responseCap = error.name; }
+capped.close();
 client.close();
 console.log(JSON.stringify(result));
 `);
@@ -277,8 +283,9 @@ console.log(JSON.stringify(result));
     expect(JSON.parse(result.matchBody as string)).toEqual({ ok: true, path: "/v1/node" });
     expect(result.mismatch).toBe("PeerTlsPinError");
     expect(result.mismatchObserved).toBe(identity.spkiFingerprint);
-    // Only the pin-matching request was ever delivered.
-    expect(requests.map((request) => request.path)).toEqual(["/v1/node"]);
+    expect(result.responseCap).toBe("PeerResponseTooLargeError");
+    // Only pin-matching requests were delivered, including the capped response.
+    expect(requests.map((request) => request.path)).toEqual(["/v1/node", "/v1/node"]);
   });
 
   test("a caller deadline cancels a stalled TLS handshake before the connector timeout", async () => {

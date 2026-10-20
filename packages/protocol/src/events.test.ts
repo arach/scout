@@ -35,6 +35,8 @@ import type {
 // branch below will fail to compile because `event` won't narrow to `never`.
 function assertExhaustiveControlEvent(event: ControlEvent): string {
   switch (event.kind) {
+    case "mesh.bridge.lifecycle":
+      return event.payload.action;
     case "node.upserted":
       return event.payload.node.id;
     case "actor.registered":

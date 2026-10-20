@@ -1,5 +1,10 @@
 // Must stay the first import: materializes OPENSCOUT_INSTANCE before any module reads paths/ports.
 import { openScoutCheckoutInstanceDefault, openScoutInstanceBootstrap } from "./instance-checkout-bootstrap.js";
+import { MeshFeedback } from "./mesh-feedback.js";
+import { MeshBridgeManagement } from "./mesh-bridge-management.js";
+import { meshDiagnostics } from "./mesh-diagnostics.js";
+import { tailscaleStatusProbe } from "./system-probes/tailscale-status.js";
+import { createMeshPing } from "./mesh-ping.js";
 import { flightCompletion, SCOUT_COMPLETION_CAPABILITY } from "@openscout/protocol";
 import { SCOUT_SESSION_INPUT_RECEIPTS_CAPABILITY } from "@openscout/protocol";
 import { deliverInPlace } from "./in-place/deliver.js";
@@ -159,6 +164,7 @@ import {
   createMeshApprovalWatch,
   meshApprovalsConfigPath,
   readMeshApprovalsConfig,
+  writeMeshApprovalsConfig,
 } from "./mesh-approvals.js";
 import { normalizeCodexAppServerLaunchArgs } from "./codex-app-server.js";
 import { WorkerSQLiteProjection } from "./sqlite-projection-worker.js";
@@ -3036,8 +3042,36 @@ const routeRequest = createBrokerHttpRouter({
     acknowledge: id => projection.acknowledgeQuarantine(id),
   },
   mcpEvents,
+  meshFeedback: new MeshFeedback({
+    supportDirectory,
+    endpoint: process.env.OPENSCOUT_FEEDBACK_REPORT_URL ?? "https://api.openscout.app/api/feedback",
+    health: () => {
+      const tailscale = tailscaleStatusProbe.snapshot();
+      return { ready: !shuttingDown, advertiseScope,
+        tailscale: { unavailable: tailscale.value === null, running: tailscale.value?.running ?? null,
+          stale: tailscale.stale, at: tailscale.at } };
+    },
+  }),
   permissionService,
-  meshApprovals: { share: meshApprovalShare, watch: meshApprovalWatch },
+  meshBridge: new MeshBridgeManagement({
+    supportDirectory,
+    lifecycle: async (action, phase) => {
+      const event = { id: createRuntimeId("event"), kind: "mesh.bridge.lifecycle" as const,
+        ts: Date.now(), actorId: operatorActorId, nodeId, payload: { action, phase } };
+      await journal.appendEntries([{ kind: "control.event.record", event }]);
+      controlStreams.streamRecordedEvent(event);
+      publishControlEvent(event);
+    },
+  }),
+  meshApprovals: {
+    share: meshApprovalShare, watch: meshApprovalWatch,
+    config: {
+      read: readMeshApprovals,
+      write: config => writeMeshApprovalsConfig(meshApprovalsConfigFile, config),
+      isActivePeer: keyId => (trustedPeerStore?.listTrustedPeers() ?? []).some(peer =>
+        peer.keyId === keyId && !peer.revokedAt && (!peer.expiresAt || peer.expiresAt > Date.now())),
+    },
+  },
   encodedSnapshotBodies: process.env.OPENSCOUT_BROKER_ENCODED_SNAPSHOT === "1",
   onSnapshotFlushedBytes: memoryMaintenance ? (bytes) => memoryMaintenance.snapshotEncoded(bytes) : undefined,
   host,
@@ -3096,6 +3130,9 @@ const routeRequest = createBrokerHttpRouter({
   integrationSlackDelivery,
   integrationSlackEvents,
   machines: machineService,
+  readMeshDiagnostics: () => meshDiagnostics(tailscaleStatusProbe.read(), {
+    nodeId, nodeName, meshId, advertiseScope, brokerUrl, seedUrls, discoveryIntervalMs,
+  }),
   access: {
     access: meshAccessStore, nodeId, nodeKeyId: nodeIdentityKeyId,
     enforced: scopedAccessAvailable,
@@ -3134,6 +3171,11 @@ const routeRequest = createBrokerHttpRouter({
     existingInvocation: (invocationId) => runtime.snapshot().invocations[invocationId],
     flightForInvocation: (invocationId) => runtime.flightForInvocation(invocationId),
   },
+  meshPing: createMeshPing({
+    nodes: () => Object.values(runtime.snapshot().nodes),
+    peers: () => trustedPeerStore?.listTrustedPeers() ?? [],
+    localNodeId: nodeId, meshId, identity: () => nodeIdentity,
+  }),
   meshTrust: {
     enrollment: trustEnrollmentService,
     rateLimiter: trustEndpointRateLimiter,
