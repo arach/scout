@@ -1,5 +1,5 @@
 import { afterEach, expect, setSystemTime, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createScoutPairingBridgeClient } from "./pairing.ts";
@@ -116,10 +116,24 @@ test("connection admission is bounded and recovers after a client disconnects", 
 
 test("snapshot polls share one connection per window and refresh after it", async () => {
   const { loadScoutPairingSessionSnapshots } = await import("./pairing.ts");
+  // Snapshot readers resolve their mode from config rather than a client option.
+  // Own that config: no operator pairing mode or identity belongs in this test.
+  const home = mkdtempSync(join(tmpdir(), "scout-pairing-snapshots-"));
+  const previousHome = process.env.OPENSCOUT_PAIRING_HOME;
+  cleanup.push(() => {
+    if (previousHome === undefined) delete process.env.OPENSCOUT_PAIRING_HOME;
+    else process.env.OPENSCOUT_PAIRING_HOME = previousHome;
+    rmSync(home, { recursive: true, force: true });
+  });
+  writeFileSync(join(home, "config.json"), JSON.stringify({ secure: false }));
+  process.env.OPENSCOUT_PAIRING_HOME = home;
   let connections = 0;
   const server = Bun.serve({
     port: 0,
-    fetch(req, server) { return server.upgrade(req) ? undefined : new Response(); },
+    fetch(req, server) {
+      if (new URL(req.url).pathname === "/health") return Response.json({ mode: "plaintext" });
+      return server.upgrade(req) ? undefined : new Response();
+    },
     websocket: {
       open() { connections++; },
       message(ws, raw) {
@@ -140,6 +154,7 @@ test("snapshot polls share one connection per window and refresh after it", asyn
     setSystemTime();
   }
   expect(connections).toBe(2);
+  expect(readdirSync(home)).toEqual(["config.json"]);
 });
 
 test("incomplete secure handshakes cannot retain a connection indefinitely", async () => {
