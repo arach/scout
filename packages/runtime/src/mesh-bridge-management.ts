@@ -1,3 +1,4 @@
+import type { MeshBridgeLifecycleEvent } from "@openscout/protocol";
 import { randomUUID } from "node:crypto";
 import { constants, closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -21,7 +22,8 @@ const bridgeConfigSchema = z.object({
   // An absent token retains the stored token; null removes it. Never returned.
   token: z.string().min(1).max(8192).regex(/^[\x21-\x7e]+$/).nullable().optional(),
 }).strict();
-export type MeshBridgeMutation = "configure" | "enable" | "disable" | "request-restart";
+export type MeshBridgeMutation = MeshBridgeLifecycleEvent["payload"]["action"];
+export type MeshBridgeLifecyclePhase = MeshBridgeLifecycleEvent["payload"]["phase"];
 export class MeshBridgeManagementError extends Error {
   constructor(readonly status: number, readonly code: string) { super(code); }
 }
@@ -42,7 +44,7 @@ function readOwnedJson(path: string, maxBytes: number): Record<string, unknown> 
 export class MeshBridgeManagement {
   private queue: Promise<unknown> = Promise.resolve();
   constructor(private readonly deps: {
-    supportDirectory: string; lifecycle: (action: MeshBridgeMutation) => Promise<void>; now?: () => number;
+    supportDirectory: string; lifecycle: (action: MeshBridgeMutation, phase: MeshBridgeLifecyclePhase) => Promise<void>; now?: () => number;
   }) {}
   private get path() { return meshBridgeConfigPath(this.deps.supportDirectory); }
   read() {
@@ -105,18 +107,24 @@ export class MeshBridgeManagement {
   }
   private run(action: MeshBridgeMutation, operation: () => void) {
     const result = this.queue.then(async () => {
-      // Persist the lifecycle request before changing desired state. No secret/config payload.
-      await this.deps.lifecycle(action);
-      operation();
-      return { ok: true, action, reconciliation: "requested" as const };
+      try {
+        // Persist intent before changing desired state. Never include config or errors.
+        await this.deps.lifecycle(action, "requested");
+        operation();
+        return { ok: true, action, reconciliation: "requested" as const };
+      } catch (error) {
+        // Preserve the original refusal even if the lifecycle journal is unavailable.
+        try { await this.deps.lifecycle(action, "failed"); } catch { /* mutation stays refused */ }
+        throw error;
+      }
     });
     this.queue = result.catch(() => {});
     return result;
   }
   configure(body: unknown) {
-    const parsed = bridgeConfigSchema.safeParse(body);
-    if (!parsed.success) throw new MeshBridgeManagementError(400, "invalid_bridge_config");
     return this.run("configure", () => {
+      const parsed = bridgeConfigSchema.safeParse(body);
+      if (!parsed.success) throw new MeshBridgeManagementError(400, "invalid_bridge_config");
       const previous = readOwnedJson(this.path, 64 * 1024);
       const { token, ...config } = parsed.data;
       const retained = token === undefined && typeof previous?.token === "string" ? previous.token : token;

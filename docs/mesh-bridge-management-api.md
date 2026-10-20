@@ -33,7 +33,11 @@ with a path-free config before control is enabled.
 Mutations serialize through the runtime writer and atomically rename config.
 They first record a credential-free `mesh.bridge.lifecycle` requested event in
 the broker journal and control streams. This is intent, not proof of a running
-process. Failed requests can therefore also have intent events.
+process. Configuration validation and write failures, and refused control
+requests with a valid action, also emit an event with `phase: "failed"` before
+returning failure. Events carry only the action and phase, never credentials,
+config values or exception text. If lifecycle persistence itself is unavailable,
+the mutation is refused and recording its failed event is best-effort.
 
 Scout-base remains the only process owner. It already reconciles `enabled` and
 config mtime; a restart request rewrites config with a changed mtime. These

@@ -3055,9 +3055,9 @@ const routeRequest = createBrokerHttpRouter({
   permissionService,
   meshBridge: new MeshBridgeManagement({
     supportDirectory,
-    lifecycle: async action => {
+    lifecycle: async (action, phase) => {
       const event = { id: createRuntimeId("event"), kind: "mesh.bridge.lifecycle" as const,
-        ts: Date.now(), actorId: operatorActorId, nodeId, payload: { action, phase: "requested" as const } };
+        ts: Date.now(), actorId: operatorActorId, nodeId, payload: { action, phase } };
       await journal.appendEntries([{ kind: "control.event.record", event }]);
       controlStreams.streamRecordedEvent(event);
       publishControlEvent(event);

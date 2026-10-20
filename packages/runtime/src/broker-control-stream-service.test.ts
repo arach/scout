@@ -394,3 +394,15 @@ test("already-journaled bridge lifecycle events fan out once without a second jo
   expect(response.body()).toContain('event: mesh.bridge.lifecycle');
   expect(response.body().match(/event-bridge/g)).toHaveLength(1);
 });
+
+test("recorded bridge failures fan out once without a second journal write", () => {
+  const { service, enqueuedEvents } = createService();
+  const response = new FakeResponse();
+  service.addEventStream({ request: new FakeRequest() as never, response: response as never, hello: {} });
+  const event: ControlEvent = { id: "event-bridge-failed", kind: "mesh.bridge.lifecycle", ts: 2, actorId: "operator",
+    payload: { action: "configure", phase: "failed" } };
+  service.streamRecordedEvent(event);
+  expect(enqueuedEvents).toEqual([]);
+  expect(response.body()).toContain('"phase":"failed"');
+  expect(response.body().match(/event-bridge-failed/g)).toHaveLength(1);
+});
