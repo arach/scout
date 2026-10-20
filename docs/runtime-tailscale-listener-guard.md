@@ -46,16 +46,31 @@ One ServeConfig includes both Serve and Funnel (`AllowFunnel`). The guard reads
 it immediately after listeners start, then every **5 seconds**, with at most one
 read in flight. Each read has a **1.5-second timeout** and a **2 MiB output cap**.
 Requests use the cached result; they never start a process or a status read.
-The standard Unix LocalAPI, when present, is read directly without a process.
-Other installations use a single `tailscale serve status --json` command.
-There is no parallel Funnel command in either the watcher or the inventory.
+On the standalone macOS app, the guard reads the target of the
+`/Library/Tailscale/ipnport` symlink as a port, then reads the corresponding
+`sameuserproof-<port>` token for each request. It sends one GET to
+`127.0.0.1:<port>/localapi/v0/serve-config`, with Basic authentication (`""`,
+token) and Host `local-tailscaled.sock`. Root:admin 0640 proof files are supported.
+The token is not cached, logged, returned or written. Discovery accepts only a
+numeric port; the proof must be a bounded regular file, not a symlink. Redirects
+are not followed. No CLI installation or personal wrapper is needed on that path.
+
+The standard Unix LocalAPI, when present, is also read without a process.
+If neither discovery path is available, the fallback runs one
+`serve status --json` command. It resolves `OPENSCOUT_TAILSCALE_BIN` first, or
+`tailscale` on PATH when no override is set. On macOS, an unavailable executable
+also falls back to `/Applications/Tailscale.app/Contents/MacOS/Tailscale`.
+A discovered LocalAPI's failure is advisory; it does not silently select another
+daemon through CLI fallback. There is no parallel Funnel command in either the
+watcher or the inventory.
 
 Before selecting the cadence, eight read-only CLI samples on macOS measured
 **26.57 ms mean wall time and 34.81 ms mean child-process CPU per read**.
 Twelve reads per minute therefore budget approximately **0.418 CPU seconds per
 minute (0.70% of one core)** for that fallback. This is measured CLI CPU, not a
-claim about total daemon/system CPU or Linux performance. The Unix LocalAPI
-path has no child-process cost; its real daemon CPU was not measured here.
+claim about total daemon/system CPU or Linux performance. Both LocalAPI paths
+have no child-process cost; their real daemon CPU was not measured here. These
+historical CLI samples do not measure the standalone macOS LocalAPI path.
 A separate eight-read warm watcher measurement used **1.37 ms mean parent CPU
 per read** (about 0.016 CPU seconds per minute). Adding these measured components
 estimates **0.434 CPU seconds per minute**, or **0.72% of one core**, excluding
@@ -65,7 +80,10 @@ measurement.
 
 Inspected Tailscale source at `47743a8b9ad16cf3a49504dc443208c37748072e`:
 [`GetServeConfig`](https://github.com/tailscale/tailscale/blob/47743a8b9ad16cf3a49504dc443208c37748072e/client/local/serve.go#L17-L36)
-provides a processless LocalAPI GET. The
+provides a processless LocalAPI GET.
+[`readMacsysSameUserProof`](https://github.com/tailscale/tailscale/blob/47743a8b9ad16cf3a49504dc443208c37748072e/safesocket/safesocket_darwin.go#L270-L305)
+and the [LocalAPI client](https://github.com/tailscale/tailscale/blob/47743a8b9ad16cf3a49504dc443208c37748072e/client/local/local.go#L166-L185)
+define standalone macOS discovery and authentication. The
 [IPN notification structure](https://github.com/tailscale/tailscale/blob/47743a8b9ad16cf3a49504dc443208c37748072e/ipn/backend.go#L311)
 has no ServeConfig-change field, and the
 [ServeConfig setter](https://github.com/tailscale/tailscale/blob/47743a8b9ad16cf3a49504dc443208c37748072e/ipn/ipnlocal/serve.go#L339-L414)
@@ -82,7 +100,7 @@ closed so accepted HTTP streams or upgrades cannot retain ambient access
 indefinitely. Other listeners are not closed. Already accepted work is not
 cancelled or rolled back. New connections are gated per request.
 
-The latest failed, unknown or unparseable result clears automatic enforcement
+The latest failed, unavailable, unknown or unparseable result clears automatic enforcement
 immediately. A recognized empty or web-only result clears it too. A hung read
 cannot keep old evidence alive beyond expiry. A missing CLI, unavailable socket,
 permission error or flaky daemon is advisory only. Explicit protected mode does
@@ -102,7 +120,11 @@ The ingress report has a separate `tailscaleRuntimeListenerGuard` object:
 `outcome`, `source`, `attemptedAt`, `completedAt`, `ageMs`, `pollIntervalMs`,
 `maxAgeMs` and `guardedListeners` (`tcp` / `unix`). Age uses monotonic time.
 The report reads this state after its other probes, rather than presenting an
-old cached decision as current. Raw targets and socket paths are never reported.
+old cached decision as current. `source` distinguishes `macos-localapi`,
+`localapi` (Unix socket) and `cli`. `unavailable` identifies missing executables,
+unreachable endpoints or unavailable authorization; `failed` identifies transient
+read failures such as timeout or HTTP 500. Both are advisory, not enforcing.
+Raw targets, socket paths, tokens and transport exception text are never reported.
 
 The existing top-level `enforced` and `activation` fields still describe the
 explicit cryptographic protected mode and scoped-access boundary. This transient

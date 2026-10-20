@@ -1,8 +1,7 @@
-import { execFile } from "node:child_process";
-import { existsSync, readlinkSync, realpathSync } from "node:fs";
-import { request as httpRequest } from "node:http";
+import { closeSync, constants, existsSync, fstatSync, openSync, readFileSync, readlinkSync, realpathSync } from "node:fs";
+import { request as httpRequest, type ClientRequest, type RequestOptions } from "node:http";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
-import { promisify } from "node:util";
+import { execProbeFile } from "./system-probes/exec.js";
 
 export type LocalListenerKind = "tcp" | "unix";
 export const TAILSCALE_GUARD_ERROR = "tailscale_runtime_listener_guarded";
@@ -11,7 +10,6 @@ export const TAILSCALE_GUARD_POLL_MS = 5_000;
 export const TAILSCALE_GUARD_MAX_AGE_MS = 10_000;
 export const TAILSCALE_GUARD_TIMEOUT_MS = 1_500;
 const MAX_BYTES = 2 * 1024 * 1024;
-const execFileAsync = promisify(execFile);
 
 type OwnListeners = { port: number; socketPath: string };
 type ParseResult = { outcome: "ok" | "unknown" | "unparseable"; matches: LocalListenerKind[] };
@@ -86,31 +84,92 @@ export function matchTailscaleRuntimeTargets(text: string, own: OwnListeners,
   return { outcome: matches.size || !malformed ? "ok" : "unknown", matches: [...matches].sort() };
 }
 
-export type TailscaleStatusRead = { ok: boolean; stdout: string; source: "localapi" | "cli" };
-/** One ServeConfig covers both Serve and Funnel. Standard Linux/Unix LocalAPI
- * avoids a child process; sandboxed macOS discovery stays with Tailscale's CLI. */
-export async function readTailscaleServeConfig(): Promise<TailscaleStatusRead> {
-  const socketPath = ["/var/run/tailscale/tailscaled.sock", "/var/run/tailscaled.socket"].find(existsSync);
-  if (socketPath) return readTailscaleServeConfigFromSocket(socketPath);
+export type TailscaleStatusRead = {
+  ok: boolean; stdout: string; source: "localapi" | "macos-localapi" | "cli"; unavailable?: boolean;
+};
+export type TailscaleStatusReaderOptions = {
+  platform?: NodeJS.Platform;
+  /** Dependency injection for isolated tests, not an operator environment switch. */
+  discoveryDirectory?: string;
+  unixSocketPaths?: readonly string[];
+  env?: NodeJS.ProcessEnv;
+  exec?: (file: string, args: readonly string[], signal: AbortSignal, env: NodeJS.ProcessEnv) => Promise<{ stdout: string }>;
+};
+function isUnavailable(error: unknown): boolean {
+  const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+  return typeof code === "string" && ["ENOENT", "ENOTDIR", "EACCES", "EPERM", "ECONNREFUSED", "ENOTFOUND"].includes(code);
+}
+/** One fixed GET, no redirects, no reusable credential-bearing HTTP agent.
+ * Error bodies and transport exceptions never escape into reports. */
+async function readLocalApi(options: RequestOptions, source: TailscaleStatusRead["source"]): Promise<TailscaleStatusRead> {
+  return new Promise((resolve) => {
+    let bytes = 0, settled = false; const chunks: Buffer[] = [];
+    let request: ClientRequest | undefined, timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (ok: boolean, stdout = "", unavailable = false) => {
+      if (settled) return; settled = true; clearTimeout(timer);
+      resolve({ ok, stdout: ok ? stdout : "", source, ...(unavailable ? { unavailable: true } : {}) });
+    };
+    try {
+      request = httpRequest({ ...options, method: "GET", path: "/localapi/v0/serve-config", agent: false,
+        headers: { host: "local-tailscaled.sock" } }, (res) => {
+        res.on("data", (chunk: Buffer) => { bytes += chunk.length; if (bytes > MAX_BYTES) { finish(false); request?.destroy(); } else chunks.push(chunk); });
+        res.on("error", () => finish(false)); res.on("aborted", () => finish(false));
+        res.on("end", () => finish(res.statusCode === 200, Buffer.concat(chunks).toString("utf8"), res.statusCode === 401 || res.statusCode === 403));
+      });
+      timer = setTimeout(() => { finish(false); request?.destroy(); }, TAILSCALE_GUARD_TIMEOUT_MS);
+      request.on("error", (error) => finish(false, "", isUnavailable(error))); request.end();
+    } catch (error) { finish(false, "", isUnavailable(error)); }
+  });
+}
+/** Mirrors safesocket/readMacsysSameUserProof. The port is the symlink TARGET,
+ * not a file's contents. Root:admin 0640 proof files are supported. No token is
+ * cached, logged, returned or written; it is read anew for this one request. */
+async function readMacosLocalApi(directory: string): Promise<TailscaleStatusRead | undefined> {
   try {
-    const { stdout } = await execFileAsync("tailscale", ["serve", "status", "--json"], { encoding: "utf8", timeout: TAILSCALE_GUARD_TIMEOUT_MS, maxBuffer: MAX_BYTES });
-    return { ok: true, stdout, source: "cli" };
-  } catch { return { ok: false, stdout: "", source: "cli" }; }
+    const portString = readlinkSync(join(directory, "ipnport"));
+    if (!/^[1-9]\d{0,4}$/.test(portString) || Number(portString) > 65535) return undefined;
+    const fd = openSync(join(directory, `sameuserproof-${portString}`), constants.O_RDONLY | constants.O_NOFOLLOW);
+    let token: string;
+    try {
+      const info = fstatSync(fd);
+      if (!info.isFile() || info.size > 4096) return undefined;
+      token = readFileSync(fd, "utf8").trim();
+    } finally { closeSync(fd); }
+    if (!token) return undefined;
+    return readLocalApi({ hostname: "127.0.0.1", port: Number(portString), auth: `:${token}` }, "macos-localapi");
+  } catch { return undefined; }
+}
+/** Standalone macOS and Unix installations use processless LocalAPI reads.
+ * CLI resolution honors the existing probe's override, then the app bundle. */
+export async function readTailscaleServeConfig(options: TailscaleStatusReaderOptions = {}): Promise<TailscaleStatusRead> {
+  const platform = options.platform ?? process.platform, env = options.env ?? process.env;
+  if (platform === "darwin") {
+    const read = await readMacosLocalApi(options.discoveryDirectory ?? "/Library/Tailscale");
+    if (read) return read;
+  }
+  const socketPath = (options.unixSocketPaths ?? ["/var/run/tailscale/tailscaled.sock", "/var/run/tailscaled.socket"]).find(existsSync);
+  if (socketPath) return readTailscaleServeConfigFromSocket(socketPath);
+  const candidates = [...new Set([env.OPENSCOUT_TAILSCALE_BIN ?? "tailscale",
+    ...(platform === "darwin" ? ["/Applications/Tailscale.app/Contents/MacOS/Tailscale"] : [])])];
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TAILSCALE_GUARD_TIMEOUT_MS);
+  const exec = options.exec ?? ((file, args, signal, env) => execProbeFile({ probeId: "tailscale-listener-guard", signal,
+    timeoutMs: TAILSCALE_GUARD_TIMEOUT_MS, startedAt: Date.now() }, file, args, { env, maxStdoutBytes: MAX_BYTES, maxStderrBytes: 128 * 1024 }));
+  try {
+    for (const file of candidates) {
+      try { const { stdout } = await exec(file, ["serve", "status", "--json"], controller.signal, env);
+        return { ok: true, stdout, source: "cli" };
+      } catch (error) {
+        if (!isUnavailable(error)) return { ok: false, stdout: "", source: "cli" };
+      }
+    }
+    return { ok: false, stdout: "", source: "cli", unavailable: true };
+  } finally { clearTimeout(timer); }
 }
 
 /** Socket-only LocalAPI transport; explicit path is injectable for fixture tests. */
 export async function readTailscaleServeConfigFromSocket(socketPath: string): Promise<TailscaleStatusRead> {
-  return new Promise((resolve) => {
-    let bytes = 0; const chunks: Buffer[] = [];
-    const request = httpRequest({ socketPath, path: "/localapi/v0/serve-config", headers: { host: "local-tailscaled.sock" } }, (res) => {
-      res.on("data", (chunk: Buffer) => { bytes += chunk.length; if (bytes > MAX_BYTES) { finish(false); request.destroy(); } else chunks.push(chunk); });
-      res.on("error", () => finish(false)); res.on("aborted", () => finish(false));
-      res.on("end", () => finish(res.statusCode === 200, Buffer.concat(chunks).toString("utf8")));
-    });
-    const timer = setTimeout(() => { finish(false); request.destroy(); }, TAILSCALE_GUARD_TIMEOUT_MS);
-    const finish = (ok: boolean, stdout = "") => { clearTimeout(timer); resolve({ ok, stdout, source: "localapi" }); };
-    request.on("error", () => finish(false)); request.end();
-  });
+  return readLocalApi({ socketPath }, "localapi");
 }
 
 /** True only for the runtime's actual loopback TCP receiving address/port.
@@ -120,8 +179,8 @@ export function isRuntimeLoopbackTcpSocket(socket: { localPort?: number; localAd
 }
 
 export type TailscaleListenerGuardReport = {
-  outcome: "not-read" | "ok" | "unknown" | "unparseable" | "failed" | "stale";
-  source: "localapi" | "cli" | null;
+  outcome: "not-read" | "ok" | "unknown" | "unparseable" | "failed" | "unavailable" | "stale";
+  source: TailscaleStatusRead["source"] | null;
   attemptedAt: number | null; completedAt: number | null; ageMs: number | null;
   pollIntervalMs: number; maxAgeMs: number; guardedListeners: LocalListenerKind[];
 };
@@ -133,7 +192,7 @@ export function createTailscaleListenerGuard(own: OwnListeners, options: {
   const connections = new Map<{ destroy(): unknown; once(event: "close", callback: () => void): unknown }, LocalListenerKind>();
   const now = options.now ?? (() => performance.now()), wallNow = options.wallNow ?? Date.now;
   let completed = -Infinity, attemptedAt: number | null = null, completedAt: number | null = null;
-  let result: ParseResult | { outcome: "failed"; matches: LocalListenerKind[] } | undefined;
+  let result: ParseResult | { outcome: "failed" | "unavailable"; matches: LocalListenerKind[] } | undefined;
   let source: TailscaleStatusRead["source"] | null = null;
   let stopped = false, pending: Promise<void> | undefined, timer: ReturnType<typeof setInterval> | undefined;
   const report = (): TailscaleListenerGuardReport => {
@@ -150,12 +209,12 @@ export function createTailscaleListenerGuard(own: OwnListeners, options: {
     const started = now();
     pending = (async () => {
       let read: TailscaleStatusRead;
-      try { read = await (options.read ?? readTailscaleServeConfig)(); }
-      catch { read = { ok: false, stdout: "", source: "cli" }; }
+      try { read = await (options.read ?? (() => readTailscaleServeConfig()))(); }
+      catch (error) { read = { ok: false, stdout: "", source: "cli", unavailable: isUnavailable(error) }; }
       if (stopped) return;
       const wasGuarded = new Set(report().guardedListeners);
       source = read.source;
-      result = read.ok ? matchTailscaleRuntimeTargets(read.stdout, own, options.canonicalize) : { outcome: "failed", matches: [] };
+      result = read.ok ? matchTailscaleRuntimeTargets(read.stdout, own, options.canonicalize) : { outcome: read.unavailable ? "unavailable" : "failed", matches: [] };
       completed = started; completedAt = wallNow();
       for (const [socket, listener] of connections) if (report().guardedListeners.includes(listener) && !wasGuarded.has(listener)) {
         connections.delete(socket); try { socket.destroy(); } catch { /* Retirement is best effort per socket. */ }

@@ -131,3 +131,8 @@ test("wrong target types are skipped without erasing other recognized targets", 
   expect(parse('{"Future":{"Proxy":"http://localhost:43110"}}').matches).toEqual([]);
   expect(parse('{"FutureRoot":{"fixture:443":true},"TCP":{"443":{"TCPForward":"localhost:43110","FutureTCP":[true]}}}').matches).toEqual(["tcp"]);
 });
+
+test("unavailable transports have their own advisory outcome", async () => {
+  const guard = createTailscaleListenerGuard(own, { read: async () => ({ ok: false, stdout: "", source: "cli", unavailable: true }) });
+  await guard.refresh(); expect(guard.report().outcome).toBe("unavailable"); expect(guard.isGuarded("tcp")).toBe(false); guard.stop();
+});
