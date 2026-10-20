@@ -84,7 +84,11 @@ function ancestors(path: string): string[] {
   }
 }
 
-/** Why `path` cannot be trusted, if it cannot. A sticky folder such as /tmp lets others add entries but not replace ours, so `allowSticky` accepts it. */
+/** Why `path` cannot be trusted, if it cannot. A sticky folder such as /tmp lets
+ * others add entries but not replace ours, so `allowSticky` accepts it.
+ * Strict ownership requires process.getuid. On platforms without getuid, the
+ * loader refuses every installed extension rather than guessing ownership.
+ */
 function untrusted(path: string, allowSticky = false): string | undefined {
   let info: ReturnType<typeof statSync>;
   try { info = statSync(path); } catch { return `Scout cannot read the permissions of ${path}`; }
