@@ -150,3 +150,26 @@ for (const host of ["0.0.0.0", "[::]"]) for (const kind of ["Proxy", "TCPForward
     } finally { guard.stop(); }
   });
 }
+
+for (const host of ["127.1", "127.0.1", "2130706433", "0x7f000001", "0177.0.0.1"]) {
+  for (const scheme of ["tcp", "https+insecure"] as const) {
+    test(`${scheme} numeric loopback spelling ${host} guards only the runtime port`, async () => {
+      const config = (port: number) => JSON.stringify(scheme === "tcp"
+        ? { TCP: { "443": { TCPForward: `${host}:${port}` } } }
+        : { Web: { "fixture:443": { Handlers: { "/": { Proxy: `${scheme}://${host}:${port}` } } } } });
+      let stdout = config(own.port);
+      const guard = createTailscaleListenerGuard(own, { canonicalize, read: async () => ({ ok: true, stdout, source: "cli" }) });
+      try {
+        await guard.refresh(); expect(guard.isGuarded("tcp")).toBe(true); expect(guard.isGuarded("unix")).toBe(false);
+        stdout = config(43120); await guard.refresh(); expect(guard.isGuarded("tcp")).toBe(false);
+      } finally { guard.stop(); }
+    });
+  }
+}
+
+test("numeric host normalization does not resolve DNS names or match non-loopback IPv4", () => {
+  for (const host of ["runtime.example.invalid", "127.1.example.invalid", "0x7f000001.example.invalid", "3232235777", "0xc0a80101", "0300.0250.01.01"]) {
+    expect(parse(JSON.stringify({ TCP: { "443": { TCPForward: `${host}:${own.port}` } } })).matches).toEqual([]);
+    expect(parse(JSON.stringify({ Web: { "fixture:443": { Handlers: { "/": { Proxy: `https+insecure://${host}:${own.port}` } } } } })).matches).toEqual([]);
+  }
+});

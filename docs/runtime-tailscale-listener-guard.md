@@ -20,12 +20,16 @@ HTTP-upgrade compatibility layer; no upgrade is accepted on a guarded listener.
 The parser examines `TCP[*].TCPForward`, `Web[*].Handlers[*].Proxy`, and the
 same mappings inside foreground/service configs. It matches actual loopback
 TCP ports (including localhost, IPv6 and mapped loopback aliases), or a
-canonical owned Unix socket path. Unspecified target addresses `0.0.0.0` and
-`::` also match the owned TCP port because connections to them can reach local
+canonical owned Unix socket path. Every target scheme uses special-scheme
+IPv4 host normalization, including `tcp` and `https+insecure`. Numeric aliases
+such as `127.1`, `127.0.1`, `2130706433`, `0x7f000001` and `0177.0.0.1` therefore
+match the runtime port as `127.0.0.1`. This is syntax normalization, not a DNS
+lookup. Other DNS names do not acquire local authority through resolution.
+Unspecified target addresses `0.0.0.0` and `::` also match the owned TCP port because connections to them can reach local
 listeners on macOS and Linux. They do not match the web app or any other port.
-Socket symlinks and parent-directory aliases are resolved. Remote hosts, other ports, other sockets, arbitrary strings
-containing a port, and `AllowFunnel` alone do not match. The receiving server
-binds listener identity; client headers cannot select it. A TLS peer-facing
+Socket symlinks and parent-directory aliases are resolved. Remote hosts, other
+ports, other sockets, arbitrary strings containing a port, and `AllowFunnel`
+alone do not match. The receiving server binds listener identity; client headers cannot select it. A TLS peer-facing
 address does not become the loopback listener just because its port is equal.
 
 The walker ignores unrelated and future fields without discarding recognized

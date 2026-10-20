@@ -44,7 +44,10 @@ export function matchTailscaleRuntimeTargets(text: string, own: OwnListeners,
       if (!tcp && /^\d+$/.test(raw)) raw = `http://127.0.0.1:${raw}`;
       const url = new URL(raw.includes("://") ? raw : `${tcp ? "tcp" : "http"}://${raw}`);
       if (!(tcp ? ["tcp:"] : ["http:", "https:", "https+insecure:"]).includes(url.protocol) || url.username || url.password) return;
-      const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+      // Opaque schemes (tcp / https+insecure) do not normalize numeric IPv4
+      // aliases. Use the special-scheme host parser for every target, without
+      // a DNS lookup; retain the original scheme/port checks above and below.
+      const host = new URL(`http://${url.hostname}/`).hostname.replace(/^\[|\]$/g, "").toLowerCase();
       const loopback = host === "localhost" || host === "localhost." || host === "::1" ||
         host === "0.0.0.0" || host === "::" ||
         /^127(?:\.\d{1,3}){3}$/.test(host) || /^::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}$/.test(host);
