@@ -87,12 +87,14 @@ rl.on("line", line => {
           replyMode: "notify", createdAt: Date.now(),
         });
         expect(continued.accepted).toBe(true);
+        expect(continued.flight.id).not.toBe(receipt.flight.id);
         const resumed = await broker.waitFor(() => broker.getJson<any>(harness.baseUrl, "/v1/snapshot"),
           value => ["completed", "failed"].includes(value.flights[continued.flight.id]?.state));
         expect(resumed.flights[continued.flight.id].state).toBe("completed");
         expect(continued.targetAgentId).toBe(receipt.targetAgentId);
         // The reply message can land just after its flight reads completed, so wait for it.
-        const isReply = (m: any) => m.body === flight.output && m.actorId === receipt.targetAgentId;
+        const isReply = (m: any) => m.body === flight.output && m.actorId === receipt.targetAgentId
+          && m.metadata?.flightId === receipt.flight.id;
         const replied = await broker.waitFor(() => broker.getJson<any>(harness.baseUrl, "/v1/snapshot"),
           value => (Object.values(value.messages) as any[]).some(isReply));
         expect((Object.values(replied.messages) as any[]).some(isReply)).toBe(true);
