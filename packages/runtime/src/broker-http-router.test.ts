@@ -1550,3 +1550,20 @@ describe("local mesh diagnostics route", () => {
     expect(result.response.status).toBe(200); expect(result.body).toEqual(model);
   });
 });
+
+describe("runtime mesh ping route", () => {
+  test("is local tier with a narrow target-only request", async () => {
+    const calls: string[] = [];
+    const h = createHarness({ meshPing: async target => { calls.push(target); return { ok: true } as never; } });
+    const context = { transport: "loopback" as const };
+    for (const transportContext of [undefined, { transport: "remote" as const }, { ...context, guest: {} }, { ...context, scoped: {} }]) {
+      expect((await requestRouter(h, "POST", "/v1/mesh/ping", { body: { target: "peer" }, transportContext: transportContext as never })).response.status).toBe(403);
+    }
+    for (const body of [{ target: "" }, { target: "peer", path: "/v1/private" }, { target: "peer", headers: {} }]) {
+      expect((await requestRouter(h, "POST", "/v1/mesh/ping", { body, transportContext: context })).response.status).toBe(400);
+    }
+    expect(calls).toEqual([]);
+    expect((await requestRouter(h, "POST", "/v1/mesh/ping", { body: { target: "peer" }, transportContext: context })).response.status).toBe(200);
+    expect(calls).toEqual(["peer"]);
+  });
+});

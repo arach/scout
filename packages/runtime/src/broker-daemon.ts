@@ -2,6 +2,7 @@
 import { openScoutCheckoutInstanceDefault, openScoutInstanceBootstrap } from "./instance-checkout-bootstrap.js";
 import { meshDiagnostics } from "./mesh-diagnostics.js";
 import { tailscaleStatusProbe } from "./system-probes/tailscale-status.js";
+import { createMeshPing } from "./mesh-ping.js";
 import { flightCompletion, SCOUT_COMPLETION_CAPABILITY } from "@openscout/protocol";
 import { SCOUT_SESSION_INPUT_RECEIPTS_CAPABILITY } from "@openscout/protocol";
 import { deliverInPlace } from "./in-place/deliver.js";
@@ -3144,6 +3145,11 @@ const routeRequest = createBrokerHttpRouter({
     existingInvocation: (invocationId) => runtime.snapshot().invocations[invocationId],
     flightForInvocation: (invocationId) => runtime.flightForInvocation(invocationId),
   },
+  meshPing: createMeshPing({
+    nodes: () => Object.values(runtime.snapshot().nodes),
+    peers: () => trustedPeerStore?.listTrustedPeers() ?? [],
+    localNodeId: nodeId, meshId, identity: () => nodeIdentity,
+  }),
   meshTrust: {
     enrollment: trustEnrollmentService,
     rateLimiter: trustEndpointRateLimiter,

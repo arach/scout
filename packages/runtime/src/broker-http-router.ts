@@ -1,3 +1,4 @@
+import { MeshPingError, type createMeshPing } from "./mesh-ping.js";
 import type { MeshDiagnostics } from "./mesh-diagnostics.js";
 import { completionReply } from "@openscout/protocol";
 import { PermissionDeliveryUnconfirmedError, type BrokerPermissionService } from "./broker-permission-service.js";
@@ -336,6 +337,7 @@ export type BrokerHttpRouterDeps = {
    */
   machines?: BrokerMachineService;
   readMeshDiagnostics?: () => MeshDiagnostics;
+  meshPing?: ReturnType<typeof createMeshPing>;
   /**
    * P1.5 restart-free bind flip (docs/proposals/mesh-trust-cone.md §11.5).
    * When absent, POST /v1/mesh/bind 404s.
@@ -544,6 +546,23 @@ export function createBrokerHttpRouter(
     if (!deps.readMeshDiagnostics) { json(response, 503, { error: "mesh_diagnostics_unavailable" }); return; }
     try { json(response, 200, deps.readMeshDiagnostics()); }
     catch { json(response, 503, { error: "mesh_diagnostics_unavailable" }); }
+    return;
+  }
+  if (method === "POST" && url.pathname === "/v1/mesh/ping") {
+    const context = request.transportContext;
+    if (!context || context.transport === "remote" || context.guest || context.scoped) {
+      json(response, 403, { error: "local_only" }); return;
+    }
+    if (!deps.meshPing) { json(response, 503, { error: "mesh_ping_unavailable" }); return; }
+    const body = await readRequestBody<unknown>(request, { maxBytes: 1024 }).catch(() => null);
+    const input = body as { target?: unknown } | null;
+    if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).length !== 1
+      || typeof input.target !== "string" || !input.target.trim() || input.target.length > 512) {
+      json(response, 400, { error: "invalid_mesh_ping" }); return;
+    }
+    try { json(response, 200, await deps.meshPing(input.target.trim())); }
+    catch (error) { json(response, error instanceof MeshPingError ? error.status : 502,
+      { error: error instanceof MeshPingError ? error.code : "mesh_ping_failed" }); }
     return;
   }
   if (guest && await handleBrokerGuestRoute(request, response, url, method, guest)) return;
