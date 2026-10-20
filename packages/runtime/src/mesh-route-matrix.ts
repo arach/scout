@@ -80,6 +80,8 @@ const MESH_ROUTE_MATRIX: Record<string, MeshRouteTier> = {
   "POST /v1/mesh/web-request": "control",
   // Cross-machine approvals: control tier AND a per-peer share opt-in on this
   // machine (mesh-approvals.ts) — the tier alone never exposes them.
+  "GET /v1/mesh/approvals/config": "local",
+  "POST /v1/mesh/approvals/config": "local",
   "GET /v1/mesh/approvals/stream": "control",
   "POST /v1/mesh/approvals/decide": "control",
   "GET /v1/approvals/remote": "local",
