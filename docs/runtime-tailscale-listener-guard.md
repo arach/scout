@@ -26,6 +26,14 @@ containing a port, and `AllowFunnel` alone do not match. The receiving server
 binds listener identity; client headers cannot select it. A TLS peer-facing
 address does not become the loopback listener just because its port is equal.
 
+The walker ignores unrelated and future fields without discarding recognized
+forwarding targets. `AcceptAppCaps` arrays and `Redirect` handlers can coexist
+with a runtime `Proxy`. It does not recursively treat arbitrary fields named
+`Proxy` as targets: only the known positions above confer evidence. A wrong
+type on a target field is skipped without coercion or erasing another valid
+target; invalid JSON cannot produce evidence. No field names or map keys are
+included in diagnostics.
+
 The designed web exposure on **:43120 is not the runtime listener** and does not
 activate this guard. Listener matching uses the actual runtime configuration,
 not a hard-coded web/runtime port guess. Status fixtures use synthetic values
@@ -82,8 +90,8 @@ not turn off when this guard clears.
 
 Under an on-time timer and responsive daemon, a newly added handler can expose
 local tier until the next read completes: up to approximately **6.5 seconds**
-(5-second cadence plus timeout). Event-loop stalls, unavailable probes or unknown
-schemas can leave exposure undetected longer. This guard deliberately does not
+(5-second cadence plus timeout). Event-loop stalls, unavailable probes or unrecognized
+target structures can leave exposure undetected longer. This guard deliberately does not
 lock out local users on uncertain evidence and is not a complete authentication
 boundary. A handler removed in actual config can leave the cached listener
 restricted until a successful re-read, failure result or expiry clears it.

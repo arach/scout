@@ -31,7 +31,7 @@ test("empty null, no substring matching, remote targets, other sockets and unkno
   for (const target of ["100.64.0.1:43110", "localhost:431100", "remote.example.invalid:43110", "unix:/fixture/other.sock", "unix:relative.sock", "http://localhost:43110@remote.example.invalid/", "http://remote.example.invalid/43110"]) {
     expect(parse(JSON.stringify({ Web: { "fixture:443": { Handlers: { "/": { Proxy: target } } } } })).matches).toEqual([]);
   }
-  for (const text of ['{"TCP":[]}', '{"Web":{"x":{"Handlers":{"/":{"Proxy":123}}}}}', '{"TCP":{"443":{"TCPForward":"127.0.0.1:43110"}},"Unknown":true}', '[]']) {
+  for (const text of ['{"TCP":[]}', '{"Web":{"x":{"Handlers":{"/":{"Proxy":123}}}}}', '[]']) {
     expect(parse(text)).toEqual({ outcome: "unknown", matches: [] });
   }
   expect(parse(readFileSync(new URL("./test-helpers/fixtures/tailscale-status/unparseable.txt", import.meta.url), "utf8"))).toEqual({ outcome: "unparseable", matches: [] });
@@ -103,9 +103,31 @@ test("receiving TCP identity excludes peer TLS addresses and other ports", async
   for (const socket of [{}, { localAddress: "100.64.0.1", localPort: 43110 }, { localAddress: "127.0.0.1", localPort: 43120 }]) expect(isRuntimeLoopbackTcpSocket(socket, 43110)).toBe(false);
 });
 
-test("a missing CLI/failed daemon and unknown handler shape are advisory only", async () => {
+test("a failed daemon is advisory; unrelated handler fields preserve evidence", async () => {
   const guard = createTailscaleListenerGuard(own, { read: async () => { throw new Error("fixture ENOENT"); } });
   await guard.refresh(); expect(guard.report().outcome).toBe("failed"); expect(guard.report().guardedListeners).toEqual([]);
   expect(JSON.stringify(guard.report())).not.toContain("ENOENT"); guard.stop();
-  expect(parse('{"TCP":{"443":{"TCPForward":"localhost:43110","Unknown":true}}}')).toEqual({ outcome: "unknown", matches: [] });
+  expect(parse('{"TCP":{"443":{"TCPForward":"localhost:43110","Unknown":true}}}')).toEqual({ outcome: "ok", matches: ["tcp"] });
+});
+
+for (const [name, extra] of [
+  ["AcceptAppCaps", { "/caps": { Proxy: "http://localhost:43120", AcceptAppCaps: ["example.invalid/cap/fixture"] } }],
+  ["Redirect", { "/redirect": { Redirect: "https://example.invalid/" } }],
+  ["future field", { "/future": { FutureField: { "not-a-target": [true] } } }],
+] as const) test(`${name} never discards a recognized runtime target`, async () => {
+  const config = { Web: { "fixture.example.ts.net:443": {
+    Handlers: { "/runtime": { Proxy: "http://localhost:43110" }, ...extra },
+  } } };
+  const guard = createTailscaleListenerGuard(own, { canonicalize, read: async () => ({ ok: true, source: "cli", stdout: JSON.stringify(config) }) });
+  await guard.refresh(); expect(guard.isGuarded("tcp")).toBe(true); guard.stop();
+});
+
+test("wrong target types are skipped without erasing other recognized targets", () => {
+  for (const bad of [null, 43110, ["http://localhost:43110"], { Proxy: "http://localhost:43110" }]) {
+    expect(parse(JSON.stringify({ Web: { "fixture:443": { Handlers: { "/bad": { Proxy: bad } } } } })).matches).toEqual([]);
+    expect(parse(JSON.stringify({ Web: { "fixture:443": { Handlers: { "/bad": { Proxy: bad }, "/good": { Proxy: "http://localhost:43110" } } } } })).matches).toEqual(["tcp"]);
+    expect(parse(JSON.stringify({ TCP: { "443": { TCPForward: bad } } })).matches).toEqual([]);
+  }
+  expect(parse('{"Future":{"Proxy":"http://localhost:43110"}}').matches).toEqual([]);
+  expect(parse('{"FutureRoot":{"fixture:443":true},"TCP":{"443":{"TCPForward":"localhost:43110","FutureTCP":[true]}}}').matches).toEqual(["tcp"]);
 });

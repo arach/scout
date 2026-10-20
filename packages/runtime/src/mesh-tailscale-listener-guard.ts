@@ -53,48 +53,37 @@ export function matchTailscaleRuntimeTargets(text: string, own: OwnListeners,
       if (loopback && port === own.port) matches.add("tcp");
     } catch { /* An unrecognized target has no enforcing evidence. */ }
   };
-  const map = (v: unknown): Record<string, unknown> => {
-    if (!object(v)) throw new Error("unknown shape");
-    return v;
+  // Additive or unrelated fields cannot veto evidence from recognized target
+  // positions. Malformed target fields/branches are skipped, never coerced.
+  let malformed = false;
+  const map = (v: unknown): Record<string, unknown> | undefined => {
+    if (object(v)) return v;
+    malformed = true; return undefined;
   };
+  const entries = (v: unknown): [string, unknown][] => v == null ? [] : Object.entries(map(v) ?? {});
   const visit = (config: unknown, depth: number, service = false) => {
-    if (++nodes > 4096 || depth > 3) throw new Error("unknown shape");
-    const c = map(config);
-    const known = service ? ["TCP", "Web", "Tun"] : ["TCP", "Web", "AllowFunnel", "Foreground", "Services"];
-    if (Object.keys(c).some((key) => !known.includes(key))) throw new Error("unknown shape");
-    if (c.Tun !== undefined && typeof c.Tun !== "boolean") throw new Error("unknown shape");
+    if (++nodes > 4096 || depth > 3) { malformed = true; return; }
+    const c = map(config); if (!c) return;
     if (service && c.Tun === true) return; // L3 mode does not use HTTP/TCP forwarding.
-    if (c.TCP != null) for (const [port, handler] of Object.entries(map(c.TCP))) {
-      if (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535) throw new Error("unknown shape");
-      const h = map(handler);
-      if (Object.keys(h).some((k) => !["TCPForward", "TerminateTLS", "HTTPS", "HTTP", "ProxyProtocol"].includes(k)) ||
-        ["HTTP", "HTTPS"].some((k) => h[k] !== undefined && typeof h[k] !== "boolean") ||
-        (h.TerminateTLS !== undefined && typeof h.TerminateTLS !== "string") ||
-        (h.ProxyProtocol !== undefined && ![0, 1, 2].includes(h.ProxyProtocol as number)) ||
-        (h.TCPForward && (h.HTTP || h.HTTPS))) throw new Error("unknown shape");
-      if (h.TCPForward !== undefined) {
-        if (typeof h.TCPForward !== "string") throw new Error("unknown shape");
-        target(h.TCPForward, true);
+    for (const [port, handler] of entries(c.TCP)) {
+      if (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535) { malformed = true; continue; }
+      const h = map(handler); if (!h || !("TCPForward" in h)) continue;
+      if (typeof h.TCPForward === "string") target(h.TCPForward, true);
+      else malformed = true;
+    }
+    for (const [, web] of entries(c.Web)) {
+      const w = map(web); if (!w) continue;
+      for (const [, handler] of entries(w.Handlers)) {
+        const h = map(handler); if (!h || !("Proxy" in h)) continue;
+        if (typeof h.Proxy === "string") target(h.Proxy, false);
+        else malformed = true;
       }
     }
-    if (c.Web != null) for (const web of Object.values(map(c.Web))) {
-      const w = map(web);
-      if (Object.keys(w).some((k) => k !== "Handlers")) throw new Error("unknown shape");
-      for (const handler of Object.values(map(w.Handlers))) {
-        const h = map(handler);
-        if (Object.keys(h).some((k) => !["Path", "Proxy", "Text"].includes(k)) || Object.values(h).some((v) => typeof v !== "string")) throw new Error("unknown shape");
-        if (h.Proxy !== undefined) {
-          if (typeof h.Proxy !== "string") throw new Error("unknown shape");
-          target(h.Proxy, false);
-        }
-      }
-    }
-    if (c.AllowFunnel != null && Object.values(map(c.AllowFunnel)).some((v) => typeof v !== "boolean")) throw new Error("unknown shape");
-    if (c.Foreground != null) for (const f of Object.values(map(c.Foreground))) visit(f, depth + 1);
-    if (c.Services != null) for (const s of Object.values(map(c.Services))) visit(s, depth + 1, true);
+    for (const [, f] of entries(c.Foreground)) visit(f, depth + 1);
+    for (const [, serviceConfig] of entries(c.Services)) visit(serviceConfig, depth + 1, true);
   };
-  try { visit(value, 0); } catch { return { outcome: "unknown", matches: [] }; }
-  return { outcome: "ok", matches: [...matches].sort() };
+  visit(value, 0);
+  return { outcome: matches.size || !malformed ? "ok" : "unknown", matches: [...matches].sort() };
 }
 
 export type TailscaleStatusRead = { ok: boolean; stdout: string; source: "localapi" | "cli" };
