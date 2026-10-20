@@ -1,6 +1,11 @@
 // Must stay the first import: materializes OPENSCOUT_INSTANCE before any module reads paths/ports.
 import { openScoutCheckoutInstanceDefault, openScoutInstanceBootstrap } from "./instance-checkout-bootstrap.js";
 import { createTailscaleListenerGuard, isRuntimeLoopbackTcpSocket, type LocalListenerKind } from "./mesh-tailscale-listener-guard.js";
+import { MeshFeedback } from "./mesh-feedback.js";
+import { MeshBridgeManagement } from "./mesh-bridge-management.js";
+import { meshDiagnostics } from "./mesh-diagnostics.js";
+import { tailscaleStatusProbe } from "./system-probes/tailscale-status.js";
+import { createMeshPing } from "./mesh-ping.js";
 import { flightCompletion, SCOUT_COMPLETION_CAPABILITY } from "@openscout/protocol";
 import { SCOUT_SESSION_INPUT_RECEIPTS_CAPABILITY } from "@openscout/protocol";
 import { deliverInPlace } from "./in-place/deliver.js";
@@ -160,6 +165,7 @@ import {
   createMeshApprovalWatch,
   meshApprovalsConfigPath,
   readMeshApprovalsConfig,
+  writeMeshApprovalsConfig,
 } from "./mesh-approvals.js";
 import { normalizeCodexAppServerLaunchArgs } from "./codex-app-server.js";
 import { WorkerSQLiteProjection } from "./sqlite-projection-worker.js";
@@ -245,7 +251,7 @@ import { findHarnessEntry } from "./harness-catalog.js";
 import { BrokerControlStreamService } from "./broker-control-stream-service.js";
 import { json } from "./broker-http-helpers.js";
 import { createBrokerHttpRouter } from "./broker-http-router.js";
-import { BrokerRequestReceipts } from "./broker-request-receipts.js";
+import { BrokerRequestReceipts, RetryablePreEffectFailure } from "./broker-request-receipts.js";
 import { BrokerMachineService } from "./broker-machine-service.js";
 import {
   closeServer,
@@ -2304,34 +2310,38 @@ async function createProjectSessionForDelivery(
       trustedNodeIds: new Set(trustedPeerStore?.listTrustedPeers().flatMap((peer) => peer.nodeId ? [peer.nodeId] : []) ?? []),
       isReachable: isReachableMeshNode,
     });
+    // Host resolution precedes every effect of this request: no actor, conversation,
+    // message, session or peer call exists yet. Only the idempotent local-agent
+    // registry refresh has run, which is not caused by this request. So these
+    // refusals are pre-effect, and the same request ID may be retried once fixed.
     if (resolution.kind === "local") {
       if (!isLocalDirectory(resolve(expandHomePath(input.projectPath)))) {
-        throw new Error(`--on ${host} is this machine, and ${input.projectPath} is not a folder here.`);
+        throw new RetryablePreEffectFailure(`--on ${host} is this machine, and ${input.projectPath} is not a folder here.`);
       }
       return createCardlessProjectSessionForDelivery(localInput);
     }
     if (resolution.kind === "ambiguous") {
-      throw new Error(
+      throw new RetryablePreEffectFailure(
         `--on ${host} matches more than one machine: `
         + resolution.nodes.map((node) => `${scoutSessionHostForNode(node)} (${node.id}${node.id === nodeId ? ", this machine" : ""})`).join(", ")
         + ". Use the node id with --on.",
       );
     }
     if (resolution.kind === "unknown") {
-      throw new Error(
+      throw new RetryablePreEffectFailure(
         `--on ${host}: no mesh machine by that name.`
         + (resolution.knownHosts.length ? ` Known machines: ${resolution.knownHosts.join(", ")}.` : " This broker knows no mesh peers yet.")
         + " See them with `scout machines`.",
       );
     }
     if (resolution.kind === "not_trusted") {
-      throw new Error(
+      throw new RetryablePreEffectFailure(
         `--on ${host}: ${scoutSessionHostForNode(resolution.node)} is in the mesh but not a trusted peer, so Scout will not start work there. `
         + "The operator can enroll it with `scout mesh enroll`.",
       );
     }
     if (resolution.kind === "unreachable") {
-      throw new Error(
+      throw new RetryablePreEffectFailure(
         `--on ${host}: ${scoutSessionHostForNode(resolution.node)} is trusted but not reachable right now`
         + (resolution.node.lastSeenAt ? ` (last seen ${new Date(resolution.node.lastSeenAt).toISOString()})` : "")
         + ". Check it with `scout mesh peers`.",
@@ -3041,8 +3051,36 @@ const routeRequest = createBrokerHttpRouter({
     acknowledge: id => projection.acknowledgeQuarantine(id),
   },
   mcpEvents,
+  meshFeedback: new MeshFeedback({
+    supportDirectory,
+    endpoint: process.env.OPENSCOUT_FEEDBACK_REPORT_URL ?? "https://api.openscout.app/api/feedback",
+    health: () => {
+      const tailscale = tailscaleStatusProbe.snapshot();
+      return { ready: !shuttingDown, advertiseScope,
+        tailscale: { unavailable: tailscale.value === null, running: tailscale.value?.running ?? null,
+          stale: tailscale.stale, at: tailscale.at } };
+    },
+  }),
   permissionService,
-  meshApprovals: { share: meshApprovalShare, watch: meshApprovalWatch },
+  meshBridge: new MeshBridgeManagement({
+    supportDirectory,
+    lifecycle: async (action, phase) => {
+      const event = { id: createRuntimeId("event"), kind: "mesh.bridge.lifecycle" as const,
+        ts: Date.now(), actorId: operatorActorId, nodeId, payload: { action, phase } };
+      await journal.appendEntries([{ kind: "control.event.record", event }]);
+      controlStreams.streamRecordedEvent(event);
+      publishControlEvent(event);
+    },
+  }),
+  meshApprovals: {
+    share: meshApprovalShare, watch: meshApprovalWatch,
+    config: {
+      read: readMeshApprovals,
+      write: config => writeMeshApprovalsConfig(meshApprovalsConfigFile, config),
+      isActivePeer: keyId => (trustedPeerStore?.listTrustedPeers() ?? []).some(peer =>
+        peer.keyId === keyId && !peer.revokedAt && (!peer.expiresAt || peer.expiresAt > Date.now())),
+    },
+  },
   encodedSnapshotBodies: process.env.OPENSCOUT_BROKER_ENCODED_SNAPSHOT === "1",
   onSnapshotFlushedBytes: memoryMaintenance ? (bytes) => memoryMaintenance.snapshotEncoded(bytes) : undefined,
   host,
@@ -3101,6 +3139,9 @@ const routeRequest = createBrokerHttpRouter({
   integrationSlackDelivery,
   integrationSlackEvents,
   machines: machineService,
+  readMeshDiagnostics: () => meshDiagnostics(tailscaleStatusProbe.read(), {
+    nodeId, nodeName, meshId, advertiseScope, brokerUrl, seedUrls, discoveryIntervalMs,
+  }),
   access: {
     access: meshAccessStore, nodeId, nodeKeyId: nodeIdentityKeyId,
     enforced: scopedAccessAvailable,
@@ -3140,6 +3181,11 @@ const routeRequest = createBrokerHttpRouter({
     existingInvocation: (invocationId) => runtime.snapshot().invocations[invocationId],
     flightForInvocation: (invocationId) => runtime.flightForInvocation(invocationId),
   },
+  meshPing: createMeshPing({
+    nodes: () => Object.values(runtime.snapshot().nodes),
+    peers: () => trustedPeerStore?.listTrustedPeers() ?? [],
+    localNodeId: nodeId, meshId, identity: () => nodeIdentity,
+  }),
   meshTrust: {
     enrollment: trustEnrollmentService,
     rateLimiter: trustEndpointRateLimiter,

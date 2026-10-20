@@ -11,6 +11,7 @@ import { PeerNonceCache, signPeerRequest } from "./mesh-peer-auth.js";
 import { accessTestKey } from "./test-helpers/access-fixture.test.js";
 import { nodeKeyId } from "./node-identity.js";
 import { requestScoutBrokerJson } from "./broker-api.js";
+import { meshRouteTierFor } from "./mesh-route-matrix.js";
 
 async function fixture(mode: "verify-warn" | "enforce") {
   const dir = mkdtempSync(join(tmpdir(), "runtime-ts-guard-")), socketPath = join(dir, "runtime.sock");
@@ -46,8 +47,8 @@ async function fixture(mode: "verify-warn" | "enforce") {
   port = (tcp.address() as { port: number }).port;
   guard = createTailscaleListenerGuard({ port, socketPath }, { now: () => now, read: async () => ({ ok, stdout: status, source: "cli" }) });
   const base = `http://127.0.0.1:${port}`;
-  const request = (path: string, viaUnix = false, headers: Record<string, string> = {}) => new Promise<{ status: number; body: any }>((resolve, reject) => {
-    const req = httpRequest({ ...(viaUnix ? { socketPath } : { hostname: "127.0.0.1", port }), path, headers }, (res) => {
+  const request = (path: string, viaUnix = false, headers: Record<string, string> = {}, method = "GET") => new Promise<{ status: number; body: any }>((resolve, reject) => {
+    const req = httpRequest({ ...(viaUnix ? { socketPath } : { hostname: "127.0.0.1", port }), path, headers, method }, (res) => {
       let body = ""; res.on("data", (chunk) => body += chunk); res.on("end", () => resolve({ status: res.statusCode!, body: JSON.parse(body) }));
     }); req.on("error", reject); req.end();
   });
@@ -56,6 +57,47 @@ async function fixture(mode: "verify-warn" | "enforce") {
     async setStatus(value: string, success = true) { status = value; ok = success; await guard.refresh(); },
     async close() { guard.stop(); tcp.closeAllConnections(); unix.closeAllConnections(); await Promise.all([new Promise<void>((r) => tcp.close(() => r())), new Promise<void>((r) => unix.close(() => r()))]); rmSync(dir, { recursive: true, force: true }); },
   };
+}
+
+// E1 management routes must lose local authority at the common ingress gate,
+// before any diagnostic, ping, configuration, control or upload handler runs.
+const meshManagementRoutes = [
+  ["GET", "/v1/mesh/approvals/config"],
+  ["POST", "/v1/mesh/approvals/config"],
+  ["GET", "/v1/mesh/diagnostics"],
+  ["POST", "/v1/mesh/ping"],
+  ["GET", "/v1/mesh/bridge"],
+  ["POST", "/v1/mesh/bridge/config"],
+  ["POST", "/v1/mesh/bridge/control"],
+  ["POST", "/v1/diagnostics/reports/collect"],
+  ["POST", "/v1/diagnostics/reports/upload"],
+  ["POST", "/v1/mesh/bridge/feedback/collect"],
+  ["POST", "/v1/mesh/bridge/feedback/upload"],
+] as const;
+for (const mode of ["verify-warn", "enforce"] as const) {
+  for (const listener of ["tcp", "unix"] as const) {
+    test(`mesh management routes are refused only on the guarded ${listener} listener in ${mode}`, async () => {
+      const f = await fixture(mode), viaUnix = listener === "unix";
+      try {
+        const target = viaUnix ? `unix:${f.socketPath}` : `127.0.0.1:${f.port}`;
+        for (const [method, path] of meshManagementRoutes) {
+          expect(meshRouteTierFor(method, path)).toBe("local");
+          expect((await f.request(path, viaUnix, {}, method)).status).toBe(200);
+        }
+        await f.setStatus(JSON.stringify({ TCP: { "443": { TCPForward: target } } }));
+        for (const [method, path] of meshManagementRoutes) {
+          const denied = await f.request(path, viaUnix, {}, method);
+          expect(denied.status).toBe(403);
+          expect(denied.body.error).toBe(TAILSCALE_GUARD_ERROR);
+          expect((await f.request(path, !viaUnix, {}, method)).status).toBe(200);
+        }
+        await f.setStatus("{}");
+        for (const [method, path] of meshManagementRoutes) {
+          expect((await f.request(path, viaUnix, {}, method)).status).toBe(200);
+        }
+      } finally { await f.close(); }
+    });
+  }
 }
 for (const mode of ["verify-warn", "enforce"] as const) {
   test(`TCP match demotes only that listener and preserves public/peer auth in ${mode}`, async () => {

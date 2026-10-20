@@ -15,6 +15,9 @@ const isolatedServerTests = new Set([
   "./server/core/pairing/service.test.ts",
   "./server/create-openscout-web-server.test.ts",
   "./server/service-budgets.test.ts",
+  // Bun 1.3.13 can collect node-pty deferred finalizers after a file's global
+  // is gone under --isolate. Keep this native addon out of the shared process.
+  "./server/terminal-relay-session.test.ts",
   "./server/work-materials.test.ts",
 ]);
 

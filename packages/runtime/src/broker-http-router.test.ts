@@ -1,3 +1,4 @@
+import { meshApprovalsConfigPath, readMeshApprovalsConfig, writeMeshApprovalsConfig } from "./mesh-approvals.js";
 import { PermissionDeliveryUnconfirmedError } from "./broker-permission-service.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -1110,6 +1111,44 @@ describe("createBrokerHttpRouter", () => {
       expect(records.size).toBe(0);
     });
 
+    test("revocation persists approval consent withdrawal without changing other peers or watch", async () => {
+      const { records, store } = memoryPeerStore([peerFixture()]);
+      const harness = trustHarness(store);
+      const dir = mkdtempSync(join(tmpdir(), "approval-revoke-"));
+      const path = meshApprovalsConfigPath(dir);
+      const keyId = "a".repeat(64), other = "b".repeat(64);
+      try {
+        writeMeshApprovalsConfig(path, { share: [keyId, other], watch: true });
+        harness.deps.meshApprovals = { config: {
+          read: () => readMeshApprovalsConfig(path),
+          write: config => writeMeshApprovalsConfig(path, config),
+          isActivePeer: key => records.has(key),
+        } };
+        const revoked = await requestRouter(harness, "POST", "/v1/trust/revoke", { body: { keyId } });
+        expect(revoked.response.status).toBe(200);
+        expect(records.has(keyId)).toBe(false);
+        expect(readMeshApprovalsConfig(path)).toEqual({ share: [other], watch: true });
+        // Re-enrolling the same key must not resurrect earlier sharing consent.
+        store.upsertTrustedPeer(peerFixture());
+        const current = await requestRouter(harness, "GET", "/v1/mesh/approvals/config", { transportContext: { transport: "loopback" } });
+        expect(current.body).toEqual({ share: [other], watch: true });
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    });
+
+    test("a failed approval consent writer refuses trust revocation", async () => {
+      const { records, store } = memoryPeerStore([peerFixture()]);
+      const harness = trustHarness(store);
+      harness.deps.meshApprovals = { config: {
+        read: () => ({ share: ["a".repeat(64)], watch: false }),
+        write: () => { throw new Error("writer-internal-detail"); },
+        isActivePeer: key => records.has(key),
+      } };
+      const result = await requestRouter(harness, "POST", "/v1/trust/revoke", { body: { keyId: "a".repeat(64) } });
+      expect(result.response.status).toBe(503);
+      expect(result.body).toEqual({ error: "approvals_config_unavailable" });
+      expect(records.has("a".repeat(64))).toBe(true);
+    });
+
     test("adjusts an existing peer's tier and label", async () => {
       const { records, store } = memoryPeerStore([peerFixture()]);
       const harness = trustHarness(store);
@@ -1533,4 +1572,80 @@ test("explicit reply endpoint requires typed identity and stable requestId befor
   expect(posted).toEqual([]);
   expect((await requestRouter(h, "POST", "/v1/messages/reply", { body })).response.status).toBe(200);
   expect(posted[0].id).toStartWith("msg.request."); expect(posted[0].metadata.completionReply.kind).toBe("progress");
+});
+
+describe("local mesh diagnostics route", () => {
+  test("returns explicit unavailability and refuses remote or ungated callers", async () => {
+    const harness = createHarness();
+    expect((await requestRouter(harness, "GET", "/v1/mesh/diagnostics")).response.status).toBe(403);
+    expect((await requestRouter(harness, "GET", "/v1/mesh/diagnostics", { transportContext: { transport: "remote" } })).response.status).toBe(403);
+    expect((await requestRouter(harness, "GET", "/v1/mesh/diagnostics", { transportContext: { transport: "loopback" } })).response.status).toBe(503);
+  });
+  test("uses only the runtime read model; never snapshots the registry", async () => {
+    const model = { generatedAt: 10, tailscale: { unavailable: true } };
+    const harness = createHarness({ readMeshDiagnostics: () => model as never });
+    harness.deps.runtime.snapshot = () => { throw new Error("must not snapshot"); };
+    const result = await requestRouter(harness, "GET", "/v1/mesh/diagnostics", { transportContext: { transport: "loopback" } });
+    expect(result.response.status).toBe(200); expect(result.body).toEqual(model);
+  });
+});
+
+describe("runtime mesh ping route", () => {
+  test("is local tier with a narrow target-only request", async () => {
+    const calls: string[] = [];
+    const h = createHarness({ meshPing: async target => { calls.push(target); return { ok: true } as never; } });
+    const context = { transport: "loopback" as const };
+    for (const transportContext of [undefined, { transport: "remote" as const }, { ...context, guest: {} }, { ...context, scoped: {} }]) {
+      expect((await requestRouter(h, "POST", "/v1/mesh/ping", { body: { target: "peer" }, transportContext: transportContext as never })).response.status).toBe(403);
+    }
+    for (const body of [{ target: "" }, { target: "peer", path: "/v1/private" }, { target: "peer", headers: {} }]) {
+      expect((await requestRouter(h, "POST", "/v1/mesh/ping", { body, transportContext: context })).response.status).toBe(400);
+    }
+    expect(calls).toEqual([]);
+    expect((await requestRouter(h, "POST", "/v1/mesh/ping", { body: { target: "peer" }, transportContext: context })).response.status).toBe(200);
+    expect(calls).toEqual(["peer"]);
+  });
+});
+
+describe("local bridge management routes", () => {
+  test("all routes refuse remote, guest, scoped and ungated callers before any management work", async () => {
+    const h = createHarness();
+    for (const [method, path] of [["GET", "/v1/mesh/bridge"], ["POST", "/v1/mesh/bridge/config"], ["POST", "/v1/mesh/bridge/control"]]) {
+      for (const context of [undefined, { transport: "remote" }, { transport: "loopback", guest: {} }, { transport: "loopback", scoped: {} }]) {
+        expect((await requestRouter(h, method!, path!, { transportContext: context as never })).response.status).toBe(403);
+      }
+      expect((await requestRouter(h, method!, path!, { transportContext: { transport: "loopback" } })).response.status).toBe(503);
+    }
+  });
+  test("transport errors cannot echo write-only credentials", async () => {
+    const manager = { read() { throw new Error("private-token"); }, configure() { throw new Error("private-token"); } };
+    const h = createHarness({ meshBridge: manager as never });
+    for (const [method, path] of [["GET", "/v1/mesh/bridge"], ["POST", "/v1/mesh/bridge/config"]]) {
+      const result = await requestRouter(h, method!, path!, { transportContext: { transport: "loopback" }, body: { token: "private-token" } });
+      expect(result.response.status).toBe(503); expect(result.rawBody).not.toContain("private-token");
+    }
+  });
+});
+
+
+describe("local diagnostic report routes", () => {
+  test("neither peers, guests, scoped keys nor ungated callers can collect or upload", async () => {
+    const h = createHarness();
+    for (const path of ["/v1/diagnostics/reports/collect", "/v1/diagnostics/reports/upload", "/v1/mesh/bridge/feedback/collect", "/v1/mesh/bridge/feedback/upload"]) {
+      for (const context of [undefined, { transport: "remote" }, { transport: "loopback", guest: {} }, { transport: "loopback", scoped: {} }]) {
+        expect((await requestRouter(h, "POST", path, { transportContext: context as never })).response.status).toBe(403);
+      }
+      expect((await requestRouter(h, "POST", path, { transportContext: { transport: "loopback" } })).response.status).toBe(503);
+    }
+  });
+  test("the route, not a tool argument, selects bridge provenance; errors are sanitized", async () => {
+    const modes: boolean[] = [];
+    const feedback = { collect: async (_input: unknown, bridge: boolean) => { modes.push(bridge); throw new Error("private-value"); } };
+    const h = createHarness({ meshFeedback: feedback as never });
+    for (const path of ["/v1/mesh/bridge/feedback/collect", "/v1/diagnostics/reports/collect"]) {
+      const result = await requestRouter(h, "POST", path, { body: { message: "note" }, transportContext: { transport: "loopback" } });
+      expect(result.response.status).toBe(503); expect(result.rawBody).not.toContain("private-value");
+    }
+    expect(modes).toEqual([true, false]);
+  });
 });

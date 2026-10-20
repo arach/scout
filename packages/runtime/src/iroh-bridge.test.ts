@@ -49,11 +49,15 @@ describe("iroh bridge helpers", () => {
     const scriptPath = join(dir, "fake-bridge.sh");
     await Bun.write(scriptPath, [
       "#!/bin/sh",
+      'if [ "$1" = "--fixture-warmup" ]; then exit 0; fi',
       "printf '%s\\n' '{\"bridgeProtocolVersion\":1,\"alpn\":\"openscout/mesh/1\",\"endpointId\":\"fake-endpoint\",\"endpointAddr\":{\"id\":\"fake-endpoint\",\"addrs\":[]},\"identityPath\":\"/tmp/fake.key\"}'",
       "sleep 30",
       "",
     ].join("\n"));
     await chmod(scriptPath, 0o755);
+    // Validate this new executable before the unchanged 1s ready-protocol budget.
+    expect(await Bun.spawn([scriptPath, "--fixture-warmup"], { stdout: "ignore", stderr: "pipe" }).exited).toBe(0);
+
 
     const service = await startIrohBridgeServe({
       bridgeBin: scriptPath,

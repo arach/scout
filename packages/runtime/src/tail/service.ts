@@ -5,6 +5,8 @@ import { StringDecoder } from "node:string_decoder";
 
 import { redactSecrets, redactSecretsDeep } from "@openscout/agent-sessions/secret-redaction";
 
+import { readClaudeSessionRecords, type ClaudeSessionRecord } from "../claude-session-records.js";
+
 import { ClaudeSource } from "./claude-source.js";
 import { CodexSource } from "./codex-source.js";
 import { CursorSource } from "./cursor-source.js";
@@ -957,6 +959,34 @@ function reconcilePersistedObservedSessions(
   }
 }
 
+/** Join by native id, never cwd or pid; a newer pid record replaces all older status fields. */
+export function joinClaudeRegistryStatus(
+  transcripts: DiscoveredTranscript[],
+  records: ClaudeSessionRecord[],
+): DiscoveredTranscript[] {
+  const newest = new Map<string, ClaudeSessionRecord>();
+  for (const record of records) {
+    const prior = newest.get(record.sessionId);
+    const rank = (r: ClaudeSessionRecord) => r.statusUpdatedAt ?? r.updatedAt ?? 0;
+    if (!prior || rank(record) > rank(prior)
+      || (rank(record) === rank(prior) && record.pid > prior.pid)) newest.set(record.sessionId, record);
+  }
+  return transcripts.map((transcript) => {
+    if (transcript.source !== "claude") return transcript;
+    const record = transcript.sessionId ? newest.get(transcript.sessionId) : null;
+    return {
+      ...transcript,
+      status: record?.status ?? null,
+      statusUpdatedAt: record?.statusUpdatedAt ?? null,
+      waitingFor: record?.waitingFor ?? null,
+      attention: record?.waitingFor ? {
+        kind: "ask" as const, source: "registry" as const,
+        reason: record.waitingFor, since: record.statusUpdatedAt ?? record.updatedAt ?? null,
+      } : null,
+    };
+  });
+}
+
 async function refreshDiscovery(
   scope: TailDiscoveryScope = "shallow",
   options: { pruneMissing: boolean } = { pruneMissing: scope !== "hot" },
@@ -1103,8 +1133,10 @@ async function refreshDiscovery(
     );
   }
 
-  const allTranscripts = [...knownTranscripts.values()]
-    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+  const allTranscripts = joinClaudeRegistryStatus(
+    [...knownTranscripts.values()].sort((a, b) => b.mtimeMs - a.mtimeMs),
+    await readClaudeSessionRecords().catch(() => []),
+  );
 
   let scoutManaged = 0;
   let hudsonManaged = 0;
@@ -1832,10 +1864,11 @@ export async function readTailEventsForSession(
 
   const discovery = options?.discovery
     ?? await getTailDiscovery(options?.forceDiscovery ?? false);
+  const allowsSource = (source: string) => Boolean(options?.includeAllSources) || NATIVE_TAIL_SOURCES.has(source);
   const transcript = discovery.transcripts.find(
-    (candidate) => (options?.includeAllSources || NATIVE_TAIL_SOURCES.has(candidate.source))
+    (candidate) => allowsSource(candidate.source)
       && transcriptMatchesSessionRef(candidate, normalizedRef),
-  );
+  ) ?? locateTranscriptOutsideDiscovery(normalizedRef, Boolean(options?.includeAllSources), allowsSource);
   if (!transcript) return null;
 
   const limit = options?.limit ?? 2_000;
@@ -1846,4 +1879,48 @@ export async function readTailEventsForSession(
   }
 
   return { transcript, events };
+}
+
+const LOCATED_TRANSCRIPT_TTL_MS = 30_000;
+/** Shorter for a miss: a just-started run writes its rollout a moment later. */
+const LOCATED_TRANSCRIPT_MISS_TTL_MS = 10_000;
+const LOCATED_TRANSCRIPT_LIMIT = 256;
+const locatedTranscripts = new Map<string, { transcript: DiscoveredTranscript | null; checkedAt: number }>();
+
+/**
+ * Exact-session lookup past discovery. Discovery keeps only transcripts touched
+ * within its window (a day) and the newest few hundred, so a task that finished
+ * two days ago is not in it, however recently someone opens its page. Each
+ * source that can find a transcript by id is asked directly. Answers are kept
+ * briefly because an empty Task tail retries every few seconds.
+ */
+function locateTranscriptOutsideDiscovery(
+  normalizedRef: string,
+  includeAllSources: boolean,
+  allowsSource: (source: string) => boolean,
+): DiscoveredTranscript | null {
+  const key = `${includeAllSources ? "all" : "native"}\u0000${normalizedRef}`;
+  const now = Date.now();
+  const cached = locatedTranscripts.get(key);
+  const ttl = cached?.transcript ? LOCATED_TRANSCRIPT_TTL_MS : LOCATED_TRANSCRIPT_MISS_TTL_MS;
+  if (cached && now - cached.checkedAt < ttl) return cached.transcript;
+
+  let transcript: DiscoveredTranscript | null = null;
+  for (const source of sources) {
+    if (!source.findTranscript || !allowsSource(source.name)) continue;
+    try {
+      transcript = source.findTranscript(normalizedRef);
+    } catch {
+      transcript = null;
+    }
+    if (transcript) break;
+  }
+  locatedTranscripts.delete(key);
+  locatedTranscripts.set(key, { transcript, checkedAt: now });
+  while (locatedTranscripts.size > LOCATED_TRANSCRIPT_LIMIT) {
+    const oldest = locatedTranscripts.keys().next().value;
+    if (oldest === undefined) break;
+    locatedTranscripts.delete(oldest);
+  }
+  return transcript;
 }

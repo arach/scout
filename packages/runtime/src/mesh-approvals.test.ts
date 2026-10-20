@@ -302,3 +302,42 @@ describe("watching side", () => {
     watch.stop();
   });
 });
+
+describe("local approvals configuration API", () => {
+  function configDeps() {
+    const dir = mkdtempSync(join(tmpdir(), "approvals-api-")); dirs.push(dir);
+    const path = join(dir, "mesh-approvals.json");
+    return { config: { read: () => readMeshApprovalsConfig(path),
+      write: (config: MeshApprovalsConfig) => writeMeshApprovalsConfig(path, config),
+      isActivePeer: (key: string) => key === PEER } };
+  }
+  test("atomic opt-in, watch and withdrawal use the same config as sharing", async () => {
+    const deps = configDeps();
+    const sharing = createMeshApprovalShare({ nodeId: "test", listSnapshots: async () => [],
+      decide: async () => {}, readConfig: deps.config.read });
+    expect(sharing.isShared(PEER)).toBe(false);
+    expect((await call("POST", "/v1/mesh/approvals/config", local, deps, { share: [PEER], watch: true })).response.status).toBe(200);
+    expect(sharing.isShared(PEER)).toBe(true);
+    expect(deps.config.read()).toEqual({ share: [PEER], watch: true });
+    expect((await call("POST", "/v1/mesh/approvals/config", local, deps, { share: [], watch: false })).response.status).toBe(200);
+    expect(sharing.isShared(PEER)).toBe(false);
+    expect(JSON.parse((await call("GET", "/v1/mesh/approvals/config", local, deps)).response.text())).toEqual({ share: [], watch: false });
+    sharing.stop();
+  });
+  test("remote, guest, scoped and ungated callers cannot configure", async () => {
+    for (const context of [remote(PEER), undefined, { ...local, guest: {} }, { ...local, scoped: {} }]) {
+      for (const method of ["GET", "POST"]) {
+        expect((await call(method, "/v1/mesh/approvals/config", context as RuntimeRequestTransportContext, configDeps(), { share: [], watch: false })).response.status).toBe(403);
+      }
+    }
+  });
+  test("invalid, revoked, expired, unknown and noncanonical entries do not partially write", async () => {
+    const deps = configDeps();
+    for (const body of [{ share: [PEER, STRANGER], watch: true }, { share: [PEER.toUpperCase()], watch: true },
+      { share: [PEER.slice(0, 12)], watch: true }, { share: [PEER] }, { share: [], watch: false, path: "/tmp/file" },
+      { share: Array(129).fill(PEER), watch: true }]) {
+      expect((await call("POST", "/v1/mesh/approvals/config", local, deps, body)).response.status).toBe(400);
+      expect(deps.config.read()).toEqual({ share: [], watch: false });
+    }
+  });
+});

@@ -455,6 +455,11 @@ export type MeshApprovalsHttpDeps = {
   share?: MeshApprovalShare;
   watch?: MeshApprovalWatch;
   heartbeatMs?: number;
+  config?: {
+    read: () => MeshApprovalsConfig;
+    write: (config: MeshApprovalsConfig) => void;
+    isActivePeer: (keyId: string) => boolean;
+  };
 };
 
 function isLocal(request: RuntimeHttpRequestLike): boolean {
@@ -470,6 +475,47 @@ export async function handleBrokerMeshApprovalsRoute(
   method: string,
   deps: MeshApprovalsHttpDeps,
 ): Promise<boolean> {
+  if (url.pathname === "/v1/mesh/approvals/config") {
+    if (!isLocal(request)) {
+      json(response, 403, { error: "local_only" });
+      return true;
+    }
+    const config = deps.config;
+    if (!config) {
+      json(response, 503, { error: "approvals_config_unavailable" });
+      return true;
+    }
+    if (method === "GET" && url.pathname === "/v1/mesh/approvals/config") {
+      json(response, 200, config.read());
+      return true;
+    }
+    if (method === "POST" && url.pathname === "/v1/mesh/approvals/config") {
+      const body = await readRequestBody<unknown>(request, { maxBytes: 16_384 }).catch(() => null);
+      const value = body as Partial<MeshApprovalsConfig> | null;
+      if (!value || typeof value !== "object" || Array.isArray(value)
+        || Object.keys(value).some(key => key !== "share" && key !== "watch")
+        || typeof value.watch !== "boolean" || !Array.isArray(value.share) || value.share.length > 128
+        || !value.share.every(key => typeof key === "string" && /^[a-f0-9]{64}$/.test(key))) {
+        json(response, 400, { error: "invalid_approvals_config" });
+        return true;
+      }
+      // No await between active-peer validation and the runtime's atomic writer.
+      if (value.share.some(key => !config.isActivePeer(key))) {
+        json(response, 400, { error: "inactive_peer" });
+        return true;
+      }
+      try {
+        config.write({ share: [...new Set(value.share)], watch: value.watch });
+        json(response, 200, config.read());
+      } catch {
+        json(response, 503, { error: "approvals_config_write_failed" });
+      }
+      return true;
+    }
+    json(response, 405, { error: "method_not_allowed" });
+    return true;
+  }
+
   if (url.pathname === "/v1/mesh/approvals/stream" || url.pathname === "/v1/mesh/approvals/decide") {
     // Only a verified peer this machine opted to share with — the grant tier
     // alone is not enough. Local callers are this machine's own operator.

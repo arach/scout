@@ -83,6 +83,9 @@ test("current audience/body is authoritative; an ancestry budget never drops lat
   } finally { h.close(); }
 });
 
+// Draining this fixture takes 102 durable catch-up/ack pairs, each rewriting
+// and syncing the retained snapshot. Keep the real HTTP and persistence path;
+// allow slow runner I/O without treating byte-budget correctness as a benchmark.
 test("R2: byte-budgeted HTTP pages drain UTF-8/JSON expansion and a huge body without advancing past omitted events", async () => {
   const { createServer } = await import("node:http");
   const { createRoomHttpSource } = await import("../../runtime/src/room-listening-http-source.ts");
@@ -122,7 +125,7 @@ test("R2: byte-budgeted HTTP pages drain UTF-8/JSON expansion and a huge body wi
     expect(limited.messages.map(m => m.id)).toEqual(["limited-one"]); expect(limited.hasMore).toBe(true);
     expect(roomListeningPage(h.db, { ...h.input, cursor: limited.nextCursor }).messages.map(m => m.id)).toEqual(["limited-two"]);
   } finally { await service.stop(); await new Promise<void>(r => server.close(() => r())); h.close(); }
-});
+}, 30_000);
 
 
 test("R1: unrelated deletion beyond and at the saved anchor never invalidates the room frontier", async () => {
