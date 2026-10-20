@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { request } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -34,13 +33,22 @@ test("bundled entrypoint serves its sibling access-client tree over TLS", async 
     expect(gatewayStaticRoot()).toBe(new URL("../../dist/access-client", import.meta.url).pathname);
     running = await bundled.startScopedAccessGateway(configPath);
     const port = (running as any).server.port;
-    async function get(path: string) { return new Promise<{ status: number; body: string }>((resolve, reject) => {
-      const req = request({ hostname: "127.0.0.1", port, path, headers: { host: "access.bundle.test:0" }, ca: tls.certificatePem, checkServerIdentity: () => undefined }, (response) => {
-        const chunks: Buffer[] = []; response.on("data", (chunk) => chunks.push(Buffer.from(chunk))); response.on("end", () => resolve({ status: response.statusCode!, body: Buffer.concat(chunks).toString() }));
-      }); req.on("error", reject); req.end();
-    }); }
+    async function get(path: string, host = "access.bundle.test:0") {
+      const response = await fetch(`https://127.0.0.1:${port}${path}`, {
+        headers: { host }, redirect: "error",
+        // Match the production Bun pinned-client TLS options, not the
+        // node:https identity override ignored by Bun 1.3.13.
+        tls: { ca: tls.certificatePem, checkServerIdentity: () => undefined },
+      } satisfies BunFetchRequestInit);
+      return { status: response.status, body: await response.text() };
+    }
     const index = await get("/"); expect(index.status).toBe(200); expect(index.body).toContain("Packaged access");
     const asset = await get("/assets/access.js"); expect(asset.status).toBe(200); expect(asset.body).toContain("Packaged access loaded");
     expect((await get("/api/terminal")).status).toBe(404);
+    // The real gateway checks the exact Host before serving static files.
+    // Successful requests above and this rejected control prove fetch sends
+    // the synthetic Host (including :0) and the bundled server sees it.
+    const wrongHost = await get("/", "unexpected.bundle.test:0");
+    expect(wrongHost.status).toBe(403); expect(JSON.parse(wrongHost.body).error).toBe("origin_not_allowed");
   } finally { running?.close(); rmSync(directory, { recursive: true, force: true }); }
 }, 30_000);
