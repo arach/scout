@@ -382,3 +382,15 @@ describe("broker control stream service", () => {
     expect(inboxResponse.body()).not.toContain(": keepalive");
   });
 });
+
+test("already-journaled bridge lifecycle events fan out once without a second journal write", () => {
+  const { service, enqueuedEvents } = createService();
+  const response = new FakeResponse();
+  service.addEventStream({ request: new FakeRequest() as never, response: response as never, hello: {} });
+  const event: ControlEvent = { id: "event-bridge", kind: "mesh.bridge.lifecycle", ts: 1, actorId: "operator",
+    payload: { action: "disable", phase: "requested" } };
+  service.streamRecordedEvent(event);
+  expect(enqueuedEvents).toEqual([]);
+  expect(response.body()).toContain('event: mesh.bridge.lifecycle');
+  expect(response.body().match(/event-bridge/g)).toHaveLength(1);
+});

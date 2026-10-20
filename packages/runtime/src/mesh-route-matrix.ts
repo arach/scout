@@ -93,6 +93,9 @@ const MESH_ROUTE_MATRIX: Record<string, MeshRouteTier> = {
   "POST /v1/mesh/bind": "local",
   "GET /v1/mesh/diagnostics": "local",
   "POST /v1/mesh/ping": "local",
+  "GET /v1/mesh/bridge": "local",
+  "POST /v1/mesh/bridge/config": "local",
+  "POST /v1/mesh/bridge/control": "local",
 
   // ── local: everything else (deny by default) ────────────────────────────
   "DELETE /v1/aliases/:id": "local",

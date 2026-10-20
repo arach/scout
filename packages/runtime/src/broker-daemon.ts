@@ -1,5 +1,6 @@
 // Must stay the first import: materializes OPENSCOUT_INSTANCE before any module reads paths/ports.
 import { openScoutCheckoutInstanceDefault, openScoutInstanceBootstrap } from "./instance-checkout-bootstrap.js";
+import { MeshBridgeManagement } from "./mesh-bridge-management.js";
 import { meshDiagnostics } from "./mesh-diagnostics.js";
 import { tailscaleStatusProbe } from "./system-probes/tailscale-status.js";
 import { createMeshPing } from "./mesh-ping.js";
@@ -3037,6 +3038,16 @@ const routeRequest = createBrokerHttpRouter({
   },
   mcpEvents,
   permissionService,
+  meshBridge: new MeshBridgeManagement({
+    supportDirectory,
+    lifecycle: async action => {
+      const event = { id: createRuntimeId("event"), kind: "mesh.bridge.lifecycle" as const,
+        ts: Date.now(), actorId: operatorActorId, nodeId, payload: { action, phase: "requested" as const } };
+      await journal.appendEntries([{ kind: "control.event.record", event }]);
+      controlStreams.streamRecordedEvent(event);
+      publishControlEvent(event);
+    },
+  }),
   meshApprovals: {
     share: meshApprovalShare, watch: meshApprovalWatch,
     config: {
