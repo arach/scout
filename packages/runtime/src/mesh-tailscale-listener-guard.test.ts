@@ -20,7 +20,12 @@ test("socket canonicalization, Proxy port shorthand and service nesting", () => 
   expect(parse('{"Web":{"fixture:443":{"Handlers":{"/":{"Proxy":"unix:/fixture/alias.sock"}}}}}').matches).toEqual(["unix"]);
   expect(parse('{"Web":{"fixture:443":{"Handlers":{"/":{"Proxy":"43110"}}}}}').matches).toEqual(["tcp"]);
   expect(parse('{"Services":{"svc:fixture":{"TCP":{"443":{"TCPForward":"127.0.0.1:43110"}}}}}').matches).toEqual(["tcp"]);
+  expect(parse('{"Services":{"svc:fixture":{"Tun":true,"TCP":{"443":{"TCPForward":"127.0.0.1:43110"}}}}}').matches).toEqual([]);
 });
+test("one config can target both owned listeners independently", () => {
+  expect(parse('{"TCP":{"443":{"TCPForward":"unix:/fixture/runtime.sock"}},"Web":{"fixture:8443":{"Handlers":{"/":{"Proxy":"http://localhost:43110"}}}}}').matches).toEqual(["tcp", "unix"]);
+});
+
 test("empty null, no substring matching, remote targets, other sockets and unknown schemas", () => {
   expect(parse("null")).toEqual({ outcome: "ok", matches: [] });
   for (const target of ["100.64.0.1:43110", "localhost:431100", "remote.example.invalid:43110", "unix:/fixture/other.sock", "unix:relative.sock", "http://localhost:43110@remote.example.invalid/", "http://remote.example.invalid/43110"]) {
@@ -29,7 +34,7 @@ test("empty null, no substring matching, remote targets, other sockets and unkno
   for (const text of ['{"TCP":[]}', '{"Web":{"x":{"Handlers":{"/":{"Proxy":123}}}}}', '{"TCP":{"443":{"TCPForward":"127.0.0.1:43110"}},"Unknown":true}', '[]']) {
     expect(parse(text)).toEqual({ outcome: "unknown", matches: [] });
   }
-  expect(parse("bad JSON")).toEqual({ outcome: "unparseable", matches: [] });
+  expect(parse(readFileSync(new URL("./test-helpers/fixtures/tailscale-status/unparseable.txt", import.meta.url), "utf8"))).toEqual({ outcome: "unparseable", matches: [] });
   expect(parse('{"AllowFunnel":{"localhost:43110":true}}').matches).toEqual([]);
 });
 test("freshness, failures, empty config, single flight and stop cannot create sticky enforcement", async () => {
@@ -64,9 +69,10 @@ test("socket LocalAPI uses one bounded processless ServeConfig read", async () =
   const { join } = await import("node:path");
   const { readTailscaleServeConfigFromSocket } = await import("./mesh-tailscale-listener-guard.js");
   const dir = mkdtempSync(join(tmpdir(), "ts-guard-api-")), socketPath = join(dir, "api.sock");
-  let mode: "ok" | "oversize" | "error" = "ok", requests = 0;
+  let mode: "ok" | "oversize" | "error" | "timeout" = "ok", requests = 0;
   const server = createServer((req, res) => {
     requests++; expect(req.url).toBe("/localapi/v0/serve-config"); expect(req.headers.host).toBe("local-tailscaled.sock");
+    if (mode === "timeout") return;
     if (mode === "oversize") res.end(" ".repeat(2 * 1024 * 1024 + 1));
     else if (mode === "error") res.writeHead(403).end("not allowed");
     else res.end('{"AllowFunnel":{"fixture:443":true}}');
@@ -76,6 +82,30 @@ test("socket LocalAPI uses one bounded processless ServeConfig read", async () =
     expect(await readTailscaleServeConfigFromSocket(socketPath)).toEqual({ ok: true, stdout: '{"AllowFunnel":{"fixture:443":true}}', source: "localapi" });
     mode = "oversize"; expect((await readTailscaleServeConfigFromSocket(socketPath)).ok).toBe(false);
     mode = "error"; expect((await readTailscaleServeConfigFromSocket(socketPath)).ok).toBe(false);
-    expect(requests).toBe(3);
+    mode = "timeout"; expect((await readTailscaleServeConfigFromSocket(socketPath)).ok).toBe(false);
+    expect(requests).toBe(4);
   } finally { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("detection closes existing connections only on the matched listener", async () => {
+  let config = "{}", tcpClosed = false, unixClosed = false;
+  const guard = createTailscaleListenerGuard(own, { canonicalize, read: async () => ({ ok: true, stdout: config, source: "cli" }) });
+  guard.trackConnection("tcp", { destroy() { tcpClosed = true; }, once() {} });
+  guard.trackConnection("unix", { destroy() { unixClosed = true; }, once() {} });
+  config = '{"TCP":{"443":{"TCPForward":"127.0.0.1:43110"}}}';
+  await guard.refresh(); expect(tcpClosed).toBe(true); expect(unixClosed).toBe(false);
+  guard.stop();
+});
+
+test("receiving TCP identity excludes peer TLS addresses and other ports", async () => {
+  const { isRuntimeLoopbackTcpSocket } = await import("./mesh-tailscale-listener-guard.js");
+  for (const localAddress of ["127.0.0.1", "::1", "::ffff:127.0.0.1"]) expect(isRuntimeLoopbackTcpSocket({ localAddress, localPort: 43110 }, 43110)).toBe(true);
+  for (const socket of [{}, { localAddress: "100.64.0.1", localPort: 43110 }, { localAddress: "127.0.0.1", localPort: 43120 }]) expect(isRuntimeLoopbackTcpSocket(socket, 43110)).toBe(false);
+});
+
+test("a missing CLI/failed daemon and unknown handler shape are advisory only", async () => {
+  const guard = createTailscaleListenerGuard(own, { read: async () => { throw new Error("fixture ENOENT"); } });
+  await guard.refresh(); expect(guard.report().outcome).toBe("failed"); expect(guard.report().guardedListeners).toEqual([]);
+  expect(JSON.stringify(guard.report())).not.toContain("ENOENT"); guard.stop();
+  expect(parse('{"TCP":{"443":{"TCPForward":"localhost:43110","Unknown":true}}}')).toEqual({ outcome: "unknown", matches: [] });
 });

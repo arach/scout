@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, readlinkSync, realpathSync } from "node:fs";
 import { request as httpRequest } from "node:http";
-import { isAbsolute } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 export type LocalListenerKind = "tcp" | "unix";
@@ -16,8 +16,14 @@ const execFileAsync = promisify(execFile);
 type OwnListeners = { port: number; socketPath: string };
 type ParseResult = { outcome: "ok" | "unknown" | "unparseable"; matches: LocalListenerKind[] };
 const object = (v: unknown): v is Record<string, unknown> => Boolean(v && typeof v === "object" && !Array.isArray(v));
-function canonicalSocket(path: string): string | undefined {
-  try { return isAbsolute(path) ? realpathSync(path) : undefined; } catch { return undefined; }
+function canonicalSocket(path: string, depth = 0): string | undefined {
+  if (!isAbsolute(path) || depth > 8) return undefined;
+  try { return realpathSync(path); } catch {
+    // Bun on macOS can reject realpath/lstat of the socket itself. Resolve
+    // explicit symlinks, then canonicalize its parent plus the socket basename.
+    try { return canonicalSocket(resolve(dirname(path), readlinkSync(path)), depth + 1); }
+    catch { try { return join(realpathSync(dirname(path)), basename(path)); } catch { return undefined; } }
+  }
 }
 
 /** Parse only source-defined ServeConfig target fields. No DNS, substring port
@@ -43,7 +49,7 @@ export function matchTailscaleRuntimeTargets(text: string, own: OwnListeners,
       const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
       const loopback = host === "localhost" || host === "localhost." || host === "::1" ||
         /^127(?:\.\d{1,3}){3}$/.test(host) || /^::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}$/.test(host);
-      const port = url.port ? Number(url.port) : url.protocol === "http:" ? 80 : url.protocol === "https:" ? 443 : NaN;
+      const port = url.port ? Number(url.port) : url.protocol === "http:" ? 80 : ["https:", "https+insecure:"].includes(url.protocol) ? 443 : NaN;
       if (loopback && port === own.port) matches.add("tcp");
     } catch { /* An unrecognized target has no enforcing evidence. */ }
   };
@@ -57,9 +63,15 @@ export function matchTailscaleRuntimeTargets(text: string, own: OwnListeners,
     const known = service ? ["TCP", "Web", "Tun"] : ["TCP", "Web", "AllowFunnel", "Foreground", "Services"];
     if (Object.keys(c).some((key) => !known.includes(key))) throw new Error("unknown shape");
     if (c.Tun !== undefined && typeof c.Tun !== "boolean") throw new Error("unknown shape");
+    if (service && c.Tun === true) return; // L3 mode does not use HTTP/TCP forwarding.
     if (c.TCP != null) for (const [port, handler] of Object.entries(map(c.TCP))) {
       if (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535) throw new Error("unknown shape");
       const h = map(handler);
+      if (Object.keys(h).some((k) => !["TCPForward", "TerminateTLS", "HTTPS", "HTTP", "ProxyProtocol"].includes(k)) ||
+        ["HTTP", "HTTPS"].some((k) => h[k] !== undefined && typeof h[k] !== "boolean") ||
+        (h.TerminateTLS !== undefined && typeof h.TerminateTLS !== "string") ||
+        (h.ProxyProtocol !== undefined && ![0, 1, 2].includes(h.ProxyProtocol as number)) ||
+        (h.TCPForward && (h.HTTP || h.HTTPS))) throw new Error("unknown shape");
       if (h.TCPForward !== undefined) {
         if (typeof h.TCPForward !== "string") throw new Error("unknown shape");
         target(h.TCPForward, true);
@@ -67,8 +79,10 @@ export function matchTailscaleRuntimeTargets(text: string, own: OwnListeners,
     }
     if (c.Web != null) for (const web of Object.values(map(c.Web))) {
       const w = map(web);
+      if (Object.keys(w).some((k) => k !== "Handlers")) throw new Error("unknown shape");
       for (const handler of Object.values(map(w.Handlers))) {
         const h = map(handler);
+        if (Object.keys(h).some((k) => !["Path", "Proxy", "Text"].includes(k)) || Object.values(h).some((v) => typeof v !== "string")) throw new Error("unknown shape");
         if (h.Proxy !== undefined) {
           if (typeof h.Proxy !== "string") throw new Error("unknown shape");
           target(h.Proxy, false);
@@ -110,6 +124,12 @@ export async function readTailscaleServeConfigFromSocket(socketPath: string): Pr
   });
 }
 
+/** True only for the runtime's actual loopback TCP receiving address/port.
+ * Unix identity is bound by the owning server, never guessed from empty fields. */
+export function isRuntimeLoopbackTcpSocket(socket: { localPort?: number; localAddress?: string }, port: number): boolean {
+  return socket.localPort === port && ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(socket.localAddress ?? "");
+}
+
 export type TailscaleListenerGuardReport = {
   outcome: "not-read" | "ok" | "unknown" | "unparseable" | "failed" | "stale";
   source: "localapi" | "cli" | null;
@@ -121,6 +141,7 @@ export function createTailscaleListenerGuard(own: OwnListeners, options: {
   canonicalize?: (path: string) => string | undefined;
   onUpdate?: (report: TailscaleListenerGuardReport) => void;
 } = {}) {
+  const connections = new Map<{ destroy(): unknown; once(event: "close", callback: () => void): unknown }, LocalListenerKind>();
   const now = options.now ?? (() => performance.now()), wallNow = options.wallNow ?? Date.now;
   let completed = -Infinity, attemptedAt: number | null = null, completedAt: number | null = null;
   let result: ParseResult | { outcome: "failed"; matches: LocalListenerKind[] } | undefined;
@@ -143,16 +164,24 @@ export function createTailscaleListenerGuard(own: OwnListeners, options: {
       try { read = await (options.read ?? readTailscaleServeConfig)(); }
       catch { read = { ok: false, stdout: "", source: "cli" }; }
       if (stopped) return;
+      const wasGuarded = new Set(report().guardedListeners);
       source = read.source;
       result = read.ok ? matchTailscaleRuntimeTargets(read.stdout, own, options.canonicalize) : { outcome: "failed", matches: [] };
       completed = started; completedAt = wallNow();
+      for (const [socket, listener] of connections) if (report().guardedListeners.includes(listener) && !wasGuarded.has(listener)) {
+        connections.delete(socket); try { socket.destroy(); } catch { /* Retirement is best effort per socket. */ }
+      }
       try { options.onUpdate?.(report()); } catch { /* Observer cannot affect guard state. */ }
     })().finally(() => { pending = undefined; });
     return pending;
   };
   return { report, refresh,
+    trackConnection(listener: LocalListenerKind, socket: { destroy(): unknown; once(event: "close", callback: () => void): unknown }) {
+      if (stopped) return;
+      connections.set(socket, listener); socket.once("close", () => connections.delete(socket));
+    },
     isGuarded: (listener: LocalListenerKind) => report().guardedListeners.includes(listener),
     start() { if (!timer && !stopped) { void refresh(); timer = setInterval(() => { void refresh(); }, TAILSCALE_GUARD_POLL_MS); timer.unref(); } },
-    stop() { stopped = true; if (timer) clearInterval(timer); result = undefined; },
+    stop() { stopped = true; if (timer) clearInterval(timer); result = undefined; connections.clear(); },
   };
 }

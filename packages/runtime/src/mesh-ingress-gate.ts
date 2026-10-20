@@ -1,3 +1,4 @@
+import { TAILSCALE_GUARD_ERROR, TAILSCALE_GUARD_DETAIL } from "./mesh-tailscale-listener-guard.js";
 import { refusesLoopbackHttpProxy, LOOPBACK_HTTP_PROXY_DETAIL, LOOPBACK_HTTP_PROXY_REFUSAL } from "./mesh-loopback-proxy.js";
 import { IROH_INGRESS_PREFIX, IROH_MESH_PATHS, irohDestinationKeyId } from "./iroh-peer-auth.js";
 import { verifyLocalAdminRequest, LOCAL_ADMIN_HEADER } from "./mesh-access-local-auth.js";
@@ -426,6 +427,8 @@ export function applyMeshGateMode(
 }
 
 export type MeshIngressGateDeps = {
+  /** Fresh per-listener evidence only; does not enable protected/scoped mode. */
+  guardedLocalListener?: (socket: { localPort?: number; localAddress?: string }) => boolean;
   /** Protected mode removes ambient loopback/Unix trust; never sent to remote peers. */
   localAdminKey?: string;
   keyConflict?: (keyId: string) => boolean;
@@ -527,7 +530,8 @@ export function createMeshIngressGate(deps: MeshIngressGateDeps): MeshIngressGat
   };
   const denialThrottle = new DenialThrottle();
 
-  function effectiveMode(transport: RuntimeTransportKind): MeshGateMode {
+  function effectiveMode(transport: RuntimeTransportKind, guarded = false): MeshGateMode {
+    if (guarded) return "enforce";
     if (deps.localAdminKey) return "enforce";
     // §11.6: non-loopback listeners force enforce for remote traffic.
     if (transport === "remote" && deps.forceRemoteEnforce?.()) {
@@ -536,7 +540,7 @@ export function createMeshIngressGate(deps: MeshIngressGateDeps): MeshIngressGat
     return deps.mode;
   }
 
-  function decide(input: Omit<MeshIngressVerifyInput, "destinationKeyId" | "bootedAt" | "lookupPeer" | "nonceClaim">): MeshIngressDecision {
+  function decide(input: Omit<MeshIngressVerifyInput, "destinationKeyId" | "bootedAt" | "lookupPeer" | "nonceClaim">, guarded = false): MeshIngressDecision {
     return applyMeshGateMode(
       evaluateMeshIngress({
         ...input,
@@ -549,7 +553,7 @@ export function createMeshIngressGate(deps: MeshIngressGateDeps): MeshIngressGat
         nonceClaim: deps.nonceClaim,
       }),
       {
-        mode: effectiveMode(input.transport),
+        mode: effectiveMode(input.transport, guarded),
         method: input.method,
         pathname: input.pathname,
         keyId: input.headers.peer,
@@ -559,9 +563,9 @@ export function createMeshIngressGate(deps: MeshIngressGateDeps): MeshIngressGat
     );
   }
 
-  function requestTransport(request: IncomingMessage, remoteAddress = request.socket?.remoteAddress): RuntimeTransportKind {
+  function requestTransport(request: IncomingMessage, remoteAddress = request.socket?.remoteAddress, guarded = deps.guardedLocalListener?.(request.socket) ?? false): RuntimeTransportKind {
     const physical = classifyMeshTransport(remoteAddress);
-    if (deps.localAdminKey || request.url?.startsWith(`${IROH_INGRESS_PREFIX}/`)) return "remote";
+    if (guarded || deps.localAdminKey || request.url?.startsWith(`${IROH_INGRESS_PREFIX}/`)) return "remote";
     return physical;
   }
 
@@ -572,7 +576,8 @@ export function createMeshIngressGate(deps: MeshIngressGateDeps): MeshIngressGat
     },
 
     async gateHttpRequest(request, response, next) {
-      let transport = requestTransport(request);
+      const guarded = deps.guardedLocalListener?.(request.socket) ?? false;
+      let transport = requestTransport(request, request.socket?.remoteAddress, guarded);
       const remoteAddress = request.socket?.remoteAddress;
       // Refuse proxy evidence on the physical local transport before any admin
       // proof, public route, or verify-warn handling can restore local trust.
@@ -650,7 +655,7 @@ export function createMeshIngressGate(deps: MeshIngressGateDeps): MeshIngressGat
         let body: Buffer;
         try { body = adminBody ?? await bufferRequestBody(request, 1024 * 1024); if (body.length > 1024 * 1024) throw new Error("scoped payload too large"); }
         catch { json(response, 413, { error: "payload_too_large" }); return; }
-        const decision = decide({ transport, method, pathname: url.pathname, requestTarget: request.url ?? url.pathname, headers, body });
+        const decision = decide({ transport, method, pathname: url.pathname, requestTarget: request.url ?? url.pathname, headers, body }, guarded);
         if (decision.action === "deny") { json(response, decision.status, { error: "access_denied", detail: decision.reason }); return; }
         await next(replayBufferedRequest(request, body, { transport, ...(remoteAddress ? { remoteAddress } : {}), ...(decision.scoped ? { scoped: decision.scoped } : {}) }));
         return;
@@ -717,10 +722,10 @@ export function createMeshIngressGate(deps: MeshIngressGateDeps): MeshIngressGat
       }
 
       if (routeTier === "local") {
-        const decision = decide({ transport, method, pathname: url.pathname, requestTarget: request.url ?? url.pathname, headers });
+        const decision = decide({ transport, method, pathname: url.pathname, requestTarget: request.url ?? url.pathname, headers }, guarded);
         if (decision.action === "deny") {
           request.resume();
-          json(response, decision.status, { error: "forbidden", detail: decision.reason });
+          json(response, decision.status, guarded ? { error: TAILSCALE_GUARD_ERROR, detail: TAILSCALE_GUARD_DETAIL } : { error: "forbidden", detail: decision.reason });
           return;
         }
         // verify-warn: logged above, fall through unauthenticated.
@@ -740,7 +745,7 @@ export function createMeshIngressGate(deps: MeshIngressGateDeps): MeshIngressGat
       } catch (error) {
         const decision = applyMeshGateMode(
           { action: "deny", status: 413, reason: error instanceof Error ? error.message : String(error) },
-          { mode: effectiveMode(transport), method, pathname: url.pathname, keyId: headers.peer, logger, throttle: denialThrottle },
+          { mode: effectiveMode(transport, guarded), method, pathname: url.pathname, keyId: headers.peer, logger, throttle: denialThrottle },
         );
         if (decision.action === "deny") {
           json(response, decision.status, { error: "payload_too_large", detail: decision.reason });
@@ -761,9 +766,9 @@ export function createMeshIngressGate(deps: MeshIngressGateDeps): MeshIngressGat
         requestTarget: request.url ?? url.pathname,
         headers,
         body,
-      });
+      }, guarded);
       if (decision.action === "deny") {
-        json(response, decision.status, {
+        json(response, decision.status, guarded ? { error: TAILSCALE_GUARD_ERROR, detail: TAILSCALE_GUARD_DETAIL } : {
           error: decision.status === 401 ? "unauthorized" : "forbidden",
           detail: decision.reason,
         });
@@ -785,7 +790,8 @@ export function createMeshIngressGate(deps: MeshIngressGateDeps): MeshIngressGat
       }
       if (deps.localAdminKey || request.url?.startsWith(`${IROH_INGRESS_PREFIX}/`)) { socket.write("HTTP/1.1 403 Forbidden\r\nconnection: close\r\n\r\n"); socket.destroy(); return false; }
       const remoteAddress = (socket as { remoteAddress?: string }).remoteAddress;
-      const transport = requestTransport(request, remoteAddress);
+      const guarded = deps.guardedLocalListener?.(socket as { localPort?: number; localAddress?: string }) ?? false;
+      const transport = requestTransport(request, remoteAddress, guarded);
       const url = new URL(request.url ?? "/", "http://localhost");
       const method = request.method ?? "GET";
       const headers = peerAuthHeadersFrom(request.headers);
@@ -797,9 +803,14 @@ export function createMeshIngressGate(deps: MeshIngressGateDeps): MeshIngressGat
           pathname: url.pathname,
           requestTarget: request.url ?? url.pathname,
           headers,
-        });
+        }, guarded);
       if (decision.action === "allow") {
         return true;
+      }
+      if (guarded) {
+        const body = JSON.stringify({ error: TAILSCALE_GUARD_ERROR, detail: TAILSCALE_GUARD_DETAIL });
+        socket.end(`HTTP/1.1 ${decision.status} Forbidden\r\nconnection: close\r\ncontent-type: application/json\r\ncontent-length: ${Buffer.byteLength(body)}\r\n\r\n${body}`, () => socket.destroy());
+        return false;
       }
       const statusText = decision.status === 401 ? "Unauthorized" : "Forbidden";
       socket.write(
