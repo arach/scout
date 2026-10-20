@@ -94,9 +94,6 @@ type WarmSpanRow = {
 };
 
 const KNOWLEDGE_SQLITE_SCHEMA = `
-PRAGMA journal_mode = WAL;
-PRAGMA foreign_keys = ON;
-
 CREATE TABLE IF NOT EXISTS storage_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 
 CREATE TABLE IF NOT EXISTS collections (
@@ -208,6 +205,14 @@ CREATE INDEX IF NOT EXISTS idx_warm_spans_source_harness_completed
   ON warm_spans(source, harness, completed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_warm_spans_job ON warm_spans(job_id);
 `;
+
+// Check the whole read schema in one SQLite snapshot, not just the first table
+// a bootstrapping writer happens to publish. Legacy/partial caches are empty
+// until a writer upgrades them; a GET must never repair their schema.
+const KNOWLEDGE_READ_TABLES = [
+  "collections", "documents", "chunks", "chunks_fts", "facets", "source_refs",
+  "index_jobs", "warm_spans", "storage_state",
+] as const;
 
 /** After this many ms without a covering re-warm, mark coverage stale (still "warmed"). */
 export const KNOWLEDGE_WARM_SPAN_STALE_MS = 6 * 60 * 60 * 1000;
@@ -466,7 +471,7 @@ function insertSourceRefs(db: Database, collectionId: string, chunkId: string | 
  * Open a read-only connection for search/status endpoints: no schema exec,
  * no migrations, no journal-mode changes. WAL permits snapshot reads during
  * indexing; the busy handler also covers the initial schema probe while a
- * writer initializes the database. A missing or never-initialized database
+ * writer initializes the database. A missing or incomplete database
  * is served from an empty in-memory schema
  * instead of falling back to a writable connection running DDL on a GET.
  */
@@ -479,9 +484,10 @@ function openReadonlyKnowledgeDatabase(sqlitePath: string): Database {
     let retained = false;
     try {
       candidate.exec("PRAGMA busy_timeout = 1000;");
-      const initialized = candidate
-        .query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'collections'")
-        .get() !== null;
+      const tables = new Set(candidate
+        .query("SELECT name FROM sqlite_master WHERE type = 'table'")
+        .all().map((row) => (row as { name: string }).name));
+      const initialized = KNOWLEDGE_READ_TABLES.every((name) => tables.has(name));
       if (initialized) {
         candidate.exec("PRAGMA query_only = ON;");
         retained = true;
@@ -524,9 +530,15 @@ export class SQLiteKnowledgeStore {
       this.db = new Database(sqlitePath, { create: true });
       this.db.exec("PRAGMA busy_timeout = 1000; PRAGMA auto_vacuum = INCREMENTAL;");
       this.db.exec("PRAGMA synchronous = NORMAL; PRAGMA cache_size = -65536;");
+      // journal_mode cannot change inside a transaction; foreign_keys must be
+      // enabled before one. Keep connection setup out of the atomic DDL batch.
+      this.db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
       const existingSchema = this.db.query("SELECT 1 FROM sqlite_master WHERE name='collections'").get();
-      if (!existingSchema) this.db.exec(KNOWLEDGE_SQLITE_SCHEMA); // Fixed-size, empty bootstrap only.
-      else this.db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
+      if (!existingSchema) {
+        // Publish all tables together. Otherwise a concurrent status/search
+        // reader can see collections before index_jobs exists.
+        (this.db as SQLiteTransactionalDatabase).transaction(() => this.db.exec(KNOWLEDGE_SQLITE_SCHEMA))();
+      }
       this.hasStorageState = Boolean(this.db.query("SELECT 1 FROM sqlite_master WHERE name='storage_state'").get());
       this.budget = new KnowledgeStorageBudget(this.db, this.paths, (id) => this.evictOldest(id), options);
       this.removeOrphanQmd();
