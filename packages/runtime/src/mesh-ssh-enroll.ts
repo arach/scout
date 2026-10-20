@@ -46,6 +46,8 @@ export type SshEnrollResult = {
   /** Grant this node should persist for the remote peer */
   localGrant: TrustedPeerGrant;
   remoteCard: SignedNodeCard;
+  /** Remote receipt for the grant of our local key. */
+  remoteGrant: { keyId: string; tier: MeshPeerTier };
   /** Destination used for the ssh argv */
   target: SshEnrollTarget;
 };
@@ -54,12 +56,15 @@ export class SshEnrollError extends Error {
   constructor(
     readonly reason:
       | "invalid-target"
+      | "invalid-tier"
       | "invalid-card"
       | "self-enrollment"
       | "ssh-failed"
       | "ssh-timeout"
       | "remote-scout-missing"
       | "remote-rejected"
+      | "remote-upgrade-required"
+      | "remote-tier-unconfirmed"
       | "local-card-missing",
     message: string,
     readonly detail?: { argv?: string[]; stderr?: string; stdout?: string; exitCode?: number },
@@ -371,8 +376,9 @@ async function runSshCommand(
  *
  * Ordering (no half-enrollment on the local side):
  *   1. fetch + verify remote card
- *   2. push local card to remote (`install-grant`); abort if remote rejects
- *   3. return the local grant for the remote peer — caller persists it
+ *   2. verify remote install-grant advertises an explicit --tier
+ *   3. push local card to remote (`install-grant`); abort if remote rejects
+ *   4. verify the remote receipt, then return the local grant for the remote peer — caller persists it
  *
  * The local grant is intentionally NOT written inside this function so the CLI
  * / broker path can own persistence; the contract is "only call install after
@@ -388,6 +394,9 @@ export async function enrollViaSsh(input: {
 }): Promise<SshEnrollResult> {
   const target = parseSshEnrollTarget(input.target);
   const tier = input.tier ?? SSH_ENROLL_DEFAULT_TIER;
+  if (tier !== "observe" && tier !== "control") {
+    throw new SshEnrollError("invalid-tier", "SSH enrollment tier must be observe or control; no SSH command was sent.");
+  }
   const timeoutMs = input.timeoutMs ?? SSH_ENROLL_DEFAULT_TIMEOUT_MS;
   const exec = input.exec ?? defaultSshExec;
   const now = input.now ?? Date.now();
@@ -417,22 +426,44 @@ export async function enrollViaSsh(input: {
     throw new SshEnrollError("self-enrollment", "cannot enroll with self over ssh");
   }
 
-  // 2. Push our card to the remote — remote must accept before we grant locally.
-  //    Pass the full card JSON so the remote CLI can re-verify the signature.
-  const pushResult = await runSshCommand(
-    exec,
-    target,
-    ["scout", "mesh", "trust", "install-grant", "-"],
-    {
-      timeoutMs,
-      step: "push local card to remote install-grant",
-      stdin: `${JSON.stringify(input.localCard)}\n`,
-    },
-  );
-  // Remote may print a peer/grant envelope; we only require success exit.
-  void pushResult;
+  // Verify capability before any mutation: generic mesh/enroll --tier help
+  // is insufficient. Old or unknown remotes must not fall back to control.
+  let help: SshExecResult;
+  try {
+    help = await runSshCommand(exec, target, ["scout", "mesh", "trust", "install-grant", "--help"],
+      { timeoutMs, step: "check remote install-grant tier support" });
+  } catch (error) {
+    if (error instanceof SshEnrollError && ["remote-rejected", "remote-scout-missing"].includes(error.reason)) {
+      throw new SshEnrollError("remote-upgrade-required", "Upgrade Scout on the remote: cannot confirm install-grant --tier support; no enrollment grant was sent.", error.detail);
+    }
+    throw error;
+  }
+  if (!/\binstall-grant\b[^\r\n]*--tier\b/.test(help.stdout)) {
+    throw new SshEnrollError("remote-upgrade-required", "Upgrade Scout on the remote: install-grant must advertise --tier; no enrollment grant was sent.");
+  }
 
-  // 3. Local grant for the remote peer (caller persists).
+  // Push our card with the same explicit tier as the grant installed locally.
+  let pushResult: SshExecResult;
+  try {
+    pushResult = await runSshCommand(exec, target,
+      ["scout", "mesh", "trust", "install-grant", "-", "--tier", tier, "--json"],
+      { timeoutMs, step: "push local card to remote install-grant", stdin: `${JSON.stringify(input.localCard)}\n` });
+  } catch (error) {
+    if (error instanceof SshEnrollError && error.reason === "remote-rejected"
+      && /(?:unknown|unrecognized|unsupported|unexpected).*(?:--tier|flag|option)/i.test(`${error.detail?.stderr} ${error.detail?.stdout}`)) {
+      throw new SshEnrollError("remote-upgrade-required", "Upgrade Scout on the remote: install-grant rejected an explicit tier; no local grant was installed. Inspect the remote's peer grants before retrying.", error.detail);
+    }
+    throw error;
+  }
+  // Exit zero alone is not an acknowledgement of least privilege. Refuse an
+  // ignored flag, wrong key, malformed receipt, or missing tier; never persist
+  // a local grant after an unconfirmed remote mutation.
+  let receipt: { peer?: { keyId?: unknown; tier?: unknown } } | null = null;
+  try { receipt = JSON.parse(pushResult.stdout); } catch { /* fail closed below */ }
+  if (receipt?.peer?.keyId !== input.localCard.keyId || receipt.peer.tier !== tier) {
+    throw new SshEnrollError("remote-tier-unconfirmed", "Remote grant tier/key was not confirmed. No local grant was installed. Inspect or revoke the remote grant, upgrade remote Scout, and retry with an explicit tier.");
+  }
+  const remoteGrant = { keyId: input.localCard.keyId, tier };
   const localGrant = grantFromVerifiedCard(remoteCard, { tier, grantedAt: now });
-  return { localGrant, remoteCard, target };
+  return { localGrant, remoteCard, remoteGrant, target };
 }
