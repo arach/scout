@@ -65,6 +65,9 @@ export function createRoomListeningSupervisor(options: {
           publish({ state: "suspended", detail }); options.warn(detail);
           schedule(recheck, 30_000);
         };
+        // Here 78 means an unsupported room-listening command. The mesh-bridge
+        // supervisor uses 78 for "no token"; a shared supervisor must keep these
+        // command-specific meanings separate rather than conflating the codes.
         if (code === UNSUPPORTED_RUNTIME_COMMAND_EXIT && !signal) {
           suspend("room listening suspended: runtime does not support `listening`; upgrade", false);
           return;
