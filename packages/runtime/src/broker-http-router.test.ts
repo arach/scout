@@ -1587,3 +1587,26 @@ describe("local bridge management routes", () => {
     }
   });
 });
+
+
+describe("local diagnostic report routes", () => {
+  test("neither peers, guests, scoped keys nor ungated callers can collect or upload", async () => {
+    const h = createHarness();
+    for (const path of ["/v1/diagnostics/reports/collect", "/v1/diagnostics/reports/upload", "/v1/mesh/bridge/feedback/collect", "/v1/mesh/bridge/feedback/upload"]) {
+      for (const context of [undefined, { transport: "remote" }, { transport: "loopback", guest: {} }, { transport: "loopback", scoped: {} }]) {
+        expect((await requestRouter(h, "POST", path, { transportContext: context as never })).response.status).toBe(403);
+      }
+      expect((await requestRouter(h, "POST", path, { transportContext: { transport: "loopback" } })).response.status).toBe(503);
+    }
+  });
+  test("the route, not a tool argument, selects bridge provenance; errors are sanitized", async () => {
+    const modes: boolean[] = [];
+    const feedback = { collect: async (_input: unknown, bridge: boolean) => { modes.push(bridge); throw new Error("private-value"); } };
+    const h = createHarness({ meshFeedback: feedback as never });
+    for (const path of ["/v1/mesh/bridge/feedback/collect", "/v1/diagnostics/reports/collect"]) {
+      const result = await requestRouter(h, "POST", path, { body: { message: "note" }, transportContext: { transport: "loopback" } });
+      expect(result.response.status).toBe(503); expect(result.rawBody).not.toContain("private-value");
+    }
+    expect(modes).toEqual([true, false]);
+  });
+});

@@ -96,6 +96,10 @@ const MESH_ROUTE_MATRIX: Record<string, MeshRouteTier> = {
   "GET /v1/mesh/bridge": "local",
   "POST /v1/mesh/bridge/config": "local",
   "POST /v1/mesh/bridge/control": "local",
+  "POST /v1/diagnostics/reports/collect": "local",
+  "POST /v1/diagnostics/reports/upload": "local",
+  "POST /v1/mesh/bridge/feedback/collect": "local",
+  "POST /v1/mesh/bridge/feedback/upload": "local",
 
   // ── local: everything else (deny by default) ────────────────────────────
   "DELETE /v1/aliases/:id": "local",

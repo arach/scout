@@ -1,5 +1,6 @@
 // Must stay the first import: materializes OPENSCOUT_INSTANCE before any module reads paths/ports.
 import { openScoutCheckoutInstanceDefault, openScoutInstanceBootstrap } from "./instance-checkout-bootstrap.js";
+import { MeshFeedback } from "./mesh-feedback.js";
 import { MeshBridgeManagement } from "./mesh-bridge-management.js";
 import { meshDiagnostics } from "./mesh-diagnostics.js";
 import { tailscaleStatusProbe } from "./system-probes/tailscale-status.js";
@@ -3037,6 +3038,16 @@ const routeRequest = createBrokerHttpRouter({
     acknowledge: id => projection.acknowledgeQuarantine(id),
   },
   mcpEvents,
+  meshFeedback: new MeshFeedback({
+    supportDirectory,
+    endpoint: process.env.OPENSCOUT_FEEDBACK_REPORT_URL ?? "https://api.openscout.app/api/feedback",
+    health: () => {
+      const tailscale = tailscaleStatusProbe.snapshot();
+      return { ready: !shuttingDown, advertiseScope,
+        tailscale: { unavailable: tailscale.value === null, running: tailscale.value?.running ?? null,
+          stale: tailscale.stale, at: tailscale.at } };
+    },
+  }),
   permissionService,
   meshBridge: new MeshBridgeManagement({
     supportDirectory,

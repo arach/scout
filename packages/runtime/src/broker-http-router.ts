@@ -1,3 +1,4 @@
+import { MeshFeedback, MeshFeedbackError } from "./mesh-feedback.js";
 import { MeshBridgeManagement, MeshBridgeManagementError } from "./mesh-bridge-management.js";
 import { MeshPingError, type createMeshPing } from "./mesh-ping.js";
 import type { MeshDiagnostics } from "./mesh-diagnostics.js";
@@ -337,6 +338,7 @@ export type BrokerHttpRouterDeps = {
    * the roster is durable by definition and cannot be served from memory.
    */
   machines?: BrokerMachineService;
+  meshFeedback?: MeshFeedback;
   meshBridge?: MeshBridgeManagement;
   readMeshDiagnostics?: () => MeshDiagnostics;
   meshPing?: ReturnType<typeof createMeshPing>;
@@ -586,6 +588,27 @@ export function createBrokerHttpRouter(
     } catch (error) {
       json(response, error instanceof MeshBridgeManagementError ? error.status : 503,
         { error: error instanceof MeshBridgeManagementError ? error.code : "bridge_management_unavailable" });
+    }
+    return;
+  }
+  if (method === "POST" && (url.pathname === "/v1/diagnostics/reports/collect"
+    || url.pathname === "/v1/diagnostics/reports/upload"
+    || url.pathname === "/v1/mesh/bridge/feedback/collect"
+    || url.pathname === "/v1/mesh/bridge/feedback/upload")) {
+    const context = request.transportContext;
+    if (!context || context.transport === "remote" || context.guest || context.scoped) {
+      json(response, 403, { error: "local_bridge_required" }); return;
+    }
+    if (!deps.meshFeedback) { json(response, 503, { error: "feedback_unavailable" }); return; }
+    try {
+      const body = await readRequestBody<unknown>(request, { maxBytes: 16 * 1024 }).catch(() => null);
+      const bridge = url.pathname.startsWith("/v1/mesh/bridge/");
+      const result = url.pathname.endsWith("/collect")
+        ? await deps.meshFeedback.collect(body, bridge) : await deps.meshFeedback.upload(body, bridge);
+      json(response, 200, result);
+    } catch (error) {
+      json(response, error instanceof MeshFeedbackError ? error.status : 503,
+        { error: error instanceof MeshFeedbackError ? error.code : "feedback_unavailable" });
     }
     return;
   }
