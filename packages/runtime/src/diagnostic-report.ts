@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { open, mkdir, writeFile } from "node:fs/promises";
 import { homedir, platform, release, arch, totalmem, uptime } from "node:os";
 import { join } from "node:path";
-import { Database } from "bun:sqlite";
+import { createRequire } from "node:module";
 import { loadOpenScoutRuntimeBuildIdentity } from "./build-info.js";
 import { detectCodingAgentHost } from "./coding-agent-host.js";
 import { resolveOpenScoutSupportPaths } from "./support-paths.js";
@@ -129,6 +129,7 @@ async function journalHealth(path: string): Promise<unknown> {
 }
 
 function databaseHealth(path: string): unknown {
+  const { Database } = createRequire(import.meta.url)("bun:sqlite") as typeof import("bun:sqlite");
   const db = new Database(path, { readonly: true, create: false });
   try {
     db.exec("PRAGMA busy_timeout = 100");
