@@ -9,7 +9,7 @@ export type EffectiveMeshSettings = {
 };
 
 const text = (value: string | undefined, max = 256) =>
-  value === undefined ? null : redactDiagnosticText(value.slice(0, 2_048)).slice(0, max);
+  value === undefined ? null : redactDiagnosticText(value).slice(0, max);
 
 /** Settings URLs disclose origins only, never userinfo, paths, queries or fragments. */
 function origin(value: string): string | null {

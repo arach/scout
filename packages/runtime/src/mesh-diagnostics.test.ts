@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
 import { meshDiagnostics, type EffectiveMeshSettings } from "./mesh-diagnostics.js";
 import type { ProbeSnapshot } from "./system-probes/registry.js";
@@ -42,4 +43,15 @@ describe("runtime mesh diagnostic read model", () => {
       error: { code: "failure", message: "secret", at: 5 } }, settings).tailscale).toMatchObject({
         status: "failed", unavailable: true, running: null, error: { code: "probe_failed", at: 5, timedOut: false } });
   });
+});
+
+
+test("diagnostic dependencies load after instance bootstrap", () => {
+  const source = readFileSync(new URL("./broker-daemon.ts", import.meta.url), "utf8");
+  expect(source.match(/^import .*$/m)?.[0]).toBe('import { openScoutCheckoutInstanceDefault, openScoutInstanceBootstrap } from "./instance-checkout-bootstrap.js";');
+});
+test("private key blocks are redacted before truncation", () => {
+  const secret = "-----BEGIN PRIVATE KEY-----" + "A".repeat(4000) + "-----END PRIVATE KEY-----";
+  const report = meshDiagnostics({ ...empty, value: { running: true, backendState: "Running", health: [secret], peers: [], self: null } }, settings);
+  expect(report.tailscale.health[0]).toBe("[REDACTED PRIVATE KEY]");
 });
