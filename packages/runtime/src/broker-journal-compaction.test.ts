@@ -14,14 +14,16 @@ const message = (id: string): BrokerJournalEntry => ({ kind: "message.record", m
   id, conversationId: "conversation", actorId: "actor", originNodeId: "node", class: "agent", body: `body-${id}`,
   visibility: "private", policy: "durable", createdAt: 1_700_000_000_000,
 } });
-async function setup(diskHistory = false) {
+async function setup(diskHistory = false, legacy = false) {
   const root = await mkdtemp(join(tmpdir(), "scout-live-compact-")); cleanup.push(() => rm(root, { recursive: true, force: true }));
   const path = join(root, "journal.jsonl");
+  const initial = [actor(0), actor(1), actor(2), message("old")];
+  if (legacy) await fsPromises.writeFile(path, JSON.stringify(initial[0]) + "\n");
   const history = diskHistory ? await BrokerMessageHistory.create(path) : undefined;
   if (history) cleanup.push(() => history.close());
   const journal = new FileBackedBrokerJournal(path, { messageHistory: history, compactionPolicy: { minimumReclaimBytes: 1 } });
   await journal.load();
-  await journal.appendEntries([actor(0), actor(1), actor(2), message("old")]);
+  await journal.appendEntries(legacy ? initial.slice(1) : initial);
   return { root, path, journal, history };
 }
 const compact = { minimumBytes: 0, minimumIntervalMs: 0 };
@@ -116,7 +118,7 @@ test("receipt markers survive restart compaction until their exact prefix has ap
 });
 
 test("receipt cleanup rejects a prior rewrite generation even when the filesystem reuses its inode", async () => {
-  const { journal, path } = await setup();
+  const { journal, path } = await setup(false, true);
   const realStat = fsPromises.stat;
   const stated = spyOn(fsPromises, "stat").mockImplementation((async (...args: Parameters<typeof fsPromises.stat>) => {
     const source = await realStat(...args);

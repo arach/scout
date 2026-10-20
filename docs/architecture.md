@@ -301,7 +301,7 @@ with a visible error at the byte bound or an unsupported frame version rather
 than silently certifying missing history. Legacy oversized records require a
 deliberate reader/migration decision. Compaction preserves logical ordering and
 replay barriers, syncs its replacement file, renames it, and syncs the directory.
-Each replacement starts with a `journal.generation` header containing `version: 1`
+New journals and journal replacements start with a `journal.generation` header containing `version: 1`
 and a fresh UUID. The header is physical framing metadata, not a domain record
 or replay barrier. Logical replay skips it. Each subsequent rewrite replaces the
 header; appends leave it unchanged. Legacy journals without a header remain
@@ -309,7 +309,7 @@ readable and acquire one on their first rewrite. Compaction can emit ordinary
 singleton lines because publication replaces the whole file atomically.
 
 Generation headers are a one-way on-disk format upgrade. Once this version
-rewrites a journal, older runtimes that do not recognize `journal.generation`
+creates or rewrites a journal, older runtimes that do not recognize `journal.generation`
 treat the header as a structural error and refuse to load the journal. Do not
 point an older runtime at that journal when you roll back. This version does
 not add support for generation headers to older runtimes.

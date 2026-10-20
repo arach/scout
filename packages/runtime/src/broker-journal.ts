@@ -49,7 +49,7 @@ import {
 import { invocationDispatchJobId, type BrokerInvocationDispatchJob } from "./broker-dispatch-job.js";
 
 /** Bind offsets to an immutable on-disk rewrite generation, not a reusable inode.
- * Legacy/uncompacted journals remain readable; every rewrite installs a nonce.
+ * Legacy journals remain readable; creation and every rewrite install a nonce.
  * Read from the same descriptor as stat/replay, never a separately reopened path.
  */
 async function replayFileIdentity(file: FileHandle, source: { dev: number; ino: number }): Promise<string> {
@@ -705,7 +705,10 @@ export class FileBackedBrokerJournal {
         }
       }
       try {
-        await appendFile(this.filePath, (this.appendPrefix ?? "") + payload, "utf8");
+        // A fresh/empty file receives its physical identity in the same durable
+        // append as its first logical commit. Existing legacy files stay intact.
+        const prefix = before === 0 ? encodeJournalGeneration() : (this.appendPrefix ?? "");
+        await appendFile(this.filePath, prefix + payload, "utf8");
         const durable = await open(this.filePath, "r+");
         try { await durable.sync(); } finally { await durable.close(); }
         // Persist a newly created journal's directory entry before acknowledging.
@@ -788,7 +791,20 @@ export class FileBackedBrokerJournal {
       return this.latestLoadReport!;
     }
 
-    if(this.messageHistory){await mkdir(dirname(this.filePath),{recursive:true});await appendFile(this.filePath, "", "utf8");}
+    if (this.messageHistory) {
+      await mkdir(dirname(this.filePath), { recursive: true });
+      // Disk history needs a file before the first logical append. Initialize
+      // only a newly created file; never add a second header to existing data.
+      const created = await open(this.filePath, "wx").catch(error => {
+        if (errorCode(error) === "EEXIST") return null;
+        throw error;
+      });
+      if (created) {
+        try { await created.writeFile(encodeJournalGeneration(), "utf8"); await created.sync(); }
+        finally { await created.close(); }
+        await this.syncDirectory();
+      }
+    }
     const startedAt = Date.now();
     await this.reapOrphanedCompactionTemps();
     const sourceBytes = await stat(this.filePath).then((value) => value.size).catch((error) => {
