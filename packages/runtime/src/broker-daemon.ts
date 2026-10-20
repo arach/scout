@@ -1,3 +1,5 @@
+import { meshDiagnostics } from "./mesh-diagnostics.js";
+import { tailscaleStatusProbe } from "./system-probes/tailscale-status.js";
 // Must stay the first import: materializes OPENSCOUT_INSTANCE before any module reads paths/ports.
 import { openScoutCheckoutInstanceDefault, openScoutInstanceBootstrap } from "./instance-checkout-bootstrap.js";
 import { flightCompletion, SCOUT_COMPLETION_CAPABILITY } from "@openscout/protocol";
@@ -3092,6 +3094,9 @@ const routeRequest = createBrokerHttpRouter({
   integrationSlackDelivery,
   integrationSlackEvents,
   machines: machineService,
+  readMeshDiagnostics: () => meshDiagnostics(tailscaleStatusProbe.read(), {
+    nodeId, nodeName, meshId, advertiseScope, brokerUrl, seedUrls, discoveryIntervalMs,
+  }),
   access: {
     access: meshAccessStore, nodeId, nodeKeyId: nodeIdentityKeyId,
     enforced: scopedAccessAvailable,

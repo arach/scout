@@ -71,6 +71,7 @@ const expectedRouteInventory = [
   "GET /v1/machines",
   "GET /v1/machines/:id",
   "GET /v1/mesh/approvals/stream",
+  "GET /v1/mesh/diagnostics",
   "GET /v1/mesh/invocations/:id/stream",
   "GET /v1/mesh/node-state",
   "GET /v1/mesh/nodes",

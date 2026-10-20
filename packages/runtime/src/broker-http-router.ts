@@ -1,3 +1,4 @@
+import type { MeshDiagnostics } from "./mesh-diagnostics.js";
 import { completionReply } from "@openscout/protocol";
 import { PermissionDeliveryUnconfirmedError, type BrokerPermissionService } from "./broker-permission-service.js";
 import { BrokerBusyError } from "./broker-storage-pressure.js";
@@ -334,6 +335,7 @@ export type BrokerHttpRouterDeps = {
    * the roster is durable by definition and cannot be served from memory.
    */
   machines?: BrokerMachineService;
+  readMeshDiagnostics?: () => MeshDiagnostics;
   /**
    * P1.5 restart-free bind flip (docs/proposals/mesh-trust-cone.md §11.5).
    * When absent, POST /v1/mesh/bind 404s.
@@ -533,6 +535,16 @@ export function createBrokerHttpRouter(
 
   if (url.pathname.startsWith("/v1/mesh/approvals/") || url.pathname.startsWith("/v1/approvals/remote")) {
     if (await handleBrokerMeshApprovalsRoute(request, response, url, method, deps.meshApprovals ?? {})) return;
+  }
+  if (method === "GET" && url.pathname === "/v1/mesh/diagnostics") {
+    const context = request.transportContext;
+    if (!context || context.transport === "remote" || context.guest || context.scoped) {
+      json(response, 403, { error: "local_only" }); return;
+    }
+    if (!deps.readMeshDiagnostics) { json(response, 503, { error: "mesh_diagnostics_unavailable" }); return; }
+    try { json(response, 200, deps.readMeshDiagnostics()); }
+    catch { json(response, 503, { error: "mesh_diagnostics_unavailable" }); }
+    return;
   }
   if (guest && await handleBrokerGuestRoute(request, response, url, method, guest)) return;
   const denyRemoteMutation = (): boolean => {
