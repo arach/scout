@@ -50,10 +50,14 @@ async function* jsonlFiles(dir: string, from: number): AsyncGenerator<[string, s
   const { readdir } = await import("node:fs/promises");
   const walk = async function* (d: string): AsyncGenerator<string> {
     let entries; try { entries = await readdir(d, { withFileTypes: true }); } catch { return; }
+    // Files first keep Claude parents ahead of their subagent folders. Use
+    // code-unit name order so neither filesystem enumeration nor locale wins.
+    entries.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
     for (const e of entries) {
-      const p = join(d, e.name);
-      if (e.isDirectory()) yield* walk(p);
-      else if (e.isFile() && e.name.endsWith(".jsonl")) yield p;
+      if (e.isFile() && e.name.endsWith(".jsonl")) yield join(d, e.name);
+    }
+    for (const e of entries) {
+      if (e.isDirectory()) yield* walk(join(d, e.name));
     }
   };
   for await (const f of walk(dir)) {

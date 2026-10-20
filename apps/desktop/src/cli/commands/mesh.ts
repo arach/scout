@@ -25,6 +25,9 @@ import {
   runMeshTrustCommand,
 } from "./mesh-trust.ts";
 
+import { resolveScoutBrokerUrl } from "../../core/broker/service.ts";
+import { runMeshGuestsCommand } from "./mesh-guests.ts";
+
 const MESH_HELP = `scout mesh — Mesh status and diagnostics
 
 Subcommands:
@@ -33,6 +36,9 @@ Subcommands:
   scout mesh nodes        List known mesh nodes
   scout mesh discover     Probe for remote mesh nodes
   scout mesh ping <node>  Ping a specific node by ID, name, or URL
+
+  Hosts unseen for 7 days are dormant: hidden from status, doctor and nodes.
+  Add --all to include them. A dormant host still answers to its name.
 
 Join / leave:
   scout mesh join         Announce, discover peers, and sync their agents
@@ -52,6 +58,9 @@ Scoped identity and resource access:
 Approvals across machines:
   scout mesh approvals    Share this Mac's permission requests with a peer, or watch theirs
 
+Direct guest access:
+  scout mesh guests       List, grant, or revoke key-bound guest access (--help)
+
 Legacy machine trust (docs/proposals/mesh-trust-cone.md):
   scout mesh peers        List trusted peers
   scout mesh grant        Adjust a peer's tier
@@ -67,19 +76,19 @@ export async function runMeshCommand(context: ScoutCommandContext, args: string[
   switch (subcommand) {
     case "":
     case "status": {
-      const report = await loadMeshStatus();
+      const report = await loadMeshStatus({ all: args.includes("--all") });
       context.output.writeValue(report, renderMeshStatus);
       return;
     }
 
     case "doctor": {
-      const report = await loadMeshDoctorReport();
+      const report = await loadMeshDoctorReport({ all: args.includes("--all") });
       context.output.writeValue(report, renderMeshDoctor);
       return;
     }
 
     case "nodes": {
-      const result = await loadMeshNodes();
+      const result = await loadMeshNodes({ all: args.includes("--all") });
       context.output.writeValue(result, renderMeshNodes);
       return;
     }
@@ -152,6 +161,10 @@ export async function runMeshCommand(context: ScoutCommandContext, args: string[
       await runMeshApprovalsCommand(context, args.slice(1));
       return;
     }
+
+    case "guests":
+      await runMeshGuestsCommand(context, args.slice(1), { brokerUrl: resolveScoutBrokerUrl() });
+      return;
 
     case "peers":
       await runMeshPeersCommand(context, args.slice(1));

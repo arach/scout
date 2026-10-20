@@ -12,8 +12,9 @@ import { readableDelivery, readableDeliveryStatus, readableMetadata, type Broker
 import { BrokerMessageBodyCache, BrokerMessageBodyCacheUnavailable, type MessageBodyCacheOptions } from "./broker-message-body-cache.js";
 import { createReadStream } from "node:fs";
 import { appendFile, mkdir, open, readdir, rename, stat, truncate, unlink } from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
 import { basename, dirname } from "node:path";
-import { decodeJournalLine, encodeJournalEntries, journalLines, JournalFrameLimitError, UnsupportedJournalFrameError } from "./broker-journal-framing.js";
+import { decodeJournalLine, encodeJournalEntries, encodeJournalGeneration, journalGenerationId, JOURNAL_GENERATION_KIND, journalLines, JournalFrameLimitError, UnsupportedJournalFrameError } from "./broker-journal-framing.js";
 
 import type {
   ControlEvent,
@@ -46,6 +47,23 @@ import {
   type RuntimeRegistrySnapshot,
 } from "./registry.js";
 import { invocationDispatchJobId, type BrokerInvocationDispatchJob } from "./broker-dispatch-job.js";
+
+/** Bind offsets to an immutable on-disk rewrite generation, not a reusable inode.
+ * Legacy journals remain readable; creation and every rewrite install a nonce.
+ * Read from the same descriptor as stat/replay, never a separately reopened path.
+ */
+async function replayFileIdentity(file: FileHandle, source: { dev: number; ino: number }): Promise<string> {
+  const inode = `${source.dev}:${source.ino}`;
+  const prefix = Buffer.alloc(256);
+  const { bytesRead } = await file.read(prefix, 0, prefix.length, 0);
+  const text = prefix.subarray(0, bytesRead).toString("utf8");
+  if (!text.startsWith(`{"kind":"${JOURNAL_GENERATION_KIND}"`)) return inode;
+  const newline = text.indexOf("\n");
+  if (newline < 0) throw new UnsupportedJournalFrameError("incomplete_journal_generation");
+  const generation = journalGenerationId(JSON.parse(text.slice(0, newline)));
+  if (!generation) throw new UnsupportedJournalFrameError("invalid_journal_generation");
+  return `${inode}:${generation}`;
+}
 
 export type BrokerJournalEntry =
   | { kind: "node.upsert"; node: NodeDefinition }
@@ -293,7 +311,7 @@ function historyRotationDropsEntry(
 export type BrokerJournalReplayBoundary = {
   endByteExclusive: number;
   barrier?: BrokerJournalReplayBarrier;
-  /** Byte offsets may only be reused while this opened-file identity matches. */
+  /** Opaque opened-file identity, including the durable rewrite generation when present. */
   fileIdentity?: string;
 };
 
@@ -687,7 +705,10 @@ export class FileBackedBrokerJournal {
         }
       }
       try {
-        await appendFile(this.filePath, (this.appendPrefix ?? "") + payload, "utf8");
+        // A fresh/empty file receives its physical identity in the same durable
+        // append as its first logical commit. Existing legacy files stay intact.
+        const prefix = before === 0 ? encodeJournalGeneration() : (this.appendPrefix ?? "");
+        await appendFile(this.filePath, prefix + payload, "utf8");
         const durable = await open(this.filePath, "r+");
         try { await durable.sync(); } finally { await durable.close(); }
         // Persist a newly created journal's directory entry before acknowledging.
@@ -770,7 +791,20 @@ export class FileBackedBrokerJournal {
       return this.latestLoadReport!;
     }
 
-    if(this.messageHistory){await mkdir(dirname(this.filePath),{recursive:true});await appendFile(this.filePath, "", "utf8");}
+    if (this.messageHistory) {
+      await mkdir(dirname(this.filePath), { recursive: true });
+      // Disk history needs a file before the first logical append. Initialize
+      // only a newly created file; never add a second header to existing data.
+      const created = await open(this.filePath, "wx").catch(error => {
+        if (errorCode(error) === "EEXIST") return null;
+        throw error;
+      });
+      if (created) {
+        try { await created.writeFile(encodeJournalGeneration(), "utf8"); await created.sync(); }
+        finally { await created.close(); }
+        await this.syncDirectory();
+      }
+    }
     const startedAt = Date.now();
     await this.reapOrphanedCompactionTemps();
     const sourceBytes = await stat(this.filePath).then((value) => value.size).catch((error) => {
@@ -1077,18 +1111,18 @@ export class FileBackedBrokerJournal {
         // diverging between capture and ordinary append.
         this.apply(entry);
       }
-      const source = await stat(this.filePath).catch((error) => {
-            const code = error && typeof error === "object" && "code" in error
-              ? (error as { code?: unknown }).code
-              : undefined;
-            if (code === "ENOENT") return null;
-            throw error;
-          });
-      boundary = {
-        endByteExclusive: source?.size ?? 0,
-        ...(source ? { fileIdentity: `${source.dev}:${source.ino}` } : {}),
-        ...(options.barrier ? { barrier: options.barrier } : {}),
-      };
+      const file = await open(this.filePath, "r").catch((error) => {
+        if (errorCode(error) === "ENOENT") return null;
+        throw error;
+      });
+      try {
+        const source = await file?.stat();
+        boundary = {
+          endByteExclusive: source?.size ?? 0,
+          ...(file && source ? { fileIdentity: await replayFileIdentity(file, source) } : {}),
+          ...(options.barrier ? { barrier: options.barrier } : {}),
+        };
+      } finally { await file?.close(); }
     });
     this.writeQueue = capture.then(() => undefined, () => undefined);
     return capture.then(() => boundary);
@@ -1634,7 +1668,7 @@ export class FileBackedBrokerJournal {
       if (!Number.isSafeInteger(start) || start < 0 || (start > 0 && !options.fileIdentity)) throw new Error("invalid_journal_tail_cursor");
       file = await open(this.filePath, "r");
       const source = await file.stat();
-      if ((options.fileIdentity && `${source.dev}:${source.ino}` !== options.fileIdentity)
+      if ((options.fileIdentity && await replayFileIdentity(file, source) !== options.fileIdentity)
         || (endByteExclusive !== undefined && source.size < endByteExclusive)) throw new Error("journal_replay_boundary_changed");
       if (endByteExclusive !== undefined && start >= endByteExclusive) return report;
       const end = endByteExclusive ?? source.size;
@@ -1681,6 +1715,10 @@ export class FileBackedBrokerJournal {
           if (error instanceof JournalFrameLimitError || error instanceof UnsupportedJournalFrameError) throw error;
           preserve(error instanceof Error ? error.message : String(error));
           report.invalidLines += 1;
+          maintenance?.add(encodedLineBytes);
+          continue;
+        }
+        if (entries.length === 0) {
           maintenance?.add(encodedLineBytes);
           continue;
         }
@@ -1743,8 +1781,9 @@ export class FileBackedBrokerJournal {
     // startup waiting forever after ENOSPC (even once free space recovers).
     const output = await writeCompactionOutput("open", () => open(temporaryPath, "wx"));
     let outputClosed = false;
-    let pendingLines: string[] = [];
-    let pendingBytes = 0;
+    const header = encodeJournalGeneration();
+    let pendingLines: string[] = [header];
+    let pendingBytes = Buffer.byteLength(header);
     const flushOutput = async () => {
       if (pendingLines.length === 0) return;
       await writeCompactionOutput("write", () => output.writeFile(pendingLines.join(""), "utf8"));
@@ -1821,8 +1860,10 @@ export class FileBackedBrokerJournal {
         // copying its suffix or replacing it with a differently sized prefix.
         await this.repairFailedAppend();
         if (live?.boundary.fileIdentity) {
-          const current = await stat(this.filePath);
-          if (`${current.dev}:${current.ino}` !== live.boundary.fileIdentity) throw new Error("journal_compaction_source_changed");
+          const current = await open(this.filePath, "r");
+          try {
+            if (await replayFileIdentity(current, await current.stat()) !== live.boundary.fileIdentity) throw new Error("journal_compaction_source_changed");
+          } finally { await current.close(); }
         }
         if (prefixBytes !== undefined) {
           // The prefix rewrite runs cooperatively while control registrations

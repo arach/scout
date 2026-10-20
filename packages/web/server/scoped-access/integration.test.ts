@@ -1,7 +1,6 @@
 import { expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { createServer } from "node:http";
-import { request as httpsRequest } from "node:https";
 import { once } from "node:events";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -101,18 +100,20 @@ async function fixture(gatewayNow: () => number = Date.now) {
     const body = options.body === undefined ? undefined : JSON.stringify(options.body);
     const headers = { host: new URL(origin).host, ...(options.browser?.cookie ? { cookie: options.browser.cookie } : {}),
       ...(body !== undefined ? { origin, "content-type": "application/json", ...(options.browser?.csrf ? { "x-scout-csrf": options.browser.csrf } : {}) } : {}), ...options.headers };
-    return new Promise<{ status: number; headers: import("node:http").IncomingHttpHeaders; text: string; json: any }>((resolve, reject) => {
-      // Trust only this fixture's certificate. Its generated SAN is unrelated to the synthetic test hostname.
-      const req = httpsRequest({ hostname: "127.0.0.1", port: listener.port, path, method: options.method ?? (body === undefined ? "GET" : "POST"),
-        ca: tls.certificatePem, checkServerIdentity: () => undefined, headers }, (response) => {
-        const chunks: Buffer[] = []; response.on("data", (chunk) => chunks.push(Buffer.from(chunk))); response.on("end", () => {
-          const text = Buffer.concat(chunks).toString(); let json: any; try { json = JSON.parse(text); } catch {}
-          const cookie = response.headers["set-cookie"]?.[0]; if (cookie && options.browser) options.browser.cookie = cookie.split(";")[0];
-          if (json?.csrf && options.browser) options.browser.csrf = json.csrf;
-          resolve({ status: response.statusCode!, headers: response.headers, text, json });
-        });
-      }); req.on("error", reject); req.end(body);
-    });
+    // Use the production Bun pinned-client TLS options. The fixture's
+    // certificate is the only CA; its SAN is informational, not the IP.
+    const response = await fetch(`https://127.0.0.1:${listener.port}${path}`, {
+      method: options.method ?? (body === undefined ? "GET" : "POST"), headers, body, redirect: "error",
+      tls: { ca: tls.certificatePem, checkServerIdentity: () => undefined },
+    } satisfies BunFetchRequestInit);
+    const text = await response.text(); let json: any; try { json = JSON.parse(text); } catch {}
+    // Preserve node:https's header shape, especially the uncombined cookie
+    // array used by session rotation, logout and replay assertions below.
+    const responseHeaders: import("node:http").IncomingHttpHeaders = Object.fromEntries(response.headers);
+    const cookies = response.headers.getSetCookie(); if (cookies.length) responseHeaders["set-cookie"] = cookies;
+    const cookie = cookies[0]; if (cookie && options.browser) options.browser.cookie = cookie.split(";")[0];
+    if (json?.csrf && options.browser) options.browser.csrf = json.csrf;
+    return { status: response.status, headers: responseHeaders, text, json };
   }
   async function login(login: string) {
     const browser: Browser = {};

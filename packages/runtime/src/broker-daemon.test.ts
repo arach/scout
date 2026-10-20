@@ -8,6 +8,7 @@ import { namedChannelNaturalKey } from "@openscout/protocol";
 import { createBrokerDaemonTestHarness } from "./test-helpers/broker-daemon-harness.test";
 
 const broker = createBrokerDaemonTestHarness();
+const capabilityPreload = join(import.meta.dir, "test-helpers", "broker-capability-preload.ts");
 
 describe("broker daemon core routes", () => {
   test("reports build identity and cheap child service states on health", async () => {
@@ -35,7 +36,7 @@ describe("broker daemon core routes", () => {
         terminalRelay?: { managedBy?: string; state?: string; healthy?: boolean | null };
         localEdge?: { managedBy?: string; state?: string; healthy?: boolean | null };
       };
-      projection?: { state?: string; detail?: string | null; worker?: { pendingRequests: number; replay: { bytes: number; fullReplays: number; tailReplays: number } } };
+      projection?: { state?: string; detail?: string | null; worker?: { pendingRequests: number; dirty: boolean; replay: { bytes: number; fullReplays: number; tailReplays: number } } };
       counts?: { collaborationRecords?: number };
     }>(harness.baseUrl, "/health");
 
@@ -65,6 +66,7 @@ describe("broker daemon core routes", () => {
       healthy: null,
     }));
     expect(health.projection).toEqual(expect.objectContaining({ state: "ready", detail: null }));
+    expect(health.projection?.worker?.dirty).toEqual(expect.any(Boolean));
     expect(health.projection?.worker?.pendingRequests).toBeGreaterThanOrEqual(0);
     expect(health.projection?.worker?.replay.bytes).toBeGreaterThanOrEqual(0);
     expect(health.projection?.worker?.replay.fullReplays).toBeGreaterThanOrEqual(1);
@@ -201,7 +203,7 @@ describe("broker daemon core routes", () => {
   }, 15_000);
 
   test("serves capability snapshots from the broker read endpoint", async () => {
-    const harness = await broker.startBroker();
+    const harness = await broker.startBroker({ preload: capabilityPreload });
 
     const snapshot = await broker.getJson<{
       generatedAt: number;
@@ -216,6 +218,10 @@ describe("broker daemon core routes", () => {
     expect(snapshot.scope?.machineId).toBe(harness.nodeId);
     expect(snapshot.sources.some((source) => source.kind === "harness_adapter")).toBe(true);
     expect(snapshot.sources.some((source) => source.kind === "runtime_probe")).toBe(true);
+    expect(snapshot.sources).toContainEqual(expect.objectContaining({
+      id: "harness:codex:readiness",
+      raw: expect.objectContaining({ state: "missing", binaryPath: null }),
+    }));
     expect(snapshot.harnessSupport?.codex).toBeTruthy();
     expect(snapshot.capabilities).toEqual([]);
     expect(snapshot.warnings).toEqual([]);
@@ -243,7 +249,7 @@ describe("broker daemon core routes", () => {
 
   test("projects local model catalog entries into capability snapshots", async () => {
     const controlHome = mkdtempSync(join(tmpdir(), "openscout-runtime-model-catalog-"));
-    const harness = await broker.startBroker({ controlHome });
+    const harness = await broker.startBroker({ controlHome, preload: capabilityPreload });
     const catalogDirectory = join(harness.controlHome, "support", "catalog");
     mkdirSync(catalogDirectory, { recursive: true });
     writeFileSync(
@@ -279,7 +285,7 @@ describe("broker daemon core routes", () => {
 
   test("projects configured MCP server catalog entries into capability snapshots", async () => {
     const controlHome = mkdtempSync(join(tmpdir(), "openscout-runtime-mcp-catalog-"));
-    const harness = await broker.startBroker({ controlHome });
+    const harness = await broker.startBroker({ controlHome, preload: capabilityPreload });
     const catalogDirectory = join(harness.controlHome, "support", "catalog");
     mkdirSync(catalogDirectory, { recursive: true });
     writeFileSync(
