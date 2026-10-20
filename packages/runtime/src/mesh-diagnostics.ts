@@ -21,7 +21,7 @@ function origin(value: string): string | null {
 
 /** Build a bounded allowlist, not a projection of the process environment. */
 export function meshDiagnostics(
-  probe: ProbeSnapshot<TailscaleStatusSummary>, settings: EffectiveMeshSettings, now = Date.now(),
+  probe: ProbeSnapshot<TailscaleStatusSummary | null>, settings: EffectiveMeshSettings, now = Date.now(),
 ) {
   const value = probe.value;
   const peers = value?.peers ?? [];
