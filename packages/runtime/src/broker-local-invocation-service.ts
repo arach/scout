@@ -40,7 +40,7 @@ import {
   type InvocationStatusPatch,
 } from "./broker-local-invocation-helpers.js";
 import { isBrokerRunnableLocalAgentTransport, isDirectLocalAgentTransport } from "./local-agent-transports.js";
-import { SCOUT_MESSAGE_ATTACHMENTS_CONTEXT_KEY } from "./local-agents.js";
+import { isLocalAgentEndpointAlive, SCOUT_MESSAGE_ATTACHMENTS_CONTEXT_KEY } from "./local-agents.js";
 import type { PairingInvocationResult } from "./pairing-session-agents.js";
 import type { RuntimeSnapshot } from "./scout-dispatcher.js";
 import { isRequesterWaitTimeoutError } from "./requester-timeout.js";
@@ -176,6 +176,8 @@ export type BrokerLocalInvocationServiceOptions = {
   runtime: LocalInvocationRuntime;
   endpointResolver: LocalInvocationEndpointResolver;
   activeInvocationTasks: Map<string, Promise<void>>;
+  /** Physical transport liveness, independent of the most recent turn result. */
+  isLocalAgentEndpointAlive?: (endpoint: AgentEndpoint) => boolean;
   /**
    * Applies a status patch to the invocation's current flight and funnels it
    * through the durable write path (recordFlight), so terminal-state hooks
@@ -944,9 +946,14 @@ export class BrokerLocalInvocationService {
         completedAt: this.now(),
       });
 
+    // Codex rejects individual turns (capacity, content, etc.) without closing
+    // its app-server connection. Probe that connection, not the error wording:
+    // a failed turn must not poison routing to the next turn on a live process.
+    const codexStillAlive = runningEndpoint.transport === "codex_app_server"
+      && (this.options.isLocalAgentEndpointAlive ?? isLocalAgentEndpointAlive)(runningEndpoint);
     await this.options.persistEndpoint({
       ...runningEndpoint,
-      state: "offline",
+      state: codexStillAlive ? "idle" : "offline",
       metadata: {
         ...(runningEndpoint.metadata ?? {}),
         lastError: message,

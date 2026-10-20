@@ -1,3 +1,4 @@
+import { receiveTransportLiveness } from "./local-endpoint-liveness.js";
 import { isExternalSessionEndpoint } from "./external-session-transport.js";
 import type {
   AgentDefinition,
@@ -115,11 +116,9 @@ export function classifyEndpoint(
     alive?: boolean;
   } = {},
 ): EndpointClassification {
-  // A registered poll mailbox can accept durable work without a running host.
-  const registeredMailbox = endpoint?.transport === "mcp_poll"
-    && endpoint.metadata?.externalSession === true && endpoint.state === "registered";
-  const candidateState = registeredMailbox ? "online" : endpointCandidateState(endpoint?.state);
-  const onlineState = registeredMailbox || isEndpointOnlineState(endpoint?.state);
+  const receiveAlive = endpoint ? receiveTransportLiveness(endpoint) : undefined;
+  const candidateState = receiveAlive === true ? "online" : endpointCandidateState(endpoint?.state);
+  const onlineState = receiveAlive ?? isEndpointOnlineState(endpoint?.state);
   const stale = !endpoint || hasRetiredEndpointRegistration(endpoint);
   const busy = endpoint?.state === "active" || endpoint?.state === "waiting" || endpoint?.state === "working";
   const supportedTransport = Boolean(
