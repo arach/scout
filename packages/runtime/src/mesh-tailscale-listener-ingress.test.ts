@@ -147,13 +147,17 @@ test("activation retires an existing HTTP stream only on the targeted listener",
   } finally { tcp?.close(); unix?.close(); await f.close(); }
 });
 
-test("guarded upgrade constructs its sanitized refusal and closes after flush", () => {
+for (const [path, statusLine] of [
+  ["/v1/snapshot", "HTTP/1.1 403 Forbidden"],
+  ["/v1/mesh/nodes", "HTTP/1.1 401 Unauthorized"],
+] as const) test(`guarded upgrade ${statusLine} constructs its sanitized refusal and closes after flush`, () => {
   let reply = "", destroyed = false;
   const gate = createMeshIngressGate({ mode: "verify-warn", guardedLocalListener: () => true,
     destinationKeyId: "b".repeat(64), bootedAt: Date.now(), lookupPeer: () => undefined,
     nonceClaim: new PeerNonceCache(), logger: { warn() {} } });
   const socket = { remoteAddress: "127.0.0.1", end(data: string, flushed?: () => void) { reply = data; flushed?.(); }, destroy() { destroyed = true; } } as unknown as Duplex;
-  expect(gate.gateUpgrade({ method: "GET", url: "/trpc", headers: {} } as IncomingMessage, socket)).toBe(false);
+  expect(gate.gateUpgrade({ method: "GET", url: path, headers: {} } as IncomingMessage, socket)).toBe(false);
+  expect(reply.startsWith(`${statusLine}\r\n`)).toBe(true);
   expect(reply).toContain(TAILSCALE_GUARD_ERROR); expect(reply).toContain("Removing the handler restores local access");
   expect(destroyed).toBe(true);
 });

@@ -807,12 +807,12 @@ export function createMeshIngressGate(deps: MeshIngressGateDeps): MeshIngressGat
       if (decision.action === "allow") {
         return true;
       }
+      const statusText = decision.status === 401 ? "Unauthorized" : "Forbidden";
       if (guarded) {
         const body = JSON.stringify({ error: TAILSCALE_GUARD_ERROR, detail: TAILSCALE_GUARD_DETAIL });
-        socket.end(`HTTP/1.1 ${decision.status} Forbidden\r\nconnection: close\r\ncontent-type: application/json\r\ncontent-length: ${Buffer.byteLength(body)}\r\n\r\n${body}`, () => socket.destroy());
+        socket.end(`HTTP/1.1 ${decision.status} ${statusText}\r\nconnection: close\r\ncontent-type: application/json\r\ncontent-length: ${Buffer.byteLength(body)}\r\n\r\n${body}`, () => socket.destroy());
         return false;
       }
-      const statusText = decision.status === 401 ? "Unauthorized" : "Forbidden";
       socket.write(
         `HTTP/1.1 ${decision.status} ${statusText}\r\nconnection: close\r\ncontent-type: application/json\r\n\r\n` +
           JSON.stringify({ error: statusText.toLowerCase(), detail: decision.reason }),
