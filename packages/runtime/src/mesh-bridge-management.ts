@@ -4,9 +4,9 @@ import { join } from "node:path";
 import { z } from "zod";
 import { meshBridgeConfigPath, meshBridgeStatePath } from "./mesh-bridge-supervisor.js";
 
-export const bridgeDiagnosticIdentitySchema = z.object({
-  kind: z.enum(["oauth", "agent_token"]), id: z.string().min(1).max(256), ownerKey: z.string().min(1).max(256),
-}).strict();
+import { mcpEventPrincipalSchema } from "./broker-mcp-events.js";
+
+export const bridgeDiagnosticIdentitySchema = mcpEventPrincipalSchema;
 const bridgeConfigSchema = z.object({
   enabled: z.boolean(),
   relayUrl: z.string().max(512).refine(value => {

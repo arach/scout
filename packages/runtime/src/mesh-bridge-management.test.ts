@@ -73,8 +73,8 @@ describe("runtime bridge management", () => {
   test("remote diagnostic consent is per explicit identity, never a blanket boolean", async () => {
     const { manager } = fixture();
     expect(() => manager.configure({ ...config, remoteDiagnostics: true })).toThrow();
-    await manager.configure({ ...config, remoteDiagnostics: [{ kind: "oauth", id: "identity-1", ownerKey: "owner-1" }] });
-    expect(manager.read().config?.remoteDiagnostics).toEqual([{ kind: "oauth", id: "identity-1", ownerKey: "owner-1" }]);
+    await manager.configure({ ...config, remoteDiagnostics: [{ kind: "oauth", id: "identity-1", ownerKey: "owner-1", node: "node", agentId: "agent" }] });
+    expect(manager.read().config?.remoteDiagnostics).toEqual([{ kind: "oauth", id: "identity-1", ownerKey: "owner-1", node: "node", agentId: "agent" }]);
     await manager.configure(config); expect(manager.read().config?.remoteDiagnostics).toEqual([]);
   });
 });

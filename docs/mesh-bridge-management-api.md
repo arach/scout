@@ -44,6 +44,6 @@ observation is not a liveness assertion. Packaging and extension supervisor
 migration are separate work.
 
 `remoteDiagnostics` defaults to `[]`. Each entry is an explicit identity
-`{kind:"oauth"|"agent_token", id, ownerKey}`. It is not a blanket remote
-permission. The feedback collection API uses these identities to gate remote
+`{kind:"oauth"|"agent_token", id, ownerKey, node, agentId, userId?}`. The full authenticated principal must match. This is not an account-wide or
+blanket remote permission. The feedback collection API uses these identities to gate remote
 collection, and rechecks consent before uploading diagnostic reports.
