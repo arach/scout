@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
 import { generateKeyPairSync } from "node:crypto";
 import type { NodeDefinition, TrustedPeerRecord } from "@openscout/protocol";
@@ -89,4 +90,10 @@ describe("bounded runtime mesh ping", () => {
     expect(cancelled).toBe(true);
     await expect(readPingBody(new Response(new ReadableStream({})), AbortSignal.timeout(10))).rejects.toBeDefined();
   });
+});
+
+
+test("ping dependencies load after instance bootstrap", () => {
+  const source = readFileSync(new URL("./broker-daemon.ts", import.meta.url), "utf8");
+  expect(source.match(/^import .*$/m)?.[0]).toBe('import { openScoutCheckoutInstanceDefault, openScoutInstanceBootstrap } from "./instance-checkout-bootstrap.js";');
 });
