@@ -272,8 +272,12 @@ describe("basic scan lifecycle", () => {
     writeFileSync(join(root, "session.jsonl"), '{"type":"user","message":{"content":"needle"}}\n');
     const pidPath = join(root, "child.pid");
     const executable = join(root, "fixture-rg");
-    writeFileSync(executable, `#!${process.execPath}\nimport { writeFileSync } from "node:fs";\nprocess.on("SIGTERM", () => {});\nwriteFileSync(${JSON.stringify(pidPath)}, String(process.pid));\nsetInterval(() => {}, 1000);\n`);
+    writeFileSync(executable, `#!${process.execPath}\nif (process.argv.includes("--fixture-warmup")) process.exit(0);\nimport { writeFileSync } from "node:fs";\nprocess.on("SIGTERM", () => {});\nwriteFileSync(${JSON.stringify(pidPath)}, String(process.pid));\nsetInterval(() => {}, 1000);\n`);
     chmodSync(executable, 0o755);
+    // First-launch validation must not consume the owned-child PID handshake.
+    expect(await Bun.spawn([executable, "--fixture-warmup"], { stdout: "ignore", stderr: "pipe" }).exited).toBe(0);
+    expect(existsSync(pidPath)).toBe(false);
+
     process.env.OPENSCOUT_RG_PATH = executable;
     const controller = new AbortController();
     const pending = scanRecentSessionKnowledge({ q: "needle", harness: "claude", signal: controller.signal, budgetMs: 5000 });
