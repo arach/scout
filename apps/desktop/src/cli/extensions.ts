@@ -54,13 +54,15 @@ function permissionDenied(error: unknown): boolean {
 }
 
 function executableProblem(path: string): string | undefined {
+  let checkingExecute = false;
   try {
     if (!statSync(path).isFile()) return "is not an executable file (chmod +x)";
+    checkingExecute = true;
     accessSync(path, constants.X_OK);
     return undefined;
   } catch (error) {
     return permissionDenied(error)
-      ? `cannot be accessed: permission denied (${(error as NodeJS.ErrnoException).code})`
+      ? `cannot be accessed: permission denied (${(error as NodeJS.ErrnoException).code})${checkingExecute ? " (chmod +x)" : ""}`
       : "is not an executable file (chmod +x)";
   }
 }

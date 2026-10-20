@@ -113,6 +113,7 @@ describe("scout extensions", () => {
     chmodSync(join(home, "noexec", "bin", "run"), 0o644);
     expect(findScoutExtension("nocommand", env)?.refused).toContain(`has no "command"`);
     expect(findScoutExtension("noexec", env)?.refused).toContain("permission denied (EACCES)");
+    expect(findScoutExtension("noexec", env)?.refused).toContain("chmod +x");
     expect(listScoutExtensions(env).filter((e) => e.refused).map((e) => e.name)).toEqual(expect.arrayContaining(["nocommand", "noexec"]));
     // A broken copy in ~/.scout must not let an older copy in ~/.openscout run in its place.
     const user = join(root, "broken-user");
@@ -191,6 +192,7 @@ process.exitCode = await runScoutExtension(extension, [], process.env);`);
       const reason = findScoutExtension("denied", env)?.refused;
       expect(reason).toContain("permission denied (EACCES)");
       expect(reason).not.toContain("does not exist");
+      expect(reason).not.toContain("chmod +x");
     } finally { deniedPath.mockRestore(); }
     const user = join(root, "denied-user");
     const primary = join(user, ".scout", "extensions");
