@@ -791,6 +791,13 @@
     "owner": "runtime"
   },
   {
+    "path": "packages/runtime/src/mesh-tailscale-listener-guard.ts",
+    "symbol": "node:child_process",
+    "category": "probe-exec",
+    "reason": "asynchronous read-only tailscale serve status fallback, one in flight, 1.5-second timeout and bounded output; no synchronous spawn or shell",
+    "owner": "runtime"
+  },
+  {
     "path": "packages/runtime/src/mesh-access-ingress-posture.ts",
     "symbol": "node:child_process",
     "category": "probe-exec",

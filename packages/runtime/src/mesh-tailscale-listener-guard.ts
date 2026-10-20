@@ -1,0 +1,158 @@
+import { execFile } from "node:child_process";
+import { existsSync, realpathSync } from "node:fs";
+import { request as httpRequest } from "node:http";
+import { isAbsolute } from "node:path";
+import { promisify } from "node:util";
+
+export type LocalListenerKind = "tcp" | "unix";
+export const TAILSCALE_GUARD_ERROR = "tailscale_runtime_listener_guarded";
+export const TAILSCALE_GUARD_DETAIL = "A Tailscale Serve or Funnel handler forwards to this runtime listener. Removing the handler restores local access after the next successful status read.";
+export const TAILSCALE_GUARD_POLL_MS = 5_000;
+export const TAILSCALE_GUARD_MAX_AGE_MS = 10_000;
+export const TAILSCALE_GUARD_TIMEOUT_MS = 1_500;
+const MAX_BYTES = 2 * 1024 * 1024;
+const execFileAsync = promisify(execFile);
+
+type OwnListeners = { port: number; socketPath: string };
+type ParseResult = { outcome: "ok" | "unknown" | "unparseable"; matches: LocalListenerKind[] };
+const object = (v: unknown): v is Record<string, unknown> => Boolean(v && typeof v === "object" && !Array.isArray(v));
+function canonicalSocket(path: string): string | undefined {
+  try { return isAbsolute(path) ? realpathSync(path) : undefined; } catch { return undefined; }
+}
+
+/** Parse only source-defined ServeConfig target fields. No DNS, substring port
+ * matching, process arguments or AllowFunnel hostnames confer local authority. */
+export function matchTailscaleRuntimeTargets(text: string, own: OwnListeners,
+  canonicalize: (path: string) => string | undefined = canonicalSocket): ParseResult {
+  let value: unknown;
+  try { value = JSON.parse(text); } catch { return { outcome: "unparseable", matches: [] }; }
+  if (value === null) return { outcome: "ok", matches: [] }; // empty *ServeConfig
+  const matches = new Set<LocalListenerKind>();
+  let nodes = 0;
+  const target = (raw: string, tcp: boolean) => {
+    if (raw.startsWith("unix:")) {
+      const path = raw.slice(5);
+      const canonical = canonicalize(path), owned = canonicalize(own.socketPath);
+      if (canonical && owned && canonical === owned) matches.add("unix");
+      return;
+    }
+    try {
+      if (!tcp && /^\d+$/.test(raw)) raw = `http://127.0.0.1:${raw}`;
+      const url = new URL(raw.includes("://") ? raw : `${tcp ? "tcp" : "http"}://${raw}`);
+      if (!(tcp ? ["tcp:"] : ["http:", "https:", "https+insecure:"]).includes(url.protocol) || url.username || url.password) return;
+      const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+      const loopback = host === "localhost" || host === "localhost." || host === "::1" ||
+        /^127(?:\.\d{1,3}){3}$/.test(host) || /^::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}$/.test(host);
+      const port = url.port ? Number(url.port) : url.protocol === "http:" ? 80 : url.protocol === "https:" ? 443 : NaN;
+      if (loopback && port === own.port) matches.add("tcp");
+    } catch { /* An unrecognized target has no enforcing evidence. */ }
+  };
+  const map = (v: unknown): Record<string, unknown> => {
+    if (!object(v)) throw new Error("unknown shape");
+    return v;
+  };
+  const visit = (config: unknown, depth: number, service = false) => {
+    if (++nodes > 4096 || depth > 3) throw new Error("unknown shape");
+    const c = map(config);
+    const known = service ? ["TCP", "Web", "Tun"] : ["TCP", "Web", "AllowFunnel", "Foreground", "Services"];
+    if (Object.keys(c).some((key) => !known.includes(key))) throw new Error("unknown shape");
+    if (c.Tun !== undefined && typeof c.Tun !== "boolean") throw new Error("unknown shape");
+    if (c.TCP != null) for (const [port, handler] of Object.entries(map(c.TCP))) {
+      if (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535) throw new Error("unknown shape");
+      const h = map(handler);
+      if (h.TCPForward !== undefined) {
+        if (typeof h.TCPForward !== "string") throw new Error("unknown shape");
+        target(h.TCPForward, true);
+      }
+    }
+    if (c.Web != null) for (const web of Object.values(map(c.Web))) {
+      const w = map(web);
+      for (const handler of Object.values(map(w.Handlers))) {
+        const h = map(handler);
+        if (h.Proxy !== undefined) {
+          if (typeof h.Proxy !== "string") throw new Error("unknown shape");
+          target(h.Proxy, false);
+        }
+      }
+    }
+    if (c.AllowFunnel != null && Object.values(map(c.AllowFunnel)).some((v) => typeof v !== "boolean")) throw new Error("unknown shape");
+    if (c.Foreground != null) for (const f of Object.values(map(c.Foreground))) visit(f, depth + 1);
+    if (c.Services != null) for (const s of Object.values(map(c.Services))) visit(s, depth + 1, true);
+  };
+  try { visit(value, 0); } catch { return { outcome: "unknown", matches: [] }; }
+  return { outcome: "ok", matches: [...matches].sort() };
+}
+
+export type TailscaleStatusRead = { ok: boolean; stdout: string; source: "localapi" | "cli" };
+/** One ServeConfig covers both Serve and Funnel. Standard Linux/Unix LocalAPI
+ * avoids a child process; sandboxed macOS discovery stays with Tailscale's CLI. */
+export async function readTailscaleServeConfig(): Promise<TailscaleStatusRead> {
+  const socketPath = ["/var/run/tailscale/tailscaled.sock", "/var/run/tailscaled.socket"].find(existsSync);
+  if (socketPath) return readTailscaleServeConfigFromSocket(socketPath);
+  try {
+    const { stdout } = await execFileAsync("tailscale", ["serve", "status", "--json"], { encoding: "utf8", timeout: TAILSCALE_GUARD_TIMEOUT_MS, maxBuffer: MAX_BYTES });
+    return { ok: true, stdout, source: "cli" };
+  } catch { return { ok: false, stdout: "", source: "cli" }; }
+}
+
+/** Socket-only LocalAPI transport; explicit path is injectable for fixture tests. */
+export async function readTailscaleServeConfigFromSocket(socketPath: string): Promise<TailscaleStatusRead> {
+  return new Promise((resolve) => {
+    let bytes = 0; const chunks: Buffer[] = [];
+    const request = httpRequest({ socketPath, path: "/localapi/v0/serve-config", headers: { host: "local-tailscaled.sock" } }, (res) => {
+      res.on("data", (chunk: Buffer) => { bytes += chunk.length; if (bytes > MAX_BYTES) { finish(false); request.destroy(); } else chunks.push(chunk); });
+      res.on("error", () => finish(false)); res.on("aborted", () => finish(false));
+      res.on("end", () => finish(res.statusCode === 200, Buffer.concat(chunks).toString("utf8")));
+    });
+    const timer = setTimeout(() => { finish(false); request.destroy(); }, TAILSCALE_GUARD_TIMEOUT_MS);
+    const finish = (ok: boolean, stdout = "") => { clearTimeout(timer); resolve({ ok, stdout, source: "localapi" }); };
+    request.on("error", () => finish(false)); request.end();
+  });
+}
+
+export type TailscaleListenerGuardReport = {
+  outcome: "not-read" | "ok" | "unknown" | "unparseable" | "failed" | "stale";
+  source: "localapi" | "cli" | null;
+  attemptedAt: number | null; completedAt: number | null; ageMs: number | null;
+  pollIntervalMs: number; maxAgeMs: number; guardedListeners: LocalListenerKind[];
+};
+export function createTailscaleListenerGuard(own: OwnListeners, options: {
+  read?: () => Promise<TailscaleStatusRead>; now?: () => number; wallNow?: () => number;
+  canonicalize?: (path: string) => string | undefined;
+  onUpdate?: (report: TailscaleListenerGuardReport) => void;
+} = {}) {
+  const now = options.now ?? (() => performance.now()), wallNow = options.wallNow ?? Date.now;
+  let completed = -Infinity, attemptedAt: number | null = null, completedAt: number | null = null;
+  let result: ParseResult | { outcome: "failed"; matches: LocalListenerKind[] } | undefined;
+  let source: TailscaleStatusRead["source"] | null = null;
+  let stopped = false, pending: Promise<void> | undefined, timer: ReturnType<typeof setInterval> | undefined;
+  const report = (): TailscaleListenerGuardReport => {
+    const age = result ? now() - completed : null;
+    const fresh = age !== null && age >= 0 && age < TAILSCALE_GUARD_MAX_AGE_MS;
+    return { outcome: result ? fresh ? result.outcome : "stale" : "not-read", source, attemptedAt, completedAt,
+      ageMs: age === null ? null : Math.max(0, age), pollIntervalMs: TAILSCALE_GUARD_POLL_MS, maxAgeMs: TAILSCALE_GUARD_MAX_AGE_MS,
+      guardedListeners: fresh && result?.outcome === "ok" ? [...result.matches] : [] };
+  };
+  const refresh = (): Promise<void> => {
+    if (stopped) return Promise.resolve();
+    if (pending) return pending;
+    attemptedAt = wallNow();
+    const started = now();
+    pending = (async () => {
+      let read: TailscaleStatusRead;
+      try { read = await (options.read ?? readTailscaleServeConfig)(); }
+      catch { read = { ok: false, stdout: "", source: "cli" }; }
+      if (stopped) return;
+      source = read.source;
+      result = read.ok ? matchTailscaleRuntimeTargets(read.stdout, own, options.canonicalize) : { outcome: "failed", matches: [] };
+      completed = started; completedAt = wallNow();
+      try { options.onUpdate?.(report()); } catch { /* Observer cannot affect guard state. */ }
+    })().finally(() => { pending = undefined; });
+    return pending;
+  };
+  return { report, refresh,
+    isGuarded: (listener: LocalListenerKind) => report().guardedListeners.includes(listener),
+    start() { if (!timer && !stopped) { void refresh(); timer = setInterval(() => { void refresh(); }, TAILSCALE_GUARD_POLL_MS); timer.unref(); } },
+    stop() { stopped = true; if (timer) clearInterval(timer); result = undefined; },
+  };
+}
