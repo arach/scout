@@ -1,0 +1,11 @@
+{
+  "TCP": {
+    "443": {
+      "TCPForward": "127.0.0.1:43110",
+      "TerminateTLS": "fixture.example.ts.net"
+    }
+  },
+  "AllowFunnel": {
+    "fixture.example.ts.net:443": true
+  }
+}
