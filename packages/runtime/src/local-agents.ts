@@ -1,3 +1,4 @@
+import { receiveTransportLiveness } from "./local-endpoint-liveness.js";
 import { hasExplicitCompletion } from "@openscout/protocol";
 import { isExternalSessionEndpoint } from "./external-session-transport.js";
 import { isA2AHttpEndpoint } from "./a2a-http-endpoint.js";
@@ -3052,11 +3053,8 @@ export async function isLocalAgentSessionAliveAsync(sessionName: string): Promis
 }
 
 export function isLocalAgentEndpointAlive(endpoint: AgentEndpoint): boolean {
-  // These endpoints are owned by a receive transport, not a local harness
-  // process. Provider rejection is recorded by that transport after dispatch.
-  if (isExternalSessionEndpoint(endpoint) || isA2AHttpEndpoint(endpoint)) {
-    return ["online", "idle", "active", "waiting", "working"].includes(endpoint.state);
-  }
+  const receiveAlive = receiveTransportLiveness(endpoint);
+  if (receiveAlive !== undefined) return receiveAlive;
 
   if (endpoint.transport === "pairing_bridge") {
     return endpoint.state !== "offline";

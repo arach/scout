@@ -19,21 +19,13 @@ import {
   homeEndpointForAgent,
   hasRetiredEndpointRegistration,
   latestEndpointForAgent,
-  isEndpointOnlineState,
 } from "./broker-endpoint-selection.js";
 import { isA2AHttpEndpoint } from "./a2a-http-endpoint.js";
 import { isExternalSessionEndpoint } from "./external-session-transport.js";
 import { isBrokerRunnableLocalAgentTransport, isDirectLocalAgentTransport } from "./local-agent-transports.js";
 import type { RuntimeRegistrySnapshot } from "./registry.js";
 
-/** Transport-owned receive evidence; a cloud/mailbox route is not a tmux process. */
-export function localEndpointCanReceive(endpoint: AgentEndpoint, localProcessAlive: (endpoint: AgentEndpoint) => boolean): boolean {
-  if (isExternalSessionEndpoint(endpoint) || isA2AHttpEndpoint(endpoint)) {
-    return isEndpointOnlineState(endpoint.state)
-      || (endpoint.transport === "mcp_poll" && endpoint.state === "registered");
-  }
-  return localProcessAlive(endpoint);
-}
+export { localEndpointCanReceive } from "./local-endpoint-liveness.js";
 
 /** These adapters execute behind the broker's endpoint-owner lane or durable mailbox. */
 export function localEndpointSupportsQueue(
