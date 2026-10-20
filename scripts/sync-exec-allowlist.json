@@ -999,5 +999,12 @@
     "category": "test",
     "reason": "warms the owned ripgrep fixture outside its strict collection deadline; waits for its successful exit",
     "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/iroh-bridge.test.ts",
+    "symbol": "Bun.spawn",
+    "category": "test",
+    "reason": "validates the owned no-op bridge fixture before its unchanged endpoint startup deadline and waits for its exit",
+    "owner": "runtime"
   }
 ]
