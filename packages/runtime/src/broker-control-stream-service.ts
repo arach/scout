@@ -296,6 +296,11 @@ export class BrokerControlStreamService {
     }
 
     this.deps.enqueueEvent(event);
+    this.streamRecordedEvent(event);
+  }
+
+  /** Fan out a lifecycle event whose runtime writer has already committed its journal entry. */
+  streamRecordedEvent(event: ControlEvent): void {
     const payload = `event: ${event.kind}\ndata: ${JSON.stringify(event)}\n\n`;
     for (const client of this.eventClients) {
       this.writeClient(client, payload);

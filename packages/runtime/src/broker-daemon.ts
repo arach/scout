@@ -1,3 +1,4 @@
+import { MeshBridgeManagement } from "./mesh-bridge-management.js";
 // Must stay the first import: materializes OPENSCOUT_INSTANCE before any module reads paths/ports.
 import { openScoutCheckoutInstanceDefault, openScoutInstanceBootstrap } from "./instance-checkout-bootstrap.js";
 import { flightCompletion, SCOUT_COMPLETION_CAPABILITY } from "@openscout/protocol";
@@ -3033,6 +3034,16 @@ const routeRequest = createBrokerHttpRouter({
   },
   mcpEvents,
   permissionService,
+  meshBridge: new MeshBridgeManagement({
+    supportDirectory,
+    lifecycle: async action => {
+      const event = { id: createRuntimeId("event"), kind: "mesh.bridge.lifecycle" as const,
+        ts: Date.now(), actorId: operatorActorId, nodeId, payload: { action, phase: "requested" as const } };
+      await journal.appendEntries([{ kind: "control.event.record", event }]);
+      controlStreams.streamRecordedEvent(event);
+      publishControlEvent(event);
+    },
+  }),
   meshApprovals: { share: meshApprovalShare, watch: meshApprovalWatch },
   encodedSnapshotBodies: process.env.OPENSCOUT_BROKER_ENCODED_SNAPSHOT === "1",
   onSnapshotFlushedBytes: memoryMaintenance ? (bytes) => memoryMaintenance.snapshotEncoded(bytes) : undefined,

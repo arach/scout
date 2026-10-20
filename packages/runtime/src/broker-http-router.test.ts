@@ -1534,3 +1534,23 @@ test("explicit reply endpoint requires typed identity and stable requestId befor
   expect((await requestRouter(h, "POST", "/v1/messages/reply", { body })).response.status).toBe(200);
   expect(posted[0].id).toStartWith("msg.request."); expect(posted[0].metadata.completionReply.kind).toBe("progress");
 });
+
+describe("local bridge management routes", () => {
+  test("all routes refuse remote, guest, scoped and ungated callers before any management work", async () => {
+    const h = createHarness();
+    for (const [method, path] of [["GET", "/v1/mesh/bridge"], ["POST", "/v1/mesh/bridge/config"], ["POST", "/v1/mesh/bridge/control"]]) {
+      for (const context of [undefined, { transport: "remote" }, { transport: "loopback", guest: {} }, { transport: "loopback", scoped: {} }]) {
+        expect((await requestRouter(h, method!, path!, { transportContext: context as never })).response.status).toBe(403);
+      }
+      expect((await requestRouter(h, method!, path!, { transportContext: { transport: "loopback" } })).response.status).toBe(503);
+    }
+  });
+  test("transport errors cannot echo write-only credentials", async () => {
+    const manager = { read() { throw new Error("private-token"); }, configure() { throw new Error("private-token"); } };
+    const h = createHarness({ meshBridge: manager as never });
+    for (const [method, path] of [["GET", "/v1/mesh/bridge"], ["POST", "/v1/mesh/bridge/config"]]) {
+      const result = await requestRouter(h, method!, path!, { transportContext: { transport: "loopback" }, body: { token: "private-token" } });
+      expect(result.response.status).toBe(503); expect(result.rawBody).not.toContain("private-token");
+    }
+  });
+});
