@@ -1,4 +1,5 @@
 import type { ScoutCommandContext } from "../context.ts";
+import { ScoutCliError } from "../errors.ts";
 import { listScoutExtensions, scoutExtensionsHome } from "../extensions.ts";
 import { renderScoutExtensionLines } from "../help.ts";
 
@@ -15,6 +16,8 @@ export async function runExtensionsCommand(context: ScoutCommandContext, args: s
     context.output.writeText(EXTENSIONS_HELP);
     return;
   }
+  // Only listing exists. `scout extensions install x` must not look like it worked.
+  if (args.length > 0) throw new ScoutCliError(`unexpected argument for extensions: ${args[0]} (see scout extensions --help)`);
   const installed = listScoutExtensions(context.env);
   context.output.writeValue({ home: scoutExtensionsHome(context.env), extensions: installed }, (value) => [
     `Extensions home: ${value.home}`,

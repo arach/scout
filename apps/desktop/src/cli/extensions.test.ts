@@ -4,6 +4,8 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, 
 import * as fs from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { runExtensionsCommand } from "./commands/extensions.ts";
+import { createScoutCommandContext } from "./context.ts";
 import { findScoutExtension, listScoutExtensions, runScoutExtension, scoutExtensionEnv, scoutExtensionRoots, scoutExtensionsHome } from "./extensions.ts";
 import { renderScoutExtensionLines } from "./help.ts";
 import { findScoutCommandRegistration, listScoutPrimaryCommands, missingScoutExtensionMessage } from "./registry.ts";
@@ -227,6 +229,15 @@ process.exitCode = await runScoutExtension(extension, [], process.env);`);
     expect(findScoutCommandRegistration("mesh")?.provider).toBeUndefined();
     expect(listScoutPrimaryCommands().some((c) => c.name === "mesh")).toBe(true);
     expect(renderScoutExtensionLines([])).toBe("");
+  });
+
+  test("scout extensions only lists: any other word is an error, not a listing", async () => {
+    const lines: string[] = [];
+    const context = createScoutCommandContext({ env, stdout: (line) => lines.push(line) });
+    await expect(runExtensionsCommand(context, ["install", "mesh"])).rejects.toThrow("unexpected argument for extensions: install");
+    expect(lines).toEqual([]);
+    await runExtensionsCommand(context, []);
+    expect(lines.join("\n")).toContain(`Extensions home: ${home}`);
   });
 
   test("a verb left to an extension says how to install it", () => {
