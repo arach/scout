@@ -308,6 +308,12 @@ header; appends leave it unchanged. Legacy journals without a header remain
 readable and acquire one on their first rewrite. Compaction can emit ordinary
 singleton lines because publication replaces the whole file atomically.
 
+Generation headers are a one-way on-disk format upgrade. Once this version
+rewrites a journal, older runtimes that do not recognize `journal.generation`
+treat the header as a structural error and refuse to load the journal. Do not
+point an older runtime at that journal when you roll back. This version does
+not add support for generation headers to older runtimes.
+
 The live SQLite projection runs in a worker. A canonical commit signals a scalar
 dirty revision; it does not retain the accepted payload in a promise queue.
 The worker captures a committed journal boundary and replays its suffix in
