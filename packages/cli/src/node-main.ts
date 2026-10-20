@@ -36,6 +36,7 @@ import {
 } from "@openscout/runtime";
 import { resolveOperatorName } from "@openscout/runtime/user-config";
 import { resolve } from "node:path";
+import { runGuestCommand } from "./guest.ts";
 
 type JsonMode = "plain" | "json";
 
@@ -71,6 +72,7 @@ const command = args[0];
 try {
   const help = preflightLifecycle(process.argv.slice(2));
   if (help !== null) { console.log(help); }
+  else if (command === "guest") { await runGuestCommand([...args.slice(1), ...(input.helpRequested ? ["--help"] : [])]); }
   else if (input.helpRequested) { writeHelp(); }
   else switch (command) {
     case "--help":
@@ -99,7 +101,7 @@ try {
     default:
       throw new Error(
         `Unsupported in the Node headless CLI: ${command}\n`
-        + "Use Bun for the full interactive Scout CLI, or use one of: init, config, setup, doctor, runtimes, service status.",
+        + "Use Bun for the full interactive Scout CLI, or use one of: init, config, setup, doctor, runtimes, guest, service status.",
       );
   }
 } catch (error) {
@@ -121,6 +123,7 @@ Node-safe onboarding commands:
   scout doctor [--json]
   scout runtimes [--json]
   scout service status [--json]
+  scout guest list|targets|approve|revoke [--help]
 
 Run the headless broker in the foreground with:
   openscout-runtime broker

@@ -64,10 +64,13 @@ export type ScoutCommandName =
   | "watch"
   | "web"
   | "who"
+  | "guest"
   | "whoami";
 
 export async function loadScoutCommandHandler(name: ScoutCommandName): Promise<ScoutCommandHandler> {
   switch (name) {
+    case "guest":
+      return (await import("./guest.ts")).runGuestCommand;
     case "integration":
       return (await import("./integration.ts")).runIntegrationCommand;
     case "app":
