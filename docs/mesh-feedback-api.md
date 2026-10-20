@@ -31,6 +31,14 @@ uploading diagnostics. Saved reports are bound to their full principal (stored a
 principal cannot upload them, and a local report cannot be substituted through
 the bridge. Removing consent blocks upload of already collected diagnostics.
 
+If a consented bridge report is stranded after consent is withdrawn or its
+principal changes, do not rescue it through the local-operator upload route.
+Establish explicit consent for the current authenticated principal, collect a
+fresh bridge report, then upload the new report ID as a separate step. Without
+that consent, collect and send only a new note without diagnostics. A failed
+network upload alone retains the saved report; retry still requires the same
+principal and current consent for diagnostic material.
+
 The collection manifest is fixed: bounded broker and bridge stderr tails,
 probe stderr tails, two allowlisted settings fields and bounded runtime health
 summaries. No caller paths, globs, environment dumps, transcript reads or
