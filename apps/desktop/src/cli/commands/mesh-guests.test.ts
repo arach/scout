@@ -57,6 +57,8 @@ test("help performs no network operation and production command has no runtime i
   const out = output("plain");
   await runMeshGuestsCommand(out.context, ["--help"], { brokerUrl: "not-a-url" });
   expect(out.lines.join("\n")).toContain("--public-key");
+  expect(out.lines.join("\n")).toContain("the runtime caps it");
+  expect(out.lines.join("\n")).not.toContain("broker");
   const source = readFileSync(new URL("./mesh-guests.ts", import.meta.url), "utf8");
   expect(source).not.toMatch(/from ["'][^"']*(?:@openscout\/runtime|core\/)[^"']*["']/);
 });

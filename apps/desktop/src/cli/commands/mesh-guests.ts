@@ -13,7 +13,7 @@ export const MESH_GUESTS_HELP = `scout mesh guests — direct guest grants (not 
   scout mesh guests revoke --request-id <id> [--json]
 
 Grant also accepts --public-key <base64-Ed25519-SPKI> instead of a positional key.
-Repeat --agent for each exact agent ID. Expiry is required; the broker caps it
+Repeat --agent for each exact agent ID. Expiry is required; the runtime caps it
 at 30 days. Reuse --request-id after a lost response; retries never extend expiry.
 Grant --json prints a bootstrap file accepted by scout-tailscale connect.
 Run on the runtime's machine. These commands only call its local HTTP API.

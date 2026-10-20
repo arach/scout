@@ -99,7 +99,7 @@ SCOUT_CLIENT="$HOME/.local/share/scout-tailscale/bin/scout-tailscale" &&
 ```
 
 Stop if verification or installation fails. Do not use sudo pip, disable TLS
-verification, overwrite the full `scout` CLI, or start a broker on the guest.
+verification, overwrite the full `scout` CLI, or start a runtime on the guest.
 Share only the `publicKey` value with the owner. Keep client state and its
 Ed25519 private key persistent and owner-only. `SCOUT_TAILSCALE_HOME` selects
 a separate state directory when needed; changing it also changes the identity.
@@ -112,7 +112,7 @@ On the runtime's own machine, choose a future expiry and exact allowed agent:
 scout mesh guests grant --public-key '<guest-public-key>' --label 'linux-guest' --agent '<agent-id>' --expires-at '<future-ISO-timestamp-with-timezone>' --request-id 'linux-guest-approval-1' --json > grant.json
 ```
 
-Repeat `--agent` for more exact IDs. The broker caps expiry at 30 days; read
+Repeat `--agent` for more exact IDs. The runtime caps expiry at 30 days; read
 the effective expiry in the response. Reuse the request ID after a lost response.
 Deliver `grant.json` privately and verify its `bootstrap.nodeKeyId` with the
 guest over a separate trusted channel. The file contains private network
@@ -149,7 +149,7 @@ scout mesh guests revoke --request-id 'linux-guest-approval-1' --json
 
 After owner revocation, a further signed operation with the old grant must be
 denied. `doctor` must not report an active grant. Disconnect only forgets local
-state; it does not revoke broker access. Revocation does not cancel accepted
+state; it does not revoke runtime access. Revocation does not cancel accepted
 work or erase results already delivered. The administrator must also remove
 the device from the tailnet when network access should end; revoking the
 admission auth key alone does not remove that device.

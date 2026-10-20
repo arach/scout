@@ -30,7 +30,7 @@ a task; the grant is not a sandbox for those tools.
 
    Repeat `--agent` to allow more agents. A positional public key is also
    accepted. `--expires-at` accepts an ISO timestamp or epoch milliseconds.
-   The broker caps expiry at 30 days. Read the effective expiry in the output.
+   The runtime caps expiry at 30 days. Read the effective expiry in the output.
    Reuse the request ID after a lost response. An unchanged retry returns the
    existing grant without extending its expiry. A different key or scope is
    refused. Re-approval after revocation requires a new request ID.
@@ -72,6 +72,6 @@ results. Removing Tailscale access and revoking a Scout grant are separate
 operator actions. `scout-tailscale disconnect` only forgets local client state.
 
 JSON list output is an array. Grant output preserves the runtime's
-`created`, `grant`, and `bootstrap` fields. It also copies the broker's effective
+`created`, `grant`, and `bootstrap` fields. It also copies the runtime's effective
 scope to `allowed_targets` and `expires_at`, as required by the Python client's
 out-of-band bootstrap format. Revoke output preserves `{ok, grant}`.

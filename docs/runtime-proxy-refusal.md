@@ -33,14 +33,14 @@ sets forwarded proto. Funnel sets its own request marker; tagged Serve
 clients do not receive user-identity headers. The tests cover these distinct
 profiles rather than requiring an optional user header.
 
-Scout's web broker service constructs new runtime requests with
+Scout's local web service constructs new runtime requests with
 `requestScoutBrokerJson` in `packages/web/server/core/broker/service.ts`.
 Its GET helper passes socket path and signal; its POST helper passes method,
 body, and socket path. Neither copies browser headers. Event-stream requests
 also construct fresh headers. `packages/runtime/src/broker-api.ts` adds
 accept/content-type headers. The regression suite exercises that client
 against the real gate to preserve local web access. The separate phone relay
-forwards selected headers to the web surface, not wholesale to the broker.
+forwards selected headers to the web surface, not wholesale to the runtime.
 The local tail/events WebSocket path in `packages/web/server/index.ts` also
 constructs a new upstream connection to `/trpc` without browser headers. Its
 peer-doorway branch forwards only selected headers to a peer web server, not
