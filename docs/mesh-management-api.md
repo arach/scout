@@ -22,3 +22,9 @@ Sharing and watching default to off. Replace `share` with `[]` to withdraw all
 sharing. Omit a previously shared key to withdraw it individually. This does
 not revoke the peer's trust grant. Existing per-frame and pre-decision sharing
 checks remain authoritative, so withdrawal takes effect without a restart.
+
+Revoking trust also removes that peer key from the persisted sharing list,
+without changing other peers or `watch`. Sharing consent is withdrawn first;
+a failed approvals-config write refuses the revocation. If the later trust
+write fails, sharing remains withdrawn. Re-enrolling the same key does not
+restore earlier consent.

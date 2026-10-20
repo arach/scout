@@ -1191,6 +1191,20 @@ export function createBrokerHttpRouter(
         badRequest(response, "keyId must be the full 64-char lowercase SHA-256 hex key ID");
         return;
       }
+      // Withdraw approval consent first, through the same runtime-owned writer.
+      // If this write fails, do not report a completed trust revocation. If the
+      // later trust write fails, sharing stays withdrawn (the safe direction).
+      const approvals = deps.meshApprovals?.config;
+      if (approvals) {
+        try {
+          const config = approvals.read();
+          const share = config.share.filter(peerKeyId => peerKeyId !== keyId);
+          if (share.length !== config.share.length) approvals.write({ ...config, share });
+        } catch {
+          json(response, 503, { error: "approvals_config_unavailable" });
+          return;
+        }
+      }
       if (!meshTrust.peers.revokeTrustedPeer(keyId, Date.now())) {
         json(response, 404, {
           error: "unknown_peer",

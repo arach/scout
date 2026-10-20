@@ -1,3 +1,4 @@
+import { meshApprovalsConfigPath, readMeshApprovalsConfig, writeMeshApprovalsConfig } from "./mesh-approvals.js";
 import { PermissionDeliveryUnconfirmedError } from "./broker-permission-service.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -1108,6 +1109,44 @@ describe("createBrokerHttpRouter", () => {
       expect(revoked.response.status).toBe(200);
       expect(revoked.body).toMatchObject({ keyId: "a".repeat(64), state: "revoked" });
       expect(records.size).toBe(0);
+    });
+
+    test("revocation persists approval consent withdrawal without changing other peers or watch", async () => {
+      const { records, store } = memoryPeerStore([peerFixture()]);
+      const harness = trustHarness(store);
+      const dir = mkdtempSync(join(tmpdir(), "approval-revoke-"));
+      const path = meshApprovalsConfigPath(dir);
+      const keyId = "a".repeat(64), other = "b".repeat(64);
+      try {
+        writeMeshApprovalsConfig(path, { share: [keyId, other], watch: true });
+        harness.deps.meshApprovals = { config: {
+          read: () => readMeshApprovalsConfig(path),
+          write: config => writeMeshApprovalsConfig(path, config),
+          isActivePeer: key => records.has(key),
+        } };
+        const revoked = await requestRouter(harness, "POST", "/v1/trust/revoke", { body: { keyId } });
+        expect(revoked.response.status).toBe(200);
+        expect(records.has(keyId)).toBe(false);
+        expect(readMeshApprovalsConfig(path)).toEqual({ share: [other], watch: true });
+        // Re-enrolling the same key must not resurrect earlier sharing consent.
+        store.upsertTrustedPeer(peerFixture());
+        const current = await requestRouter(harness, "GET", "/v1/mesh/approvals/config", { transportContext: { transport: "loopback" } });
+        expect(current.body).toEqual({ share: [other], watch: true });
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    });
+
+    test("a failed approval consent writer refuses trust revocation", async () => {
+      const { records, store } = memoryPeerStore([peerFixture()]);
+      const harness = trustHarness(store);
+      harness.deps.meshApprovals = { config: {
+        read: () => ({ share: ["a".repeat(64)], watch: false }),
+        write: () => { throw new Error("writer-internal-detail"); },
+        isActivePeer: key => records.has(key),
+      } };
+      const result = await requestRouter(harness, "POST", "/v1/trust/revoke", { body: { keyId: "a".repeat(64) } });
+      expect(result.response.status).toBe(503);
+      expect(result.body).toEqual({ error: "approvals_config_unavailable" });
+      expect(records.has("a".repeat(64))).toBe(true);
     });
 
     test("adjusts an existing peer's tier and label", async () => {
