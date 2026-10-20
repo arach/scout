@@ -159,6 +159,7 @@ import {
   createMeshApprovalWatch,
   meshApprovalsConfigPath,
   readMeshApprovalsConfig,
+  writeMeshApprovalsConfig,
 } from "./mesh-approvals.js";
 import { normalizeCodexAppServerLaunchArgs } from "./codex-app-server.js";
 import { WorkerSQLiteProjection } from "./sqlite-projection-worker.js";
@@ -3033,7 +3034,15 @@ const routeRequest = createBrokerHttpRouter({
   },
   mcpEvents,
   permissionService,
-  meshApprovals: { share: meshApprovalShare, watch: meshApprovalWatch },
+  meshApprovals: {
+    share: meshApprovalShare, watch: meshApprovalWatch,
+    config: {
+      read: readMeshApprovals,
+      write: config => writeMeshApprovalsConfig(meshApprovalsConfigFile, config),
+      isActivePeer: keyId => (trustedPeerStore?.listTrustedPeers() ?? []).some(peer =>
+        peer.keyId === keyId && !peer.revokedAt && (!peer.expiresAt || peer.expiresAt > Date.now())),
+    },
+  },
   encodedSnapshotBodies: process.env.OPENSCOUT_BROKER_ENCODED_SNAPSHOT === "1",
   onSnapshotFlushedBytes: memoryMaintenance ? (bytes) => memoryMaintenance.snapshotEncoded(bytes) : undefined,
   host,
