@@ -57,7 +57,11 @@ does not cover third-party clients or external proxies.
 
 ## Limits
 
-This is defense in depth for HTTP proxies that preserve forwarding evidence,
+The separate [runtime-targeted Tailscale listener guard](runtime-tailscale-listener-guard.md)
+uses fresh parsed config evidence to demote only the matched runtime listener,
+including known raw TCP targets. Unknown/failed/stale probes are advisory only.
+
+This HTTP rule is defense in depth for proxies that preserve forwarding evidence,
 not proof that every relay is absent. Raw TCP forwarding and a proxy that
 strips every marker are indistinguishable from a local client. Startup or
 process/config scans cannot prove their absence either. Use cryptographically

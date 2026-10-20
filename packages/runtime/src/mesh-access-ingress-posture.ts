@@ -1,3 +1,4 @@
+import type { TailscaleListenerGuardReport } from "./mesh-tailscale-listener-guard.js";
 import { LOOPBACK_HTTP_PROXY_POLICY } from "./mesh-loopback-proxy.js";
 /**
  * Read-only ingress inventory for the broker's privileged loopback deployment.
@@ -30,6 +31,8 @@ export type MeshAccessIngressRelay = {
 export type MeshAccessIngressPosture = {
   enforced: boolean;
   localHttpProxyPolicy: typeof LOOPBACK_HTTP_PROXY_POLICY;
+  /** Transient per-listener demotion, never scoped-activation authorization. */
+  tailscaleRuntimeListenerGuard: TailscaleListenerGuardReport | null;
   observedAt: number;
   deployment: "privileged-loopback";
   activation: "blocked" | "permitted";
@@ -45,6 +48,7 @@ export type MeshAccessIngressProbe = {
   file: (path: string, readContents: boolean) => Promise<MeshAccessIngressFileResult>;
 };
 export type MeshAccessIngressOptions = {
+  tailscaleRuntimeListenerGuard?: () => TailscaleListenerGuardReport;
   /** Must come from the running gate, with its cryptographic admin credential
    * configured and uncredentialled TCP/Unix traffic treated as remote; upgrades denied.
    * Never derive this from an environment assertion, process scan, or relay.
@@ -126,10 +130,9 @@ export async function inspectMeshAccessIngressPosture(
   const safeCommand = async (file: string, args: string[]) => {
     try { return await probe.command(file, args); } catch { return { ok: false, stdout: "" }; }
   };
-  const [processes, serve, funnel, files] = await Promise.all([
+  const [processes, serve, files] = await Promise.all([
     safeCommand("ps", ["-axo", "pid=,args="]),
     safeCommand("tailscale", ["serve", "status", "--json"]),
-    safeCommand("tailscale", ["funnel", "status", "--json"]),
     Promise.all(fileSpecs.map(async (spec) => {
       try { return await probe.file(spec.path, spec.contents); } catch { return { status: "unreadable" } as const; }
     })),
@@ -142,10 +145,10 @@ export async function inspectMeshAccessIngressPosture(
       else evidence(spec.item, "configured", spec.source, "Relay configuration/state exists; neither a disabled flag nor a saved process state proves independent caller authentication or absence of another instance.");
     }
   }
-  for (const [result, source] of [[serve, "tailscale:serve-status"], [funnel, "tailscale:funnel-status"]] as const) {
+  for (const [result, source] of [[serve, "tailscale:serve-status"]] as const) {
     const config = result.ok ? parsedObject(result.stdout) : undefined;
     if (!config) evidence(items.tailscale, "unknown", source, "Tailscale serve/funnel configuration could not be established (missing CLI, daemon, permission, timeout, or invalid output).");
-    else if (hasConfiguration(config)) evidence(items.tailscale, "active", source, "Tailscale reports serve/funnel configuration. Local HTTP requests carrying proxy headers are refused, including upgrades. TCP forwarding or a relay stripping these headers remains indistinguishable from a local client without protected ingress.");
+    else if (hasConfiguration(config)) evidence(items.tailscale, "active", source, "Tailscale reports serve/funnel configuration. Local HTTP requests carrying proxy headers are refused, including upgrades. TCP forwarding or stripped headers cannot identify a caller; the separate tailscaleRuntimeListenerGuard reports transient demotion only for fresh own-listener target matches. Unobserved relays still require protected ingress for an authentication boundary.");
     else items.tailscale.proof.push(`${source}:empty`);
   }
   const processRows = processes.ok ? processes.stdout.split(/\r?\n/).filter((line) => line.trim()).map((line) => /^\s*(\d+)\s+(.+)$/.exec(line)) : [];
@@ -178,6 +181,7 @@ export async function inspectMeshAccessIngressPosture(
   }
   return {
     localHttpProxyPolicy: LOOPBACK_HTTP_PROXY_POLICY,
+    tailscaleRuntimeListenerGuard: input.tailscaleRuntimeListenerGuard?.() ?? null,
     enforced: protectedLocalIngress, observedAt: input.now ?? Date.now(), deployment: "privileged-loopback", activation: protectedLocalIngress ? "permitted" : "blocked",
     relays,
     reason: protectedLocalIngress

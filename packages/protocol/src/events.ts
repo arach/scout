@@ -115,7 +115,14 @@ export type PresenceUpdatedEvent = ControlEventBase<"presence.updated", {
   previousActivity?: ObservedActivity;
 }>;
 
+/** Runtime-owned bridge requests and failures. Credential/config values are never event payloads. */
+export type MeshBridgeLifecycleEvent = ControlEventBase<"mesh.bridge.lifecycle", {
+  action: "configure" | "enable" | "disable" | "request-restart";
+  phase: "requested" | "failed";
+}>;
+
 export type ControlEvent =
+  | MeshBridgeLifecycleEvent
   | NodeUpsertedEvent
   | ActorRegisteredEvent
   | AgentRegisteredEvent

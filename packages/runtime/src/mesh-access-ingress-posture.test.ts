@@ -74,7 +74,7 @@ describe("scoped access ingress posture", () => {
       file: async () => { throw new Error("secret-do-not-emit"); },
     };
     const report = await inspectMeshAccessIngressPosture(options, injected);
-    expect(commands.sort()).toEqual(["ps -axo pid=,args=", "tailscale funnel status --json", "tailscale serve status --json"]);
+    expect(commands.sort()).toEqual(["ps -axo pid=,args=", "tailscale serve status --json"]);
     expect(report.enforced).toBe(false);
     expect(JSON.stringify(report)).not.toContain("secret-do-not-emit");
   });
@@ -84,4 +84,15 @@ describe("scoped access ingress posture", () => {
     expect(item(report, "cloudflare-tunnel").observedStatus).toBe("active");
     expect(item(report, "cloudflare-tunnel").proof).toContain("process:pid:11");
   });
+});
+
+test("transient listener protection never authorizes scoped activation or changes explicit mode", async () => {
+  const guard = { outcome: "ok" as const, source: "cli" as const, attemptedAt: 12340, completedAt: 12345, ageMs: 0,
+    pollIntervalMs: 5000, maxAgeMs: 10000, guardedListeners: ["tcp" as const] };
+  const report = await inspectMeshAccessIngressPosture({ ...options, tailscaleRuntimeListenerGuard: () => guard }, probe());
+  expect(report.tailscaleRuntimeListenerGuard).toEqual(guard);
+  expect(report.enforced).toBe(false); expect(report.activation).toBe("blocked");
+  const explicit = await inspectMeshAccessIngressPosture({ ...options, protectedLocalIngress: true,
+    tailscaleRuntimeListenerGuard: () => ({ ...guard, outcome: "failed", guardedListeners: [] }) }, probe({ fail: true }));
+  expect(explicit.enforced).toBe(true); expect(explicit.activation).toBe("permitted");
 });

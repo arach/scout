@@ -1,5 +1,11 @@
 // Must stay the first import: materializes OPENSCOUT_INSTANCE before any module reads paths/ports.
 import { openScoutCheckoutInstanceDefault, openScoutInstanceBootstrap } from "./instance-checkout-bootstrap.js";
+import { createTailscaleListenerGuard, isRuntimeLoopbackTcpSocket, type LocalListenerKind } from "./mesh-tailscale-listener-guard.js";
+import { MeshFeedback } from "./mesh-feedback.js";
+import { MeshBridgeManagement } from "./mesh-bridge-management.js";
+import { meshDiagnostics } from "./mesh-diagnostics.js";
+import { tailscaleStatusProbe } from "./system-probes/tailscale-status.js";
+import { createMeshPing } from "./mesh-ping.js";
 import { flightCompletion, SCOUT_COMPLETION_CAPABILITY } from "@openscout/protocol";
 import { SCOUT_SESSION_INPUT_RECEIPTS_CAPABILITY } from "@openscout/protocol";
 import { deliverInPlace } from "./in-place/deliver.js";
@@ -159,6 +165,7 @@ import {
   createMeshApprovalWatch,
   meshApprovalsConfigPath,
   readMeshApprovalsConfig,
+  writeMeshApprovalsConfig,
 } from "./mesh-approvals.js";
 import { normalizeCodexAppServerLaunchArgs } from "./codex-app-server.js";
 import { WorkerSQLiteProjection } from "./sqlite-projection-worker.js";
@@ -618,7 +625,15 @@ const meshAccessStore: MeshAccessStore | null = sharedControlPlaneStore
 // reads forceRemoteEnforce via this ref so §11.6 can key off live listeners.
 let meshBindController: MeshBindController | null = null;
 let localIrohEntrypoint = resolveIrohMeshEntrypointFromEnv();
+// Server-bound identity prevents callers from choosing the guarded listener.
+const localIngressSockets = new WeakMap<object, LocalListenerKind>();
+const tailscaleListenerGuard = createTailscaleListenerGuard({ port, socketPath: brokerSocketPath });
 const meshIngressGate = createMeshIngressGate({
+  guardedLocalListener: (socket) => {
+    if (localAdminKey) return false; // Explicit protected mode keeps its own policy/errors.
+    const listener = localIngressSockets.get(socket);
+    return Boolean(listener && tailscaleListenerGuard.isGuarded(listener));
+  },
   irohEndpointId: () => localIrohEntrypoint?.endpointId,
   localAdminKey,
   keyConflict: (id) => [Boolean(trustedPeerStore?.knownTrustedPeerKey(id)), Boolean(guestGrantStore?.knownKey(id)), Boolean(meshAccessStore?.knownDevice(id)), Boolean(meshAccessStore?.knownPrincipal(id))].filter(Boolean).length > 1,
@@ -3036,8 +3051,36 @@ const routeRequest = createBrokerHttpRouter({
     acknowledge: id => projection.acknowledgeQuarantine(id),
   },
   mcpEvents,
+  meshFeedback: new MeshFeedback({
+    supportDirectory,
+    endpoint: process.env.OPENSCOUT_FEEDBACK_REPORT_URL ?? "https://api.openscout.app/api/feedback",
+    health: () => {
+      const tailscale = tailscaleStatusProbe.snapshot();
+      return { ready: !shuttingDown, advertiseScope,
+        tailscale: { unavailable: tailscale.value === null, running: tailscale.value?.running ?? null,
+          stale: tailscale.stale, at: tailscale.at } };
+    },
+  }),
   permissionService,
-  meshApprovals: { share: meshApprovalShare, watch: meshApprovalWatch },
+  meshBridge: new MeshBridgeManagement({
+    supportDirectory,
+    lifecycle: async (action, phase) => {
+      const event = { id: createRuntimeId("event"), kind: "mesh.bridge.lifecycle" as const,
+        ts: Date.now(), actorId: operatorActorId, nodeId, payload: { action, phase } };
+      await journal.appendEntries([{ kind: "control.event.record", event }]);
+      controlStreams.streamRecordedEvent(event);
+      publishControlEvent(event);
+    },
+  }),
+  meshApprovals: {
+    share: meshApprovalShare, watch: meshApprovalWatch,
+    config: {
+      read: readMeshApprovals,
+      write: config => writeMeshApprovalsConfig(meshApprovalsConfigFile, config),
+      isActivePeer: keyId => (trustedPeerStore?.listTrustedPeers() ?? []).some(peer =>
+        peer.keyId === keyId && !peer.revokedAt && (!peer.expiresAt || peer.expiresAt > Date.now())),
+    },
+  },
   encodedSnapshotBodies: process.env.OPENSCOUT_BROKER_ENCODED_SNAPSHOT === "1",
   onSnapshotFlushedBytes: memoryMaintenance ? (bytes) => memoryMaintenance.snapshotEncoded(bytes) : undefined,
   host,
@@ -3096,12 +3139,16 @@ const routeRequest = createBrokerHttpRouter({
   integrationSlackDelivery,
   integrationSlackEvents,
   machines: machineService,
+  readMeshDiagnostics: () => meshDiagnostics(tailscaleStatusProbe.read(), {
+    nodeId, nodeName, meshId, advertiseScope, brokerUrl, seedUrls, discoveryIntervalMs,
+  }),
   access: {
     access: meshAccessStore, nodeId, nodeKeyId: nodeIdentityKeyId,
     enforced: scopedAccessAvailable,
     legacyPeers: () => trustedPeerStore?.listTrustedPeers() ?? [],
     ingressPosture: () => inspectMeshAccessIngressPosture({ protectedLocalIngress: Boolean(localAdminKey),
-      supportDirectory: resolveOpenScoutSupportPaths().supportDirectory, entrypoints: currentLocalNode().meshEntrypoints ?? [] }),
+      supportDirectory: resolveOpenScoutSupportPaths().supportDirectory, entrypoints: currentLocalNode().meshEntrypoints ?? [],
+      tailscaleRuntimeListenerGuard: () => tailscaleListenerGuard.report() }),
     listAgents: () => Object.values(runtime.snapshot().agents).filter((agent) => agent.authorityNodeId === nodeId).map((agent) => {
       const roots = new Set(runtime.endpointsForAgent(agent.id, { nodeId }).map((endpoint) => brokerTargetProjectRoot(agent, endpoint)).filter((root): root is string => Boolean(root)));
       const metadataRoot = brokerTargetProjectRoot(agent, null);
@@ -3134,6 +3181,11 @@ const routeRequest = createBrokerHttpRouter({
     existingInvocation: (invocationId) => runtime.snapshot().invocations[invocationId],
     flightForInvocation: (invocationId) => runtime.flightForInvocation(invocationId),
   },
+  meshPing: createMeshPing({
+    nodes: () => Object.values(runtime.snapshot().nodes),
+    peers: () => trustedPeerStore?.listTrustedPeers() ?? [],
+    localNodeId: nodeId, meshId, identity: () => nodeIdentity,
+  }),
   meshTrust: {
     enrollment: trustEnrollmentService,
     rateLimiter: trustEndpointRateLimiter,
@@ -3270,11 +3322,12 @@ function openRolesControlPlaneDb() {
   }
 }
 
-function createBrokerHttpServer(): ReturnType<typeof createServer> {
+function createBrokerHttpServer(listener: LocalListenerKind): ReturnType<typeof createServer> {
   return createServer((request, response) => {
+    if (listener === "unix" || isRuntimeLoopbackTcpSocket(request.socket, port)) localIngressSockets.set(request.socket, listener);
     // Mesh trust cone ingress gate: classifies the transport, and for remote
     // peers verifies the signed request before the router sees it (default
-    // verify-warn: logs and allows). Local transports pass through untouched.
+    // verify-warn: logs and allows). Unmatched local listeners retain local tier.
     meshIngressGate
       .gateHttpRequest(request, response, (gatedRequest) =>
         routeBrokerHttpRequest(gatedRequest, response))
@@ -3308,8 +3361,14 @@ async function routeBrokerHttpRequest(
   });
 }
 
-const server = createBrokerHttpServer();
-const socketServer = createBrokerHttpServer();
+const server = createBrokerHttpServer("tcp");
+const socketServer = createBrokerHttpServer("unix");
+server.on("connection", (socket) => {
+  if (!localAdminKey && isRuntimeLoopbackTcpSocket(socket, port)) tailscaleListenerGuard.trackConnection("tcp", socket);
+});
+socketServer.on("connection", (socket) => {
+  if (!localAdminKey) tailscaleListenerGuard.trackConnection("unix", socket);
+});
 server.on("close", () => {
   unregisterActiveScoutBrokerService(brokerService);
 });
@@ -3351,8 +3410,14 @@ function handleBrokerUpgrade(
   socket.destroy();
 }
 
-server.on("upgrade", handleBrokerUpgrade);
-socketServer.on("upgrade", handleBrokerUpgrade);
+server.on("upgrade", (request, socket, head) => {
+  if (isRuntimeLoopbackTcpSocket(socket as { localPort?: number; localAddress?: string }, port)) localIngressSockets.set(socket, "tcp");
+  handleBrokerUpgrade(request, socket, head);
+});
+socketServer.on("upgrade", (request, socket, head) => {
+  localIngressSockets.set(socket, "unix");
+  handleBrokerUpgrade(request, socket, head);
+});
 
 const trpcHandler = applyWSSHandler({
   wss: trpcWss,
@@ -3373,6 +3438,7 @@ try {
   // bind controller (never a 0.0.0.0 plaintext default).
   await listenTcp(server, { host: isLoopbackHost(host) || host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host, port });
   await listenUnixSocket(socketServer, brokerSocketPath);
+  tailscaleListenerGuard.start();
   startupTrafficGate.markListening();
 
   const bootstrapIdentityWrite = upsertNodeDurably(localNode, bootstrapProjectionOptions())
@@ -3721,6 +3787,7 @@ async function shutdownBroker(exitCode = 0): Promise<void> {
     return;
   }
   shuttingDown = true;
+  tailscaleListenerGuard.stop();
   storageMaintenance.stop();
   meshApprovalWatch.stop();
   meshApprovalShare.stop();

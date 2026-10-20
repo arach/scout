@@ -80,6 +80,8 @@ const MESH_ROUTE_MATRIX: Record<string, MeshRouteTier> = {
   "POST /v1/mesh/web-request": "control",
   // Cross-machine approvals: control tier AND a per-peer share opt-in on this
   // machine (mesh-approvals.ts) — the tier alone never exposes them.
+  "GET /v1/mesh/approvals/config": "local",
+  "POST /v1/mesh/approvals/config": "local",
   "GET /v1/mesh/approvals/stream": "control",
   "POST /v1/mesh/approvals/decide": "control",
   "GET /v1/approvals/remote": "local",
@@ -89,6 +91,15 @@ const MESH_ROUTE_MATRIX: Record<string, MeshRouteTier> = {
 
   // ── local: machine-local bind flip (handler also refuse-remote, §11.5/§11.9)
   "POST /v1/mesh/bind": "local",
+  "GET /v1/mesh/diagnostics": "local",
+  "POST /v1/mesh/ping": "local",
+  "GET /v1/mesh/bridge": "local",
+  "POST /v1/mesh/bridge/config": "local",
+  "POST /v1/mesh/bridge/control": "local",
+  "POST /v1/diagnostics/reports/collect": "local",
+  "POST /v1/diagnostics/reports/upload": "local",
+  "POST /v1/mesh/bridge/feedback/collect": "local",
+  "POST /v1/mesh/bridge/feedback/upload": "local",
 
   // ── local: everything else (deny by default) ────────────────────────────
   "DELETE /v1/aliases/:id": "local",
