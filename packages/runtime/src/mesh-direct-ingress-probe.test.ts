@@ -1,7 +1,6 @@
 import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:https";
-import { request } from "node:https";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -38,16 +37,17 @@ for (const mode of ["verify-warn", "enforce"] as const) {
     try {
       await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, address!, resolve); });
       const port = (server.address() as { port: number }).port;
-      const get = (path: string, headers: Record<string, string> = {}) => new Promise<{ status: number; body: any }>((resolve, reject) => {
-        const req = request({ host: address, port, path, headers,
-          // Trust only this fixture certificate; it has no interface-IP SAN.
-          ca: tls.certificatePem, checkServerIdentity: () => undefined,
-        }, (res) => {
-          let body = ""; res.setEncoding("utf8"); res.on("data", (chunk) => { body += chunk; });
-          res.on("end", () => { try { resolve({ status: res.statusCode!, body: JSON.parse(body) }); } catch (error) { reject(error); } });
-        });
-        req.setTimeout(3000, () => req.destroy(new Error("probe timed out"))); req.on("error", reject); req.end();
-      });
+      const get = async (path: string, headers: Record<string, string> = {}) => {
+        const response = await fetch(`https://${address}:${port}${path}`, {
+          headers, redirect: "error", signal: AbortSignal.timeout(3000),
+          // Match the production Bun pinned-client request: this fixture
+          // certificate is the only CA; its SAN is informational, not the
+          // interface IP. Use fetch rather than node:https, whose identity
+          // override is ignored on Bun 1.3.13.
+          tls: { ca: tls.certificatePem, checkServerIdentity: () => undefined },
+        } satisfies BunFetchRequestInit);
+        return { status: response.status, body: await response.json() };
+      };
       const node = await get("/v1/node");
       expect(node.status).toBe(200); expect(node.body.card.keyId).toBe(nodeKeyId(identity.publicKey));
       for (const path of ["/v1/mesh/nodes", "/v1/mesh/snapshot"]) {
