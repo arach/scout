@@ -81,6 +81,33 @@ describe("loopback proxy refusal", () => {
     expect(await requestScoutBrokerJson(f.url, "/v1/commands", { method: "POST", body: {} })).toEqual({ ok: true });
     expect(f.handled()).toBe(2);
   });
+  for (const [name, example] of [
+    ["Via", "1.1 proxy.example.invalid"], ["X-Forwarded-Port", "443"],
+    ["CF-Connecting-IP", "198.51.100.2"], ["True-Client-IP", "198.51.100.2"],
+  ]) {
+    test(`${name} alone refuses local HTTP and upgrades without promoting remote callers`, async () => {
+      for (const mode of ["verify-warn", "enforce"] as const) {
+        const f = await runtime(mode);
+        for (const value of [example, ""]) {
+          const headers = { [name]: value };
+          const response = await fetch(f.url + "/v1/guest-grants", { headers });
+          expect(response.status).toBe(403);
+          expect(await response.json()).toMatchObject({ error: "loopback_proxy_refused" });
+          expect(refusesLoopbackHttpProxy("loopback", headers)).toBe(true);
+          expect(refusesLoopbackHttpProxy("unix-socket", headers)).toBe(true);
+          expect(refusesLoopbackHttpProxy("remote", headers)).toBe(false);
+          let reply = "", destroyed = false;
+          const socket = { remoteAddress: "127.0.0.1", end: (data: string, flushed: () => void) => { reply += data; flushed(); }, destroy: () => { destroyed = true; } } as unknown as Duplex;
+          const request = { method: "GET", url: "/trpc", headers } as IncomingMessage;
+          expect(f.gate.gateUpgrade(request, socket)).toBe(false);
+          expect(reply).toContain("403 Forbidden");
+          expect(destroyed).toBe(true);
+        }
+        expect(f.handled()).toBe(0);
+        expect((await fetch(f.url + "/health")).status).toBe(200);
+      }
+    });
+  }
   test("WebSocket proxy evidence is refused before an upgrade", async () => {
     const f = await runtime();
     let reply = "", destroyed = false;

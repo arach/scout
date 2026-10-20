@@ -6,7 +6,8 @@ privileged loopback or Unix-socket listener.
 
 The HTTP ingress gate refuses requests on physical local transports when they
 carry `Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto`,
-`X-Real-IP`, or a `Tailscale-*` header. Header presence, including an empty
+`X-Real-IP`, `Via`, `X-Forwarded-Port`, `CF-Connecting-IP`, `True-Client-IP`,
+or a `Tailscale-*` header. Header presence, including an empty
 value, is negative evidence only. It never authenticates a caller. Refusal is
 HTTP 403 with `loopback_proxy_refused`. It precedes routing, local admin proof,
 and verify-warn handling. The same rule refuses WebSocket upgrades.
@@ -45,6 +46,14 @@ The local tail/events WebSocket path in `packages/web/server/index.ts` also
 constructs a new upstream connection to `/trpc` without browser headers. Its
 peer-doorway branch forwards only selected headers to a peer web server, not
 the local runtime. Vite asset proxying is a separate dev-server path.
+
+Before extending the refusal set, a source inventory of Scout's local clients
+confirmed that none sends `Via`, `X-Forwarded-Port`, `CF-Connecting-IP`, or
+`True-Client-IP` to the runtime. The HTTP helper, CLI guest client and Python
+transport construct their own headers; the web HTTP/event/WebSocket paths above
+do not copy arbitrary browser headers to the runtime. Source occurrences of
+`via` describe coordination or UI data, not outbound HTTP headers. This audit
+does not cover third-party clients or external proxies.
 
 ## Limits
 

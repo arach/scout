@@ -6,6 +6,7 @@ export const LOOPBACK_HTTP_PROXY_DETAIL = "Do not proxy Serve, Funnel, or anothe
 
 const FORWARDING_HEADERS = new Set([
   "forwarded", "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "x-real-ip",
+  "via", "x-forwarded-port", "cf-connecting-ip", "true-client-ip",
 ]);
 
 /** Headers are only negative evidence, never proof of caller identity. Their
