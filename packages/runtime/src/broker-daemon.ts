@@ -1,3 +1,4 @@
+import { createMeshPing } from "./mesh-ping.js";
 // Must stay the first import: materializes OPENSCOUT_INSTANCE before any module reads paths/ports.
 import { openScoutCheckoutInstanceDefault, openScoutInstanceBootstrap } from "./instance-checkout-bootstrap.js";
 import { flightCompletion, SCOUT_COMPLETION_CAPABILITY } from "@openscout/protocol";
@@ -3130,6 +3131,11 @@ const routeRequest = createBrokerHttpRouter({
     existingInvocation: (invocationId) => runtime.snapshot().invocations[invocationId],
     flightForInvocation: (invocationId) => runtime.flightForInvocation(invocationId),
   },
+  meshPing: createMeshPing({
+    nodes: () => Object.values(runtime.snapshot().nodes),
+    peers: () => trustedPeerStore?.listTrustedPeers() ?? [],
+    localNodeId: nodeId, meshId, identity: () => nodeIdentity,
+  }),
   meshTrust: {
     enrollment: trustEnrollmentService,
     rateLimiter: trustEndpointRateLimiter,

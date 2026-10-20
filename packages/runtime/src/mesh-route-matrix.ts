@@ -89,6 +89,7 @@ const MESH_ROUTE_MATRIX: Record<string, MeshRouteTier> = {
 
   // ── local: machine-local bind flip (handler also refuse-remote, §11.5/§11.9)
   "POST /v1/mesh/bind": "local",
+  "POST /v1/mesh/ping": "local",
 
   // ── local: everything else (deny by default) ────────────────────────────
   "DELETE /v1/aliases/:id": "local",

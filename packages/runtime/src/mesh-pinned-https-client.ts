@@ -85,7 +85,14 @@ export type PinnedPeer = {
   expectedKeyId?: string;
 };
 
+export class PeerResponseTooLargeError extends Error {
+  override readonly name = "PeerResponseTooLargeError";
+  constructor() { super("Peer response exceeds configured byte limit"); }
+}
+
 export type PinnedHttpsClientDeps = {
+  /** Cap Node's buffered transport; Bun streaming consumers also enforce their own cap. */
+  maxResponseBytes?: number;
   now?: () => number;
   sessionTtlMs?: number;
   connectTimeoutMs?: number;
@@ -409,7 +416,18 @@ export function createPinnedHttpsClient(deps: PinnedHttpsClientDeps = {}): Pinne
         },
         (response) => {
           const chunks: Buffer[] = [];
-          response.on("data", (chunk: Buffer) => chunks.push(chunk));
+          let bytes = 0;
+          response.on("data", (chunk: Buffer) => {
+            bytes += chunk.byteLength;
+            if (deps.maxResponseBytes !== undefined && bytes > deps.maxResponseBytes) {
+              const error = new PeerResponseTooLargeError();
+              response.destroy(error);
+              request.destroy(error);
+              reject(error);
+              return;
+            }
+            chunks.push(chunk);
+          });
           response.on("error", reject);
           response.on("end", () => {
             const responseHeaders = new Headers();
