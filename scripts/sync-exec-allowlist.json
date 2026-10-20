@@ -987,6 +987,13 @@
     "owner": "runtime"
   },
   {
+    "path": "apps/desktop/src/cli/extensions.test.ts",
+    "symbol": "spawnSync",
+    "category": "test",
+    "reason": "uses /bin/chmod to preserve the sticky bit while testing extension ancestor permissions; Bun chmodSync drops it",
+    "owner": "cli"
+  },
+  {
     "path": "packages/runtime/src/knowledge/session-indexer.test.ts",
     "symbol": "Bun.spawn",
     "category": "test",
