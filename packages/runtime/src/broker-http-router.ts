@@ -1,3 +1,4 @@
+import { MeshFeedback, MeshFeedbackError } from "./mesh-feedback.js";
 import { completionReply } from "@openscout/protocol";
 import { PermissionDeliveryUnconfirmedError, type BrokerPermissionService } from "./broker-permission-service.js";
 import { BrokerBusyError } from "./broker-storage-pressure.js";
@@ -334,6 +335,7 @@ export type BrokerHttpRouterDeps = {
    * the roster is durable by definition and cannot be served from memory.
    */
   machines?: BrokerMachineService;
+  meshFeedback?: MeshFeedback;
   /**
    * P1.5 restart-free bind flip (docs/proposals/mesh-trust-cone.md §11.5).
    * When absent, POST /v1/mesh/bind 404s.
@@ -533,6 +535,27 @@ export function createBrokerHttpRouter(
 
   if (url.pathname.startsWith("/v1/mesh/approvals/") || url.pathname.startsWith("/v1/approvals/remote")) {
     if (await handleBrokerMeshApprovalsRoute(request, response, url, method, deps.meshApprovals ?? {})) return;
+  }
+  if (method === "POST" && (url.pathname === "/v1/diagnostics/reports/collect"
+    || url.pathname === "/v1/diagnostics/reports/upload"
+    || url.pathname === "/v1/mesh/bridge/feedback/collect"
+    || url.pathname === "/v1/mesh/bridge/feedback/upload")) {
+    const context = request.transportContext;
+    if (!context || context.transport === "remote" || context.guest || context.scoped) {
+      json(response, 403, { error: "local_bridge_required" }); return;
+    }
+    if (!deps.meshFeedback) { json(response, 503, { error: "feedback_unavailable" }); return; }
+    try {
+      const body = await readRequestBody<unknown>(request, { maxBytes: 16 * 1024 }).catch(() => null);
+      const bridge = url.pathname.startsWith("/v1/mesh/bridge/");
+      const result = url.pathname.endsWith("/collect")
+        ? await deps.meshFeedback.collect(body, bridge) : await deps.meshFeedback.upload(body, bridge);
+      json(response, 200, result);
+    } catch (error) {
+      json(response, error instanceof MeshFeedbackError ? error.status : 503,
+        { error: error instanceof MeshFeedbackError ? error.code : "feedback_unavailable" });
+    }
+    return;
   }
   if (guest && await handleBrokerGuestRoute(request, response, url, method, guest)) return;
   const denyRemoteMutation = (): boolean => {
