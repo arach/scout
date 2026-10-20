@@ -1,6 +1,6 @@
-import { MeshBridgeManagement } from "./mesh-bridge-management.js";
 // Must stay the first import: materializes OPENSCOUT_INSTANCE before any module reads paths/ports.
 import { openScoutCheckoutInstanceDefault, openScoutInstanceBootstrap } from "./instance-checkout-bootstrap.js";
+import { MeshBridgeManagement } from "./mesh-bridge-management.js";
 import { flightCompletion, SCOUT_COMPLETION_CAPABILITY } from "@openscout/protocol";
 import { SCOUT_SESSION_INPUT_RECEIPTS_CAPABILITY } from "@openscout/protocol";
 import { deliverInPlace } from "./in-place/deliver.js";

@@ -78,3 +78,9 @@ describe("runtime bridge management", () => {
     await manager.configure(config); expect(manager.read().config?.remoteDiagnostics).toEqual([]);
   });
 });
+
+
+test("bridge management loads after the broker instance bootstrap", () => {
+  const source = readFileSync(new URL("./broker-daemon.ts", import.meta.url), "utf8");
+  expect(source.match(/^import .*$/m)?.[0]).toBe('import { openScoutCheckoutInstanceDefault, openScoutInstanceBootstrap } from "./instance-checkout-bootstrap.js";');
+});
