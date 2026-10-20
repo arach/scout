@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, type Server, type Socket } from "node:net";
@@ -144,14 +144,13 @@ function fakeCommand(subcommand: "scan" | "diff"): RepoServiceCommand {
 }
 
 function writeFallbackRepoService(): RepoServiceCommand {
-  const script = join(tempRoot, "repo-service-fallback.sh");
-  writeFileSync(script, [
-    "#!/bin/sh",
+  // Invoke the known shell directly: first-launch validation of a newly
+  // executable file must not consume the strict 1s transport-fallback budget.
+  const script = [
     "cat >/dev/null",
     "printf '%s\\n' '{\"schema\":\"openscout.repo.scan/v1\",\"generatedAt\":2,\"projects\":[],\"coverage\":{},\"diagnostics\":[]}'",
-  ].join("\n"));
-  chmodSync(script, 0o755);
-  return { command: script, args: ["scan"], subcommand: "scan" };
+  ].join("\n");
+  return { command: "/bin/sh", args: ["-c", script, "repo-service-fallback", "scan"], subcommand: "scan" };
 }
 
 async function startRepoServer(

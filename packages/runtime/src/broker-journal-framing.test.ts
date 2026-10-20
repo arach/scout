@@ -6,7 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileBackedBrokerJournal, type BrokerJournalEntry } from "./broker-journal.js";
 import { BrokerDurableStore } from "./broker-durable-store.js";
-import { decodeJournalLine, encodeJournalEntries, JOURNAL_FRAME_LIMITS, journalLines } from "./broker-journal-framing.js";
+import { decodeJournalLine, encodeJournalEntries, encodeJournalGeneration, JOURNAL_FRAME_LIMITS, journalLines } from "./broker-journal-framing.js";
+import { BrokerMessageHistory } from "./broker-message-history.js";
 import { HistoryLeaf } from "./message-history/store.js";
 
 const roots: string[] = [];
@@ -38,6 +39,58 @@ test("checksum/count/nested-frame failures do not expose an earlier valid entry"
   expect(() => decodeJournalLine(JSON.stringify({ ...frame, payload: frame.payload.replace("one", "two") }))).toThrow("invalid_journal_batch");
   const payload = JSON.stringify([entries[0], { kind: "journal.batch" }]);
   expect(() => decodeJournalLine(JSON.stringify({ ...frame, payload, sha256: createHash("sha256").update(payload).digest("hex") }))).toThrow("invalid_journal_batch_entries");
+});
+
+test("generation headers are physical metadata and cannot be nested in an accepted batch", () => {
+  const header = encodeJournalGeneration();
+  expect(decodeJournalLine(header)).toEqual([]);
+  expect(encodeJournalGeneration()).not.toBe(header);
+  const value = JSON.parse(header);
+  expect(() => decodeJournalLine(JSON.stringify({ ...value, version: 2 }))).toThrow("unsupported_journal_generation");
+  expect(() => decodeJournalLine(JSON.stringify({ ...value, id: "not-a-generation" }))).toThrow("unsupported_journal_generation");
+  const payload = JSON.stringify([entries[0], value]);
+  expect(() => decodeJournalLine(JSON.stringify({ kind: "journal.batch", version: 1, count: 2,
+    sha256: createHash("sha256").update(payload).digest("hex"), payload }))).toThrow("invalid_journal_batch_entries");
+});
+
+test.each([false, true])("fresh journals carry a generation before any rewrite (history=%s)", async diskHistory => {
+  const { path } = await setup();
+  const history = diskHistory ? await BrokerMessageHistory.create(path) : undefined;
+  const journal = new FileBackedBrokerJournal(path, { messageHistory: history });
+  try {
+    await journal.load();
+    if (history) {
+      const created = JSON.parse((await readFile(path, "utf8")).trim());
+      expect(created).toMatchObject({ kind: "journal.generation", version: 1 });
+      expect((await journal.captureReplayBoundary()).fileIdentity).toEndWith(`:${created.id}`);
+    }
+    await journal.appendEntries(entries);
+    const lines = (await readFile(path, "utf8")).trimEnd().split("\n").map(line => JSON.parse(line));
+    expect(lines[0]).toMatchObject({ kind: "journal.generation", version: 1 });
+    expect(lines[0].id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(lines.filter(line => line.kind === "journal.generation")).toHaveLength(1);
+    const boundary = await journal.captureReplayBoundary();
+    expect(boundary.fileIdentity).toEndWith(`:${lines[0].id}`);
+    await journal.appendEntries(retire("later"));
+    expect((await journal.captureReplayBoundary()).fileIdentity).toBe(boundary.fileIdentity);
+    const restored = new FileBackedBrokerJournal(path);
+    expect((await restored.load()).validEntries).toBe(3);
+    expect((await restored.captureReplayBoundary()).fileIdentity).toBe(boundary.fileIdentity);
+    expect([...restored.retiredActorIds()]).toEqual(["one", "snow-雪-\ud800", "later"]);
+  } finally { await history?.close(); }
+});
+
+test("appending a legacy journal keeps its headerless framing until rewrite", async () => {
+  const { path } = await setup();
+  await writeFile(path, JSON.stringify(retire("legacy")) + "\n");
+  const journal = new FileBackedBrokerJournal(path);
+  await journal.load();
+  const before = await journal.captureReplayBoundary();
+  expect(before.fileIdentity).toMatch(/^\d+:\d+$/);
+  await journal.appendEntries(retire("after"));
+  expect((await readFile(path, "utf8")).split("\n").filter(Boolean).map(line => JSON.parse(line).kind))
+    .toEqual(["actor.delete", "actor.delete"]);
+  expect((await journal.captureReplayBoundary()).fileIdentity).toBe(before.fileIdentity);
 });
 
 test("bounded scans reject oversized records instead of certifying truncated history", async () => {

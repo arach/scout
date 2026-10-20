@@ -272,8 +272,12 @@ describe("basic scan lifecycle", () => {
     writeFileSync(join(root, "session.jsonl"), '{"type":"user","message":{"content":"needle"}}\n');
     const pidPath = join(root, "child.pid");
     const executable = join(root, "fixture-rg");
-    writeFileSync(executable, `#!${process.execPath}\nimport { writeFileSync } from "node:fs";\nprocess.on("SIGTERM", () => {});\nwriteFileSync(${JSON.stringify(pidPath)}, String(process.pid));\nsetInterval(() => {}, 1000);\n`);
+    writeFileSync(executable, `#!${process.execPath}\nif (process.argv.includes("--fixture-warmup")) process.exit(0);\nimport { writeFileSync } from "node:fs";\nprocess.on("SIGTERM", () => {});\nwriteFileSync(${JSON.stringify(pidPath)}, String(process.pid));\nsetInterval(() => {}, 1000);\n`);
     chmodSync(executable, 0o755);
+    // First-launch validation must not consume the owned-child PID handshake.
+    expect(await Bun.spawn([executable, "--fixture-warmup"], { stdout: "ignore", stderr: "pipe" }).exited).toBe(0);
+    expect(existsSync(pidPath)).toBe(false);
+
     process.env.OPENSCOUT_RG_PATH = executable;
     const controller = new AbortController();
     const pending = scanRecentSessionKnowledge({ q: "needle", harness: "claude", signal: controller.signal, budgetMs: 5000 });
@@ -314,9 +318,13 @@ describe("basic scan lifecycle", () => {
     writeFileSync(transcript, record + "\n");
     const pidPath = join(root, "partial-rg.pid");
     const executable = join(root, "fixture-rg-partial");
-    const output = `${transcript}\0${1}:${0}:${record}\n`;
-    writeFileSync(executable, `#!${process.execPath}\nimport { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(pidPath)}, String(process.pid));\nawait Bun.write(Bun.stdout, ${JSON.stringify(output)});\nsetInterval(() => {}, 1000);\n`);
+    // Warm the executable outside the collection budget (first-launch validation
+    // on macOS can itself exceed 250ms). Shell builtins then publish immediately;
+    // exec keeps the blocked producer PID owned by the scanner for reaping.
+    const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
+    writeFileSync(executable, `#!/bin/sh\nif [ "$1" = "--warmup" ]; then exit 0; fi\nprintf '%s\\n' "$$" > ${quote(pidPath)}\nprintf '%s\\000%s\\n' ${quote(transcript)} ${quote(`1:0:${record}`)}\nexec /bin/sleep 30\n`);
     chmodSync(executable, 0o755);
+    expect(await Bun.spawn([executable, "--warmup"], { stdout: "ignore", stderr: "pipe" }).exited).toBe(0);
     process.env.OPENSCOUT_RG_PATH = executable;
     const result = await scanRecentSessionKnowledge({ q: "needle", harness: "claude", budgetMs: 250 });
     expect(existsSync(pidPath)).toBe(true);
