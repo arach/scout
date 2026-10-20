@@ -51,10 +51,11 @@ export function diagnosticSource(client?: DiagnosticClient): string {
 /** Applied to notes, errors and diagnostic output before either disk or network. */
 export function redactDiagnosticText(text: string): string {
   return text
-    .replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/g, "[REDACTED PRIVATE KEY]")
+    .replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?(?:-----END [^-]*PRIVATE KEY-----|$)/g, "[REDACTED PRIVATE KEY]")
     .replace(/\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, "[REDACTED AUTH]")
     .replace(/\b(?:sk-(?:proj-)?|gh[pousr]_|github_pat_|xox[baprs]-|osn_session_)[A-Za-z0-9_-]+/g, "[REDACTED TOKEN]")
-    .replace(/(["']?(?:[\w.-]*(?:token|secret|password|credential|api[_-]?key|authorization|cookie)[\w.-]*)["']?\s*[:=]\s*)(?:"[^"\n]*"|'[^'\n]*'|[^\s,;}]+)/gi, "$1[REDACTED]")
+    // Start only at a whole credential key, not every suffix of a long word.
+    .replace(/(["']?)(?<![\w.-])(?=[\w.-]*(?:token|secret|password|credential|api[_-]?key|authorization|cookie))([\w.-]+)\1(\s*[:=]\s*)(?:"[^"\n]*"|'[^'\n]*'|[^\s,;}]+)/gi, "$1$2$1$3[REDACTED]")
     .replace(/https?:\/\/[^\s<>"']+/g, (raw) => {
       try { const u = new URL(raw); u.username = ""; u.password = ""; u.search = ""; u.hash = ""; return u.toString(); } catch { return "[URL]"; }
     })
