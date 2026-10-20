@@ -23,6 +23,23 @@ This is a source audit, not proof of the executable installed on a remote.
 Scout therefore checks capability at execution time instead of assuming a
 version or retrying without the flag.
 
+A separate receipt spot-check at `v0.2.84` (commit
+`3c0052604c1b20d4f4c42d7dc7e91d3afa560ea7`) confirms that
+`scout mesh trust install-grant - --tier <t> --json` prints a JSON object
+containing `peer.keyId` and `peer.tier` on success. For an observe grant, its
+shape is `{"peer":{"keyId":"<key-id>","tier":"observe"}}` with additional
+peer metadata. The
+[global argument parser](https://github.com/oscout/scout/blob/v0.2.84/apps/desktop/src/cli/argv.ts#L13-L22)
+consumes `--json` before subcommand parsing. The
+[grant installer](https://github.com/oscout/scout/blob/v0.2.84/apps/desktop/src/core/mesh/trust-service.ts#L136-L165)
+returns the runtime's peer record, including its key ID and requested tier;
+the [command](https://github.com/oscout/scout/blob/v0.2.84/apps/desktop/src/cli/commands/mesh-trust.ts#L545-L560)
+wraps it in `{peer}`, and the
+[JSON formatter](https://github.com/oscout/scout/blob/v0.2.84/apps/desktop/src/cli/output.ts#L18-L23)
+serializes that object. This is an additional source check of the earliest
+tag, not a receipt audit of all 35 tags or an execution of an old binary.
+The execution-time capability and receipt checks remain fail-closed.
+
 An old or unknown remote gets a clear upgrade refusal before a grant is sent
 when its help cannot confirm support. If it rejects the explicit flag, Scout
 does not fall back to implicit `control`. A zero exit with a missing, malformed,
