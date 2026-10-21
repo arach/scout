@@ -57,6 +57,9 @@ describe("passive runtime provider quota consumer", () => {
     const text = renderProviderUsageReport(report);
     expect(text).toContain('account "Account A"'); expect(text).toContain('account "Account B"');
     expect(text).toContain('endpoint "endpoint-1"'); expect(text).toContain('endpoint "endpoint-2"');
+    const sharedEndpoint = buildProviderUsageReport(quota([window(), window({ id: "another-account", accountId: "Account B" })]), format);
+    expect(sharedEndpoint.providers).toHaveLength(2);
+    expect(() => buildProviderQuotaMap(sharedEndpoint, { now: NOW })).toThrow("pool_ambiguous");
   });
   test("same account across endpoints/sessions remains separate, while its windows stay distinct", () => {
     const report = buildProviderUsageReport(quota([window(), window({ id: "5h", label: "5h" }), window({ id: "other", endpointId: "endpoint-2", sessionId: "session-2" })]), format);
