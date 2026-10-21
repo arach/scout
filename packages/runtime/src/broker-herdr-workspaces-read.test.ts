@@ -105,7 +105,7 @@ test("session is an exact bounded selector, not arbitrary extra probing", async 
 });
 
 class Reply extends EventEmitter { status = 0; body = ""; writableEnded = false; writeHead(status: number) { this.status = status; } end(body = "") { this.body += body; this.writableEnded = true; } }
-test("HTTP local inventory tier refuses remote, guest, scoped, origin and forwarded callers before probing", async () => {
+test("HTTP probe route requires identified local transport, unlike cache-only observed sessions", async () => {
   let reads = 0;
   const route = createBrokerHttpRouter({ brokerService: {}, host: "local", port: 1, nodeId: "node-test", runtime: {},
     herdrWorkspaces: { ...deps(), sessions: async () => { reads++; return snapshot([]); } },
@@ -113,12 +113,16 @@ test("HTTP local inventory tier refuses remote, guest, scoped, origin and forwar
   } as unknown as BrokerHttpRouterDeps);
   for (const transportContext of [undefined, { transport: "unix-socket" }, { transport: "loopback" }, { transport: "remote" }, { transport: "loopback", guest: {} }, { transport: "loopback", scoped: {} }]) {
     const reply = new Reply(); await route({ method: "GET", url: path, headers: {}, transportContext } as any, reply as any);
-    expect(reply.status).toBe(!transportContext || ["unix-socket", "loopback"].includes(transportContext.transport) && !("guest" in transportContext) && !("scoped" in transportContext) ? 200 : 403);
+    expect(reply.status).toBe(transportContext && ["unix-socket", "loopback"].includes(transportContext.transport) && !("guest" in transportContext) && !("scoped" in transportContext) ? 200 : 403);
   }
+  expect(reads).toBe(2); // Missing context cannot authorize a subprocess probe.
+  const unidentified = new Reply();
+  await route({ method: "GET", url: path, headers: {} } as any, unidentified as any);
+  expect(JSON.parse(unidentified.body)).toEqual({ error: "local_only" });
   for (const headers of [{ origin: "https://example.invalid" }, { "x-openscout-forwarded-node-id": "remote" }]) {
-    const reply = new Reply(); await route({ method: "GET", url: path, headers } as any, reply as any); expect(reply.status).toBe(403);
+    const reply = new Reply(); await route({ method: "GET", url: path, headers, transportContext: { transport: "loopback" } } as any, reply as any); expect(reply.status).toBe(403);
   }
-  expect(reads).toBe(3); expect(meshRouteMatrixEntries()[`GET ${path}`]).toBe("local");
+  expect(reads).toBe(2); expect(meshRouteMatrixEntries()[`GET ${path}`]).toBe("local");
 });
 
 /** Only a disposable executable, never the installed Herdr or a real session. */
