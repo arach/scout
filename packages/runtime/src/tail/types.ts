@@ -1,3 +1,5 @@
+import type { ClassifiedPrompt } from "@openscout/agent-sessions";
+
 /**
  * Launch attribution for a tailed transcript. The runtime/harness name shown
  * to users is carried by `source` ("claude", "codex", "quad", ...).
@@ -37,6 +39,10 @@ export type TailEvent = {
   harness: TailHarness;
   kind: TailEventKind;
   summary: string;
+  /** A user turn split by its harness's adapter into the operator's words and
+   *  the harness's own markup. Present when the source's adapter classifies
+   *  prompts; render from this rather than parsing `summary`. */
+  prompt?: ClassifiedPrompt;
   raw?: unknown;
 };
 

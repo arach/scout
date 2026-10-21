@@ -493,6 +493,12 @@
       "types": "./dist/lan-network.d.ts",
       "import": "./dist/lan-network.js",
       "default": "./dist/lan-network.js"
+    },
+    "./delivery-client": {
+      "bun": "./src/delivery-client.ts",
+      "types": "./dist/delivery-client.d.ts",
+      "import": "./dist/delivery-client.js",
+      "default": "./dist/delivery-client.js"
     }
   },
   "types": "./dist/index.d.ts",
@@ -504,6 +510,7 @@
     "!src/**/test-helpers/**",
     "drizzle",
     "README.md",
+    "DELIVERY.md",
     "LICENSE"
   ],
   "scripts": {

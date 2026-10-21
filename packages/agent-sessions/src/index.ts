@@ -3,6 +3,7 @@ export * from "./protocol/adapter.js";
 export * from "./protocol/approval-normalization.js";
 export * from "./protocol/cost.js";
 export * from "./protocol/budget-observations.js";
+export * from "./protocol/prompt-parts.js";
 export {
   readAdapterBudgetObservations,
 } from "./adapters/budget-observations.js";
