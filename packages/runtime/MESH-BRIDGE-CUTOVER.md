@@ -1,4 +1,52 @@
-# Mesh bridge cutover gate
+# Mesh bridge upgrade preflight
+
+## Before upgrading an enabled bridge
+
+Run `openscout-runtime mesh-bridge-preflight` on **every bridge-enabled machine
+before upgrading past the removal of the implicit CLI fallback**. Repeat it for
+each enabled instance. Do not switch the running service to the new runtime
+until this check passes.
+
+Use the candidate runtime that contains this command, not an older installed
+runtime that does not recognize it:
+
+```bash
+openscout-runtime mesh-bridge-preflight
+```
+
+If the candidate is a Scout checkout rather than an installed executable, run
+this equivalent command from that checkout's root:
+
+```bash
+bun packages/runtime/bin/openscout-runtime.mjs mesh-bridge-preflight
+```
+
+Run the check **as the service runs**: the same uid, home and instance, with the
+same support root, extension root and BIN environment. In particular, preserve
+`HOME`, `OPENSCOUT_INSTANCE`, `OPENSCOUT_SUPPORT_DIRECTORY`, `SCOUT_HOME`,
+`OPENSCOUT_HOME`, `OPENSCOUT_EXTENSIONS_HOME`, `OPENSCOUT_MESH_BRIDGE_BIN` and
+`OPENSCOUT_BASE_MESH_BRIDGE_ENABLED` where the service sets them. An installer's
+shell or another account can inspect different configuration and give a
+misleading result.
+
+Output is JSON; optional `--json` is also accepted.
+
+- **Exit 0:** this instance passes the selection gate. An enabled bridge has a
+  trusted extension or an available explicit BIN. Disabled or unconfigured
+  instances also return 0, so check that `enabled` matches the intended service.
+  This is not a relay-authentication, network-health or legacy-handoff check.
+- **Exit 78:** do not upgrade yet. Read `reason` and `fix`. Stage the trusted
+  mesh artifact, or configure an explicit absolute `OPENSCOUT_MESH_BRIDGE_BIN`
+  in the service environment, before upgrading. A refused or removed artifact
+  blocks BIN too: repair that installation rather than trying to bypass it.
+  Repair invalid bridge configuration if reported. Rerun the preflight and
+  require exit 0; otherwise, **do not upgrade**.
+
+The preflight does **not** start a bridge, enable one, install an artifact or
+migrate a legacy owner. Legacy-owner handoff remains a separate operation even
+when the check returns 0.
+
+## Selection contract
 
 An enabled bridge requires a trusted installed `mesh` extension, or an explicit
 `OPENSCOUT_MESH_BRIDGE_BIN` when the extension is absent. The runtime no longer
@@ -28,11 +76,10 @@ remain in force. No migration test should start a second relay connection.
 
 ## Required installer / cutover checklist
 
-The consuming product's cutover checklist must incorporate these steps before
-this runtime is adopted. Keep this change in draft until that checklist exists.
-For each machine **and each enabled instance**:
+Use these steps before adopting the runtime on each machine **and each enabled
+instance**:
 
-1. Inventory its bridge configuration and service environment, including any
+1. Identify its bridge configuration and service environment, including any
    legacy LaunchAgent. Do not infer production readiness from a dev instance.
 2. Stage the mesh artifact before switching the runtime. From the matching
    public Scout checkout, with a Scout CLI that supports extension installation:
@@ -49,7 +96,7 @@ For each machine **and each enabled instance**:
    environment**, not just an installer shell. Keep its artifact available
    through restart and rollback. Changing service environment requires the normal
    authorized service restart; it cannot mutate an already running daemon.
-3. Run the one-command gate using the candidate runtime, with the **same uid,
+3. Run the one-command gate using the candidate runtime, with the **same uid, home,
    instance, support directory and extension-root/BIN environment as scout-base**:
 
    ```bash

@@ -28,10 +28,18 @@ Web and Scoutbot source entries require explicit configuration. See the
 [durable entry contract](./SUPERVISION.md) for installer ordering, reload
 boundaries and the temporary installed-npm web compatibility exception.
 
-An enabled mesh bridge also requires an installed `mesh` extension or an
-explicit CLI override. Run `openscout-runtime mesh-bridge-preflight` before
-upgrading; see the [mesh bridge cutover gate](./MESH-BRIDGE-CUTOVER.md) for
-installation ordering and refusal diagnostics.
+### Mesh bridge upgrade requirement
+
+Run `openscout-runtime mesh-bridge-preflight` on **every bridge-enabled machine
+before upgrading past the removal of the implicit CLI fallback**. Use the
+candidate runtime and the service's uid, home, instance and environment. Exit
+78 blocks the upgrade: stage a trusted mesh extension or an explicit absolute
+CLI override, repair any refused artifact (which blocks overrides too), then
+rerun the check. Otherwise, do not upgrade.
+
+See the [public mesh bridge upgrade note](./MESH-BRIDGE-CUTOVER.md) for the
+checkout command, exit-code meanings, service environment and installation
+ordering. The preflight neither starts a bridge nor migrates a legacy owner.
 
 ## Quickstart: embed the in-memory runtime
 
