@@ -72,6 +72,57 @@ manifest without them still loads. These additions do not change argv or the
 environment contract, so they do not require an API version change. Older
 loaders ignore these fields and do not provide the new help or completion.
 
+## Reserved commands and unavailable errors
+
+The command registry can reserve a verb for an extension. A reserved verb
+never becomes an implicit ask or a `scout-<verb>` executable from PATH. Its
+registration remains reserved after removal. The six app verbs (`app`, `menu`,
+`server`, `web`, `pair` and `install`) remain built-ins until their separate
+cutover changes their registrations.
+
+If a reserved extension is unavailable, Scout exits with **69**
+(`EX_UNAVAILABLE`). With `--json`, Scout writes exactly one JSON object and a
+newline to **stderr**, with no stdout output:
+
+```json
+{"schema":"scout.cli.command-unavailable/v1","error":"command_unavailable","command":"sample","reason":"missing"}
+```
+
+The schema ID, error name, command name, reason and exit code form the machine
+contract. Plain mode uses the same exit code and includes the reason with
+installation or repair guidance. Do not parse the remaining prose.
+
+| Reason | Meaning |
+| --- | --- |
+| `missing` | No installation exists in the selected extension roots. |
+| `tombstoned` | The selected installation has `disabled: true`. |
+| `refused` | Trust, containment, permissions or optional metadata checks refuse the artifact. |
+| `incompatible` | The executable artifact declares an unsupported extension API. |
+| `corrupt` | The installation has a damaged generation, missing or malformed manifest, missing command, or invalid instance binding. |
+| `wrong_instance` | The artifact declares a different instance from the selected CLI instance. |
+
+Scout resolves a reserved extension before automatic broker maintenance. Each
+unavailable state, including unavailable help, refuses without an implicit ask,
+extension execution, broker maintenance, restart or app start. A valid extension
+retains normal dispatch and maintenance policy. Built-ins still take priority.
+An unregistered verb retains extension lookup followed by implicit-ask parsing.
+
+### Optional instance binding
+
+An API-1 manifest can declare `"instance": "prod"` or another canonical Scout
+instance name. If present, it must match the selected CLI instance. The installer
+checks it before publishing a generation; the loader checks it again before
+execution or documentation lookup. Unbound API-1 artifacts remain portable.
+This field is a local selection guard, not authentication or broker identity.
+Older loaders ignore it; use a CLI with this contract when binding is required.
+The field does not add environment variables to the extension runner contract.
+
+Scout never searches another instance's home to diagnose an absent artifact.
+An artifact present only in another isolated home therefore produces `missing`,
+not `wrong_instance`. A damaged primary installation or tombstone blocks legacy
+fallback, including a dangling managed-generation pointer. These checks do not
+provide a signed artifact inventory or detect every post-install byte change.
+
 ## Trust and runtime access
 
 Install only code you trust as your own user. Extensions are not sandboxed.

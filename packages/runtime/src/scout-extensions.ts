@@ -1,6 +1,7 @@
+import { normalizeOpenScoutInstanceName, resolveOpenScoutInstanceName } from "./instance.js";
 import { untrustedPathMetadata } from "./path-trust.js";
 import { createHash } from "node:crypto";
-import { accessSync, closeSync, constants, fstatSync, openSync, readSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { accessSync, closeSync, constants, fstatSync, lstatSync, openSync, readSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { resolveScoutHome, scoutHomeReadRoots } from "./scout-home.js";
 
@@ -22,6 +23,8 @@ import { resolveScoutHome, scoutHomeReadRoots } from "./scout-home.js";
 /** The contract version in extension.json's "api" field. Bump it on any breaking change to scoutExtensionEnv. */
 export const SCOUT_EXTENSION_API_VERSION = 1;
 
+export type ScoutExtensionRefusalReason = "refused" | "incompatible" | "corrupt" | "wrong_instance";
+
 export type ScoutExtension = {
   name: string;
   command: string;
@@ -37,6 +40,8 @@ export type ScoutExtension = {
   docs?: string;
   /** Set when the extension is installed but must not run, with the reason. */
   refused?: string;
+  /** Stable classification; never infer machine behavior from refused prose. */
+  refusalReason?: ScoutExtensionRefusalReason;
 };
 
 type Env = NodeJS.ProcessEnv;
@@ -161,33 +166,40 @@ export function readScoutExtensionDocs(extension: ScoutExtension, env: Env = pro
   return current.docs ? readExtensionFile(current.docs, SCOUT_EXTENSION_DOCS_MAX_BYTES) : undefined;
 }
 
-function readInstalled(root: string, name: string): ScoutExtension | undefined {
+function readInstalled(root: string, name: string, env: Env): ScoutExtension | undefined {
   const dir = join(root, name);
   const manifestPath = join(dir, "extension.json");
   // From here the folder is an installed extension. When it cannot run, say why instead of
   // skipping it, so it does not look uninstalled and an older copy in ~/.openscout cannot run in its place.
-  const refuse = (command: string, reason: string, summary?: string): ScoutExtension =>
-    ({ name, command, summary, root, refused: `the ${name} extension ${reason}` });
+  const refuse = (command: string, reason: string, summary?: string, refusalReason: ScoutExtensionRefusalReason = "refused"): ScoutExtension =>
+    ({ name, command, summary, root, refused: `the ${name} extension ${reason}`, refusalReason });
+  // A missing manifest or dangling generation is damaged, not an absent install.
+  // Preserve its precedence over a legacy-home artifact.
+  try { lstatSync(dir); } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return undefined;
+    return refuse(dir, "cannot read its installation directory.");
+  }
   try { statSync(manifestPath); }
   catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT" || code === "ENOTDIR") return undefined;
+    if (code === "ENOENT" || code === "ENOTDIR") return refuse(manifestPath, "has a missing manifest or damaged generation; install it again.", undefined, "corrupt");
     return refuse(manifestPath, permissionDenied(error)
       ? `cannot read its extension.json: permission denied (${code}).`
       : `cannot read its extension.json (${manifestPath}).`);
   }
-  let manifest: { summary?: unknown; command?: unknown; api?: unknown; version?: unknown; disabled?: unknown; completion?: unknown; complete?: unknown; docs?: unknown };
+  let manifest: { summary?: unknown; command?: unknown; api?: unknown; version?: unknown; disabled?: unknown; completion?: unknown; complete?: unknown; docs?: unknown; instance?: unknown };
   try {
     manifest = JSON.parse(readExtensionFile(realpathSync(manifestPath), 16 * 1024));
   } catch (error) {
     return refuse(manifestPath, permissionDenied(error)
       ? `cannot read its extension.json: permission denied (${(error as NodeJS.ErrnoException).code}).`
-      : `has an extension.json Scout cannot read as JSON (${manifestPath}).`);
+      : `has an extension.json Scout cannot read as JSON (${manifestPath}).`, undefined, permissionDenied(error) ? "refused" : "corrupt");
   }
-  if (!manifest || typeof manifest !== "object") return refuse(manifestPath, `has an extension.json that is not a JSON object (${manifestPath}).`);
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) return refuse(manifestPath, `has an extension.json that is not a JSON object (${manifestPath}).`, undefined, "corrupt");
   const summary = typeof manifest.summary === "string" ? manifest.summary : undefined;
   if (manifest.disabled === true) return { ...refuse(manifestPath, "was removed; install it again to enable it.", summary), removed: true };
-  if (typeof manifest.command !== "string" || !manifest.command) return refuse(manifestPath, `has no "command" in its extension.json.`, summary);
+  if (typeof manifest.command !== "string" || !manifest.command) return refuse(manifestPath, `has no "command" in its extension.json.`, summary, "corrupt");
   const command = resolve(dir, manifest.command);
   let realRoot: string, realDir: string, realCommand: string;
   try {
@@ -195,7 +207,7 @@ function readInstalled(root: string, name: string): ScoutExtension | undefined {
   } catch (error) {
     return refuse(command, permissionDenied(error)
       ? `cannot resolve ${command}: permission denied (${(error as NodeJS.ErrnoException).code}).`
-      : `runs ${command}, which does not exist.`, summary);
+      : `runs ${command}, which does not exist.`, summary, permissionDenied(error) ? "refused" : "corrupt");
   }
   if (!isInside(realDir, realCommand)) {
     return refuse(command, `runs ${command}, which is outside the extension's folder. Scout runs only files inside it.`, summary);
@@ -203,7 +215,7 @@ function readInstalled(root: string, name: string): ScoutExtension | undefined {
   const executable = executableProblem(realCommand);
   if (executable) return refuse(command, `runs ${command}, which ${executable}.`, summary);
   if (!SUPPORTED_EXTENSION_APIS.has(manifest.api)) {
-    return refuse(command, `is built for extension API ${String(manifest.api ?? "(none)")}; this scout supports API ${[...SUPPORTED_EXTENSION_APIS].join(", ")}. Update scout or the extension.`, summary);
+    return refuse(command, `is built for extension API ${String(manifest.api ?? "(none)")}; this scout supports API ${[...SUPPORTED_EXTENSION_APIS].join(", ")}. Update scout or the extension.`, summary, "incompatible");
   }
   const problem = untrustedChain(realRoot, realDir, realCommand);
   if (problem) return refuse(command, `cannot be trusted: ${problem}. Fix its ownership and remove write permission for others before Scout will run it.`, summary);
@@ -227,6 +239,18 @@ function readInstalled(root: string, name: string): ScoutExtension | undefined {
   } catch {
     return refuse(command, "has invalid or untrusted completion/documentation metadata.", summary);
   }
+  // Optional instance binding is a local selection guard, not authorization.
+  // Unbound API-1 artifacts remain portable; never scan another instance home.
+  if (manifest.instance !== undefined) {
+    let instance: string;
+    try {
+      if (typeof manifest.instance !== "string" || !manifest.instance) throw new Error("invalid instance");
+      instance = normalizeOpenScoutInstanceName(manifest.instance);
+      if (instance !== manifest.instance) throw new Error("noncanonical instance");
+    } catch { return refuse(command, "has an invalid instance binding.", summary, "corrupt"); }
+    if (instance !== resolveOpenScoutInstanceName(env)) return refuse(command,
+      `is installed for instance ${instance}, not the selected instance ${resolveOpenScoutInstanceName(env)}. Install the matching artifact.`, summary, "wrong_instance");
+  }
   return { name, command, summary, root, docs, complete, completion, ...(typeof manifest.version === "string" ? { version: manifest.version } : {}) };
 }
 
@@ -234,7 +258,7 @@ function readInstalled(root: string, name: string): ScoutExtension | undefined {
 export function findScoutExtension(name: string, env: Env = process.env): ScoutExtension | undefined {
   if (!NAME.test(name)) return undefined;
   for (const root of scoutExtensionRoots(env)) {
-    const extension = readInstalled(root, name);
+    const extension = readInstalled(root, name, env);
     if (extension) return extension;
   }
   return undefined;
@@ -248,7 +272,7 @@ export function listScoutExtensions(env: Env = process.env): ScoutExtension[] {
     try { entries = readdirSync(root); } catch { continue; }
     for (const entry of entries) {
       if (found.has(entry) || !NAME.test(entry)) continue;
-      const extension = readInstalled(root, entry);
+      const extension = readInstalled(root, entry, env);
       if (extension) found.set(entry, extension);
     }
   }
