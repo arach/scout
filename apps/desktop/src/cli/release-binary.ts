@@ -298,9 +298,9 @@ export async function installReleaseBinary(options: ReleaseBinaryOptions): Promi
     writeFileSync(archivePath, bytes);
     const unpacked = join(work, options.version);
     mkdirSync(unpacked, { recursive: true });
-    const tar = spawnSync("tar", ["-xzf", archivePath, "-C", unpacked], { encoding: "utf8" });
+    const tar = spawnSync("tar", ["-xzf", archivePath, "-C", unpacked], { encoding: "utf8", timeout: 30_000, killSignal: "SIGKILL" });
     if (tar.status !== 0) {
-      throw new ScoutCliError(`Couldn't unpack ${archive}: ${(tar.stderr || tar.error?.message || "tar failed").trim()}`);
+      throw new ScoutCliError(`Couldn't unpack ${archive}: ${(tar.error?.message || tar.stderr || "tar failed").trim()}`);
     }
     const binary = join(unpacked, options.name);
     if (!existsSync(binary)) throw new ScoutCliError(`${archive} doesn't contain ${options.name}; not installing it.`);
