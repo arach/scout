@@ -543,8 +543,8 @@ export async function requestScoutBrokerJsonWithTrace<T>(
     if (parsedJson && options.acceptErrorJson?.(parsed)) {
       return { value: parsed, trace };
     }
-    // The census includes t3_* codes. Require absolute end-of-input too:
-    // JavaScript's `$` would also accept a token followed by a line break.
+    // The census includes t3_* codes. The final assertion pins end-of-input,
+    // even if a future edit adds the multiline flag.
     const code = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
       && Object.hasOwn(parsed, "error") && "error" in parsed && typeof parsed.error === "string"
       && /^[a-z_][a-z0-9_]{0,127}(?![\s\S])/.test(parsed.error)
