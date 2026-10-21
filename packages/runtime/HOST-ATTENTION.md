@@ -71,6 +71,8 @@ allocating too much memory. A timed-out worker slot retires, so a callback
 that ignores abort cannot cause more than six outstanding captures in one
 collection. Other rows remain explicitly unscanned.
 
+Across collections, a capture implementation must either honor abort or bound its own in-flight captures globally, and a timer-driven caller must not start a new collection while a previous collection's captures are still pending.
+
 ## Adoption boundary
 
 The web keeps state-based candidate ranking and presentation IDs/actions.
