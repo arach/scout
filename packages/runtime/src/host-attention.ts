@@ -2,7 +2,7 @@
  * happens on import. A rendered prompt is an observation, not answer authority. */
 import { createHash } from "node:crypto";
 import { formatTerminalSurfaceId } from "@openscout/protocol";
-import type { HostReadAvailability, TmuxHostAttentionObservation, TmuxHostAttentionRead, TmuxHostAttentionTarget } from "@openscout/protocol";
+import type { TmuxHostAttentionAnswer, HostReadAvailability, TmuxHostAttentionObservation, TmuxHostAttentionRead, TmuxHostAttentionTarget } from "@openscout/protocol";
 
 export const TMUX_HOST_ATTENTION_LIMITS = Object.freeze({
   maxCandidates: 24, captureConcurrency: 6, captureTimeoutMs: 2_000,
@@ -161,17 +161,7 @@ export const TMUX_HOST_ATTENTION_ANSWER_LIMITS = Object.freeze({
   captureTimeoutMs: 2_000, sendTimeoutMs: 2_000, verificationTimeoutMs: 2_000,
   verificationIntervalMs: 50, maxVerificationCaptures: 8, maxConcurrentAnswers: 6, maxAttempts: 256,
 });
-export type TmuxHostAttentionAnswer = {
-  outcome: "answered" | "stale" | "gone" | "unverified" | "failed" | "refused";
-  /** `sent` means the injected transport resolved, not a native harness acknowledgement. */
-  effect: "not_sent" | "sent" | "unknown";
-  /** Present only on busy: this pane’s hold age, or the oldest hold at global capacity. */
-  heldForMs?: number;
-  reason: "dialog_disappeared" | "prompt_changed" | "prompt_gone" | "dialog_still_present"
-    | "different_dialog" | "capture_failed" | "capture_truncated" | "capture_timeout"
-    | "send_failed" | "send_timeout" | "aborted" | "invalid_request" | "nonlocal_ref"
-    | "local_identity_unknown" | "unsupported_options" | "busy" | "already_attempted" | "attempt_capacity";
-};
+export type { TmuxHostAttentionAnswer, HerdrHostAttentionAnswer } from "@openscout/protocol";
 export type TmuxHostAttentionAnswerInput = {
   target: TmuxHostAttentionTarget;
   promptVersion: string;
@@ -332,3 +322,6 @@ function findLastIndex(values: readonly string[], predicate: (value: string, ind
   for (let index = values.length - 1; index >= 0; index--) if (predicate(values[index]!, index)) return index;
   return -1;
 }
+
+export { collectHerdrHostAttention, HERDR_HOST_ATTENTION_LIMITS } from "./herdr-host-attention.js";
+export type { HerdrHostAttentionCapture, HerdrHostAttentionCaptureEvidence } from "./herdr-host-attention.js";
