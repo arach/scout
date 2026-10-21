@@ -1747,7 +1747,7 @@ describe("staged supervision handoff discovery", () => {
   });
   test("remote, forwarded, browser, guest and unclassified callers cannot use the handshake", async () => {
     const h = createHarness();
-    for (const context of [undefined, { transport: "remote" }, { transport: "loopback", guest: {} }, { transport: "loopback", scoped: {} }]) {
+    for (const context of [undefined, { transport: "unexpected" }, { transport: "remote" }, { transport: "loopback", guest: {} }, { transport: "loopback", scoped: {} }]) {
       expect((await requestRouter(h, "GET", "/v1/supervision-handoff", { transportContext: context as never })).response.status).toBe(403);
     }
     for (const headers of [{ origin: "http://fixture.invalid" }, { "x-openscout-forwarded-node-id": "fixture-peer" }]) {

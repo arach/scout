@@ -519,7 +519,7 @@ export function createBrokerHttpRouter(
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? `${host}:${port}`}`);
   if (method === "GET" && url.pathname === "/v1/supervision-handoff") {
     const context = request.transportContext;
-    if (!context || context.transport === "remote" || context.guest || context.scoped
+    if (!context || !["unix-socket", "loopback"].includes(context.transport) || context.guest || context.scoped
       || request.headers.origin || request.headers["x-openscout-forwarded-node-id"]) {
       json(response, 403, { error: "local_only" }); return;
     }
