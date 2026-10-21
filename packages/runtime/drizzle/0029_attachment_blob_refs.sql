@@ -1,0 +1,1 @@
+ALTER TABLE `message_attachments` ADD `blob_ref_json` text;

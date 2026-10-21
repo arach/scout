@@ -1058,6 +1058,7 @@ interface AttachmentRow {
   media_type: string;
   file_name: string | null;
   blob_key: string | null;
+  blob_ref_json: string | null;
   url: string | null;
   metadata_json: string | null;
 }
@@ -2207,6 +2208,7 @@ export class SQLiteControlPlaneStore {
         id: row.id,
         mediaType: row.media_type,
         fileName: row.file_name ?? undefined,
+        ...(row.blob_ref_json ? { blob: parseJson<MessageAttachment["blob"]>(row.blob_ref_json, undefined) } : {}),
         blobKey: row.blob_key ?? undefined,
         url: row.url ?? undefined,
         metadata: parseJson<Record<string, unknown> | undefined>(row.metadata_json, undefined),
@@ -3463,8 +3465,8 @@ export class SQLiteControlPlaneStore {
       for (const attachment of nextMessage.attachments ?? []) {
         this.db.query(
           `INSERT OR REPLACE INTO message_attachments (
-            id, message_id, media_type, file_name, blob_key, url, metadata_json
-          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
+            id, message_id, media_type, file_name, blob_key, url, metadata_json, blob_ref_json
+          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
         ).run(
           attachment.id,
           nextMessage.id,
@@ -3473,6 +3475,7 @@ export class SQLiteControlPlaneStore {
           attachment.blobKey ?? null,
           attachment.url ?? null,
           stringify(attachment.metadata),
+          stringify(attachment.blob),
         );
       }
       this.recordActivityItem(nextActivityItem);
@@ -4203,6 +4206,21 @@ export class SQLiteControlPlaneStore {
     return { invocation, flight, deliveries: [...deliveries.values()] };
   }
 
+  referencedAttachmentHashes(candidates: ReadonlySet<string>): Set<string> {
+    const found = new Set<string>();
+    for (const chunk of chunksOf([...candidates])) {
+      if (!chunk.length) continue;
+      const marks = chunk.map(() => "?").join(",");
+      const rows = queryAllDynamic<{ hash: string }>(this.readDb,
+        `SELECT DISTINCT json_extract(a.blob_ref_json, '$.sha256') AS hash
+         FROM message_attachments a JOIN messages m ON m.id=a.message_id
+         JOIN conversations c ON c.id=m.conversation_id
+         WHERE json_valid(a.blob_ref_json) AND json_extract(a.blob_ref_json, '$.sha256') IN (${marks})`, [...chunk]);
+      for (const row of rows) found.add(row.hash);
+    }
+    return found;
+  }
+
   readMessages(ids: readonly string[]): Map<string, MessageRecord> {
     const found = new Map<string, MessageRecord>();
     for (const chunk of chunksOf(ids)) {
@@ -4233,6 +4251,7 @@ export class SQLiteControlPlaneStore {
           id: row.id,
           mediaType: row.media_type,
           fileName: row.file_name ?? undefined,
+          ...(row.blob_ref_json ? { blob: parseJson<MessageAttachment["blob"]>(row.blob_ref_json, undefined) } : {}),
           blobKey: row.blob_key ?? undefined,
           url: row.url ?? undefined,
           metadata: parseJson<Record<string, unknown> | undefined>(row.metadata_json, undefined),

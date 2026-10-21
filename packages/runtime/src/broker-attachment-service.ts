@@ -1,0 +1,121 @@
+import { createHash } from "node:crypto";
+import { ATTACHMENT_LIMITS, type AttachmentReadResult, type ConversationDefinition, type MessageRecord, type PostWithAttachments, type ReadAttachment } from "@openscout/protocol";
+import { AttachmentBlobStore, attachmentHash } from "./attachment-blob-store.js";
+import { AttachmentError, blobRefSchema, decodeAttachment, imageMimes, isTextMime, postWithAttachmentsSchema, readAttachmentSchema, validateAttachmentBytes } from "./attachment-contract.js";
+import { isIdempotentMessageRetry } from "./broker-message-idempotency.js";
+export type AttachmentPrincipal = { actorId: string; nodeId: string };
+export type BrokerAttachmentServiceOptions = {
+  nodeId: string;
+  store?: AttachmentBlobStore;
+  conversation: (id: string) => ConversationDefinition | undefined;
+  /** Runtime composition verifies local/peer actor authority; no operator fallback. */
+  authorizeActor: (principal: AttachmentPrincipal) => boolean;
+  message: (id: string) => Promise<MessageRecord | undefined>;
+  post: (message: MessageRecord) => Promise<unknown>;
+  now?: () => number;
+};
+export class BrokerAttachmentService {
+  private readonly admitted = new WeakSet<MessageRecord>();
+  private uploadActive = false;
+  constructor(private readonly options: BrokerAttachmentServiceOptions) {}
+  private available(): AttachmentBlobStore {
+    if (!this.options.store) throw new AttachmentError("attachments_unavailable");
+    return this.options.store;
+  }
+  private member(conversationId: string, principal: AttachmentPrincipal) {
+    if (!this.options.authorizeActor(principal)) throw new AttachmentError("attachment_forbidden", 403);
+    const conversation = this.options.conversation(conversationId);
+    if (!conversation || !conversation.participantIds.includes(principal.actorId)) throw new AttachmentError("attachment_forbidden", 403);
+    if (conversation.authorityNodeId !== this.options.nodeId) throw new AttachmentError("attachment_wrong_node", 409);
+    return conversation;
+  }
+  /** Called INSIDE the broker's serialized canonical writer, after file barriers.
+   * Every other local write path refuses typed refs, even a caller who knows a hash. */
+  assertMessageAdmission = (message: MessageRecord): void => {
+    if (!message.attachments?.some(a => a.blob !== undefined)) return;
+    if (!this.admitted.has(message)) throw new AttachmentError("attachment_inline_write_required", 400);
+    this.member(message.conversationId, { actorId: message.actorId, nodeId: this.options.nodeId });
+    for (const attachment of message.attachments) {
+      const ref = blobRefSchema.parse(attachment.blob);
+      if (attachment.mediaType !== ref.mediaType || attachment.url !== undefined || attachment.blobKey !== undefined) throw new AttachmentError("invalid_attachment_binding", 400);
+    }
+  };
+  async postWithAttachments(input: PostWithAttachments, principal: AttachmentPrincipal) {
+    if (this.uploadActive) throw new AttachmentError("attachments_busy");
+    this.uploadActive = true;
+    try { return await this.postAdmitted(input, principal); }
+    finally { this.uploadActive = false; }
+  }
+  private async postAdmitted(input: PostWithAttachments, principal: AttachmentPrincipal) {
+    const store = this.available();
+    const parsed = postWithAttachmentsSchema.safeParse(input);
+    if (!parsed.success) throw new AttachmentError("invalid_attachment_request", 400);
+    const request = parsed.data;
+    if (principal.nodeId !== this.options.nodeId) throw new AttachmentError("attachment_forbidden", 403);
+    const conversation = this.member(request.conversationId, principal);
+    if (request.attachments.reduce((n,a) => n+a.data.length,0) > Math.ceil(ATTACHMENT_LIMITS.imageBytes/3)*4 + 16) throw new AttachmentError("attachment_too_large", 413);
+    const blobs = request.attachments.map(upload => {
+      const bytes = decodeAttachment(upload.data); validateAttachmentBytes(bytes, upload.mediaType);
+      return { ref: { sha256: attachmentHash(bytes), mediaType: upload.mediaType, byteSize: bytes.length }, bytes };
+    });
+    // A 25 MiB image fits the bounded 36 MiB JSON upload route. Multiple files
+    // share this decoded budget; no larger hidden aggregate is admitted.
+    if (blobs.reduce((n,b) => n+b.bytes.length,0) > ATTACHMENT_LIMITS.imageBytes) throw new AttachmentError("attachment_too_large", 413);
+    const id = `msg.request.${createHash("sha256").update(JSON.stringify([principal.actorId, request.requestId])).digest("hex")}`;
+    const message: MessageRecord = {
+      id, requestId: request.requestId, conversationId: conversation.id, actorId: principal.actorId,
+      originNodeId: this.options.nodeId, class: "agent", body: request.body,
+      ...(request.replyToMessageId ? { replyToMessageId: request.replyToMessageId } : {}),
+      visibility: conversation.visibility, policy: "durable", createdAt: (this.options.now ?? Date.now)(),
+      metadata: { clientMessageId: id },
+      attachments: blobs.map((blob,i) => ({ id: `${id}.attachment.${i}`, mediaType: blob.ref.mediaType, blob: blob.ref,
+        ...(request.attachments[i]!.fileName ? { fileName: request.attachments[i]!.fileName } : {}) })),
+    };
+    const retry = async () => {
+      this.member(conversation.id, principal);
+      const existing = await this.options.message(id);
+      if (existing && !isIdempotentMessageRetry(existing, message)) throw new AttachmentError("attachment_request_conflict", 409);
+      return existing;
+    };
+    const existing = await retry();
+    if (existing) return { ok: true as const, message: existing, duplicate: true };
+    if (request.replyToMessageId) {
+      const parent = await this.options.message(request.replyToMessageId);
+      if (!parent || parent.conversationId !== conversation.id) throw new AttachmentError("attachment_forbidden", 403);
+    }
+    return store.withBlobs(blobs, async () => {
+      const accepted = await retry();
+      if (accepted) return { ok: true as const, message: accepted, duplicate: true };
+      this.admitted.add(message);
+      try {
+        await this.options.post(message);
+        return { ok: true as const, message, duplicate: false };
+      } finally { this.admitted.delete(message); }
+    });
+  }
+  async read(input: ReadAttachment, principal: AttachmentPrincipal): Promise<AttachmentReadResult> {
+    const store = this.available();
+    const parsed = readAttachmentSchema.safeParse(input);
+    if (!parsed.success) throw new AttachmentError("invalid_attachment_request", 400);
+    const request = parsed.data;
+    this.member(request.conversationId, principal);
+    const message = await this.options.message(request.messageId);
+    if (!message || message.id !== request.messageId || message.conversationId !== request.conversationId
+      || message.originNodeId !== this.options.nodeId) throw new AttachmentError("attachment_forbidden", 403);
+    const attachment = message.attachments?.find(a => a.blob?.sha256 === request.blobId);
+    if (!attachment) throw new AttachmentError("attachment_unavailable");
+    const ref = blobRefSchema.safeParse(attachment.blob);
+    if (!ref.success || ref.data.mediaType !== attachment.mediaType) throw new AttachmentError("attachment_unavailable");
+    if (request.mode === "text" ? !isTextMime(ref.data.mediaType) : !imageMimes.has(ref.data.mediaType)) throw new AttachmentError("attachment_unsupported_mime", 415);
+    const bytes = await store.read(ref.data);
+    validateAttachmentBytes(bytes, ref.data.mediaType);
+    // Recheck both membership and the current binding after asynchronous IO.
+    const current = await this.options.message(request.messageId);
+    this.member(request.conversationId, principal);
+    if (current?.conversationId !== message.conversationId || !current.attachments?.some(a => a.blob?.sha256 === ref.data.sha256 && a.blob.mediaType === ref.data.mediaType && a.blob.byteSize === ref.data.byteSize)) throw new AttachmentError("attachment_unavailable");
+    const base = { blobId: request.blobId, messageId: message.id, mediaType: ref.data.mediaType, byteSize: bytes.length, ...(attachment.fileName ? { fileName: attachment.fileName } : {}) };
+    if (request.mode === "image") return { ...base, mode: "image", data: bytes.toString("base64") };
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return { ...base, mode: "text", text: text.slice(0, ATTACHMENT_LIMITS.textCharacters), truncated: text.length > ATTACHMENT_LIMITS.textCharacters, sourceTrust: "untrusted_attachment" };
+  }
+}

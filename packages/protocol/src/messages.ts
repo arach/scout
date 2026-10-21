@@ -1,3 +1,4 @@
+import type { MessageBlobRef } from "./attachments.js";
 import type {
   DeliveryPolicy,
   DeliveryReason,
@@ -18,6 +19,8 @@ export interface MessageAttachment {
   id: ScoutId;
   mediaType: string;
   fileName?: string;
+  /** Typed canonical binding; absent for legacy URL-only attachments. */
+  blob?: MessageBlobRef;
   blobKey?: string;
   url?: string;
   metadata?: MetadataMap;

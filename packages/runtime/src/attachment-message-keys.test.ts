@@ -39,7 +39,7 @@ test("repairs a legacy global attachment key without losing the retained row", (
   try {
     db.exec(`ALTER TABLE message_attachments RENAME TO old_attachments;
       CREATE TABLE message_attachments(id TEXT PRIMARY KEY, message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE, media_type TEXT NOT NULL, file_name TEXT, blob_key TEXT, url TEXT, metadata_json TEXT);
-      INSERT INTO message_attachments SELECT * FROM old_attachments; DROP TABLE old_attachments; PRAGMA user_version=18;`);
+      INSERT INTO message_attachments SELECT id,message_id,media_type,file_name,blob_key,url,metadata_json FROM old_attachments; DROP TABLE old_attachments; PRAGMA user_version=18;`);
     migrateControlPlaneDatabaseSchema(db);
     migrateControlPlaneDatabaseSchema(db);
     const pk = (db.query("PRAGMA table_info(message_attachments)").all() as Array<{ name: string; pk: number }>).filter(c => c.pk).sort((a,b) => a.pk-b.pk).map(c => c.name);

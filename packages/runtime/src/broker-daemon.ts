@@ -1,5 +1,11 @@
 // Must stay the first import: materializes OPENSCOUT_INSTANCE before any module reads paths/ports.
 import { openScoutCheckoutInstanceDefault, openScoutInstanceBootstrap } from "./instance-checkout-bootstrap.js";
+import { readAttachmentHostResponse } from "./attachment-host-response.js";
+import { AttachmentBlobStore } from "./attachment-blob-store.js";
+import { BrokerAttachmentService } from "./broker-attachment-service.js";
+import { AttachmentError } from "./attachment-contract.js";
+import { markAttachmentReferences } from "./attachment-retention.js";
+import { iterateMessageRecordsAsync } from "./broker-message-records.js";
 import { createTailscaleListenerGuard, isRuntimeLoopbackTcpSocket, type LocalListenerKind } from "./mesh-tailscale-listener-guard.js";
 import { MeshFeedback } from "./mesh-feedback.js";
 import { MeshBridgeManagement } from "./mesh-bridge-management.js";
@@ -845,7 +851,14 @@ const controlStreams = new BrokerControlStreamService({
   presenceSnapshot: () => snapshotPresenceControlEvents(),
 });
 const operatorActorId = "operator";
+let attachmentService: BrokerAttachmentService | undefined;
+let attachmentBlobStore: AttachmentBlobStore | undefined;
 const durableRecords = new BrokerDurableRecordStore({
+  assertMessageAdmission: message => {
+    if (!message.attachments?.some(a => a.blob !== undefined)) return;
+    if (!attachmentService) throw new AttachmentError("attachments_unavailable");
+    attachmentService.assertMessageAdmission(message);
+  },
   localNodeId: nodeId,
   completionCurrentFlight: id => journal.getCurrentFlightForInvocation(id),
   completionFlight: id => journal.getFlight(id),
@@ -1893,6 +1906,8 @@ const storageMaintenance = new BrokerStorageMaintenance({
   compact: async signal => {
     signal.throwIfAborted();
     if (shuttingDown) return;
+    await attachmentBlobStore?.collect(signal);
+    signal.throwIfAborted();
     // Capture before flushing, so only receipts inside a proven byte boundary
     // may be discarded. Newer receipts remain protected even if a concurrent
     // canonical write reaches the compaction prefix in between these awaits.
@@ -2006,6 +2021,62 @@ const messageService = new BrokerMessageService({
   authorizeReplyCompletion: (invocation, reply) => externalSessionService.authorizesReplyCompletion(invocation, reply) && t3Service.authorizesReplyCompletion(invocation, reply),
   activeLocalEndpointForAgent: (agentId) => localEndpointResolver.activeLocalEndpointForAgent(agentId),
 });
+
+// Without retained SQLite coverage, absence in the hot journal is not proof
+// that a blob is orphaned. Refuse this optional capability before any write.
+if (process.env.OPENSCOUT_ATTACHMENTS_DISABLED !== "1" && !sqliteDisabled) {
+  try {
+    const store = new AttachmentBlobStore({
+      supportDirectory,
+      ...(process.env.OPENSCOUT_ATTACHMENT_STORE_MAX_BYTES ? { maxBytes: Number(process.env.OPENSCOUT_ATTACHMENT_STORE_MAX_BYTES) } : {}),
+      references: async (candidates, signal) => {
+        if (!candidates.size) return new Set();
+        const found = await markAttachmentReferences(candidates,
+          [iterateMessageRecordsAsync(runtime.peek().messages, { signal })], id => Boolean(runtime.conversation(id)), signal);
+        if (!sqliteDisabled) {
+          // The hot view is not evidence of historical absence. Flush before
+          // consulting retained projected bindings, then scan archived messages.
+          await projection.flush();
+          for (const hash of sharedControlPlaneStore!.get().referencedAttachmentHashes(candidates)) found.add(hash);
+        }
+        let after: { timestamp: number; id: string } | undefined;
+        while (true) {
+          signal?.throwIfAborted();
+          const page = historicalReader.page({ kind: "message", limit: 64, after });
+          if (!page.length) break;
+          for (const location of page) {
+            signal?.throwIfAborted();
+            const archived = historicalReader.readLocation<MessageRecord>(location);
+            if (!runtime.conversation(archived.conversationId)) continue;
+            const current = await runtime.readMessage(archived.id) ?? (sqliteDisabled ? archived : (await projection.readMessages([archived.id])).get(archived.id));
+            for (const attachment of current?.attachments ?? []) if (attachment.blob && candidates.has(attachment.blob.sha256)) found.add(attachment.blob.sha256);
+          }
+          const last = page[page.length-1]!; after = { timestamp: last.timestamp, id: last.id };
+          await new Promise<void>(resolve => setImmediate(resolve));
+        }
+        return found;
+      },
+    });
+    attachmentBlobStore = store;
+    attachmentService = new BrokerAttachmentService({
+      nodeId, store,
+      conversation: id => runtime.conversation(id),
+      authorizeActor: principal => {
+        // Mesh host reads never inherit this broker's local operator privileges.
+        if (principal.actorId === operatorActorId) return principal.nodeId === nodeId;
+        const agent = runtime.agent(principal.actorId);
+        if (agent) return agent.authorityNodeId === principal.nodeId;
+        const endpoints = Object.values(runtime.peek().endpoints).filter(e => e.agentId === principal.actorId);
+        if (endpoints.length) return endpoints.some(e => e.nodeId === principal.nodeId && e.state !== "stopped");
+        return principal.nodeId === nodeId && Boolean(runtime.peek().actors[principal.actorId]);
+      },
+      message: async id => await runtime.readMessage(id) ?? (sqliteDisabled ? historicalReader.read<MessageRecord>("message", id) : (await projection.readMessages([id])).get(id)),
+      post: message => postConversationMessage(message),
+    });
+  } catch {
+    console.warn("[openscout-runtime] attachments unavailable: invalid blob-store configuration");
+  }
+}
 
 const replyCompletionRecovery = new BrokerReplyCompletionRecovery({
   flights: function* () {
@@ -3039,7 +3110,48 @@ const meshApprovalWatch = createMeshApprovalWatch({
   }),
 });
 
+async function forwardAttachmentHostRead(input: import("./host-web-request.js").HostWebRequest & { nodeId: string }): Promise<import("./host-web-request.js").HostWebResponse> {
+  const authority = runtime.node(input.nodeId);
+  if (!authority || authority.meshId !== meshId) {
+    return { status: 404, body: { error: "Destination is not in this mesh" } };
+  }
+  if (authority.id === nodeId) return input.path === "/v1/attachments/read"
+    ? { status: 503, body: { error: "attachments_unavailable" } }
+    : webControl.requestForHost(input);
+  if (!authority.brokerUrl) return { status: 503, body: { error: "Destination broker is unavailable" } };
+  if (input.path === "/v1/attachments/read") {
+    const peer = trustedPeerForBrokerBaseUrl(authority.brokerUrl);
+    if (!peer || peer.nodeId !== input.nodeId) return { status: 503, body: { error: "attachments_unavailable" } };
+  }
+  try {
+    const forwarded = await daemonMeshPeerFetch(authority.brokerUrl, "/v1/mesh/web-request", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: input.path, method: input.method, body: input.body }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!forwarded.ok) return { status: forwarded.status, body: { error: input.path === "/v1/attachments/read" ? "attachments_unavailable" : "Destination broker rejected host routing; check its version and mesh trust" } };
+    if (input.path === "/v1/attachments/read") return await readAttachmentHostResponse(forwarded, input.body as import("@openscout/protocol").ReadAttachment);
+    const result = await forwarded.json() as { status: number; body: unknown };
+    if (!Number.isInteger(result.status) || result.status < 200 || result.status > 599) {
+      return { status: 502, body: { error: "Destination broker returned an invalid host response" } };
+    }
+    return result;
+  } catch {
+    return { status: 502, body: { error: "Destination broker could not be reached" } };
+  }
+}
+
 const routeRequest = createBrokerHttpRouter({
+  attachments: {
+    service: attachmentService, nodeId,
+    uploadRequestBytes: localAdminKey ? 16 * 1024 * 1024 : 36 * 1024 * 1024,
+    peerNode: keyId => {
+      const peer = trustedPeerStore?.trustedPeer(keyId);
+      return peer && !peer.revokedAt && (!peer.expiresAt || peer.expiresAt > Date.now()) ? peer.nodeId : undefined;
+    },
+    // Use the existing exact-node host routing, with no additional fetch target.
+    forward: input => forwardAttachmentHostRead(input),
+  },
   requestReceipts,
   deliveryReceiptsOwnedByService: true,
   readHistoricalInvocationSnapshot: id => projection.readInvocationSnapshot(id),
@@ -3220,29 +3332,7 @@ const routeRequest = createBrokerHttpRouter({
       hasNonLoopbackListener: false,
     },
   },
-  forwardHostWebRequest: async (input) => {
-    const authority = runtime.node(input.nodeId);
-    if (!authority || authority.meshId !== meshId) {
-      return { status: 404, body: { error: "Destination is not in this mesh" } };
-    }
-    if (authority.id === nodeId) return webControl.requestForHost(input);
-    if (!authority.brokerUrl) return { status: 503, body: { error: "Destination broker is unavailable" } };
-    try {
-      const forwarded = await daemonMeshPeerFetch(authority.brokerUrl, "/v1/mesh/web-request", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ path: input.path, method: input.method, body: input.body }),
-        signal: AbortSignal.timeout(20_000),
-      });
-      if (!forwarded.ok) return { status: forwarded.status, body: { error: "Destination broker rejected host routing; check its version and mesh trust" } };
-      const result = await forwarded.json() as { status: number; body: unknown };
-      if (!Number.isInteger(result.status) || result.status < 200 || result.status > 599) {
-        return { status: 502, body: { error: "Destination broker returned an invalid host response" } };
-      }
-      return result;
-    } catch {
-      return { status: 502, body: { error: "Destination broker could not be reached" } };
-    }
-  },
+  forwardHostWebRequest: forwardAttachmentHostRead,
   forwardRouteAliasRequest: async ({ nodeSelector, path, method, body }) => {
     const matches = Object.values(runtime.snapshot().nodes).filter((candidate) =>
       candidate.id === nodeSelector || candidate.name === nodeSelector || candidate.hostName === nodeSelector

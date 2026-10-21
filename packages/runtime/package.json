@@ -499,6 +499,12 @@
       "types": "./dist/delivery-client.d.ts",
       "import": "./dist/delivery-client.js",
       "default": "./dist/delivery-client.js"
+    },
+    "./attachments": {
+      "bun": "./src/attachments.ts",
+      "types": "./dist/attachments.d.ts",
+      "import": "./dist/attachments.js",
+      "default": "./dist/attachments.js"
     }
   },
   "types": "./dist/index.d.ts",
