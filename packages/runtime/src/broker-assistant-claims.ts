@@ -34,13 +34,14 @@ export class BrokerAssistantClaims {
   }
 
   capability() {
+    const now = this.now();
     const agents = Object.fromEntries([...this.protectedAgents].map(agentId => {
       const lease = this.leases.get(agentId);
-      const held = !!lease && (lease.deadline > this.now() || lease.admitted > 0);
+      const held = !!lease && (lease.deadline > now || lease.admitted > 0);
       return [agentId, { held, holderId: held ? lease.holderId : null,
         admitted: lease?.admitted ?? 0,
         oldestAdmissionAgeMs: lease?.admissions.size
-          ? Math.max(0, this.now() - Math.min(...[...lease.admissions].map(admission => admission.startedAt))) : null }];
+          ? Math.max(0, now - Math.min(...[...lease.admissions].map(admission => admission.startedAt))) : null }];
     }));
     return { capability: ASSISTANT_CLAIMS_CAPABILITY, agentIds: [...this.protectedAgents], ttlMs: this.ttlMs, agents };
   }
@@ -81,13 +82,32 @@ export class BrokerAssistantClaims {
     // Separate objects distinguish simultaneous admissions with the same clock tick.
     const admission = { startedAt: this.now() };
     lease.admissions.add(admission);
-    const timer = setTimeout(() => {
-      // Diagnostic only: an admitted mutation never loses its ownership pin.
-      this.warn(`[assistant-claims] admitted write outlived TTL agentId=${JSON.stringify(agentId)} holderId=${JSON.stringify(lease.holderId)} admitted=${lease.admitted} ageMs=${Math.max(0, this.now() - admission.startedAt)} ttlMs=${this.ttlMs}`);
-    }, this.ttlMs);
+    let warned = false;
+    const warn = () => {
+      if (warned) return;
+      warned = true;
+      // Diagnostic only: logging cannot change a mutation's result or ownership.
+      try {
+        this.warn(`[assistant-claims] admitted write outlived TTL agentId=${JSON.stringify(agentId)} holderId=${JSON.stringify(lease.holderId)} admitted=${lease.admitted} ageMs=${Math.max(0, this.now() - admission.startedAt)} ttlMs=${this.ttlMs}`);
+      } catch { /* A failed diagnostic must not fail the canonical write. */ }
+    };
+    let timer: ReturnType<typeof setTimeout>;
+    const check = () => {
+      const remaining = this.ttlMs - (this.now() - admission.startedAt);
+      if (remaining <= 0) { warn(); return; }
+      timer = setTimeout(check, Math.max(1, remaining));
+      timer.unref?.();
+    };
+    timer = setTimeout(check, this.ttlMs);
     timer.unref?.();
     try { return await action(); }
-    finally { clearTimeout(timer); lease.admissions.delete(admission); lease.admitted--; }
+    finally {
+      clearTimeout(timer);
+      // Promise settlement can run before a due timer after an event-loop stall.
+      if (this.now() - admission.startedAt >= this.ttlMs) warn();
+      lease.admissions.delete(admission);
+      lease.admitted--;
+    }
   }
 
   commandAgent(command: ControlCommand): string | undefined {

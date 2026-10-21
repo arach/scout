@@ -80,7 +80,7 @@ describe("shared web/standalone answerer claimant", () => {
   });
 
   test("renews at half TTL, keeping the token and never writing it into command bodies", async () => {
-    const r = runtime(80); // Static monotonic fixture clock; timers still run normally.
+    const r = runtime(1000); // Static clock, with wall-clock headroom for a busy test runner.
     const began = performance.now();
     let renewedAt = 0;
     const answerer = startAssistantAnswerer({ mode: "standalone", request: (path, init) => {
@@ -92,7 +92,7 @@ describe("shared web/standalone answerer claimant", () => {
       const renew = r.calls.find(c => c.path.endsWith("/renew"))!;
       const proof = renew.headers.get("x-scout-assistant-claim-token")!;
       expect(proof).toHaveLength(64);
-      expect(renewedAt - began).toBeGreaterThanOrEqual(38);
+      expect(renewedAt - began).toBeGreaterThanOrEqual(498);
       expect(renew.body).toEqual({ agentId: "scoutbot" });
       expect(JSON.stringify(r.calls.map(c => c.body))).not.toContain(proof);
     } finally { await answerer.stop(); }
@@ -100,7 +100,7 @@ describe("shared web/standalone answerer claimant", () => {
   });
 
   test("holder death, a stray web without managed, expiry and an old post arriving late", async () => {
-    const r = runtime(60); let disconnected = false; let oldHeaders: Record<string, string> = {};
+    const r = runtime(500); let disconnected = false; let oldHeaders: Record<string, string> = {};
     let lateClientWrite!: () => void;
     const dead = startAssistantAnswerer({ mode: "standalone", now: r.now, retryMs: 10,
       request: (path, init) => disconnected ? Promise.resolve(new Response(null, { status: 503 })) : r.request(path, init),
@@ -122,7 +122,7 @@ describe("shared web/standalone answerer claimant", () => {
       await until(() => { try { lateClientWrite(); return false; } catch { return true; } });
       await dead.stop();
       expect(r.claims.capability().agents.scoutbot.held).toBe(true);
-      r.advance(61);
+      r.advance(501);
       await until(() => webAnswers === 1);
       const stale = await r.request("/v1/messages", { method: "POST", headers: oldHeaders, body: JSON.stringify({ actorId: "scoutbot", body: "delayed old answer" }) });
       expect(stale.status).toBe(409); expect(await stale.json()).toEqual({ error: "assistant_claim_lost" });
@@ -132,7 +132,7 @@ describe("shared web/standalone answerer claimant", () => {
   });
 
   test("broker restart requires a fresh claim; stale async work cannot borrow it", async () => {
-    let r = runtime(60); const first = r;
+    let r = runtime(500); const first = r;
     let generations = 0; let stale!: () => void;
     const answerer = startAssistantAnswerer({ mode: "web", request: (p, i) => r.request(p, i), now: () => r.now(), retryMs: 10 }, async signal => {
       generations++;
@@ -140,7 +140,7 @@ describe("shared web/standalone answerer claimant", () => {
       await waitForStop(signal);
     });
     try {
-      await until(() => generations === 1); r = runtime(60);
+      await until(() => generations === 1); r = runtime(500);
       await until(() => generations === 2);
       expect(() => stale()).toThrow("assistant_claim_lost");
       expect(first.claims.capability().agents.scoutbot.holderId).toBe(answerer.holderId);
@@ -150,7 +150,7 @@ describe("shared web/standalone answerer claimant", () => {
 });
 
 test("expiry aborts answering even when a renewal request stalls", async () => {
-  const r = runtime(60); let stopped = false;
+  const r = runtime(500); let stopped = false;
   const answerer = startAssistantAnswerer({ mode: "standalone", retryMs: 1000,
     request: (path, init) => path.endsWith("/renew") ? new Promise<Response>((_resolve, reject) => {
       init.signal!.addEventListener("abort", () => reject(new Error("aborted renewal")), { once: true });

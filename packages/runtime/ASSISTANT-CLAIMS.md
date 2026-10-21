@@ -60,7 +60,9 @@ An idle, expired owner reports `held: false` and `holderId: null`. An agent
 without admissions reports `oldestAdmissionAgeMs: null`. Tokens are never
 included. One diagnostic timer per admitted write logs its agent, holder,
 admission count and age if it outlives the TTL. The timer does not revoke the
-claim, cancel the write or permit takeover.
+claim, cancel the write or permit takeover. Completion also checks the age
+in case a stalled event loop has not run the timer. A diagnostic failure cannot
+change the write result.
 
 Existing operation timeouts/recovery apply; this API does not forcibly cancel
 canonical writes or spawn/kill processes.

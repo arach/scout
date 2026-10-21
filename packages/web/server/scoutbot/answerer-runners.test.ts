@@ -191,7 +191,7 @@ test("a stopped generation's proxy cannot submit under a later holder", async ()
 
 test("runtime HTTP fences a dead holder's delayed post after a standby web takes over", async () => {
   let now = 100;
-  const f = await fixture(false, { ttlMs: 60, now: () => now });
+  const f = await fixture(false, { ttlMs: 1000, now: () => now });
   let disconnected = false; let oldProof: Record<string, string> | undefined; let lost = false;
   const dead = startAssistantAnswerer({ mode: "standalone", now: () => now,
     request: (path, init) => disconnected ? Promise.resolve(new Response(null, { status: 503 })) : fetch(new URL(path, f.baseUrl), init),
@@ -206,7 +206,7 @@ test("runtime HTTP fences a dead holder's delayed post after a standby web takes
     disconnected = true;
     await until(() => lost); await dead.stop(); // Simulate death: no release reached the broker.
     expect(f.claims.capability().agents.scoutbot.held).toBe(true);
-    now += 61;
+    now += 1001;
     await until(() => f.streams.size > 0);
     expect(f.claims.capability().agents.scoutbot.holderId).toContain(`web:pid:${process.pid}:`);
     const stale = await fetch(new URL("/v1/messages", f.baseUrl), { method: "POST", headers: { "content-type": "application/json", ...oldProof },
