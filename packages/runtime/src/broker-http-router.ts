@@ -1,4 +1,5 @@
 import { createRepoDiffReadHandler, type RepoDiffRead } from "./broker-repo-diff-read.js";
+import { readProviderQuotas } from "./broker-provider-quota-read.js";
 import { MeshFeedback, MeshFeedbackError } from "./mesh-feedback.js";
 import { MeshBridgeManagement, MeshBridgeManagementError } from "./mesh-bridge-management.js";
 import { MeshPingError, type createMeshPing } from "./mesh-ping.js";
@@ -2041,6 +2042,17 @@ export function createBrokerHttpRouter(
     }
     const result = await readRepoDiff(url);
     json(response, result.status, result.body); return;
+  }
+
+  // Pure public adapter observation; never refreshes private provider dashboards.
+  if (method === "GET" && url.pathname === "/v1/provider-quotas") {
+    if (request.transportContext?.transport === "remote" || request.transportContext?.guest) {
+      json(response, 403, { error: "forbidden" }); return;
+    }
+    if (!runtime.peek) { json(response, 503, { error: "provider_quotas_unavailable" }); return; }
+    try { json(response, 200, readProviderQuotas(runtime.peek().endpoints, nodeId, url)); }
+    catch (error) { json(response, error instanceof TypeError ? 400 : 503, { error: error instanceof TypeError ? "invalid_quota_query" : "provider_quotas_unavailable" }); }
+    return;
   }
 
   if (method === "GET" && url.pathname === "/v1/pairing/sessions") {
