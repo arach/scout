@@ -3878,6 +3878,7 @@ async function shutdownBroker(exitCode = 0): Promise<void> {
     return;
   }
   shuttingDown = true;
+  capabilityMatrixService.stop();
   tailscaleListenerGuard.stop();
   storageMaintenance.stop();
   meshApprovalWatch.stop();

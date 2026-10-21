@@ -1,4 +1,4 @@
-import type { RuntimeSignal } from "./portable-types.js";
+import type { RuntimeEnv, RuntimeSignal } from "./portable-types.js";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 
 import type {
@@ -126,12 +126,12 @@ export async function discoverConfiguredMcpServers(
 
 export function createStdioMcpDiscoveryTransport(
   server: RuntimeMcpServerConfig,
-  options: { requestTimeoutMs?: number } = {},
+  options: { requestTimeoutMs?: number; env?: RuntimeEnv } = {},
 ): McpDiscoveryJsonRpcTransport {
   const child = spawn(server.command, server.args ?? [], {
     cwd: server.cwd,
     env: {
-      ...process.env,
+      ...(options.env ?? process.env),
       ...server.env,
     },
     stdio: "pipe",
