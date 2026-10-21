@@ -5,6 +5,8 @@ selected verb after inspection. These conditions are opt-in. Explicit
 `install`, `update`, `remove` and reinstall over a tombstone keep their existing
 selection semantics. See [CLI extension installation](./cli-extensions.md) for
 artifact trust, bounds and generation retention.
+Install requires valid UTF-8 entry names because publication identity is
+defined over those names.
 
 ## Install only into an absent selection
 
@@ -30,27 +32,26 @@ Recover the current publication receipt first:
 scout --json extensions receipt mesh
 ```
 
-Use its `publishedGeneration` and `digest` values as separate arguments:
+Use its `publishedGeneration` and `treeDigest` values as separate arguments:
 
 ```bash
 scout --json extensions update mesh /trusted/artifacts/mesh \
   --expect-generation /absolute/extensions/.installed/mesh/GENERATION \
-  --expect-digest SHA256_FROM_RECEIPT --operation-id provision-002
+  --expect-tree-digest VERSIONED_TREE_DIGEST_FROM_RECEIPT --operation-id provision-002
 ```
 
 The selected entry must resolve to that exact direct managed generation and
-its current manifest/command digest must match. A different generation fails
+its current full-tree digest must match. A different generation fails
 even if its bytes are identical. Removed, refused, missing and unmanaged state
 cannot satisfy the condition. The lock covers comparison, staging and
 publication; callers must not acquire or remove that lock themselves.
 
-`--expect-absent` is valid only for install. The generation/digest pair is valid
+`--expect-absent` is valid only for install. The generation/tree-digest pair is valid
 only for update. Conditions require `--operation-id`; the two condition forms
 cannot be combined. Flags follow the existing positional arguments and cannot
 repeat. `--operation-id` alone is also accepted on install, update or remove.
 IDs contain 1–128 ASCII letters, digits, `.`, `_`, `:` or `-`, starting with a
-letter or digit. Do not put credentials in an ID. A digest is 64 lowercase hex
-digits; a generation is an absolute managed directory path, not a version.
+letter or digit. Do not put credentials in an ID. A tree digest uses the versioned `sha256:scout-extension-tree-v1:<64 lowercase hex digits>` scheme; a generation is an absolute managed directory path, not a version.
 
 ## Success and lost stdout
 
@@ -61,6 +62,7 @@ JSON success keeps `action`, `name`, `home`, `status`, `version`, `digest` and
 | --- | --- |
 | `publishedGeneration` | Absolute canonical directory selected by publication. A rollback through update creates a new directory too. |
 | `operationId` | Exact caller-supplied correlation ID, or `null` when omitted. |
+| `treeDigest` | Canonical full-tree identity, or `null` for a removed marker. See [the exact walk](./extension-tree-digest.md). |
 
 Before publishing the selection link, the installer writes a complete
 same-user/root-owned, non-group/world-writable record under
@@ -70,9 +72,9 @@ The public installer remains the only writer of managed generations.
 
 If stdout is discarded or the caller exits before recording success, use
 `extensions receipt <verb>`. It reads the record for the **currently selected**
-generation and verifies its identity, version and digest against the current
+generation and verifies its identity, version, legacy dispatch digest and full-tree digest against the current
 selection. It does not stage, install, repair, clear locks or execute code.
-Use the returned generation/digest for the next conditional update. If another
+Use the returned generation/tree-digest for the next conditional update. If another
 operation published afterwards, the command reports that newer current receipt,
 not the lost operation; compare `operationId` before claiming that operation
 still owns the selection. The next conditional mutation still rechecks under
@@ -80,7 +82,7 @@ the lock, so receipt inspection does not reopen the original race.
 
 This is correlation, not an idempotency key or exactly-once protocol. Reusing an
 ID does not replay a prior result. A pre-change installation has no receipt;
-unknown, mismatched, torn or unsafe metadata refuses readback. Inspect that
+unknown, mismatched, torn or unsafe metadata, including older records without `treeDigest`, refuses readback. Inspect that
 state explicitly instead of guessing ownership or blindly retrying. A hard
 crash can leave a lock, staged files or orphan records. Atomic selection does
 not promise power-loss durability or a transaction across several verbs.
@@ -90,9 +92,12 @@ old generations it deletes. Updates still count toward the eight-generation
 limit. Reserve capacity for rollback in an automatic caller's policy; this
 change adds no pruning API, automatic retry or remove/reinstall shortcut.
 
-The digest remains SHA-256 of manifest bytes, NUL and command bytes. It does not
-cover every auxiliary asset. Publication receipts prove neither download
-origin nor a user capability grant and must not be used as either.
+The legacy `digest` remains SHA-256 of manifest bytes, NUL and command bytes.
+`treeDigest` includes every accepted entry, its relative path, file executable
+classification and bytes. Conditional updates use only that full-tree identity.
+Publication receipts prove neither download origin nor a user capability grant
+and must not be used as either. The new tree flag supersedes the unreleased
+draft `--expect-digest`; legacy hashes and that old flag refuse explicitly.
 
 ## Refusals
 

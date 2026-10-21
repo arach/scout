@@ -1,17 +1,17 @@
 import { constants, closeSync, chmodSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
+import { scoutExtensionTreeDigest, isScoutExtensionTreeDigest, SCOUT_EXTENSION_TREE_LIMITS, type ScoutExtensionTreeDigest } from "./extension-tree-digest.ts";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { findScoutExtension, scoutExtensionDigest, scoutExtensionDirectoryProblem, scoutExtensionsHome } from "./extensions.ts";
 
 const NAME = /^[a-z][a-z0-9-]{0,39}$/;
-const MAX_BYTES = 32 * 1024 * 1024;
-const MAX_FILES = 1024;
+const { bytes: MAX_BYTES, entries: MAX_FILES, depth: MAX_DEPTH } = SCOUT_EXTENSION_TREE_LIMITS;
 const MAX_GENERATIONS = 8;
 const MAX_RECEIPT_BYTES = 32 * 1024;
 const OPERATION_ID = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}(?![\s\S])/;
-const DIGEST = /^[a-f0-9]{64}(?![\s\S])/;
+
 export type ScoutExtensionInstallOptions = {
-  expected?: { absent: true } | { generation: string; digest: string };
+  expected?: { absent: true } | { generation: string; treeDigest: string };
   operationId?: string;
 };
 export class ScoutExtensionInstallError extends Error {
@@ -25,7 +25,10 @@ export type ScoutExtensionInstallReceipt = {
   home: string;
   status: "installed" | "removed";
   version: string | null;
+  /** Legacy manifest/command observation, not full-tree identity. */
   digest: string | null;
+  /** Canonical normalized installed-tree identity; absent for a removed marker. */
+  treeDigest: ScoutExtensionTreeDigest | null;
   previousArtifact: string | null;
   publishedGeneration: string;
   operationId: string | null;
@@ -43,9 +46,9 @@ function validateOptions(action: string, options: ScoutExtensionInstallOptions) 
     || (expected !== undefined && (!expected || typeof expected !== "object" || action === "remove" || !operationId
       || ("absent" in expected
         ? expected.absent !== true || Object.keys(expected).length !== 1 || action !== "install"
-        : typeof expected.generation !== "string" || !isAbsolute(expected.generation) || !DIGEST.test(expected.digest)
+        : typeof expected.generation !== "string" || !isAbsolute(expected.generation) || !isScoutExtensionTreeDigest(expected.treeDigest)
           || Object.keys(expected).length !== 2 || action !== "update")))) {
-    throw new ScoutExtensionInstallError("EXTENSION_CONDITION_INVALID", "use install with expected absence, or update with an absolute generation and SHA-256 digest; a condition requires an operation ID (1–128 letters, digits, . _ : -)");
+    throw new ScoutExtensionInstallError("EXTENSION_CONDITION_INVALID", "use install with expected absence, or update with an absolute generation and versioned full-tree digest; a condition requires an operation ID (1–128 letters, digits, . _ : -)");
   }
 }
 
@@ -78,9 +81,10 @@ export function readScoutExtensionInstallReceipt(name: string, env: NodeJS.Proce
     const current = findScoutExtension(name, { ...env, OPENSCOUT_EXTENSIONS_HOME: home });
     if (!current || (current.refused && !current.removed)) throw new Error("selected artifact is refused");
     const digest = current.removed ? null : scoutExtensionDigest(current);
+    const treeDigest = current.removed ? null : scoutExtensionTreeDigest(generation);
     if (!record || record.name !== name || record.home !== home || record.publishedGeneration !== generation
       || !["install", "update", "remove"].includes(record.action) || record.status !== (current.removed ? "removed" : "installed")
-      || record.version !== (current.version ?? null) || record.digest !== digest
+      || record.version !== (current.version ?? null) || record.digest !== digest || record.treeDigest !== treeDigest
       || (record.operationId !== null && (typeof record.operationId !== "string" || !OPERATION_ID.test(record.operationId)))
       || (record.previousArtifact !== null && typeof record.previousArtifact !== "string")
       || resolve(home, readlinkSync(target)) !== generation) throw new Error("receipt does not match the current selection");
@@ -92,7 +96,7 @@ export function readScoutExtensionInstallReceipt(name: string, env: NodeJS.Proce
 function copyArtifact(source: string, target: string) {
   let bytes = 0, files = 0;
   const visit = (from: string, to: string, depth: number) => {
-    if (depth > 16) throw new Error("extension artifact exceeds directory depth limit");
+    if (depth > MAX_DEPTH) throw new Error("extension artifact exceeds directory depth limit");
     const info = lstatSync(from);
     if (info.isDirectory()) {
       if (++files > MAX_FILES) throw new Error("extension artifact has too many entries");
@@ -143,7 +147,7 @@ export function mutateScoutExtension(action: "install" | "update" | "remove", na
           const selected = resolve(home, readlinkSync(target));
           const current = findScoutExtension(name, { ...env, OPENSCOUT_EXTENSIONS_HOME: home });
           matches = selected === expected.generation && dirname(selected) === generations && realpathSync(selected) === selected
-            && !!current && !current.refused && !current.removed && scoutExtensionDigest(current) === expected.digest;
+            && !!current && !current.refused && !current.removed && scoutExtensionTreeDigest(selected) === expected.treeDigest;
         }
       } catch { /* Unknown or unsafe current state cannot satisfy a condition. */ }
       if (!matches) throw new ScoutExtensionInstallError("EXTENSION_PRECONDITION_FAILED", `extension ${name} no longer matches the expected state; inspect its selection and receipt before retrying`);
@@ -162,6 +166,7 @@ export function mutateScoutExtension(action: "install" | "update" | "remove", na
     mkdirSync(stage, { mode: 0o700 });
     const artifact = join(stage, name);
     let version: string | null = null, digest: string | null = null;
+    let treeDigest: ScoutExtensionTreeDigest | null = null;
     if (action === "remove") {
       mkdirSync(artifact, { mode: 0o700 });
       writeFileSync(join(artifact, "extension.json"), JSON.stringify({ api: 1, disabled: true }), { mode: 0o600 });
@@ -179,9 +184,9 @@ export function mutateScoutExtension(action: "install" | "update" | "remove", na
       const candidate = findScoutExtension(name, { ...env, OPENSCOUT_EXTENSIONS_HOME: stage });
       if (!candidate || candidate.refused) throw new Error(candidate?.refused ?? "artifact has no valid extension manifest");
       // Force digest bounds before publication; execution is never a validation step.
-      digest = scoutExtensionDigest(candidate); version = candidate.version ?? null;
+      digest = scoutExtensionDigest(candidate); treeDigest = scoutExtensionTreeDigest(artifact); version = candidate.version ?? null;
     }
-    const receipt: ScoutExtensionInstallReceipt = { action, name, home, status: action === "remove" ? "removed" : "installed", version, digest,
+    const receipt: ScoutExtensionInstallReceipt = { action, name, home, status: action === "remove" ? "removed" : "installed", version, digest, treeDigest,
       previousArtifact: action === "update" ? previous ?? null : null, publishedGeneration: generation, operationId: options.operationId ?? null };
     const receipts = join(home, ".receipts"); directory(receipts);
     const verbReceipts = join(receipts, name); directory(verbReceipts);
