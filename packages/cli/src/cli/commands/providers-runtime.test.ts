@@ -66,29 +66,28 @@ describe("passive runtime provider quota consumer", () => {
     expect(report.providers).toHaveLength(2); expect(report.providers[0]!.windows).toHaveLength(2);
     expect(() => buildProviderQuotaMap(report, { now: NOW })).toThrow("pool_ambiguous");
   });
-  test("account and endpoint selectors are exact, opaque and passed through top-level argv", () => {
-    expect(parseProvidersCommandOptions(["map", "--account", "Account A", "--endpoint", "endpoint-1"])).toMatchObject({ accountId: "Account A", endpointId: "endpoint-1" });
-    const args = ["providers", "usage", "--account", "Account A", "--endpoint", "endpoint-1", "--json"];
+  test("retains existing flag grammar and preserves account case without new pool selectors", () => {
+    expect(parseProvidersCommandOptions(["map", "--role", "implementation", "--cached"])).toEqual({ command: "map", role: "implementation", forceRefresh: false });
+    const args = ["providers", "map", "--role", "implementation", "--json"];
     expect(parseScoutArgv(args)).toMatchObject({ command: "providers", args: args.slice(1, -1), outputMode: "json" });
-    const body = quota([window(), window({ id: "case", accountId: "account a", endpointId: "endpoint-2" })]);
-    expect(buildProviderUsageReport(body, format, { accountId: "Account A" }).providers).toHaveLength(1);
-    expect(buildProviderUsageReport(body, format, { accountId: "account A" }).availability).toBe("unknown");
-    for (const args of [["usage", "--account"], ["usage", "--endpoint", "--cached"], ["map", "--account", "a", "--account", "b"], ["map", "--endpoint", "a", "--endpoint", "b"]]) expect(() => parseProvidersCommandOptions(args)).toThrow();
+    const report = buildProviderUsageReport(quota([window(), window({ id: "case", accountId: "account a" })]), format);
+    expect(report.providers.map(pool => pool.identity.accountId)).toEqual(["Account A", "account a"]);
+    for (const args of [["usage", "--account", "Account A"], ["map", "--endpoint", "endpoint-1"]]) expect(() => parseProvidersCommandOptions(args)).toThrow("unknown providers option");
   });
   test("ambiguous map refuses instead of last-account-wins or an average", async () => {
     await fixture(async ({ context, lines }) => {
       await expect(runProvidersCommand(context, ["map"], format)).rejects.toThrow("pool_ambiguous"); expect(lines).toEqual([]);
     }, () => Response.json(quota([window(), window({ id: "two", accountId: "Account B", endpointId: "endpoint-2" })])));
   });
-  test("selected map retains exact quota basis and does not promise account-bound dispatch", async () => {
+  test("single-pool map retains exact quota basis and does not promise account-bound dispatch", async () => {
     await fixture(async ({ context, lines, paths }) => {
-      await runProvidersCommand(context, ["map", "--endpoint", "endpoint-2", "--role", "implementation"], format);
+      await runProvidersCommand(context, ["map", "--role", "implementation"], format);
       const map = JSON.parse(lines[0]!);
       expect(map.quotaRead.providers).toHaveLength(1);
       expect(map.quotaBasis).toEqual([{ providerId: "codex", poolId: map.quotaRead.providers[0].poolId, identity: expect.objectContaining({ provider: "openai", accountId: "Account B", endpointId: "endpoint-2" }) }]);
       expect(map.accountBinding).toBe("not_enforced"); expect(map.assignments).toHaveLength(1);
-      expect(paths[0]!.searchParams.has("endpointId")).toBe(false); // Runtime contract is unchanged; selection is local.
-    }, () => Response.json(quota([window(), window({ id: "two", accountId: "Account B", endpointId: "endpoint-2" })])));
+      expect(paths[0]!.searchParams.has("endpointId")).toBe(false); // Do not invent new runtime selector parameters.
+    }, () => Response.json(quota([window({ id: "two", accountId: "Account B", endpointId: "endpoint-2" })])));
   });
   test("map text names the account/endpoint observation basis", async () => {
     await fixture(async ({ context, lines }) => {
@@ -138,8 +137,8 @@ describe("passive runtime provider quota consumer", () => {
     const earlierClient = buildProviderUsageReport(body, { ...format, now: NOW - 60_000 });
     expect(earlierClient.providers[0]!.windows[0]!.freshness.ageMs).toBe(30_000);
   });
-  test("incomplete coverage is visible in usage and blocks mapping even after selection", () => {
-    const report = buildProviderUsageReport(quota(undefined, { coverage: { endpointsScanned: 1000, truncated: true } }), format, { endpointId: "endpoint-1" });
+  test("incomplete coverage is visible in usage and blocks mapping", () => {
+    const report = buildProviderUsageReport(quota(undefined, { coverage: { endpointsScanned: 1000, truncated: true } }), format);
     expect(report.coverage.truncated).toBe(true); expect(renderProviderUsageReport(report)).toContain("Incomplete observation coverage");
     expect(() => buildProviderQuotaMap(report, { now: NOW })).toThrow("coverage_incomplete");
   });

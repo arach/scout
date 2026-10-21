@@ -73,7 +73,6 @@ export type ProviderUsageReport = {
   availability: "available" | "stale" | "unknown";
   refresh: ProviderQuotaRead["refresh"];
   coverage: ProviderQuotaRead["coverage"];
-  selection: { accountId: string | null; endpointId: string | null };
 
   generatedAt: number;
   generatedAtIso: string;
@@ -81,12 +80,10 @@ export type ProviderUsageReport = {
   providers: ProviderUsageProvider[];
 };
 
-type PoolSelection = { accountId?: string; endpointId?: string };
-
 export type ProvidersCommandOptions =
   | { command: "help" }
-  | ({ command: "usage"; forceRefresh: boolean } & PoolSelection)
-  | ({ command: "map"; forceRefresh: boolean; role: OrchestrationRoleId | null } & PoolSelection);
+  | { command: "usage"; forceRefresh: boolean }
+  | { command: "map"; forceRefresh: boolean; role: OrchestrationRoleId | null };
 
 export type ProviderUsageFormatOptions = {
   now?: number;
@@ -101,8 +98,8 @@ export type ProvidersCommandDependencies = ProviderUsageFormatOptions & {
 export function renderProvidersCommandHelp(): string {
   return [
     "Usage:",
-    "  scout providers usage [--refresh | --cached] [--account <id>] [--endpoint <id>] [--json]",
-    "  scout providers map [--refresh | --cached] [--account <id>] [--endpoint <id>] [--role <role>] [--json]",
+    "  scout providers usage [--refresh | --cached] [--json]",
+    "  scout providers map [--refresh | --cached] [--role <role>] [--json]",
     "",
     "Read passive runtime observations or build a quota-aware orchestration map.",
     "",
@@ -117,15 +114,13 @@ export function renderProvidersCommandHelp(): string {
     "  --refresh       Request refresh (default); runtime reports unsupported.",
     "                  Reads remain passive; no polling, app or dashboard refresh.",
     "  --cached        Read passive observations without requesting refresh.",
-    "  --account <id>  Select an exact observed account (no credentials lookup).",
-    "  --endpoint <id> Select an exact observed endpoint.",
     "  --role <role>   Limit the orchestration map to one role.",
     "  --json          Emit structured JSON (global Scout flag).",
     "",
     "Usage keeps account/endpoint/session pools separate, with capture provenance.",
     "Unknown is not zero. Facts older than 1h or past reset are labeled stale.",
-    "Map refuses unknown, stale, incomplete or ambiguous selected quota pools;",
-    "select an account/endpoint instead of silently combining or picking one.",
+    "Map refuses unknown, stale, incomplete or ambiguous observed quota pools;",
+    "there is no per-pool selector in this increment. Inspect usage instead.",
     "Map quota pools are observation provenance, not a dispatch account binding.",
     "",
     "Examples:",
@@ -146,7 +141,6 @@ export function parseProvidersCommandOptions(args: string[]): ProvidersCommandOp
   let forceRefresh = true;
   let refreshMode: "refresh" | "cached" | null = null;
   let role: OrchestrationRoleId | null = null;
-  const selection: PoolSelection = {};
   for (let index = 1; index < args.length; index += 1) {
     const arg = args[index]!;
     if (arg === "--refresh" || arg === "--cached") {
@@ -156,14 +150,6 @@ export function parseProvidersCommandOptions(args: string[]): ProvidersCommandOp
       }
       refreshMode = nextMode;
       forceRefresh = nextMode === "refresh";
-      continue;
-    }
-    if (arg === "--account" || arg === "--endpoint") {
-      const value = args[++index];
-      if (!value || value.startsWith("--") || value.length > 1024 || /[\x00-\x1f]/u.test(value)) throw new ScoutCliError(`${arg} needs a literal id`);
-      const key = arg === "--account" ? "accountId" : "endpointId";
-      if (selection[key] !== undefined) throw new ScoutCliError(`${arg} may appear only once`);
-      selection[key] = value;
       continue;
     }
     if (arg === "--role") {
@@ -184,8 +170,8 @@ export function parseProvidersCommandOptions(args: string[]): ProvidersCommandOp
     throw new ScoutCliError(`unexpected providers ${action} argument: ${arg}`);
   }
   return action === "usage"
-    ? { command: "usage", forceRefresh, ...selection }
-    : { command: "map", forceRefresh, role, ...selection };
+    ? { command: "usage", forceRefresh }
+    : { command: "map", forceRefresh, role };
 }
 
 export async function runProvidersCommand(
@@ -202,7 +188,7 @@ export async function runProvidersCommand(
   const path = `/v1/provider-quotas?limit=200${options.forceRefresh ? "&refresh=1" : ""}`;
   const payload = await (dependencies.readJson ?? readProviderQuotaJson)<ProviderQuotaRead>(context, path);
   if (options.forceRefresh && payload.refresh !== "unsupported") throw new ScoutCliError("provider_quotas_invalid_response: passive runtime did not report refresh unsupported");
-  const report = buildProviderUsageReport(payload, dependencies, options);
+  const report = buildProviderUsageReport(payload, dependencies);
   if (options.command === "usage") {
     context.output.writeValue(report, renderProviderUsageReport);
     return;
@@ -229,7 +215,6 @@ async function readProviderQuotaJson<T>(context: Pick<ScoutCommandContext, "env"
 export function buildProviderUsageReport(
   payload: ProviderQuotaRead,
   options: ProviderUsageFormatOptions = {},
-  selection: PoolSelection = {},
 ): ProviderUsageReport {
   if (payload.schema !== "scout.provider-quotas/v1" || !["available", "unknown"].includes(payload.availability)
     || !["unsupported", "not_requested"].includes(payload.refresh) || !Array.isArray(payload.windows)
@@ -240,8 +225,6 @@ export function buildProviderUsageReport(
   const pools = new Map<string, ProviderUsageProvider>();
   for (const facts of payload.windows) {
     // IDs are opaque: do not trim, case-fold, or infer an account from a provider.
-    if (selection.accountId !== undefined && facts.accountId !== selection.accountId) continue;
-    if (selection.endpointId !== undefined && facts.endpointId !== selection.endpointId) continue;
     if (typeof facts.id !== "string" || !facts.id || typeof facts.provider !== "string" || !facts.provider || !Number.isFinite(facts.ageMs) || facts.ageMs < 0 || !Number.isFinite(facts.capturedAt)
       || !Number.isFinite(new Date(facts.capturedAt).getTime()) || facts.capturedAt > payload.generatedAt || ![facts.resetAt, facts.windowMs].every(value => value === undefined || Number.isFinite(value))
       || (facts.resetAt !== undefined && !Number.isFinite(new Date(facts.resetAt).getTime()))) throw new ScoutCliError("provider_quotas_invalid_response");
@@ -272,7 +255,6 @@ export function buildProviderUsageReport(
     generatedAtLocal: formatLocalTimestamp(payload.generatedAt, now, options), providers,
     availability: providers.length === 0 ? "unknown" : providers.every(pool => pool.windows.every(window => window.freshness.stale)) ? "stale" : "available",
     refresh: payload.refresh, coverage: payload.coverage,
-    selection: { accountId: selection.accountId ?? null, endpointId: selection.endpointId ?? null },
   };
 }
 
@@ -282,18 +264,18 @@ function routingProviderId(provider: string): string {
 
 /** Never feed duplicate provider IDs to a mapper whose Map would pick the last account. */
 export function buildProviderQuotaMap(report: ProviderUsageReport, options: { now?: number; role?: OrchestrationRoleId | null } = {}) {
-  if (!report.providers.length) throw new ScoutCliError("provider_quotas_unknown: no observed quota facts match; unknown is not zero");
-  if (report.coverage.truncated) throw new ScoutCliError("provider_quota_coverage_incomplete: map requires complete selected observation coverage");
+  if (!report.providers.length) throw new ScoutCliError("provider_quotas_unknown: no approved observed quota facts; unknown is not zero");
+  if (report.coverage.truncated) throw new ScoutCliError("provider_quota_coverage_incomplete: map requires complete observation coverage");
   const seen = new Set<string>();
   for (const pool of report.providers) {
-    if (seen.has(pool.routingProviderId)) throw new ScoutCliError(`provider_quota_pool_ambiguous: ${pool.routingProviderId}; select --account and/or --endpoint`);
+    if (seen.has(pool.routingProviderId)) throw new ScoutCliError(`provider_quota_pool_ambiguous: ${pool.routingProviderId}; inspect providers usage; per-pool map selection is unsupported`);
     seen.add(pool.routingProviderId);
     if (!pool.identity.endpointId || !pool.identity.accountId) throw new ScoutCliError("provider_quota_identity_unknown: map needs observed endpoint and account identity; user identity is not an account");
     if (pool.windows.some(window => window.freshness.stale)) throw new ScoutCliError("provider_quotas_stale: map cannot use stale observations; --refresh is unsupported");
   }
   const map = buildOrchestrationProviderMap({ ...report, providers: report.providers.map(pool => ({ ...pool, id: pool.routingProviderId })) }, options);
   const supported = new Set(map.models.map(model => model.route.providerId));
-  if (report.providers.some(pool => !supported.has(pool.routingProviderId))) throw new ScoutCliError("provider_quota_provider_unsupported: no routing policy for a selected provider");
+  if (report.providers.some(pool => !supported.has(pool.routingProviderId))) throw new ScoutCliError("provider_quota_provider_unsupported: no routing policy for an observed provider");
   return { ...map, quotaRead: report, quotaBasis: report.providers.map(pool => ({ providerId: pool.routingProviderId, poolId: pool.poolId, identity: pool.identity })),
     accountBinding: "not_enforced" as const };
 }
@@ -311,7 +293,7 @@ function renderQuotaPools(report: ProviderUsageReport): string {
 
 export function renderProviderUsageReport(report: ProviderUsageReport): string {
   const notice = renderQuotaNotice(report);
-  if (report.availability === "unknown") return `${notice}\n\nProvider quota availability unknown: no approved observations match this selection. Unknown is not zero.\nOpen a provider session that reports quota metadata; --refresh cannot poll it.`;
+  if (report.availability === "unknown") return `${notice}\n\nProvider quota availability unknown: no approved observations are available. Unknown is not zero.\nOpen a provider session that reports quota metadata; --refresh cannot poll it.`;
   const windowCount = report.providers.reduce((count, provider) => count + provider.windows.length, 0);
   const lines = [notice, `Provider usage · ${windowCount} ${windowCount === 1 ? "window" : "windows"} · generated ${report.generatedAtLocal}`,
     ...(report.availability === "stale" ? ["Stale observations only; these are historical facts, not current capacity."] : [])];
