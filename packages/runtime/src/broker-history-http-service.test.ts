@@ -33,3 +33,22 @@ test("historical access remains local and rejects unknown record kinds", async (
   expect((await call("/v1/history/records/invalid/old-1")).status).toBe(400);
   expect((await call("/v1/history/unrelated")).handled).toBe(false);
 });
+
+test("inventory-friendly dispatch preserves method, namespace and denial precedence", async () => {
+  for (const method of [undefined, "GET", "POST", "HEAD", "DELETE"]) {
+    for (const remote of [false, true]) {
+      for (const available of [false, true]) {
+        for (const path of ["/v1/unrelated", "/v1/history/records", "/v1/history/records/message/old-1", "/v1/history/records/sibling", "/v1/history/records-extra"]) {
+          let status = 0;
+          const handled = await handleBrokerHistoryRoute({ method, ...(remote ? { transportContext: { transport: "remote" } } : {}) } as never,
+            {} as never, new URL(path, "http://localhost"), available ? queries : undefined, (_res, code) => { status = code; });
+          const inNamespace = path.startsWith("/v1/history/records");
+          const route = path === "/v1/history/records" || path === "/v1/history/records/message/old-1";
+          const expected = (method ?? "GET") !== "GET" || !inNamespace ? 0 : remote ? 403 : !available ? 503 : route ? 200 : 0;
+          expect({ handled, status }, `${method} ${path} remote=${remote} available=${available}`)
+            .toEqual({ handled: expected !== 0, status: expected });
+        }
+      }
+    }
+  }
+});

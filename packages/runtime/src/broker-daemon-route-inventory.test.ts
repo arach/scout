@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { scoutBrokerPaths } from "@openscout/protocol";
 
 import {
-  extractRouteInventory,
+  delegatedRouteInventory,
   literalRouteBranches,
   type LiteralRouteBranch,
 } from "./broker-route-inventory.js";
@@ -24,8 +24,8 @@ function brokerHttpRouterSource(): string {
 }
 
 // The checked-in broker HTTP route inventory ("METHOD path", sorted). This is
-// the wire contract served by broker-http-router.ts +
-// broker-http-entity-write-routes.ts. If a test run diffs against this list,
+// the wire contract served by broker-http-router.ts and its transitive
+// delegated HTTP handlers (discovered from called relative imports). If a test run diffs against this list,
 // a route was added, dropped, or renamed: update the list only when the change
 // is intentional, and remember mesh (/v1/mesh/*) and A2A paths are external
 // contracts consumed by peer brokers and outside clients. Every route here
@@ -45,6 +45,7 @@ const expectedRouteInventory = [
   "GET /v1/aliases/:id/history",
   "GET /v1/approvals/remote",
   "GET /v1/assistant-claims",
+  "GET /v1/attachments/capability",
   "GET /v1/broker/messages",
   "GET /v1/capabilities",
   "GET /v1/capabilities/availability",
@@ -63,6 +64,8 @@ const expectedRouteInventory = [
   "GET /v1/guest/agents",
   "GET /v1/guest/asks/:id",
   "GET /v1/guest/whoami",
+  "GET /v1/history/records",
+  "GET /v1/history/records/:kind/:id",
   "GET /v1/home",
   "GET /v1/inbox",
   "GET /v1/inbox/stream",
@@ -89,6 +92,8 @@ const expectedRouteInventory = [
   "GET /v1/observed-sessions/resolve",
   "GET /v1/pairing/sessions",
   "GET /v1/provider-quotas",
+  "GET /v1/quarantine",
+  "GET /v1/quarantine/:id",
   "GET /v1/repo-diff/worktree",
   "GET /v1/repo-watch/snapshot",
   "GET /v1/repo-watch/warm",
@@ -123,6 +128,7 @@ const expectedRouteInventory = [
   "POST /v1/aliases",
   "POST /v1/aliases/resolve",
   "POST /v1/approvals/remote/decide",
+  "POST /v1/attachments/read",
   "POST /v1/bindings",
   "POST /v1/collaboration/events",
   "POST /v1/collaboration/records",
@@ -191,12 +197,14 @@ const expectedRouteInventory = [
   "POST /v1/message-reactions/remove",
   "POST /v1/messages",
   "POST /v1/messages/reply",
+  "POST /v1/messages/with-attachments",
   "POST /v1/missions/:id/log",
   "POST /v1/native-session-attention",
   "POST /v1/nodes",
   "POST /v1/pairing/attach",
   "POST /v1/pairing/detach",
   "POST /v1/permissions/decide",
+  "POST /v1/quarantine/:id/acknowledge",
   "POST /v1/rendezvous/match",
   "POST /v1/repo-watch/warm",
   "POST /v1/roles/assignments",
@@ -217,13 +225,7 @@ const expectedRouteInventory = [
 ];
 
 function liveRouteInventory(): string[] {
-  const routes = new Set<string>([
-    ...extractRouteInventory(brokerHttpRouterSource()),
-    ...extractRouteInventory(routerSource("broker-http-entity-write-routes.ts")),
-    ...extractRouteInventory(routerSource("broker-guest-http-routes.ts")),
-    ...extractRouteInventory(routerSource("mesh-approvals.ts")),
-  ]);
-  return [...routes].sort();
+  return delegatedRouteInventory(file => readFileSync(join(import.meta.dir, file), "utf8")).routes;
 }
 
 describe("broker HTTP route inventory", () => {
@@ -248,6 +250,31 @@ describe("broker HTTP route inventory", () => {
 
   test("matches the checked-in route inventory snapshot", () => {
     expect(liveRouteInventory()).toEqual(expectedRouteInventory);
+  });
+
+  test("follows every current delegated HTTP handler without a manually maintained source list", () => {
+    const { sources } = delegatedRouteInventory(routerSource);
+    for (const file of [
+      "broker-attachments-http.ts", "broker-history-http-service.ts",
+      "broker-quarantine-http-service.ts", "broker-access-http-routes.ts",
+      "broker-mcp-event-routes.ts", "broker-guest-http-routes.ts",
+      "broker-http-entity-write-routes.ts", "mesh-approvals.ts",
+    ]) expect(sources.has(file), file).toBe(true);
+  });
+
+  test("a new unregistered route in any delegated handler fails both inventory gates", () => {
+    const { sources } = delegatedRouteInventory(routerSource);
+    const matrix = meshRouteMatrixEntries();
+    for (const file of sources.keys()) {
+      if (file === "broker-http-router.ts") continue;
+      const route = "POST /v1/inventory-unregistered-probe";
+      const mutated = delegatedRouteInventory(name => routerSource(name) + (name === file
+        ? '\nif (request.method === "POST" && url.pathname === "/v1/inventory-unregistered-probe") return true;'
+        : "")).routes;
+      expect(mutated, file).toContain(route);
+      expect(() => expect(mutated).toEqual(expectedRouteInventory), file).toThrow();
+      expect(mutated.filter(entry => !(entry in matrix)), file).toEqual([route]);
+    }
   });
 
   test("binds enrolled mesh requests to both the peer identity and durable TLS pin", () => {

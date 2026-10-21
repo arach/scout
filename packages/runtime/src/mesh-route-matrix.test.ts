@@ -2,8 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { extractRouteInventory } from "./broker-route-inventory.js";
+import { delegatedRouteInventory } from "./broker-route-inventory.js";
 import {
+  compileMeshRouteMatrix,
   grantSatisfiesRouteTier,
   meshRouteMatrixEntries,
   meshRouteTierFor,
@@ -13,13 +14,7 @@ import {
 } from "./mesh-route-matrix.js";
 
 function liveRouteInventory(): string[] {
-  const routes = new Set<string>([
-    ...extractRouteInventory(readFileSync(join(import.meta.dir, "broker-http-router.ts"), "utf8")),
-    ...extractRouteInventory(readFileSync(join(import.meta.dir, "broker-http-entity-write-routes.ts"), "utf8")),
-    ...extractRouteInventory(readFileSync(join(import.meta.dir, "broker-guest-http-routes.ts"), "utf8")),
-    ...extractRouteInventory(readFileSync(join(import.meta.dir, "mesh-approvals.ts"), "utf8")),
-  ]);
-  return [...routes].sort();
+  return delegatedRouteInventory(file => readFileSync(join(import.meta.dir, file), "utf8")).routes;
 }
 
 // GET routes that mutate broker state — they must never be readable by a
@@ -40,6 +35,30 @@ describe("mesh route matrix", () => {
     }
     expect(Object.keys(matrix).filter((route) => !live.includes(route))).toEqual([TRPC_UPGRADE_ROUTE]);
   });
+
+  // Remove only the eight newly explicit registrations to reconstruct the
+  // previous policy with the same lookup algorithm, including parameter matching.
+  const newlyRegistered = [
+    "GET /v1/attachments/capability", "POST /v1/attachments/read",
+    "POST /v1/messages/with-attachments", "GET /v1/history/records",
+    "GET /v1/history/records/:kind/:id", "GET /v1/quarantine",
+    "GET /v1/quarantine/:id", "POST /v1/quarantine/:id/acknowledge",
+  ];
+  for (const route of newlyRegistered) {
+    test(`registration preserves the previous default-local tier: ${route}`, () => {
+      const matrix = meshRouteMatrixEntries();
+      const previous = { ...matrix };
+      for (const added of newlyRegistered) delete previous[added];
+      const before = compileMeshRouteMatrix(previous);
+      const [method, pattern] = route.split(" ");
+      const path = pattern!.replace(/:[^/]+/g, "sample");
+      expect(previous[route]).toBeUndefined();
+      expect(before(method!, path)).toBe("local");
+      expect(matrix[route]).toBe("local");
+      expect(meshRouteTierFor(method!, path)).toBe(before(method!, path));
+      expect(grantSatisfiesRouteTier("control", meshRouteTierFor(method!, path))).toBe(false);
+    });
+  }
 
   test("the public surface is exactly node card, enrollment handshake and bounded signed-policy carriage", () => {
     const publicRoutes = Object.entries(meshRouteMatrixEntries())
