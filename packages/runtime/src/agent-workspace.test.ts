@@ -100,7 +100,7 @@ describe("createAgentWorkspace", () => {
     const git = (...args: string[]) => execFileSync("git", args, { cwd: repo }).toString();
     const branchesBefore = git("for-each-ref", "refs/heads");
     const worktreesBefore = git("worktree", "list", "--porcelain");
-    const env = { ...process.env, TMPDIR: nestedTmp, TMP: nestedTmp, TEMP: nestedTmp };
+    const env: NodeJS.ProcessEnv = { ...process.env, TMPDIR: nestedTmp, TMP: nestedTmp, TEMP: nestedTmp };
     // The subprocess must supply its own ceiling, not inherit one from us.
     delete env.GIT_CEILING_DIRECTORIES;
 
