@@ -35,7 +35,7 @@ export async function collectTmuxHostAttention(input: {
     ...target, ref: { ...target.ref }, nativeSession: target.nativeSession ? { ...target.nativeSession } : undefined,
   }));
   const rows: TmuxHostAttentionObservation[] = targets.map(target => ({
-    ...target, label: clamp(target.label, limits.summaryChars), ref: { ...target.ref }, nativeSession: target.nativeSession ? { ...target.nativeSession } : undefined,
+    ...target, label: typeof target.label === "string" ? clamp(target.label, limits.summaryChars) : "", ref: { ...target.ref }, nativeSession: target.nativeSession ? { ...target.nativeSession } : undefined,
     observedAt: now, source: "tmux_pane", provenance: "inferred", detector: target.harness === "claude" ? "claude_permission_dialog" : null, availability: "not_scanned",
     reason: "capture_capacity", coverage: { capturedBytes: 0, maxBytes: limits.maxCaptureBytes, truncated: false }, prompt: null,
   }));
@@ -44,7 +44,7 @@ export async function collectTmuxHostAttention(input: {
     while (next < targets.length) {
       const index = next++, target = targets[index]!, row = rows[index]!;
       if (!nodeId?.trim()) { row.availability = "unknown"; row.reason = "local_identity_unknown"; continue; }
-      if (!validRef(target.ref) || (target.nativeSession && (target.nativeSession.nodeId !== target.ref.nodeId
+      if (typeof target.label !== "string" || !validRef(target.ref) || (target.nativeSession && (target.nativeSession.nodeId !== target.ref.nodeId
         || target.nativeSession.harness !== target.harness || !validIdentity(target.nativeSession.nativeSessionId)))) {
         row.availability = "unknown"; row.reason = "invalid_ref"; continue;
       }

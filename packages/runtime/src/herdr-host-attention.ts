@@ -43,7 +43,7 @@ export async function collectHerdrHostAttention(input: {
   const timeoutMs = ceiling(input.limits?.captureTimeoutMs, hard.captureTimeoutMs, 1);
   const targets = input.targets.slice(0, maxCandidates).map(copyTarget);
   const rows: HerdrHostAttentionObservation[] = targets.map(target => ({
-    ...copyTarget(target), label: target.label.slice(0, hard.summaryChars), observedAt,
+    ...copyTarget(target), label: typeof target.label === "string" ? target.label.slice(0, hard.summaryChars) : "", observedAt,
     source: "herdr_visible", provenance: "inferred", detector: target.harness === "claude" ? "claude_permission_dialog" : null,
     availability: "not_scanned", reason: "capture_capacity",
     coverage: { capturedBytes: 0, maxBytes: hard.maxCaptureBytes, truncated: false }, prompt: null,
@@ -53,7 +53,7 @@ export async function collectHerdrHostAttention(input: {
     while (next < targets.length) {
       const index = next++, target = targets[index]!, row = rows[index]!;
       if (!nodeId?.trim()) { row.availability = "unknown"; row.reason = "local_identity_unknown"; continue; }
-      if (!validBinding(target)) { row.availability = "unknown"; row.reason = "invalid_ref"; continue; }
+      if (typeof target.label !== "string" || !validBinding(target)) { row.availability = "unknown"; row.reason = "invalid_ref"; continue; }
       if (target.ref.nodeId !== nodeId) { row.availability = "unavailable"; row.reason = "nonlocal_ref"; continue; }
       if (target.harness !== "claude") { row.availability = "unknown"; row.reason = "unsupported_harness"; continue; }
       if (signal?.aborted) { row.availability = "unavailable"; row.reason = "aborted"; continue; }

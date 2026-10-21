@@ -99,6 +99,18 @@ describe("strict injected Herdr observations, never actuation", () => {
     expect(result.observations.map(row => row.reason)).toEqual(["nonlocal_ref", "invalid_ref", "invalid_ref", "invalid_ref", "invalid_ref", "unsupported_harness", "invalid_ref", "invalid_ref"]);
     expect(calls).toBe(0); expect(result.coverage.scanned).toBe(0);
   });
+  test("malformed labels fail only their own rows closed", async () => {
+    const malformed: unknown[] = [undefined, null, 0, {}, [], Symbol("bad label")];
+    const targets = [target(), ...malformed.map(label => ({ ...target(), label: label as string })), target()];
+    let calls = 0;
+    const result = await collect({ nodeId: "local", targets, capture: async row => { calls++; return evidence(row); } });
+    expect(calls).toBe(2); expect(result.availability).toBe("partial");
+    expect(result.coverage).toMatchObject({ requested: 8, scanned: 2, omitted: 0, complete: false });
+    for (const row of result.observations.slice(1, -1)) {
+      expect(row).toMatchObject({ label: "", availability: "unknown", reason: "invalid_ref", prompt: null });
+    }
+    expect(result.observations[0]!.prompt).not.toBeNull(); expect(result.observations.at(-1)!.prompt).not.toBeNull();
+  });
   test.each(["null", "plain", "missing_truncated", "error_envelope", "saved", "cached", "missing_binding"])("%s is not complete live capture evidence", async mode => {
     const value: unknown = mode === "null" ? null : mode === "plain" ? pane : mode === "error_envelope" ? { error: { code: "not_found" } }
       : mode === "saved" ? { ...evidence(), freshness: "saved" } : mode === "cached" ? { ...evidence(), freshness: "ttl_cached_probes" }

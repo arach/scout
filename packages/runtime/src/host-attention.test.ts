@@ -111,6 +111,18 @@ describe("bounded machine-local host reads", () => {
     expect(result.coverage.scanned).toBe(0);
     expect(calls).toBe(0);
   });
+  test("malformed labels fail only their own rows closed", async () => {
+    const malformed: unknown[] = [undefined, null, 0, {}, [], Symbol("bad label")];
+    const targets = [target(), ...malformed.map(label => target({ label: label as string })), target()];
+    let calls = 0;
+    const result = await collect({ nodeId: "node-1", targets, capture: async () => { calls++; return pane; } });
+    expect(calls).toBe(2); expect(result.availability).toBe("partial");
+    expect(result.coverage).toMatchObject({ requested: 8, scanned: 2, omitted: 0, complete: false });
+    for (const row of result.observations.slice(1, -1)) {
+      expect(row).toMatchObject({ label: "", availability: "unknown", reason: "invalid_ref", prompt: null });
+    }
+    expect(result.observations[0]!.prompt).not.toBeNull(); expect(result.observations.at(-1)!.prompt).not.toBeNull();
+  });
   test("all failed and zero-ref reads do not claim a complete fleet scan", async () => {
     expect((await collect({ nodeId: "node-1", targets: [target()], capture: async () => null })).availability).toBe("unavailable");
     const empty = await collect({ nodeId: "node-1", targets: [], capture: async () => { throw new Error("never"); } });
