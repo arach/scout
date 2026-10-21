@@ -1,7 +1,8 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import * as childProcess from "node:child_process";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -39,7 +40,9 @@ function packClient(version: string, profileVersion = version): Uint8Array<Array
   writeFileSync(join(client, "assets", "app.js"), "Mission Control");
   writeFileSync(join(client, "scout-web-profile.json"), JSON.stringify({ profile: "full", version: profileVersion }));
   const tarball = join(root, `${version}-${profileVersion}.tar.gz`);
-  expect(spawnSync("tar", ["-czf", tarball, "-C", client, "."]).status).toBe(0);
+  const packed = spawnSync("tar", ["-czf", tarball, "-C", client, "."], { timeout: 5_000, killSignal: "SIGKILL" });
+  expect(packed.error).toBeUndefined();
+  expect(packed.status, packed.stderr?.toString()).toBe(0);
   return new Uint8Array(readFileSync(tarball));
 }
 
@@ -123,7 +126,7 @@ describe("scout web", () => {
     expect(lines.join("\n")).toContain(`Installed the full web app ${VERSION}`);
 
     // Nothing left behind from the install.
-    expect(spawnSync("ls", ["-A", join(support, "web", "full")]).stdout.toString().trim()).toBe(VERSION);
+    expect(readdirSync(join(support, "web", "full"))).toEqual([VERSION]);
 
     // Other versions are never served by this server, even if present.
     expect(resolveInstalledWebFullClient("9.8.6", { env: {}, supportDirectory: support })).toBeNull();
@@ -144,7 +147,22 @@ describe("scout web", () => {
     await expect(runWebCommand(wrong.context, ["install"], wrong.deps)).rejects.toThrow("isn't the full web app");
 
     expect(resolveInstalledWebFullClient(VERSION, { env: {}, supportDirectory: support })).toBeNull();
-    expect(spawnSync("ls", ["-A", join(support, "web", "full")]).stdout.toString().trim()).toBe("");
+    expect(readdirSync(join(support, "web", "full"))).toEqual([]);
+  });
+
+  test("a stuck unpack child has a hard deadline, reports its error and leaves no partial install", async () => {
+    const tarball = packClient(VERSION);
+    const { context, deps } = harness({ tarball, env: { SCOUT_DIST_KEY: KEY } });
+    const child = spyOn(childProcess, "spawnSync").mockReturnValue({
+      status: null, signal: "SIGKILL", error: Object.assign(new Error("spawnSync tar ETIMEDOUT"), { code: "ETIMEDOUT" }),
+      pid: 0, output: [], stdout: "", stderr: "partial tar diagnostic",
+    });
+    try {
+      await expect(runWebCommand(context, ["install", "--no-restart"], deps)).rejects.toThrow("Couldn't unpack the download: spawnSync tar ETIMEDOUT");
+      expect(child).toHaveBeenCalledWith("tar", expect.any(Array), expect.objectContaining({ timeout: 30_000, killSignal: "SIGKILL" }));
+      expect(resolveInstalledWebFullClient(VERSION, { env: {}, supportDirectory: support })).toBeNull();
+      expect(readdirSync(join(support, "web", "full"))).toEqual([]);
+    } finally { child.mockRestore(); }
   });
 
   test("install explains a missing key and an unpublished version", async () => {

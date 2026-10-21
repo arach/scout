@@ -224,14 +224,14 @@ process.exitCode = await runScoutExtension(extension, [], process.env);`);
     const extensions = join(shared, "extensions");
     install(extensions, "tool", "exit 0");
     // Bun chmodSync drops the sticky bit; use chmod itself on both macOS and Linux.
-    expect(spawnSync("/bin/chmod", ["1777", shared]).status).toBe(0);
+    expect(spawnSync("/bin/chmod", ["1777", shared], { timeout: 5_000, killSignal: "SIGKILL" }).status).toBe(0);
     expect(fs.statSync(shared).mode & 0o1000).toBe(0o1000);
     expect(findScoutExtension("tool", { OPENSCOUT_EXTENSIONS_HOME: extensions })?.refused).toBeUndefined();
     try {
-      expect(spawnSync("/bin/chmod", ["1777", extensions]).status).toBe(0);
+      expect(spawnSync("/bin/chmod", ["1777", extensions], { timeout: 5_000, killSignal: "SIGKILL" }).status).toBe(0);
       expect(findScoutExtension("tool", { OPENSCOUT_EXTENSIONS_HOME: extensions })?.refused)
         .toContain("anyone on this machine can write to");
-    } finally { expect(spawnSync("/bin/chmod", ["0755", extensions]).status).toBe(0); }
+    } finally { expect(spawnSync("/bin/chmod", ["0755", extensions], { timeout: 5_000, killSignal: "SIGKILL" }).status).toBe(0); }
   });
 
   test("mesh stays built in until its extension ships with an installer", () => {

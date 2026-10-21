@@ -109,6 +109,7 @@ exit 1
         ["--silent", "-e", `const mod = await import(${JSON.stringify(moduleUrl)}); await mod.suggestedRelayUrl(43131);`],
         {
           encoding: "utf8",
+          timeout: 10_000, killSignal: "SIGKILL",
           env: {
             ...process.env,
             PATH: `${directory}:${process.env.PATH ?? ""}`,
