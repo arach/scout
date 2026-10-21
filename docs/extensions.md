@@ -82,7 +82,9 @@ cutover changes their registrations.
 
 If a reserved extension is unavailable, Scout exits with **69**
 (`EX_UNAVAILABLE`). With `--json`, Scout writes exactly one JSON object and a
-newline to **stderr**, with no stdout output:
+newline to **stderr**, with no stdout output. Any bare `--json` token in the
+arguments selects JSON refusal rendering, including after `--`. The unavailable
+extension never runs, so Scout interprets that token itself:
 
 ```json
 {"schema":"scout.cli.command-unavailable/v1","error":"command_unavailable","command":"sample","reason":"missing"}

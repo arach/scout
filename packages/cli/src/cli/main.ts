@@ -36,7 +36,11 @@ try {
   }
 } catch (error) {
   if (error instanceof ScoutCommandUnavailableError) {
-    console.error(renderScoutCommandUnavailable(error, process.argv.includes("--json")));
+    if (process.argv.includes("--json")) {
+      process.stderr.write(JSON.stringify(error.toJSON()) + "\n");
+    } else {
+      console.error(renderScoutCommandUnavailable(error, false));
+    }
     process.exit(error.exitCode);
   }
   console.error(`error: ${error instanceof Error ? error.message : String(error)}`);

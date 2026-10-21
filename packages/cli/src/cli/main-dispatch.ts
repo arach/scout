@@ -174,7 +174,11 @@ try {
   await main();
 } catch (error) {
   if (error instanceof ScoutCommandUnavailableError) {
-    console.error(renderScoutCommandUnavailable(error, process.argv.includes("--json")));
+    if (process.argv.includes("--json")) {
+      process.stderr.write(JSON.stringify(error.toJSON()) + "\n");
+    } else {
+      console.error(renderScoutCommandUnavailable(error, false));
+    }
     process.exit(error.exitCode);
   }
   const message = error instanceof Error ? error.message : String(error);

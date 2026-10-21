@@ -32,7 +32,7 @@ function fixture() {
     mock.module(${JSON.stringify(resolve(import.meta.dir, "commands/index.ts"))}, () => ({
       loadScoutCommandHandler: async name => async () => {record("builtin:"+name); console.log("builtin fixture");},
     }));`);
-  const inherited = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(OPENSCOUT|SCOUT)_/.test(key)));
+  const inherited = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(OPENSCOUT|SCOUT)_/.test(key) && !["FORCE_COLOR", "CLICOLOR_FORCE", "NO_COLOR"].includes(key)));
   const env = { ...inherited, HOME: home, OPENSCOUT_EXTENSIONS_HOME: extensions, OPENSCOUT_BROKER_URL: "http://127.0.0.1:43110", PATH: bin + delimiter + (inherited.PATH ?? ""), BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" };
   // A PATH executable is deliberately present for every refusal case.
   writeFileSync(join(bin, `scout-${verb}`), `#!/bin/sh\nprintf 'path_lookup\\n' >> '${events}'\n`, { mode: 0o700 });
@@ -88,6 +88,25 @@ test("absent reserved help refuses in discovery and dispatch, including aliases/
   // The bundled dispatcher also has its own catch, independent of main's discovery catch.
   const direct = await f.run([verb, "--json"], "main-dispatch.ts");
   expect(direct.code).toBe(69); expect(JSON.parse(direct.stderr).reason).toBe("missing"); expect(direct.events).toEqual([]);
+});
+
+test("forced color leaves JSON refusals unformatted in discovery and dispatch", async () => {
+  const f = fixture();
+  const expected = { schema: "scout.cli.command-unavailable/v1", error: "command_unavailable", command: verb, reason: "missing" };
+  const cases = [
+    { entry: "main.ts", args: [verb, "--help", "--json"] },
+    // Any bare --json token selects refusal rendering, even after the argv delimiter.
+    { entry: "main.ts", args: [verb, "--", "--json"] },
+    { entry: "main-dispatch.ts", args: [verb, "--json"] },
+  ];
+  for (const { entry, args } of cases) {
+    const result = await f.run(args, entry, { ...f.env, FORCE_COLOR: "1" });
+    expect(result.code, result.stderr).toBe(69);
+    expect(result.stdout).toBe("");
+    expect(JSON.parse(result.stderr)).toEqual(expected);
+    expect(result.stderr).toBe(JSON.stringify(expected) + "\n");
+    expect(result.events).toEqual([]);
+  }
 });
 
 test("a valid reserved extension preserves argv, JSON context and foreground exit", async () => {
