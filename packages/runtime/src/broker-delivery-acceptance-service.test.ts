@@ -23,7 +23,12 @@ import {
 
 import { recoverSessionInputDelivery } from "./broker-session-input-delivery.js";
 import type { SessionInputDeliveryOptions } from "./broker-session-input-delivery.js";
-import { BrokerDeliveryAcceptanceService } from "./broker-delivery-acceptance-service.js";
+import { wakeLocalHarnessSession } from "./broker-session-wake.js";
+import { brokerDeliverRequestSchema } from "./broker-command-boundary-schemas.js";
+import { deliverScoutRequest, prepareScoutSessionReply } from "./delivery-client.js";
+import { createHash } from "node:crypto";
+import { canonicalRequest } from "./broker-request-receipts.js";
+import { BrokerDeliveryAcceptanceService, type BrokerDeliveryAcceptanceServiceOptions } from "./broker-delivery-acceptance-service.js";
 import type { InvocationResolution } from "./broker-delivery-routing.js";
 import type { RuntimeSnapshot } from "./scout-dispatcher.js";
 
@@ -116,6 +121,7 @@ function testSnapshot(input: {
 
 function createHarness(input: {
   resolution?: InvocationResolution;
+  resolveDeliveryTarget?: BrokerDeliveryAcceptanceServiceOptions["resolveBrokerDeliveryTargetWithImplicitProjectAgent"];
   conversation?: ConversationDefinition;
   conversationForRequest?: (
     request: { requesterId: string; targetAgentId?: string; channel?: string },
@@ -222,8 +228,8 @@ function createHarness(input: {
     isOperatorDeliveryTarget: input.isOperatorTarget ?? (() => false),
     isLocalScoutProductTarget: input.isScoutTarget ?? (() => false),
     onlineConversationNotifyTargets: () => ["agent-1"],
-    resolveBrokerDeliveryTargetWithImplicitProjectAgent: async () =>
-      input.resolution ?? { kind: "resolved", agent },
+    resolveBrokerDeliveryTargetWithImplicitProjectAgent: input.resolveDeliveryTarget ?? (async () =>
+      input.resolution ?? { kind: "resolved", agent }),
     async createCardlessProjectSession(request) {
       cardlessProjectSessionCalls.push(request);
       const cardlessEndpoint = testEndpoint({
@@ -310,6 +316,98 @@ describe("broker session input receipts", () => {
   const payload: ScoutDeliverRequest = { requestId: "mobile-reply-1", requesterId: "operator", requesterNodeId: "node-1",
     intent: "consult", body: "continue with this", sessionDelivery: "in_place_or_resume",
     target: { kind: "session_id", sessionId: "native-1", harness: "claude" }, execution: { session: "existing" } };
+
+  for (const flag of [true, false, undefined]) {
+    test(`native Codex reply guards a concurrent writer and replays refusal (forkIfLive=${flag})`, async () => {
+      const directory = await mkdtemp(join(tmpdir(), "scout-native-writer-"));
+      try {
+        let writer = false, submits = 0, resolves = 0, registrations = 0;
+        const ledger = new BrokerRequestReceipts(directory);
+        const command: ScoutDeliverRequest = { ...payload, target: { kind: "session_id", sessionId: "native-1", harness: "codex",
+          ...(flag === undefined ? {} : { forkIfLive: flag }) } };
+        const original = structuredClone(command);
+        Object.freeze(command.target);
+        const harness = createHarness({ requestReceipts: ledger, submitSessionInput: async () => {
+          submits++;
+          if (submits === 1) writer = true; // Another writer appears after the initial live-input probe.
+          return { ok: false, code: "not_live" };
+        }, resolveDeliveryTarget: async request => {
+          resolves++;
+          const target = request.target;
+          if (target?.kind !== "session_id") throw new Error("expected native target");
+          const wake = await wakeLocalHarnessSession({
+            nodeId: "node-1", snapshotEndpoints: () => ({}), harnessSupportsResume: () => true,
+            locate: () => ({ ok: true, session: { harness: "codex", nativeSessionId: "native-1", cwd: "/work/project",
+              path: "/fixtures/native-1.jsonl", lastActivityAt: 1, match: "session_meta id" } }),
+            registry: { upsertActor: async () => { registrations++; }, upsertEndpoint: async () => { registrations++; } },
+            isCodexThreadLive: async () => writer,
+          }, { nativeSessionId: target.sessionId, harness: "codex", forkIfLive: target.forkIfLive });
+          return wake.ok ? { kind: "resolved", agent: testAgent() }
+            : { kind: "unknown", label: "native-1", detail: wake.detail, sessionWakeReason: wake.reason };
+        } });
+        const refusal = await harness.service.accept(command);
+        expect(refusal).toMatchObject({ kind: "rejected", rejection: { sessionWakeReason: "session_live_fork_unsupported" } });
+        expect(registrations).toBe(0);
+        writer = false;
+        expect(await harness.service.accept(command)).toEqual(refusal);
+        expect(submits).toBe(1); expect(resolves).toBe(1);
+        expect(harness.acceptedInvocations).toHaveLength(0);
+        expect(command).toEqual(original);
+        expect((await ledger.get("operator", command.requestId!, "deliver"))?.fingerprint)
+          .toBe(createHash("sha256").update(canonicalRequest(original)).digest("hex"));
+        // Once the writer leaves, sending again is a new instruction, not a retry.
+        expect(await harness.service.accept({ ...command, requestId: "new-instruction" })).toMatchObject({ kind: "delivery" });
+        expect(submits).toBe(2); expect(harness.acceptedInvocations).toHaveLength(1);
+      } finally { await rm(directory, { recursive: true, force: true }); }
+    });
+  }
+
+  test("post-upgrade native retry replays a stored receipt with forkIfLive absent", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "scout-native-upgrade-"));
+    try {
+      const old: ScoutDeliverRequest = { ...payload, target: { kind: "session_id", sessionId: "native-1", harness: "codex" } };
+      const ledger = new BrokerRequestReceipts(directory);
+      const original = { kind: "rejected", accepted: false, reason: "invalid_target", rejection: { id: "old-refusal" } };
+      await ledger.run("operator", old.requestId!, "deliver", old, async () => original);
+      const fingerprint = (await ledger.get("operator", old.requestId!, "deliver"))!.fingerprint;
+      const upgraded = createHarness({ requestReceipts: new BrokerRequestReceipts(directory),
+        submitSessionInput: async () => { throw new Error("replay must not submit input"); },
+        resolveDeliveryTarget: async () => { throw new Error("replay must not re-resolve"); } });
+      expect(await upgraded.service.accept(old)).toEqual(original);
+      expect((await ledger.get("operator", old.requestId!, "deliver"))!.fingerprint).toBe(fingerprint);
+      expect(old.target).not.toHaveProperty("forkIfLive");
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+
+  test("a non-web client loses its reply then replays broker acceptance after restart without another input", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "scout-native-client-"));
+    const fetch = globalThis.fetch;
+    try {
+      let submits = 0, lose = true;
+      const first = createHarness({ requestReceipts: new BrokerRequestReceipts(directory), submitSessionInput: async () => {
+        submits++; return { ok: true, via: "tmux", location: "%3" };
+      } });
+      let service = first.service;
+      globalThis.fetch = (async (input, init) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        if (new URL(request.url).pathname === "/v1/node") return Response.json({ id: "node-1", capabilities: ["session-input-receipts/1"] });
+        const accepted = await service.accept(brokerDeliverRequestSchema.parse(await request.json()));
+        if (lose) { lose = false; throw new Error("lost response after native submission"); }
+        return Response.json(accepted);
+      }) as typeof globalThis.fetch;
+      const prepared = prepareScoutSessionReply({ clientMessageId: "retained-native", requesterId: "operator", requesterNodeId: "node-1",
+        sessionId: "native-1", harness: "claude", body: "continue", source: "reference-client" });
+      const broker = { baseUrl: "http://native-client.test", expectedNodeId: "node-1", socketPath: null };
+      await expect(deliverScoutRequest(broker, prepared)).rejects.toThrow("lost response");
+      service = createHarness({ requestReceipts: new BrokerRequestReceipts(directory), submitSessionInput: async () => {
+        throw new Error("replay must not submit or resume");
+      } }).service;
+      const result = await deliverScoutRequest(broker, prepared);
+      expect(result).toMatchObject({ kind: "delivery", receipt: { inputSubmitted: { state: "submitted", sessionId: "native-1" } } });
+      expect(result).not.toHaveProperty("flight"); expect(submits).toBe(1);
+      expect(first.acceptedInvocations).toHaveLength(0); expect(first.postedMessages).toHaveLength(1);
+    } finally { globalThis.fetch = fetch; await rm(directory, { recursive: true, force: true }); }
+  });
 
   test("reserves before input, coalesces concurrent retries and replays after restart without a flight", async () => {
     const directory = await mkdtemp(join(tmpdir(), "scout-session-input-"));
