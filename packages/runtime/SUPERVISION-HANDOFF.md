@@ -109,6 +109,10 @@ The lock assumes a host-local filesystem with working `flock` and `fsync`
 semantics, not a shared network home or mesh store. The SDK loads the existing
 system library (`libSystem.B.dylib` on macOS, `libc.so.6` on supported Linux).
 There is no native build, PID-file fallback or unsupported-platform takeover.
+Only `EWOULDBLOCK` or `EAGAIN` maps to `ownership_busy`. Unsupported locking
+(`ENOTSUP` or `EOPNOTSUPP`), platforms or system-library bindings refuse with
+`ownership_lock_unsupported`. Other `flock` failures, including `EBADF`, refuse
+with `ownership_lock_failed`. Neither failure means another owner holds the lock.
 
 The staged implementation bounds the file at 16 MiB and receipts/authorizations
 at 256 each. Capacity refuses rather than evicting replay protection. There is

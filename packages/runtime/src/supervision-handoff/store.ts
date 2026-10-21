@@ -1,7 +1,8 @@
-import { dlopen } from "bun:ffi";
+import { dlopen, read, type Pointer } from "bun:ffi";
 import { createHash, randomBytes } from "node:crypto";
 import { closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readFileSync, realpathSync, writeSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
+import { constants as osConstants } from "node:os";
 import { HANDOFF_CAPABILITY, HANDOFF_PROTOCOL, HANDOFF_ROLES, requireRole, refuse,
   type AuthorizationIntent, type FloorPolicy, type HandoffRole, type Ownership, type MutationReceipt,
   type OperatorApproval, type PendingReceipt, type StageApproval, type SelectedInstance } from "./contracts.js";
@@ -20,15 +21,33 @@ export const receiptKey = (role: HandoffRole, generation: number, id: string) =>
 let native: ReturnType<typeof openNative> | undefined;
 function openNative() {
   if (process.platform !== "darwin" && process.platform !== "linux") refuse("ownership_lock_unsupported");
-  return dlopen(process.platform === "darwin" ? "/usr/lib/libSystem.B.dylib" : "libc.so.6", {
-    flock: { args: ["i32", "i32"], returns: "i32" },
-  });
+  try {
+    const library = dlopen(process.platform === "darwin" ? "/usr/lib/libSystem.B.dylib" : "libc.so.6", {
+      flock: { args: ["i32", "i32"], returns: "i32" },
+      [process.platform === "darwin" ? "__error" : "__errno_location"]: { args: [], returns: "ptr" },
+    });
+    // The computed symbol key widens Bun's inferred return to include flock's
+    // integer; its FFI descriptor above is always the errno pointer signature.
+    const errnoPointer = library.symbols[process.platform === "darwin" ? "__error" : "__errno_location"] as () => Pointer | null;
+    return { library, flock: library.symbols.flock,
+      errno: () => {
+        const pointer = errnoPointer();
+        if (pointer === null) refuse("ownership_lock_failed");
+        return read.i32(pointer);
+      } };
+  } catch { refuse("ownership_lock_unsupported"); }
 }
-function lock(fd: number) {
+/** Internal diagnostics boundary, not a public API or lock override. */
+export function ownershipLockFailure(errno: number) {
+  if (errno === osConstants.errno.EWOULDBLOCK || errno === osConstants.errno.EAGAIN) return "ownership_busy";
+  if (errno === osConstants.errno.ENOTSUP || errno === osConstants.errno.EOPNOTSUPP) return "ownership_lock_unsupported";
+  return "ownership_lock_failed";
+}
+export function acquireOwnershipLock(fd: number) {
   native ??= openNative();
-  if (native.symbols.flock(fd, 2 | 4) !== 0) refuse("ownership_busy"); // LOCK_EX | LOCK_NB; no TTL/PID stealing.
+  if (native.flock(fd, 2 | 4) !== 0) refuse(ownershipLockFailure(native.errno())); // LOCK_EX | LOCK_NB; no TTL/PID stealing.
 }
-function unlock(fd: number) { native!.symbols.flock(fd, 8); }
+function unlock(fd: number) { native!.flock(fd, 8); }
 function fileIdentity(pathOrFd: string | number) {
   const stat = typeof pathOrFd === "number" ? fstatSync(pathOrFd, { bigint: true }) : lstatSync(pathOrFd, { bigint: true });
   return { dev: stat.dev.toString(), ino: stat.ino.toString() };
@@ -69,7 +88,7 @@ export class HandoffStore {
     selection(this.instance); owned(this.directory, true, this.instance.uid);
     const fd = openSync(this.path, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | constants.O_NOFOLLOW, 0o600);
     try {
-      lock(fd);
+      acquireOwnershipLock(fd);
       const identity = fileIdentity(fd);
       const anchor = openSync(join(this.directory, "identity.json"), constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600);
       try { const bytes = Buffer.from(JSON.stringify({ dev: identity.dev, ino: identity.ino }));
@@ -92,7 +111,7 @@ export class HandoffStore {
       const opened = fileIdentity(fd);
       if (opened.ino !== info.ino || opened.dev !== info.dev) refuse("ownership_path_changed");
       this.assertIdentity(opened);
-      lock(fd); acquired = true; fsyncSync(fd);
+      acquireOwnershipLock(fd); acquired = true; fsyncSync(fd);
       const parsed = readJournal(fd);
       if (digest(parsed.state.instance) !== digest(this.instance)) refuse("wrong_instance");
       tx = new CustodyTransaction(this, fd, parsed.state, parsed.sequence, parsed.hash);

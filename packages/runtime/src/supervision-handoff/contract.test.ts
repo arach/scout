@@ -1,10 +1,10 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, readdirSync, renameSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { constants as osConstants, tmpdir } from "node:os";
 import { join } from "node:path";
 import { SupervisionHandoff, HANDOFF_ROLES, productionHandoffReadiness,
   type Absence, type ExactChild, type FloorPolicy, type HandoffInspector, type Observation, type Readiness, type RoleCustody } from "./index.js";
-import { HandoffStore } from "./store.js";
+import { acquireOwnershipLock, HandoffStore, ownershipLockFailure } from "./store.js";
 
 const roots: string[] = [];
 afterEach(() => { for (const path of roots.splice(0)) rmSync(path, { recursive: true, force: true }); });
@@ -464,4 +464,16 @@ test("the 16 MiB journal limit refuses an append before writing and refuses over
   truncateSync(journal, limit + 1);
   await expect(f.reopen().read("web")).rejects.toThrow("ownership_store_capacity");
   expect(f.effects()).toBe(0);
+});
+
+test("flock deployment errors are not reported as owner contention", () => {
+  expect(ownershipLockFailure(osConstants.errno.EWOULDBLOCK)).toBe("ownership_busy");
+  expect(ownershipLockFailure(osConstants.errno.EAGAIN)).toBe("ownership_busy");
+  expect(ownershipLockFailure(osConstants.errno.ENOTSUP)).toBe("ownership_lock_unsupported");
+  expect(ownershipLockFailure(osConstants.errno.EOPNOTSUPP)).toBe("ownership_lock_unsupported");
+  for (const errno of [osConstants.errno.EBADF, osConstants.errno.EINVAL, osConstants.errno.EIO]) {
+    expect(ownershipLockFailure(errno)).toBe("ownership_lock_failed");
+  }
+  // Exercise real errno capture, not just the classification helper.
+  expect(() => acquireOwnershipLock(-1)).toThrow("ownership_lock_failed");
 });
