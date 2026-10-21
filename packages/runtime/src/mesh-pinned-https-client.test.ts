@@ -8,6 +8,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import {
   PeerTlsPinError,
   PeerTlsConnectionError,
+  PeerTransportError,
+  PeerTimeoutError,
   createPinnedHttpsClient,
 } from "./mesh-pinned-https-client.js";
 import {
@@ -53,7 +55,7 @@ type CapturedRequest = { method: string; path: string; headers: Headers; body: s
 
 function startTlsPeer(
   identity: NodeTlsIdentity,
-  handler?: (request: Request) => Response,
+  handler?: (request: Request) => Response | Promise<Response>,
 ): { baseUrl: string; requests: CapturedRequest[] } {
   const requests: CapturedRequest[] = [];
   const server = Bun.serve({
@@ -223,7 +225,12 @@ describe("pinned https client", () => {
   test("node runtime: same pin match / pin mismatch behaviour via the socket-handoff path", async () => {
     const identity = await freshTlsIdentity();
     const impostor = await freshTlsIdentity();
-    const { baseUrl, requests } = startTlsPeer(identity);
+    const { baseUrl, requests } = startTlsPeer(identity, async (request) => {
+      const path = new URL(request.url).pathname;
+      if (path === "/slow") await Bun.sleep(150);
+      if (path === "/stream") return streamResponse();
+      return Response.json({ ok: true, path });
+    });
 
     const workDir = mkdtempSync(join(tmpdir(), "openscout-pinned-node-conformance-"));
     const bundlePath = join(workDir, "pinned-client.mjs");
@@ -260,6 +267,14 @@ try {
   result.responseCap = "UNBOUNDED";
 } catch (error) { result.responseCap = error.name; }
 capped.close();
+const bounded = createPinnedHttpsClient({ responseTimeoutMs: 30 });
+try {
+  await bounded.fetch(${JSON.stringify(`${baseUrl}/slow`)}, { spkiFingerprint: ${JSON.stringify(identity.spkiFingerprint)} });
+  result.timeout = "UNBOUNDED";
+} catch (error) { result.timeout = error.name; result.timeoutPhase = error.phase; }
+const streaming = await bounded.fetch(${JSON.stringify(`${baseUrl}/stream`)}, { spkiFingerprint: ${JSON.stringify(identity.spkiFingerprint)} });
+result.streamBody = await streaming.text();
+bounded.close();
 client.close();
 console.log(JSON.stringify(result));
 `);
@@ -284,8 +299,11 @@ console.log(JSON.stringify(result));
     expect(result.mismatch).toBe("PeerTlsPinError");
     expect(result.mismatchObserved).toBe(identity.spkiFingerprint);
     expect(result.responseCap).toBe("PeerResponseTooLargeError");
+    expect(result.timeout).toBe("PeerTimeoutError");
+    expect(result.timeoutPhase).toBe("response");
+    expect(result.streamBody).toBe(streamText);
     // Only pin-matching requests were delivered, including the capped response.
-    expect(requests.map((request) => request.path)).toEqual(["/v1/node", "/v1/node"]);
+    expect(requests.map((request) => request.path)).toEqual(["/v1/node", "/v1/node", "/slow", "/stream"]);
   });
 
   test("a caller deadline cancels a stalled TLS handshake before the connector timeout", async () => {
@@ -300,10 +318,12 @@ console.log(JSON.stringify(result));
     const address = server.address() as import("node:net").AddressInfo;
     try {
       const started = performance.now();
-      await expect(makeClient({ connectTimeoutMs: 2_000 }).fetch(
+      const signal = AbortSignal.timeout(50);
+      const outcome = await makeClient({ connectTimeoutMs: 2_000 }).fetch(
         `https://127.0.0.1:${address.port}/v1/node`, { spkiFingerprint: "f".repeat(64) },
-        { signal: AbortSignal.timeout(50) },
-      )).rejects.toBeInstanceOf(PeerTlsConnectionError);
+        { signal },
+      ).catch(error => error);
+      expect(outcome).toBe(signal.reason);
       expect(performance.now() - started).toBeLessThan(1_000);
       await new Promise((resolve) => setTimeout(resolve, 20));
       expect(closed).toBe(true);
@@ -329,4 +349,85 @@ console.log(JSON.stringify(result));
       ),
     ).rejects.toBeInstanceOf(PeerTlsConnectionError);
   });
+});
+
+const streamText = [0, 1, 2, 3, 4, 5].map((i) => `data: ${i}\n\n`).join("");
+function streamResponse() {
+  return new Response(new ReadableStream({
+    async start(controller) {
+      for (let i = 0; i < 6; i++) {
+        controller.enqueue(new TextEncoder().encode(`data: ${i}\n\n`));
+        await Bun.sleep(50);
+      }
+      controller.close();
+    },
+  }), { headers: { "content-type": "text/event-stream" } });
+}
+
+for (const probe of [false, true]) {
+  test(`Bun ${probe ? "probe" : "pinned"} response timeout is transport, never a trust refusal`, async () => {
+    const identity = await freshTlsIdentity();
+    const { baseUrl } = startTlsPeer(identity, async () => { await Bun.sleep(150); return Response.json({ ok: true }); });
+    const client = makeClient({ responseTimeoutMs: 20 });
+    const outcome = await (probe ? client.probeFetch(baseUrl) : client.fetch(baseUrl, { spkiFingerprint: identity.spkiFingerprint })).catch(error => error);
+    expect(outcome).toBeInstanceOf(PeerTimeoutError);
+    expect(outcome).toBeInstanceOf(PeerTransportError);
+    expect(outcome.phase).toBe("response");
+    expect(outcome).not.toBeInstanceOf(PeerTlsPinError);
+  });
+
+  test(`Bun ${probe ? "probe" : "pinned"} response budget ends at headers; SSE outlives it`, async () => {
+    const identity = await freshTlsIdentity();
+    const { baseUrl } = startTlsPeer(identity, streamResponse);
+    const client = makeClient({ responseTimeoutMs: 40 });
+    const response = await (probe ? client.probeFetch(baseUrl) : client.fetch(baseUrl, { spkiFingerprint: identity.spkiFingerprint }));
+    expect(response.ok).toBe(true);
+    expect(await response.text()).toBe(streamText);
+  });
+
+  test(`Bun ${probe ? "probe" : "pinned"} caller cancellation still governs the response body`, async () => {
+    const identity = await freshTlsIdentity();
+    let finish!: () => void;
+    const { baseUrl } = startTlsPeer(identity, () => new Response(new ReadableStream({
+      start(controller) { controller.enqueue(new TextEncoder().encode("data: first\n\n")); finish = () => { try { controller.close(); } catch {} }; },
+    }), { headers: { "content-type": "text/event-stream" } }));
+    const client = makeClient({ responseTimeoutMs: 40 }), abort = new AbortController();
+    try {
+      const response = await (probe ? client.probeFetch(baseUrl, { signal: abort.signal })
+        : client.fetch(baseUrl, { spkiFingerprint: identity.spkiFingerprint }, { signal: abort.signal }));
+      const reading = response.text();
+      abort.abort(new Error("caller stopped stream"));
+      await expect(reading).rejects.toBeDefined();
+    } finally { finish?.(); }
+  });
+}
+
+test("Bun connector timeout is typed and closes the stalled handshake socket", async () => {
+  const sockets = new Set<import("node:net").Socket>();
+  const server = createServer(socket => { sockets.add(socket); socket.on("data", () => {}); socket.on("close", () => sockets.delete(socket)); });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as import("node:net").AddressInfo;
+  try {
+    await expect(makeClient({ connectTimeoutMs: 40 }).fetch(`https://127.0.0.1:${port}`, { spkiFingerprint: "a".repeat(64) }))
+      .rejects.toMatchObject({ name: "PeerTimeoutError", phase: "connect" });
+    await Bun.sleep(20);
+    expect(sockets.size).toBe(0);
+  } finally { for (const socket of sockets) socket.destroy(); await new Promise<void>(resolve => server.close(() => resolve())); }
+});
+
+test("Bun cached-anchor certificate failure stays a trust error, not transport fallback", async () => {
+  const identity = await freshTlsIdentity(), other = await freshTlsIdentity();
+  const { baseUrl } = startTlsPeer(identity);
+  const client = makeClient();
+  await client.fetch(baseUrl, { spkiFingerprint: identity.spkiFingerprint });
+  for (const server of servers) server.stop(true);
+  servers.clear();
+  let requests = 0;
+  const impostor = Bun.serve({ hostname: "127.0.0.1", port: Number(new URL(baseUrl).port),
+    tls: { cert: other.certificatePem, key: other.keyPair.privateKey.export({ type: "pkcs8", format: "pem" }) as string },
+    fetch() { requests++; return Response.json({ ok: true }); },
+  });
+  servers.add(impostor);
+  await expect(client.fetch(baseUrl, { spkiFingerprint: identity.spkiFingerprint })).rejects.toBeInstanceOf(PeerTlsPinError);
+  expect(requests).toBe(0);
 });

@@ -445,3 +445,31 @@ describe("ObservedSessionReducer", () => {
     await reducer.close({ flush: false });
   });
 });
+
+describe("classified prompt projections", () => {
+  test("uses operator words rather than the raw harness frame for the title and preview", async () => {
+    const { sink, batches } = collectingSink();
+    const reducer = new ObservedSessionReducer(sink, manualFlushOptions);
+    try {
+      reducer.ingest(event({
+        summary: "Injected context the raw summary clipped before the request",
+        prompt: { parts: [{ kind: "words", text: "Fix the sidebar sort" }], words: "Fix the sidebar sort", harnessOnly: false },
+      }));
+      await reducer.flushNow();
+      expect(batches[0]?.[0]).toMatchObject({ title: "Fix the sidebar sort", preview: "Fix the sidebar sort" });
+    } finally { await reducer.close({ flush: false }); }
+  });
+
+  test("a harness-only notice supplies a readable headline, never a task title", async () => {
+    const { sink, batches } = collectingSink();
+    const reducer = new ObservedSessionReducer(sink, manualFlushOptions);
+    try {
+      reducer.ingest(event({
+        summary: "<task-notification>raw wrapper</task-notification>",
+        prompt: { parts: [{ kind: "notice", source: "task", summary: "Background build completed" }], words: "", harnessOnly: true },
+      }));
+      await reducer.flushNow();
+      expect(batches[0]?.[0]).toMatchObject({ title: "openscout", preview: "Background build completed" });
+    } finally { await reducer.close({ flush: false }); }
+  });
+});

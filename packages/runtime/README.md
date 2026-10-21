@@ -280,3 +280,10 @@ miss.
 
 These live checks require local harnesses and are not a substitute for the unit,
 package, and external-consumer checks above.
+
+## Retry-safe delivery client
+
+Use `@openscout/runtime/delivery-client` to prepare retained delivery commands
+and submit native-session replies without a web or pairing server. See
+[the delivery contract](./DELIVERY.md) for key ownership, capability and legacy
+wire fences, uncertainty handling, and embedded-broker requirements.

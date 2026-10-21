@@ -943,3 +943,112 @@ describe("authenticated mesh route fallback", () => {
     expect(() => trustedMeshPeerForBrokerUrl(url, nodes, peers)).toThrow(PeerCardVerificationError);
   });
 });
+
+async function staleCardFixture(options: { cardAgeMs?: number; enrolled?: boolean } = {}) {
+  const { PeerTimeoutError } = await import("./mesh-peer-client.js");
+  const remote = freshIdentity(), local = freshIdentity();
+  let clock = Date.now(), pin: string | undefined = "a".repeat(64), key: string | undefined = nodeKeyId(remote.publicKey);
+  const card = peerCard(remote, clock - (options.cardAgeMs ?? 0), { spkiFingerprint: pin });
+  if (options.enrolled === false) { pin = undefined; key = undefined; }
+  let failure: Error | undefined, sendFailure: Error | undefined, mutate: (() => void) | undefined;
+  const sent: Array<{ url: string; channel: PinnedPeer; headers: Headers }> = [], invalidated: string[] = [];
+  const readCard = async () => { mutate?.(); if (failure) throw failure; return Response.json(card); };
+  const stub: PinnedHttpsClient = {
+    fetch: async (url, channel, init) => {
+      if (url.endsWith("/v1/node")) return readCard();
+      if (sendFailure) throw sendFailure;
+      sent.push({ url, channel, headers: new Headers(init?.headers) }); return Response.json({ ok: true });
+    }, probeFetch: readCard, invalidate(origin) { invalidated.push(origin); }, close() {},
+  };
+  const client = createMeshPeerFetch({ loadIdentity: () => local, now: () => clock, cardCacheTtlMs: 100,
+    expectedPeerKeyId: () => key, expectedPeerTlsPin: () => pin, pinnedClient: stub });
+  await client("https://peer", "/work");
+  clock += 101;
+  failure = new PeerTimeoutError("response");
+  return { client, sent, card, invalidated, local,
+    advance(ms: number) { clock += ms; },
+    fail(error: Error | undefined) { failure = error; },
+    failSend(error: Error) { sendFailure = error; },
+    changeTrust(kind: "revoke" | "key" | "pin") { if (kind === "revoke") { key = undefined; pin = undefined; } else if (kind === "key") key = "c".repeat(64); else pin = "b".repeat(64); },
+    duringRead(action: () => void) { mutate = action; },
+  };
+}
+
+test("refresh timeout reuses only the still-enrolled verified card and sends pinned, signed traffic", async () => {
+  const f = await staleCardFixture();
+  await f.client("https://peer", "/work");
+  expect(f.sent).toHaveLength(2);
+  expect(f.sent[1]!.channel).toEqual({ expectedKeyId: f.card.keyId, spkiFingerprint: f.card.tls!.spkiFingerprint });
+  expect(f.sent[1]!.headers.get(PEER_AUTH_HEADERS.peer)).toBe(nodeKeyId(f.local.publicKey));
+  expect(f.sent[1]!.headers.get(PEER_AUTH_HEADERS.signature)).toBeTruthy();
+  // Reuse never renews the original verification timestamp.
+  f.advance(15 * 60_000);
+  await expect(f.client("https://peer", "/work")).rejects.toMatchObject({ name: "PeerTimeoutError" });
+  expect(f.sent).toHaveLength(2);
+});
+
+for (const kind of ["revoke", "key", "pin"] as const) {
+  for (const during of [false, true]) {
+    test(`stale timeout fallback refuses ${kind} ${during ? "during refresh" : "before refresh"}`, async () => {
+      const f = await staleCardFixture();
+      if (during) f.duringRead(() => f.changeTrust(kind)); else f.changeTrust(kind);
+      await expect(f.client("https://peer", "/work")).rejects.toBeDefined();
+      expect(f.sent).toHaveLength(1);
+    });
+  }
+  test(`fresh cache is discarded on ${kind}; a failed new probe never reuses its old binding`, async () => {
+    const f = await staleCardFixture();
+    f.advance(-101); // Still inside the ordinary cache TTL.
+    f.changeTrust(kind);
+    await expect(f.client("https://peer", "/work")).rejects.toBeDefined();
+    expect(f.sent).toHaveLength(1);
+    expect(f.invalidated).toContain("https://peer");
+  });
+}
+
+test("stale fallback never uses an unbound card, an expired signed card, or a caller abort", async () => {
+  const unbound = await staleCardFixture({ enrolled: false });
+  await expect(unbound.client("https://peer", "/work")).rejects.toMatchObject({ name: "PeerTimeoutError" });
+  expect(unbound.sent).toHaveLength(1);
+  const expires = await staleCardFixture({ cardAgeMs: 24 * 60 * 60_000 - 200 });
+  expires.advance(100);
+  await expect(expires.client("https://peer", "/work")).rejects.toMatchObject({ name: "PeerTimeoutError" });
+  expect(expires.sent).toHaveLength(1);
+  const aborted = await staleCardFixture(), caller = new AbortController();
+  aborted.duringRead(() => caller.abort(new Error("caller stopped")));
+  await expect(aborted.client("https://peer", "/work", { signal: caller.signal })).rejects.toThrow("caller stopped");
+  expect(aborted.sent).toHaveLength(1);
+});
+
+test("non-timeout refresh failure never uses a stale card, and trust refusal erases it", async () => {
+  const { PeerTransportError, PeerTimeoutError } = await import("./mesh-peer-client.js");
+  const f = await staleCardFixture();
+  f.fail(new PeerTransportError("unreachable"));
+  const failure = await f.client("https://peer", "/work").catch(error => error);
+  expect(failure).toBeInstanceOf(PeerCardUnavailableError);
+  expect(failure).toBeInstanceOf(PeerTransportError);
+  expect(f.sent).toHaveLength(1);
+  f.fail(new PeerTlsPinError("mismatch", "https://peer", "a".repeat(64), "b".repeat(64)));
+  await expect(f.client("https://peer", "/work")).rejects.toBeInstanceOf(PeerTlsPinError);
+  f.fail(new PeerTimeoutError("response"));
+  await expect(f.client("https://peer", "/work")).rejects.toBeInstanceOf(PeerTimeoutError);
+  expect(f.sent).toHaveLength(1);
+});
+
+test("trust changes during a successful card refresh are checked again before signing", async () => {
+  const f = await staleCardFixture();
+  f.fail(undefined); f.duringRead(() => f.changeTrust("revoke"));
+  await expect(f.client("https://peer", "/work")).rejects.toBeInstanceOf(PeerCardVerificationError);
+  expect(f.sent).toHaveLength(1);
+});
+
+test("typed recovery timeout cannot erase a pin mismatch or reuse its stale card", async () => {
+  const f = await staleCardFixture();
+  f.advance(-101); // Force the initial send to use the still-fresh cache.
+  f.failSend(new PeerTlsPinError("changed served key", "https://peer", "a".repeat(64), "b".repeat(64)));
+  // The recovery probe times out, but the observed pin failure must remain a
+  // trust refusal. Routing must not interpret it as an unavailable alias.
+  await expect(f.client("https://peer", "/work")).rejects.toBeInstanceOf(PeerTlsPinError);
+  expect(f.sent).toHaveLength(1);
+  expect(f.invalidated).toContain("https://peer");
+});

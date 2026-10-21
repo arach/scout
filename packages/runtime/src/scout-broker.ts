@@ -1,3 +1,4 @@
+import { prepareScoutDelivery, deliverScoutRequest } from "./delivery-client.js";
 import { iterateMessageRecords } from "./broker-message-records.js";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
@@ -24,6 +25,7 @@ import {
   type AgentState,
   type ControlEvent,
   type MessageRecord,
+  type ScoutDeliverRequest,
   type ScoutDeliverResponse,
   type ScoutDispatchRecord,
   type ThreadEventEnvelope,
@@ -417,24 +419,10 @@ async function brokerPostJson<T>(
   });
 }
 
-function isScoutDeliverResponse(value: unknown): value is ScoutDeliverResponse {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const kind = (value as { kind?: unknown }).kind;
-  return kind === "delivery" || kind === "question" || kind === "rejected";
-}
-
-async function brokerPostDeliver(
-  baseUrl: string,
-  body: unknown,
-): Promise<ScoutDeliverResponse> {
-  return brokerPostJson<ScoutDeliverResponse>(
-    baseUrl,
-    "/v1/deliver",
-    body,
-    { acceptErrorJson: isScoutDeliverResponse },
-  );
+async function brokerPostDeliver(baseUrl: string, body: ScoutDeliverRequest): Promise<ScoutDeliverResponse> {
+  const direct = await maybePostJsonToActiveScoutBrokerService<ScoutDeliverResponse>(baseUrl, "/v1/deliver", body);
+  if (direct.handled) return direct.value;
+  return deliverScoutRequest({ baseUrl, expectedNodeId: body.requesterNodeId!, socketPath: resolveBrokerSocketPathForBaseUrl(baseUrl) }, body);
 }
 
 function renderScoutTargetLabel(targetLabel: string): string {
@@ -1352,6 +1340,7 @@ async function ensureBrokerDirectConversationBetween(
 
 export async function sendScoutMessage(input: {
   senderId: string;
+  clientMessageId?: string | null;
   body: string;
   channel?: string;
   shouldSpeak?: boolean;
@@ -1380,20 +1369,22 @@ export async function sendScoutMessage(input: {
     && mentionResolution.resolved.length + mentionResolution.unresolved.length + mentionResolution.ambiguous.length === 1
   ) {
     const targetLabel = selectors[0]!.label;
-    const delivery = await brokerPostDeliver(broker.baseUrl, {
-      id: `deliver-${createdAtMs.toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-      requesterId: input.senderId,
-      requesterNodeId: broker.node.id,
-      targetLabel,
-      body: input.body,
-      intent: "tell",
-      channel: input.channel,
-      speechText: input.shouldSpeak ? stripScoutAgentSelectorLabels(input.body) : undefined,
-      createdAt: createdAtMs,
-      messageMetadata: {
-        source: "scout-cli",
+    const delivery = await brokerPostDeliver(broker.baseUrl, prepareScoutDelivery({
+      clientMessageId: input.clientMessageId, createdAtMs: input.createdAtMs, now: createdAtMs,
+      command: {
+        requesterId: input.senderId,
+        requesterNodeId: broker.node.id,
+        targetLabel,
+        body: input.body,
+        intent: "tell",
+        channel: input.channel,
+        speechText: input.shouldSpeak ? stripScoutAgentSelectorLabels(input.body) : undefined,
+        messageMetadata: {
+          source: "scout-cli",
+          ...(input.clientMessageId?.trim() ? { clientMessageId: input.clientMessageId.trim() } : {}),
+        },
       },
-    });
+    }));
     if (delivery.kind !== "delivery") {
       return {
         usedBroker: true,
@@ -1521,6 +1512,7 @@ export async function sendScoutMessage(input: {
 
 export async function askScoutQuestion(input: {
   senderId: string;
+  clientMessageId?: string | null;
   targetLabel: string;
   body: string;
   channel?: string;
@@ -1560,30 +1552,32 @@ export async function askScoutQuestion(input: {
   const messageBody = input.body.trim().startsWith(normalizedTargetLabel)
     ? input.body.trim()
     : `${normalizedTargetLabel} ${input.body.trim()}`;
-  const delivery = await brokerPostDeliver(broker.baseUrl, {
-    id: `deliver-${createdAt.toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-    requesterId: input.senderId,
-    requesterNodeId: broker.node.id,
-    targetLabel: input.targetLabel,
-    targetAgentId: explicitTargetAgentId,
-    body: messageBody,
-    intent: "consult",
-    channel: input.channel,
-    speechText: input.shouldSpeak ? stripScoutAgentSelectorLabels(messageBody) : undefined,
-    execution: input.executionHarness
-      ? {
-          harness: input.executionHarness,
-        }
-      : undefined,
-    ensureAwake: true,
-    createdAt,
-    messageMetadata: {
-      source: "scout-cli",
+  const delivery = await brokerPostDeliver(broker.baseUrl, prepareScoutDelivery({
+    clientMessageId: input.clientMessageId, createdAtMs: input.createdAtMs, now: createdAt,
+    command: {
+      requesterId: input.senderId,
+      requesterNodeId: broker.node.id,
+      targetLabel: input.targetLabel,
+      targetAgentId: explicitTargetAgentId,
+      body: messageBody,
+      intent: "consult",
+      channel: input.channel,
+      speechText: input.shouldSpeak ? stripScoutAgentSelectorLabels(messageBody) : undefined,
+      execution: input.executionHarness
+        ? {
+            harness: input.executionHarness,
+          }
+        : undefined,
+      ensureAwake: true,
+      messageMetadata: {
+        source: "scout-cli",
+          ...(input.clientMessageId?.trim() ? { clientMessageId: input.clientMessageId.trim() } : {}),
+      },
+      invocationMetadata: {
+        source: "scout-cli",
+      },
     },
-    invocationMetadata: {
-      source: "scout-cli",
-    },
-  });
+  }));
 
   if (delivery.kind !== "delivery") {
     return {

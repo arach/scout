@@ -1,4 +1,5 @@
 export * from "./protocol/primitives.js";
+export * from "./protocol/prompt-parts.js";
 export {
   extractPendingApprovalRequests,
   normalizeApprovalRequest,

@@ -1,3 +1,4 @@
+import { scoutSessionReplyTarget, validateScoutSessionReplyResult } from "@openscout/runtime/delivery-client";
 // Reply from the phone to a harness session Scout did not start (seen in the
 // transcript tail: session id, harness, cwd). A session open somewhere gets
 // the words where it runs — its Herdr pane, its Orca terminal, its tmux pane, or its terminal tab
@@ -97,17 +98,7 @@ export async function askMobileHarnessSession(
   try {
     result = await deps.ask({
       senderId: deps.senderId,
-      target: {
-        kind: "session_id",
-        sessionId,
-        harness,
-        // After a definite not-live result, a concurrent Codex writer must
-        // still be refused: a reply never splits the session.
-        // Codex keeps the flag because its fork-if-live path only ever
-        // refuses (a thread open in another Codex app); without it the
-        // broker would resume a second writer on that thread.
-        forkIfLive: harness === "codex",
-      },
+      target: scoutSessionReplyTarget(sessionId, harness),
       body,
       sessionDelivery: "in_place_or_resume",
       clientMessageId: input.clientMessageId ?? null,
@@ -132,16 +123,15 @@ export async function askMobileHarnessSession(
     return mobileAskSessionRefusal(code);
   }
 
-  if (result.inputSubmitted) {
-    const submitted = result.inputSubmitted;
-    if (submitted.kind !== "in_place" || submitted.state !== "submitted" || submitted.sessionId !== sessionId || submitted.harness !== harness) {
-      return mobileAskSessionRefusal("delivery_unconfirmed");
-    }
+  let submission;
+  try { submission = validateScoutSessionReplyResult({ sessionId, harness }, result); }
+  catch { return mobileAskSessionRefusal("delivery_unconfirmed"); }
+  if (submission.kind === "in_place") {
+    const submitted = submission.receipt;
     return { ok: true, mode: "resumed", delivery: "in_place", via: submitted.via, location: submitted.location,
       sessionId, sourceSessionId: sessionId, conversationId: result.conversationId, messageId: result.messageId };
   }
-  if (!result.flight?.id) return mobileAskSessionRefusal("delivery_unconfirmed");
-  const deliveredSessionId = result.targetSessionId?.trim() || sessionId;
+  const deliveredSessionId = submission.sessionId;
   return {
     ok: true,
     mode: deliveredSessionId === sessionId ? "resumed" : "forked",
