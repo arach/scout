@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import {
   verifySignedNodeCard,
   type SignedNodeCard,
-} from "./node-identity.js";
+} from "./node-identity-wire.js";
 import {
   computeEnrollmentSas,
   verifyEnrollmentCommitment,

@@ -6,7 +6,7 @@ import {
   signNodePayload,
   verifyNodeSignature,
   type NodeIdentity,
-} from "./node-identity.js";
+} from "./node-identity-wire.js";
 import type { AccessDelegation } from "./mesh-access.js";
 
 /**

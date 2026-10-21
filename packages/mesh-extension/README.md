@@ -46,3 +46,70 @@ filter strings to 2,048 characters. Oversized filters are refused, not truncated
 Run `bun run check` and `bun test src` from this directory. Tests include an
 isolated protected runtime, all default tool handlers, discovery/schema parity,
 principal pinning, feedback provenance, modern events and mailbox parsing.
+
+## Build and install the mesh artifact
+
+Run `bun run --cwd packages/mesh-extension build`. This creates
+`packages/mesh-extension/dist/mesh`, with one executable and `extension.json`.
+Install that directory with `scout extensions install mesh <directory>` after
+installing a Scout version with extension installation support. Use `update`
+for later builds. No install step runs automatically. The built-in `mesh` verb
+is still registered and still takes precedence. This change does not flip it.
+
+The executable can run outside this checkout with Bun on PATH. It uses no
+source-relative files, node_modules, desktop modules, broker stores, native
+probes, support-directory lookup, or runtime machine keys. Shared wire,
+cryptography, pinned HTTPS, explicit user-key and SSH helpers are client code,
+not an alternate runtime. Custody decides origin: machine/node-key operations
+use the runtime HTTP API; public or user-key operations can run in this client.
+SSH retains the user's SSH policy.
+
+Set `OPENSCOUT_BROKER_URL` for foreground commands, or pass `--config` with an
+explicit JSON file. The CLI supports mesh status, diagnostics, discovery,
+presence, ping, approvals, guests, trust/SAS/SSH enrollment, and scoped access.
+JSON is the portable output format; plain trust/access output remains readable.
+The portable join command does not open a Tailscale GUI. A successful bind stays
+successful if subsequent discovery is unavailable. Ping always uses the bounded
+runtime route, including raw URLs. A raw-URL ping lets a local caller learn
+whether an address answers; it does not request a machine-key signature.
+
+## Run the bridge
+
+Use `scout-mesh bridge --config <file>`. Configuration and credential files must
+be owner-only regular files, not symlinks. The bridge never falls back to an
+environment token or a guessed runtime directory. Relative paths resolve from
+the configuration directory. For example, a user-provisioned file can contain:
+
+```json
+{
+  "brokerUrl": "http://127.0.0.1:4800",
+  "relayUrl": "https://relay.example.invalid",
+  "tokenFile": "relay-token",
+  "tools": "core"
+}
+```
+
+Optional fields are `dir`, `localAdmin: {keyFile, destinationKeyId}`,
+`tokenKeychainService`, `eventsEnabled`, and `supervisor: {parentPid}`. The
+local-admin key is a separately provisioned user-owned credential, not the
+machine identity. The keychain is read only for an explicitly named service on
+macOS. Credential values are never included in logs or errors. Exit 78 means
+configuration is refused, including unsupported tools. Unsupported `--tools`
+are reported by name before any connection. Help reads no configuration.
+
+Every request, including the legacy MCP protocol, must carry the relay's full
+authenticated principal. Agent-only envelopes are refused with 403 rather than
+inventing consent identity. Each principal has its own MCP server. Cancellation
+reaches the SDK and HTTP request. Reconnects, mailbox hints and MCP Events use
+the same portable HTTP adapter. `eventsEnabled` must be explicit and requires
+runtime support. Remote diagnostic collection remains subject to runtime
+per-identity consent; the default is a note without diagnostics. A consented
+stranded report is collected again according to the runtime report contract.
+
+`bridge status`, `configure <owner-only-json-file>`, `enable`, `disable` and
+`request-restart` call the runtime management routes. They never spawn a bridge
+or write runtime configuration directly. The original built-in OAuth connect
+and legacy LaunchAgent migration commands remain available in the core CLI;
+they are not portable extension commands. Provision a relay credential through
+the runtime configuration API or an explicit bridge file for now. Supervisor
+selection is a separate change, and the final built-in-verb flip remains later.

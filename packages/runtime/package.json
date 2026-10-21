@@ -506,6 +506,12 @@
       "import": "./dist/scout-extensions.js",
       "default": "./dist/scout-extensions.js"
     },
+    "./mesh/client-wire": {
+      "bun": "./src/mesh-client-wire.ts",
+      "types": "./dist/mesh-client-wire.d.ts",
+      "import": "./dist/mesh-client-wire.js",
+      "default": "./dist/mesh-client-wire.js"
+    },
     "./delivery-client": {
       "bun": "./src/delivery-client.ts",
       "types": "./dist/delivery-client.d.ts",

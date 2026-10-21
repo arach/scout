@@ -24,8 +24,8 @@ export async function createModernScoutHandler(principal: McpEventPrincipal, leg
       capabilities,
       supportedProtocolVersions: ["2026-07-28"],
     });
-    server.setRequestHandler("tools/list", async (request) => ListToolsResultSchema.parse(await client.listTools(request.params)));
-    server.setRequestHandler("tools/call", async (request) => CallToolResultSchema.parse(await client.callTool(request.params)));
+    server.setRequestHandler("tools/list", async (request, ctx) => ListToolsResultSchema.parse(await client.listTools(request.params, { signal: ctx.mcpReq.signal })));
+    server.setRequestHandler("tools/call", async (request, ctx) => CallToolResultSchema.parse(await client.callTool(request.params, undefined, { signal: ctx.mcpReq.signal })));
     for (const method of ["events/list", "events/subscribe", "events/unsubscribe"]) {
       server.setRequestHandler(method, { params: z.record(z.string(), z.unknown()) }, async (params) => {
         try { return await broker({ operation: "rpc", principal, method, params }) as Record<string, unknown>; }
