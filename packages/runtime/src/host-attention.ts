@@ -165,6 +165,8 @@ export type TmuxHostAttentionAnswer = {
   outcome: "answered" | "stale" | "gone" | "unverified" | "failed" | "refused";
   /** `sent` means the injected transport resolved, not a native harness acknowledgement. */
   effect: "not_sent" | "sent" | "unknown";
+  /** Present only on busy: this pane’s hold age, or the oldest hold at global capacity. */
+  heldForMs?: number;
   reason: "dialog_disappeared" | "prompt_changed" | "prompt_gone" | "dialog_still_present"
     | "different_dialog" | "capture_failed" | "capture_truncated" | "capture_timeout"
     | "send_failed" | "send_timeout" | "aborted" | "invalid_request" | "nonlocal_ref"
@@ -196,7 +198,7 @@ export function createTmuxHostAttentionAnswerer(deps: {
   const limits = Object.fromEntries(Object.entries(hard).map(([key, value]) => [key,
     key === "verificationIntervalMs" ? value : ceiling(deps.limits?.[key as keyof NonNullable<typeof deps.limits>], value, 1),
   ])) as Record<keyof typeof hard, number>;
-  const busy = new Set<string>(), attempted = new Set<string>();
+  const busy = new Map<string, number>(), attempted = new Set<string>();
   let active = 0;
   return async function answerTmuxHostAttention(input): Promise<TmuxHostAttentionAnswer> {
     const result = (outcome: TmuxHostAttentionAnswer["outcome"], reason: TmuxHostAttentionAnswer["reason"],
@@ -216,10 +218,13 @@ export function createTmuxHostAttentionAnswerer(deps: {
     if (signal?.aborted) return result("failed", "aborted");
     const paneKey = JSON.stringify([nodeId, target.ref.paneId]);
     const attemptKey = JSON.stringify([formatTerminalSurfaceId(target.ref), expected]);
-    if (busy.has(paneKey) || active >= limits.maxConcurrentAnswers) return result("refused", "busy");
+    if (busy.has(paneKey) || active >= limits.maxConcurrentAnswers) {
+      const heldSince = busy.get(paneKey) ?? Math.min(...busy.values());
+      return { ...result("refused", "busy"), heldForMs: Math.max(0, performance.now() - heldSince) };
+    }
     if (attempted.has(attemptKey)) return result("refused", "already_attempted");
     if (attempted.size >= limits.maxAttempts) return result("refused", "attempt_capacity");
-    busy.add(paneKey); active++;
+    busy.set(paneKey, performance.now()); active++;
     const pending = new Set<Promise<unknown>>();
     type Operation<T> = { state: "ok"; value: T } | { state: "failed" | "timeout" | "aborted" };
     async function bounded<T>(fn: (signal: AbortSignal) => Promise<T>, ms: number): Promise<Operation<T>> {
@@ -278,7 +283,11 @@ export function createTmuxHostAttentionAnswerer(deps: {
         if ("reason" in after) return result("unverified", after.reason, "sent");
         if (signal?.aborted) return result("unverified", "aborted", "sent");
         if (performance.now() > deadline) return result("unverified", "capture_timeout", "sent");
-        if (!after.dialog) return result("answered", "dialog_disappeared", "sent");
+        if (!after.dialog) {
+          // Observed disappearance ends this occurrence; identical content can recur.
+          attempted.delete(attemptKey);
+          return result("answered", "dialog_disappeared", "sent");
+        }
         if (tmuxPromptVersion(target, after.dialog) !== expected) return result("unverified", "different_dialog", "sent");
         if (i + 1 < limits.maxVerificationCaptures) await new Promise(resolve => setTimeout(resolve,
           Math.min(limits.verificationIntervalMs, Math.max(0, deadline - performance.now()))));

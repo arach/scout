@@ -163,7 +163,7 @@ needed for a stronger guarantee. This API does not claim exactly-once actuation.
 
 Hard ceilings are two seconds each for preflight capture, send, and the whole
 verification phase; at most eight verification captures with 50 ms spacing;
-six concurrent answers; and 256 consumed content-version attempts per answerer.
+six concurrent answers; and 256 unresolved content-version attempts per answerer.
 Each verification capture is also limited by the remaining phase budget.
 Caller limits can only lower these ceilings. No polling send or transport
 retry occurs. A dialog that remains after the capture-count or time budget
@@ -175,16 +175,26 @@ result. They do not pretend the underlying operation stopped. Its pane and
 global slot remain occupied until all callbacks actually settle. There is no
 late continuation that can send after a timed-out preflight. A permanently
 abort-ignoring callback can permanently retire a slot. The callbacks must honor
-abort or bound their I/O globally; do not manufacture new answerers to bypass
-these bounds.
+abort or bound their I/O globally. A `refused` / `busy` / `not_sent` result
+includes `heldForMs: number`, a finite, nonnegative elapsed age in milliseconds
+measured with a monotonic clock. It measures this pane's hold, including a
+host-session alias; if only the global ceiling blocks a new pane, it measures
+the oldest occupied slot. The age includes pending callbacks after timeout.
+It is diagnostic, not an expiry or permission to overlap I/O. The caller can
+use it to decide whether to reconstruct the answerer deliberately, after
+inspecting unresolved effects and coordinating any outstanding callbacks.
+Do not manufacture new answerers to bypass these bounds.
 
-A ref/content version is consumed once a send stage starts, regardless of its
-result. The answerer keeps that replay latch for its lifetime. It never evicts
-old latches to make room: when capacity is full, it refuses new attempts.
-Stale/gone/preflight failures do not consume a version. An identical legitimate
-prompt later in the same pane can therefore be refused conservatively. The
-read DTO has no incarnation ID to distinguish it from a replay. Do not clear
-the latch or recreate the answerer merely to make a second tap succeed.
+A ref/content version is latched before a send stage starts. The entry leaves
+the latch only on `answered` / `sent`, when a complete capture observed the
+dialog gone. A later identical prompt at the same ref can then be answered as
+a new occurrence. `failed` / `unknown`, `unverified` / `unknown`, and
+`unverified` / `sent` retain the entry for the answerer's lifetime. Entries
+never expire by age and are not evicted to make room. The 256-entry cap fills
+only with unresolved incidents; `attempt_capacity` refuses new attempts when
+it is full. Stale/gone/preflight refusals and failures do not add an entry.
+Do not clear an unresolved latch or recreate the answerer merely to make a
+second tap succeed.
 Cross-process/restart durability and coordination with autonomous continuation
 are caller responsibilities; this in-memory guard is not a shared claim.
 
@@ -220,3 +230,5 @@ is not supplied by the tmux-only DTOs. #64 is a cached read route, not permissio
 answer authority. Keep Herdr extraction/adoption after that read-contract line
 and a separately reviewed answer/claim/audit adapter. Do not silently map its
 numeric version to this SHA-256 observation or route phone input through tmux.
+
+When the Herdr answer adapter arrives, its result type will match this outcome/effect/reason shape field for field, and the shared vocabulary will then move into protocol as the generic answer-result type.

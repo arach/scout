@@ -83,9 +83,9 @@ describe("fresh, bounded tmux permission answers", () => {
     expect(result).toMatchObject({ outcome: "unverified", effect: "sent" }); expect(f.sent).toEqual([["1"]]);
     if (mode === "timeout") { expect(result.reason).toBe("capture_timeout"); expect(signals[0]!.aborted).toBe(true); }
   });
-  test("send rejection is an unknown effect and cannot be blindly replayed", async () => {
+  test("effect-unknown recurrence retains its latch and cannot be blindly replayed", async () => {
     let sends = 0;
-    const f = fixture(pane, { sendKeys: async () => { sends++; throw Error("may already have sent"); } });
+    const f = fixture(pane, { capture: async () => pane, sendKeys: async () => { sends++; throw Error("may already have sent"); } });
     const input = await request();
     expect(await f.answer(input)).toEqual({ outcome: "failed", reason: "send_failed", effect: "unknown" });
     expect(await f.answer(input)).toMatchObject({ outcome: "refused", reason: "already_attempted" }); expect(sends).toBe(1);
@@ -100,10 +100,36 @@ describe("fresh, bounded tmux permission answers", () => {
     pending.resolve(); await Bun.sleep(0);
     expect(await f.answer(input)).toMatchObject({ outcome: "refused", reason: "already_attempted" }); expect(sends).toBe(1);
   });
-  test("settled and uncertain attempts consume the version, including identical ABA content", async () => {
-    const f = fixture(); const input = await request();
-    expect((await f.answer(input)).outcome).toBe("answered");
-    expect(await f.answer(input)).toMatchObject({ outcome: "refused", reason: "already_attempted" }); expect(f.sent).toHaveLength(1);
+  test("identical recurrence after a verified answer succeeds and frees attempt capacity", async () => {
+    let reads = 0;
+    const f = fixture(pane, { limits: { maxAttempts: 1 }, capture: async () => reads++ % 2 === 0 ? pane : "❯ " });
+    const input = await request();
+    expect(await f.answer(input)).toEqual({ outcome: "answered", reason: "dialog_disappeared", effect: "sent" });
+    expect(await f.answer(input)).toEqual({ outcome: "answered", reason: "dialog_disappeared", effect: "sent" });
+    expect(f.sent).toEqual([["1"], ["1"]]); expect(reads).toBe(4);
+  });
+  test("sent-but-unverified recurrence retains its latch", async () => {
+    const f = fixture(pane, { capture: async () => pane }); const input = await request();
+    expect(await f.answer(input)).toMatchObject({ outcome: "unverified", effect: "sent" });
+    expect(await f.answer(input)).toMatchObject({ outcome: "refused", reason: "already_attempted", effect: "not_sent" });
+    expect(f.sent).toEqual([["1"]]);
+  });
+  test("busy hold age grows while a timed-out callback hangs and disappears only on settlement", async () => {
+    const pending = deferred<string>(); let reads = 0;
+    const f = fixture(pane, { limits: { captureTimeoutMs: 5 }, capture: async () => ++reads === 1 ? pending.promise : "❯ " });
+    const input = await request();
+    expect(await f.answer(input)).toMatchObject({ outcome: "failed", reason: "capture_timeout", effect: "not_sent" });
+    const first = await f.answer(input);
+    expect(first).toMatchObject({ outcome: "refused", reason: "busy", effect: "not_sent" });
+    expect(Number.isFinite(first.heldForMs)).toBe(true); expect(first.heldForMs!).toBeGreaterThanOrEqual(0);
+    await Bun.sleep(10);
+    const later = await f.answer({ ...input, target: { ...input.target, ref: { ...input.target.ref, hostSession: "alias" } } });
+    expect(later.reason).toBe("busy"); expect(later.heldForMs!).toBeGreaterThan(first.heldForMs!);
+    expect(reads).toBe(1); expect(f.sent).toEqual([]);
+    pending.resolve(pane); await Bun.sleep(0);
+    const released = await f.answer(input);
+    expect(released).toEqual({ outcome: "gone", reason: "prompt_gone", effect: "not_sent" });
+    expect(reads).toBe(2); expect(f.sent).toEqual([]);
   });
   test("simultaneous answers for one pane, even host-session aliases, cannot both capture/send", async () => {
     const pending = deferred<string>(); let reads = 0;
@@ -180,17 +206,18 @@ describe("fresh, bounded tmux permission answers", () => {
       capture: async (_r, { signal }) => { signals.push(signal); reads++; return new Promise<string>(() => {}); }, sendKeys: async () => { throw Error("no sends"); } });
     const input = await request();
     const outcomes = await Promise.all(Array.from({ length: 7 }, (_, i) => answer({ ...input, target: { ...input.target, ref: { ...input.target.ref, paneId: `%${i}` } } })));
-    expect(reads).toBe(6); expect(outcomes.filter(row => row.reason === "busy")).toHaveLength(1); expect(signals.every(signal => signal.aborted)).toBe(true);
+    expect(reads).toBe(6); expect(outcomes.filter(row => row.reason === "busy")).toHaveLength(1);
+    expect(outcomes.find(row => row.reason === "busy")!.heldForMs!).toBeGreaterThanOrEqual(0); expect(signals.every(signal => signal.aborted)).toBe(true);
     expect(await answer(input)).toMatchObject({ outcome: "refused", reason: "busy" });
   });
   test("attempt capacity cannot evict a replay tombstone or be exceeded by concurrent preflights", async () => {
     const first = deferred<string>(), second = deferred<string>(); let reads = 0;
     const answer = createTmuxHostAttentionAnswerer({ nodeId: "local", limits: { maxAttempts: 1, maxVerificationCaptures: 1 },
-      capture: async () => ++reads === 1 ? first.promise : reads === 2 ? second.promise : "❯ ", sendKeys: async () => {} });
+      capture: async () => ++reads === 1 ? first.promise : reads === 2 ? second.promise : "❯ ", sendKeys: async () => { throw Error("uncertain send"); } });
     const input = await request(); const another = await request(pane, { ...target(), ref: { ...target().ref, paneId: "%43" } });
     const one = answer(input), two = answer(another); await Bun.sleep(0);
     first.resolve(pane); second.resolve(pane);
-    expect((await Promise.all([one, two])).map(r => r.outcome).sort()).toEqual(["answered", "refused"]);
+    expect((await Promise.all([one, two])).map(r => r.outcome).sort()).toEqual(["failed", "refused"]);
     expect(await answer(input)).toMatchObject({ outcome: "refused", reason: "already_attempted" });
     expect(await answer(another)).toMatchObject({ outcome: "refused", reason: "attempt_capacity" });
   });
