@@ -59,6 +59,8 @@ import {
   readProcessIdentity,
   resolveMeshBridgeDesiredState,
   resolveMeshBridgeEntrypoint,
+  meshBridgeSelectionRefusal,
+  MESH_BRIDGE_INSTALL_FIX,
   type MeshBridgeDesiredState,
 } from "./mesh-bridge-supervisor.js";
 import { openScoutNetworkServiceEnvironment } from "./open-scout-network.js";
@@ -891,9 +893,8 @@ async function spawnMeshBridge(desired: Extract<MeshBridgeDesiredState, { run: t
         cliVersion:loadOpenScoutRuntimeBuildIdentity().version ?? "dev",runtimeDir:dirname(bun?.path ?? process.execPath)});
       entrypoint = launch.command;
     } else {
-      // Absence alone retains the old bridge until app pre-install and the
-      // separate built-in mesh flip. A refused installation never reaches here.
-      entrypoint = resolveMeshBridgeEntrypoint({repoRoot,moduleDirectory,serviceMode:config.mode,env:process.env});
+      // Only an explicit operator override may replace an absent extension.
+      entrypoint = resolveMeshBridgeEntrypoint({env:process.env});
       if (!entrypoint || !bun) throw new Error();
       launch = {command:bun.path,args:meshBridgeArgs(entrypoint,desired.configPath),
         env:{...process.env,OPENSCOUT_PARENT_PID:String(process.pid)}};
@@ -902,7 +903,7 @@ async function spawnMeshBridge(desired: Extract<MeshBridgeDesiredState, { run: t
     meshBridgeNextStartAt = Date.now() + MESH_BRIDGE_UNCONFIGURED_RETRY_MS;
     meshBridgeUnconfiguredMtimeMs = desired.configMtimeMs;
     writeMeshBridgeState({state:"unconfigured",pid:null,reason:"launch-configuration",extensionState:selected.state});
-    warn("mesh bridge launch configuration unavailable; retrying later");
+    warn("mesh bridge launch configuration unavailable; retrying later", { fix: MESH_BRIDGE_INSTALL_FIX });
     return;
   }
   if (shuttingDown) return;
@@ -999,7 +1000,8 @@ async function reconcileMeshBridgeOnce(): Promise<void> {
     meshBridgeUnconfiguredMtimeMs = null;
     meshBridgeRestartDelayMs = RESTART_MIN_DELAY_MS;
   }
-  if (selected.state === "refused") {
+  const refusal = meshBridgeSelectionRefusal(selected, process.env);
+  if (refusal) {
     if (running) {
       meshBridgeProcess = null;
       await terminateChildProcess(running,"mesh bridge",MESH_BRIDGE_STOP_TIMEOUT_MS);
@@ -1009,9 +1011,9 @@ async function reconcileMeshBridgeOnce(): Promise<void> {
     if (Date.now() >= meshBridgeNextStartAt) {
       meshBridgeNextStartAt = Date.now() + meshBridgeRestartDelayMs;
       meshBridgeRestartDelayMs = Math.min(meshBridgeRestartDelayMs*2,RESTART_MAX_DELAY_MS);
-      warn("installed mesh extension refused; no legacy fallback",{reason:selected.reason});
+      warn("mesh bridge refused; no implicit CLI fallback",{reason:refusal,fix:MESH_BRIDGE_INSTALL_FIX});
     }
-    writeMeshBridgeState({state:"refused",pid:null,extensionState:"refused",reason:selected.reason,nextStartAt:meshBridgeNextStartAt});
+    writeMeshBridgeState({state:"refused",pid:null,extensionState:selected.state,reason:refusal,fix:MESH_BRIDGE_INSTALL_FIX,nextStartAt:meshBridgeNextStartAt});
     return;
   }
 
@@ -1059,7 +1061,7 @@ async function reconcileMeshBridgeOnce(): Promise<void> {
   // Fence it before starting ours so two never hold this node's connection.
   await fencePreviousMeshBridge();
   if (shuttingDown) return;
-  await spawnMeshBridge(desired,selected);
+  if (selected.state !== "refused") await spawnMeshBridge(desired,selected);
 }
 
 async function fencePreviousMeshBridge(): Promise<void> {

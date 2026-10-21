@@ -28,6 +28,11 @@ Web and Scoutbot source entries require explicit configuration. See the
 [durable entry contract](./SUPERVISION.md) for installer ordering, reload
 boundaries and the temporary installed-npm web compatibility exception.
 
+An enabled mesh bridge also requires an installed `mesh` extension or an
+explicit CLI override. Run `openscout-runtime mesh-bridge-preflight` before
+upgrading; see the [mesh bridge cutover gate](./MESH-BRIDGE-CUTOVER.md) for
+installation ordering and refusal diagnostics.
+
 ## Quickstart: embed the in-memory runtime
 
 For tests, tools, and small local integrations, start with the in-memory runtime

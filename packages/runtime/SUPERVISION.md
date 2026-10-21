@@ -121,3 +121,10 @@ stable-inode lock, durable generations, effect receipts and operator consent.
 Its production readiness gate is closed. This SDK does not yet fence the
 legacy supervisors described above and must not be advertised as an integrated
 R0 release. Old machines are not enrolled by importing or installing it.
+
+## Mesh bridge
+
+Mesh bridge selection has no implicit source or CLI fallback, including in dev
+mode. Its installation ordering and read-only preflight are specified in the
+[mesh bridge cutover gate](./MESH-BRIDGE-CUTOVER.md). Incorporate that gate into
+the consuming installer checklist before adopting the refusal-only runtime.

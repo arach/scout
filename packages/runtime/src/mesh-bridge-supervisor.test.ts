@@ -79,27 +79,20 @@ describe("resolveMeshBridgeEntrypoint", () => {
   const dist = "/repo/packages/cli/dist/main.mjs";
   const all = (path: string) => [source, dist].includes(path);
 
-  test("dev mode runs the CLI from source, like the broker", () => {
-    expect(resolveMeshBridgeEntrypoint({ repoRoot, moduleDirectory: "/repo/packages/runtime/src", serviceMode: "dev", env: {}, home, exists: all }))
-      .toBe(source);
+  test("never probes implicit candidates, even in a public checkout's dev mode", () => {
+    const probes: string[] = [];
+    const input = { repoRoot, moduleDirectory: "/repo/packages/runtime/src", serviceMode: "dev", home,
+      env: { OPENSCOUT_BROKER_SERVICE_MODE: "dev" }, exists: (path: string) => { probes.push(path); return true; } };
+    expect(resolveMeshBridgeEntrypoint(input)).toBeNull();
+    expect(resolveMeshBridgeEntrypoint({ ...input, serviceMode: "prod" })).toBeNull();
+    expect(probes).toEqual([]);
   });
 
-  test("other modes prefer the built CLI", () => {
-    expect(resolveMeshBridgeEntrypoint({ repoRoot, moduleDirectory: "/repo/packages/runtime/src", serviceMode: "prod", env: {}, home, exists: all }))
-      .toBe(dist);
-  });
-
-  test("an explicit override wins, and nothing resolvable is null", () => {
-    expect(resolveMeshBridgeEntrypoint({
-      repoRoot,
-      moduleDirectory: "/x",
-      serviceMode: "dev",
-      env: { OPENSCOUT_MESH_BRIDGE_BIN: "/opt/scout/main.mjs" },
-      home,
-      exists: (path) => path === "/opt/scout/main.mjs" || all(path),
-    })).toBe("/opt/scout/main.mjs");
-    expect(resolveMeshBridgeEntrypoint({ repoRoot: null, moduleDirectory: "/x", serviceMode: "dev", env: {}, home, exists: () => false }))
-      .toBeNull();
+  test("only an explicit absolute CLI file resolves; a bad override never falls through", () => {
+    expect(resolveMeshBridgeEntrypoint({ env: { OPENSCOUT_MESH_BRIDGE_BIN: ` ${source} ` }, exists: all })).toBe(source);
+    expect(resolveMeshBridgeEntrypoint({ env: { OPENSCOUT_MESH_BRIDGE_BIN: "/missing" }, exists: all })).toBeNull();
+    expect(resolveMeshBridgeEntrypoint({ env: { OPENSCOUT_MESH_BRIDGE_BIN: "scout" }, exists: () => true })).toBeNull();
+    expect(resolveMeshBridgeEntrypoint({ env: { OPENSCOUT_MESH_BRIDGE_BIN: home } })).toBeNull();
   });
 
   test("builds the bridge argv", () => {

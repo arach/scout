@@ -1219,5 +1219,12 @@
     "category": "test",
     "reason": "pure-import probe replaces these child-process APIs with fail-fast guards before importing the factory; it never executes them",
     "owner": "cli"
+  },
+  {
+    "path": "packages/runtime/src/mesh-bridge-preflight.test.ts",
+    "symbol": "Bun.spawn",
+    "category": "test",
+    "reason": "isolated read-only runtime preflight subprocess verifies JSON, exit status and no bridge execution",
+    "owner": "runtime"
   }
 ]
