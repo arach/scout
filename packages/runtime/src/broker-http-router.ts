@@ -1,3 +1,4 @@
+import { createSessionMaterialsRead } from "./broker-session-materials-read.js";
 import { readObservedSessions, type ObservedSessionReadDeps } from "./broker-observed-sessions-read.js";
 import { MeshFeedback, MeshFeedbackError } from "./mesh-feedback.js";
 import { MeshBridgeManagement, MeshBridgeManagementError } from "./mesh-bridge-management.js";
@@ -501,6 +502,8 @@ export function createBrokerHttpRouter(
   } = deps;
 
   const requestReceipts = deps.requestReceipts ?? new BrokerRequestReceipts();
+  const readSessionMaterials = createSessionMaterialsRead({ nodeId, readCache: deps.readObservedSessionCache,
+    readEndpoints: runtime.peek ? () => runtime.peek!().endpoints : undefined });
 
   return async function routeRequest(request: RuntimeHttpRequestLike, response: RuntimeHttpResponseLike): Promise<void> {
   const method = request.method ?? "GET";
@@ -2030,6 +2033,11 @@ export function createBrokerHttpRouter(
       ...(url.searchParams.get("agentId") ? { agentId: url.searchParams.get("agentId")! } : {}),
     }));
     return;
+  }
+
+  if (method === "GET" && url.pathname === "/v1/observed-sessions/materials") {
+    if (request.transportContext?.transport === "remote" || request.transportContext?.guest) { json(response, 403, { error: "forbidden" }); return; }
+    const result = await readSessionMaterials(url); json(response, result.status, result.body); return;
   }
 
   if (method === "GET" && (url.pathname === "/v1/observed-sessions" || url.pathname === "/v1/observed-sessions/resolve")) {
