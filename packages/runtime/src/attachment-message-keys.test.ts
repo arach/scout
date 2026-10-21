@@ -13,7 +13,7 @@ function fixture() {
   const root = mkdtempSync(join(tmpdir(), "scout-attachment-keys-")); roots.push(root);
   const store = new SQLiteControlPlaneStore(join(root, "projection.sqlite"));
   store.upsertNode({ id: "n", meshId: "mesh", name: "Test", advertiseScope: "local", registeredAt: 1 });
-  store.upsertActor({ id: "a", kind: "human", displayName: "A" });
+  store.upsertActor({ id: "a", kind: "person", displayName: "A" });
   for (const id of ["c1", "c2"]) store.upsertConversation({ id, kind: "direct", title: id, participantIds: ["a"], visibility: "private", shareMode: "local", authorityNodeId: "n" });
   const message = (id: string, conversationId: string, fileName: string): MessageRecord => ({ id, conversationId, actorId: "a", originNodeId: "n", class: "agent", body: id, visibility: "private", policy: "durable", createdAt: 1,
     attachments: [{ id: "same-id", mediaType: "image/png", fileName, blobKey: "legacy" }] });
