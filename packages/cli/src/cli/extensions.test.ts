@@ -27,7 +27,7 @@ const home = join(root, "extensions");
 const bin = join(root, "bin");
 const out = join(root, "out.txt");
 install(home, "mesh", `printf '%s|%s|%s|%s|%s\\n' "$*" "$SCOUT_EXTENSION_API" "$SCOUT_OUTPUT" "$OPENSCOUT_BROKER_URL" "\${PATH%%:*}" > "${out}"; exit 3`, { summary: "Mesh from the app" });
-install(home, "future", "exit 0", { api: 2 });
+install(home, "future", "exit 0", { api: 99 });
 mkdirSync(bin);
 script(join(bin, "scout-hello"), "exit 0");
 const env = { OPENSCOUT_EXTENSIONS_HOME: home, PATH: bin };
@@ -66,7 +66,7 @@ describe("scout extensions", () => {
   });
 
   test("an extension for another API version, or in a world-writable folder, is refused with the reason", () => {
-    expect(findScoutExtension("future", env)?.refused).toContain("built for extension API 2; this scout supports API 1");
+    expect(findScoutExtension("future", env)?.refused).toContain("built for extension API 99; this scout supports API 1");
     install(home, "loose", "exit 0");
     chmodSync(join(home, "loose"), 0o777);
     expect(findScoutExtension("loose", env)?.refused).toContain("anyone on this machine can write to");

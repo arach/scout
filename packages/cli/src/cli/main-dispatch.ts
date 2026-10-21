@@ -1,3 +1,6 @@
+import { prepareScoutExtensionContext } from "./extension-context-runner.ts";
+import { selectedScoutExtensionInvocation } from "./extension-context.ts";
+import { resolveEffectiveLocalConfig } from "@openscout/runtime/local-config";
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -61,8 +64,16 @@ async function main() {
   const reservedExtension = registration?.provider === "extension"
     ? resolveReservedScoutExtension(registration, context.env) : undefined;
 
+  const dispatchExtension = reservedExtension ?? (!registration ? findScoutExtension(command, context.env) : undefined);
+  if (dispatchExtension?.refused) throw new ScoutCliError(dispatchExtension.refused);
+  const brokerUrl = dispatchExtension?.api === 2 ? context.env.OPENSCOUT_BROKER_URL?.trim() || resolveBrokerControlUrl() : "";
+  const frame = dispatchExtension?.api === 2 ? prepareScoutExtensionContext({ extension: dispatchExtension, env: context.env,
+    selection: selectedScoutExtensionInvocation(), brokerUrl, ports: resolveEffectiveLocalConfig().ports,
+    cli: { version: SCOUT_APP_VERSION, executable: process.argv[1]!, runtimeExecutable: process.execPath,
+      output: input.outputMode === "json" ? "json" : "plain", cwd: context.cwd } }) : undefined;
+
   // Help and diagnostics must not refresh/restart the service they describe.
-  if (shouldEnsureBrokerUptodateForCommand(command, commandArgs)) {
+  if (dispatchExtension?.api !== 2 && shouldEnsureBrokerUptodateForCommand(command, commandArgs)) {
     await ensureBrokerUptodate({
       checkpointPath: cliMtimeCheckpointPath(),
       debug: brokerUpdateDebugEnabled(context.env),
@@ -80,7 +91,7 @@ async function main() {
   }
   if (!registration || registration.provider === "extension") {
     // Built-ins are never shadowed; extensions fill verbs the core does not own.
-    const extension = reservedExtension ?? findScoutExtension(command, context.env);
+    const extension = dispatchExtension;
     if (extension?.refused) throw new ScoutCliError(extension.refused);
     if (extension) {
       process.exitCode = await runScoutExtension(extension, commandArgs, scoutExtensionEnv({
@@ -88,8 +99,8 @@ async function main() {
         extension,
         cliVersion: SCOUT_APP_VERSION,
         outputMode: input.outputMode === "json" ? "json" : "plain",
-        brokerUrl: context.env.OPENSCOUT_BROKER_URL?.trim() || resolveBrokerControlUrl(),
-      }));
+        brokerUrl: frame ? brokerUrl : context.env.OPENSCOUT_BROKER_URL?.trim() || resolveBrokerControlUrl(),
+      }), frame ? { frame, selectionEnv: context.env } : undefined);
       return;
     }
   }

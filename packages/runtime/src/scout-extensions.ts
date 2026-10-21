@@ -1,3 +1,6 @@
+import { parseScoutExtensionInvocation, type ScoutExtensionInvocation } from "./scout-extension-invocation.js";
+export { SCOUT_EXTENSION_CONTEXT_SCHEMA, SCOUT_EXTENSION_CONTEXT_FEATURES } from "./scout-extension-invocation.js";
+export type { ScoutExtensionInvocation, ScoutExtensionContextFeature } from "./scout-extension-invocation.js";
 import { normalizeOpenScoutInstanceName, resolveOpenScoutInstanceName } from "./instance.js";
 import { untrustedPathMetadata } from "./path-trust.js";
 import { createHash } from "node:crypto";
@@ -23,10 +26,13 @@ import { resolveScoutHome, scoutHomeReadRoots } from "./scout-home.js";
 /** The contract version in extension.json's "api" field. Bump it on any breaking change to scoutExtensionEnv. */
 export const SCOUT_EXTENSION_API_VERSION = 1;
 
-export type ScoutExtensionRefusalReason = "refused" | "incompatible" | "corrupt" | "wrong_instance";
+export type ScoutExtensionRefusalReason = "refused" | "incompatible" | "corrupt" | "wrong_instance" | "context_invalid" | "selection_changed" | "context_delivery_failed" | "context_backend_unproven";
 
 export type ScoutExtension = {
   name: string;
+  /** Missing on historical API-1 objects; never changes their transport. */
+  api?: 1 | 2;
+  invocation?: ScoutExtensionInvocation;
   command: string;
   summary?: string;
   /** The extensions folder it was found in. */
@@ -80,7 +86,7 @@ function executableProblem(path: string): string | undefined {
 }
 
 /** The extension API versions this scout runs. A compatible bump adds a version here instead of refusing every installed extension. */
-const SUPPORTED_EXTENSION_APIS: ReadonlySet<unknown> = new Set([SCOUT_EXTENSION_API_VERSION]);
+const SUPPORTED_EXTENSION_APIS: ReadonlySet<unknown> = new Set([SCOUT_EXTENSION_API_VERSION, 2]);
 
 /** Whether `path` is the folder `dir` or inside it. Both are real paths. */
 function isInside(dir: string, path: string): boolean {
@@ -188,7 +194,7 @@ function readInstalled(root: string, name: string, env: Env): ScoutExtension | u
       ? `cannot read its extension.json: permission denied (${code}).`
       : `cannot read its extension.json (${manifestPath}).`);
   }
-  let manifest: { summary?: unknown; command?: unknown; api?: unknown; version?: unknown; disabled?: unknown; completion?: unknown; complete?: unknown; docs?: unknown; instance?: unknown };
+  let manifest: { summary?: unknown; command?: unknown; api?: unknown; version?: unknown; disabled?: unknown; completion?: unknown; complete?: unknown; docs?: unknown; instance?: unknown; invocation?: unknown };
   try {
     manifest = JSON.parse(readExtensionFile(realpathSync(manifestPath), 16 * 1024));
   } catch (error) {
@@ -216,6 +222,11 @@ function readInstalled(root: string, name: string, env: Env): ScoutExtension | u
   if (executable) return refuse(command, `runs ${command}, which ${executable}.`, summary);
   if (!SUPPORTED_EXTENSION_APIS.has(manifest.api)) {
     return refuse(command, `is built for extension API ${String(manifest.api ?? "(none)")}; this scout supports API ${[...SUPPORTED_EXTENSION_APIS].join(", ")}. Update scout or the extension.`, summary, "incompatible");
+  }
+  let invocation: ScoutExtensionInvocation | undefined;
+  if (manifest.api === 2) {
+    try { invocation = parseScoutExtensionInvocation(manifest.invocation, manifest.complete); }
+    catch { return refuse(command, "has unsupported API-2 invocation metadata.", summary, "incompatible"); }
   }
   const problem = untrustedChain(realRoot, realDir, realCommand);
   if (problem) return refuse(command, `cannot be trusted: ${problem}. Fix its ownership and remove write permission for others before Scout will run it.`, summary);
@@ -251,7 +262,7 @@ function readInstalled(root: string, name: string, env: Env): ScoutExtension | u
     if (instance !== resolveOpenScoutInstanceName(env)) return refuse(command,
       `is installed for instance ${instance}, not the selected instance ${resolveOpenScoutInstanceName(env)}. Install the matching artifact.`, summary, "wrong_instance");
   }
-  return { name, command, summary, root, docs, complete, completion, ...(typeof manifest.version === "string" ? { version: manifest.version } : {}) };
+  return { name, command, summary, root, docs, complete, completion, ...(invocation ? { api: 2 as const, invocation } : {}), ...(typeof manifest.version === "string" ? { version: manifest.version } : {}) };
 }
 
 /** The installed extension for one verb, if any. ~/.scout wins over ~/.openscout. */
@@ -300,7 +311,7 @@ export function scoutExtensionEnv(input: {
   return {
     ...Object.fromEntries(passed),
     PATH: [runtimeDir, input.env.PATH].filter(Boolean).join(delimiter),
-    SCOUT_EXTENSION_API: String(SCOUT_EXTENSION_API_VERSION),
+    SCOUT_EXTENSION_API: String(input.extension.api ?? SCOUT_EXTENSION_API_VERSION),
     SCOUT_EXTENSION_NAME: input.extension.name,
     SCOUT_CLI_VERSION: input.cliVersion,
     SCOUT_OUTPUT: input.outputMode,
