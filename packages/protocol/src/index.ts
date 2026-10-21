@@ -82,3 +82,4 @@ export * from "./completion.js";
 
 export type { ProviderQuotaRead, ProviderQuotaReadWindow } from "./provider-quota.js";
 export * from "./attachments.js";
+export type { ObservedSessionIdentity, ObservedSessionLink, SessionReadAvailability, ObservedSessionSource, ObservedSessionRead, ObservedSessionInventory } from "./observed-sessions.js";

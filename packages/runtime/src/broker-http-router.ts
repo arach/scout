@@ -2,6 +2,7 @@ import { createRepoDiffReadHandler, type RepoDiffRead } from "./broker-repo-diff
 import { readProviderQuotas } from "./broker-provider-quota-read.js";
 import { ASSISTANT_CLAIM_HEADER } from "./broker-assistant-claims.js";
 import { handleAttachmentRoute, executeHostAttachmentRead, ATTACHMENT_READ_PATH, type AttachmentHttpDeps } from "./broker-attachments-http.js";
+import { readObservedSessions, type ObservedSessionReadDeps } from "./broker-observed-sessions-read.js";
 import { MeshFeedback, MeshFeedbackError } from "./mesh-feedback.js";
 import { MeshBridgeManagement, MeshBridgeManagementError } from "./mesh-bridge-management.js";
 import { MeshPingError, type createMeshPing } from "./mesh-ping.js";
@@ -206,6 +207,7 @@ export type BrokerHttpRouterDeps = {
   /** Test/embedding seam; default uses only the bounded public scoutd repo capability. */
   readRepoDiff?: RepoDiffRead;
   attachments?: AttachmentHttpDeps;
+  readObservedSessionCache?: ObservedSessionReadDeps["readCache"];
   encodedSnapshotBodies?: boolean;
   onSnapshotFlushedBytes?: (bytes: number) => void;
   host: string;
@@ -2078,6 +2080,13 @@ export function createBrokerHttpRouter(
     try { json(response, 200, readProviderQuotas(runtime.peek().endpoints, nodeId, url)); }
     catch (error) { json(response, error instanceof TypeError ? 400 : 503, { error: error instanceof TypeError ? "invalid_quota_query" : "provider_quotas_unavailable" }); }
     return;
+  }
+
+  if (method === "GET" && (url.pathname === "/v1/observed-sessions" || url.pathname === "/v1/observed-sessions/resolve")) {
+    if (request.transportContext?.transport === "remote" || request.transportContext?.guest) { json(response, 403, { error: "forbidden" }); return; }
+    const result = readObservedSessions({ nodeId, readCache: deps.readObservedSessionCache,
+      readEndpoints: runtime.peek ? () => runtime.peek!().endpoints : undefined }, url, url.pathname.endsWith("/resolve"));
+    json(response, result.status, result.body); return;
   }
 
   if (method === "GET" && url.pathname === "/v1/pairing/sessions") {
