@@ -145,6 +145,59 @@ describe("tail transcript sources", () => {
     expect(event?.summary).toBe("hello from claude");
   });
 
+  test("splits a Claude user turn into the operator's words and Claude Code's markup", () => {
+    const transcript: DiscoveredTranscript = {
+      source: "claude",
+      transcriptPath: "/tmp/claude/prompt.jsonl",
+      sessionId: "claude-prompt",
+      cwd: "/work/project",
+      project: "openscout",
+      harness: "unattributed",
+      mtimeMs: Date.now(),
+      size: 100,
+    };
+    const notice = ClaudeSource.parseLine(
+      JSON.stringify({
+        type: "user",
+        timestamp: "2026-10-20T15:00:00.000Z",
+        message: { content: "<task-notification>\n<task-id>b2akh</task-id>\n<status>completed</status>\n<summary>Background command \"Start the studio\" completed (exit code 0)</summary>\n</task-notification>" },
+      }),
+      makeContext("claude", transcript),
+    );
+    expect(notice?.kind).toBe("user");
+    expect(notice?.prompt?.harnessOnly).toBe(true);
+    expect(notice?.prompt?.parts).toEqual([{
+      kind: "notice",
+      source: "task",
+      status: "completed",
+      summary: 'Background command "Start the studio" completed (exit code 0)',
+      title: "Start the studio",
+      refs: { taskId: "b2akh" },
+    }]);
+
+    const words = ClaudeSource.parseLine(
+      JSON.stringify({
+        type: "user",
+        timestamp: "2026-10-20T15:00:01.000Z",
+        message: { content: [{ type: "text", text: "<system-reminder>be brief</system-reminder>\nMake it full width." }] },
+      }),
+      makeContext("claude", transcript),
+    );
+    expect(words?.prompt?.words).toBe("Make it full width.");
+    expect(words?.prompt?.parts.map((part) => part.kind)).toEqual(["context", "words"]);
+
+    const meta = ClaudeSource.parseLine(
+      JSON.stringify({
+        type: "user",
+        isMeta: true,
+        timestamp: "2026-10-20T15:00:02.000Z",
+        message: { content: [{ type: "text", text: "# /commit - Git Commit and Push" }] },
+      }),
+      makeContext("claude", transcript),
+    );
+    expect(meta?.prompt?.harnessOnly).toBe(true);
+  });
+
   test("drops Claude lines without a parseable timestamp during replay", () => {
     const transcript = {
       source: "claude" as const,
@@ -479,6 +532,31 @@ describe("tail transcript sources", () => {
     expect(event?.source).toBe("codex");
     expect(event?.kind).toBe("assistant");
     expect(event?.summary).toBe("hello from codex");
+  });
+
+  test("splits a Codex user message into the operator's words and Codex's material", () => {
+    const transcript: DiscoveredTranscript = {
+      source: "codex",
+      transcriptPath: "/tmp/codex/rollout-prompt.jsonl",
+      sessionId: "codex-prompt",
+      cwd: "/work/project",
+      project: "openscout",
+      harness: "unattributed",
+      mtimeMs: Date.now(),
+      size: 100,
+    };
+    const parse = (text: string) => CodexSource.parseLine(
+      JSON.stringify({
+        timestamp: "2026-10-20T15:00:00.000Z",
+        type: "response_item",
+        payload: { type: "message", role: "user", content: [{ type: "input_text", text }] },
+      }),
+      makeContext("codex", transcript),
+    );
+    expect(parse("<environment_context>\n  <cwd>/repo</cwd>\n</environment_context>")?.prompt?.harnessOnly).toBe(true);
+    const asked = parse("# Files mentioned by the user:\n\n## a.png: /tmp/a.png\n\n## My request for Codex:\nTighten the header.");
+    expect(asked?.kind).toBe("user");
+    expect(asked?.prompt?.words).toBe("Tighten the header.");
   });
 
   test("joins Codex tool results to their tool calls by call_id", () => {

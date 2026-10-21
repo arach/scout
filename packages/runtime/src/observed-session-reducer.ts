@@ -3,6 +3,7 @@ import {
   observedSessionFeedId,
   type ObservedActivity,
 } from "@openscout/protocol";
+import { promptHeadline } from "@openscout/agent-sessions";
 
 import { isTailNoiseEvent } from "./tail/display.js";
 import {
@@ -149,6 +150,8 @@ function fallbackTitle(event: TailEvent): string {
 
 function contentTitle(event: TailEvent): string | null {
   if (event.kind !== "user") return null;
+  // A classified turn names the session only by the operator's words.
+  if (event.prompt) return event.prompt.harnessOnly ? null : logicalSessionTitle(event.prompt.words);
   return logicalSessionTitle(event.summary);
 }
 
@@ -156,7 +159,8 @@ function previewForEvent(event: TailEvent): string | null {
   if (event.kind !== "user" && event.kind !== "assistant" && event.kind !== "tool") {
     return null;
   }
-  const summary = compactOptional(event.summary, PREVIEW_MAX_CHARS);
+  const text = event.kind === "user" && event.prompt ? promptHeadline(event.prompt) : event.summary;
+  const summary = compactOptional(text, PREVIEW_MAX_CHARS);
   if (!summary || /^\[(user|assistant|reasoning)\]$/iu.test(summary)) return null;
   return summary;
 }

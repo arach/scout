@@ -2694,7 +2694,7 @@ describe("broker-owned live session replies", () => {
 });
 
 describe("web delivery request receipts", () => {
-  function receiptBroker() {
+  function receiptBroker(captureOnly = false) {
     const home = useIsolatedOpenScoutHome();
     // Exercise the real durable receipt ledger against the payload emitted by
     // the web service. Only HTTP and the downstream execution are simulated.
@@ -2727,7 +2727,7 @@ describe("web delivery request receipts", () => {
       };
       let result: unknown;
       try {
-        result = command.requestId
+        result = command.requestId && !captureOnly
           ? await ledger.run(command.requesterId!, command.requestId, "deliver", command, execute)
           : await execute();
       } catch (error) {
@@ -2746,6 +2746,32 @@ describe("web delivery request receipts", () => {
       loseResponse: () => { loseNextResponse = true; },
     };
   }
+
+  test("delivery commands match the pre-extraction golden fixtures", async () => {
+    const broker = receiptBroker(true);
+    const attachments = [
+      { mediaType: "  ", url: "invalid" },
+      { mediaType: " image/png ", fileName: " evidence.png ", blobKey: " blob-original " },
+      { id: " uploaded-explicit ", mediaType: " text/plain ", url: " https://example.com/evidence " },
+    ];
+    const shared = { body: "  Inspect this  ", attachments, clientMessageId: " golden-key ", currentDirectory: broker.home };
+    await sendScoutDirectMessage({ ...shared, agentId: "kepler" });
+    await askScoutQuestion({ ...shared, senderId: "operator", targetAgentId: "kepler" });
+    await sendScoutMessage({ ...shared, senderId: "operator", explicitTargetAgentIds: ["kepler"] });
+    await sendScoutMessage({ ...shared, senderId: "operator", body: "@kepler Inspect this" });
+    // Capture values without accepting these different commands under one key.
+    // The separate receipt tests exercise conflicts with the real ledger.
+    const commands = broker.commands;
+    const fetch = globalThis.fetch;
+    globalThis.fetch = (async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (new URL(request.url).pathname === "/v1/node") return jsonResponse({ id: "node-1", capabilities: ["session-input-receipts/1"] });
+      return fetch(input, init);
+    }) as typeof globalThis.fetch;
+    await askScoutQuestion({ senderId: "operator", target: { kind: "session_id", sessionId: "native-session", harness: "codex", forkIfLive: true },
+      body: "  keep going  ", clientMessageId: " session-key ", sessionDelivery: "in_place_or_resume", source: "scout-mobile", currentDirectory: broker.home });
+    expect(commands).toEqual(await Bun.file(new URL("../../../../runtime/src/test-helpers/delivery-golden.json", import.meta.url)).json());
+  });
 
   const attachment = { mediaType: "image/png", fileName: "evidence.png", blobKey: "blob-original" };
   const routes = {

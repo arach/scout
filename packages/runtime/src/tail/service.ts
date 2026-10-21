@@ -328,9 +328,10 @@ function compactRawValue(value: unknown, depth = 0): unknown {
 
 function compactEvent(event: TailEvent): TailEvent {
   const summary = redactSecrets(event.summary);
-  if (!event.raw) return summary === event.summary ? event : { ...event, summary };
+  const base = event.prompt ? { ...event, prompt: redactSecretsDeep(event.prompt) } : event;
+  if (!event.raw) return summary === event.summary ? base : { ...base, summary };
   return {
-    ...event,
+    ...base,
     summary,
     raw: compactRawValue(event.raw),
   };
@@ -344,6 +345,7 @@ function redactTailEvent(event: TailEvent): TailEvent {
   return {
     ...event,
     summary: redactSecrets(event.summary),
+    ...(event.prompt ? { prompt: redactSecretsDeep(event.prompt) } : {}),
     ...(event.raw ? { raw: redactSecretsDeep(event.raw) } : {}),
   };
 }
@@ -1341,6 +1343,7 @@ async function installWatcherForTest(input: {
 }
 
 export const __testing = {
+  redactTailEvent,
   quietTailEventKey,
   resetQuietTailCoalescer: () => quietEventLastSeen.clear(),
   shouldCoalesceQuietTailEvent,
@@ -1873,12 +1876,16 @@ export async function readTailEventsForSession(
 
   const limit = options?.limit ?? 2_000;
   const sessionId = transcript.sessionId?.trim() || normalizedRef;
-  let events = snapshotSessionEvents(sessionId, transcript.source, limit);
-  if (events.length === 0) {
-    events = await parseTranscriptSessionEvents(transcript, discovery.processes, limit);
+  const buffered = snapshotSessionEvents(sessionId, transcript.source, limit);
+  // A line watcher seeds at the end of its file, so its buffer holds only what
+  // it saw after attaching: a task discovered mid-run would lose its opening.
+  // Whole-file sources seed from the start and their buffer is the history.
+  const wholeFile = Boolean(sources.find((source) => source.name === transcript.source)?.parseFile);
+  if (buffered.length >= limit || (buffered.length > 0 && wholeFile)) {
+    return { transcript, events: buffered };
   }
-
-  return { transcript, events };
+  const replayed = await parseTranscriptSessionEvents(transcript, discovery.processes, limit);
+  return { transcript, events: mergeSessionHistory(replayed, buffered, limit) };
 }
 
 const LOCATED_TRANSCRIPT_TTL_MS = 30_000;
@@ -1923,4 +1930,37 @@ function locateTranscriptOutsideDiscovery(
     locatedTranscripts.delete(oldest);
   }
   return transcript;
+}
+
+/**
+ * The watcher and a replay number lines from where each started reading, so
+ * one transcript line arrives under two ids. Match on content (as the broker's
+ * recent merge does); the buffered copy wins, and a line genuinely repeated
+ * in the file survives as often as it appears.
+ */
+export function mergeSessionHistory(
+  replayed: readonly TailEvent[],
+  buffered: readonly TailEvent[],
+  limit: number,
+): TailEvent[] {
+  const lineKey = (event: TailEvent) =>
+    [event.source, event.sessionId, event.ts, event.kind, event.summary].join("\u0000");
+  const bufferedCounts = new Map<string, number>();
+  for (const event of buffered) {
+    const key = lineKey(event);
+    bufferedCounts.set(key, (bufferedCounts.get(key) ?? 0) + 1);
+  }
+  const earlier: TailEvent[] = [];
+  for (const event of replayed) {
+    const key = lineKey(event);
+    const count = bufferedCounts.get(key) ?? 0;
+    if (count > 0) {
+      bufferedCounts.set(key, count - 1);
+      continue;
+    }
+    earlier.push(event);
+  }
+  return [...earlier, ...buffered]
+    .sort((left, right) => left.ts - right.ts)
+    .slice(-limit);
 }

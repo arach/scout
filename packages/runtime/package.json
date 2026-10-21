@@ -505,6 +505,12 @@
       "types": "./dist/scout-extensions.d.ts",
       "import": "./dist/scout-extensions.js",
       "default": "./dist/scout-extensions.js"
+    },
+    "./delivery-client": {
+      "bun": "./src/delivery-client.ts",
+      "types": "./dist/delivery-client.d.ts",
+      "import": "./dist/delivery-client.js",
+      "default": "./dist/delivery-client.js"
     }
   },
   "types": "./dist/index.d.ts",
@@ -516,6 +522,7 @@
     "!src/**/test-helpers/**",
     "drizzle",
     "README.md",
+    "DELIVERY.md",
     "LICENSE"
   ],
   "scripts": {
