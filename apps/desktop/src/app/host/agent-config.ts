@@ -12,7 +12,7 @@ import {
 import type { RuntimeRegistrySnapshot } from "@openscout/runtime/registry";
 import { relayAgentLogsDirectory, relayAgentRuntimeDirectory } from "@openscout/runtime/support-paths";
 
-import { loadScoutBrokerContext } from "../../core/broker/service.ts";
+import { loadScoutBrokerContext } from "../../../../../packages/cli/src/lib/core/broker/service.ts";
 
 export type ScoutDesktopAgentConfigRuntime = {
   cwd: string;

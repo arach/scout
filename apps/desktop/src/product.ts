@@ -1,1 +1,1 @@
-export { SCOUT_PRODUCT_NAME } from "./shared/product.ts";
+export { SCOUT_PRODUCT_NAME } from "../../../packages/cli/src/lib/shared/product.ts";

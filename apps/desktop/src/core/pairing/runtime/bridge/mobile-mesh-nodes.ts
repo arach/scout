@@ -1,4 +1,4 @@
-import { loadScoutBrokerContext } from "../../../broker/service.ts";
+import { loadScoutBrokerContext } from "../../../../../../../packages/cli/src/lib/core/broker/service.ts";
 import { buildMobileMeshNodes, type MobileMeshNodesResponse } from "./mobile-mesh-nodes-view.ts";
 
 /**

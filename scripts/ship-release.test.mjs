@@ -41,7 +41,7 @@ test("public release plan is reviewed-source-only and complete-state idempotent"
   assert.equal(result.status, 0, result.stderr);
   assert.ok(result.stdout.includes(`@openscout/protocol@${currentVersion}`));
   assert.ok(result.stdout.includes(`@openscout/scout@${currentVersion}`));
-  assert.ok(result.stdout.includes(`apps/desktop/src/shared/product.ts: ${currentVersion}`));
+  assert.ok(result.stdout.includes(`packages/cli/src/lib/shared/product.ts: ${currentVersion}`));
   assert.ok(result.stdout.includes(`docs.json: ${currentVersion}`));
   assert.match(result.stdout, /git fetch --no-tags origin refs\/heads\/main/);
   assert.match(result.stdout, /ship-npm\.sh --verify-state/);
@@ -152,9 +152,9 @@ test("SCOUT_APP_VERSION participates in release lockstep", () => {
       join(fixture, "bun.lock"),
       `{\n  "lockfileVersion": 1,\n  "workspaces": {\n${lockWorkspaces}\n  },\n}\n`,
     );
-    mkdirSync(join(fixture, "apps/desktop/src/shared"), { recursive: true });
+    mkdirSync(join(fixture, "packages/cli/src/lib/shared"), { recursive: true });
     writeFileSync(
-      join(fixture, "apps/desktop/src/shared/product.ts"),
+      join(fixture, "packages/cli/src/lib/shared/product.ts"),
       'export const SCOUT_APP_VERSION = process.env.SCOUT_APP_VERSION?.trim() || "0.2.87";\n',
     );
     writeFileSync(join(fixture, "docs.json"), JSON.stringify({ version: "0.2.99" }));
@@ -998,6 +998,10 @@ test("the isolated retained Scout candidate is normalized and passes the exact a
       new URL("check-packed-manifests.mjs", import.meta.url),
       join(fixture, "scripts/check-packed-manifests.mjs"),
     );
+    copyFileSync(
+      new URL("check-cli-private-inventory.mjs", import.meta.url),
+      join(fixture, "scripts/check-cli-private-inventory.mjs"),
+    );
     writeFileSync(
       join(fixture, "package.json"),
       JSON.stringify({ private: true, workspaces: ["packages/*"] }),
@@ -1311,8 +1315,8 @@ function createLocalReleaseFixture({ corruptReceipt = false, initialRelease = "f
     }
   }
   writeFileSync(join(fixture, "bun.lock"), '{\n"workspaces": {\n' + manifests.filter(p => p !== ".").map(p => `    "${p}": {\n      "version": "${version}",\n    },`).join("\n") + '\n}\n}');
-  mkdirSync(join(fixture, "apps/desktop/src/shared"), { recursive: true });
-  writeFileSync(join(fixture, "apps/desktop/src/shared/product.ts"), `export const SCOUT_APP_VERSION = process.env.SCOUT_APP_VERSION?.trim() || "${version}";`);
+  mkdirSync(join(fixture, "packages/cli/src/lib/shared"), { recursive: true });
+  writeFileSync(join(fixture, "packages/cli/src/lib/shared/product.ts"), `export const SCOUT_APP_VERSION = process.env.SCOUT_APP_VERSION?.trim() || "${version}";`);
   writeFileSync(join(fixture, "docs.json"), JSON.stringify({ version }));
   const receipt = readFileSync(join(fixture, "release-state/receipt.json"));
   const remoteReceipt = join(fixture, "remote-receipt.json");
@@ -1655,7 +1659,7 @@ function createOriginalCandidateFixture() {
   writeFileSync(markerPath, JSON.stringify({ schemaVersion: 1, kind: "scout-npm-candidate", releaseState: "CANDIDATE", repository: receipt.repository,
     releaseVersion: version, releaseSha: source, authority: "local-signed", provenance: "none", stagingTag: "scout-release-0-3-3",
     integrityReceiptSha256: digest(readFileSync(receiptPath)), packages: receipt.packages }, null, 2) + "\n");
-  const sourceFiles = ["package.json", "apps/desktop/package.json", "packages/agent-sessions/package.json", "packages/cli/package.json", "packages/protocol/package.json", "packages/runtime/package.json", "packages/session-trace/package.json", "packages/session-trace-react/package.json", "packages/web/package.json", "apps/desktop/src/shared/product.ts", "docs.json", "bun.lock"];
+  const sourceFiles = ["package.json", "apps/desktop/package.json", "packages/agent-sessions/package.json", "packages/cli/package.json", "packages/protocol/package.json", "packages/runtime/package.json", "packages/session-trace/package.json", "packages/session-trace-react/package.json", "packages/web/package.json", "packages/cli/src/lib/shared/product.ts", "docs.json", "bun.lock"];
   for (const file of sourceFiles) {
     const target = join(fixture, "original-tree", file);
     mkdirSync(dirname(target), { recursive: true });
@@ -1804,7 +1808,7 @@ for (const conflict of ["partial pair", "missing public marker", "changed public
 test("default release and fresh candidate/promotion still require the current HEAD version tag", () => {
   const f = createOriginalCandidateFixture();
   try {
-    for (const file of ["package.json", "apps/desktop/package.json", "packages/agent-sessions/package.json", "packages/cli/package.json", "packages/protocol/package.json", "packages/runtime/package.json", "packages/session-trace/package.json", "packages/session-trace-react/package.json", "packages/web/package.json", "apps/desktop/src/shared/product.ts", "docs.json", "bun.lock"]) {
+    for (const file of ["package.json", "apps/desktop/package.json", "packages/agent-sessions/package.json", "packages/cli/package.json", "packages/protocol/package.json", "packages/runtime/package.json", "packages/session-trace/package.json", "packages/session-trace-react/package.json", "packages/web/package.json", "packages/cli/src/lib/shared/product.ts", "docs.json", "bun.lock"]) {
       copyFileSync(join(f.fixture, "original-tree", file), join(f.fixture, file));
     }
     for (const phase of ["release", "candidate", "promote"]) {

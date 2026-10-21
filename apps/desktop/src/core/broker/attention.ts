@@ -15,7 +15,7 @@ import {
   readScoutBrokerSnapshot,
   resolveScoutBrokerUrl,
   type ScoutBrokerSnapshot,
-} from "./service.ts";
+} from "../../../../../packages/cli/src/lib/core/broker/service.ts";
 
 export type ScoutAttentionSeverity = "interrupt" | "badge" | "info";
 

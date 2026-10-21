@@ -1,7 +1,7 @@
 /**
  * Machine roster for the web UI (docs/eng/sco-104-machines.md).
  *
- * Ported from apps/desktop/src/core/machines/service.ts. Like that one, it
+ * Ported from packages/cli/src/lib/core/machines/service.ts. Like that one, it
  * only forwards to the broker: the broker owns the scan and the durable table,
  * so the web server never browses mDNS or reads an ARP table itself.
  */

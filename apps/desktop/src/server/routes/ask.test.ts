@@ -6,7 +6,7 @@ import {
   buildScoutAskCommand,
   parseAskApiBody,
 } from "./ask-contract.ts";
-import type { ScoutAskCommand } from "../../core/broker/ask-types.ts";
+import type { ScoutAskCommand } from "../../../../../packages/cli/src/lib/core/broker/ask-types.ts";
 
 function createAskRouteTestApp(options: {
   scoutAskHandler?: (input: ScoutAskCommand) => Promise<{

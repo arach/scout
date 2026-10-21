@@ -28,7 +28,7 @@ import {
 import { loadLocalConfig, resolvePairingPort } from "@openscout/runtime/local-config";
 import { resolveBunExecutable as resolveResolvedBunExecutable } from "@openscout/runtime/tool-resolution";
 
-import { resolveScoutAppRoot } from "../../shared/paths.ts";
+import { resolveScoutAppRoot } from "../../../../../packages/cli/src/lib/shared/paths.ts";
 import { resolveOpenScoutPairingHome } from "@openscout/runtime/support-paths";
 import { selectInstanceAwareEntrypoint } from "@openscout/runtime/instance";
 

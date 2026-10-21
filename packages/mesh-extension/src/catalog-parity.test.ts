@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { SCOUT_MCP_CORE_TOOL_NAMES } from '@openscout/protocol';
-import { createScoutMcpServer } from '../../../apps/desktop/src/core/mcp/scout-mcp.ts';
+import { createScoutMcpServer } from '../../cli/src/mcp/scout-mcp.ts';
 import { selectCoreTools } from './core-http-mcp.ts';
 function wire(value:any):any {
   if(Array.isArray(value))return value.map(wire);

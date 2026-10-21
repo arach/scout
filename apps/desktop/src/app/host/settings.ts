@@ -23,9 +23,9 @@ import {
 } from "@openscout/runtime/onboarding";
 import { resolveOpenScoutSupportPaths } from "@openscout/runtime/support-paths";
 
-import { getRuntimeBrokerServiceStatus } from "./runtime-service-client.ts";
-import { SCOUT_PRODUCT_NAME } from "../../shared/product.ts";
-import { syncScoutBrokerBindings } from "../../core/broker/service.ts";
+import { getRuntimeBrokerServiceStatus } from "../../../../../packages/cli/src/lib/app/host/runtime-service-client.ts";
+import { SCOUT_PRODUCT_NAME } from "../../../../../packages/cli/src/lib/shared/product.ts";
+import { syncScoutBrokerBindings } from "../../../../../packages/cli/src/lib/core/broker/service.ts";
 import {
   deriveScoutHostTelegramRuntimeState as deriveScoutDesktopTelegramRuntimeState,
   normalizeScoutHostTelegramConfig as normalizeScoutDesktopTelegramConfig,

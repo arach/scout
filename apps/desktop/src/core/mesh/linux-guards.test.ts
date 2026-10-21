@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { openTailscaleApp } from "./service.ts";
+import { openTailscaleApp } from "../../../../../packages/cli/src/lib/core/mesh/service.ts";
 
 function withPlatform<T>(platform: NodeJS.Platform, run: () => T): T {
   const previous = Object.getOwnPropertyDescriptor(process, "platform");

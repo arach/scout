@@ -31,7 +31,7 @@ import {
 } from "@openscout/runtime/setup";
 import { createAgentWorkspace } from "@openscout/runtime/agent-workspace";
 
-import { upScoutAgent } from "../agents/service.ts";
+import { upScoutAgent } from "../../../../../packages/cli/src/lib/core/agents/service.ts";
 import { queryAgents, queryFleet } from "../../server/db-queries.ts";
 import {
   loadScoutBrokerContext,
@@ -48,7 +48,7 @@ import {
   type ScoutBrokerHomeActivityRecord,
   type ScoutBrokerSnapshot,
   type ScoutDirectMessageResult,
-} from "../broker/service.ts";
+} from "../../../../../packages/cli/src/lib/core/broker/service.ts";
 import { resolveOperatorName } from "@openscout/runtime/user-config";
 
 const SCOUTBOT_AGENT_ID = "scoutbot";

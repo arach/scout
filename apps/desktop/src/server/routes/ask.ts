@@ -3,9 +3,9 @@ import { Hono, type Context, type Handler } from "hono";
 import {
   scoutAskHandler as defaultScoutAskHandler,
   type ScoutAskHandler,
-} from "../../core/broker/ask.ts";
-import type { ScoutAskReceipt } from "../../core/broker/ask-types.ts";
-import { resolveScoutSenderId } from "../../core/broker/sender.ts";
+} from "../../../../../packages/cli/src/lib/core/broker/ask.ts";
+import type { ScoutAskReceipt } from "../../../../../packages/cli/src/lib/core/broker/ask-types.ts";
+import { resolveScoutSenderId } from "../../../../../packages/cli/src/lib/core/broker/sender.ts";
 import {
   buildScoutAskCommand,
   parseAskApiBody,

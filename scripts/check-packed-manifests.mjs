@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { checkCliPrivateInventory } from "./check-cli-private-inventory.mjs";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -303,6 +304,20 @@ function reportFailures(results) {
 }
 
 async function main() {
+  // Independent of native packaging: validate a named JS-only or full candidate
+  // against freshly collected source/output metadata. Never refresh on check.
+  if (process.argv[2] === "--private-inventory") {
+    const [expectedPath, observedPath, tarball] = process.argv.slice(3);
+    if (!tarball) throw new Error("--private-inventory requires reviewed JSON, observed JSON and one exact tarball");
+    const expected = JSON.parse(readFileSync(expectedPath, "utf8"));
+    const observed = JSON.parse(readFileSync(observedPath, "utf8"));
+    const footprint = readTarballFootprint(tarball);
+    const failures = checkCliPrivateInventory(expected, observed, [...footprint.fileSizes.keys()],
+      (entry) => execFileSync("tar", ["-xOf", tarball, entry], { maxBuffer: 64 * 1024 * 1024 }));
+    if (failures.length) { console.error(failures.join("\n")); process.exitCode = 1; }
+    else console.log("Named private inventory matches exact packed candidate.");
+    return;
+  }
   if (process.argv[2] === "--tarball") {
     const tarballs = process.argv.slice(3).map((value) => path.resolve(value));
     if (tarballs.length === 0) {

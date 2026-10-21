@@ -20,7 +20,7 @@ test("repo Scout MCP lists real tools, identifies as scoutbot, and uses Unix soc
   const port = (tcp.address() as { port: number }).port;
   const client = new McpClient({ name: "scoutbot-socket-test", version: "1" });
   const transport = new StdioTransport({ command: process.execPath,
-    args: [fileURLToPath(new URL("../../../../../apps/desktop/src/cli/main.ts", import.meta.url)), "mcp", "--context-root", directory],
+    args: [fileURLToPath(new URL("../../../../cli/src/cli/main.ts", import.meta.url)), "mcp", "--context-root", directory],
     env: { HOME: directory, OPENSCOUT_SUPPORT_DIRECTORY: join(directory, "support"), OPENSCOUT_CONTROL_HOME: join(directory, "control"),
       OPENSCOUT_RELAY_HUB: join(directory, "relay"), OPENSCOUT_AGENT: "scoutbot", OPENSCOUT_BROKER_URL: `http://127.0.0.1:${port}`,
       OPENSCOUT_BROKER_PORT: String(port), OPENSCOUT_BROKER_SOCKET_PATH: socket, OPENSCOUT_BROKER_SOCKET_ONLY: "1",

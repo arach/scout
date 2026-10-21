@@ -10,7 +10,7 @@ package code should not import from `apps/`; shared behavior moves down into
 `packages/runtime`, `packages/protocol`, `packages/cli`, or another package-owned
 boundary before an app consumes it. The current known exception is
 `packages/cli/src/main.ts`, which temporarily imports the old
-`apps/desktop/src/cli/main.ts` command tree until the CLI implementation moves.
+`packages/cli/src/cli/main.ts` command tree until the CLI implementation moves.
 
 ## Directory Map
 

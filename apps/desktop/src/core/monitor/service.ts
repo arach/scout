@@ -8,12 +8,12 @@ import {
   type ScoutBrokerHomeActivityRecord,
   type ScoutBrokerHomeAgentRecord,
   type ScoutBrokerMessageRecord,
-} from "../broker/service.ts";
+} from "../../../../../packages/cli/src/lib/core/broker/service.ts";
 import { sendScoutMobileMessage } from "../mobile/service.ts";
 import {
   loadScoutRuntimesReport,
   type ScoutRuntimesReport,
-} from "../setup/service.ts";
+} from "../../../../../packages/cli/src/lib/core/setup/service.ts";
 
 export type ScoutMonitorAgent = ScoutBrokerHomeAgentRecord;
 export type ScoutMonitorActivity = ScoutBrokerHomeActivityRecord;

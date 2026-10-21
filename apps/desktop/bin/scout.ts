@@ -7,7 +7,7 @@ async function runClaudeStatuslineFastPath(): Promise<boolean> {
   }
 
   try {
-    const { runStatuslineCommand } = await import("../src/cli/commands/statusline.ts");
+    const { runStatuslineCommand } = await import("../../../packages/cli/src/cli/commands/statusline.ts");
     const context: Parameters<typeof runStatuslineCommand>[0] = {
       env: process.env,
       output: {
@@ -28,5 +28,5 @@ async function runClaudeStatuslineFastPath(): Promise<boolean> {
 }
 
 if (!(await runClaudeStatuslineFastPath())) {
-  await import("../src/cli/main.ts");
+  await import("../../../packages/cli/src/cli/main.ts");
 }

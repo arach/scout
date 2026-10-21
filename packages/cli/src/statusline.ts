@@ -4,7 +4,7 @@ import { applyOpenScoutInstanceEnvironment, selectStatuslineOpenScoutInstance } 
 selectStatuslineOpenScoutInstance(process.env);
 applyOpenScoutInstanceEnvironment(process.env);
 // Load the command only after the instance env is settled.
-const { runStatuslineCommand } = await import("../../../apps/desktop/src/cli/commands/statusline.ts");
+const { runStatuslineCommand } = await import("./cli/commands/statusline.ts");
 
 try {
   const args = process.argv[2] === "statusline"

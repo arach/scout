@@ -429,7 +429,7 @@ describe("runScoutdServiceCommand shell-out", () => {
           health: { reachable: true, ok: true, ...fields },
         })));
       expect(result.health.storage).toEqual(storage);
-      const { doctorBrokerCheck } = await import("../../../apps/desktop/src/cli/doctor-checks.ts");
+      const { doctorBrokerCheck } = await import("../../cli/src/cli/doctor-checks.ts");
       expect(doctorBrokerCheck(result).state).toBe("impaired");
     }
     for (const body of ["not JSON", "null", JSON.stringify({ storage: { journal: { state: "failing" } } })]) {

@@ -38,7 +38,7 @@ const VERSION_MANIFESTS = [
   "packages/web",
 ];
 
-const APP_VERSION_SOURCE = "apps/desktop/src/shared/product.ts";
+const APP_VERSION_SOURCE = "packages/cli/src/lib/shared/product.ts";
 const DOCS_VERSION_SOURCE = "docs.json";
 const LOCKFILE_SOURCE = "bun.lock";
 const APP_VERSION_PATTERN =
