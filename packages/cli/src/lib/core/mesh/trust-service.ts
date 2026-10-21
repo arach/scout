@@ -340,7 +340,9 @@ export async function beginMeshEnrollment(input: {
 
 /** Normalize operator-typed SAS words for comparison (any spacing/dashes/case). */
 export function normalizeSasWords(value: string): string[] {
-  return value.trim().toLowerCase().split(/[\s-]+/).filter(Boolean);
+  // EFF v1 has one hyphenated word. Preserve it before treating other dashes
+  // as separators, including when the entire six-word SAS is dash-joined.
+  return value.trim().toLowerCase().match(/yo-yo(?=$|[\s-])|[^\s-]+/g) ?? [];
 }
 
 /**
@@ -356,7 +358,7 @@ export async function confirmMeshEnrollment(
 ): Promise<TrustedPeerRecord> {
   if (confirmedWords !== undefined) {
     const typed = normalizeSasWords(confirmedWords);
-    if (typed.join(" ") !== normalizeSasWords(handshake.words.join(" ")).join(" ")) {
+    if (typed.join(" ") !== handshake.words.join(" ")) {
       throw new Error(
         "the words you entered do not match this enrollment; do not approve — start over with `scout mesh enroll`",
       );
