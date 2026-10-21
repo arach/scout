@@ -523,6 +523,12 @@
       "types": "./dist/attachments.d.ts",
       "import": "./dist/attachments.js",
       "default": "./dist/attachments.js"
+    },
+    "./supervision-handoff": {
+      "bun": "./src/supervision-handoff/index.ts",
+      "types": "./dist/supervision-handoff/index.d.ts",
+      "import": "./dist/supervision-handoff/index.js",
+      "default": "./dist/supervision-handoff/index.js"
     }
   },
   "types": "./dist/index.d.ts",
