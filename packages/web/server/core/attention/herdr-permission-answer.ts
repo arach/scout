@@ -7,7 +7,8 @@
  * item's `version`), the pane is read again, and keys go out only while that
  * same dialog is still up. Approve presses the dialog's plain Yes (never
  * "don't ask again"); Deny presses its No, or Esc when it shows none. Every
- * send is written to the continuation audit log first.
+ * send is written to the continuation audit log first. A success receipt means
+ * Herdr accepted the keys; prompt disappearance has not been verified.
  */
 
 import type { HerdrPaneProjection } from "@openscout/protocol";
@@ -31,7 +32,7 @@ import {
 export type HerdrPermissionDecision = "approve" | "deny";
 
 export type HerdrPermissionAnswer =
-  | { ok: true; keys: string[]; location: string }
+  | { ok: true; keys: string[]; location: string; message: string }
   | { ok: false; code: "not_found" | "changed" | "claimed" | "send_failed"; message: string };
 
 export type HerdrPermissionAnswerDeps = {
@@ -83,8 +84,8 @@ export async function answerHerdrPermission(
     reason: `operator ${input.decision === "approve" ? "approved" : "denied"} from another device`,
   });
 
-  // The same claim continuation takes, so an operator tap and an auto-continue
-  // (or a second Scout server) can never both answer one prompt.
+  // The same claim as continuation excludes competing claim acquisitions for
+  // a 30-second window, not indefinitely. It does not verify a prompt answer.
   const claimKey = `${session}:${pane.terminalId ?? pane.paneId}:${dialog.command ?? ""}`;
   if (!(deps.claim ?? claimContinuationActuation)(claimKey, CLAIM_TTL_MS)) {
     try { record("claimed-elsewhere"); } catch { /* nothing was sent */ }
@@ -104,7 +105,7 @@ export async function answerHerdrPermission(
     return { ok: false, code: "send_failed", message: `Couldn't press the key in ${location}.` };
   }
   try { record("sent"); } catch { /* the attempt row already stands */ }
-  return { ok: true, keys, location };
+  return { ok: true, keys, location, message: "Herdr accepted the keys. Prompt disappearance has not been verified." };
 }
 
 export function keysFor(dialog: ContinuationDialog, decision: HerdrPermissionDecision): string[] {

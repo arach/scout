@@ -60,6 +60,23 @@ describe("answerHerdrPermission", () => {
     expect(sent).toEqual([["enter"]]);
   });
 
+  test("success reports accepted keys without claiming or checking disappearance", async () => {
+    const sent: Array<readonly string[]> = []; let captures = 0;
+    const result = await answerHerdrPermission(
+      { itemId: item.id, version: item.version!, decision: "approve" },
+      { ...deps(BASH_PERMISSION, sent), capture: async () => { captures++; return BASH_PERMISSION; } },
+    );
+    // The dialog deliberately remains present; this is a transport receipt only.
+    expect(result).toEqual({ ok: true, keys: ["enter"], location: "Herdr scout · w1:p2",
+      message: "Herdr accepted the keys. Prompt disappearance has not been verified." });
+    expect(captures).toBe(1); expect(sent).toEqual([["enter"]]);
+    // Existing phone decoders still receive their ok/location/code/message fields.
+    const wire = JSON.parse(JSON.stringify(result));
+    expect({ ok: wire.ok, location: wire.location, code: wire.code, message: wire.message }).toEqual({
+      ok: true, location: "Herdr scout · w1:p2", code: undefined,
+      message: "Herdr accepted the keys. Prompt disappearance has not been verified.",
+    });
+  });
   test("deny presses No", async () => {
     const sent: Array<readonly string[]> = [];
     const result = await answerHerdrPermission(
