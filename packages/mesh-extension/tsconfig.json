@@ -1,0 +1,4 @@
+{
+  "compilerOptions": { "target": "ES2022", "module": "ESNext", "moduleResolution": "bundler", "customConditions": ["bun"], "strict": true, "skipLibCheck": true, "noEmit": true, "resolveJsonModule": true, "allowImportingTsExtensions": true, "types": ["bun-types", "node"] },
+  "include": ["src/**/*.ts"], "exclude": ["src/**/*.test.ts"]
+}

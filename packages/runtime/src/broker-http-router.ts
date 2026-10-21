@@ -123,7 +123,7 @@ import {
 import type { BrokerMeshDiscoveryService } from "./broker-mesh-discovery-service.js";
 import type { BrokerMeshHttpService } from "./broker-mesh-http-service.js";
 import { brokerActorDisplayName } from "./broker-conversation-helpers.js";
-import type { BrokerRepoTailService } from "./broker-repo-tail-service.js";
+import { parseTailRecentFilters, type BrokerRepoTailService } from "./broker-repo-tail-service.js";
 import type { BrokerRendezvousService } from "./broker-rendezvous-service.js";
 import type { BrokerWebControlService } from "./broker-web-control-service.js";
 import { buildCollaborationInvocation } from "./collaboration-invocations.js";
@@ -1450,6 +1450,7 @@ export function createBrokerHttpRouter(
   }
 
   if (method === "GET" && url.pathname === "/v1/tail/recent") {
+    try { parseTailRecentFilters(url); } catch { json(response, 400, { error: "invalid_tail_filters" }); return; }
     const result = await brokerRepoTailService.readTailRecentPayloadWithTiming(url);
     jsonWithHeaders(response, 200, result.payload, {
       "Server-Timing": serverTimingHeader(result.timings),
