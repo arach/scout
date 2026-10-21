@@ -63,6 +63,24 @@
       "import": "./dist/adapters/claude-code/index.js",
       "default": "./dist/adapters/claude-code/index.js"
     },
+    "./adapters/codex/prompt-markup": {
+      "bun": "./src/adapters/codex/prompt-markup.ts",
+      "types": "./dist/adapters/codex/prompt-markup.d.ts",
+      "import": "./dist/adapters/codex/prompt-markup.js",
+      "default": "./dist/adapters/codex/prompt-markup.js"
+    },
+    "./prompt-classifiers": {
+      "bun": "./src/adapters/prompt-classifiers.ts",
+      "types": "./dist/adapters/prompt-classifiers.d.ts",
+      "import": "./dist/adapters/prompt-classifiers.js",
+      "default": "./dist/adapters/prompt-classifiers.js"
+    },
+    "./adapters/claude-code/prompt-markup": {
+      "bun": "./src/adapters/claude-code/prompt-markup.ts",
+      "types": "./dist/adapters/claude-code/prompt-markup.d.ts",
+      "import": "./dist/adapters/claude-code/prompt-markup.js",
+      "default": "./dist/adapters/claude-code/prompt-markup.js"
+    },
     "./adapters/claude-code/team-topology": {
       "bun": "./src/adapters/claude-code/team-topology.ts",
       "types": "./dist/adapters/claude-code/team-topology.d.ts",
