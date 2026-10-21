@@ -1027,5 +1027,12 @@
     "category": "test",
     "reason": "isolated custody-lock crash fixtures own and await their exact child handles; no installed runtime or app entrypoint is executed",
     "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/supervision-handoff/node-import.test.ts",
+    "symbol": "Bun.spawn",
+    "category": "test",
+    "reason": "isolated Node child imports the actual transpiled custody SDK graph to prove optional native binding refusal; owns and awaits only that fixture handle, never an installed entrypoint",
+    "owner": "runtime"
   }
 ]

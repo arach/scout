@@ -1,4 +1,5 @@
-import { dlopen, read, type Pointer } from "bun:ffi";
+import type { Pointer } from "bun:ffi";
+import { createRequire } from "node:module";
 import { createHash, randomBytes } from "node:crypto";
 import { closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readFileSync, realpathSync, writeSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
@@ -22,6 +23,7 @@ let native: ReturnType<typeof openNative> | undefined;
 function openNative() {
   if (process.platform !== "darwin" && process.platform !== "linux") refuse("ownership_lock_unsupported");
   try {
+    const { dlopen, read } = createRequire(import.meta.url)("bun:ffi") as typeof import("bun:ffi");
     const library = dlopen(process.platform === "darwin" ? "/usr/lib/libSystem.B.dylib" : "libc.so.6", {
       flock: { args: ["i32", "i32"], returns: "i32" },
       [process.platform === "darwin" ? "__error" : "__errno_location"]: { args: [], returns: "ptr" },

@@ -252,3 +252,5 @@ export class SupervisionHandoff {
     });
   }
 }
+
+export { createProcessEvidenceReader, type ProcessEvidenceReader, type ProcessSample, type ProcessSampleResult, type ProcessComparison } from "./process-evidence.js";
