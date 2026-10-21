@@ -1,3 +1,4 @@
+import { readObservedSessions, type ObservedSessionReadDeps } from "./broker-observed-sessions-read.js";
 import { MeshFeedback, MeshFeedbackError } from "./mesh-feedback.js";
 import { MeshBridgeManagement, MeshBridgeManagementError } from "./mesh-bridge-management.js";
 import { MeshPingError, type createMeshPing } from "./mesh-ping.js";
@@ -199,6 +200,7 @@ const CHANNEL_INVITE_COMMAND_KINDS = new Set<string>([
 ]);
 
 export type BrokerHttpRouterDeps = {
+  readObservedSessionCache?: ObservedSessionReadDeps["readCache"];
   encodedSnapshotBodies?: boolean;
   onSnapshotFlushedBytes?: (bytes: number) => void;
   host: string;
@@ -2028,6 +2030,13 @@ export function createBrokerHttpRouter(
       ...(url.searchParams.get("agentId") ? { agentId: url.searchParams.get("agentId")! } : {}),
     }));
     return;
+  }
+
+  if (method === "GET" && (url.pathname === "/v1/observed-sessions" || url.pathname === "/v1/observed-sessions/resolve")) {
+    if (request.transportContext?.transport === "remote" || request.transportContext?.guest) { json(response, 403, { error: "forbidden" }); return; }
+    const result = readObservedSessions({ nodeId, readCache: deps.readObservedSessionCache,
+      readEndpoints: runtime.peek ? () => runtime.peek!().endpoints : undefined }, url, url.pathname.endsWith("/resolve"));
+    json(response, result.status, result.body); return;
   }
 
   if (method === "GET" && url.pathname === "/v1/pairing/sessions") {

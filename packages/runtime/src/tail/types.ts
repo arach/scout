@@ -1,4 +1,5 @@
 import type { ClassifiedPrompt } from "@openscout/agent-sessions";
+import type { ObservedSessionSource } from "@openscout/protocol";
 
 /**
  * Launch attribution for a tailed transcript. The runtime/harness name shown
@@ -99,6 +100,8 @@ export type TailDiscoveryIssue = {
 };
 
 export type DiscoverySnapshot = {
+  /** Availability belongs to the cached pass, not the time of this read. */
+  readStatus?: { initialized: boolean; scope: TailDiscoveryScope | null; sources: ObservedSessionSource[] };
   generatedAt: number;
   processes: DiscoveredProcess[];
   transcripts: DiscoveredTranscript[];
@@ -127,6 +130,8 @@ export type TailContext = {
 
 export interface TranscriptSource {
   readonly name: string;
+  /** Empty legacy adapters can hide IO failures; only an explicit report proves empty. */
+  discoveryAvailability?: () => "available" | "unavailable" | "unknown";
   discoverProcesses(): Promise<DiscoveredProcess[]> | DiscoveredProcess[];
   discoverTranscripts(
     processes: DiscoveredProcess[],

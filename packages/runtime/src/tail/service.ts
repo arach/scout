@@ -231,6 +231,7 @@ let lastDiscovery: DiscoverySnapshot | null = null;
 function emptyDiscoverySnapshot(): DiscoverySnapshot {
   return {
     generatedAt: Date.now(),
+    readStatus: { initialized: false, scope: null, sources: sources.map(source => ({ harness: source.name, availability: "not_scanned", processes: "not_scanned" })) },
     processes: [],
     transcripts: [],
     totals: {
@@ -992,38 +993,48 @@ export function joinClaudeRegistryStatus(
 async function refreshDiscovery(
   scope: TailDiscoveryScope = "shallow",
   options: { pruneMissing: boolean } = { pruneMissing: scope !== "hot" },
+  discoverySources: readonly TranscriptSource[] = sources,
 ): Promise<DiscoverySnapshot> {
   const allProcesses: DiscoveredProcess[] = [];
   const cachedProcesses = lastDiscovery?.processes ?? [];
   const seenSessionKeys = new Set<string>();
   const seenObservedLifecycleKeys = new Set<string>();
   const successfullyScannedSources = new Set<string>();
+  const sourceStatus: NonNullable<DiscoverySnapshot["readStatus"]>["sources"] = [];
   const discoveryIssues: TailDiscoveryIssue[] = [];
   const discoveryIssueKeys = new Set<string>();
 
-  for (const source of sources) {
+  for (const source of discoverySources) {
+    let processesAvailability: "available" | "unavailable" | "unknown" = "available";
     let remainingInternalReconciliations = internalSubscribers.size > 0
       ? INTERNAL_RECONCILE_SESSIONS_PER_SOURCE
       : 0;
     let processes: DiscoveredProcess[] = [];
     if (scope === "hot" && cachedProcesses.length > 0) {
       processes = cachedProcesses.filter((proc) => proc.source === source.name);
+      const cachedState = lastDiscovery?.readStatus?.sources.find(status => status.harness === source.name)?.processes;
+      processesAvailability = cachedState === "available" || cachedState === "unavailable" ? cachedState : "unknown";
     } else {
       try {
         processes = await source.discoverProcesses();
       } catch {
         processes = [];
+        processesAvailability = "unavailable";
       }
     }
     allProcesses.push(...processes);
 
     let transcripts: DiscoveredTranscript[] = [];
+    let transcriptAvailability: "available" | "unavailable" | "unknown" = "unavailable";
     try {
       transcripts = await source.discoverTranscripts(processes, scope);
+      transcriptAvailability = source.discoveryAvailability?.() ?? (transcripts.length ? "available" : "unknown");
       successfullyScannedSources.add(source.name);
     } catch {
       transcripts = [];
     }
+
+    sourceStatus.push({ harness: source.name, availability: transcriptAvailability, processes: processesAvailability });
 
     for (const transcript of [...transcripts].sort((left, right) => right.mtimeMs - left.mtimeMs)) {
       const primary = processForTranscript(transcript, processes);
@@ -1151,6 +1162,7 @@ async function refreshDiscovery(
 
   const snapshot: DiscoverySnapshot = {
     generatedAt: Date.now(),
+    readStatus: { initialized: true, scope, sources: sourceStatus },
     processes: allProcesses,
     transcripts: allTranscripts,
     issues: discoveryIssues.length > 0 ? discoveryIssues : undefined,
@@ -1237,6 +1249,11 @@ function normalizeTailDiscoveryOptions(
     return { force: input };
   }
   return { ...input, force: input.force === true };
+}
+
+/** Passive read: no scheduling, watcher pumping, scan or service startup. */
+export function getCachedTailDiscovery(): DiscoverySnapshot {
+  return lastDiscovery ?? emptyDiscoverySnapshot();
 }
 
 export async function getTailDiscovery(
@@ -1344,6 +1361,8 @@ async function installWatcherForTest(input: {
 
 export const __testing = {
   redactTailEvent,
+  resetDiscovery: () => { lastDiscovery = null; },
+  refreshDiscovery: (testSources: readonly TranscriptSource[]) => refreshDiscovery("hot", { pruneMissing: false }, testSources),
   quietTailEventKey,
   resetQuietTailCoalescer: () => quietEventLastSeen.clear(),
   shouldCoalesceQuietTailEvent,

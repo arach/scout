@@ -79,3 +79,5 @@ export * from "./room-listening.js";
 export * from "./mcp-events.js";
 
 export * from "./completion.js";
+
+export type { ObservedSessionIdentity, ObservedSessionLink, SessionReadAvailability, ObservedSessionSource, ObservedSessionRead, ObservedSessionInventory } from "./observed-sessions.js";
