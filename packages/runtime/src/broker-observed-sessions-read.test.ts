@@ -72,7 +72,7 @@ test("bounds and strict selectors refuse unknown/mixed queries, and incomplete l
 class Response extends EventEmitter { status = 0; body = ""; writableEnded = false; writeHead(status: number) { this.status = status; } end(body = "") { this.body += body; this.writableEnded = true; } }
 test("HTTP mounts use local/scoped/guest policy and metadata peek, never web or a full snapshot", async () => {
   let reads = 0;
-  const route = createBrokerHttpRouter({ host: "local", port: 1, nodeId: "node-1", runtime: { peek: () => ({ endpoints }), snapshot: () => { throw new Error("no message scan"); } },
+  const route = createBrokerHttpRouter({ brokerService: {} as never, host: "local", port: 1, nodeId: "node-1", runtime: { peek: () => ({ endpoints }), snapshot: () => { throw new Error("no message scan"); } },
     readObservedSessionCache: () => { reads++; return cache(); }, webControl: new Proxy({}, { get() { throw new Error("no web"); } }),
   } as unknown as BrokerHttpRouterDeps);
   for (const path of ["/v1/observed-sessions", "/v1/observed-sessions/resolve" + exact]) {

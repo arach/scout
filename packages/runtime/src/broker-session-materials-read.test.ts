@@ -77,7 +77,7 @@ test("only one parse runs at once and rejection does not leak the slot", async (
 class Response extends EventEmitter { status = 0; body = ""; writableEnded = false; writeHead(status: number) { this.status = status; } end(body = "") { this.body += body; this.writableEnded = true; } }
 test("HTTP materials route uses the same local/scoped/guest policy with no web/full snapshot", async () => {
   const f = fixture([init()]);
-  const route = createBrokerHttpRouter({ nodeId: "node-1", host: "local", port: 1, readObservedSessionCache: () => f.cached,
+  const route = createBrokerHttpRouter({ brokerService: {} as never, nodeId: "node-1", host: "local", port: 1, readObservedSessionCache: () => f.cached,
     runtime: { peek: () => ({ endpoints: {} }), snapshot() { throw new Error("no full snapshot"); } }, webControl: new Proxy({}, { get() { throw new Error("no web"); } }),
   } as unknown as BrokerHttpRouterDeps);
   for (const transportContext of [undefined, { transport: "remote" }, { transport: "local", guest: {} }, { transport: "local", scoped: {} }]) {

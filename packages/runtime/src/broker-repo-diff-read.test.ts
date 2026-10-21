@@ -55,7 +55,7 @@ class Response extends EventEmitter {
 }
 test("router mounts a local-only read and never invokes web control", async () => {
   let calls = 0;
-  const route = createBrokerHttpRouter({ host: "localhost", port: 1, runtime: {},
+  const route = createBrokerHttpRouter({ brokerService: {} as never, host: "localhost", port: 1, runtime: {},
     readRepoDiff: async () => { calls++; return snapshot; },
     webControl: new Proxy({}, { get() { throw new Error("must not access web"); } }),
   } as unknown as BrokerHttpRouterDeps);

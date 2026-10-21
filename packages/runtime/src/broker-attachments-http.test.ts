@@ -62,7 +62,7 @@ test("destination preserves verified node authority and never defaults a remote 
 });
 test("real router dispatches the fixed host operation before its legacy web adapter", async () => {
   const d=deps(); let webReads=0;
-  const router=createBrokerHttpRouter({attachments:d,nodeId:"n",meshId:"mesh",runtime:{snapshot:()=>({nodes:{}})},webControl:{requestForHost:()=>{webReads++;throw Error("must not fetch web");}}} as never);
+  const router=createBrokerHttpRouter({brokerService:{},attachments:d,nodeId:"n",meshId:"mesh",runtime:{snapshot:()=>({nodes:{}})},webControl:{requestForHost:()=>{webReads++;throw Error("must not fetch web");}}} as never);
   const input={path:ATTACHMENT_READ_PATH,method:"POST",nodeId:"n",body:read},res=response();
   await router(request(input,"/v1/hosts/web-request"),res);
   expect(res.status).toBe(200); expect(res.body.status).toBe(200); expect(d.calls).toHaveLength(1); expect(webReads).toBe(0);

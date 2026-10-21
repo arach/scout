@@ -36,7 +36,7 @@ async function fixture(legacy = false, leaseOptions: { ttlMs?: number; now?: () 
     snapshot.messages[message.id] = message; posts.push({ path: "/v1/messages", body: message }); return { ok: true, message };
   } } as unknown as ActiveScoutBrokerService;
   const service = legacy ? raw : protectAssistantService(raw, claims);
-  const router = createBrokerHttpRouter({ host: "127.0.0.1", port: 0, brokerService: service } as BrokerHttpRouterDeps);
+  const router = createBrokerHttpRouter({ host: "127.0.0.1", port: 0, brokerService: service, runtime: { snapshot: () => snapshot, peek: () => ({ endpoints: snapshot.endpoints }) } } as BrokerHttpRouterDeps);
   const handler = async (request: IncomingMessage, response: ServerResponse) => {
     try {
       const path = new URL(request.url!, "http://localhost").pathname;
