@@ -408,13 +408,14 @@ CREATE INDEX IF NOT EXISTS idx_message_reactions_message
   ON message_reactions (message_id);
 
 CREATE TABLE IF NOT EXISTS message_attachments (
-  id TEXT PRIMARY KEY,
+  id TEXT NOT NULL,
   message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
   media_type TEXT NOT NULL,
   file_name TEXT,
   blob_key TEXT,
   url TEXT,
-  metadata_json TEXT
+  metadata_json TEXT,
+  PRIMARY KEY (message_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS conversation_read_cursors (

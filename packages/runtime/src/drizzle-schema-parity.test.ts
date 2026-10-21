@@ -385,7 +385,7 @@ test("forward web-read migration tolerates indexes already installed by a pilot 
     const indexes = indexDescriptors(database);
     // Simulate the previous managed lineage with the same indexes already
     // installed by its idempotent repair or historical local migration.
-    database.exec("DELETE FROM __drizzle_migrations WHERE created_at = 1791900000000");
+    database.exec("DELETE FROM __drizzle_migrations WHERE created_at >= 1791900000000");
     expect(applyControlPlaneDrizzleMigrations(database)).toBe(true);
     expect(indexDescriptors(database)).toEqual(indexes);
     expect(database.query("SELECT COUNT(*) AS count FROM __drizzle_migrations WHERE created_at = 1791900000000").get()).toEqual({ count: 1 });
