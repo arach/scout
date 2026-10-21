@@ -508,7 +508,15 @@ async function requestBrokerWire<T>(
 
 /** A completed HTTP response is evidence of reachability, even on failure. */
 export class ScoutBrokerHttpError extends Error {
-  constructor(public readonly status: number, path: string, body: string) {
+  constructor(
+    public readonly status: number,
+    path: string,
+    /** Raw response text, including non-JSON and empty bodies. */
+    public readonly body: string,
+    /** Top-level JSON `error` string, supplied by the request helper when present.
+     * Preserved verbatim; not necessarily a machine-readable token. */
+    public readonly code?: string,
+  ) {
     super(`${path} returned ${status}: ${body}`);
     this.name = "ScoutBrokerHttpError";
   }
@@ -535,7 +543,10 @@ export async function requestScoutBrokerJsonWithTrace<T>(
     if (parsedJson && options.acceptErrorJson?.(parsed)) {
       return { value: parsed, trace };
     }
-    throw new ScoutBrokerHttpError(response.status, path, response.text);
+    const code = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+      && Object.hasOwn(parsed, "error") && "error" in parsed && typeof parsed.error === "string"
+      ? parsed.error : undefined;
+    throw new ScoutBrokerHttpError(response.status, path, response.text, code);
   }
 
   if (parsedJson) {
