@@ -1,0 +1,153 @@
+[
+  {
+    "id": "deliver-client-62518b7ee254c5426695f549d536d62c",
+    "requestId": "deliver-client-62518b7ee254c5426695f549d536d62c",
+    "requesterId": "operator",
+    "requesterNodeId": "node-1",
+    "targetAgentId": "kepler",
+    "body": "Inspect this",
+    "attachments": [
+      {
+        "id": "att-client-05113a9be7b097dc2176f3c8525ba565",
+        "mediaType": "image/png",
+        "fileName": "evidence.png",
+        "blobKey": "blob-original"
+      },
+      {
+        "id": "uploaded-explicit",
+        "mediaType": "text/plain",
+        "url": "https://example.com/evidence"
+      }
+    ],
+    "intent": "consult",
+    "execution": {
+      "session": "new"
+    },
+    "ensureAwake": true,
+    "messageMetadata": {
+      "source": "scout-mobile",
+      "destinationKind": "direct",
+      "destinationId": "kepler",
+      "referenceMessageIds": [],
+      "clientMessageId": "golden-key"
+    },
+    "invocationMetadata": {
+      "source": "scout-mobile",
+      "destinationKind": "direct",
+      "destinationId": "kepler"
+    }
+  },
+  {
+    "id": "deliver-client-62518b7ee254c5426695f549d536d62c",
+    "requestId": "deliver-client-62518b7ee254c5426695f549d536d62c",
+    "requesterId": "operator",
+    "requesterNodeId": "node-1",
+    "targetLabel": "kepler",
+    "targetAgentId": "kepler",
+    "body": "@kepler Inspect this",
+    "attachments": [
+      {
+        "id": "att-client-05113a9be7b097dc2176f3c8525ba565",
+        "mediaType": "image/png",
+        "fileName": "evidence.png",
+        "blobKey": "blob-original"
+      },
+      {
+        "id": "uploaded-explicit",
+        "mediaType": "text/plain",
+        "url": "https://example.com/evidence"
+      }
+    ],
+    "intent": "consult",
+    "execution": {
+      "session": "new"
+    },
+    "ensureAwake": true,
+    "messageMetadata": {
+      "source": "scout-cli",
+      "clientMessageId": "golden-key"
+    },
+    "invocationMetadata": {
+      "source": "scout-cli"
+    }
+  },
+  {
+    "id": "deliver-client-62518b7ee254c5426695f549d536d62c",
+    "requestId": "deliver-client-62518b7ee254c5426695f549d536d62c",
+    "requesterId": "operator",
+    "requesterNodeId": "node-1",
+    "targetAgentId": "kepler",
+    "body": "  Inspect this  ",
+    "attachments": [
+      {
+        "id": "att-client-05113a9be7b097dc2176f3c8525ba565",
+        "mediaType": "image/png",
+        "fileName": "evidence.png",
+        "blobKey": "blob-original"
+      },
+      {
+        "id": "uploaded-explicit",
+        "mediaType": "text/plain",
+        "url": "https://example.com/evidence"
+      }
+    ],
+    "intent": "tell",
+    "messageMetadata": {
+      "source": "scout-cli",
+      "clientMessageId": "golden-key"
+    }
+  },
+  {
+    "id": "deliver-client-62518b7ee254c5426695f549d536d62c",
+    "requestId": "deliver-client-62518b7ee254c5426695f549d536d62c",
+    "requesterId": "operator",
+    "requesterNodeId": "node-1",
+    "targetLabel": "@kepler",
+    "body": "@kepler Inspect this",
+    "attachments": [
+      {
+        "id": "att-client-05113a9be7b097dc2176f3c8525ba565",
+        "mediaType": "image/png",
+        "fileName": "evidence.png",
+        "blobKey": "blob-original"
+      },
+      {
+        "id": "uploaded-explicit",
+        "mediaType": "text/plain",
+        "url": "https://example.com/evidence"
+      }
+    ],
+    "intent": "tell",
+    "messageMetadata": {
+      "source": "scout-cli",
+      "clientMessageId": "golden-key"
+    }
+  },
+  {
+    "id": "deliver-client-1add55581aaea687f8c5e7919f217cb6",
+    "requestId": "deliver-client-1add55581aaea687f8c5e7919f217cb6",
+    "requesterId": "operator",
+    "requesterNodeId": "node-1",
+    "target": {
+      "kind": "session_id",
+      "sessionId": "native-session",
+      "harness": "codex",
+      "forkIfLive": true
+    },
+    "targetLabel": "session:native-session",
+    "body": "keep going",
+    "intent": "session_input",
+    "sessionDelivery": "in_place_or_resume",
+    "execution": {
+      "session": "existing"
+    },
+    "ensureAwake": true,
+    "messageMetadata": {
+      "source": "scout-mobile",
+      "clientMessageId": "session-key"
+    },
+    "invocationMetadata": {
+      "source": "scout-mobile"
+    }
+  }
+]

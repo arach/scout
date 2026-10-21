@@ -9,6 +9,8 @@ import {
 import { signPeerRequest } from "./mesh-peer-auth.js";
 import {
   PeerTlsPinError,
+  PeerTransportError,
+  PeerTimeoutError,
   createPinnedHttpsClient,
   type PinnedHttpsClient,
 } from "./mesh-pinned-https-client.js";
@@ -47,7 +49,8 @@ import {
 export const MESH_PEER_CARD_PATH = "/v1/node";
 export const PEER_CARD_CACHE_TTL_MS = 5 * 60 * 1_000;
 export const PEER_CARD_MISS_CACHE_TTL_MS = 60 * 1_000;
-export const PEER_CARD_FETCH_TIMEOUT_MS = 2_000;
+export const PEER_CARD_FETCH_TIMEOUT_MS = 12_500;
+export const PEER_CARD_STALE_MAX_AGE_MS = 15 * 60_000;
 
 /** The peer presented a node card but it failed verification; refuse to send. */
 export class PeerCardVerificationError extends Error {
@@ -61,7 +64,7 @@ export class PeerCardVerificationError extends Error {
 }
 
 /** A card could not be reached; no request was submitted to that candidate. */
-export class PeerCardUnavailableError extends Error {
+export class PeerCardUnavailableError extends PeerTransportError {
   override readonly name = "PeerCardUnavailableError";
   constructor(readonly baseUrl: string, cause: unknown) {
     super(`peer ${baseUrl} node card could not be fetched: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
@@ -82,7 +85,7 @@ export class PeerTlsDowngradeError extends Error {
   }
 }
 
-export { PeerTlsPinError };
+export { PeerTlsPinError, PeerTransportError, PeerTimeoutError };
 
 export function isMeshPeerTrustError(error: unknown): boolean {
   return error instanceof PeerCardVerificationError
@@ -140,7 +143,8 @@ export type MeshPeerClientDeps = {
 };
 
 type PeerCardCacheEntry =
-  | { kind: "card"; keyId: string; tlsSpkiFingerprint?: string; expiresAt: number }
+  | { kind: "card"; keyId: string; tlsSpkiFingerprint?: string; expiresAt: number;
+      verifiedAt: number; signedExpiresAt: number; expectedKeyId?: string; durablePin?: string }
   | { kind: "legacy"; expiresAt: number };
 
 /** What the resolver expects of one base URL for the duration of one call. */
@@ -299,7 +303,13 @@ export function createMeshPeerFetch(deps: MeshPeerClientDeps = {}): MeshPeerFetc
     callerSignal?: AbortSignal,
   ): Promise<PeerResolution> {
     const { baseUrl, expectedKeyId, durablePin } = expectation;
-    const cached = cardCache.get(baseUrl);
+    let cached = cardCache.get(baseUrl);
+    if (cached?.kind === "card" && (cached.expectedKeyId !== expectedKeyId || cached.durablePin !== durablePin)) {
+      cardCache.delete(baseUrl);
+      pinned.invalidate(new URL(baseUrl).origin);
+      cached = undefined;
+    }
+    callerSignal?.throwIfAborted();
     if (cached && cached.expiresAt > now()) {
       if (cached.kind === "legacy") {
         return fallBackToLegacy(expectation, "it presents no signed node card");
@@ -318,10 +328,24 @@ export function createMeshPeerFetch(deps: MeshPeerClientDeps = {}): MeshPeerFetc
     try {
       response = await fetchCard(expectation, durablePin, callerSignal);
     } catch (error) {
+      callerSignal?.throwIfAborted();
+      const timedOut = error instanceof PeerTimeoutError || (error instanceof Error && error.name === "TimeoutError");
+      // Refresh timeout is not new identity evidence. Reuse only a card verified
+      // under this same still-current enrollment, and never extend its lifetime.
+      const age = cached?.kind === "card" ? now() - cached.verifiedAt : -1;
+      if (timedOut && cached?.kind === "card" && expectedKeyId && durablePin
+        && cached.keyId === expectedKeyId && cached.tlsSpkiFingerprint === durablePin
+        && age >= 0 && age <= PEER_CARD_STALE_MAX_AGE_MS && cached.signedExpiresAt > now()
+        && deps.expectedPeerKeyId?.(baseUrl) === expectedKeyId
+        && deps.expectedPeerTlsPin?.(baseUrl) === durablePin) {
+        return { keyId: cached.keyId, pin: durablePin };
+      }
       // A pinned probe that fails the pin is a refusal, never a legacy peer.
-      if (error instanceof PeerTlsPinError || error instanceof PeerTlsDowngradeError) {
+      if (isMeshPeerTrustError(error)) {
+        cardCache.delete(baseUrl);
         throw error;
       }
+      if (timedOut) throw error;
       // A failed dial proves neither a legacy peer nor an invalid identity.
       // Let routing try another authenticated alias without ever submitting
       // an unsigned request to this unreachable candidate.
@@ -396,6 +420,7 @@ export function createMeshPeerFetch(deps: MeshPeerClientDeps = {}): MeshPeerFetc
     const expiresAt = Math.min(now() + cardCacheTtlMs, card.expiresAt);
     cardCache.set(baseUrl, {
       kind: "card",
+      verifiedAt: now(), signedExpiresAt: card.expiresAt, expectedKeyId, durablePin,
       keyId: card.keyId,
       tlsSpkiFingerprint: cardPin,
       expiresAt,
@@ -425,6 +450,12 @@ export function createMeshPeerFetch(deps: MeshPeerClientDeps = {}): MeshPeerFetc
     }
 
     const send = async (resolution: PeerResolution): Promise<Response> => {
+      init.signal?.throwIfAborted();
+      if (expectation.expectedKeyId !== deps.expectedPeerKeyId?.(normalized)
+        || expectation.durablePin !== deps.expectedPeerTlsPin?.(normalized)) {
+        cardCache.delete(normalized); pinned.invalidate(new URL(normalized).origin);
+        throw new PeerCardVerificationError("peer trust changed during request; refusing to send", normalized);
+      }
       // Redirects must never move a pinned, keyId-bound request to another origin.
       const requestInit: RequestInit = { ...init, redirect: init.redirect ?? "error" };
       if (!resolution.keyId) {
