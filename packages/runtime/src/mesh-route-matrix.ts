@@ -85,6 +85,7 @@ const MESH_ROUTE_MATRIX: Record<string, MeshRouteTier> = {
   "GET /v1/mesh/approvals/stream": "control",
   "POST /v1/mesh/approvals/decide": "control",
   "GET /v1/approvals/remote": "local",
+  "GET /v1/assistant-claims": "local",
   "POST /v1/approvals/remote/decide": "local",
   "POST /v1/hosts/web-request": "local",
   [TRPC_UPGRADE_ROUTE]: "control",
