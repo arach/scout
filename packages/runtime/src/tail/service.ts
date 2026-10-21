@@ -328,9 +328,10 @@ function compactRawValue(value: unknown, depth = 0): unknown {
 
 function compactEvent(event: TailEvent): TailEvent {
   const summary = redactSecrets(event.summary);
-  if (!event.raw) return summary === event.summary ? event : { ...event, summary };
+  const base = event.prompt ? { ...event, prompt: redactSecretsDeep(event.prompt) } : event;
+  if (!event.raw) return summary === event.summary ? base : { ...base, summary };
   return {
-    ...event,
+    ...base,
     summary,
     raw: compactRawValue(event.raw),
   };
@@ -344,6 +345,7 @@ function redactTailEvent(event: TailEvent): TailEvent {
   return {
     ...event,
     summary: redactSecrets(event.summary),
+    ...(event.prompt ? { prompt: redactSecretsDeep(event.prompt) } : {}),
     ...(event.raw ? { raw: redactSecretsDeep(event.raw) } : {}),
   };
 }
@@ -1341,6 +1343,7 @@ async function installWatcherForTest(input: {
 }
 
 export const __testing = {
+  redactTailEvent,
   quietTailEventKey,
   resetQuietTailCoalescer: () => quietEventLastSeen.clear(),
   shouldCoalesceQuietTailEvent,
