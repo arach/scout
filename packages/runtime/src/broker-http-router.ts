@@ -1,3 +1,4 @@
+import { createRepoDiffReadHandler, type RepoDiffRead } from "./broker-repo-diff-read.js";
 import { MeshFeedback, MeshFeedbackError } from "./mesh-feedback.js";
 import { MeshBridgeManagement, MeshBridgeManagementError } from "./mesh-bridge-management.js";
 import { MeshPingError, type createMeshPing } from "./mesh-ping.js";
@@ -199,6 +200,8 @@ const CHANNEL_INVITE_COMMAND_KINDS = new Set<string>([
 ]);
 
 export type BrokerHttpRouterDeps = {
+  /** Test/embedding seam; default uses only the bounded public scoutd repo capability. */
+  readRepoDiff?: RepoDiffRead;
   encodedSnapshotBodies?: boolean;
   onSnapshotFlushedBytes?: (bytes: number) => void;
   host: string;
@@ -499,6 +502,7 @@ export function createBrokerHttpRouter(
   } = deps;
 
   const requestReceipts = deps.requestReceipts ?? new BrokerRequestReceipts();
+  const readRepoDiff = createRepoDiffReadHandler(deps.readRepoDiff);
 
   return async function routeRequest(request: RuntimeHttpRequestLike, response: RuntimeHttpResponseLike): Promise<void> {
   const method = request.method ?? "GET";
@@ -2028,6 +2032,15 @@ export function createBrokerHttpRouter(
       ...(url.searchParams.get("agentId") ? { agentId: url.searchParams.get("agentId")! } : {}),
     }));
     return;
+  }
+
+  // Same local tier as repo-watch/tail reads; never starts the private web app.
+  if (method === "GET" && url.pathname === "/v1/repo-diff/worktree") {
+    if (request.transportContext?.transport === "remote" || request.transportContext?.guest) {
+      json(response, 403, { error: "forbidden" }); return;
+    }
+    const result = await readRepoDiff(url);
+    json(response, result.status, result.body); return;
   }
 
   if (method === "GET" && url.pathname === "/v1/pairing/sessions") {
