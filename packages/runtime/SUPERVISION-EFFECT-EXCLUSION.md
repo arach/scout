@@ -184,7 +184,7 @@ FDs according to exported `CARRIER_LAYOUT` (`role-custody/1`):
 | 5, 6 | Unused padding | Ignored |
 | 7 | Anchored role lifetime fence | SDK maps its own locked description |
 
-Each role's coverage audit must prove its start command does not propagate the carrier descriptor into intended survivors (the direct child must close it or set close-on-exec before exec-ing anything meant to outlive the cohort, tmux servers first among them); a leaked description converts a non-owner into a carrier and blocks retirement until that process exits.
+The mapped fence descriptor is inherited by everything a carrier forks or execs until check() marks it close-on-exec. The coverage audit must therefore prove, per role: that an SDK-aware child calls check before its first fork or exec; that a plain-binary child which can never call check — Caddy and dns-sd are the known candidates — has its entire process tree audited as the carrier cohort, where any daemonizing descendant blocks retirement for its lifetime; and that no path maps the fence into an intended survivor. Deliberate next-hop mapping is the only sanctioned propagation.
 
 The SDK retains the sole-reaper handle and the pipe's write end for the
 controller's lifetime, not merely the short ledger transaction. It closes its
