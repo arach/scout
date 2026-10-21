@@ -3116,8 +3116,8 @@ const routeRequest = createBrokerHttpRouter({
   }),
   startMeshProjectSession: startMeshProjectSessionForPeer,
   threadEvents,
-  handleCommand,
-  handleInvocationRequest,
+  handleCommand: brokerService.executeCommand,
+  handleInvocationRequest: (request) => brokerService.invokeAgent!(request),
   deleteEndpoint: async (endpointId) => {
     await deleteEndpointDurably(endpointId);
   },

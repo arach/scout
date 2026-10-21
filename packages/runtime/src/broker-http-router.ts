@@ -1,3 +1,4 @@
+import { ASSISTANT_CLAIM_HEADER } from "./broker-assistant-claims.js";
 import { MeshFeedback, MeshFeedbackError } from "./mesh-feedback.js";
 import { MeshBridgeManagement, MeshBridgeManagementError } from "./mesh-bridge-management.js";
 import { MeshPingError, type createMeshPing } from "./mesh-ping.js";
@@ -500,7 +501,7 @@ export function createBrokerHttpRouter(
 
   const requestReceipts = deps.requestReceipts ?? new BrokerRequestReceipts();
 
-  return async function routeRequest(request: RuntimeHttpRequestLike, response: RuntimeHttpResponseLike): Promise<void> {
+  const routeRequest = async function(request: RuntimeHttpRequestLike, response: RuntimeHttpResponseLike): Promise<void> {
   const method = request.method ?? "GET";
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? `${host}:${port}`}`);
   // Mesh trust cone §4 / §11.9 defense in depth: machine-local mutation
@@ -523,6 +524,22 @@ export function createBrokerHttpRouter(
     json(response, 503, { error: "access_unavailable" }); return;
   }
   if (request.transportContext?.scoped) { json(response, 403, { error: "access_denied" }); return; }
+  if (url.pathname === "/v1/assistant-claims" || url.pathname.startsWith("/v1/assistant-claims/")) {
+    if (request.transportContext?.transport === "remote" || request.transportContext?.guest || request.headers.origin || request.headers["x-openscout-forwarded-node-id"]) { json(response, 403, { error: "local_only" }); return; }
+    const claims = brokerService.assistantClaims;
+    if (!claims) { json(response, 404, { error: "assistant_claims_unsupported" }); return; }
+    if (method === "GET" && url.pathname === "/v1/assistant-claims") { json(response, 200, claims.capability()); return; }
+    if (method === "POST" && ["/v1/assistant-claims", "/v1/assistant-claims/renew", "/v1/assistant-claims/release"].includes(url.pathname)) {
+      try {
+        const body = await readRequestBody<{ agentId: string; holderId: string }>(request, { maxBytes: 4096 });
+        const result = url.pathname.endsWith("/renew") ? claims.renew(body.agentId)
+          : url.pathname.endsWith("/release") ? claims.release(body.agentId) : claims.acquire(body.agentId, body.holderId);
+        json(response, url.pathname === "/v1/assistant-claims" ? 201 : 200, result);
+      } catch (error) { badRequest(response, error); }
+      return;
+    }
+    notFound(response); return;
+  }
   if (method === "POST" && url.pathname === "/v1/mcp-events") {
     await handleBrokerMcpEvents(request, response, deps.mcpEvents); return;
   }
@@ -2580,46 +2597,51 @@ export function createBrokerHttpRouter(
     const signal = requestAbortSignal(request, response);
     try {
       const payload = await readValidatedRequestBody(request, brokerDeliverRequestSchema);
-      if ((payload.completion || payload.relation) && payload.target
-        && payload.target.kind !== "agent_id" && payload.target.kind !== "session_id") {
-        throw new Error("completion_route_unsupported");
-      }
-      if (
-        !payload.requestId && payload.target?.kind === "route_alias"
-        && await forwardAliasIfRemote(payload.target.scope?.nodeId, url.pathname, "POST", payload)
-      ) return;
-      if (payload.requestId && !deps.deliveryReceiptsOwnedByService) {
-        if (typeof payload.requestId !== "string") throw new Error("invalid requestId");
-        payload.messageMetadata = { ...payload.messageMetadata, requestId: payload.requestId, requestIntent: payload.intent };
-        payload.invocationMetadata = { ...payload.invocationMetadata, requestId: payload.requestId };
-      }
-      const reserveInRouter = Boolean(payload.requestId && (!deps.deliveryReceiptsOwnedByService
-        || (payload.target?.kind === "route_alias" && payload.target.scope?.nodeId && forwardRouteAliasRequest)));
-      const accept = async (): Promise<ScoutDeliverResponse> => {
-        if (payload.requestId && payload.target?.kind === "route_alias" && payload.target.scope?.nodeId && forwardRouteAliasRequest) {
-          const forwarded = await forwardRouteAliasRequest({ nodeSelector: payload.target.scope.nodeId, path: url.pathname, method: "POST", body: payload });
-          if (forwarded) {
-            if (forwarded.status >= 500) throw new Error("forwarded request outcome unknown");
-            return forwarded.body as ScoutDeliverResponse;
+      const execute = async () => {
+        if ((payload.completion || payload.relation) && payload.target
+          && payload.target.kind !== "agent_id" && payload.target.kind !== "session_id") {
+          throw new Error("completion_route_unsupported");
+        }
+        if (
+          !payload.requestId && payload.target?.kind === "route_alias"
+          && await forwardAliasIfRemote(payload.target.scope?.nodeId, url.pathname, "POST", payload)
+        ) return;
+        if (payload.requestId && !deps.deliveryReceiptsOwnedByService) {
+          if (typeof payload.requestId !== "string") throw new Error("invalid requestId");
+          payload.messageMetadata = { ...payload.messageMetadata, requestId: payload.requestId, requestIntent: payload.intent };
+          payload.invocationMetadata = { ...payload.invocationMetadata, requestId: payload.requestId };
+        }
+        const reserveInRouter = Boolean(payload.requestId && (!deps.deliveryReceiptsOwnedByService
+          || (payload.target?.kind === "route_alias" && payload.target.scope?.nodeId && forwardRouteAliasRequest)));
+        const accept = async (): Promise<ScoutDeliverResponse> => {
+          if (payload.requestId && payload.target?.kind === "route_alias" && payload.target.scope?.nodeId && forwardRouteAliasRequest) {
+            const forwarded = await forwardRouteAliasRequest({ nodeSelector: payload.target.scope.nodeId, path: url.pathname, method: "POST", body: payload });
+            if (forwarded) {
+              if (forwarded.status >= 500) throw new Error("forwarded request outcome unknown");
+              return forwarded.body as ScoutDeliverResponse;
+            }
           }
-        }
-        if (reserveInRouter && deps.deliveryReceiptsOwnedByService) {
-          return deliveryAcceptanceService.accept(payload, { receiptReserved: true, admissionReserved: true });
-        }
-        return brokerService.deliver ? brokerService.deliver(payload, { signal }) : deliveryAcceptanceService.accept(payload, { signal });
+          if (reserveInRouter && deps.deliveryReceiptsOwnedByService) {
+            return deliveryAcceptanceService.accept(payload, { receiptReserved: true, admissionReserved: true });
+          }
+          return brokerService.deliver ? brokerService.deliver(payload, { signal }) : deliveryAcceptanceService.accept(payload, { signal });
+        };
+        const result = payload.requestId && reserveInRouter
+          ? await requestReceipts.run(payload.caller?.actorId || payload.requesterId || operatorActorId,
+              payload.requestId, "deliver", payload, accept,
+              deps.deliveryReceiptsOwnedByService ? () => deliveryAcceptanceService.recoverReceipt(payload.caller?.actorId || payload.requesterId || operatorActorId, payload.requestId!) : undefined,
+              deps.deliveryReceiptsOwnedByService ? () => deliveryAcceptanceService.reserveCommand(payload) : undefined)
+          : await accept();
+        throwIfAborted(signal);
+        json(
+          response,
+          result.kind === "delivery" ? 202 : result.kind === "question" ? 409 : 422,
+          result,
+        );
       };
-      const result = payload.requestId && reserveInRouter
-        ? await requestReceipts.run(payload.caller?.actorId || payload.requesterId || operatorActorId,
-            payload.requestId, "deliver", payload, accept,
-            deps.deliveryReceiptsOwnedByService ? () => deliveryAcceptanceService.recoverReceipt(payload.caller?.actorId || payload.requesterId || operatorActorId, payload.requestId!) : undefined,
-            deps.deliveryReceiptsOwnedByService ? () => deliveryAcceptanceService.reserveCommand(payload) : undefined)
-        : await accept();
-      throwIfAborted(signal);
-      json(
-        response,
-        result.kind === "delivery" ? 202 : result.kind === "question" ? 409 : 422,
-        result,
-      );
+      const claims = brokerService.assistantClaims;
+      if (claims) await claims.admit(claims.deliveryAgent(payload), execute);
+      else await execute();
     } catch (error) {
       if (signal.aborted || response.destroyed || response.writableEnded) {
         return;
@@ -2637,24 +2659,29 @@ export function createBrokerHttpRouter(
         request,
         brokerInvocationRequestSchemaFor(runtimeCatalogSnapshot?.catalog),
       );
-      if (
-        !payload.requestId && payload.target?.kind === "route_alias"
-        && await forwardAliasIfRemote(payload.target.scope?.nodeId, url.pathname, "POST", payload)
-      ) return;
-      const invoke = async () => {
-        if (payload.requestId && payload.target?.kind === "route_alias" && payload.target.scope?.nodeId && forwardRouteAliasRequest) {
-          const forwarded = await forwardRouteAliasRequest({ nodeSelector: payload.target.scope.nodeId, path: url.pathname, method: "POST", body: payload });
-          if (forwarded) {
-            if (forwarded.status >= 500) throw new Error("forwarded request outcome unknown");
-            return forwarded.body as Awaited<ReturnType<typeof handleInvocationRequest>>;
+      const execute = async () => {
+        if (
+          !payload.requestId && payload.target?.kind === "route_alias"
+          && await forwardAliasIfRemote(payload.target.scope?.nodeId, url.pathname, "POST", payload)
+        ) return;
+        const invoke = async () => {
+          if (payload.requestId && payload.target?.kind === "route_alias" && payload.target.scope?.nodeId && forwardRouteAliasRequest) {
+            const forwarded = await forwardRouteAliasRequest({ nodeSelector: payload.target.scope.nodeId, path: url.pathname, method: "POST", body: payload });
+            if (forwarded) {
+              if (forwarded.status >= 500) throw new Error("forwarded request outcome unknown");
+              return forwarded.body as Awaited<ReturnType<typeof handleInvocationRequest>>;
+            }
           }
-        }
-        return brokerService.invokeAgent ? brokerService.invokeAgent(payload) : handleInvocationRequest(payload);
+          return brokerService.invokeAgent ? brokerService.invokeAgent(payload) : handleInvocationRequest(payload);
+        };
+        const result = payload.requestId
+          ? await requestReceipts.run(payload.requesterId, payload.requestId, "invoke", payload, invoke)
+          : await invoke();
+        json(response, 202, result);
       };
-      const result = payload.requestId
-        ? await requestReceipts.run(payload.requesterId, payload.requestId, "invoke", payload, invoke)
-        : await invoke();
-      json(response, 202, result);
+      const claims = brokerService.assistantClaims;
+      if (claims) await claims.admit(claims.invocationAgent(payload), execute);
+      else await execute();
     } catch (error) {
       badRequest(response, error);
     }
@@ -2727,5 +2754,13 @@ export function createBrokerHttpRouter(
   }
 
   notFound(response);
-};
+  };
+  return (request, response) => {
+    const header = request.headers[ASSISTANT_CLAIM_HEADER];
+    const local = request.transportContext?.transport !== "remote" && !request.transportContext?.guest && !request.transportContext?.scoped && !request.headers.origin && !request.headers["x-openscout-forwarded-node-id"];
+    const token = local && typeof header === "string" && header.length <= 512 ? header : undefined;
+    return brokerService.assistantClaims
+      ? brokerService.assistantClaims.withToken(token, () => routeRequest(request, response))
+      : routeRequest(request, response);
+  };
 }

@@ -1,3 +1,4 @@
+import { BrokerAssistantClaims, protectAssistantService, ASSISTANT_CLAIM_HEADER } from "./broker-assistant-claims.js";
 import { meshApprovalsConfigPath, readMeshApprovalsConfig, writeMeshApprovalsConfig } from "./mesh-approvals.js";
 import { PermissionDeliveryUnconfirmedError } from "./broker-permission-service.js";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -235,16 +236,17 @@ async function requestRouter(
     body?: unknown;
     beforeBody?: () => Promise<void>;
     rawBody?: string;
-    transportContext?: { transport: "unix-socket" | "loopback" | "remote"; remoteAddress?: string };
+    headers?: Record<string, string>;
+    transportContext?: { transport: "unix-socket" | "loopback" | "remote"; remoteAddress?: string; guest?: boolean; scoped?: boolean };
   } = {},
 ): Promise<{ body: unknown; rawBody: string; response: FakeResponse }> {
   const request = new PassThrough() as PassThrough & {
     headers: Record<string, string>;
     method: string;
     url: string;
-    transportContext?: { transport: "unix-socket" | "loopback" | "remote"; remoteAddress?: string };
+    transportContext?: { transport: "unix-socket" | "loopback" | "remote"; remoteAddress?: string; guest?: boolean; scoped?: boolean };
   };
-  request.headers = { host: "broker.test" };
+  request.headers = { host: "broker.test", ...options.headers };
   request.method = method;
   request.url = path;
   if (options.transportContext) {
@@ -1647,5 +1649,90 @@ describe("local diagnostic report routes", () => {
       expect(result.response.status).toBe(503); expect(result.rawBody).not.toContain("private-value");
     }
     expect(modes).toEqual([true, false]);
+  });
+});
+
+
+describe("exclusive assistant HTTP contract", () => {
+  function claimedHarness() {
+    const h = createHarness(); let now = 100; const writes: unknown[] = [];
+    const claims = new BrokerAssistantClaims(["scoutbot"], { ttlMs: 30, now: () => now });
+    h.deps.brokerService = protectAssistantService({ ...h.deps.brokerService,
+      executeCommand: async command => { writes.push(command); return { ok: true }; },
+      postConversationMessage: async message => { writes.push(message); return { ok: true }; },
+    }, claims);
+    h.routed = createBrokerHttpRouter(h.deps);
+    return { h, claims, writes, advance: (ms: number) => { now += ms; } };
+  }
+  test("capability, second claimant refusal, renewal and release", async () => {
+    const { h } = claimedHarness();
+    expect((await requestRouter(h, "GET", "/v1/assistant-claims")).body).toEqual({ capability: "assistant-answerer-claims/1", agentIds: ["scoutbot"], ttlMs: 30 });
+    const acquired = await requestRouter(h, "POST", "/v1/assistant-claims", { body: { agentId: "scoutbot", holderId: "first" } });
+    expect(acquired.response.status).toBe(201);
+    const token = (acquired.body as any).token;
+    const refused = await requestRouter(h, "POST", "/v1/assistant-claims", { body: { agentId: "scoutbot", holderId: "second" } });
+    expect(refused.response.status).toBe(409);
+    expect(refused.body).toMatchObject({ error: "assistant_claim_busy", retryAfterMs: 30 });
+    expect(refused.rawBody).not.toContain(token);
+    for (const action of ["renew", "release"]) {
+      expect((await requestRouter(h, "POST", `/v1/assistant-claims/${action}`, { body: { agentId: "scoutbot" }, headers: { [ASSISTANT_CLAIM_HEADER]: token } })).response.status).toBe(200);
+    }
+    expect((await requestRouter(h, "POST", "/v1/assistant-claims", { body: { agentId: "scoutbot", holderId: "second" } })).response.status).toBe(201);
+  });
+  test.each(["/v1/actors", "/v1/agents", "/v1/endpoints"])("registration cannot replace the owner without a claim (%s)", async path => {
+    const { h, claims, writes } = claimedHarness();
+    const body = path === "/v1/endpoints" ? { id: "endpoint", agentId: "scoutbot" } : { id: "scoutbot" };
+    const token = claims.acquire("scoutbot", "first").token;
+    expect((await requestRouter(h, "POST", path, { body })).response.status).toBe(409); expect(writes).toHaveLength(0);
+    expect((await requestRouter(h, "POST", path, { body, headers: { [ASSISTANT_CLAIM_HEADER]: token } })).response.status).toBe(200); expect(writes).toHaveLength(1);
+  });
+  test.each(["/v1/messages", "/v1/messages/reply", "/v1/commands"])("unclaimed and stale replies cannot bypass the fence (%s)", async path => {
+    const { h, claims, writes, advance } = claimedHarness();
+    const message = { id: "reply", actorId: "scoutbot", requestId: "reply-1", body: "answer", metadata: {
+      completionReply: { kind: "final", invocationId: "inv-1", flightId: "flt-1", revision: 1 }, assistantClaim: "not-proof",
+    } };
+    const body = path === "/v1/commands" ? { kind: "conversation.post", message } : message;
+    expect((await requestRouter(h, "POST", path, { body })).response.status).toBe(409); expect(writes).toHaveLength(0);
+    const first = claims.acquire("scoutbot", "first"); advance(31); const next = claims.acquire("scoutbot", "second");
+    expect((await requestRouter(h, "POST", path, { body, headers: { [ASSISTANT_CLAIM_HEADER]: first.token } })).response.status).toBe(409); expect(writes).toHaveLength(0);
+    const accepted = await requestRouter(h, "POST", path, { body, headers: { [ASSISTANT_CLAIM_HEADER]: next.token } });
+    expect(accepted.response.status).toBe(200); expect(writes).toHaveLength(1);
+    expect(JSON.stringify(writes)).not.toContain(next.token);
+  });
+  test("remote, forwarded and browser callers cannot acquire a local lease or lend a proof", async () => {
+    const { h, claims, writes } = claimedHarness(); const lease = claims.acquire("scoutbot", "first");
+    for (const options of [{ transportContext: { transport: "remote" as const } }, { headers: { origin: "https://example.test" } }, { headers: { "x-openscout-forwarded-node-id": "peer" } }]) {
+      const result = await requestRouter(h, "POST", "/v1/assistant-claims", { ...options, body: { agentId: "scoutbot", holderId: "other" } });
+      expect(result.response.status).toBe(403);
+      const post = await requestRouter(h, "POST", "/v1/messages", { ...options, headers: { ...options.headers, [ASSISTANT_CLAIM_HEADER]: lease.token }, body: { actorId: "scoutbot" } });
+      expect(post.response.status).toBe(options.headers?.["x-openscout-forwarded-node-id"] ? 403 : 409);
+    }
+    expect(writes).toHaveLength(0);
+  });
+  test.each([false, true])("assistant dispatch is fenced before alias forwarding/receipt creation (keyed=%s)", async keyed => {
+    const { h, claims } = claimedHarness(); let forwards = 0;
+    const directory = mkdtempSync(join(tmpdir(), "assistant-receipt-fence-"));
+    const receipts = new BrokerRequestReceipts(directory); h.deps.requestReceipts = receipts;
+    h.deps.forwardRouteAliasRequest = async () => { forwards++; return { status: 202, body: { kind: "delivery", accepted: true } }; };
+    h.routed = createBrokerHttpRouter(h.deps);
+    const body = { ...(keyed ? { requestId: "assistant-dispatch" } : {}), body: "assistant dispatch", intent: "consult", requesterId: "operator", messageMetadata: { source: "scoutbot" },
+      target: { kind: "route_alias", alias: "review", scope: { projectRoot: "/fixture", nodeId: "peer" } } };
+    try {
+      expect((await requestRouter(h, "POST", "/v1/deliver", { body })).response.status).toBe(409); expect(forwards).toBe(0);
+      expect(await receipts.get("operator", "assistant-dispatch", "deliver")).toBeNull();
+      const lease = claims.acquire("scoutbot", "first");
+      expect((await requestRouter(h, "POST", "/v1/deliver", { body, headers: { [ASSISTANT_CLAIM_HEADER]: lease.token } })).response.status).toBe(202); expect(forwards).toBe(1);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  });
+  test.each(["guest", "scoped"])("%s transport cannot acquire or use claims", async flag => {
+    const { h, claims, writes } = claimedHarness(); const lease = claims.acquire("scoutbot", "first");
+    const transportContext = { transport: "loopback" as const, [flag]: true };
+    expect((await requestRouter(h, "POST", "/v1/assistant-claims", { transportContext, body: { agentId: "scoutbot", holderId: "other" } })).response.status).toBe(403);
+    const posted = await requestRouter(h, "POST", "/v1/messages", { transportContext, headers: { [ASSISTANT_CLAIM_HEADER]: lease.token }, body: { actorId: "scoutbot" } });
+    expect(posted.response.status).toBe(flag === "scoped" ? 403 : 409); expect(writes).toHaveLength(0);
+  });
+  test("an older/non-claim service is explicitly discoverable as unsupported", async () => {
+    const h = createHarness();
+    expect((await requestRouter(h, "GET", "/v1/assistant-claims")).response.status).toBe(404);
   });
 });
