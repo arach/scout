@@ -186,11 +186,22 @@ export function assessCoreSetupCompletion(input: {
   });
   const failures = [...(input.failures ?? [])];
   const failed = failures.length > 0 || report.service.state === "impaired";
-  const outcome = failed ? "failed" : report.service.state === "working" ? "complete" : "pending";
+  const identityConfirmed = Boolean(report.target.expectedNodeId?.trim()) && report.service.identity === "matched";
+  const outcome = failed ? "failed" : report.service.state === "working" && identityConfirmed ? "complete" : "pending";
+  const unsupplied = report.service.checks.filter(check => check.state === "not_checked").map(check => check.name);
+  const onlyUnsupplied = unsupplied.length > 0
+    && report.service.checks.every(check => check.state === "working" || check.state === "not_checked");
+  const pendingReasons = [
+    ...(!identityConfirmed ? [report.target.expectedNodeId?.trim()
+      ? "Scout core identity is unverified for the selected instance and expected node."
+      : "Scout core identity is unverified: no expected node was supplied."] : []),
+    ...(onlyUnsupplied ? [`Health did not supply these checks: ${unsupplied.join(", ")}.`] : []),
+  ];
   return {
     schema: "scout.core-setup-completion/v1", scope: "core", outcome, report, failures,
     headline: failed ? "Scout core needs attention." : outcome === "complete"
-      ? "Scout core is available. Coding-agent sign-in has not been checked." : "Scout core readiness is not confirmed.",
+      ? "Scout core is available. Coding-agent sign-in has not been checked."
+      : pendingReasons.join(" ") || "Scout core readiness is not confirmed.",
     nextStep: outcome !== "complete" ? "scout doctor" : report.harnesses.some(row => row.state === "found") ? "scout whoami" : "scout runtimes",
   };
 }

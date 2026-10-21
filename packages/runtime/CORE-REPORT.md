@@ -11,7 +11,7 @@ harness probing at runtime. It adds no route.
 2. Core liveness, startup/replay, projection, journal writes and cached storage are assessed separately as working, starting, impaired, inconclusive or not checked.
 3. App, local edge, PTY and native supervision are optional, each available, unavailable or not checked, with supplied provenance; none changes core assessment.
 4. `describeCoreHarnessPresence` says found, missing or not checked from supplied executable-path evidence; authentication and readiness remain not checked.
-5. `assessCoreSetupCompletion` returns core-scoped complete, pending or failed, independently of the app and harness; it never offers app installation, browser/server or phone pairing.
+5. `assessCoreSetupCompletion` returns core-scoped complete, pending or failed, requiring a matched expected node but independent of the app and harness; it never offers app installation, browser/server or phone pairing.
 
 ## Inputs and evidence
 
@@ -110,8 +110,16 @@ The completion function re-derives checks from retained observations instead
 of trusting an edited summary.
 
 - Any required core setup failure or impaired core gives `failed`.
-- Working core gives `complete`, even without an app or harness.
+- Working core gives `complete` only when expectedNodeId is present and identity
+  is matched, even without an app or harness.
 - Starting, missing or inconclusive core evidence gives `pending`.
+- Missing/unmatched expected identity also gives `pending`, with an explicit
+  unverified-identity headline. The report builder remains permissive for
+  readers that legitimately lack an expected node.
+- When only unsupplied checks block verification (all checks are working or
+  not_checked), the pending headline enumerates their names. It does not
+  describe observed impairment, restore work, timeout or other inconclusive
+  evidence as merely missing fields.
 
 Completion means **core only**. The headline explicitly says coding-agent
 sign-in has not been checked. Guidance is terminal-only: doctor, runtimes or
@@ -136,7 +144,7 @@ C can next split setup/doctor away from private local-edge/PTY imports:
   `hasUsableScoutApp` in the core-only presentation path.
 
 For Fable's wire review, the named replacement proposal is
-**`scout.doctor.core.v1` NDJSON**, with `start` (target) and `complete`
+**`scout.doctor.core/v1` NDJSON**, with `start` (target) and `complete`
 (report) phases over `scout.core-report/v1`. C must introduce it explicitly
 rather than silently putting this DTO in `scout.doctor.v1`. That CLI stream
 is proposed, not implemented by this runtime PR; the legacy stream remains

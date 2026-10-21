@@ -228,3 +228,73 @@ test("cold subpath import exposes only pure functions and constants", async () =
   const module = await import(specifier);
   expect(Object.keys(module).sort()).toEqual(["CORE_OPTIONAL_CAPABILITIES", "assessCoreSetupCompletion", "buildCoreServiceReport", "describeCoreHarnessPresence"]);
 });
+
+test("pending solely on absent health fields enumerates unsupplied checks", () => {
+  const result = complete({ report: report({ ok: true, nodeId: "node-one" }) });
+  expect(result.outcome).toBe("pending");
+  expect(result.headline).toBe("Health did not supply these checks: startup, projection, journal, storage.");
+  const payload = healthy(); delete payload.projection;
+  expect(complete({ report: report(payload) }).headline).toBe("Health did not supply these checks: projection.");
+});
+
+test("a completely unchecked core names all unsupplied checks and its unverified identity", () => {
+  const result = complete({ report: build({ target, health: { state: "not_checked", target, checkedAt: null } }) });
+  expect(result.outcome).toBe("pending");
+  expect(result.headline).toContain("identity is unverified");
+  expect(result.headline).toContain("Health did not supply these checks: health, startup, projection, journal, storage.");
+});
+
+test("observed timeout, restore or impairment is not described as only unsupplied fields", () => {
+  const timeout = complete({ report: build({ target, health: { state: "timed_out", target, checkedAt: 101 } }) });
+  expect(timeout.outcome).toBe("pending");
+  expect(timeout.headline).not.toContain("did not supply");
+  const payload = healthy(); payload.projection!.state = "warming"; delete payload.storage;
+  const restoring = complete({ report: report(payload) });
+  expect(restoring.outcome).toBe("pending");
+  expect(restoring.headline).not.toContain("did not supply");
+  payload.ok = false;
+  const impaired = complete({ report: report(payload) });
+  expect(impaired.outcome).toBe("failed");
+  expect(impaired.headline).toBe("Scout core needs attention.");
+  const inconclusive = healthy(); delete inconclusive.projection;
+  inconclusive.memory!.storage!.detail = "cached sample failed";
+  expect(complete({ report: report(inconclusive) }).headline).not.toContain("did not supply");
+});
+
+test("working endpoint-only reports stay permissive but setup needs an expected matched identity", () => {
+  for (const expectedNodeId of [undefined, ""]) {
+    const endpointOnly = build({ target: { instance: target.instance, brokerUrl: target.brokerUrl, expectedNodeId }, health: observation() });
+    expect(endpointOnly.service.state).toBe("working");
+    expect(endpointOnly.service.identity).toBe("unverified");
+    // An edited summary cannot bypass re-projection.
+    endpointOnly.service.identity = "matched";
+    const result = complete({ report: endpointOnly });
+    expect(result.outcome).toBe("pending");
+    expect(result.headline).toBe("Scout core identity is unverified: no expected node was supplied.");
+  }
+});
+
+test("missing, mismatched or wrong-instance identity stays pending with a named identity reason", () => {
+  for (const health of [
+    observation({ ...healthy(), nodeId: null }),
+    observation({ ...healthy(), nodeId: "another-node" }),
+    { ...observation(), target: { ...target, instance: "another-instance" } },
+  ]) {
+    const result = complete({ report: build({ target, health }) });
+    expect(result.outcome).toBe("pending");
+    expect(result.headline).toContain("identity is unverified");
+    expect(result.nextStep).toBe("scout doctor");
+  }
+});
+
+test("matched complete core keeps whoami for found harness and runtimes otherwise", () => {
+  expect(complete({ report: report() })).toMatchObject({ outcome: "complete", nextStep: "scout runtimes" });
+  const found = presence({ harness: "codex", observation: { binaryPath: "/fixture/codex", source: "PATH", observedAt: 100 } });
+  expect(complete({ report: build({ target, health: observation(), harnesses: [found] }) }))
+    .toMatchObject({ outcome: "complete", nextStep: "scout whoami" });
+});
+
+test("required setup failure still fails even when expected identity was not supplied", () => {
+  const endpointOnly = build({ target: { instance: target.instance, brokerUrl: target.brokerUrl }, health: observation() });
+  expect(complete({ report: endpointOnly, failures: ["required write failed"] }).outcome).toBe("failed");
+});
