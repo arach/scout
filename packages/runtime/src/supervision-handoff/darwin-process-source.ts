@@ -1,4 +1,4 @@
-import { dlopen, ptr, read } from "bun:ffi";
+import { createRequire } from "node:module";
 import { constants } from "node:os";
 
 /** Read-only ABI boundary. No process enumeration, signals, handles or jobs. */
@@ -15,6 +15,8 @@ export const PID_PATH_BYTES = 4096;
 let source: DarwinProcessSource | undefined;
 export function nativeDarwinProcessSource(): DarwinProcessSource {
   if (source) return source;
+  // Optional native capability: Node must import the SDK without resolving Bun.
+  const { dlopen, ptr, read } = createRequire(import.meta.url)("bun:ffi") as typeof import("bun:ffi");
   const proc = dlopen("/usr/lib/libproc.dylib", {
     proc_pidinfo: { args: ["i32", "i32", "u64", "ptr", "i32"], returns: "i32" },
     proc_pidpath: { args: ["i32", "ptr", "u32"], returns: "i32" },

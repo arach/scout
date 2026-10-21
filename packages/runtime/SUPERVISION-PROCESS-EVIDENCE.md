@@ -82,6 +82,13 @@ There is no fallback or repair. Effective-UID drift, root, a wrong instance
 and invalid PID input refuse before lookup. Subsequent samples revalidate the
 selected instance; reads do not borrow a previous UID check.
 
+The compiled SDK index can also load under Node. Both the sampler and the
+custody store resolve `bun:ffi` only when their native operation is requested.
+On supported macOS, a Node sample returns `native_binding_unavailable`; other
+platforms keep the `unsupported_platform` result. A Node lock attempt refuses
+with `ownership_lock_unsupported`. Import success does not make Node a native
+custody host or change production readiness.
+
 The repeated reads detect changes but do not form an atomic snapshot. An exec
 that changes and changes back between reads can go unobserved. Start timestamps
 are not kernel-held process references. These limits are why the result is
