@@ -317,3 +317,12 @@ change core storage/startup health or restore canonical coordination data.
 
 The public contract and fixtures can be reviewed before these gates open. They
 must not be advertised as a production custody certificate.
+
+## Next native evidence slice (still inactive)
+
+The additive [native process evidence reader](SUPERVISION-PROCESS-EVIDENCE.md)
+provides read-only, explicit-PID diagnostic samples on macOS. It is not a full
+absence inspector, exact-child custody/exit proof or signaling handle. No
+existing handoff or pending-receipt contract changes, and it opens no production
+gate. Complete native role coverage, protected effects and exit proofs remain
+required before wiring or live handoff.
