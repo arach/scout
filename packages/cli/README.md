@@ -49,6 +49,35 @@ Installing the package does not silently start services. `scout setup`
 configures the local broker, starts it only when unhealthy, and verifies its own
 outcome. `scout doctor` remains optional later troubleshooting.
 
+## Worktree and observed-session reads
+
+`diff` and `session touched` read the selected runtime broker, not the local web
+app. They do not bootstrap browser cookies or start an app.
+
+```bash
+scout diff worktree . --file src/main.ts --json
+scout session touched NATIVE_ID --node NODE_ID --harness codex --json
+scout diff session NATIVE_ID --node NODE_ID --harness codex --all --raw
+```
+
+Session reads require the exact `(nodeId, harness, nativeSessionId)` tuple.
+Supported harness selectors are `claude`, `codex` and `pi`. Native IDs are opaque
+and case-sensitive. An unqualified reference cannot prove uniqueness while
+conversation and terminal links are unsupported, so the CLI refuses it rather
+than choosing an identity.
+
+Touched JSON preserves the runtime's identity and coverage metadata. Text labels
+incomplete coverage. Session diff selects modified paths by default; `--all` or
+`--touched` includes read paths too. It refuses incomplete materials and more
+than 200 selected paths. An empty selection returns an empty diff, never the
+whole worktree. Worktree reads retain the runtime's bounded branch, staged and
+unstaged layers; `--raw` prints their patches.
+
+A runtime refusal or unavailable source remains an error, including its HTTP
+status. The CLI does not retry these reads through web routes, another node,
+a local Git process or a native build. These read-only ports do not complete
+the remaining app/bootstrap/attachment extraction.
+
 ## Direct guest access
 
 Use `scout mesh guests` to list, grant, and revoke key-bound guest access to
