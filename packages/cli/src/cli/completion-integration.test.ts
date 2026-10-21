@@ -48,29 +48,31 @@ test("actual CLI serves completion and structured help without local state or ma
   expect(bad.code).toBe(1); expect(bad.stderr).toContain("zsh|bash|fish");
 });
 
-for (const shell of ["bash", "zsh"] as const) test(`${shell} script parses and completes real registry tokens`, async () => {
-  const file = join(root, `${shell}-completion`); writeFileSync(file, renderScoutCompletion(shell));
-  const executable = `/bin/${shell}`;
-  expect((await run(executable, ["-n", file])).code).toBe(0);
-  const tests = shell === "bash" ? [
-    `source "$1"; COMP_WORDS=(scout extensions in); COMP_CWORD=2; _scout; printf '%s\\n' "\${COMPREPLY[@]}"`,
-    `source "$1"; COMP_WORDS=(scout mesh approvals w); COMP_CWORD=3; _scout; printf '%s\\n' "\${COMPREPLY[@]}"`,
-    `source "$1"; COMP_WORDS=(scout ask --ha); COMP_CWORD=2; _scout; printf '%s\\n' "\${COMPREPLY[@]}"`,
-    `source "$1"; COMP_WORDS=(scout --json search --harness codex q); COMP_CWORD=5; _scout; printf '%s\\n' "\${COMPREPLY[@]}"`,
-    `source "$1"; COMP_WORDS=(scout --instance dev ex); COMP_CWORD=3; _scout; printf '%s\\n' "\${COMPREPLY[@]}"`,
-  ] : [
-    `compdef() { :; }; compadd() { shift; print -rl -- "$@"; }; source "$1"; words=(scout extensions in); CURRENT=3; _scout`,
-    `compdef() { :; }; compadd() { shift; print -rl -- "$@"; }; source "$1"; words=(scout mesh approvals w); CURRENT=4; _scout`,
-    `compdef() { :; }; compadd() { shift; print -rl -- "$@"; }; source "$1"; words=(scout ask --ha); CURRENT=3; _scout`,
-    `compdef() { :; }; compadd() { shift; print -rl -- "$@"; }; source "$1"; words=(scout --json search --harness codex q); CURRENT=6; _scout`,
-    `compdef() { :; }; compadd() { shift; print -rl -- "$@"; }; source "$1"; words=(scout --instance dev ex); CURRENT=4; _scout`,
-  ];
-  for (const [i, script] of tests.entries()) {
-    const result = await run(executable, ["-c", script, "fixture", file]);
-    expect(result.stderr).toBe(""); expect(result.code).toBe(0);
-    expect(result.stdout.trim()).toBe(["install", "watch", "--harness", "query", "extensions"][i]!);
-  }
-});
+for (const shell of ["bash", "zsh"] as const) {
+  const executable = shell === "bash" ? "/bin/bash" : Bun.which("zsh") ?? Bun.which("/bin/zsh");
+  test.skipIf(executable === null)(`${shell} script parses and completes real registry tokens${executable === null ? " (zsh unavailable: not on PATH or /bin/zsh)" : ""}`, async () => {
+    const file = join(root, `${shell}-completion`); writeFileSync(file, renderScoutCompletion(shell));
+    expect((await run(executable!, ["-n", file])).code).toBe(0);
+    const tests = shell === "bash" ? [
+      `source "$1"; COMP_WORDS=(scout extensions in); COMP_CWORD=2; _scout; printf '%s\\n' "\${COMPREPLY[@]}"`,
+      `source "$1"; COMP_WORDS=(scout mesh approvals w); COMP_CWORD=3; _scout; printf '%s\\n' "\${COMPREPLY[@]}"`,
+      `source "$1"; COMP_WORDS=(scout ask --ha); COMP_CWORD=2; _scout; printf '%s\\n' "\${COMPREPLY[@]}"`,
+      `source "$1"; COMP_WORDS=(scout --json search --harness codex q); COMP_CWORD=5; _scout; printf '%s\\n' "\${COMPREPLY[@]}"`,
+      `source "$1"; COMP_WORDS=(scout --instance dev ex); COMP_CWORD=3; _scout; printf '%s\\n' "\${COMPREPLY[@]}"`,
+    ] : [
+      `compdef() { :; }; compadd() { shift; print -rl -- "$@"; }; source "$1"; words=(scout extensions in); CURRENT=3; _scout`,
+      `compdef() { :; }; compadd() { shift; print -rl -- "$@"; }; source "$1"; words=(scout mesh approvals w); CURRENT=4; _scout`,
+      `compdef() { :; }; compadd() { shift; print -rl -- "$@"; }; source "$1"; words=(scout ask --ha); CURRENT=3; _scout`,
+      `compdef() { :; }; compadd() { shift; print -rl -- "$@"; }; source "$1"; words=(scout --json search --harness codex q); CURRENT=6; _scout`,
+      `compdef() { :; }; compadd() { shift; print -rl -- "$@"; }; source "$1"; words=(scout --instance dev ex); CURRENT=4; _scout`,
+    ];
+    for (const [i, script] of tests.entries()) {
+      const result = await run(executable!, ["-c", script, "fixture", file]);
+      expect(result.stderr).toBe(""); expect(result.code).toBe(0);
+      expect(result.stdout.trim()).toBe(["install", "watch", "--harness", "query", "extensions"][i]!);
+    }
+  });
+}
 
 test("query treats shell source and flags after its boundary as argv data", async () => {
   const artifact = join(extensions, "sample"); mkdirSync(artifact);
