@@ -212,7 +212,7 @@ export function parseAppCommand(args) {
 }
 
 
-export const UP_HELP = "Usage: scout up <name|path> [--name <alias>] [--harness <harness>] [--provider <provider>] [--model <model>] [--reasoning-effort <effort>] [--permission-profile <profile>]\nStart a local agent.";
+export const UP_HELP = "Usage: scout up <name|path> [--name <alias>] [--harness <harness>] [--provider <provider>] [--model <model>] [--reasoning-effort <effort>] [--permission-profile <profile>]\nStart a local agent.\nAlias: --effort <effort> = --reasoning-effort <effort>.";
 export const SETUP_HELP = "Usage: scout setup [--source-root <path>] [--default-harness <name>] [--context-root <path>] [--json]\n\nConfigure project discovery and install/start the local broker.\nRepeat --source-root to add workspace roots. Prompts for a root in an interactive terminal.\nUse scout doctor to inspect readiness without requesting setup." + "\n\n" + QUICK_LINKS;
 
 function flagValue(args, index, flag) {
@@ -277,6 +277,7 @@ export const INSTALL_HELP = [
   "  scout install --version <tag> # install a specific release (e.g. v0.2.70)",
   "  scout install --force         # reinstall even if already up to date",
   "  scout install --no-restart    # do not relaunch Scout after installing",
+  "  Aliases: -f = --force; --tag <tag> = --version <tag>",
   "  scout install --candidate <receipt.json> --dmg <file> # explicit local signed candidate",
   "",
   "Behavior:",
@@ -300,6 +301,8 @@ export const INSTALL_HELP = [
 export function preflightLifecycle(argv, currentDirectory = process.cwd()) {
   const input = parseScoutArgv(argv);
   if (input.versionRequested) return null;
+  // Structured help comes from the command registry, never a lifecycle handler.
+  if (input.outputMode === "json" && input.helpRequested) return null;
   let { command, args } = input;
   if (command === "relay") { command = args[0] ?? null; args = args.slice(1); }
   // Installation help is also available before Bun or a runtime bundle exists.

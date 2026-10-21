@@ -1,6 +1,8 @@
+import { SCOUT_COMMAND_GRAMMAR, type ScoutCommandGrammar } from "./registry-grammar.ts";
 export type ScoutCommandRegistration = {
   name: string;
   hidden?: boolean;
+  grammar?: ScoutCommandGrammar;
   summary: string;
   status?: "stable" | "deprecated";
   canonicalName?: string;
@@ -11,6 +13,7 @@ export type ScoutCommandRegistration = {
 };
 
 export const SCOUT_COMMANDS: ScoutCommandRegistration[] = [
+  { name: "completion", summary: "Generate zsh, bash or fish tab completion" },
   { name: "help", summary: "Show help text" },
   { name: "version", summary: "Print the Scout CLI version" },
   { name: "integration", summary: "Prepare and resume local project-agent integrations" },
@@ -83,6 +86,12 @@ export const SCOUT_COMMANDS: ScoutCommandRegistration[] = [
   { name: "tui", summary: "Launch the Scout TUI" },
   { name: "init", summary: "Write ~/.openscout/config.json with broker/web/pairing ports" },
 ];
+
+// One registry owns discovery. Aliases share their canonical command's grammar.
+for (const command of SCOUT_COMMANDS) command.grammar = SCOUT_COMMAND_GRAMMAR[command.canonicalName ?? command.name];
+
+export const SCOUT_GLOBAL_FLAGS = "--help -h --json --instance= --version -v";
+export const SCOUT_COMMAND_GLOBAL_FLAGS = "--help -h --json --instance=";
 
 export function listScoutPrimaryCommands(): ScoutCommandRegistration[] {
   return SCOUT_COMMANDS.filter((command) => !command.hidden && !command.provider && (command.status ?? "stable") === "stable");

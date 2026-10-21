@@ -1,5 +1,8 @@
 # CLI extension installation
 
+See the [Extensions guide](./extensions.md) for the API-1 artifact contract,
+completion, installed Markdown help and agent-readable help.
+
 `scout extensions install <verb> <directory>` installs a **trusted, prebuilt
 local artifact**. It does not download packages, execute hooks, or search PATH.
 The directory must contain `extension.json` with `api: 1`, a semantic `version`

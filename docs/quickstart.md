@@ -73,6 +73,8 @@ Use `scout ask` when the target should investigate, act, judge, or report back.
 
 ## Next Steps
 
+- Read [Extensions](./extensions.md) to install trusted CLI verbs and enable tab completion.
+
 - Read the [CLI guide](../packages/cli/README.md) for routing, profiles,
   sessions, aliases, channels, and file-backed prompts.
 - Read the [overview](./overview.md) for the broker ownership and public/private
