@@ -197,6 +197,13 @@
       "when": 1792545582038,
       "tag": "0028_attachment_message_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "6",
+      "when": 1792546094745,
+      "tag": "0029_attachment_blob_refs",
+      "breakpoints": true
     }
   ]
 }

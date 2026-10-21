@@ -415,6 +415,7 @@ CREATE TABLE IF NOT EXISTS message_attachments (
   blob_key TEXT,
   url TEXT,
   metadata_json TEXT,
+  blob_ref_json TEXT,
   PRIMARY KEY (message_id, id)
 );
 

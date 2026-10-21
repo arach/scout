@@ -83,6 +83,8 @@ export class BrokerMeshHttpService {
   readonly receiveMessageBundle = async (bundle: MeshMessageBundle): Promise<BrokerMeshHttpResult> => {
     const result = await this.deps.runDurableWrite(async () => {
       const existingMessage = await this.deps.messageFor(bundle.message.id);
+      if (bundle.conversation.authorityNodeId === this.deps.nodeId && bundle.message.attachments?.some(a => a.blob !== undefined)
+        && (!existingMessage || !sameCanonicalMessage(existingMessage, bundle.message))) throw new Error("attachment_inline_write_required");
       if (bundle.conversation.authorityNodeId === this.deps.nodeId
         && existingMessage && !sameCanonicalMessage(existingMessage, bundle.message)) {
         throw new Error(`mesh message ${bundle.message.id} conflicts with existing record`);
@@ -194,6 +196,8 @@ export class BrokerMeshHttpService {
         throw new Error(`mesh invocation ${bundle.invocation.id} conflicts with its persisted flight`);
       }
       const existingMessage = bundle.message ? await this.deps.messageFor(bundle.message.id) : undefined;
+      if (bundle.message?.attachments?.some(a => a.blob !== undefined) && bundle.conversation?.authorityNodeId === this.deps.nodeId
+        && (!existingMessage || !sameCanonicalMessage(existingMessage, bundle.message))) throw new Error("attachment_inline_write_required");
       if (bundle.message && existingMessage && !sameCanonicalMessage(existingMessage, bundle.message)) {
         throw new Error(`mesh invocation message ${bundle.message.id} conflicts with existing record`);
       }

@@ -42,6 +42,7 @@ function canonicalAttachments(attachments: MessageAttachment[] | undefined): Mes
       id: attachment.id,
       mediaType: attachment.mediaType,
       fileName: attachment.fileName ?? undefined,
+      ...(attachment.blob ? { blob: jsonCanonical(attachment.blob) } : {}),
       blobKey: attachment.blobKey ?? undefined,
       url: attachment.url ?? undefined,
       metadata: jsonCanonical(attachment.metadata),

@@ -81,3 +81,4 @@ export * from "./mcp-events.js";
 export * from "./completion.js";
 
 export type { ProviderQuotaRead, ProviderQuotaReadWindow } from "./provider-quota.js";
+export * from "./attachments.js";

@@ -382,6 +382,7 @@ export const messageAttachmentsTable = sqliteTable("message_attachments", {
   blobKey: text("blob_key"),
   url: text("url"),
   metadataJson: text("metadata_json"),
+  blobRefJson: text("blob_ref_json"),
 }, (table) => [primaryKey({ columns: [table.messageId, table.id] })]);
 
 // -- conversation_read_cursors -----------------------------------------------

@@ -1,6 +1,7 @@
 import { createRepoDiffReadHandler, type RepoDiffRead } from "./broker-repo-diff-read.js";
 import { readProviderQuotas } from "./broker-provider-quota-read.js";
 import { ASSISTANT_CLAIM_HEADER } from "./broker-assistant-claims.js";
+import { handleAttachmentRoute, executeHostAttachmentRead, ATTACHMENT_READ_PATH, type AttachmentHttpDeps } from "./broker-attachments-http.js";
 import { MeshFeedback, MeshFeedbackError } from "./mesh-feedback.js";
 import { MeshBridgeManagement, MeshBridgeManagementError } from "./mesh-bridge-management.js";
 import { MeshPingError, type createMeshPing } from "./mesh-ping.js";
@@ -204,6 +205,7 @@ const CHANNEL_INVITE_COMMAND_KINDS = new Set<string>([
 export type BrokerHttpRouterDeps = {
   /** Test/embedding seam; default uses only the bounded public scoutd repo capability. */
   readRepoDiff?: RepoDiffRead;
+  attachments?: AttachmentHttpDeps;
   encodedSnapshotBodies?: boolean;
   onSnapshotFlushedBytes?: (bytes: number) => void;
   host: string;
@@ -651,6 +653,7 @@ export function createBrokerHttpRouter(
       return;
     }
   }
+  if (await handleAttachmentRoute(request, response, url, deps.attachments ?? { nodeId, peerNode: () => undefined })) return;
   const aliasItemMatch = method === "PATCH" || method === "DELETE"
     ? url.pathname.match(/^\/v1\/aliases\/([^/]+)$/)
     : null;
@@ -987,6 +990,10 @@ export function createBrokerHttpRouter(
   if (method === "POST" && (url.pathname === "/v1/hosts/web-request" || url.pathname === "/v1/mesh/web-request")) {
     try {
       const input = await readRequestBody<HostWebRequest & { nodeId?: string }>(request, { maxBytes: 36 * 1024 * 1024, requireJsonContentType: true });
+      if (input.path === ATTACHMENT_READ_PATH) {
+        const result = await executeHostAttachmentRead(input, request, url.pathname, deps.attachments ?? { nodeId, peerNode: () => undefined });
+        json(response, 200, result); return;
+      }
       if (!isAllowedHostWebRequest(input)) {
         json(response, 400, { error: "unsupported_host_operation" });
         return;
@@ -2537,6 +2544,7 @@ export function createBrokerHttpRouter(
   if (method === "POST" && (url.pathname === "/v1/messages" || url.pathname === "/v1/messages/reply")) {
     try {
       let message = await readRequestBody<MessageRecord>(request);
+      if (message.attachments?.some(a => a.blob !== undefined)) throw new Error("attachment_inline_write_required");
       if (url.pathname === "/v1/messages/reply" && (!message.requestId || !completionReply(message))) {
         throw new Error("explicit reply requires requestId and completionReply identity");
       }
