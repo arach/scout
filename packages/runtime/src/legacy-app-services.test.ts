@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -10,7 +10,7 @@ afterEach(() => { for (const home of homes.splice(0)) rmSync(home, { recursive: 
 function fixture(packaged = false) {
   const home = mkdtempSync(join(tmpdir(), "scout-app-entries-")); homes.push(home);
   const env = { HOME: home, OPENSCOUT_INSTANCE: "prod", OPENSCOUT_SUPPORT_DIRECTORY: join(home, "support") };
-  const root = join(home, "checkout");
+  const root = packaged ? join(home, "node_modules", "@openscout", "scout") : join(home, "checkout");
   const moduleDirectory = packaged ? join(root, "dist/runtime") : join(root, "packages/runtime/src");
   function file(relative: string, content = "export {};\n") {
     const path = join(root, relative); mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, content); return path;
@@ -43,6 +43,25 @@ describe("explicit app service entries", () => {
     expect(resolveLegacyWebEntry({ ...f.env, OPENSCOUT_WEB_SERVER_ENTRY: f.entry }, f.moduleDirectory)).toBe(f.entry);
     expect(() => resolveLegacyWebEntry({ ...f.env, OPENSCOUT_WEB_SERVER_ENTRY: join(f.root, "missing") }, f.moduleDirectory)).toThrow("Configured web entry is unavailable");
     expect(resolveLegacyWebEntry({ ...f.env, OPENSCOUT_WEB_SERVER_ENTRY: "" }, f.moduleDirectory)).toBeNull();
+  });
+  test("a built checkout CLI is not an installed npm package", () => {
+    const f = fixture();
+    f.file("packages/cli/package.json", JSON.stringify({ name: "@openscout/scout" }));
+    f.file("packages/cli/dist/scout-control-plane-web.mjs");
+    const moduleDirectory = dirname(f.file("packages/cli/dist/runtime/broker-daemon.mjs"));
+    expect(resolveLegacyWebEntry(f.env, moduleDirectory)).toBeNull();
+  });
+  test("a real node_modules installation can select its own web bundle", () => {
+    const f = fixture(true);
+    expect(resolveLegacyWebEntry(f.env, f.moduleDirectory)).toBe(f.bundle);
+  });
+  test("a bun-linked package escaping node_modules requires explicit configuration", () => {
+    const f = fixture(); f.file("package.json", JSON.stringify({ name: "@openscout/scout" }));
+    const link = join(f.home, "node_modules", "@openscout", "scout");
+    mkdirSync(dirname(link), { recursive: true }); symlinkSync(f.root, link, "dir");
+    const moduleDirectory = join(link, "dist", "runtime");
+    expect(resolveLegacyWebEntry(f.env, moduleDirectory)).toBeNull();
+    expect(resolveLegacyWebEntry({ ...f.env, OPENSCOUT_WEB_SERVER_ENTRY: f.entry }, moduleDirectory)).toBe(f.entry);
   });
   test("keeps the installed npm bundle only when explicit configuration is absent", () => {
     const f = fixture(true);

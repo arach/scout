@@ -1,6 +1,6 @@
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
 
 import { deriveOpenScoutInstanceLayout } from "./instance.js";
 import type { RuntimeEnv } from "./portable-types.js";
@@ -60,7 +60,11 @@ function checkedEntry(value: string | null | undefined, role: string): string | 
 function installedWebBundle(moduleDirectory: string): string | null {
   for (const directory of [resolve(moduleDirectory, ".."), resolve(moduleDirectory, "..", "..")]) {
     try {
-      const manifest = JSON.parse(readFileSync(join(directory, "..", "package.json"), "utf8"));
+      const packageDirectory = realpathSync(join(directory, ".."));
+      // A built checkout has the same dist layout and package name. Only a
+      // real installation qualifies; linked checkouts need explicit entries.
+      if (!packageDirectory.split(sep).includes("node_modules")) continue;
+      const manifest = JSON.parse(readFileSync(join(packageDirectory, "package.json"), "utf8"));
       if (manifest.name !== "@openscout/scout") continue;
     } catch { continue; }
     for (const name of ["scout-control-plane-web.mjs", "scout-web-server.mjs"]) {

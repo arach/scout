@@ -79,7 +79,9 @@ A public npm installation currently ships web. Preserve that behavior until
 the web packaging cutover: **only when no web entry variable and no durable
 configuration file are present**, the broker can use its installed CLI web
 bundle. Selection requires the neighboring package manifest to name
-`@openscout/scout`. It accepts the current bundle name or its compatibility
+`@openscout/scout` and its directory's real path to contain a `node_modules`
+path component. A built checkout or a linked package whose real path leaves
+`node_modules` requires explicit configuration. It accepts the current bundle name or its compatibility
 name. It never selects `packages/web` or walks the repository.
 
 This exception is not used after explicit configuration, including a configured
