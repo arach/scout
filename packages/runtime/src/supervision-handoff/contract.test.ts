@@ -1,9 +1,10 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, readdirSync, renameSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SupervisionHandoff, HANDOFF_ROLES, productionHandoffReadiness,
   type Absence, type ExactChild, type FloorPolicy, type HandoffInspector, type Observation, type Readiness, type RoleCustody } from "./index.js";
+import { HandoffStore } from "./store.js";
 
 const roots: string[] = [];
 afterEach(() => { for (const path of roots.splice(0)) rmSync(path, { recursive: true, force: true }); });
@@ -365,4 +366,102 @@ test("pending receipt discovery survives controller journal loss without grantin
   await f.reopen().exclusive("R0", "web", 1, lease => lease.recover("lost-attempt-journal", token));
   expect(await f.sdk.pendingReceipts("web", 1)).toEqual([]);
   expect((await f.sdk.pendingReceipts("menu", 1))[0]!.requestId).toBe("other-role");
+});
+
+test("repeating the same drain is inert without another observation or persisted record", async () => {
+  const f = await fixture(); await f.activate();
+  const token = await f.authorize("handoff", "P1"); await f.sdk.drain("web", token);
+  const journal = join(f.path, "supervision-handoff-v1/custody.log"), before = readFileSync(journal);
+  const ownership = await f.sdk.read("web");
+  // A replay acknowledges the durable drain; it does not depend on new proofs.
+  f.inspector.readiness = async () => { throw new Error("unexpected-readiness"); };
+  f.inspector.observe = async () => { throw new Error("unexpected-observation"); };
+  await f.reopen().drain("web", token);
+  expect(await f.sdk.read("web")).toEqual(ownership);
+  expect(readFileSync(journal)).toEqual(before);
+  expect(f.effects()).toBe(0);
+});
+
+test("recovery refuses an owned process with another effect ID and keeps the receipt pending", async () => {
+  const f = await fixture(); await f.activate(); let effectId = "";
+  await expect(f.sdk.exclusive("R0", "web", 1, async lease => {
+    lease.begin("wrong-effect", "start");
+    await lease.perform("wrong-effect", "start", async permit => {
+      effectId = permit.effectId;
+      permit.atEffect(() => f.setObservation({ state: "owned", child: { uid: f.instance.uid, instance: f.instance.id,
+        role: "web", generation: 1, pid: 321, birth: "fixture-birth", executable: "fixture-worker", effectId: "another-effect" } }));
+      throw new Error("lost-ack");
+    });
+  })).rejects.toThrow("lost-ack");
+  const token = await f.authorize("recover", "R0", "wrong-effect");
+  const journal = join(f.path, "supervision-handoff-v1/custody.log"), before = readFileSync(journal);
+  await expect(f.reopen().exclusive("R0", "web", 1, lease => lease.recover("wrong-effect", token))).rejects.toThrow("identity_unproven");
+  expect(readFileSync(journal)).toEqual(before);
+  expect(await f.sdk.pendingReceipts("web", 1)).toEqual([{ requestId: "wrong-effect", operation: "start", state: "pending",
+    effects: [{ id: effectId, kind: "start", state: "intent" }] }]);
+  // The failed observation did not consume consent or make another attempt.
+  const observation = f.observe() as { state: "owned"; child: ExactChild };
+  f.setObservation({ state: "owned", child: { ...observation.child, effectId } });
+  await f.sdk.exclusive("R0", "web", 1, lease => lease.recover("wrong-effect", token));
+  expect(await f.sdk.pendingReceipts("web", 1)).toEqual([]);
+  expect(f.effects()).toBe(0);
+});
+
+test("the 256-authorization limit refuses a new grant without evicting old grants", async () => {
+  const f = await fixture(), store = new HandoffStore(f.instance);
+  const intent = { role: "web" as const, generation: 0, source: null, target: "R0" as const, action: "enroll" as const, desired: "stopped" as const };
+  const first = await f.sdk.authorize(intent, async () => true);
+  await store.exclusive(async tx => {
+    // Seed valid stored records without hundreds of quadratic journal snapshots.
+    const grant = Object.values(tx.state.authorizations)[0]!;
+    for (let i = 1; i < 255; i++) tx.state.authorizations[i.toString(16).padStart(64, "0")] = structuredClone(grant);
+    tx.persist();
+  });
+  const last = await f.sdk.authorize(intent, async () => true);
+  expect(last).not.toBe(first);
+  await store.exclusive(async tx => expect(Object.keys(tx.state.authorizations)).toHaveLength(256));
+  const journal = join(f.path, "supervision-handoff-v1/custody.log"), before = readFileSync(journal);
+  await expect(f.sdk.authorize(intent, async () => true)).rejects.toThrow("authorization_capacity");
+  expect(readFileSync(journal)).toEqual(before);
+  await f.sdk.activate("web", first, "stopped");
+  expect((await f.sdk.read("web")).generation).toBe(1);
+});
+
+test("the 256-receipt limit preserves replay and refuses before changing desired state", async () => {
+  const f = await fixture(); await f.activate();
+  const store = new HandoffStore(f.instance);
+  await store.exclusive(async tx => {
+    for (let i = 0; i < 255; i++) tx.state.receipts[`web:1:seed-${i}`] = { operation: "start", state: "done", effects: [], error: "fixture_rejected" };
+    tx.persist();
+  });
+  await f.sdk.exclusive("R0", "web", 1, async lease => { lease.begin("last", "start"); lease.complete("last", "fixture_rejected"); });
+  await store.exclusive(async tx => expect(Object.keys(tx.state.receipts)).toHaveLength(256));
+  const journal = join(f.path, "supervision-handoff-v1/custody.log"), before = readFileSync(journal);
+  await expect(f.sdk.exclusive("R0", "web", 1, async lease => lease.begin("overflow", "stop"))).rejects.toThrow("receipt_capacity");
+  await f.reopen().exclusive("R0", "web", 1, async lease => {
+    lease.begin("last", "start"); expect(lease.receipt("last")?.state).toBe("done");
+  });
+  expect(readFileSync(journal)).toEqual(before);
+  expect((await f.sdk.read("web")).desired).toBe("running");
+  expect(f.effects()).toBe(0);
+});
+
+test("the 16 MiB journal limit refuses an append before writing and refuses oversized reads", async () => {
+  const f = await fixture(), store = new HandoffStore(f.instance), limit = 16 * 1024 * 1024;
+  const journal = join(f.path, "supervision-handoff-v1/custody.log");
+  const before = readFileSync(journal), last = JSON.parse(before.toString().trimEnd());
+  await store.exclusive(async tx => {
+    const nextBytes = Buffer.byteLength(JSON.stringify({ sequence: last.sequence + 1, previous: last.hash, state: tx.state, hash: "0".repeat(64) }) + "\n");
+    tx.state.policy.id += "x".repeat(limit - before.length - nextBytes);
+    tx.persist();
+  });
+  expect(statSync(journal).size).toBe(limit);
+  expect((await f.sdk.read("web")).owner).toBeNull();
+  const full = readFileSync(journal);
+  await expect(store.exclusive(async tx => tx.persist())).rejects.toThrow("ownership_store_capacity");
+  expect(readFileSync(journal)).toEqual(full);
+  // Test-only oversized image, not a production repair or truncation path.
+  truncateSync(journal, limit + 1);
+  await expect(f.reopen().read("web")).rejects.toThrow("ownership_store_capacity");
+  expect(f.effects()).toBe(0);
 });
