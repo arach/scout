@@ -49,7 +49,7 @@ async function childProbe(args: string[], env: NodeJS.ProcessEnv, run: (child: R
 }
 function send(child: ReturnType<typeof Bun.spawn>, message: unknown) { (child.stdin as any).write(JSON.stringify(message) + "\n"); }
 
-test("public MCP factory import starts no listener, socket, timer, child or runtime contact", async () => {
+test("public MCP factory import starts no listener, socket, timer, worker, child or runtime contact", async () => {
   const root = mkdtempSync(join(tmpdir(), "scout-pure-mcp-"));
   try {
     const messages = await childProbe([resolve(import.meta.dir, "test-helpers/import-purity.ts")], isolated(root), async (child) => { (child.stdin as any).end(); });
