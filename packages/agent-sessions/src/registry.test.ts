@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
-import type { Adapter, AdapterConfig, AgentSessionStreamEvent } from "./protocol/index.ts";
+import type { Adapter, AdapterConfig, AgentSessionStreamEvent, Session } from "./protocol/index.ts";
 import { SessionRegistry } from "./registry.ts";
 
 class TestApprovalAdapter implements Adapter {
   readonly type = "test";
-  readonly session;
+  readonly session: Session;
 
   private eventListeners = new Set<(event: AgentSessionStreamEvent) => void>();
   private errorListeners = new Set<(error: Error) => void>();
@@ -375,5 +375,172 @@ describe("SessionRegistry", () => {
     expect(registry.replay(second.id, 1).map((event) => event.event.event)).toEqual([
       "turn:start",
     ]);
+  });
+});
+
+// This fixture owns git, not a coding harness. Its release file makes lookup
+// completion an explicit event, so the proof is ordering rather than speed.
+async function withBranchFixture(
+  run: (fixture: { root: string; release: () => void; entered: () => Promise<void>; calls: string; mode: (value: string) => void; hideGit: () => void }) => Promise<void>,
+): Promise<void> {
+  const { mkdtempSync, writeFileSync, rmSync, existsSync, realpathSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "scout-registry-branch-")));
+  const oldPath = process.env.PATH;
+  const release = join(root, "release"), entered = join(root, "entered"), mode = join(root, "mode"), calls = join(root, "calls");
+  writeFileSync(mode, "branch");
+  writeFileSync(join(root, "git"), `#!${process.execPath}
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+writeFileSync(${JSON.stringify(calls)}, JSON.stringify({args:process.argv.slice(2),cwd:process.cwd()}));
+writeFileSync(${JSON.stringify(entered)}, 'entered');
+// Bound the fake independently of the parent: reintroducing sync spawn must
+// not leave an indefinitely waiting fixture process.
+const timer=setTimeout(()=>process.exit(79),2000);
+while(!existsSync(${JSON.stringify(release)})) await Bun.sleep(2);
+clearTimeout(timer);
+switch(readFileSync(${JSON.stringify(mode)},'utf8')) {
+ case 'branch': console.log('  feature/async-branch  '); break;
+ case 'detached': console.log('HEAD'); break;
+ case 'empty': console.log('   '); break;
+ case 'failure': console.error('git: not a repository'); process.exitCode=128; break;
+}
+`, { mode: 0o755 });
+  process.env.PATH = root;
+  try {
+    await run({ root, calls,
+      release: () => writeFileSync(release, "release"),
+      entered: async () => {
+        for (let i = 0; i < 200; i++) { if (existsSync(entered)) return; await Bun.sleep(5); }
+        throw new Error("fake git did not report entry");
+      },
+      mode: value => writeFileSync(mode, value),
+      hideGit: () => { process.env.PATH = join(root, "absent"); },
+    });
+  } finally {
+    if (oldPath === undefined) delete process.env.PATH; else process.env.PATH = oldPath;
+    // Every test awaits creation/close, so the metadata child has completed.
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+describe("SessionRegistry asynchronous branch discovery", () => {
+  test("unknown adapter refusal occurs before any branch subprocess", async () => {
+    await withBranchFixture(async fixture => {
+      const { existsSync } = await import("node:fs");
+      const registry = new SessionRegistry({ adapters: {} });
+      await expect(registry.createSession("unknown", { cwd: fixture.root })).rejects.toThrow('Unknown adapter type: "unknown"');
+      expect(existsSync(fixture.calls)).toBe(false);
+    });
+  });
+
+  test("yields to the event loop, then supplies exact branch metadata before factory/start events", async () => {
+    await withBranchFixture(async fixture => {
+      const { readFileSync } = await import("node:fs");
+      let factoryCalls = 0, startedBranch: unknown;
+      const registry = new SessionRegistry({ adapters: { test: config => {
+        factoryCalls++;
+        const adapter = new TestApprovalAdapter(config);
+        const start = adapter.start.bind(adapter);
+        adapter.start = async () => { startedBranch = adapter.session.providerMeta?.branch; await start(); };
+        return adapter;
+      } } });
+      const events: AgentSessionStreamEvent[] = [];
+      registry.onEvent(event => events.push(event.event));
+      const creating = registry.createSession("test", { sessionId: "async-branch", cwd: fixture.root });
+      try {
+        await fixture.entered(); // impossible while a synchronous git wait owns the parent loop
+        expect(factoryCalls).toBe(0); expect(events).toEqual([]);
+        expect(registry.listSessions()).toEqual([]);
+        fixture.release();
+        const session = await creating;
+        expect(startedBranch).toBe("feature/async-branch");
+        expect(session.providerMeta?.branch).toBe("feature/async-branch");
+        expect(JSON.parse(readFileSync(fixture.calls, "utf8"))).toEqual({ args: ["rev-parse", "--abbrev-ref", "HEAD"], cwd: fixture.root });
+        expect(events.filter(event => event.event === "session:update").every(event => event.session.providerMeta?.branch === "feature/async-branch")).toBe(true);
+      } finally { fixture.release(); await creating.catch(() => undefined); await registry.shutdown(); }
+    });
+  });
+
+  test("preserves detached HEAD, empty success, command failure and missing-command outcomes", async () => {
+    for (const mode of ["detached", "empty", "failure", "missing", "bad-cwd"]) {
+      await withBranchFixture(async fixture => {
+        fixture.mode(mode); fixture.release();
+        if (mode === "missing") fixture.hideGit();
+        const registry = new SessionRegistry({ adapters: { test: config => new TestApprovalAdapter(config) } });
+        try {
+          const session = await registry.createSession("test", { cwd: mode === "bad-cwd" ? fixture.root + "/absent" : fixture.root });
+          expect(session.providerMeta?.branch).toBe(mode === "detached" ? "HEAD" : undefined);
+        } finally { await registry.shutdown(); }
+      });
+    }
+  });
+
+  test("close joins a pending metadata child and never constructs a delayed adapter", async () => {
+    await withBranchFixture(async fixture => {
+      let factories = 0;
+      const registry = new SessionRegistry({ adapters: { test: config => { factories++; return new TestApprovalAdapter(config); } } });
+      const creating = registry.createSession("test", { sessionId: "cancelled", cwd: fixture.root });
+      const outcome = creating.then(() => null, error => error);
+      try {
+        await fixture.entered();
+        let closed = false;
+        const closing = registry.closeSession("cancelled").then(() => { closed = true; });
+        await Promise.resolve();
+        expect(closed).toBe(false);
+        fixture.release();
+        await closing;
+        expect(await outcome).toMatchObject({ code: "CONFLICT", message: "Session creation closed during branch discovery." });
+        expect(factories).toBe(0); expect(registry.listSessions()).toEqual([]);
+      } finally { fixture.release(); await outcome; await registry.shutdown(); }
+    });
+  });
+
+  test("close stops an existing adapter immediately while joining a same-ID pending lookup", async () => {
+    await withBranchFixture(async fixture => {
+      const { rmSync } = await import("node:fs");
+      let factories = 0, stopped = false;
+      const registry = new SessionRegistry({ adapters: { test: config => {
+        factories++;
+        const adapter = new TestApprovalAdapter(config);
+        const shutdown = adapter.shutdown.bind(adapter);
+        adapter.shutdown = async () => { stopped = true; await shutdown(); };
+        return adapter;
+      } } });
+      fixture.release();
+      await registry.createSession("test", { sessionId: "shared", cwd: fixture.root });
+      rmSync(fixture.root + "/release"); rmSync(fixture.root + "/entered");
+      const replacement = registry.createSession("test", { sessionId: "shared", cwd: fixture.root }).then(() => null, error => error);
+      try {
+        await fixture.entered();
+        let closed = false;
+        const closing = registry.closeSession("shared").then(() => { closed = true; });
+        expect(stopped).toBe(true);
+        await Promise.resolve(); expect(closed).toBe(false);
+        fixture.release(); await closing;
+        expect(await replacement).toMatchObject({ code: "CONFLICT" });
+        expect(factories).toBe(1); expect(registry.listSessions()).toEqual([]);
+      } finally { fixture.release(); await replacement; await registry.shutdown(); }
+    });
+  });
+
+  test("shutdown joins every pending lookup without starting a harness and permits later explicit creation", async () => {
+    await withBranchFixture(async fixture => {
+      let factories = 0;
+      const registry = new SessionRegistry({ adapters: { test: config => { factories++; return new TestApprovalAdapter(config); } } });
+      const first = registry.createSession("test", { sessionId: "one", cwd: fixture.root }).then(() => null, error => error);
+      const second = registry.createSession("test", { sessionId: "two", cwd: fixture.root }).then(() => null, error => error);
+      try {
+        await fixture.entered();
+        let stopped = false;
+        const stopping = registry.shutdown().then(() => { stopped = true; });
+        await Promise.resolve(); expect(stopped).toBe(false);
+        fixture.release(); await stopping;
+        expect(await first).toMatchObject({ code: "CONFLICT" }); expect(await second).toMatchObject({ code: "CONFLICT" });
+        expect(factories).toBe(0);
+        const later = await registry.createSession("test", { sessionId: "later", cwd: fixture.root });
+        expect(later.id).toBe("later"); expect(factories).toBe(1);
+      } finally { fixture.release(); await Promise.all([first, second]); await registry.shutdown(); }
+    });
   });
 });

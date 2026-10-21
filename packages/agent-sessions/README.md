@@ -63,6 +63,14 @@ reply; // "Echo: ship it"
 await registry.shutdown();
 ```
 
+`createSession()` returns a promise and reads Git branch metadata without
+blocking the embedding event loop. It resolves the lookup before adapter
+construction, then attaches the metadata before startup events; a failed Git lookup still omits the branch.
+If `closeSession()` or `shutdown()` closes a creation while its lookup is
+pending, creation rejects with `SessionRegistryError` code `CONFLICT` and does
+not construct an adapter. Close and shutdown join the owned metadata command;
+they do not leave a delayed harness start behind.
+
 > `registry.decide()` resolves the adapter's pending approval. Call it *outside*
 > the `onEvent` broadcast loop (as above, via `queueMicrotask`) — deciding
 > synchronously while an approval event is still being broadcast can stall the

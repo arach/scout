@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import type {
   Adapter,
   AdapterConfig,
@@ -44,6 +44,11 @@ export function isSessionRegistryError(error: unknown): error is SessionRegistry
 
 export class SessionRegistry {
   private sessions = new Map<string, Adapter>();
+  private readonly pendingBranchReads = new Set<{
+    sessionId: string;
+    branch: Promise<string | undefined>;
+    cancelled: boolean;
+  }>();
   private readonly submittedInterrupts = new Map<string, string>();
   private readonly submittedDecisions = new Map<string, Set<string>>();
   private listeners = new Set<(event: SequencedEvent) => void>();
@@ -72,7 +77,17 @@ export class SessionRegistry {
       options: options?.options,
     };
 
-    const branch = this.detectBranch(config.cwd);
+    const pending = { sessionId, branch: this.detectBranch(config.cwd), cancelled: false };
+    this.pendingBranchReads.add(pending);
+    let branch: string | undefined;
+    try {
+      branch = await pending.branch;
+      // close/shutdown can now run while git is pending. A closed creation
+      // must not construct an adapter (which may itself spawn) after that wait.
+      if (pending.cancelled) throw new SessionRegistryError("CONFLICT", "Session creation closed during branch discovery.");
+    } finally {
+      this.pendingBranchReads.delete(pending);
+    }
     const adapter = factory(config);
 
     adapter.on("event", (event) => {
@@ -196,11 +211,15 @@ export class SessionRegistry {
 
   async closeSession(sessionId: string): Promise<void> {
     const adapter = this.sessions.get(sessionId);
+    const pending = this.cancelBranchReads(sessionId);
     if (!adapter) {
+      if (pending.length) await Promise.all(pending);
       return;
     }
 
-    await adapter.shutdown();
+    // Stop an existing adapter immediately while joining any cancelled lookup.
+    if (pending.length) await Promise.all([adapter.shutdown(), ...pending]);
+    else await adapter.shutdown();
     this.sessions.delete(sessionId);
     this.submittedDecisions.delete(sessionId);
     this.submittedInterrupts.delete(sessionId);
@@ -217,8 +236,18 @@ export class SessionRegistry {
   }
 
   async shutdown(): Promise<void> {
+    const pending = this.cancelBranchReads();
     const ids = [...this.sessions.keys()];
-    await Promise.allSettled(ids.map((sessionId) => this.closeSession(sessionId)));
+    await Promise.allSettled([...pending, ...ids.map((sessionId) => this.closeSession(sessionId))]);
+  }
+
+  private cancelBranchReads(sessionId?: string): Promise<string | undefined>[] {
+    return [...this.pendingBranchReads].filter(read => sessionId === undefined || read.sessionId === sessionId).map(read => {
+      read.cancelled = true;
+      // Join the owned metadata command, rather than abandoning it or letting
+      // its completion start a harness after close/shutdown has returned.
+      return read.branch;
+    });
   }
 
   getSessionSnapshot(sessionId: string): SessionState | null {
@@ -259,22 +288,20 @@ export class SessionRegistry {
     }
   }
 
-  private detectBranch(cwd: string | undefined): string | undefined {
-    try {
-      // node:child_process (not the Bun-only sync spawn) so branch detection
-      // works under plain Node as well as Bun — the registry is a Node+Bun surface.
-      const result = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
-        cwd: cwd ?? process.cwd(),
-        encoding: "utf8",
-      });
-      if (result.status === 0) {
-        return result.stdout.trim();
+  private detectBranch(cwd: string | undefined): Promise<string | undefined> {
+    // Portable Node+Bun async execution: the public createSession API was
+    // already asynchronous. Keep the same argv, cwd, trim and failure policy.
+    return new Promise(resolve => {
+      try {
+        execFile("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+          cwd: cwd ?? process.cwd(),
+          encoding: "utf8",
+        }, (error, stdout) => resolve(error ? undefined : stdout.trim()));
+      } catch {
+        // Not a git repo or git unavailable, as with an asynchronous failure.
+        resolve(undefined);
       }
-    } catch {
-      // Not a git repo or git unavailable.
-    }
-
-    return undefined;
+    });
   }
 
   private findApprovalVersion(sessionId: string, turnId: string, blockId: string): number | null {
