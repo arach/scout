@@ -2,6 +2,9 @@ import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from
 import { homedir } from "node:os";
 import { basename, join, relative } from "node:path";
 
+import { classifyClaudeCodePrompt } from "@openscout/agent-sessions/adapters/claude-code/prompt-markup";
+import { compactClassifiedPrompt, type ClassifiedPrompt } from "@openscout/agent-sessions";
+
 import { resolveTailThinkingMode } from "../user-config.js";
 import { discoverClaudeProcesses } from "./discover.js";
 import { formatToolCall, formatToolResult } from "./tool-format.js";
@@ -415,6 +418,25 @@ function pickTimestamp(obj: Record<string, unknown>): number | null {
   return null;
 }
 
+/** The text of a user turn, whole (summaries are clipped; classification needs the closes). */
+function userText(blocks: unknown): string {
+  if (typeof blocks === "string") return blocks;
+  if (!Array.isArray(blocks)) return "";
+  return blocks
+    .map((block) => (block && typeof block === "object" && (block as Record<string, unknown>).type === "text"
+      ? String((block as Record<string, unknown>).text ?? "")
+      : ""))
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+/** Claude Code's own markup in a user turn, split out by its adapter. */
+function classifyUserTurn(obj: Record<string, unknown>, blocks: unknown): ClassifiedPrompt | undefined {
+  const text = userText(blocks);
+  if (!text.trim()) return undefined;
+  return compactClassifiedPrompt(classifyClaudeCodePrompt(text, { meta: obj.isMeta === true }));
+}
+
 function classifyKind(rawType: string, blocks: unknown): TailEventKind {
   if (rawType === "user") {
     if (Array.isArray(blocks)) {
@@ -524,6 +546,7 @@ function parseClaudeLine(line: string, ctx: TailContext): TailEvent | null {
   const kind = classifyKind(rawType, blocks);
   const summary = summaryForType(rawType, obj, blocks)
     || `[${rawType}]`;
+  const prompt = kind === "user" ? classifyUserTurn(obj, blocks) : undefined;
 
   const finalSessionId = explicitSessionId
     || ctx.transcript.sessionId
@@ -544,6 +567,7 @@ function parseClaudeLine(line: string, ctx: TailContext): TailEvent | null {
     harness: ctx.process.harness,
     kind,
     summary,
+    ...(prompt ? { prompt } : {}),
     raw: obj,
   };
 }

@@ -2,6 +2,9 @@ import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, s
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
+import { classifyCodexPrompt } from "@openscout/agent-sessions/adapters/codex/prompt-markup";
+import { compactClassifiedPrompt, type ClassifiedPrompt } from "@openscout/agent-sessions";
+
 import {
   buildParentChain,
   classifyAttribution,
@@ -392,6 +395,20 @@ function completedItemType(item: Record<string, unknown>): string {
   return String(item.type ?? item.kind ?? "").replace(/[_-]/gu, "").toLowerCase();
 }
 
+/** Codex's own material in a user message, split out by its adapter. Reads
+ *  the whole text: summaries are clipped, and classification needs closes. */
+function classifyUserMessage(content: unknown): ClassifiedPrompt | undefined {
+  const text = typeof content === "string"
+    ? content
+    : Array.isArray(content)
+      ? content.map((entry) => {
+        const record = metadataRecord(entry);
+        return typeof entry === "string" ? entry : typeof record?.text === "string" ? record.text : "";
+      }).filter(Boolean).join("\n\n")
+      : "";
+  return text.trim() ? compactClassifiedPrompt(classifyCodexPrompt(text)) : undefined;
+}
+
 function codexKind(entryType: string, payloadType: string, payload: Record<string, unknown>): TailEventKind {
   if (entryType === "response_item") {
     if (payloadType === "message") {
@@ -504,6 +521,8 @@ function parseCodexLine(line: string, ctx: TailContext): TailEvent | null {
       ?? basename(ctx.transcriptPath).replace(/\.jsonl$/, "");
   const cwd = ctx.transcript.cwd ?? ctx.process.cwd ?? "";
   const summary = summarizeCodex(entryType, payloadType, payload, ctx);
+  const kind = codexKind(entryType, payloadType, payload);
+  const prompt = kind === "user" && entryType === "response_item" ? classifyUserMessage(payload.content) : undefined;
   const idSuffix = codexEventIdSuffix(entryType, payloadType, payload, ctx.lineOffset);
 
   return {
@@ -516,8 +535,9 @@ function parseCodexLine(line: string, ctx: TailContext): TailEvent | null {
     project: cwd ? basename(cwd) : ctx.transcript.project,
     cwd,
     harness: ctx.process.harness,
-    kind: codexKind(entryType, payloadType, payload),
+    kind,
     summary: summary || `[${entryType}]`,
+    ...(prompt ? { prompt } : {}),
     raw: record,
   };
 }
