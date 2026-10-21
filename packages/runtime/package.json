@@ -518,6 +518,12 @@
       "import": "./dist/delivery-client.js",
       "default": "./dist/delivery-client.js"
     },
+    "./remote-tail": {
+      "bun": "./src/remote-tail.ts",
+      "types": "./dist/remote-tail.d.ts",
+      "import": "./dist/remote-tail.js",
+      "default": "./dist/remote-tail.js"
+    },
     "./attachments": {
       "bun": "./src/attachments.ts",
       "types": "./dist/attachments.d.ts",
