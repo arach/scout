@@ -34,7 +34,7 @@ function canonicalAttachments(attachments: MessageAttachment[] | undefined): Mes
   if (attachments === undefined || attachments.length === 0) {
     return undefined;
   }
-  // message_attachments is keyed by attachment id: INSERT OR REPLACE keeps
+  // message_attachments is keyed by (message id, attachment id): INSERT OR REPLACE keeps
   // the last write per id and reads order by id. The canonical form is that set.
   const byId = new Map<string, MessageAttachment>();
   for (const attachment of attachments) {

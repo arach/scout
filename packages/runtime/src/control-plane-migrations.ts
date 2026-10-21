@@ -85,7 +85,23 @@ function repairSessionActorTargets(database: ControlPlaneSqliteDatabase): void {
   }
 }
 
+// Repair pre-ledger or partially upgraded stores as well as managed migrations.
+function repairAttachmentMessageKeys(database: ControlPlaneSqliteDatabase): void {
+  if (!hasTable(database, "message_attachments")) return;
+  const keys = (database.query("PRAGMA table_info(message_attachments)").all() as Array<{ name: string; pk: number }>)
+    .filter(column => column.pk).sort((a, b) => a.pk - b.pk).map(column => column.name);
+  if (keys.join(",") === "message_id,id") return;
+  database.exec(`CREATE TABLE __scoped_message_attachments (
+    id TEXT NOT NULL, message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    media_type TEXT NOT NULL, file_name TEXT, blob_key TEXT, url TEXT, metadata_json TEXT,
+    PRIMARY KEY (message_id, id));
+    INSERT INTO __scoped_message_attachments SELECT id, message_id, media_type, file_name, blob_key, url, metadata_json FROM message_attachments;
+    DROP TABLE message_attachments;
+    ALTER TABLE __scoped_message_attachments RENAME TO message_attachments;`);
+}
+
 export const CONTROL_PLANE_SCHEMA_MIGRATIONS: ControlPlaneSchemaMigration[] = [
+  { id: "attachment-message-keys", description: "Scopes each attachment binding to its owning canonical message.", apply: repairAttachmentMessageKeys },
   { id: "broker-history-anchors", description: "Preserves exact canonical history locations and foreign-key identity anchors after payload relocation.",
     apply(database) { database.exec(CONTROL_PLANE_HISTORY_ANCHORS_SQLITE_SCHEMA); } },
   {

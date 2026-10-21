@@ -375,14 +375,14 @@ export const messageReactionsTable = sqliteTable("message_reactions", {
 
 // -- message_attachments -----------------------------------------------------
 export const messageAttachmentsTable = sqliteTable("message_attachments", {
-  id: text("id").primaryKey(),
+  id: text("id").notNull(),
   messageId: text("message_id").notNull().references(() => messagesTable.id, { onDelete: "cascade" }),
   mediaType: text("media_type").notNull(),
   fileName: text("file_name"),
   blobKey: text("blob_key"),
   url: text("url"),
   metadataJson: text("metadata_json"),
-});
+}, (table) => [primaryKey({ columns: [table.messageId, table.id] })]);
 
 // -- conversation_read_cursors -----------------------------------------------
 export const conversationReadCursorsTable = sqliteTable("conversation_read_cursors", {
