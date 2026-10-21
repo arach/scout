@@ -379,6 +379,13 @@ export class BrokerDeliveryAcceptanceService {
     payload: ScoutDeliverRequest,
     options: { signal?: AbortSignal } = {},
   ): Promise<ScoutDeliverResponse> {
+    // acceptCommand runs only after the caller's original command is fingerprinted
+    // and reserved. Inject native-reply policy into a private execution copy:
+    // old receipts with an absent/false flag must keep replaying the same bytes.
+    // Ordinary exact asks retain their park-until-released behavior.
+    if (payload.sessionDelivery && payload.target?.kind === "session_id" && payload.target.harness === "codex") {
+      payload = { ...payload, target: { ...payload.target, forkIfLive: true } };
+    }
     const requestId = payload.requestId?.trim() || payload.id?.trim() || this.options.createId("deliver");
     const createdAt = typeof payload.createdAt === "number" && Number.isFinite(payload.createdAt)
       ? payload.createdAt

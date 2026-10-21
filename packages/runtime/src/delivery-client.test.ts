@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { askScoutQuestion as askExportedScoutQuestion } from "./scout-broker.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -163,5 +164,59 @@ test("session receipt validation distinguishes submission, resume and unconfirme
   expect(validateScoutSessionReplyResult(expected, { conversationId: "dm", flight: { id: "flight" } })).toEqual({ kind: "resumed", sessionId: "native", flightId: "flight" });
   for (const result of [{}, { conversationId: "dm" }, { conversationId: "dm", inputSubmitted: { ...inputSubmitted, sessionId: "wrong" } }, { conversationId: "dm", inputSubmitted: { ...inputSubmitted, harness: "codex" as const } }]) {
     expect(() => validateScoutSessionReplyResult(expected, result)).toThrow("delivery_unconfirmed");
+  }
+});
+
+
+test("native client refuses malformed acceptance and never invents a replacement key", async () => {
+  let posts = 0;
+  globalThis.fetch = (async (input, init) => {
+    const request = input instanceof Request ? input : new Request(input, init);
+    if (new URL(request.url).pathname === "/v1/node") return Response.json({ id: "node-1", capabilities: [SCOUT_SESSION_INPUT_RECEIPTS_CAPABILITY] });
+    posts++;
+    return Response.json({ kind: "delivery", accepted: true, conversation: { id: "dm" }, message: { id: "m" }, receipt: {} });
+  }) as typeof fetch;
+  const prepared = prepareScoutSessionReply(replyInput);
+  await expect(deliverScoutRequest(broker, { ...prepared, requestId: undefined })).rejects.toThrow("request_id_required");
+  expect(posts).toBe(0);
+  await expect(deliverScoutRequest(broker, prepared)).rejects.toThrow("delivery_unconfirmed");
+  expect(posts).toBe(1);
+});
+
+test("exported ordinary ask delegates retained keys while preserving unkeyed compatibility", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "exported-delivery-client-"));
+  const keys = ["HOME", "OPENSCOUT_HOME", "OPENSCOUT_SUPPORT_DIRECTORY", "OPENSCOUT_CONTROL_HOME", "OPENSCOUT_RELAY_HUB", "OPENSCOUT_BROKER_URL", "OPENSCOUT_BROKER_SOCKET_PATH", "OPENSCOUT_BROKER_SOCKET_ONLY"];
+  const saved = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+  for (const key of keys) process.env[key] = directory;
+  process.env.OPENSCOUT_BROKER_URL = broker.baseUrl;
+  process.env.OPENSCOUT_BROKER_SOCKET_PATH = join(directory, "absent.sock");
+  delete process.env.OPENSCOUT_BROKER_SOCKET_ONLY;
+  try {
+    const posts: ScoutDeliverRequest[] = [];
+    globalThis.fetch = (async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const path = new URL(request.url).pathname;
+      if (path === "/health") return Response.json({ ok: true });
+      if (path === "/v1/node") return Response.json({ id: "node-1" });
+      if (path === "/v1/snapshot") return Response.json({ actors: { operator: { id: "operator", kind: "person" } },
+        agents: { kepler: { id: "kepler", kind: "agent", handle: "kepler", state: "idle" } }, endpoints: {}, conversations: {}, messages: {} });
+      if (path !== "/v1/deliver") throw new Error(`unexpected write: ${path}`);
+      posts.push(await request.json() as ScoutDeliverRequest);
+      return Response.json({ kind: "delivery", accepted: true, conversation: { id: "dm" }, message: { id: "m" }, receipt: {} });
+    }) as typeof fetch;
+    const input = { senderId: "operator", targetLabel: "kepler", body: "inspect" };
+    await askExportedScoutQuestion({ ...input, clientMessageId: " retained " });
+    await askExportedScoutQuestion({ ...input, clientMessageId: "retained" });
+    expect(posts[1]).toEqual(posts[0]);
+    expect(posts[0]?.requestId).toMatch(/^deliver-client-/);
+    expect(posts[0]?.createdAt).toBeUndefined();
+    await askExportedScoutQuestion(input);
+    expect(posts[2]?.requestId).toBeUndefined();
+    expect(posts[2]?.createdAt).toBeNumber();
+  } finally {
+    for (const key of keys) {
+      if (saved[key] === undefined) delete process.env[key]; else process.env[key] = saved[key];
+    }
+    await rm(directory, { recursive: true, force: true });
   }
 });

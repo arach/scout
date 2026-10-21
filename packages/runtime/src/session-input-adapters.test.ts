@@ -1,7 +1,10 @@
 // Core actuator regressions formerly exercised only by the web session wrapper.
 import { describe, expect, test } from "bun:test";
-import { deliverInPlace } from "./in-place/deliver.js";
+import { deliverInPlace as submitInPlace } from "./in-place/deliver.js";
 import type { ClaudeSessionRecord } from "./claude-session-records.js";
+// Never inspect operator processes when a fixture omits a host-specific seam.
+const deliverInPlace = (input: Parameters<typeof submitInPlace>[0], deps: Parameters<typeof submitInPlace>[1]) =>
+  submitInPlace(input, { codexThreadPids: async () => [], locateProcess: async () => null, ...deps });
 const SOURCE = "4fad8bb9-b4d3-4432-be75-8cfd636e78c0";
 
 describe("deliverInPlace", () => {

@@ -62,8 +62,10 @@ Native replies accept plain text and an exact local Claude or Codex session.
 Attachments, remote targets, work items, project launches and execution
 overrides are unsupported. `prepareScoutSessionReply` sets existing-session
 execution and Codex's concurrent-writer guard. It does not prepend an address
-to the prompt. `validateScoutSessionReplyResult` checks the submitted native
-session/harness receipt or a resume flight; it rejects unconfirmed acceptance.
+to the prompt. `deliverScoutRequest` validates the submitted native session/harness receipt
+or a resume flight before returning native acceptance. The exported
+`validateScoutSessionReplyResult` applies that same check to protocol responses
+or existing flattened adapter results; it rejects unconfirmed acceptance.
 
 Before each submission, the public client freshly reads `/v1/node`, verifies
 the expected node id, and requires `session-input-receipts/1`. It sends
@@ -77,6 +79,17 @@ The required wire intent is a compatibility fence. Old brokers use a required
 `tell | consult` enum even though their schemas allow extra fields. They reject
 `session_input`; they cannot ignore the option and execute ordinary consult
 work if a broker replacement races the capability read.
+
+For native replies, the broker also enforces the Codex concurrent-writer guard
+when a raw client omits or disables `forkIfLive`. It applies that guard to an
+internal execution copy after fingerprinting the original command. It never
+adds the flag to the retained command or the fingerprint used for replay.
+Previously stored receipts with the flag absent still replay without conflict.
+Ordinary exact-session asks keep their existing park-until-released behavior.
+
+A concurrent-writer refusal is a completed, replayable rejection. The same key
+keeps returning that refusal after the writer leaves. Sending again after the
+writer leaves is a new instruction and requires a new key.
 
 The broker reserves `unknown` durably before live input. Only a definite
 `not_live` result can fall through to exact-session resume within that same

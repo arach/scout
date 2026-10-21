@@ -128,9 +128,17 @@ export async function deliverScoutRequest(broker: ScoutDeliveryBroker, prepared:
   }
   const wire: ScoutDeliverHttpRequest = { ...prepared,
     intent: prepared.sessionDelivery ? "session_input" : prepared.completion || prepared.relation ? "explicit_consult" : prepared.intent };
-  return requestScoutBrokerJson<ScoutDeliverResponse>(broker.baseUrl, "/v1/deliver", {
+  const result = await requestScoutBrokerJson<ScoutDeliverResponse>(broker.baseUrl, "/v1/deliver", {
     method: "POST", body: wire, socketPath: broker.socketPath, signal: options.signal, acceptErrorJson: isDeliveryResponse,
   });
+  if (prepared.sessionDelivery && result.kind === "delivery") {
+    const target = prepared.target;
+    if (target?.kind !== "session_id" || (target.harness !== "claude" && target.harness !== "codex")) {
+      throw new Error("delivery_unconfirmed: broker returned acceptance for an unsupported native target");
+    }
+    validateScoutSessionReplyResult({ sessionId: target.sessionId, harness: target.harness }, result);
+  }
+  return result;
 }
 
 export type ScoutSessionReplyAcceptance = {
@@ -145,7 +153,11 @@ export type ScoutSessionReplySubmission =
 
 /** A submission receipt is not proof that the agent completed the turn. */
 export function validateScoutSessionReplyResult(expected: Pick<ScoutSessionReplyInput, "sessionId" | "harness">,
-  result: ScoutSessionReplyAcceptance): ScoutSessionReplySubmission {
+  acceptance: ScoutSessionReplyAcceptance | Extract<ScoutDeliverResponse, { kind: "delivery" }>): ScoutSessionReplySubmission {
+  const result: ScoutSessionReplyAcceptance = "kind" in acceptance ? {
+    conversationId: acceptance.conversation?.id, targetSessionId: acceptance.targetSessionId,
+    flight: acceptance.flight, inputSubmitted: acceptance.receipt?.inputSubmitted,
+  } : acceptance;
   const receipt = result.inputSubmitted;
   if (!result.conversationId || (receipt && (receipt.kind !== "in_place" || receipt.state !== "submitted"
     || receipt.sessionId !== expected.sessionId.trim() || receipt.harness !== expected.harness))) {
