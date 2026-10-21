@@ -1,9 +1,10 @@
-import { readFileSync, realpathSync, statSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 
 import { deriveOpenScoutInstanceLayout } from "./instance.js";
 import type { RuntimeEnv } from "./portable-types.js";
+import { untrustedPathMetadata } from "./path-trust.js";
 
 /** Transitional app entry configuration. This is not an extension autostart registry. */
 type LegacyAppServices = {
@@ -20,11 +21,20 @@ export function legacyAppServicesPath(env: RuntimeEnv): string {
 function readConfig(env: RuntimeEnv): LegacyAppServices | null {
   const path = legacyAppServicesPath(env);
   let text: string;
+  let fd: number | undefined;
   try {
-    text = readFileSync(path, "utf8");
+    fd = openSync(path, "r");
+    const info = fstatSync(fd);
+    if (!info.isFile()) throw new Error("not a regular file");
+    const problem = untrustedPathMetadata(path, info);
+    if (problem) throw new Error(problem);
+    // Read the same file whose ownership/mode was checked, across atomic updates.
+    text = readFileSync(fd, "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw new Error(`Cannot read app service configuration ${path}: ${(error as Error).message}`);
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
   try {
     if (text.length > 64 * 1024) throw new Error("configuration exceeds 64 KiB");
@@ -48,7 +58,10 @@ function checkedEntry(value: string | null | undefined, role: string): string | 
   if (!entry) return null;
   if (!isAbsolute(entry)) throw new Error(`${role} entry must be an absolute file path: ${entry}`);
   try {
-    if (!statSync(entry).isFile()) throw new Error("not a regular file");
+    const info = statSync(entry);
+    if (!info.isFile()) throw new Error("not a regular file");
+    const problem = untrustedPathMetadata(entry, info);
+    if (problem) throw new Error(problem);
   } catch (error) {
     throw new Error(`Configured ${role} entry is unavailable: ${entry}: ${(error as Error).message}`);
   }

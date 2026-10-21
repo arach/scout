@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import * as fs from "node:fs";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -129,6 +130,60 @@ describe("explicit app service entries", () => {
     const f = fixture();
     expect(() => resolveLegacyWebEntry({ ...f.env, OPENSCOUT_WEB_SERVER_ENTRY: "./server.mjs" }, f.moduleDirectory)).toThrow("absolute file path");
     expect(() => resolveLegacyWebEntry({ ...f.env, OPENSCOUT_WEB_SERVER_ENTRY: f.root }, f.moduleDirectory)).toThrow("not a regular file");
+  });
+  test("only ENOENT makes config absent; permission and path errors fail closed", () => {
+    const f = fixture(true);
+    expect(resolveLegacyWebEntry(f.env, f.moduleDirectory)).toBe(f.bundle);
+    f.config({ version: 1, web: { entry: f.entry } });
+    const path = legacyAppServicesPath(f.env), open = fs.openSync;
+    const deny = spyOn(fs, "openSync").mockImplementation(((candidate: fs.PathLike, ...args: any[]) => {
+      if (String(candidate) === path) throw Object.assign(new Error("permission denied (EACCES)"), { code: "EACCES" });
+      return (open as any)(candidate, ...args);
+    }) as typeof fs.openSync);
+    try { expect(() => resolveLegacyWebEntry(f.env, f.moduleDirectory)).toThrow("permission denied (EACCES)"); }
+    finally { deny.mockRestore(); }
+    expect(() => resolveLegacyWebEntry({ ...f.env, OPENSCOUT_SUPPORT_DIRECTORY: f.entry }, f.moduleDirectory)).toThrow("Cannot read app service configuration");
+  });
+  test("world-writable config is refused instead of selecting the installed bundle", () => {
+    const f = fixture(true); f.config({ version: 1, web: { entry: f.entry } });
+    chmodSync(legacyAppServicesPath(f.env), 0o666);
+    expect(() => resolveLegacyWebEntry(f.env, f.moduleDirectory)).toThrow("anyone on this machine can write");
+    expect(() => resolveLegacyScoutbotEntry(f.env)).toThrow("anyone on this machine can write");
+  });
+  test("world-writable configured entries are refused for both services", () => {
+    const f = fixture(true); chmodSync(f.entry, 0o666);
+    f.config({ version: 1, web: { entry: f.entry }, scoutbot: { enabled: true, entry: f.entry } });
+    expect(() => resolveLegacyWebEntry(f.env, f.moduleDirectory)).toThrow("anyone on this machine can write");
+    expect(() => resolveLegacyScoutbotEntry(f.env)).toThrow("anyone on this machine can write");
+    expect(() => resolveLegacyWebEntry({ ...f.env, OPENSCOUT_WEB_SERVER_ENTRY: f.entry }, f.moduleDirectory)).toThrow("anyone on this machine can write");
+  });
+  test("config owned by a different uid is refused", () => {
+    const f = fixture(true); f.config({ version: 1, web: { entry: f.entry } });
+    const fstat = fs.fstatSync;
+    const mocked = spyOn(fs, "fstatSync").mockImplementation(((fd: number) => Object.assign(fstat(fd), { uid: (process.getuid?.() ?? 1000) + 1 })) as typeof fs.fstatSync);
+    try { expect(() => resolveLegacyWebEntry(f.env, f.moduleDirectory)).toThrow("not owned by the current user or root"); }
+    finally { mocked.mockRestore(); }
+  });
+  test("configured entries owned by a different uid are refused", () => {
+    const f = fixture(); const stat = fs.statSync;
+    const mocked = spyOn(fs, "statSync").mockImplementation(((path: fs.PathLike) => Object.assign(stat(path), { uid: (process.getuid?.() ?? 1000) + 1 })) as typeof fs.statSync);
+    try {
+      expect(() => resolveLegacyWebEntry({ ...f.env, OPENSCOUT_WEB_SERVER_ENTRY: f.entry }, f.moduleDirectory)).toThrow("not owned by the current user or root");
+      expect(() => resolveLegacyScoutbotEntry({ ...f.env, OPENSCOUT_SCOUTBOT_PROCESS: "1", OPENSCOUT_SCOUTBOT_ENTRY: f.entry })).toThrow("not owned by the current user or root");
+    } finally { mocked.mockRestore(); }
+  });
+  test("root-owned config and entries remain trusted", () => {
+    const f = fixture(); f.config({ version: 1, web: { entry: f.entry }, scoutbot: { enabled: true, entry: f.entry } });
+    const stat = fs.statSync, fstat = fs.fstatSync;
+    const a = spyOn(fs, "statSync").mockImplementation(((path: fs.PathLike) => Object.assign(stat(path), { uid: 0 })) as typeof fs.statSync);
+    const b = spyOn(fs, "fstatSync").mockImplementation(((fd: number) => Object.assign(fstat(fd), { uid: 0 })) as typeof fs.fstatSync);
+    try { expect(resolveLegacyWebEntry(f.env, f.moduleDirectory)).toBe(f.entry); expect(resolveLegacyScoutbotEntry(f.env)).toBe(f.entry); }
+    finally { a.mockRestore(); b.mockRestore(); }
+  });
+  test("strict ownership refuses paths without getuid", () => {
+    const f = fixture(); const getuid = spyOn(process, "getuid").mockImplementation(() => undefined as any);
+    try { expect(() => resolveLegacyWebEntry({ ...f.env, OPENSCOUT_WEB_SERVER_ENTRY: f.entry }, f.moduleDirectory)).toThrow("not owned by the current user or root"); }
+    finally { getuid.mockRestore(); }
   });
   test("durable configuration is instance-scoped", () => {
     const f = fixture();

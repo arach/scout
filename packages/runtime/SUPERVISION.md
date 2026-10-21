@@ -36,7 +36,9 @@ A present file is authoritative. An absent or null `web.entry` disables web
 entry selection. Scoutbot requires `scoutbot.enabled: true` **and** its explicit
 entry. A missing/false `enabled` disables it. Relative paths, directories,
 invalid JSON, unsupported versions, invalid field types and unreadable
-configuration fail closed with a diagnostic. Blank entries do not enable a
+configuration fail closed with a diagnostic. Configuration files and configured
+entries must be owned by the current uid or root and must not be world-writable;
+without `getuid`, strict ownership checks refuse them. Blank entries do not enable a
 service. An enabled Scoutbot without an entry reports a configuration error.
 
 The daemon reads this file at each entry/enablement decision, including daemon
@@ -72,6 +74,9 @@ installation or reload mechanism.
 - Unspecified fields use the durable file. Remove stale environment overrides
   before relying on durable configuration. The broker's internal posting-only
   web marker must not replace Scoutbot's captured enablement policy.
+
+Set `OPENSCOUT_WEB_SERVER_ENTRY=""` or `OPENSCOUT_SCOUTBOT_PROCESS=""` to turn
+that role off explicitly; an empty override is not an absent override.
 
 ## Installed npm compatibility until web removal
 
