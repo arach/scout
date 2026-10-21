@@ -4,7 +4,7 @@ import { createProcessEvidenceReader, type ProcessSample } from "./process-evide
 import { refuse, type ExactChild, type HandoffRole, type SelectedInstance } from "./contracts.js";
 import { RetainedChild, type ChildExit } from "./retained-child.js";
 import type { CustodyTransaction } from "./store.js";
-import { createParentChannel, mappingCopy } from "./carrier-layout.js";
+import { carrierStdio, createParentChannel, mappingCopy } from "./carrier-layout.js";
 
 export type DirectChildCommand = { argv: string[]; cwd: string; env: Record<string, string>;
   stdio?: readonly ["ignore" | "inherit", "ignore" | "inherit", "ignore" | "inherit"];
@@ -70,7 +70,7 @@ export class DirectChildren {
     try {
       if (channel) { parentMapping = mappingCopy(channel.reader); fenceMapping = mappingCopy(carrierDescriptor!); }
       handle = Bun.spawn(command.argv, { onExit: (_child, _code, _signal, error) => { reaped = true; waitError = error != null; }, cwd: command.cwd, env: { ...command.env },
-        stdio: channel ? [stdio[0], stdio[1], stdio[2], parentMapping!.descriptor, "ignore", "ignore", "ignore", fenceMapping!.descriptor] : [stdio[0], stdio[1], stdio[2]] });
+        stdio: channel ? carrierStdio(stdio, parentMapping!.descriptor, fenceMapping!.descriptor) : [stdio[0], stdio[1], stdio[2]] });
       held = { retained: new RetainedChild(handle, () => waitError), record: undefined, role, generation, channel };
       this.held.set(effectId, held); // Retain even if mapping cleanup, birth sampling or persistence fails.
     } catch (error) {

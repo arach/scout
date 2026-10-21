@@ -176,14 +176,15 @@ An audited carrier adapter uses `permit.spawnChild()` in the committed owner's
 start scope. Its command must select `carrier: "role-lifetime/7"` and an explicit
 three-entry `stdio` tuple. Each stdio entry is `"ignore"` or `"inherit"`; pipes,
 numeric FDs and arbitrary extra mappings are not supported. The SDK fills child
-FDs according to exported `CARRIER_LAYOUT` (`role-custody/1`):
+FDs according to exported `CARRIER_LAYOUT` (`role-custody/1`), derived from the
+[shared inherited-descriptor registry](./INHERITED-DESCRIPTORS.md):
 
 | Child slot | Meaning | Ownership |
 | --- | --- | --- |
 | 0, 1, 2 | Explicit ignore/inherit stdio | No arbitrary caller FD or pipe |
 | 3 | Parent-loss channel, read end | SDK-created EOF-only pipe, never credentials or the fence |
 | 4 | Reserved inherited context | Not implemented; currently ignored |
-| 5, 6 | Unused padding | Ignored |
+| 5, 6 | Reserved extension context/credential targets | Ignored in worker spawns |
 | 7 | Anchored role lifetime fence | SDK maps its own locked description |
 
 The mapped fence descriptor is inherited by everything a carrier forks or execs until check() marks it close-on-exec. The coverage audit must therefore prove, per role: that an SDK-aware child calls check before its first fork or exec; that a plain-binary child which can never call check — Caddy and dns-sd are the known candidates — has its entire process tree audited as the carrier cohort, where any daemonizing descendant blocks retirement for its lifetime; and that no path maps the fence into an intended survivor. Deliberate next-hop mapping is the only sanctioned propagation.
