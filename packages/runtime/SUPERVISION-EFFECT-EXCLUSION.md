@@ -43,12 +43,14 @@ external effects are cancelled. Generation enforcement or receipt settlement
 must occur at each effect's **linearization point**, including effects that
 land after their initiating process exits.
 
-Only SDK ownership decisions consume this proof. It never becomes a worker
+Only SDK ownership and cohort-retirement decisions consume this proof. It never
+becomes a worker
 `Observation` or `Absence`. Old worker start/stop and recovery observation
 semantics are not relaxed. Wiring a production drain/stop receipt to an
 approved role-specific actuator remains a separate integration obligation.
 A transfer replay returns no fresh certificate; it replays only the committed
-owner transition.
+owner transition. A retirement replay returns a saved receipt snapshot with
+`replayed: true`, not a fresh observation.
 
 ## Durable profile selection and compatibility
 
@@ -79,12 +81,15 @@ Missing capability, including on a transition replay, refuses. Read-only
 ownership inspection does not grant this capability.
 
 **One-way store format:** a store staged with selected profiles writes state
-version 2 from its first journal record. Absence-only stores remain version 1.
-Older SDKs require version 1 and therefore refuse version 2 structurally instead
-of silently ignoring an unknown profile and falling back to absence. Rolling
-back such a store requires an approved artifact that understands version 2.
+version 3 from its first journal record. Absence-only stores remain version 1.
+Version 3 adds durable cohort retirement and the one-start rule; older
+absence-only and version-2 profile SDKs refuse it structurally. This prevents an
+older SDK from ignoring retirement state and admitting another cohort.
+The new SDK can inspect version-2 stores, but refuses profile authority there.
+Rolling back such a store requires an approved artifact that understands version 3.
 Do not edit a journal version or restore an earlier store to downgrade it.
-Migrating an existing version-1 store to this profile is not implemented.
+There is no in-place migration from version 1 or 2; operator-reviewed re-staging
+remains a separate cutover obligation. A journal's version cannot change.
 
 ## Lifetime fence and ledger serialization
 
@@ -131,6 +136,7 @@ change durable ownership, settle receipts or close child references. A newly
 constructed controller has no effect rights from the ledger alone.
 `acquireLifetimeFence()` requires the full proof and no pending mutation before
 re-establishing those rights. It cannot adopt a process by PID.
+It refuses a retiring or retired generation, even when its fence is free.
 
 `recoverReceipt()` provides observation-only recovery when a lost controller
 left a pending receipt. It uses the existing operator grant and exact-owned or
@@ -164,11 +170,35 @@ An unfenced legacy owner cannot be excluded by introducing a new lock.
 
 ## Child-side custody check
 
-A trusted carrier adapter can obtain `lease.carrierDescriptor()` only inside an
-active committed owner scope. This is mapping input, not another effect permit;
-the actual spawn still belongs inside `EffectPermit.atEffect`. Deliberate
-mapping and binary retention are the adapter's reviewed obligations. Existing
-`spawnChild` is **not** silently changed to propagate an FD.
+An audited carrier adapter uses `permit.spawnChild()` in the committed owner's
+start scope. Its command must select `carrier: "role-lifetime/3"` and an explicit
+three-entry `stdio` tuple. Each stdio entry is `"ignore"` or `"inherit"`; pipes,
+numeric FDs and arbitrary extra mappings are not supported. The SDK fills child
+FD 3 from its own retained lifetime description and keeps the sole-reaper handle.
+The caller supplies no descriptor number and receives no raw process handle.
+The parent description remains close-on-exec; only the explicit child mapping
+is inheritable. The staged raw `lease.carrierDescriptor()` API is removed.
+Raw `atEffect()` starts refuse under a profile, so this is the only supported
+carrier-spawn path. Absence-only commands keep their unmapped, ignored-stdio
+default; an explicit ignore/inherit tuple is also supported there.
+
+`carrierChildCapability()` currently permits mapped starts only on the pinned
+Darwin Bun 1.3.14 revision. Bun 1.3.13 still supports the existing unmapped
+direct-child custody adapter, but mapped starts refuse before spawn with
+`carrier_mapping_backend_unproven`. An isolated GC probe found that 1.3.13 closes
+the caller's extra numeric FD during subprocess finalization; 1.3.14 leaves it
+open. The pinned source corroborates this distinction:
+[1.3.13 closes extra FDs](https://github.com/oven-sh/bun/blob/bf2e2cecf27e800962b1e7f03d66278f9d5d2e79/src/bun.js/api/bun/subprocess.zig#L727-L744),
+whereas [1.3.14 preserves unowned FDs](https://github.com/oven-sh/bun/blob/0d9b296af33f2b851fcbf4df3e9ec89751734ba4/src/runtime/api/bun/subprocess.zig#L767-L785).
+Passing the controller FD on 1.3.13 can invalidate it, or double-close an unrelated
+reused FD after the controller releases it. A manually closed duplicate has the
+same delayed-double-close hazard; a GC-owned duplicate would make stop depend on
+GC. This SDK refuses that backend instead of adopting either workaround.
+
+Mapping does not certify binary retention. Every effect-capable child or helper
+must retain the description or use an approved fenced actuator. A child that
+closes the descriptor can defeat advisory participation; unexplained resource
+evidence must still refuse its cohort's retirement.
 
 The child declares the capability when constructing `ChildRoleCustody`. Before
 performing any role work, it calls `check(role, owner, generation, descriptor)`.
@@ -200,6 +230,80 @@ A child's verified result is a carrier claim only once the parent controller
 re-confirms its own retained fence after the child reports (its next lease scope
 does this for free); a verified child whose parent cannot confirm is treated as
 unknown and stopped through the ordinary landing-side gates.
+
+## One cohort per generation
+
+Under a selected profile, `begin(id, "start")` and `perform(id, "start", ...)`
+admit at most one durable start intent per generation. The committed exclusion
+proof and retained controller fence replace the pre-start Absence requirement.
+The SDK still records the exact native birth and requires the matching owned
+observation after spawn. This is not child readiness. The adapter must not wait
+for child initialization while it holds the parent's ledger scope.
+
+The intent consumes the generation even if command validation, spawn, birth
+persistence or later confirmation fails. Retrying a completed request is inert;
+another start intent in the same generation refuses. Reacquiring the same
+generation's fence does not clear this history. Descendant observations and the
+worker's `absence()` remain unknown where they were unknown before.
+
+Ordinary `stop` and `restart` receipts refuse under a profile. The adapter uses
+this explicit cycle instead:
+
+1. Call `retireCohort(owner, role, generation, id, signal?)`. The default signal
+   is SIGTERM; SIGKILL must be selected explicitly on the first call.
+2. Retry the same call and ID on contention or incomplete exclusion evidence.
+   A pending stop is not a stopped role. No timer grants takeover.
+3. After retirement completes, call
+   `advanceCohort(owner, role, generation, retirementId)` to authorize a restart.
+4. Start once in the returned generation through `permit.spawnChild()`.
+
+Retirement persists its intent and disables ordinary effect scopes before it
+signals or closes any reference. An active role's desired state becomes stopped;
+a draining handoff preserves its incoming running/stopped intent. It can request at most one signal through the
+exact retained direct-child handle. The signal-attempt marker is durable before
+the syscall. A lost acknowledgment never replays that syscall. With lost handle
+custody, retirement sends no signal and never adopts a PID. There is no implicit
+signal escalation. A surviving carrier that will not exit keeps the stop pending;
+the SDK cannot promise to terminate a cohort after losing its handles.
+
+The method never waits for child exit under the ledger mutex. It records an
+exact exit when the retained handle has published one. It then closes only its
+controller reference and attempts a new nonblocking exclusive lock on the
+anchored inode, still under the ledger mutex. Other conforming controllers
+cannot acquire in between. Any surviving carrier keeps the acquisition busy.
+Acquisition also requires fresh resource, legacy, delegated-work and relaunch
+evidence. A free fence alone never confirms the stop.
+
+A completed stop receipt means **role effects are excluded**, not that every
+process exited. Its `retirement.exclusion` preserves the distinct certificate,
+including unproven descendants and surviving non-owners. Exact direct-child exit
+is not mandatory when complete audited exclusion independently covers the role;
+it cannot be reconstructed from a PID after host custody loss. A descriptor-
+dropping direct child remains unknown unless the resource/legacy audit explains
+it as an approved non-owner. No exit record is invented for that child.
+
+Full retirement proof can settle an uncertain carrier-only start as
+`error: "cohort_retired"`. Unconfirmed start effects become `state: "retired"`,
+not successful start observations. This includes a crash between spawn and birth
+persistence. Arbitrary pending mutation receipts without the SDK's carrier-start
+marker still block. Generic `recoverReceipt()` cannot substitute Absence for a
+retirement certificate.
+
+Advance is a same-owner authority operation, not an operator-approved transfer.
+It requires a completed retirement, no pending receipts, active ownership and
+another fresh complete exclusion proof. The SDK fsyncs generation + 1 before it
+retains the new controller reference. A draining handoff cannot be cancelled by
+advance. Cross-owner transfer and the existing resume path keep their operator
+grants. Advance does not spawn or reuse the old stop certificate. Its replay
+returns the committed ownership without recreating lost effect rights.
+
+The one-cohort hypothesis holds, but an in-generation restart does not: while the
+controller keeps its own reference, a free-lock probe cannot exclude an escaped
+carrier. That carrier also has the current generation. Closing the reference,
+certifying retirement and advancing the generation are all required. Automatic
+restart needs no new operator grant, but it still needs carriers to release and
+the complete audit to pass. The cost is a full certification at retirement and
+again at advance. Receipt capacity and storage-retention limits still apply.
 
 ## Open rollout obligations
 

@@ -189,4 +189,10 @@ The optional [role-effect exclusion profile](SUPERVISION-EFFECT-EXCLUSION.md)
 keeps this adapter's descendant result unknown. Its separate lifetime fence and
 child-side descriptor check feed only SDK ownership decisions. They do not
 upgrade a direct child into complete descendant or resource coverage, and this
-adapter does not automatically pass its child a lifetime descriptor.
+adapter passes a lifetime descriptor only through an explicitly selected
+`carrier: "role-lifetime/3"` command under that profile's retained start permit.
+Explicit stdio supports ignore/inherit only; default absence-only commands stay
+unmapped with ignored stdio. No raw descriptor or process handle escapes.
+The mapped path is narrower than unmapped custody: its audited backend is
+currently Darwin Bun 1.3.14 only. Bun 1.3.13 mapped starts refuse because its
+extra-FD finalizer closes caller-owned descriptors; see the exclusion contract.

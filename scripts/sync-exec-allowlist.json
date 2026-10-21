@@ -1039,14 +1039,14 @@
     "path": "packages/runtime/src/supervision-handoff/child-custody.ts",
     "symbol": "Bun.spawn",
     "category": "process-lifecycle",
-    "reason": "inactive opt-in SDK boundary persists intent before synchronous owned-child spawn and native birth sampling; audited Darwin backend only, no production caller or discovery",
+    "reason": "inactive opt-in retained spawn persists intent before native birth sampling; profile starts map the SDK-held lifetime description to child FD 3 with explicit ignore/inherit stdio only on audited Darwin Bun 1.3.14 (1.3.13 extra-FD finalization refuses); no production caller or discovery",
     "owner": "runtime"
   },
   {
     "path": "packages/runtime/src/supervision-handoff/retained-child.ts",
     "symbol": "Subprocess.kill",
     "category": "process-lifecycle",
-    "reason": "inactive SDK signals only its private retained direct-child handle under an effect permit; refuses after terminal status/reap and never calls kill(pid)",
+    "reason": "inactive SDK signals only its private retained direct-child handle under an effect permit or serialized durable cohort-retirement intent; refuses after terminal status/reap and never calls kill(pid)",
     "owner": "runtime"
   },
   {
@@ -1147,6 +1147,13 @@
     "symbol": "Subprocess.kill",
     "category": "test",
     "reason": "bounded isolated carrier fixture validates mapped inode against durable custody, retains the shared lock after its controller closes, and is always ended and awaited; sanitized environment and scratch HOME, no installed services",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/supervision-handoff/cohort-carrier.fixture.ts",
+    "symbol": "Bun.spawn",
+    "category": "test",
+    "reason": "entrypoint-only isolated fixture deliberately maps FD 3 to a detached carrier or independent non-owner helper; all processes have five-second bounds, scratch HOME and sanitized environments, file-backed cleanup and zombie-inclusive native survivor checks in the owning test",
     "owner": "runtime"
   }
 ]

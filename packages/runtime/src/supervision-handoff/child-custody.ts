@@ -5,7 +5,9 @@ import { refuse, type ExactChild, type HandoffRole, type SelectedInstance } from
 import { RetainedChild, type ChildExit } from "./retained-child.js";
 import type { CustodyTransaction } from "./store.js";
 
-export type DirectChildCommand = { argv: string[]; cwd: string; env: Record<string, string> };
+export type DirectChildCommand = { argv: string[]; cwd: string; env: Record<string, string>;
+  stdio?: readonly ["ignore" | "inherit", "ignore" | "inherit", "ignore" | "inherit"];
+  carrier?: "role-lifetime/3" };
 export type DirectChildRecord = { format: "bun-darwin-direct-child/1"; child: ExactChild; sample: ProcessSample; exit?: ChildExit };
 export type CurrentChildCoverage = { state: "no_starts" | "unknown";
   reason?: "current_owner_birth_unproven" | "current_owner_exit_unproven" | "current_owner_descendants_unproven";
@@ -22,6 +24,17 @@ function requireDirectChildCapability() {
   const capability = directChildCapability();
   if (!capability.available) refuse(capability.reason);
 }
+/** Extra numeric stdio FDs are borrowed only on this audited revision. Bun
+ * 1.3.13 closes them in Subprocess.finalizeStreams, even when caller-owned.
+ * Duplicating and manually closing one would permit a later GC double-close;
+ * leaving it to GC would make retirement depend on nondeterministic GC. */
+export function carrierChildCapability() {
+  const direct = directChildCapability();
+  if (!direct.available) return direct;
+  return Bun.revision === "0d9b296af33f2b851fcbf4df3e9ec89751734ba4"
+    ? { available: true as const, backend: "darwin-borrowed-extra-fd/1" as const }
+    : { available: false as const, reason: "carrier_mapping_backend_unproven" as const };
+}
 function sameChild(a: ExactChild, b: ExactChild) {
   return (["uid", "instance", "role", "generation", "pid", "birth", "executable", "effectId"] as const).every(key => a[key] === b[key]);
 }
@@ -30,16 +43,22 @@ function sameChild(a: ExactChild, b: ExactChild) {
 export class DirectChildren {
   private readonly held = new Map<string, { retained: RetainedChild; record?: DirectChildRecord }>();
   constructor(private readonly instance: SelectedInstance, private readonly enabled = false) {}
-  spawn(role: HandoffRole, generation: number, effectId: string, command: DirectChildCommand): DirectChildRecord {
+  spawn(role: HandoffRole, generation: number, effectId: string, command: DirectChildCommand, carrierDescriptor?: number): DirectChildRecord {
     if (!this.enabled) refuse("child_custody_not_enabled");
     requireDirectChildCapability();
     if (this.held.has(effectId)) refuse("child_effect_already_started");
     if (!Array.isArray(command.argv) || !command.argv.length || !isAbsolute(command.argv[0]!)
       || command.argv.some(arg => typeof arg !== "string" || arg.includes("\0")) || !isAbsolute(command.cwd)
-      || !command.env || Object.entries(command.env).some(([key, value]) => !key || /[=\0]/.test(key) || typeof value !== "string" || value.includes("\0"))) refuse("invalid_child_command");
+      || !command.env || Object.entries(command.env).some(([key, value]) => !key || /[=\0]/.test(key) || typeof value !== "string" || value.includes("\0"))
+      || (command.stdio !== undefined && (!Array.isArray(command.stdio) || command.stdio.length !== 3 || [0, 1, 2].some(index => command.stdio![index] !== "ignore" && command.stdio![index] !== "inherit")))
+      || (command.carrier !== undefined && command.carrier !== "role-lifetime/3")) refuse("invalid_child_command");
+    if (command.carrier ? !Number.isSafeInteger(carrierDescriptor) || carrierDescriptor! < 3 : carrierDescriptor !== undefined) refuse("carrier_mapping_required");
+    if (command.carrier) { const capability = carrierChildCapability(); if (!capability.available) refuse(capability.reason); }
     const reader = createProcessEvidenceReader(this.instance); // validate selection before spawn
     let reaped = false, waitError = false;
-    const handle = Bun.spawn(command.argv, { onExit: (_child, _code, _signal, error) => { reaped = true; waitError = error != null; }, cwd: command.cwd, env: { ...command.env }, stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+    const stdio = command.stdio ?? ["ignore", "ignore", "ignore"] as const;
+    const handle = Bun.spawn(command.argv, { onExit: (_child, _code, _signal, error) => { reaped = true; waitError = error != null; }, cwd: command.cwd, env: { ...command.env },
+      stdio: command.carrier ? [stdio[0], stdio[1], stdio[2], carrierDescriptor!] : [stdio[0], stdio[1], stdio[2]] });
     const held = { retained: new RetainedChild(handle, () => waitError), record: undefined as DirectChildRecord | undefined };
     this.held.set(effectId, held); // Retain even if birth sampling/persistence fails.
     // Synchronous, before the event-loop reaper can run. No sample-then-kill:
@@ -64,6 +83,15 @@ export class DirectChildren {
     const held = this.held.get(record.child.effectId);
     if (!held?.record || !sameChild(held.record.child, record.child)) refuse("child_custody_lost");
     return held.retained.exit();
+  }
+  has(child: ExactChild) {
+    const held = this.held.get(child.effectId);
+    return !!held?.record && sameChild(held.record.child, child);
+  }
+  pollExit(record: DirectChildRecord) {
+    const held = this.held.get(record.child.effectId);
+    if (!held?.record || !sameChild(held.record.child, record.child)) return undefined;
+    return held.retained.pollExit();
   }
 }
 /** Direct exit is necessary, never sufficient for role absence. There is no

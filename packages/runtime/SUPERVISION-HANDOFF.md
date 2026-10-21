@@ -353,6 +353,9 @@ this does not open readiness, P1 or reverse handoff.
 [Role-effect exclusion](SUPERVISION-EFFECT-EXCLUSION.md) adds a distinct,
 policy-bound transfer proof and a separate per-role lifetime fence. It does not
 turn unknown worker descendants into absent processes or open production
-readiness. Stores with selected profiles use the one-way version-2 state gate;
+readiness. Stores with selected profiles use the one-way version-3 state gate;
 absence-only stores keep version 1. The runtime remains the unenrolled custody
 host, including the enrolled roles' broker-mediated generation checks.
+Profile effects use one retained carrier start per generation, certified cohort
+retirement, then a same-owner generation advance for restart. They do not use
+worker Absence as a substitute for exclusion or declare surviving non-owners dead.

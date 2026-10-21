@@ -8,6 +8,7 @@ export function selectedProfile(tx: CustodyTransaction, role: HandoffRole, capab
   tx.assertCurrent();
   const profile = tx.state.policy.effectProfiles?.[role], selection = tx.state.roles[role].proofProfile;
   if (!profile) { if (selection) refuse("proof_profile_changed"); return; }
+  if (tx.state.version !== 3) refuse("cohort_store_version_required");
   if (!capabilities.includes(EFFECT_EXCLUSION_CAPABILITY)) refuse("proof_capability_required");
   if (tx.state.roles[role].owner !== null && (!selection || selection.id !== profile.id
     || selection.hash !== profileHash(profile) || selection.capability !== EFFECT_EXCLUSION_CAPABILITY)) refuse("proof_profile_changed");
@@ -57,6 +58,9 @@ export class LifetimeFences {
     this.held.delete(role); // Disable local effect scopes before closing.
     closeSync(fd);
   }
+  releaseIfHeld(tx: CustodyTransaction, role: HandoffRole) {
+    if (this.held.has(role)) this.release(tx, role);
+  }
   /** Host shutdown drops references, never changes durable ownership or settles
    * work. Existing carrier references keep the kernel lock alive. */
   close() {
@@ -79,7 +83,7 @@ export class ChildRoleCustody {
     if (!Number.isSafeInteger(descriptor) || descriptor < 3) refuse("invalid_carrier_descriptor");
     return this.store.exclusive(async tx => {
       const profile = selectedProfile(tx, role, this.capabilities), state = tx.state.roles[role];
-      if (!profile || state.owner !== owner || state.generation !== generation || state.phase !== "active" || state.desired !== "running") refuse("ownership_changed");
+      if (!profile || state.owner !== owner || state.generation !== generation || state.phase !== "active" || state.desired !== "running" || state.retirement) refuse("ownership_changed");
       const identity = assertFenceIdentity(tx, role, descriptor);
       // A separately opened fd on the right inode is not a mapped carrier.
       // First establish contention, then require the supplied description's

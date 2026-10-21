@@ -10,7 +10,7 @@ import { HANDOFF_CAPABILITY, HANDOFF_PROTOCOL, HANDOFF_ROLES, requireRole, refus
   type AuthorizationIntent, type FloorPolicy, type HandoffRole, type Ownership, type MutationReceipt,
   type OperatorApproval, type PendingReceipt, type StageApproval, type SelectedInstance } from "./contracts.js";
 
-export type CustodyState = { version: 1 | 2; instance: SelectedInstance; policy: FloorPolicy;
+export type CustodyState = { version: 1 | 2 | 3; instance: SelectedInstance; policy: FloorPolicy;
   roles: Record<HandoffRole, Ownership>;
   authorizations: Record<string, { intent: AuthorizationIntent; state: "issued" | "reserved" | "used" | "revoked"; policy: string }>;
   receipts: Record<string, MutationReceipt>; legacyCaptures?: Record<string, { manifest: LegacyRoleCapture; authorization: string }>;
@@ -118,9 +118,9 @@ export class HandoffStore {
         if (writeSync(anchor, bytes) !== bytes.length) refuse("ownership_store_write_failed");
         fsyncSync(anchor);
       } finally { closeSync(anchor); }
-      // Older SDKs ignore unknown policy fields. Version 2 makes them refuse
-      // this store structurally instead of silently reverting to Absence.
-      const state: CustodyState = { version: Object.keys(policy.effectProfiles ?? {}).length ? 2 : 1, instance: this.instance, policy: structuredClone(policy),
+      // Version 3 also fences older profile SDKs that do not understand cohort
+      // retirement or the one-start rule. Absence-only stores remain version 1.
+      const state: CustodyState = { version: Object.keys(policy.effectProfiles ?? {}).length ? 3 : 1, instance: this.instance, policy: structuredClone(policy),
         roles: Object.fromEntries(HANDOFF_ROLES.map(role => [role, { owner: null, generation: 0, phase: "staged", desired: "stopped" }])) as CustodyState["roles"],
         authorizations: {}, receipts: {} };
       // Preparation only, under the ledger mutex. No role is enrolled and no
@@ -181,7 +181,10 @@ export class HandoffStore {
   }
   async authorize(intent: AuthorizationIntent, approve: OperatorApproval, capabilities: readonly string[] = []): Promise<string> {
     intent = structuredClone(intent); requireRole(intent.role);
-    const snapshot = await this.exclusive(async tx => structuredClone(tx.state.policy));
+    const snapshot = await this.exclusive(async tx => {
+      if (tx.state.policy.effectProfiles?.[intent.role] && tx.state.version !== 3) refuse("cohort_store_version_required");
+      return structuredClone(tx.state.policy);
+    });
     if (snapshot.effectProfiles?.[intent.role] && !capabilities.includes(EFFECT_EXCLUSION_CAPABILITY)) refuse("proof_capability_required");
     if (!await approve(this.instance, snapshot, structuredClone(intent))) refuse("operator_authorization_required");
     return this.exclusive(async tx => {
@@ -219,9 +222,9 @@ function readJournal(fd: number): { state: CustodyState; sequence: number; hash:
     for (const line of text.trimEnd().split("\n")) {
       const record = JSON.parse(line);
       if (record.sequence !== sequence + 1 || record.previous !== previous
-        || record.hash !== digest([record.sequence, record.previous, record.state]) || ![1, 2].includes(record.state.version)
+        || record.hash !== digest([record.sequence, record.previous, record.state]) || ![1, 2, 3].includes(record.state.version)
         || (version !== undefined && record.state.version !== version)
-        || record.state.version !== (Object.keys(record.state.policy?.effectProfiles ?? {}).length ? 2 : 1)) refuse("ownership_store_corrupt");
+        || (Object.keys(record.state.policy?.effectProfiles ?? {}).length ? ![2, 3].includes(record.state.version) : record.state.version !== 1)) refuse("ownership_store_corrupt");
       version = record.state.version; // No in-place upgrade or downgrade of this journal.
       previous = record.hash; sequence++; state = record.state; policyValid(state.policy);
       for (const role of HANDOFF_ROLES) {
