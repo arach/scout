@@ -20,14 +20,14 @@ non-browser-origin requests.
 
 | Request | Result |
 | --- | --- |
-| `GET /v1/assistant-claims` | `{ capability: "assistant-answerer-claims/1", agentIds: ["scoutbot"], ttlMs: 30000 }` |
+| `GET /v1/assistant-claims` | `{ capability: "assistant-answerer-claims/1", agentIds: ["scoutbot"], ttlMs: 30000, agents: { scoutbot: { held, holderId, admitted, oldestAdmissionAgeMs } } }` |
 | `POST /v1/assistant-claims` with `{ agentId: "scoutbot", holderId: "<unique process instance label>" }` | 201 and `{ agentId, token, ttlMs }` |
 | `POST /v1/assistant-claims/renew` with `{ agentId }` and proof header | 200 and `{ agentId, ttlMs }` |
 | `POST /v1/assistant-claims/release` with `{ agentId }` and proof header | 200 and `{ ok: true, draining: <boolean> }` |
 
 The proof header is **`x-scout-assistant-claim-token: <token>`**. The broker uses a
 cryptographically random token and a monotonic 30-second deadline. Renew at
-about 10-second intervals, before expiry. Renewal keeps the same token. A new
+half the TTL (15-second intervals for the default TTL), before expiry. Renewal keeps the same token. A new
 claim receives a different token. The client cannot choose an unbounded TTL.
 
 A second claim receives **409 `assistant_claim_busy`**, even if it repeats the
@@ -54,11 +54,19 @@ Admission pins the lease while a client mutation is running. Expiry or release
 does not let a second owner overlap that admitted mutation. Release prevents
 new admissions immediately and reports whether the old owner is draining. If
 an admitted operation is stuck, takeover waits rather than stealing ownership.
+The capability GET reports per-agent `held`, `holderId`, `admitted` and
+`oldestAdmissionAgeMs`. A draining owner remains held after expiry or release.
+An idle, expired owner reports `held: false` and `holderId: null`. An agent
+without admissions reports `oldestAdmissionAgeMs: null`. Tokens are never
+included. One diagnostic timer per admitted write logs its agent, holder,
+admission count and age if it outlives the TTL. The timer does not revoke the
+claim, cancel the write or permit takeover.
+
 Existing operation timeouts/recovery apply; this API does not forcibly cancel
 canonical writes or spawn/kill processes.
 
 Leases exist only in the broker's memory. Broker restart invalidates every old
-token. There is no credential file, journal replay of leases, timer per lease,
+token. There is no credential file, journal replay of leases,
 or automatic resumption under an old token. A reconnected client reacquires
 and reconciles already accepted work by its existing message/request identity.
 A lease change does not cancel or erase canonical invocations already accepted
