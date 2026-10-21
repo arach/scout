@@ -2,6 +2,7 @@ import { createRepoDiffReadHandler, type RepoDiffRead } from "./broker-repo-diff
 import { readProviderQuotas } from "./broker-provider-quota-read.js";
 import { ASSISTANT_CLAIM_HEADER } from "./broker-assistant-claims.js";
 import { handleAttachmentRoute, executeHostAttachmentRead, ATTACHMENT_READ_PATH, type AttachmentHttpDeps } from "./broker-attachments-http.js";
+import { createSessionMaterialsRead } from "./broker-session-materials-read.js";
 import { readObservedSessions, type ObservedSessionReadDeps } from "./broker-observed-sessions-read.js";
 import { MeshFeedback, MeshFeedbackError } from "./mesh-feedback.js";
 import { MeshBridgeManagement, MeshBridgeManagementError } from "./mesh-bridge-management.js";
@@ -509,6 +510,8 @@ export function createBrokerHttpRouter(
 
   const requestReceipts = deps.requestReceipts ?? new BrokerRequestReceipts();
   const readRepoDiff = createRepoDiffReadHandler(deps.readRepoDiff);
+  const readSessionMaterials = createSessionMaterialsRead({ nodeId, readCache: deps.readObservedSessionCache,
+    readEndpoints: runtime.peek ? () => runtime.peek!().endpoints : undefined });
 
   const routeRequest = async function(request: RuntimeHttpRequestLike, response: RuntimeHttpResponseLike): Promise<void> {
   const method = request.method ?? "GET";
@@ -2080,6 +2083,11 @@ export function createBrokerHttpRouter(
     try { json(response, 200, readProviderQuotas(runtime.peek().endpoints, nodeId, url)); }
     catch (error) { json(response, error instanceof TypeError ? 400 : 503, { error: error instanceof TypeError ? "invalid_quota_query" : "provider_quotas_unavailable" }); }
     return;
+  }
+
+  if (method === "GET" && url.pathname === "/v1/observed-sessions/materials") {
+    if (request.transportContext?.transport === "remote" || request.transportContext?.guest) { json(response, 403, { error: "forbidden" }); return; }
+    const result = await readSessionMaterials(url); json(response, result.status, result.body); return;
   }
 
   if (method === "GET" && (url.pathname === "/v1/observed-sessions" || url.pathname === "/v1/observed-sessions/resolve")) {
