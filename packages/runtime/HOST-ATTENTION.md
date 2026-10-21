@@ -1,5 +1,11 @@
 # Machine-local tmux attention
 
+`detectClaudePermissionDialog` reads Claude's permission-dialog grammar in a
+backend-neutral module. `detectClaudeTmuxHostAttention` and
+`ClaudeTmuxAttentionDialog` remain compatibility aliases of that detector and
+`ClaudePermissionDialog`. Both collectors depend on the shared leaf module;
+the Herdr collector does not import the tmux entrypoint.
+
 Import `detectClaudeTmuxHostAttention`, `collectTmuxHostAttention` and
 `TMUX_HOST_ATTENTION_LIMITS` from `@openscout/runtime/host-attention`.
 Importing this subpath does not enumerate hosts, capture panes, spawn processes

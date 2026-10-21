@@ -1,7 +1,7 @@
 /** Injected local reads only. No default transport, host enumeration or actuation. */
 import { createHash } from "node:crypto";
 import type { HerdrHostAttentionBinding, HerdrHostAttentionObservation, HerdrHostAttentionRead, HerdrHostAttentionTarget } from "@openscout/protocol";
-import { detectClaudeTmuxHostAttention } from "./host-attention.js";
+import { detectClaudePermissionDialog } from "./claude-permission-dialog.js";
 
 export const HERDR_HOST_ATTENTION_LIMITS = Object.freeze({
   maxCandidates: 24, captureConcurrency: 6, captureTimeoutMs: 2_000,
@@ -90,7 +90,7 @@ export async function collectHerdrHostAttention(input: {
         row.coverage.truncated = value.truncated || bytes > hard.maxCaptureBytes;
         if (row.coverage.truncated) { row.availability = "partial"; row.reason = "capture_truncated"; continue; }
         row.availability = "available"; row.reason = null;
-        const dialog = detectClaudeTmuxHostAttention(value.body);
+        const dialog = detectClaudePermissionDialog(value.body);
         if (dialog) row.prompt = {
           title: dialog.title, summary: dialog.summary, detail: dialog.detail, promptIdentity: null,
           promptVersion: `sha256:${createHash("sha256").update(JSON.stringify([

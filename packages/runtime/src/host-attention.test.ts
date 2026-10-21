@@ -2,7 +2,8 @@ import { describe, expect, spyOn, test } from "bun:test";
 import type { TmuxHostAttentionTarget } from "@openscout/protocol";
 import {
   collectTmuxHostAttention as collect, detectClaudeTmuxHostAttention as detect,
-  TMUX_HOST_ATTENTION_LIMITS as limits,
+  TMUX_HOST_ATTENTION_LIMITS as limits, detectClaudePermissionDialog,
+  type ClaudePermissionDialog, type ClaudeTmuxAttentionDialog,
 } from "./host-attention.js";
 import { livePermissionPrompt as pane } from "./test-helpers/tmux-host-attention-fixture.test.js";
 
@@ -18,6 +19,12 @@ async function version(body = pane, row = target()) {
 }
 
 describe("pure Claude tmux dialog detector", () => {
+  test("the old detector and dialog type remain aliases of the backend-neutral grammar", () => {
+    expect(detect).toBe(detectClaudePermissionDialog);
+    const current: ClaudePermissionDialog | null = detectClaudePermissionDialog(pane);
+    const compatible: ClaudeTmuxAttentionDialog | null = current;
+    expect(compatible).toEqual(detect(pane));
+  });
   test("preserves the active permission fixture and bounded previews", () => {
     expect(detect(pane)).toMatchObject({
       title: "Claude needs permission", summary: "Permission rule Bash(curl:*) requires confirmation.",
