@@ -12,7 +12,7 @@ union, including a provider/role-worker overlap at the pairing boundary:
 | stdio | stderr | 2 | Standard process ABI |
 | roleCustody | parentChannel | 3 | Existing SDK-owned EOF parent channel |
 | roleCustody | reservedContext | 4 | Reserved, ignored by current workers |
-| extensionApi2 | context | 5 | Reserved for the forthcoming context-only loader |
+| extensionApi2 | context | 5 | API-2 context-only loader target |
 | extensionApi2 | credential | 6 | Reserved only; credential transport comes last |
 | roleCustody | fence | 7 | Existing anchored role lifetime fence |
 
@@ -32,6 +32,8 @@ builds the actual worker mapping from the view; `DirectChildren` calls it.
 `mappingCopy` uses `MAX_INHERITED_DESCRIPTOR_SLOT` so borrowed mapping sources
 are copied above every reserved target. The ceiling remains 7 today. This does
 not change descriptor ownership, CLOEXEC, FFI/backend gates or fence authority.
+Parent-side numeric mapping sources must be CLOEXEC-marked copies duplicated
+above `MAX_INHERITED_DESCRIPTOR_SLOT`, as the carrier layout already does.
 
 The registry is pure and deeply frozen. `assertInheritedDescriptorRegistry`
 checks every pair implicitly, both populated and reserved purposes, on import
@@ -57,13 +59,14 @@ leave the credential slot unused. The later credential slice must select
 Both channels must close before a provider calls a launcher or starts a child.
 Do not forward worker parent/fence descriptors or arbitrary parent FDs.
 
-This PR does not edit the API-1 runner or `packages/runtime/package.json`, which
-belong to open loader/read-half lanes. The dedicated public subpath
-`@openscout/runtime/inherited-descriptors` is a release dependency for E1's
-loader slice, to be added by that owner. Do not import the runtime root or
-custody implementation just to reach these constants, and do not describe an
-unexported source module as a released package capability. Current internal
-SDK imports use a relative module import. No API-2 transport is enabled here.
+The dedicated public subpath `@openscout/runtime/inherited-descriptors` exports
+this pure registry with Bun-source, built-ESM and declaration targets. Its
+presence in a packed artifact must be verified; a source export alone is not a
+released package capability. Internal SDK imports remain relative. The CLI's
+context-only slice uses the extension target, without importing custody or
+changing the API-1 runner's transport. See
+[the invocation contract](../../docs/extension-context.md). No credential channel
+is enabled by this registry or the context-only slice.
 
 The test restores the former extension 3/4 proposal and requires a collision,
 checks each worker slot against extension channels, and inserts a new fragment

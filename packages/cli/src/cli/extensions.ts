@@ -1,3 +1,5 @@
+import { runScoutExtensionWithContext } from "./extension-context-runner.ts";
+import { contextRefusal, type ScoutExtensionContext } from "./extension-context.ts";
 import { spawn } from "node:child_process";
 import { constants as osConstants } from "node:os";
 import type { ScoutExtension } from "@openscout/runtime/scout-extensions";
@@ -10,7 +12,15 @@ type Env = NodeJS.ProcessEnv;
  * stops the extension too instead of orphaning it. Ctrl-C already reaches the
  * extension through the terminal's process group, so scout only waits for it.
  */
-export async function runScoutExtension(extension: ScoutExtension, args: readonly string[], env: Env): Promise<number> {
+export async function runScoutExtension(extension: ScoutExtension, args: readonly string[], env: Env,
+  invocation?: { frame: ScoutExtensionContext; selectionEnv: Env }): Promise<number> {
+  if (extension.api === 2) {
+    if (!invocation) contextRefusal(extension.name);
+    return runScoutExtensionWithContext(extension, args, env, invocation.frame, invocation.selectionEnv);
+  }
+  return runScoutApi1Extension(extension, args, env);
+}
+async function runScoutApi1Extension(extension: ScoutExtension, args: readonly string[], env: Env): Promise<number> {
   const child = spawn(extension.command, args, { env, stdio: "inherit" });
   const forward = (signal: NodeJS.Signals) => { child.kill(signal); };
   const wait = () => {};

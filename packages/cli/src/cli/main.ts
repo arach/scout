@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import { captureScoutExtensionSelection, rememberScoutExtensionSelection } from "./extension-context.ts";
 import { ScoutCommandUnavailableError, renderScoutCommandUnavailable } from "./command-unavailable.ts";
 import { runScoutDiscovery } from "./discovery.ts";
 import { SCOUT_APP_VERSION } from "../lib/shared/product.ts";
@@ -28,8 +30,9 @@ try {
       // Scout terminal or agent was launched with, else prod.
       selectCliOpenScoutInstance(process.env);
     }
-    applyOpenScoutInstanceEnvironment(process.env);
+    const selected = applyOpenScoutInstanceEnvironment(process.env);
     assertOpenScoutInstanceIsolation("scout");
+    rememberScoutExtensionSelection(captureScoutExtensionSelection({ layout: selected.layout, env: process.env, home: homedir(), uid: process.getuid?.() ?? -1, cwd: process.cwd() }));
     const help = preflightLifecycle(process.argv.slice(2));
     if (help !== null) console.log(help);
     else await import("./main-dispatch.ts");

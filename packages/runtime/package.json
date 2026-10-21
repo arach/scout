@@ -13,6 +13,12 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./inherited-descriptors": {
+      "bun": "./src/inherited-descriptors.ts",
+      "types": "./dist/inherited-descriptors.d.ts",
+      "import": "./dist/inherited-descriptors.js",
+      "default": "./dist/inherited-descriptors.js"
+    },
     "./jetstream": {
       "bun": "./src/jetstream/index.ts",
       "types": "./dist/jetstream/index.d.ts",
