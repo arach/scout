@@ -19,6 +19,7 @@ const ALLOWLIST = new Set([
   "client.ts",
   "protocol/primitives.ts",
   "protocol/approval-normalization.ts",
+  "protocol/prompt-parts.ts",
   "model-context-window.ts",
   "adapters/codex/context-window.ts",
   "model-catalog.ts",
