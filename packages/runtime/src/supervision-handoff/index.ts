@@ -1,3 +1,4 @@
+import { captureLegacyRole, inspectLegacyRole, type LegacyRoleSources, type RoleAbsence } from "./role-absence.js";
 import { randomBytes } from "node:crypto";
 import { HandoffStore, authorizationHash, policyHash, receiptKey, type CustodyTransaction } from "./store.js";
 import { HANDOFF_PROTOCOL, refuse, requireRole, type Absence, type AuthorizationIntent, type ExactChild,
@@ -56,6 +57,8 @@ export interface EffectPermit {
 }
 export interface RoleCustody {
   ownership(): Ownership;
+  captureLegacyInventory(captureId: string): Promise<void>;
+  inspectLegacyAbsence(): Promise<RoleAbsence>;
   assertCurrent(kind?: "start" | "stop"): void;
   receipt(id: string): MutationReceipt | undefined;
   begin(id: string, operation: MutationReceipt["operation"]): void;
@@ -67,12 +70,19 @@ export interface RoleCustody {
  * is no daemon wiring, HTTP authority, source discovery or automatic enrollment. */
 export class SupervisionHandoff {
   private readonly store: HandoffStore;
-  constructor(readonly instance: SelectedInstance, private readonly inspector: HandoffInspector) {
-    this.instance = Object.freeze({ ...instance }); this.store = new HandoffStore(this.instance);
+  constructor(readonly instance: SelectedInstance, private readonly inspector: HandoffInspector, private readonly legacySources: LegacyRoleSources = {}) {
+    this.instance = Object.freeze({ ...instance }); this.store = new HandoffStore(this.instance); this.legacySources = Object.freeze({ ...legacySources });
   }
   stage(policy: FloorPolicy, approve: StageApproval) { return this.store.stage(policy, approve); }
   handshake(hello: { protocol: number; instance: SelectedInstance }) { return this.store.handshake(hello); }
   read(role: HandoffRole) { return this.store.read(role); }
+  async inspectRoleAbsence(role: HandoffRole, generation: number): Promise<RoleAbsence> {
+    requireRole(role);
+    return this.store.exclusive(async tx => {
+      if (tx.state.roles[role].generation !== generation) refuse("ownership_changed");
+      return inspectLegacyRole(tx, role, this.legacySources);
+    }).catch(() => ({ state: "unknown" as const }));
+  }
   pendingReceipts(role: HandoffRole, generation: number) { return this.store.pendingReceipts(role, generation); }
   authorize(intent: AuthorizationIntent, approve: OperatorApproval) { return this.store.authorize(intent, approve); }
   closeRollback(approve: StageApproval) { return this.store.closeRollback(approve); }
@@ -162,6 +172,8 @@ export class SupervisionHandoff {
       const receipt = (id: string) => tx.state.receipts[key(id)];
       const lease: RoleCustody = {
         ownership: () => { assertCurrent(); return structuredClone(state); }, assertCurrent,
+        captureLegacyInventory: async captureId => { assertCurrent(); await captureLegacyRole(tx, role, captureId, this.legacySources); assertCurrent(); },
+        inspectLegacyAbsence: async () => { assertCurrent(); const proof = await inspectLegacyRole(tx, role, this.legacySources); assertCurrent(); return proof; },
         receipt: id => { assertCurrent(); return structuredClone(receipt(id)); },
         begin: (id, operation) => {
           assertCurrent();
@@ -254,3 +266,5 @@ export class SupervisionHandoff {
 }
 
 export { createProcessEvidenceReader, type ProcessEvidenceReader, type ProcessSample, type ProcessSampleResult, type ProcessComparison } from "./process-evidence.js";
+
+export { LEGACY_ROLE_SURFACES, type LegacyResource, type LegacyRoleCapture, type LegacyRoleContext, type LegacyRoleSources, type RoleAbsence } from "./role-absence.js";

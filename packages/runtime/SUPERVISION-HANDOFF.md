@@ -326,3 +326,15 @@ absence inspector, exact-child custody/exit proof or signaling handle. No
 existing handoff or pending-receipt contract changes, and it opens no production
 gate. Complete native role coverage, protected effects and exit proofs remain
 required before wiring or live handoff.
+
+## Legacy capture and conditional absence (still inactive)
+
+The additive [role capture/absence surface](SUPERVISION-ROLE-ABSENCE.md) stores
+complete generation-bound resource captures under the existing custody lock
+and journal. It can inspect all recorded process and non-process obligations;
+missing capture producers or native source fences remain unknown. Executable
+change alone is occupied, not an exit proof. The current legacy runtime has no
+complete durable inventory, so no production absence adapter is enabled here.
+The new scoped reader avoids nested flock. Its inherited proof is limited to
+legacy bootstrap; P1 births require further current-owner coverage. Readiness,
+private activation, protected signaling/exit and operator rollout remain closed.
