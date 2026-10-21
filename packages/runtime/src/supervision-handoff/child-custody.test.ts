@@ -1,12 +1,14 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DirectChildren, directChildCapability } from "./child-custody.js";
+import * as sigchld from "./sigchld-disposition.js";
 import { RetainedChild, type OwnedChildHandle } from "./retained-child.js";
 import { nativeDarwinProcessSource } from "./darwin-process-source.js";
 import { SupervisionHandoff, HANDOFF_ROLES, LEGACY_ROLE_SURFACES, productionHandoffReadiness,
   type Observation, type SelectedInstance, type ExactChild, type EffectPermit } from "./index.js";
+import type { DirectChildCommand } from "./child-custody.js";
 
 const roots: string[] = [];
 afterEach(() => { for (const path of roots.splice(0)) rmSync(path, { recursive: true, force: true }); });
@@ -65,6 +67,35 @@ test("direct child custody is opt-in, does not adopt PIDs and leaves readiness c
   expect(() => registry.spawn("web", 2, "effect", { argv: [process.execPath, "-e", ""], cwd: selected.supportDirectory, env: {} })).toThrow("child_custody_not_enabled");
   expect(() => registry.signal({ effectId: "unowned" } as ExactChild, "SIGTERM")).toThrow("child_custody_lost");
   expect(productionHandoffReadiness().ready).toBe(false);
+});
+
+test("unproven backend preserves opt-in, duplicate, shape, mapping, then capability refusal order", () => {
+  const selected = instance(), registry = new DirectChildren(selected, true);
+  const valid: DirectChildCommand = { argv: [process.execPath, "-e", ""], cwd: selected.supportDirectory, env: {} };
+  const disposition = spyOn(sigchld, "probeSigchldDisposition").mockReturnValue({ safe: false, reason: "sigchld_probe_unavailable" });
+  try {
+    const capability = directChildCapability(); expect(capability.available).toBe(false);
+    if (capability.available) throw new Error("fixture must remove direct-child capability");
+    const malformed = { ...valid, stdio: ["pipe", "ignore", "ignore"] } as unknown as DirectChildCommand;
+    expect(() => new DirectChildren(selected).spawn("web", 2, "started", malformed)).toThrow("child_custody_not_enabled");
+    // Represent already-retained history without starting a process or granting capability.
+    (Reflect.get(registry, "held") as Map<string, unknown>).set("started", { retained: fake().retained, role: "web", generation: 2 });
+    expect(() => registry.spawn("web", 2, "started", malformed)).toThrow("child_effect_already_started");
+    for (const bad of [
+      { ...valid, argv: [undefined] }, { ...valid, argv: [process.execPath, , "argument"] },
+      { ...valid, cwd: undefined }, { ...valid, cwd: "/bad\0cwd" },
+      { ...valid, env: "not-an-environment" }, { ...valid, env: [] },
+      { ...valid, env: { "bad=key": "value" } }, { ...valid, env: { KEY: "bad\0value" } },
+      malformed, { ...valid, carrier: "role-lifetime/7", parentChannel: 3 },
+    ]) expect(() => registry.spawn("web", 2, "new", bad as DirectChildCommand, 7)).toThrow("invalid_child_command");
+    expect(() => registry.spawn("web", 2, "new", valid, 7)).toThrow("carrier_mapping_required");
+    const carrier: DirectChildCommand = { ...valid, stdio: ["ignore", "ignore", "ignore"], carrier: "role-lifetime/7" };
+    expect(() => registry.spawn("web", 2, "new", carrier)).toThrow("carrier_mapping_required");
+    expect(() => registry.spawn("web", 2, "new", carrier, 2)).toThrow("carrier_mapping_required");
+    expect(() => registry.spawn("web", 2, "new", valid)).toThrow(capability.reason);
+    expect(() => registry.spawn("web", 2, "new", carrier, 7)).toThrow(capability.reason);
+    expect(productionHandoffReadiness().ready).toBe(false);
+  } finally { disposition.mockRestore(); }
 });
 
 const nativeTest = directChildCapability().available ? test : test.skip;

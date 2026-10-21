@@ -47,14 +47,18 @@ export class DirectChildren {
   constructor(private readonly instance: SelectedInstance, private readonly enabled = false) {}
   spawn(role: HandoffRole, generation: number, effectId: string, command: DirectChildCommand, carrierDescriptor?: number): DirectChildRecord {
     if (!this.enabled) refuse("child_custody_not_enabled");
-    requireDirectChildCapability();
     if (this.held.has(effectId)) refuse("child_effect_already_started");
-    if (!Array.isArray(command.argv) || !command.argv.length || !isAbsolute(command.argv[0]!)
-      || command.argv.some(arg => typeof arg !== "string" || arg.includes("\0")) || !isAbsolute(command.cwd)
-      || !command.env || Object.entries(command.env).some(([key, value]) => !key || /[=\0]/.test(key) || typeof value !== "string" || value.includes("\0"))
+    if (!command || !Array.isArray(command.argv) || !command.argv.length || typeof command.argv[0] !== "string" || !isAbsolute(command.argv[0])
+      || Array.from(command.argv).some(arg => typeof arg !== "string" || arg.includes("\0"))
+      || typeof command.cwd !== "string" || !isAbsolute(command.cwd) || command.cwd.includes("\0")
+      || !command.env || typeof command.env !== "object" || Array.isArray(command.env)
+      || Object.entries(command.env).some(([key, value]) => !key || /[=\0]/.test(key) || typeof value !== "string" || value.includes("\0"))
       || (command.stdio !== undefined && (!Array.isArray(command.stdio) || command.stdio.length !== 3 || [0, 1, 2].some(index => command.stdio![index] !== "ignore" && command.stdio![index] !== "inherit")))
       || (command.carrier !== undefined && (command.carrier !== "role-lifetime/7" || Object.keys(command).some(key => !["argv", "cwd", "env", "stdio", "carrier"].includes(key))))) refuse("invalid_child_command");
     if (command.carrier ? !Number.isSafeInteger(carrierDescriptor) || carrierDescriptor! < 3 : carrierDescriptor !== undefined) refuse("carrier_mapping_required");
+    // Refusal of malformed input (and a retained duplicate) is host-independent.
+    // No process evidence, descriptor mapping or spawn happens before this gate.
+    requireDirectChildCapability();
     if (command.carrier) { const capability = carrierChildCapability(); if (!capability.available) refuse(capability.reason); }
     const reader = createProcessEvidenceReader(this.instance); // validate selection before spawn
     let reaped = false, waitError = false;

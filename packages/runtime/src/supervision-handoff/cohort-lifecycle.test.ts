@@ -8,8 +8,9 @@ import { SupervisionHandoff, EFFECT_EXCLUSION_CAPABILITY, ChildRoleCustody, prof
   type Observation, type Readiness } from "./index.js";
 import { nativeDarwinProcessSource } from "./darwin-process-source.js";
 import { CustodyTransaction, HandoffStore } from "./store.js";
-import { DirectChildren } from "./child-custody.js";
+import { DirectChildren, directChildCapability } from "./child-custody.js";
 import * as layout from "./carrier-layout.js";
+import * as sigchld from "./sigchld-disposition.js";
 
 const caps = [EFFECT_EXCLUSION_CAPABILITY];
 const carrierTest = carrierChildCapability().available ? test : test.skip;
@@ -100,27 +101,34 @@ carrierTest("profile start uses committed exclusion, retained mapping and one in
   expect(productionHandoffReadiness().ready).toBe(false);
 });
 
-test.each(["raw", "missing-mapping", "missing-stdio", "numeric-fd", "pipes", "sparse-stdio", "raw-parent", "raw-context", "old-layout"])("profile start refuses unreviewed spawn boundary: %s", async reason => {
+async function spawnBoundaryRefusal(reason: string, unproven = false) {
   const f = await fixture();
-  await f.sdk.exclusive("R0", "web", 1, async lease => {
-    lease.begin("start", "start");
-    await expect(lease.perform("start", "start", async permit => {
-      if (reason === "raw") { permit.atEffect(() => {}); return; }
-      const cmd = f.command();
-      if (reason === "missing-mapping") delete cmd.carrier;
-      if (reason === "missing-stdio") delete cmd.stdio;
-      if (reason === "numeric-fd") (cmd as any).carrier = 3;
-      if (reason === "pipes") (cmd as any).stdio = ["pipe", "ignore", "ignore"];
-      if (reason === "sparse-stdio") (cmd as any).stdio = new Array(3);
-      if (reason === "raw-parent") (cmd as any).parentChannel = 3;
-      if (reason === "raw-context") (cmd as any).inheritedContext = 4;
-      if (reason === "old-layout") (cmd as any).carrier = "role-lifetime/3";
-      permit.spawnChild(cmd);
-    })).rejects.toThrow(reason === "raw" ? "carrier_spawn_required" : ["pipes", "sparse-stdio", "raw-parent", "raw-context"].includes(reason) ? "invalid_child_command" : "carrier_mapping_required");
-  });
+  // Only remove capability; never grant an unaudited host permission to spawn.
+  const disposition = unproven ? spyOn(sigchld, "probeSigchldDisposition").mockReturnValue({ safe: false, reason: "sigchld_probe_unavailable" }) : undefined;
+  try {
+    if (unproven) expect(directChildCapability()).toMatchObject({ available: false });
+    await f.sdk.exclusive("R0", "web", 1, async lease => {
+      lease.begin("start", "start");
+      await expect(lease.perform("start", "start", async permit => {
+        if (reason === "raw") { permit.atEffect(() => {}); return; }
+        const cmd = f.command();
+        if (reason === "missing-mapping") delete cmd.carrier;
+        if (reason === "missing-stdio") delete cmd.stdio;
+        if (reason === "numeric-fd") (cmd as any).carrier = 3;
+        if (reason === "pipes") (cmd as any).stdio = ["pipe", "ignore", "ignore"];
+        if (reason === "sparse-stdio") (cmd as any).stdio = new Array(3);
+        if (reason === "raw-parent") (cmd as any).parentChannel = 3;
+        if (reason === "raw-context") (cmd as any).inheritedContext = 4;
+        if (reason === "old-layout") (cmd as any).carrier = "role-lifetime/3";
+        permit.spawnChild(cmd);
+      })).rejects.toThrow(reason === "raw" ? "carrier_spawn_required" : ["pipes", "sparse-stdio", "raw-parent", "raw-context"].includes(reason) ? "invalid_child_command" : "carrier_mapping_required");
+    });
+  } finally { disposition?.mockRestore(); }
   const result = await f.retire(); expect(result.exclusion).toMatchObject({ carriers: "excluded", descendants: "unproven" });
   expect(await f.store.exclusive(async tx => tx.state.receipts["web:1:start"])).toMatchObject({ state: "done", error: "cohort_retired", effects: [{ state: "retired" }] });
-});
+}
+test.each(["raw", "missing-mapping", "missing-stdio", "numeric-fd", "pipes", "sparse-stdio", "raw-parent", "raw-context", "old-layout"])("profile start refuses unreviewed spawn boundary: %s", reason => spawnBoundaryRefusal(reason));
+test.each(["pipes", "sparse-stdio", "raw-parent", "raw-context"])("unproven backend still refuses malformed profile spawn: %s", reason => spawnBoundaryRefusal(reason, true));
 
 test.each(["stop", "restart"] as const)("ordinary profile %s receipts refuse before changing intent", async operation => {
   const f = await fixture();
