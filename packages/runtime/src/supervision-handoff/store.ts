@@ -1,3 +1,4 @@
+import type { LegacyRoleCapture } from "./role-absence.js";
 import type { Pointer } from "bun:ffi";
 import { createRequire } from "node:module";
 import { createHash, randomBytes } from "node:crypto";
@@ -11,7 +12,7 @@ import { HANDOFF_CAPABILITY, HANDOFF_PROTOCOL, HANDOFF_ROLES, requireRole, refus
 export type CustodyState = { version: 1; instance: SelectedInstance; policy: FloorPolicy;
   roles: Record<HandoffRole, Ownership>;
   authorizations: Record<string, { intent: AuthorizationIntent; state: "issued" | "reserved" | "used" | "revoked"; policy: string }>;
-  receipts: Record<string, MutationReceipt> };
+  receipts: Record<string, MutationReceipt>; legacyCaptures?: Record<string, { manifest: LegacyRoleCapture; authorization: string }> };
 const MAX_BYTES = 16 * 1024 * 1024;
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value, (_key, item) =>
   item && typeof item === "object" && !Array.isArray(item)
