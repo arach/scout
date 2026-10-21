@@ -132,9 +132,10 @@ Capture/fence/resource contexts refer to the captured R0 generation;
 `liveOccupants` refers to the current owner generation.
 
 **Bootstrap limit:** an inherited R0 capture cannot cover resources later born
-under P1. Once the current P1 generation has a recorded child birth, this slice
+under P1. Once the current P1 generation has a recorded start effect, this slice
 returns unknown even after a later stop receipt. Full current-owner native
 inventory/descendant exit integration is still required for replacement starts.
+A recovered start with no recorded child still counts as a birth attempt.
 This conservative gate prevents a legacy-only inventory from reporting an
 active new role absent. It is not a production restart implementation.
 

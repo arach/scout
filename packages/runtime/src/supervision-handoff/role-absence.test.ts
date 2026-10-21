@@ -264,3 +264,33 @@ test("changing the authorized floor policy invalidates its capture certificate",
   expect(await f.sdk.inspectRoleAbsence(f.role, 1)).toEqual({ state: "unknown" });
   await expect(f.capture()).rejects.toThrow("invalid_authorization");
 });
+
+test("a recovered P1 start without a recorded child still counts as a birth attempt", async () => {
+  const f = await fixture(); await f.drain(); await f.capture(); await f.sdk.transfer(f.role, f.handoff);
+  let admitted = 0;
+  await expect(f.sdk.exclusive("P1", f.role, 2, async lease => {
+    lease.begin("recovered-birth-attempt", "start");
+    await lease.perform("recovered-birth-attempt", "start", async permit => {
+      permit.atEffect(() => { admitted++; });
+      // A child may exist, but the adapter never records its after-observation.
+      throw new Error("crashed-after-admission");
+    });
+  })).rejects.toThrow("crashed-after-admission");
+  expect(admitted).toBe(1);
+  expect(await f.reopen().inspectRoleAbsence(f.role, 2)).toEqual({ state: "unknown" });
+  const authorization = await f.sdk.authorize({ role: f.role, generation: 2, source: "P1", target: "P1",
+    action: "recover", requestId: "recovered-birth-attempt" }, async () => true);
+  await f.reopen().exclusive("P1", f.role, 2, async lease => {
+    await lease.recover("recovered-birth-attempt", authorization);
+    const receipt = lease.receipt("recovered-birth-attempt")!;
+    expect(receipt.state).toBe("done");
+    expect(receipt.error).toBe("recovered_absent");
+    expect(receipt.effects).toHaveLength(1);
+    expect(receipt.effects[0]!.state).toBe("confirmed");
+    expect(receipt.effects[0]!.child).toBeUndefined();
+    // Settling the receipt cannot certify descendants or erase the birth attempt.
+    expect(await lease.inspectLegacyAbsence()).toEqual({ state: "unknown" });
+  });
+  expect(await f.reopen().inspectRoleAbsence(f.role, 2)).toEqual({ state: "unknown" });
+  expect(admitted).toBe(1); // Recovery observed; it did not repeat the effect.
+});
