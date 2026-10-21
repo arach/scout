@@ -473,3 +473,23 @@ export function renderHerdrWorkspaceDigest(digest: HerdrWorkspaceDigest): string
 
   return lines.join("\n");
 }
+
+/** Local, TTL-cached host observation; never a verified Scout session binding. */
+export type HerdrWorkspaceAvailability = Exclude<import("./observed-sessions.js").ObservedSessionInventory["availability"], "unknown">;
+export type HerdrWorkspacesRead = {
+  schema: "scout.herdr-workspaces/v1";
+  nodeId: string;
+  scannedAt: number | null;
+  availability: HerdrWorkspaceAvailability;
+  reason: "not_scanned" | "session_list_unavailable" | null;
+  requestedSession: string | null;
+  count: number;
+  digests: Array<HerdrWorkspaceDigest & { availability: HerdrWorkspaceAvailability }>;
+  truncated: boolean;
+  coverage: {
+    kind: "ttl_cached_probes";
+    scope: "this_host_only";
+    listedSessions: number | null;
+    limits: { sessions: number; enumeratedSessions: number; workspacesPerSession: number; tabsPerSession: number; inputPanesPerSession: number; emittedPanesPerSession: number; leadsPerSession: number; concurrentSessions: number };
+  };
+};
