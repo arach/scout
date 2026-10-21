@@ -192,6 +192,8 @@ export type ScoutBrokerCapabilityAvailabilityQuery = {
 };
 
 export type ActiveScoutBrokerService = {
+  /** Local assistant answerer leases; never included in snapshots. */
+  assistantClaims?: import("./broker-assistant-claims.js").BrokerAssistantClaims;
   baseUrl: string;
   matchesBaseUrl?: (baseUrl: string) => boolean;
   readHealth: () => Promise<ScoutBrokerHealthPayload>;

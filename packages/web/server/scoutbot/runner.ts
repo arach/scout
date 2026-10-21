@@ -1,3 +1,4 @@
+import { assistantClaimHeaders, startAssistantAnswerer } from "./answerer-claim.ts";
 import { handleDiagnosticCommand } from "./report.ts";
 import type {
   ScoutBrokerAgentRecord,
@@ -121,44 +122,28 @@ export async function startScoutbotRunner(
     log.info("stopping prior runner before starting fresh");
     const prior = registry.handle;
     registry.handle = null;
-    void prior.stop().catch(() => undefined);
+    await prior.stop().catch(() => undefined);
   }
 
-  const boot = await ensureScoutbotBootstrapped({
-    baseUrl,
-    currentDirectory: options.currentDirectory,
-    threadMap,
-    log,
+  const claimant = startAssistantAnswerer({ mode: "web",
+    request: (path, init) => fetch(new URL(path, baseUrl), init), warn: message => log.warn(message),
+  }, async signal => {
+    const boot = await ensureScoutbotBootstrapped({ baseUrl, currentDirectory: options.currentDirectory, threadMap, log });
+    if (!boot || signal.aborted) return;
+    await runEventLoop({ baseUrl, threadMap, signal, log });
   });
-  if (!boot) {
-    return inertHandle();
-  }
-
-  const controller = new AbortController();
-  const loop = runEventLoop({
-    baseUrl,
-    threadMap,
-    signal: controller.signal,
-    log,
-  });
+  await claimant.ready;
 
   const handle: ScoutbotRunnerHandle = {
     async stop() {
-      controller.abort();
-      try { await loop; } catch { /* ignore */ }
+      await claimant.stop();
       const current = runnerRegistry();
       if (current.handle === handle) current.handle = null;
     },
     async getThreads() {
-      const prepared = await ensureScoutbotBootstrapped({
-        baseUrl,
-        currentDirectory: options.currentDirectory,
-        threadMap,
-        log,
-      });
-      if (!prepared) {
-        throw new Error("broker unreachable");
-      }
+      const ctx = await loadScoutBrokerContext(baseUrl);
+      if (!ctx) throw new Error("broker unreachable");
+      await threadMap.ensureDefaultThread({ snapshot: ctx.snapshot, transport: "codex_app_server", transportSessionId: null });
       return threadMap.list();
     },
     async createThread(input) {
@@ -184,7 +169,7 @@ export async function startScoutbotRunner(
     },
   };
   registry.handle = handle;
-  log.info("runner ready: transport=codex_app_server");
+  log.info("runner started; broker claim selects the active answerer");
   return handle;
 }
 
@@ -195,17 +180,8 @@ export async function postScoutbotOperatorMessage(
   const baseUrl = input.brokerBaseUrl ?? resolveScoutBrokerUrl();
   const threadMap = input.threadMap ?? new ScoutbotThreadMapStore();
 
-  if (input.bootstrap) {
-    const prepared = await ensureScoutbotBootstrapped({
-      baseUrl,
-      currentDirectory: input.currentDirectory,
-      threadMap,
-      log,
-    });
-    if (!prepared) {
-      return { usedBroker: false, invokedTargets: [], unresolvedTargets: [] };
-    }
-  }
+  // UI posting is independent of answerer ownership. Thread resolution below
+  // initializes a default thread without registering or waking the assistant.
   const thread = await resolvePostTargetThread({
     baseUrl,
     threadMap,
@@ -282,23 +258,6 @@ function stopLegacyRunner(log: ScoutbotRunnerLog): void {
   if (legacy) legacy.handle = null;
   log.info("stopping legacy scoutbot runner");
   void handle.stop().catch(() => undefined);
-}
-
-function inertHandle(): ScoutbotRunnerHandle {
-  return {
-    inert: true,
-    async stop() { /* inert */ },
-    async getThreads() { throw new Error("scoutbot runner is inert because broker is unreachable"); },
-    async createThread() { throw new Error("broker unreachable"); },
-    async postOperatorMessage(_input?: {
-      body?: string;
-      threadId?: string | null;
-      attachments?: OutgoingAttachmentInput[];
-      replyToMessageId?: string | null;
-    }) {
-      return { usedBroker: false, invokedTargets: [], unresolvedTargets: [] };
-    },
-  };
 }
 
 async function ensureScoutbotBootstrapped(input: {
@@ -981,7 +940,7 @@ async function postJson<T = { ok: true }>(
   try {
     const res = await fetch(new URL(path, baseUrl), {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...assistantClaimHeaders() },
       body: JSON.stringify(body),
       ...(controller ? { signal: controller.signal } : {}),
     });

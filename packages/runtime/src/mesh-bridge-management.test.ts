@@ -67,7 +67,7 @@ describe("runtime bridge management", () => {
     mkdirSync(join(dir, "runtime"));
     writeFileSync(meshBridgeStatePath(dir), JSON.stringify({ state: "running", pid: 123, updatedAt: 1000, token: "private-value", entrypoint: "/tmp/internal-path" }));
     const observed = manager.read().observed;
-    expect(observed).toEqual({ state: "running", pid: 123, updatedAt: 1000, ageMs: 99_000, stale: true });
+    expect(observed).toEqual({ state: "running", pid: 123, extensionState:"unavailable", artifactDigest:null, extensionVersion:null, updatedAt: 1000, ageMs: 99_000, stale: true });
     expect(JSON.stringify(manager.read())).not.toMatch(/private-value|internal-path/);
   });
   test("failed lifecycle persistence refuses the mutation; queued changes do not lose state", async () => {

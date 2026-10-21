@@ -1,3 +1,4 @@
+import { assistantClaimHeaders } from "../answerer-claim.ts";
 /**
  * Scoutbot's line to the broker: the local Unix socket and nothing else.
  * There is no HTTP fallback on purpose; if the socket is gone the broker is
@@ -51,7 +52,7 @@ export function createScoutbotBrokerLink(input: {
     postJson: async (path, body, options = {}) =>
       readJson(path, await request(path, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...assistantClaimHeaders() },
         body: JSON.stringify(body),
         ...options,
       })),

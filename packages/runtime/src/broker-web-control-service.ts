@@ -2,18 +2,15 @@ import { isAllowedHostWebRequest, type HostWebRequest, type HostWebResponse } fr
 import type { RuntimeChildProcessLike, RuntimeEnv, RuntimeHttpRequestLike, RuntimeSpawnFunction } from "./portable-types.js";
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { closeSync, existsSync, mkdirSync, openSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { closeSync, mkdirSync, openSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { ScoutBrokerChildServiceSnapshots } from "./broker-api.js";
 import { resolveBrokerServiceConfig } from "./broker-process-manager.js";
 import { loadLocalConfig, resolveWebAuthToken, resolveWebPort } from "./local-config.js";
-import {
-  resolveBunExecutable,
-  resolveOpenScoutRepoRoot,
-  resolveRepoEntrypoint,
-} from "./tool-resolution.js";
+import { resolveBunExecutable } from "./tool-resolution.js";
+import { resolveLegacyWebEntry } from "./legacy-app-services.js";
 
 export type WebRecoveryStatus = {
   state: "checking" | "healthy" | "suspect" | "recovering" | "unavailable" | "paused";
@@ -628,38 +625,11 @@ export class BrokerWebControlService {
     if (this.options.resolveEntry) {
       return this.options.resolveEntry();
     }
-    const explicit = this.env.OPENSCOUT_WEB_SERVER_ENTRY?.trim();
-    if (explicit && existsSync(explicit)) {
-      return explicit;
-    }
-
-    const repoRoot = this.resolveRepoRoot();
-    const repoEntry = resolveRepoEntrypoint(repoRoot, "packages/web/server/index.ts");
-    if (repoEntry) {
-      return repoEntry;
-    }
-
-    const candidates = [
-      resolve(this.moduleDirectory, "..", "scout-control-plane-web.mjs"),
-      resolve(this.moduleDirectory, "..", "scout-web-server.mjs"),
-      resolve(this.moduleDirectory, "..", "..", "scout-control-plane-web.mjs"),
-      resolve(this.moduleDirectory, "..", "..", "scout-web-server.mjs"),
-    ];
-    return candidates.find((candidate) => existsSync(candidate)) ?? null;
-  }
-
-  private resolveRepoRoot(): string | null {
-    return resolveOpenScoutRepoRoot({
-      startDirectories: [
-        this.env.OPENSCOUT_SETUP_CWD,
-        this.cwd(),
-        this.moduleDirectory,
-      ],
-    });
+    return resolveLegacyWebEntry(this.env, this.moduleDirectory);
   }
 
   private resolveSetupCwd(): string {
-    return this.env.OPENSCOUT_SETUP_CWD?.trim() || this.resolveRepoRoot() || this.cwd();
+    return this.env.OPENSCOUT_SETUP_CWD?.trim() || this.cwd();
   }
 
   private resolveLogPath(): string {

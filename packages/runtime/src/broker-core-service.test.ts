@@ -920,3 +920,15 @@ test("collaboration history rejects partial or unstable cursors", async () => {
   ]) await expect(service.readCollaborationRecords!(query)).rejects.toThrow("creation-order cursor");
   expect(await service.readCollaborationRecords!({ afterCreatedAt: 1, afterId: "q", orderByCreatedAt: true })).toEqual([]);
 });
+
+
+test("core composition enforces the assistant claim before any client write", async () => {
+  const service = createReadOnlyBrokerCoreService(createRuntimeRegistrySnapshot());
+  const message = { actorId: "scoutbot", body: "answer" } as any;
+  await expect(service.postConversationMessage!(message)).rejects.toThrow("assistant_claim_required");
+  await expect(service.executeCommand({ kind: "conversation.post", message })).rejects.toThrow("assistant_claim_required");
+  const claims = service.assistantClaims!;
+  const lease = claims.acquire("scoutbot", "answerer");
+  expect(await claims.withToken(lease.token, () => service.postConversationMessage!(message))).toEqual({ ok: true });
+  expect(await service.postConversationMessage!({ ...message, actorId: "operator" })).toEqual({ ok: true });
+});

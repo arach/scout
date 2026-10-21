@@ -1,3 +1,4 @@
+import { BrokerAssistantClaims, protectAssistantService } from "./broker-assistant-claims.js";
 import { readMessageRecord } from "./broker-message-records.js";
 import { messageRecordCount, withMessageCapture, materializeMessageRecords } from "./broker-message-records.js";
 import { evaluateScoutCapabilityAvailability } from "@openscout/protocol";
@@ -863,7 +864,7 @@ export function createBrokerCoreService(
     if(query.scope==='agents')return consume(createRuntimeRegistrySnapshot({agents:currentLocalAgentRecords(deps.runtime.peek().agents,deps.nodeId)}));
     return withMessageCapture(deps.runtime.peek().messages,async messages=>{const snapshot=deps.runtime.snapshot();snapshot.messages=messages;return consume(await queryRuntimeRegistrySnapshotAsync(snapshot,query,options));},{...options,stream:true});
   };
-  return {
+  return protectAssistantService({
     baseUrl: deps.baseUrl,
     readHealth: async () => {
       // Synchronous summary only: no detached copy of every historical map.
@@ -981,5 +982,5 @@ export function createBrokerCoreService(
     listMessageReactions: deps.listMessageReactions,
     deliver: deps.deliver,
     invokeAgent: deps.invokeAgent,
-  };
+  }, new BrokerAssistantClaims(["scoutbot"]));
 }

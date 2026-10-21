@@ -739,3 +739,12 @@ describe("BrokerMeshHttpService", () => {
     expect(harness.projectedEntries[0]?.map((entry) => entry.kind)).toEqual(["node.upsert"]);
   });
 });
+
+test("mesh message and invocation ingress cannot adopt an existing local attachment hash", async () => {
+  const harness=createHarness();
+  const managed=message({attachments:[{id:"binding",mediaType:"image/png",blob:{sha256:"a".repeat(64),mediaType:"image/png",byteSize:8}}]});
+  await expect(harness.service.receiveMessageBundle(messageBundle({message:managed}))).rejects.toThrow("attachment_inline_write_required");
+  const invocationMessage={...managed,actorId:invocation().requesterId,id:invocation().messageId!,conversationId:invocation().conversationId!};
+  await expect(harness.service.receiveInvocationBundle(invocationBundle({message:invocationMessage}))).rejects.toThrow("attachment_inline_write_required");
+  expect(harness.applyBundleCalls).toHaveLength(0); expect(harness.committedEntries).toHaveLength(0);
+});

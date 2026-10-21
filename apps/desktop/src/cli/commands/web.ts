@@ -231,8 +231,8 @@ async function runInstall(context: ScoutCommandContext, args: string[], deps: Sc
 
     const unpacked = join(workDirectory, "client");
     mkdirSync(unpacked, { recursive: true });
-    const tar = spawnSync("tar", ["-xzf", tarball, "-C", unpacked], { encoding: "utf8" });
-    if (tar.status !== 0) throw new ScoutCliError(`Couldn't unpack the download: ${(tar.stderr || tar.error?.message || "tar failed").trim()}`);
+    const tar = spawnSync("tar", ["-xzf", tarball, "-C", unpacked], { encoding: "utf8", timeout: 30_000, killSignal: "SIGKILL" });
+    if (tar.status !== 0) throw new ScoutCliError(`Couldn't unpack the download: ${(tar.error?.message || tar.stderr || "tar failed").trim()}`);
     const profile = readWebFullClientProfile(unpacked);
     if (!existsSync(join(unpacked, "index.html")) || profile?.version !== version) {
       throw new ScoutCliError(`The download isn't the full web app for ${version}; not installing it.`);

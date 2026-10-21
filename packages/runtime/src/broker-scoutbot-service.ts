@@ -1,14 +1,11 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, openSync } from "node:fs";
+import { mkdirSync, openSync } from "node:fs";
 import { join } from "node:path";
 
 import { resolveBrokerServiceConfig } from "./broker-process-manager.js";
 import type { RuntimeChildProcessLike, RuntimeEnv, RuntimeSpawnFunction } from "./portable-types.js";
-import {
-  resolveBunExecutable,
-  resolveOpenScoutRepoRoot,
-  resolveRepoEntrypoint,
-} from "./tool-resolution.js";
+import { resolveBunExecutable } from "./tool-resolution.js";
+import { resolveLegacyScoutbotEntry } from "./legacy-app-services.js";
 
 /**
  * Scoutbot runs as its own process beside the broker, the way scout-web does,
@@ -18,7 +15,6 @@ import {
  */
 
 export const DEFAULT_SCOUTBOT_PROCESS_NAME = "scout-bot";
-export const SCOUTBOT_PROCESS_ENTRY = "packages/web/server/scoutbot/process/main.ts";
 
 /** Set in the broker's environment while it runs Scoutbot, so scout-web leaves answering to it. */
 export const SCOUTBOT_PROCESS_ENV = "OPENSCOUT_SCOUTBOT_PROCESS";
@@ -53,16 +49,21 @@ export class BrokerScoutbotService {
 
   constructor(options: BrokerScoutbotServiceOptions) {
     this.options = options;
-    this.env = options.env ?? process.env;
+    // The broker later sets an internal web-answering marker in its own env.
+    // That marker must not replace this service's explicit startup policy.
+    this.env = { ...(options.env ?? process.env) };
     this.spawnImpl = options.spawnProcess
       ?? (spawn as unknown as RuntimeSpawnFunction<RuntimeChildProcessLike>);
   }
 
-  /** Off with OPENSCOUT_SCOUTBOT_PROCESS=0, or when there is no entry to run. */
+  /** Requires explicit enablement and an explicit entry; resolution fails closed. */
   enabled(): boolean {
-    const flag = this.env[SCOUTBOT_PROCESS_ENV]?.trim().toLowerCase();
-    if (flag === "0" || flag === "off" || flag === "false") return false;
-    return this.resolveEntry() !== null;
+    try {
+      return this.resolveEntry() !== null;
+    } catch (error) {
+      this.options.error?.("[openscout-runtime] Scoutbot configuration refused:", error);
+      return false;
+    }
   }
 
   pid(): number | null {
@@ -70,7 +71,7 @@ export class BrokerScoutbotService {
   }
 
   start(): void {
-    if (this.stopping || this.child) return;
+    if (this.stopping || this.child || !this.enabled()) return;
     try {
       this.child = this.spawnScoutbot();
     } catch (error) {
@@ -97,17 +98,7 @@ export class BrokerScoutbotService {
   }
 
   private resolveEntry(): string | null {
-    if (this.options.resolveEntry) return this.options.resolveEntry();
-    const explicit = this.env.OPENSCOUT_SCOUTBOT_ENTRY?.trim();
-    if (explicit && existsSync(explicit)) return explicit;
-    const repoRoot = resolveOpenScoutRepoRoot({
-      startDirectories: [
-        this.env.OPENSCOUT_SETUP_CWD,
-        (this.options.cwd ?? (() => process.cwd()))(),
-        this.options.moduleDirectory,
-      ],
-    });
-    return resolveRepoEntrypoint(repoRoot, SCOUTBOT_PROCESS_ENTRY);
+    return resolveLegacyScoutbotEntry(this.env, this.options.resolveEntry);
   }
 
   private resolveLogPath(): string {

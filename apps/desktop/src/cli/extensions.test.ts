@@ -146,17 +146,26 @@ process.exitCode = await runScoutExtension(extension, [], process.env);`);
     const scout = spawn(process.execPath, [runner], { stdio: "ignore" });
     const exited = new Promise<number | null>((resolveExit) => scout.once("exit", (code) => resolveExit(code)));
     let childPid = 0;
-    for (let i = 0; i < 100 && !childPid; i += 1) {
-      await Bun.sleep(50);
-      try { childPid = Number(readFileSync(pidFile, "utf8").trim()); } catch { /* not started yet */ }
+    try {
+      // Source cold starts can exceed five seconds on a memory-constrained
+      // shared host. Readiness is explicit; the whole fixture is still bounded.
+      const deadline = Date.now() + 15_000;
+      while (!childPid && Date.now() < deadline) {
+        if (scout.exitCode !== null) throw new Error("fixture runner exited before child readiness");
+        await Bun.sleep(50);
+        try { childPid = Number(readFileSync(pidFile, "utf8").trim()); } catch { /* not started yet */ }
+      }
+      expect(childPid).toBeGreaterThan(0);
+      scout.kill("SIGTERM");
+      expect(await exited).toBe(143);
+      const alive = (() => { try { process.kill(childPid, 0); return true; } catch { return false; } })();
+      expect(alive).toBe(false);
+    } finally {
+      // A failed readiness assertion must not leave a fixture child behind.
+      if (scout.exitCode === null) scout.kill("SIGKILL");
+      if (childPid) try { process.kill(childPid, "SIGKILL"); } catch { /* already exited */ }
     }
-    expect(childPid).toBeGreaterThan(0);
-    scout.kill("SIGTERM");
-    expect(await exited).toBe(143);
-    const alive = (() => { try { process.kill(childPid, 0); return true; } catch { return false; } })();
-    if (alive) process.kill(childPid, "SIGKILL");
-    expect(alive).toBe(false);
-  }, 15_000);
+  }, 30_000);
 
 
   test("strict path components must belong to the current user or root", () => {
@@ -215,14 +224,14 @@ process.exitCode = await runScoutExtension(extension, [], process.env);`);
     const extensions = join(shared, "extensions");
     install(extensions, "tool", "exit 0");
     // Bun chmodSync drops the sticky bit; use chmod itself on both macOS and Linux.
-    expect(spawnSync("/bin/chmod", ["1777", shared]).status).toBe(0);
+    expect(spawnSync("/bin/chmod", ["1777", shared], { timeout: 5_000, killSignal: "SIGKILL" }).status).toBe(0);
     expect(fs.statSync(shared).mode & 0o1000).toBe(0o1000);
     expect(findScoutExtension("tool", { OPENSCOUT_EXTENSIONS_HOME: extensions })?.refused).toBeUndefined();
     try {
-      expect(spawnSync("/bin/chmod", ["1777", extensions]).status).toBe(0);
+      expect(spawnSync("/bin/chmod", ["1777", extensions], { timeout: 5_000, killSignal: "SIGKILL" }).status).toBe(0);
       expect(findScoutExtension("tool", { OPENSCOUT_EXTENSIONS_HOME: extensions })?.refused)
         .toContain("anyone on this machine can write to");
-    } finally { expect(spawnSync("/bin/chmod", ["0755", extensions]).status).toBe(0); }
+    } finally { expect(spawnSync("/bin/chmod", ["0755", extensions], { timeout: 5_000, killSignal: "SIGKILL" }).status).toBe(0); }
   });
 
   test("mesh stays built in until its extension ships with an installer", () => {
@@ -236,7 +245,7 @@ process.exitCode = await runScoutExtension(extension, [], process.env);`);
   test("scout extensions only lists: any other word is an error, not a listing", async () => {
     const lines: string[] = [];
     const context = createScoutCommandContext({ env, stdout: (line) => lines.push(line) });
-    await expect(runExtensionsCommand(context, ["install", "mesh"])).rejects.toThrow("unexpected argument for extensions: install");
+    await expect(runExtensionsCommand(context, ["install", "mesh"])).rejects.toThrow("usage: scout extensions");
     expect(lines).toEqual([]);
     await runExtensionsCommand(context, []);
     expect(lines.join("\n")).toContain(`Extensions home: ${home}`);

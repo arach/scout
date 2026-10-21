@@ -331,6 +331,12 @@
       "import": "./dist/local-config.js",
       "default": "./dist/local-config.js"
     },
+    "./path-trust": {
+      "bun": "./src/path-trust.ts",
+      "types": "./dist/path-trust.d.ts",
+      "import": "./dist/path-trust.js",
+      "default": "./dist/path-trust.js"
+    },
     "./scout-home": {
       "bun": "./src/scout-home.ts",
       "types": "./dist/scout-home.d.ts",
@@ -494,11 +500,29 @@
       "import": "./dist/lan-network.js",
       "default": "./dist/lan-network.js"
     },
+    "./scout-extensions": {
+      "bun": "./src/scout-extensions.ts",
+      "types": "./dist/scout-extensions.d.ts",
+      "import": "./dist/scout-extensions.js",
+      "default": "./dist/scout-extensions.js"
+    },
+    "./mesh/client-wire": {
+      "bun": "./src/mesh-client-wire.ts",
+      "types": "./dist/mesh-client-wire.d.ts",
+      "import": "./dist/mesh-client-wire.js",
+      "default": "./dist/mesh-client-wire.js"
+    },
     "./delivery-client": {
       "bun": "./src/delivery-client.ts",
       "types": "./dist/delivery-client.d.ts",
       "import": "./dist/delivery-client.js",
       "default": "./dist/delivery-client.js"
+    },
+    "./attachments": {
+      "bun": "./src/attachments.ts",
+      "types": "./dist/attachments.d.ts",
+      "import": "./dist/attachments.js",
+      "default": "./dist/attachments.js"
     }
   },
   "types": "./dist/index.d.ts",

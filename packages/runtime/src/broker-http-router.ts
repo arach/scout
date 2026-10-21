@@ -1,3 +1,9 @@
+import { createRepoDiffReadHandler, type RepoDiffRead } from "./broker-repo-diff-read.js";
+import { readProviderQuotas } from "./broker-provider-quota-read.js";
+import { ASSISTANT_CLAIM_HEADER } from "./broker-assistant-claims.js";
+import { handleAttachmentRoute, executeHostAttachmentRead, ATTACHMENT_READ_PATH, type AttachmentHttpDeps } from "./broker-attachments-http.js";
+import { createSessionMaterialsRead } from "./broker-session-materials-read.js";
+import { readObservedSessions, type ObservedSessionReadDeps } from "./broker-observed-sessions-read.js";
 import { MeshFeedback, MeshFeedbackError } from "./mesh-feedback.js";
 import { MeshBridgeManagement, MeshBridgeManagementError } from "./mesh-bridge-management.js";
 import { MeshPingError, type createMeshPing } from "./mesh-ping.js";
@@ -121,7 +127,7 @@ import {
 import type { BrokerMeshDiscoveryService } from "./broker-mesh-discovery-service.js";
 import type { BrokerMeshHttpService } from "./broker-mesh-http-service.js";
 import { brokerActorDisplayName } from "./broker-conversation-helpers.js";
-import type { BrokerRepoTailService } from "./broker-repo-tail-service.js";
+import { parseTailRecentFilters, type BrokerRepoTailService } from "./broker-repo-tail-service.js";
 import type { BrokerRendezvousService } from "./broker-rendezvous-service.js";
 import type { BrokerWebControlService } from "./broker-web-control-service.js";
 import { buildCollaborationInvocation } from "./collaboration-invocations.js";
@@ -199,6 +205,10 @@ const CHANNEL_INVITE_COMMAND_KINDS = new Set<string>([
 ]);
 
 export type BrokerHttpRouterDeps = {
+  /** Test/embedding seam; default uses only the bounded public scoutd repo capability. */
+  readRepoDiff?: RepoDiffRead;
+  attachments?: AttachmentHttpDeps;
+  readObservedSessionCache?: ObservedSessionReadDeps["readCache"];
   encodedSnapshotBodies?: boolean;
   onSnapshotFlushedBytes?: (bytes: number) => void;
   host: string;
@@ -499,8 +509,11 @@ export function createBrokerHttpRouter(
   } = deps;
 
   const requestReceipts = deps.requestReceipts ?? new BrokerRequestReceipts();
+  const readRepoDiff = createRepoDiffReadHandler(deps.readRepoDiff);
+  const readSessionMaterials = createSessionMaterialsRead({ nodeId, readCache: deps.readObservedSessionCache,
+    readEndpoints: runtime.peek ? () => runtime.peek!().endpoints : undefined });
 
-  return async function routeRequest(request: RuntimeHttpRequestLike, response: RuntimeHttpResponseLike): Promise<void> {
+  const routeRequest = async function(request: RuntimeHttpRequestLike, response: RuntimeHttpResponseLike): Promise<void> {
   const method = request.method ?? "GET";
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? `${host}:${port}`}`);
   // Mesh trust cone §4 / §11.9 defense in depth: machine-local mutation
@@ -523,6 +536,22 @@ export function createBrokerHttpRouter(
     json(response, 503, { error: "access_unavailable" }); return;
   }
   if (request.transportContext?.scoped) { json(response, 403, { error: "access_denied" }); return; }
+  if (url.pathname === "/v1/assistant-claims" || url.pathname.startsWith("/v1/assistant-claims/")) {
+    if (request.transportContext?.transport === "remote" || request.transportContext?.guest || request.headers.origin || request.headers["x-openscout-forwarded-node-id"]) { json(response, 403, { error: "local_only" }); return; }
+    const claims = brokerService.assistantClaims;
+    if (!claims) { json(response, 404, { error: "assistant_claims_unsupported" }); return; }
+    if (method === "GET" && url.pathname === "/v1/assistant-claims") { json(response, 200, claims.capability()); return; }
+    if (method === "POST" && ["/v1/assistant-claims", "/v1/assistant-claims/renew", "/v1/assistant-claims/release"].includes(url.pathname)) {
+      try {
+        const body = await readRequestBody<{ agentId: string; holderId: string }>(request, { maxBytes: 4096 });
+        const result = url.pathname.endsWith("/renew") ? claims.renew(body.agentId)
+          : url.pathname.endsWith("/release") ? claims.release(body.agentId) : claims.acquire(body.agentId, body.holderId);
+        json(response, url.pathname === "/v1/assistant-claims" ? 201 : 200, result);
+      } catch (error) { badRequest(response, error); }
+      return;
+    }
+    notFound(response); return;
+  }
   if (method === "POST" && url.pathname === "/v1/mcp-events") {
     await handleBrokerMcpEvents(request, response, deps.mcpEvents); return;
   }
@@ -629,6 +658,7 @@ export function createBrokerHttpRouter(
       return;
     }
   }
+  if (await handleAttachmentRoute(request, response, url, deps.attachments ?? { nodeId, peerNode: () => undefined })) return;
   const aliasItemMatch = method === "PATCH" || method === "DELETE"
     ? url.pathname.match(/^\/v1\/aliases\/([^/]+)$/)
     : null;
@@ -965,6 +995,10 @@ export function createBrokerHttpRouter(
   if (method === "POST" && (url.pathname === "/v1/hosts/web-request" || url.pathname === "/v1/mesh/web-request")) {
     try {
       const input = await readRequestBody<HostWebRequest & { nodeId?: string }>(request, { maxBytes: 36 * 1024 * 1024, requireJsonContentType: true });
+      if (input.path === ATTACHMENT_READ_PATH) {
+        const result = await executeHostAttachmentRead(input, request, url.pathname, deps.attachments ?? { nodeId, peerNode: () => undefined });
+        json(response, 200, result); return;
+      }
       if (!isAllowedHostWebRequest(input)) {
         json(response, 400, { error: "unsupported_host_operation" });
         return;
@@ -1445,6 +1479,7 @@ export function createBrokerHttpRouter(
   }
 
   if (method === "GET" && url.pathname === "/v1/tail/recent") {
+    try { parseTailRecentFilters(url); } catch { json(response, 400, { error: "invalid_tail_filters" }); return; }
     const result = await brokerRepoTailService.readTailRecentPayloadWithTiming(url);
     jsonWithHeaders(response, 200, result.payload, {
       "Server-Timing": serverTimingHeader(result.timings),
@@ -2030,6 +2065,38 @@ export function createBrokerHttpRouter(
     return;
   }
 
+  // Same local tier as repo-watch/tail reads; never starts the private web app.
+  if (method === "GET" && url.pathname === "/v1/repo-diff/worktree") {
+    if (request.transportContext?.transport === "remote" || request.transportContext?.guest) {
+      json(response, 403, { error: "forbidden" }); return;
+    }
+    const result = await readRepoDiff(url);
+    json(response, result.status, result.body); return;
+  }
+
+  // Pure public adapter observation; never refreshes private provider dashboards.
+  if (method === "GET" && url.pathname === "/v1/provider-quotas") {
+    if (request.transportContext?.transport === "remote" || request.transportContext?.guest) {
+      json(response, 403, { error: "forbidden" }); return;
+    }
+    if (!runtime.peek) { json(response, 503, { error: "provider_quotas_unavailable" }); return; }
+    try { json(response, 200, readProviderQuotas(runtime.peek().endpoints, nodeId, url)); }
+    catch (error) { json(response, error instanceof TypeError ? 400 : 503, { error: error instanceof TypeError ? "invalid_quota_query" : "provider_quotas_unavailable" }); }
+    return;
+  }
+
+  if (method === "GET" && url.pathname === "/v1/observed-sessions/materials") {
+    if (request.transportContext?.transport === "remote" || request.transportContext?.guest) { json(response, 403, { error: "forbidden" }); return; }
+    const result = await readSessionMaterials(url); json(response, result.status, result.body); return;
+  }
+
+  if (method === "GET" && (url.pathname === "/v1/observed-sessions" || url.pathname === "/v1/observed-sessions/resolve")) {
+    if (request.transportContext?.transport === "remote" || request.transportContext?.guest) { json(response, 403, { error: "forbidden" }); return; }
+    const result = readObservedSessions({ nodeId, readCache: deps.readObservedSessionCache,
+      readEndpoints: runtime.peek ? () => runtime.peek!().endpoints : undefined }, url, url.pathname.endsWith("/resolve"));
+    json(response, result.status, result.body); return;
+  }
+
   if (method === "GET" && url.pathname === "/v1/pairing/sessions") {
     try {
       json(response, 200, await managedSessionHttpService.listPairingSessionCandidates());
@@ -2494,6 +2561,7 @@ export function createBrokerHttpRouter(
   if (method === "POST" && (url.pathname === "/v1/messages" || url.pathname === "/v1/messages/reply")) {
     try {
       let message = await readRequestBody<MessageRecord>(request);
+      if (message.attachments?.some(a => a.blob !== undefined)) throw new Error("attachment_inline_write_required");
       if (url.pathname === "/v1/messages/reply" && (!message.requestId || !completionReply(message))) {
         throw new Error("explicit reply requires requestId and completionReply identity");
       }
@@ -2580,46 +2648,51 @@ export function createBrokerHttpRouter(
     const signal = requestAbortSignal(request, response);
     try {
       const payload = await readValidatedRequestBody(request, brokerDeliverRequestSchema);
-      if ((payload.completion || payload.relation) && payload.target
-        && payload.target.kind !== "agent_id" && payload.target.kind !== "session_id") {
-        throw new Error("completion_route_unsupported");
-      }
-      if (
-        !payload.requestId && payload.target?.kind === "route_alias"
-        && await forwardAliasIfRemote(payload.target.scope?.nodeId, url.pathname, "POST", payload)
-      ) return;
-      if (payload.requestId && !deps.deliveryReceiptsOwnedByService) {
-        if (typeof payload.requestId !== "string") throw new Error("invalid requestId");
-        payload.messageMetadata = { ...payload.messageMetadata, requestId: payload.requestId, requestIntent: payload.intent };
-        payload.invocationMetadata = { ...payload.invocationMetadata, requestId: payload.requestId };
-      }
-      const reserveInRouter = Boolean(payload.requestId && (!deps.deliveryReceiptsOwnedByService
-        || (payload.target?.kind === "route_alias" && payload.target.scope?.nodeId && forwardRouteAliasRequest)));
-      const accept = async (): Promise<ScoutDeliverResponse> => {
-        if (payload.requestId && payload.target?.kind === "route_alias" && payload.target.scope?.nodeId && forwardRouteAliasRequest) {
-          const forwarded = await forwardRouteAliasRequest({ nodeSelector: payload.target.scope.nodeId, path: url.pathname, method: "POST", body: payload });
-          if (forwarded) {
-            if (forwarded.status >= 500) throw new Error("forwarded request outcome unknown");
-            return forwarded.body as ScoutDeliverResponse;
+      const execute = async () => {
+        if ((payload.completion || payload.relation) && payload.target
+          && payload.target.kind !== "agent_id" && payload.target.kind !== "session_id") {
+          throw new Error("completion_route_unsupported");
+        }
+        if (
+          !payload.requestId && payload.target?.kind === "route_alias"
+          && await forwardAliasIfRemote(payload.target.scope?.nodeId, url.pathname, "POST", payload)
+        ) return;
+        if (payload.requestId && !deps.deliveryReceiptsOwnedByService) {
+          if (typeof payload.requestId !== "string") throw new Error("invalid requestId");
+          payload.messageMetadata = { ...payload.messageMetadata, requestId: payload.requestId, requestIntent: payload.intent };
+          payload.invocationMetadata = { ...payload.invocationMetadata, requestId: payload.requestId };
+        }
+        const reserveInRouter = Boolean(payload.requestId && (!deps.deliveryReceiptsOwnedByService
+          || (payload.target?.kind === "route_alias" && payload.target.scope?.nodeId && forwardRouteAliasRequest)));
+        const accept = async (): Promise<ScoutDeliverResponse> => {
+          if (payload.requestId && payload.target?.kind === "route_alias" && payload.target.scope?.nodeId && forwardRouteAliasRequest) {
+            const forwarded = await forwardRouteAliasRequest({ nodeSelector: payload.target.scope.nodeId, path: url.pathname, method: "POST", body: payload });
+            if (forwarded) {
+              if (forwarded.status >= 500) throw new Error("forwarded request outcome unknown");
+              return forwarded.body as ScoutDeliverResponse;
+            }
           }
-        }
-        if (reserveInRouter && deps.deliveryReceiptsOwnedByService) {
-          return deliveryAcceptanceService.accept(payload, { receiptReserved: true, admissionReserved: true });
-        }
-        return brokerService.deliver ? brokerService.deliver(payload, { signal }) : deliveryAcceptanceService.accept(payload, { signal });
+          if (reserveInRouter && deps.deliveryReceiptsOwnedByService) {
+            return deliveryAcceptanceService.accept(payload, { receiptReserved: true, admissionReserved: true });
+          }
+          return brokerService.deliver ? brokerService.deliver(payload, { signal }) : deliveryAcceptanceService.accept(payload, { signal });
+        };
+        const result = payload.requestId && reserveInRouter
+          ? await requestReceipts.run(payload.caller?.actorId || payload.requesterId || operatorActorId,
+              payload.requestId, "deliver", payload, accept,
+              deps.deliveryReceiptsOwnedByService ? () => deliveryAcceptanceService.recoverReceipt(payload.caller?.actorId || payload.requesterId || operatorActorId, payload.requestId!) : undefined,
+              deps.deliveryReceiptsOwnedByService ? () => deliveryAcceptanceService.reserveCommand(payload) : undefined)
+          : await accept();
+        throwIfAborted(signal);
+        json(
+          response,
+          result.kind === "delivery" ? 202 : result.kind === "question" ? 409 : 422,
+          result,
+        );
       };
-      const result = payload.requestId && reserveInRouter
-        ? await requestReceipts.run(payload.caller?.actorId || payload.requesterId || operatorActorId,
-            payload.requestId, "deliver", payload, accept,
-            deps.deliveryReceiptsOwnedByService ? () => deliveryAcceptanceService.recoverReceipt(payload.caller?.actorId || payload.requesterId || operatorActorId, payload.requestId!) : undefined,
-            deps.deliveryReceiptsOwnedByService ? () => deliveryAcceptanceService.reserveCommand(payload) : undefined)
-        : await accept();
-      throwIfAborted(signal);
-      json(
-        response,
-        result.kind === "delivery" ? 202 : result.kind === "question" ? 409 : 422,
-        result,
-      );
+      const claims = brokerService.assistantClaims;
+      if (claims) await claims.admit(claims.deliveryAgent(payload), execute);
+      else await execute();
     } catch (error) {
       if (signal.aborted || response.destroyed || response.writableEnded) {
         return;
@@ -2637,24 +2710,29 @@ export function createBrokerHttpRouter(
         request,
         brokerInvocationRequestSchemaFor(runtimeCatalogSnapshot?.catalog),
       );
-      if (
-        !payload.requestId && payload.target?.kind === "route_alias"
-        && await forwardAliasIfRemote(payload.target.scope?.nodeId, url.pathname, "POST", payload)
-      ) return;
-      const invoke = async () => {
-        if (payload.requestId && payload.target?.kind === "route_alias" && payload.target.scope?.nodeId && forwardRouteAliasRequest) {
-          const forwarded = await forwardRouteAliasRequest({ nodeSelector: payload.target.scope.nodeId, path: url.pathname, method: "POST", body: payload });
-          if (forwarded) {
-            if (forwarded.status >= 500) throw new Error("forwarded request outcome unknown");
-            return forwarded.body as Awaited<ReturnType<typeof handleInvocationRequest>>;
+      const execute = async () => {
+        if (
+          !payload.requestId && payload.target?.kind === "route_alias"
+          && await forwardAliasIfRemote(payload.target.scope?.nodeId, url.pathname, "POST", payload)
+        ) return;
+        const invoke = async () => {
+          if (payload.requestId && payload.target?.kind === "route_alias" && payload.target.scope?.nodeId && forwardRouteAliasRequest) {
+            const forwarded = await forwardRouteAliasRequest({ nodeSelector: payload.target.scope.nodeId, path: url.pathname, method: "POST", body: payload });
+            if (forwarded) {
+              if (forwarded.status >= 500) throw new Error("forwarded request outcome unknown");
+              return forwarded.body as Awaited<ReturnType<typeof handleInvocationRequest>>;
+            }
           }
-        }
-        return brokerService.invokeAgent ? brokerService.invokeAgent(payload) : handleInvocationRequest(payload);
+          return brokerService.invokeAgent ? brokerService.invokeAgent(payload) : handleInvocationRequest(payload);
+        };
+        const result = payload.requestId
+          ? await requestReceipts.run(payload.requesterId, payload.requestId, "invoke", payload, invoke)
+          : await invoke();
+        json(response, 202, result);
       };
-      const result = payload.requestId
-        ? await requestReceipts.run(payload.requesterId, payload.requestId, "invoke", payload, invoke)
-        : await invoke();
-      json(response, 202, result);
+      const claims = brokerService.assistantClaims;
+      if (claims) await claims.admit(claims.invocationAgent(payload), execute);
+      else await execute();
     } catch (error) {
       badRequest(response, error);
     }
@@ -2727,5 +2805,13 @@ export function createBrokerHttpRouter(
   }
 
   notFound(response);
-};
+  };
+  return (request, response) => {
+    const header = request.headers[ASSISTANT_CLAIM_HEADER];
+    const local = request.transportContext?.transport !== "remote" && !request.transportContext?.guest && !request.transportContext?.scoped && !request.headers.origin && !request.headers["x-openscout-forwarded-node-id"];
+    const token = local && typeof header === "string" && header.length <= 512 ? header : undefined;
+    return brokerService.assistantClaims
+      ? brokerService.assistantClaims.withToken(token, () => routeRequest(request, response))
+      : routeRequest(request, response);
+  };
 }

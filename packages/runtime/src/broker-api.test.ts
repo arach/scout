@@ -1,3 +1,4 @@
+import { BrokerAssistantClaims, protectAssistantService } from "./broker-assistant-claims.js";
 import { afterEach, describe, expect, test } from "bun:test";
 import { createServer } from "node:http";
 import { mkdtemp, rm, unlink } from "node:fs/promises";
@@ -665,4 +666,21 @@ test("collaboration history query forwards scope and a stable creation cursor", 
   const result = await maybeReadJsonFromActiveScoutBrokerService("http://history.test", "/v1/collaboration/records?kind=question&state=closed&conversationId=room&includeThreads=true&orderByCreatedAt=true&afterCreatedAt=123&afterId=question-2&limit=51");
   expect(result).toMatchObject({ handled: true });
   expect(observed).toMatchObject({ kind: "question", state: "closed", conversationId: "room", includeThreads: true, orderByCreatedAt: true, afterCreatedAt: 123, afterId: "question-2", limit: 51 });
+});
+
+
+test("active-service shortcuts cannot bypass assistant registration or answer fencing", async () => {
+  const claims = new BrokerAssistantClaims(["scoutbot"]); let writes = 0;
+  const service = protectAssistantService({ baseUrl: "http://claims.test", executeCommand: async () => ++writes,
+    postConversationMessage: async () => ++writes,
+  } as unknown as ActiveScoutBrokerService, claims);
+  registerActiveScoutBrokerService(service);
+  const message = { actorId: "scoutbot", metadata: { assistantClaim: "forged" } };
+  for (const [path, body] of [["/v1/messages", message], ["/v1/agents", { id: "scoutbot" }], ["/v1/commands", { kind: "conversation.post", message }]] as const) {
+    await expect(maybePostJsonToActiveScoutBrokerService(service.baseUrl, path, body)).rejects.toThrow("assistant_claim_required");
+  }
+  expect(writes).toBe(0);
+  const lease = claims.acquire("scoutbot", "answerer");
+  await claims.withToken(lease.token, () => maybePostJsonToActiveScoutBrokerService(service.baseUrl, "/v1/messages", message));
+  expect(writes).toBe(1);
 });

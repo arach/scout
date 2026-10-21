@@ -306,8 +306,33 @@ describe("broker daemon thread and mesh routes", () => {
       advertiseScope: "local",
     });
 
-    await broker.postJson(local.baseUrl, "/v1/agents", scoutbotAgent(local.nodeId));
-    await broker.postJson(peer.baseUrl, "/v1/agents", scoutbotAgent(peer.nodeId));
+    // Local assistant registrations obey the same lease admission as the host.
+    for (const harness of [local, peer]) {
+      const claim = await broker.postJson<{ token: string }>(harness.baseUrl, "/v1/assistant-claims", {
+        agentId: "scoutbot", holderId: "thread-mesh-fixture",
+      });
+      const registered = await broker.requestJson(harness.baseUrl, "/v1/agents", {
+        method: "POST",
+        headers: { "x-scout-assistant-claim-token": claim.token },
+        body: JSON.stringify(scoutbotAgent(harness.nodeId)),
+      });
+      expect(registered.status).toBe(200);
+    }
+    // Discovery synchronizes enrolled peers only. Grant both fixture cards so
+    // a preserved local scoutbot cannot pass merely because no roster was read.
+    for (const [receiver, sender] of [[local, peer], [peer, local]] as const) {
+      const { card } = await broker.getJson<{ card: { keyId: string; publicKey: string; fingerprint: string } }>(
+        sender.baseUrl, "/v1/node",
+      );
+      await broker.postJson(receiver.baseUrl, "/v1/trust/grant", {
+        ...card, nodeId: sender.nodeId, label: "thread-mesh-peer", tier: "observe",
+      });
+    }
+    await broker.postJson(peer.baseUrl, "/v1/agents", {
+      ...scoutbotAgent(peer.nodeId), id: "peer-worker", definitionId: "peer-worker",
+      handle: "peer-worker", selector: "@peer-worker", defaultSelector: "@peer-worker",
+      labels: ["test"], metadata: { source: "test" }, advertiseScope: "mesh",
+    });
     await broker.postJson(local.baseUrl, "/v1/nodes", {
       id: peer.nodeId,
       meshId: "openscout",
@@ -324,6 +349,8 @@ describe("broker daemon thread and mesh routes", () => {
     }>(local.baseUrl, "/v1/snapshot");
     expect(snapshot.agents.scoutbot?.homeNodeId).toBe(local.nodeId);
     expect(snapshot.agents.scoutbot?.authorityNodeId).toBe(local.nodeId);
+    expect(snapshot.agents["peer-worker"]?.homeNodeId).toBe(peer.nodeId);
+    expect(snapshot.agents["peer-worker"]?.authorityNodeId).toBe(peer.nodeId);
   }, 40_000);
 
   test("fails remote-authority message posts when the authority broker stalls", async () => {

@@ -22,6 +22,12 @@ Bun monorepo checkout, the package export map keeps the `bun` condition pointed
 at `src/` so local development can type-check without building `dist` first.
 Published Node/ESM consumers resolve `dist/`.
 
+## Transitional app supervision
+
+Web and Scoutbot source entries require explicit configuration. See the
+[durable entry contract](./SUPERVISION.md) for installer ordering, reload
+boundaries and the temporary installed-npm web compatibility exception.
+
 ## Quickstart: embed the in-memory runtime
 
 For tests, tools, and small local integrations, start with the in-memory runtime
@@ -287,3 +293,10 @@ Use `@openscout/runtime/delivery-client` to prepare retained delivery commands
 and submit native-session replies without a web or pairing server. See
 [the delivery contract](./DELIVERY.md) for key ownership, capability and legacy
 wire fences, uncertainty handling, and embedded-broker requirements.
+
+
+## Resident assistant ownership
+
+The broker requires an exclusive claim for Scoutbot registration and answers.
+See [assistant answerer claims](./ASSISTANT-CLAIMS.md) for the API, expiry rules
+and the paired app/runtime adoption gate. Operator asks do not require a claim.

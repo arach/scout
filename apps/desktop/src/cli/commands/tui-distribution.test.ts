@@ -34,8 +34,8 @@ function buildArchive(): Buffer {
   const dir = tempDir("openscout-tui-archive-");
   writeExecutable(join(dir, "src", "scout-tui"));
   const out = join(dir, "scout-tui.tar.gz");
-  const tar = realSpawnSync("tar", ["-czf", out, "-C", join(dir, "src"), "scout-tui"]);
-  if (tar.status !== 0) throw new Error("tar failed");
+  const tar = realSpawnSync("tar", ["-czf", out, "-C", join(dir, "src"), "scout-tui"], { timeout: 5_000, killSignal: "SIGKILL" });
+  if (tar.status !== 0) throw new Error(tar.error?.message || tar.stderr?.toString() || "tar failed");
   return readFileSync(out);
 }
 
