@@ -137,7 +137,10 @@ returns unknown even after a later stop receipt. Full current-owner native
 inventory/descendant exit integration is still required for replacement starts.
 A recovered start with no recorded child still counts as a birth attempt.
 This conservative gate prevents a legacy-only inventory from reporting an
-active new role absent. It is not a production restart implementation.
+active new role absent. The [direct-child custody adapter](SUPERVISION-CHILD-CUSTODY.md)
+now separates missing births, missing direct exits and missing descendant
+coverage, but even a proven direct exit does not lift the whole-role gate.
+It is not a production restart implementation.
 
 ## Consumer and rollout contract
 
@@ -154,7 +157,7 @@ and exact-exit integration remains separate. Do not call the standalone SDK
 read from inside an existing role lock; use the scoped method. No reader result
 releases ownership, resolves a receipt or opens the production gates.
 
-Production legacy capture producers, protected native exit/custody, complete
+Production legacy capture producers, integrated protected native exit/custody, complete
 current-owner coverage, real legacy effect wiring, native jobs/registration
 barriers, repair, retention and operator authorization remain open. No app is
 registered, started, stopped, signaled or selected by this PR. There is no new

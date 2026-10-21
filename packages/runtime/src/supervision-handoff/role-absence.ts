@@ -1,3 +1,4 @@
+import { currentChildCoverage } from "./child-custody.js";
 import { createProcessEvidenceReader, type ProcessSample, type ProcessSampleResult } from "./process-evidence.js";
 import { refuse, type Absence, type HandoffRole, type SelectedInstance } from "./contracts.js";
 import { policyHash, type CustodyTransaction } from "./store.js";
@@ -125,11 +126,9 @@ export async function inspectLegacyRole(tx: CustodyTransaction, role: HandoffRol
   const uncertain = () => Object.entries(tx.state.receipts).some(([key, receipt]) =>
     (key.startsWith(`${role}:${owner.generation}:`) || key.startsWith(`${role}:${captureGeneration}:`))
     && receipt.state === "pending" && receipt.effects.some(effect => effect.state === "intent"));
-  // An inherited R0 inventory cannot certify children possibly born under
-  // P1. Until a current-owner native inventory is integrated, remain closed
-  // even if a later stop receipt exists; never reuse bootstrap absence.
-  const newerBirth = () => owner.owner === "P1" && Object.entries(tx.state.receipts).some(([key, receipt]) =>
-    key.startsWith(`${role}:${owner.generation}:`) && receipt.effects.some(effect => effect.kind === "start"));
+  // Account for every start attempt, including childless recovered starts.
+  // Direct reaping does not discharge descendants or current-owner resources.
+  const newerBirth = () => owner.owner === "P1" && currentChildCoverage(tx, role).state !== "no_starts";
   if (uncertain() || newerBirth()) unknown = true;
   try { validateCapture(capture, selected, tx.state.policy.runtimeArtifacts); } catch { return { state: "unknown" }; }
   const fenced = async () => {

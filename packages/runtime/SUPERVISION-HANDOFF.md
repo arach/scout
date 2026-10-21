@@ -338,3 +338,12 @@ complete durable inventory, so no production absence adapter is enabled here.
 The new scoped reader avoids nested flock. Its inherited proof is limited to
 legacy bootstrap; P1 births require further current-owner coverage. Readiness,
 private activation, protected signaling/exit and operator rollout remain closed.
+
+## Current-owner direct-child custody (still inactive)
+
+The additive [direct-child custody adapter](SUPERVISION-CHILD-CUSTODY.md) records
+birth before awaited observation and exact exit under the same custody lock.
+It is opt-in and restricted to audited Darwin Bun backends. Lost handles cannot
+be adopted by PID. Linux custody remains unproven. Every started role still
+returns unknown without complete current-owner descendant/resource coverage;
+this does not open readiness, P1 or reverse handoff.

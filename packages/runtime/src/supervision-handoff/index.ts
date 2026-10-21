@@ -1,8 +1,9 @@
+import { DirectChildren, currentChildCoverage, type DirectChildCommand, type CurrentChildCoverage } from "./child-custody.js";
 import { captureLegacyRole, inspectLegacyRole, type LegacyRoleSources, type RoleAbsence } from "./role-absence.js";
 import { randomBytes } from "node:crypto";
 import { HandoffStore, authorizationHash, policyHash, receiptKey, type CustodyTransaction } from "./store.js";
 import { HANDOFF_PROTOCOL, refuse, requireRole, type Absence, type AuthorizationIntent, type ExactChild,
-  type FloorPolicy, type HandoffInspector, type HandoffOwner, type HandoffRole, type MutationReceipt,
+  type Effect, type FloorPolicy, type HandoffInspector, type HandoffOwner, type HandoffRole, type MutationReceipt,
   type Observation, type OperatorApproval, type Ownership, type StageApproval, type SelectedInstance } from "./contracts.js";
 export * from "./contracts.js";
 
@@ -54,9 +55,14 @@ export interface EffectPermit {
   /** The actual synchronous spawn/signal boundary, not a preliminary check.
    * Awaiting observations afterward does not grant a second effect. */
   atEffect<T>(effect: () => T): T;
+  /** Opt-in audited direct-child boundary; no raw handle escapes. */
+  spawnChild(command: DirectChildCommand): ExactChild;
+  signalChild(signal: "SIGTERM" | "SIGKILL"): "signalled" | "already_exited";
 }
 export interface RoleCustody {
   ownership(): Ownership;
+  childCoverage(): CurrentChildCoverage;
+  recordChildExit(effectId: string): Promise<void>;
   captureLegacyInventory(captureId: string): Promise<void>;
   inspectLegacyAbsence(): Promise<RoleAbsence>;
   assertCurrent(kind?: "start" | "stop"): void;
@@ -70,7 +76,9 @@ export interface RoleCustody {
  * is no daemon wiring, HTTP authority, source discovery or automatic enrollment. */
 export class SupervisionHandoff {
   private readonly store: HandoffStore;
-  constructor(readonly instance: SelectedInstance, private readonly inspector: HandoffInspector, private readonly legacySources: LegacyRoleSources = {}) {
+  private readonly children: DirectChildren;
+  constructor(readonly instance: SelectedInstance, private readonly inspector: HandoffInspector, private readonly legacySources: LegacyRoleSources = {}, options: { enableAuditedDirectChildren?: true } = {}) {
+    this.children = new DirectChildren(Object.freeze({ ...instance }), options.enableAuditedDirectChildren === true);
     this.instance = Object.freeze({ ...instance }); this.store = new HandoffStore(this.instance); this.legacySources = Object.freeze({ ...legacySources });
   }
   stage(policy: FloorPolicy, approve: StageApproval) { return this.store.stage(policy, approve); }
@@ -171,6 +179,18 @@ export class SupervisionHandoff {
       };
       const receipt = (id: string) => tx.state.receipts[key(id)];
       const lease: RoleCustody = {
+        childCoverage: () => { assertCurrent(); return currentChildCoverage(tx, role); },
+        recordChildExit: async effectId => {
+          assertCurrent();
+          const effects = Object.entries(tx.state.receipts).filter(([key]) => key.startsWith(`${role}:${generation}:`))
+            .flatMap(([, value]) => value.effects);
+          const effect = effects.find(effect => effect.id === effectId && effect.kind === "start");
+          const record = effect?.directChild;
+          if (!record) refuse("child_birth_unproven");
+          if (record.exit) return;
+          const exit = await this.children.exit(record); assertCurrent();
+          record.exit = exit; tx.persist();
+        },
         ownership: () => { assertCurrent(); return structuredClone(state); }, assertCurrent,
         captureLegacyInventory: async captureId => { assertCurrent(); await captureLegacyRole(tx, role, captureId, this.legacySources); assertCurrent(); },
         inspectLegacyAbsence: async () => { assertCurrent(); const proof = await inspectLegacyRole(tx, role, this.legacySources); assertCurrent(); return proof; },
@@ -208,18 +228,32 @@ export class SupervisionHandoff {
                 && sameChild(effect.child, before.child)));
             if (!known) refuse("identity_unproven");
           }
-          const effect = { id: randomBytes(16).toString("hex"), kind, state: "intent" as "intent" | "confirmed" };
+          const effect: Effect = { id: randomBytes(16).toString("hex"), kind, state: "intent" };
           current.effects.push(effect); tx.persist();
           let admitted = false, open = true;
           try {
             if (!(kind === "stop" && absent(before))) {
-              await runEffect({ effectId: effect.id, ...(before.state === "owned" ? { child: structuredClone(before.child) } : {}), atEffect: action => {
+              const atEffect = <T>(action: () => T): T => {
                 assertCurrent(kind); if (!open || admitted) refuse("effect_scope_closed");
                 admitted = true;
                 const result = action();
                 if (result && typeof (result as { then?: unknown }).then === "function") refuse("async_effect_boundary");
                 return result;
-              } });
+              };
+              await runEffect({ effectId: effect.id, ...(before.state === "owned" ? { child: structuredClone(before.child) } : {}), atEffect,
+                spawnChild: command => {
+                  if (kind !== "start") refuse("effect_order_invalid");
+                  return atEffect(() => {
+                    effect.directChild = this.children.spawn(role, generation, effect.id, command);
+                    tx.persist(); // Birth is durable before any awaited observation.
+                    return structuredClone(effect.directChild.child);
+                  });
+                },
+                signalChild: signal => {
+                  if (kind !== "stop" || before.state !== "owned") refuse("identity_unproven");
+                  return atEffect(() => this.children.signal(before.child, signal));
+                },
+              });
               assertCurrent(kind); if (!admitted) refuse("effect_boundary_required");
             }
             const after = await this.inspector.observe(role); assertCurrent(kind);
@@ -227,6 +261,7 @@ export class SupervisionHandoff {
             if (kind === "start") {
               if (after.state !== "owned") refuse("identity_unproven");
               exact(after.child, tx, role, generation, effect.id);
+              if (effect.directChild && !sameChild(effect.directChild.child, after.child)) refuse("identity_unproven");
               (effect as { child?: ExactChild }).child = structuredClone(after.child);
             }
             effect.state = "confirmed"; tx.persist();
@@ -252,6 +287,7 @@ export class SupervisionHandoff {
           const pending = current.effects.find(effect => effect.state === "intent");
           if (pending && pending.kind === "start" && proof.state === "owned") {
             exact(proof.child, tx, role, generation, pending.id);
+            if (pending.directChild && !sameChild(pending.directChild.child, proof.child)) refuse("identity_unproven");
             pending.child = structuredClone(proof.child); pending.state = "confirmed";
           } else if (absent(proof)) {
             if (pending) pending.state = "confirmed";
@@ -268,3 +304,5 @@ export class SupervisionHandoff {
 export { createProcessEvidenceReader, type ProcessEvidenceReader, type ProcessSample, type ProcessSampleResult, type ProcessComparison } from "./process-evidence.js";
 
 export { LEGACY_ROLE_SURFACES, type LegacyResource, type LegacyRoleCapture, type LegacyRoleContext, type LegacyRoleSources, type RoleAbsence } from "./role-absence.js";
+
+export { directChildCapability, type DirectChildCommand, type DirectChildRecord, type CurrentChildCoverage } from "./child-custody.js";

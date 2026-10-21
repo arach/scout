@@ -1,3 +1,4 @@
+import type { DirectChildRecord } from "./child-custody.js";
 /** Temporary, explicitly enrolled custody protocol. Not extension autostart. */
 export const HANDOFF_PROTOCOL = 1;
 export const HANDOFF_CAPABILITY = "supervision-handoff/1";
@@ -24,7 +25,7 @@ export type AuthorizationIntent = { role: HandoffRole; generation: number; sourc
   target: HandoffOwner; action: "enroll" | "handoff" | "recover" | "resume"; desired?: "running" | "stopped"; requestId?: string };
 export type StageApproval = (selection: SelectedInstance, policy: Readonly<FloorPolicy>) => Promise<boolean>;
 export type OperatorApproval = (selection: SelectedInstance, policy: Readonly<FloorPolicy>, intent: Readonly<AuthorizationIntent>) => Promise<boolean>;
-export type Effect = { id: string; kind: "start" | "stop"; state: "intent" | "confirmed"; child?: ExactChild };
+export type Effect = { id: string; kind: "start" | "stop"; state: "intent" | "confirmed"; child?: ExactChild; directChild?: DirectChildRecord };
 export type MutationReceipt = { operation: "start" | "stop" | "restart"; state: "pending" | "done"; effects: Effect[]; error?: string };
 /** Recovery discovery only: no authorization token, child custody or effect permit. */
 export type PendingReceipt = { requestId: string; operation: MutationReceipt["operation"]; state: "pending";

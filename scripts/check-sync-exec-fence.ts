@@ -19,7 +19,8 @@ type AllowEntry = {
     | "spawnSync"
     | "Bun.spawnSync"
     | "node:child_process"
-    | "Bun.spawn";
+    | "Bun.spawn"
+    | "Subprocess.kill";
   category: AllowCategory;
   reason: string;
   owner: string;
@@ -36,7 +37,7 @@ const PHASE_B_ROOTS = [
 ];
 const SYNC_SYMBOLS = ["execFileSync", "execSync", "spawnSync", "Bun.spawnSync"] as const;
 const PHASE_B_SYMBOLS = ["node:child_process", "Bun.spawn", "Bun.spawnSync"] as const;
-const SYMBOLS = [...SYNC_SYMBOLS, "node:child_process", "Bun.spawn"] as const;
+const SYMBOLS = [...SYNC_SYMBOLS, "node:child_process", "Bun.spawn", "Subprocess.kill"] as const;
 const CATEGORIES = new Set<AllowCategory>([
   "boot",
   "cli",
@@ -132,6 +133,7 @@ function symbolPattern(symbol: AllowEntry["symbol"]): RegExp {
   if (symbol === "node:child_process") {
     return /(?:from\s+["']node:child_process["']|import\s*\(\s*["']node:child_process["']\s*\))/gu;
   }
+  if (symbol === "Subprocess.kill") return /\.kill\s*\(/gu;
   if (symbol === "Bun.spawn") {
     return /(?<![A-Za-z0-9_$.])Bun\.spawn(?!Sync)(?![A-Za-z0-9_$])/gu;
   }
@@ -144,6 +146,9 @@ function isUnderAnyRoot(rel: string, roots: readonly string[]): boolean {
 }
 
 function shouldScanSymbol(rel: string, symbol: AllowEntry["symbol"]): boolean {
+  // Custody adds a protected signal boundary. Expand this scope deliberately,
+  // rather than silently grandfathering every unrelated lifecycle caller.
+  if (symbol === "Subprocess.kill") return isUnderAnyRoot(rel, ["packages/runtime/src/supervision-handoff"]);
   if ((SYNC_SYMBOLS as readonly string[]).includes(symbol)) return true;
   if ((PHASE_B_SYMBOLS as readonly string[]).includes(symbol)) {
     return isUnderAnyRoot(rel, PHASE_B_ROOTS);
