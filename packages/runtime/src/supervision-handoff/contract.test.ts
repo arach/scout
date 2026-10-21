@@ -1,5 +1,5 @@
-import { afterEach, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { afterEach, expect, spyOn, test } from "bun:test";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SupervisionHandoff, HANDOFF_ROLES, productionHandoffReadiness,
@@ -12,7 +12,7 @@ const policy: FloorPolicy = { id: "fixture-floor", minimumRuntimeVersion: "900.0
   launcherArtifacts: ["fixture-p1"], rollbackArtifacts: ["fixture-r0"], rollbackOpen: true };
 async function fixture(enroll = true) {
   const path = realpathSync(mkdtempSync(join(tmpdir(), "r0-custody-"))); roots.push(path);
-  const instance = { uid: process.getuid!(), id: "fixture", supportDirectory: path };
+  const instance = { uid: process.geteuid!(), id: "fixture", supportDirectory: path };
   const ready: Readiness = { protocol: 1, ready: true, runtimeVersion: "900.0.0", runtimeArtifact: "fixture-r0",
     launcherArtifact: "fixture-p1", assistantClaims: true, integratedRoles: [...HANDOFF_ROLES] };
   let observation: Observation = structuredClone(absent); let effects = 0;
@@ -317,4 +317,17 @@ test("failed store revalidation poisons the scope rather than letting restored p
     expect(() => lease.assertCurrent()).toThrow("ownership_scope_closed");
   });
   expect(await f.reopen().read("web")).toMatchObject({ owner: "R0", generation: 1 }); expect(f.effects()).toBe(0);
+});
+
+
+test("effective-UID drift or root cannot borrow the real user's selection", async () => {
+  const f = await fixture(false);
+  const mock = spyOn(process, "geteuid");
+  try {
+    mock.mockReturnValue(f.instance.uid + 1);
+    expect(() => new SupervisionHandoff(f.instance, f.inspector)).toThrow("wrong_instance");
+    mock.mockReturnValue(0);
+    expect(() => new SupervisionHandoff(f.instance, f.inspector)).toThrow("wrong_instance");
+  } finally { mock.mockRestore(); }
+  expect(readdirSync(join(f.path, "supervision-handoff-v1"))).toEqual([]);
 });

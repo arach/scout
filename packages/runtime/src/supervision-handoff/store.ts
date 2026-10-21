@@ -40,7 +40,8 @@ function owned(path: string, directory: boolean, uid: number) {
   return { ...info, ...fileIdentity(path) };
 }
 function selection(value: SelectedInstance) {
-  if (!process.getuid || value.uid !== process.getuid() || value.uid === 0 || !value.id.trim()
+  const uid = process.geteuid?.();
+  if (uid === undefined || value.uid !== uid || uid === 0 || !value.id.trim()
     || !isAbsolute(value.supportDirectory) || realpathSync(value.supportDirectory) !== value.supportDirectory) refuse("wrong_instance");
   const root = lstatSync(value.supportDirectory);
   if (!root.isDirectory() || root.uid !== value.uid || (root.mode & 0o022) !== 0) refuse("unsafe_support_directory");
