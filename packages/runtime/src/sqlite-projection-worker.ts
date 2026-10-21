@@ -251,12 +251,31 @@ export class WorkerSQLiteProjection {
     if (this.watchdog) clearInterval(this.watchdog);
     this.failRequests(new Error("sqlite projection worker closed"));
     const worker = this.worker; this.worker = null;
-    if (worker) void worker.terminate();
+    if (worker) this.terminateWorker(worker);
     this.cachedHealth = { ...this.cachedHealth, unavailable: "sqlite projection closed" };
   }
   private failRequests(error: Error): void {
     for (const request of this.requests.values()) request.reject(error);
     this.requests.clear(); this.warmPromise = null;
+  }
+  private terminateWorker(worker: Worker): void {
+    // Retirement can race a worker's own exit. Neither a synchronous throw nor
+    // a rejected termination promise belongs on the broker's fatal path.
+    try { void worker.terminate().catch(() => {}); } catch { /* Already retired. */ }
+  }
+  private failed(worker: Worker, cause: unknown): void {
+    if (this.worker !== worker) return;
+    const error = cause instanceof Error ? cause : new Error(String(cause));
+    if (this.watchdog) { clearInterval(this.watchdog); this.watchdog = null; }
+    this.worker = null; this.failRequests(error);
+    this.cachedStatus = { state: "degraded", detail: error.message };
+    this.cachedHealth = { failures: this.cachedHealth.failures + 1, unavailable: error.message };
+    this.terminateWorker(worker);
+  }
+  private postMessage(worker: Worker, packet: unknown): void {
+    if (this.worker !== worker) return;
+    try { worker.postMessage(packet); }
+    catch (error) { this.failed(worker, error); }
   }
   private ensureWorker(): Worker {
     if (this.worker) return this.worker;
@@ -268,14 +287,8 @@ export class WorkerSQLiteProjection {
     const worker = new Worker(url, { workerData: { dbPath: this.dbPath, journalPath: this.journalPath, historyDirectory: this.options.historyDirectory, heartbeatMs } });
     this.worker = worker;
     this.workerProgress = 0;
-    worker.on("message", packet => { void this.onMessage(worker, packet); });
-    const failed = (error: Error) => {
-      if (this.worker !== worker) return;
-      if (this.watchdog) { clearInterval(this.watchdog); this.watchdog = null; }
-      this.worker = null; this.failRequests(error);
-      this.cachedStatus = { state: "degraded", detail: error.message };
-      this.cachedHealth = { failures: this.cachedHealth.failures + 1, unavailable: error.message };
-    };
+    worker.on("message", packet => { void this.onMessage(worker, packet).catch(error => this.failed(worker, error)); });
+    const failed = (error: Error) => this.failed(worker, error);
     worker.on("error", failed);
     worker.on("exit", code => { if (!this.closed) failed(new Error(`sqlite projection worker exited (${code})`)); });
     this.watchdog = setInterval(() => {
@@ -283,7 +296,6 @@ export class WorkerSQLiteProjection {
       const now = Date.now();
       if ([...this.requests.values()].some(request => now - request.lastProgressAt >= timeout)) {
         failed(new Error(`sqlite projection worker stalled for ${timeout}ms without replay progress`));
-        void worker.terminate();
       }
     }, heartbeatMs);
     this.watchdog.unref();
@@ -296,8 +308,7 @@ export class WorkerSQLiteProjection {
     const worker = this.ensureWorker(), id = ++this.nextRequestId;
     return new Promise((resolve, reject) => {
       this.requests.set(id, { resolve, reject, lastProgressAt: Date.now() });
-      try { worker.postMessage({ kind: "request", id, method, args }); }
-      catch (error) { this.requests.delete(id); reject(error); }
+      this.postMessage(worker, { kind: "request", id, method, args });
     });
   }
   private async onMessage(worker: Worker, packet: any): Promise<void> {
@@ -315,15 +326,20 @@ export class WorkerSQLiteProjection {
       this.requests.delete(packet.id);
       if (packet.error) request.reject(new Error(packet.error)); else request.resolve(packet.value);
     } else if (packet.kind === "source") {
+      let reply: { kind: "sourceResult"; id: number; value?: unknown; error?: string };
       try {
         let value: unknown;
         if (packet.operation === "boundary") value = await this.journal.captureReplayBoundary(packet.value);
         else if (packet.operation === "threadEvents") this.threadEvents?.publish(packet.value);
         else throw new Error("unknown projection source request");
-        worker.postMessage({ kind: "sourceResult", id: packet.id, value });
+        reply = { kind: "sourceResult", id: packet.id, value };
       } catch (error) {
-        worker.postMessage({ kind: "sourceResult", id: packet.id, error: error instanceof Error ? error.message : String(error) });
+        reply = { kind: "sourceResult", id: packet.id, error: error instanceof Error ? error.message : String(error) };
       }
+      // The journal await may outlive the watchdog, close(), or even a new
+      // worker generation. Never reply to or fail that replacement generation.
+      if (this.worker !== worker) return;
+      this.postMessage(worker, reply);
     }
   }
 }
