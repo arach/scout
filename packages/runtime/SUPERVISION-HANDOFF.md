@@ -292,6 +292,13 @@ change core storage/startup health or restore canonical coordination data.
    rollout authorization. Existing machines stay on their old owner until then.
 4. Only afterward: shared forward/reverse native failure fixtures, independently
    authorized live-Mac checks, and activation. No current process or job changed.
+5. **Torn-append repair (M1):** a torn journal append freezes all roles because
+   they share one authority journal. Before any live handoff, supply a reviewed,
+   operator-consented repair that truncates only to the last valid record.
+   The repair must hold the existing stable-inode lock, preserve that inode and
+   valid authority/receipt history, and retain uncertain effects for observation
+   rather than rerunning them. This PR implements no repair or automatic
+   truncation. The pre-authority staging exception does not cover this case.
 
 The public contract and fixtures can be reviewed before these gates open. They
 must not be advertised as a production custody certificate.
