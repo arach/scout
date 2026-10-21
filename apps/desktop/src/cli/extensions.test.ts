@@ -236,7 +236,7 @@ process.exitCode = await runScoutExtension(extension, [], process.env);`);
   test("scout extensions only lists: any other word is an error, not a listing", async () => {
     const lines: string[] = [];
     const context = createScoutCommandContext({ env, stdout: (line) => lines.push(line) });
-    await expect(runExtensionsCommand(context, ["install", "mesh"])).rejects.toThrow("unexpected argument for extensions: install");
+    await expect(runExtensionsCommand(context, ["install", "mesh"])).rejects.toThrow("usage: scout extensions");
     expect(lines).toEqual([]);
     await runExtensionsCommand(context, []);
     expect(lines.join("\n")).toContain(`Extensions home: ${home}`);

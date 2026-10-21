@@ -499,6 +499,12 @@
       "types": "./dist/mesh-client-wire.d.ts",
       "import": "./dist/mesh-client-wire.js",
       "default": "./dist/mesh-client-wire.js"
+    },
+    "./scout-extensions": {
+      "bun": "./src/scout-extensions.ts",
+      "types": "./dist/scout-extensions.d.ts",
+      "import": "./dist/scout-extensions.js",
+      "default": "./dist/scout-extensions.js"
     }
   },
   "types": "./dist/index.d.ts",
