@@ -115,7 +115,9 @@ export class BrokerUnavailableTargetService {
     // endpoint refresh timestamp; no heartbeat, card mutation or new lease.
     const freshRemoteEndpoint = typeof lastSeenAt === "number"
       && lastSeenAt <= checkedAt && checkedAt - lastSeenAt <= 90_000;
-    const alive = endpoint ? (remote ? freshRemoteEndpoint : this.#deps.isEndpointAlive?.(endpoint)) : false;
+    // Retirement is authoritative: do not probe a process that cannot receive.
+    const alive = endpoint && !hasRetiredEndpointRegistration(endpoint)
+      ? (remote ? freshRemoteEndpoint : this.#deps.isEndpointAlive?.(endpoint)) : false;
     // A local Codex connection is stronger evidence than an old turn-failure
     // latch. Admit recovery; the resolver durably repairs the endpoint state.
     // A remote refresh timestamp is NOT physical process evidence.
