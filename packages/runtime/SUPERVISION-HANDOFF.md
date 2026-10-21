@@ -263,6 +263,9 @@ change core storage/startup health or restore canonical coordination data.
 2. Private adapter: implement the mapping above, exact OS process/job/in-flight
    evidence and protected native effect boundary. No production adapter is
    supplied by this public PR.
+   The production inspector for `app-edge` must count the old runtime's Caddy
+   and mDNS advertisements as occupied evidence. It must not prove absence
+   while either remains active.
 3. Operator: choose the compatible artifact floor, rollback window and a live
    rollout authorization. Existing machines stay on their old owner until then.
 4. Only afterward: shared forward/reverse native failure fixtures, independently
