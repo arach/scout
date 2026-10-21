@@ -1184,5 +1184,40 @@
     "category": "test",
     "reason": "bounded isolated SDK-owner fixture proves EOF-parent guard after its actual custodian is SIGKILLed; sanitized scratch HOME, exact owned handle awaited, and child/owner PID disappearance checked including zombies",
     "owner": "runtime"
+  },
+  {
+    "path": "packages/cli/src/mcp/public-lifecycle.test.ts",
+    "symbol": "Bun.spawn",
+    "category": "test",
+    "reason": "isolated public stdio/channel and pure-import child probes have an 8-second watchdog, process-group cleanup, awaited exit and survivor assertions",
+    "owner": "cli"
+  },
+  {
+    "path": "packages/cli/src/mcp/test-helpers/import-purity.ts",
+    "symbol": "node:child_process",
+    "category": "test",
+    "reason": "pure-import probe replaces these child-process APIs with fail-fast guards before importing the factory; it never executes them",
+    "owner": "cli"
+  },
+  {
+    "path": "packages/cli/src/mcp/test-helpers/import-purity.ts",
+    "symbol": "execFileSync",
+    "category": "test",
+    "reason": "pure-import probe replaces these child-process APIs with fail-fast guards before importing the factory; it never executes them",
+    "owner": "cli"
+  },
+  {
+    "path": "packages/cli/src/mcp/test-helpers/import-purity.ts",
+    "symbol": "execSync",
+    "category": "test",
+    "reason": "pure-import probe replaces these child-process APIs with fail-fast guards before importing the factory; it never executes them",
+    "owner": "cli"
+  },
+  {
+    "path": "packages/cli/src/mcp/test-helpers/import-purity.ts",
+    "symbol": "spawnSync",
+    "category": "test",
+    "reason": "pure-import probe replaces these child-process APIs with fail-fast guards before importing the factory; it never executes them",
+    "owner": "cli"
   }
 ]
