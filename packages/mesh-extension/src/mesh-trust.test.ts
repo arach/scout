@@ -315,3 +315,10 @@ describe("mesh enrollment handshake", () => {
     expect(wire.grantBodies).toEqual([]);
   });
 });
+
+test('confirmation normalizes canonical hyphenated dictionary words too', async()=>{
+  const handshake:any={words:['yo-yo','alpha','bravo','charlie','delta','echo'],grant:{keyId:'a'.repeat(64)},tier:'observe'};
+  const peer:any={keyId:'a'.repeat(64)};
+  const result=await confirmMeshEnrollment('http://127.0.0.1:1',handshake,'YO-YO - ALPHA - BRAVO - CHARLIE - DELTA - ECHO',(async()=>Response.json({peer})) as unknown as typeof fetch);
+  expect(result).toEqual(peer);
+});

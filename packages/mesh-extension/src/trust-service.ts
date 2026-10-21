@@ -357,7 +357,7 @@ export async function confirmMeshEnrollment(
 ): Promise<TrustedPeerRecord> {
   if (confirmedWords !== undefined) {
     const typed = normalizeSasWords(confirmedWords);
-    if (typed.join(" ") !== handshake.words.join(" ")) {
+    if (typed.join(" ") !== normalizeSasWords(handshake.words.join(" ")).join(" ")) {
       throw new Error(
         "the words you entered do not match this enrollment; do not approve — start over with `scout mesh enroll`",
       );
