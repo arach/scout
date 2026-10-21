@@ -1666,7 +1666,7 @@ describe("exclusive assistant HTTP contract", () => {
   }
   test("capability, second claimant refusal, renewal and release", async () => {
     const { h } = claimedHarness();
-    expect((await requestRouter(h, "GET", "/v1/assistant-claims")).body).toEqual({ capability: "assistant-answerer-claims/1", agentIds: ["scoutbot"], ttlMs: 30 });
+    expect((await requestRouter(h, "GET", "/v1/assistant-claims")).body).toEqual({ capability: "assistant-answerer-claims/1", agentIds: ["scoutbot"], ttlMs: 30, agents: { scoutbot: { held: false, holderId: null, admitted: 0, oldestAdmissionAgeMs: null } } });
     const acquired = await requestRouter(h, "POST", "/v1/assistant-claims", { body: { agentId: "scoutbot", holderId: "first" } });
     expect(acquired.response.status).toBe(201);
     const token = (acquired.body as any).token;

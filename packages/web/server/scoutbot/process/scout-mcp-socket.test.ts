@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { McpClient, StdioTransport } from "@earendil-works/pi-mcp";
 
+// This fixture starts the source CLI and completes the MCP handshake. Its
+// assertions prove Unix-socket isolation, not cold-start latency.
 test("repo Scout MCP lists real tools, identifies as scoutbot, and uses Unix socket rather than TCP", async () => {
   const directory = mkdtempSync(join(tmpdir(), "scoutbot-real-mcp-"));
   const socket = join(directory, "broker.sock");
@@ -40,4 +42,4 @@ test("repo Scout MCP lists real tools, identifies as scoutbot, and uses Unix soc
     await new Promise<void>(resolve => tcp.close(() => resolve()));
     rmSync(directory, { recursive: true, force: true });
   }
-}, 10000);
+}, 30_000);

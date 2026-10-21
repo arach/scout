@@ -126,3 +126,66 @@ describe("common client boundary", () => {
     finish(); await first; expect(writes).toBe(1);
   });
 });
+
+describe("assistant claim diagnostics", () => {
+  test("reports idle, held and draining ownership with the oldest admission's age, without secrets", async () => {
+    const { claims, advance } = fixture();
+    expect(claims.capability().agents.scoutbot).toEqual({ held: false, holderId: null, admitted: 0, oldestAdmissionAgeMs: null });
+    const lease = claims.acquire("scoutbot", "web:pid:123");
+    expect(claims.capability().agents.scoutbot).toEqual({ held: true, holderId: "web:pid:123", admitted: 0, oldestAdmissionAgeMs: null });
+    let done!: () => void;
+    const first = claims.withToken(lease.token, () => claims.admit("scoutbot", () => new Promise<void>(r => { done = r; })));
+    advance(5);
+    let doneSecond!: () => void;
+    const second = claims.withToken(lease.token, () => claims.admit("scoutbot", () => new Promise<void>(r => { doneSecond = r; })));
+    advance(7);
+    expect(claims.capability().agents.scoutbot).toEqual({ held: true, holderId: "web:pid:123", admitted: 2, oldestAdmissionAgeMs: 12 });
+    done(); await first;
+    expect(claims.capability().agents.scoutbot.oldestAdmissionAgeMs).toBe(7);
+    claims.withToken(lease.token, () => claims.release("scoutbot"));
+    expect(claims.capability().agents.scoutbot.held).toBe(true);
+    expect(JSON.stringify(claims.capability())).not.toContain(lease.token);
+    doneSecond(); await second;
+    expect(claims.capability().agents.scoutbot).toEqual({ held: false, holderId: null, admitted: 0, oldestAdmissionAgeMs: null });
+  });
+
+  test("warns once for an over-TTL admitted write, but never steals it", async () => {
+    const warnings: string[] = [];
+    const claims = new BrokerAssistantClaims(["scoutbot"], { ttlMs: 10, warn: message => warnings.push(message) });
+    const lease = claims.acquire("scoutbot", "standalone:pid:456");
+    let finish!: () => void;
+    const write = claims.withToken(lease.token, () => claims.admit("scoutbot", () => new Promise<void>(r => { finish = r; })));
+    try {
+      await Bun.sleep(30);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain('holderId="standalone:pid:456"');
+      expect(warnings[0]).toContain('admitted=1');
+      expect(warnings[0]).not.toContain(lease.token);
+      expect(() => claims.acquire("scoutbot", "replacement")).toThrow("assistant_claim_busy");
+    } finally { finish(); await write; }
+    expect(claims.acquire("scoutbot", "replacement").token).not.toBe(lease.token);
+  });
+});
+
+test("over-TTL completion logs even when a stalled event loop has not run its timer", async () => {
+  let now = 100; const warnings: string[] = [];
+  const claims = new BrokerAssistantClaims(["scoutbot"], { ttlMs: 10, now: () => now, warn: w => warnings.push(w) });
+  const lease = claims.acquire("scoutbot", "web:pid:123");
+  const result = await claims.withToken(lease.token, () => claims.admit("scoutbot", async () => { now += 11; return "stored"; }));
+  expect(result).toBe("stored"); expect(warnings).toHaveLength(1); expect(warnings[0]).toContain("ageMs=11");
+  expect(claims.capability().agents.scoutbot.admitted).toBe(0);
+});
+
+test.each([false, true])("diagnostic failures cannot change canonical write results (write fails: %s)", async fails => {
+  let logs = 0;
+  const claims = new BrokerAssistantClaims(["scoutbot"], { ttlMs: 10, warn: () => { logs++; throw new Error("logger failed"); } });
+  const lease = claims.acquire("scoutbot", "standalone:pid:456");
+  const result = claims.withToken(lease.token, () => claims.admit("scoutbot", async () => {
+    await Bun.sleep(25);
+    if (fails) throw new Error("original write failed");
+    return "stored";
+  }));
+  if (fails) await expect(result).rejects.toThrow("original write failed");
+  else expect(await result).toBe("stored");
+  expect(logs).toBe(1); expect(claims.capability().agents.scoutbot.admitted).toBe(0);
+});

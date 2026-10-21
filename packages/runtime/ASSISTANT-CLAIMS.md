@@ -20,14 +20,14 @@ non-browser-origin requests.
 
 | Request | Result |
 | --- | --- |
-| `GET /v1/assistant-claims` | `{ capability: "assistant-answerer-claims/1", agentIds: ["scoutbot"], ttlMs: 30000 }` |
+| `GET /v1/assistant-claims` | `{ capability: "assistant-answerer-claims/1", agentIds: ["scoutbot"], ttlMs: 30000, agents: { scoutbot: { held, holderId, admitted, oldestAdmissionAgeMs } } }` |
 | `POST /v1/assistant-claims` with `{ agentId: "scoutbot", holderId: "<unique process instance label>" }` | 201 and `{ agentId, token, ttlMs }` |
 | `POST /v1/assistant-claims/renew` with `{ agentId }` and proof header | 200 and `{ agentId, ttlMs }` |
 | `POST /v1/assistant-claims/release` with `{ agentId }` and proof header | 200 and `{ ok: true, draining: <boolean> }` |
 
 The proof header is **`x-scout-assistant-claim-token: <token>`**. The broker uses a
 cryptographically random token and a monotonic 30-second deadline. Renew at
-about 10-second intervals, before expiry. Renewal keeps the same token. A new
+half the TTL (15-second intervals for the default TTL), before expiry. Renewal keeps the same token. A new
 claim receives a different token. The client cannot choose an unbounded TTL.
 
 A second claim receives **409 `assistant_claim_busy`**, even if it repeats the
@@ -54,11 +54,21 @@ Admission pins the lease while a client mutation is running. Expiry or release
 does not let a second owner overlap that admitted mutation. Release prevents
 new admissions immediately and reports whether the old owner is draining. If
 an admitted operation is stuck, takeover waits rather than stealing ownership.
+The capability GET reports per-agent `held`, `holderId`, `admitted` and
+`oldestAdmissionAgeMs`. A draining owner remains held after expiry or release.
+An idle, expired owner reports `held: false` and `holderId: null`. An agent
+without admissions reports `oldestAdmissionAgeMs: null`. Tokens are never
+included. One diagnostic timer per admitted write logs its agent, holder,
+admission count and age if it outlives the TTL. The timer does not revoke the
+claim, cancel the write or permit takeover. Completion also checks the age
+in case a stalled event loop has not run the timer. A diagnostic failure cannot
+change the write result.
+
 Existing operation timeouts/recovery apply; this API does not forcibly cancel
 canonical writes or spawn/kill processes.
 
 Leases exist only in the broker's memory. Broker restart invalidates every old
-token. There is no credential file, journal replay of leases, timer per lease,
+token. There is no credential file, journal replay of leases,
 or automatic resumption under an old token. A reconnected client reacquires
 and reconciles already accepted work by its existing message/request identity.
 A lease change does not cancel or erase canonical invocations already accepted
@@ -94,52 +104,58 @@ requests do not inherit another request's authorization. A token is not a
 permanent privileged identity: a same-user client that deliberately shares it
 can share its authority. This remains a high-trust local system.
 
-## App compatibility and private adoption
+## App compatibility and adoption
 
-**Choice: ship the public runtime contract; adopt it in the private app at the
-CLI/runtime cutover.** This PR does not port changes into the current private
-runtime or modify the private app's claimant implementation. It does not depend
-on transitional app entry configuration.
+`packages/web/server/scoutbot/answerer-claim.ts` is the shared claimant for the
+in-process web runner and the standalone process. Holder labels include mode,
+pid and a unique process-instance suffix. Both acquire before registration,
+endpoint retirement, event consumption or answering. They renew at half the
+TTL. A busy candidate stays posting-only and retries quietly once per second.
+It does not register, consume the inbox, generate an answer or retire an
+endpoint while another owner holds the claim.
 
-Today's private runtime and app keep their existing behavior because neither
-is changed here. At cutover, ship a paired private app build and public runtime
-version with this capability. The installer must verify compatibility before
-repointing the app. Do not call this API from today's private app against an
-older runtime, and do not release the new runtime to app users with an old
-claimless assistant implementation. Old claimless Scoutbot registration and
-answer submissions to the new public runtime intentionally fail closed,
-including the frozen web implementation still in this checkout.
+The claimant uses a monotonic local deadline, conservatively measured from the
+start of each acquire/renew request. Renewal failure or expiry aborts the local
+answering scope. Stop aborts new work, drains the runner and releases the claim.
+A replacement generation cannot lend its token to old async work. The broker
+still fences an already-sent request that arrives after expiry or takeover.
+Canonical operations already admitted by the broker keep their existing
+completion behavior and ownership pin.
 
-A compatible no-op is **not** part of this contract. If the new claimant sees
-404, a missing capability or a different capability version, it must remain
-non-answering and report that a compatible runtime/app pair is required. Core
-and operator posting remain usable. Do not interpret absence as permission for
-two legacy answerers.
+Capability discovery is backward compatible. A missing capability (404, or a
+successful legacy response with no capability field) permits the old, claimless
+answering behavior **only against that older runtime**. Network errors, an
+unknown capability version, 409 busy and failed renewal do not permit a legacy
+fallback. Legacy mode probes the capability every 15 seconds, so a broker
+upgrade exits legacy mode and reacquires before the next answering generation.
+An older runtime cannot guarantee exclusive answering. The new
+runtime always refuses claimless assistant mutations; discovery does not turn
+off its enforcement.
 
-The private adoption work must do the following:
+The web runner attaches proof in its broker POST helper. Its UI posting and
+thread-read APIs do not register or warm an answering endpoint. The standalone
+process attaches proof in `process/broker-link.ts`. Its stdio MCP child uses a
+generation-bound Unix socket proxy (`process/claim-broker-proxy.ts`) so tool
+writes get the same proof without exposing it in child environment, tool
+arguments or dispatch receipts. The proxy directory is mode 0700 and its socket
+is 0600. It cannot manage claims, and a stopped generation cannot forward new
+work with a successor's token. The proxy closes with the generation; it is not
+a second answerer or a process supervisor.
 
-1. In the standalone process (`process/scoutbot-process.ts` bootstrap and run)
-   and any answering web runner (`runner.ts`), acquire before registration,
-   endpoint retirement, event consumption or model/tool execution. The posting
-   handle remains posting-only without acquiring.
-2. In `process/broker-link.ts` and the runner's broker request helper, attach the
-   proof header to registration, answer and assistant-originated dispatch
-   requests. Keep it out of payloads and persisted dispatch journals. UI/operator
-   posting must not attempt answering-role registration without a claim.
-3. Renew on a bounded loop. A failed renewal pauses new work immediately. On
-   lost/expired claim, abort local generation/tool admission and stop publishing.
-   Reacquire only through the selected owner's recovery policy. A second
-   candidate reports `assistant_claim_busy` and stays inert/posting-only; it
-   must not delete the holder's endpoint or activate another fallback mode.
-4. Release after stopping new work and draining local work. On broker restart,
-   reacquire, then reconcile canonical messages, invocations and private
-   dispatch receipts before retrying a turn. Do not mint a new instruction to
-   replace work whose outcome is unknown.
-5. Test two live claimant fixtures, a stray web without `managed`, death/expiry,
-   renewal failure, old-token delayed posts, old-runtime capability absence,
-   broker restart and preserved operator posting. These are app adoption gates,
-   not claims that this runtime-only PR has tested an updated private app.
+The runtime claim change and this public claimant must ship in the same release.
+Public npm installs retain a working assistant while the web is included. At
+the app/runtime cutover, the private app adopts this claimant module unchanged,
+along with the two runner integrations and the standalone transport adapter.
+No port to the current private runtime is required: the new claimant can use
+its old-runtime compatibility path until the paired cutover. Do not ship a new,
+enforcing runtime with a claimless app build.
 
-The lease establishes exclusivity, not preferred-owner selection. The private
+Affected tests pair the public runners and claimant with the runtime guard and
+HTTP claim/answer routes. They cover a stray web without `managed`, quiet busy
+retry, death and expiry, delayed old-token posts, renewal failure, stalled
+renewal, broker restart, old-runtime discovery, and the generation-bound tool
+socket. These are fixture tests; they do not start or change installed apps.
+
+The lease establishes exclusivity, not preferred-owner selection. The app
 launcher's desired-state handoff still determines which process should claim.
-Full app process handoff and rollback remain separate work.
+Full process handoff and rollback remain separate work.

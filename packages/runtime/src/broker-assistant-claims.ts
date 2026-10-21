@@ -13,7 +13,7 @@ export class AssistantClaimError extends Error {
   }
 }
 
-type Lease = { token: string; holderId: string; deadline: number; admitted: number };
+type Lease = { token: string; holderId: string; deadline: number; admitted: number; admissions: Set<{ startedAt: number }> };
 
 /** Broker-lifetime, machine-local ownership, not a mesh lock or persisted credential.
  * Admission pins the owner until its mutation settles, even across lease expiry. */
@@ -23,16 +23,27 @@ export class BrokerAssistantClaims {
   private readonly protectedAgents: ReadonlySet<string>;
   readonly ttlMs: number;
   private readonly now: () => number;
+  private readonly warn: (message: string) => void;
 
-  constructor(agentIds: readonly string[], options: { ttlMs?: number; now?: () => number } = {}) {
+  constructor(agentIds: readonly string[], options: { ttlMs?: number; now?: () => number; warn?: (message: string) => void } = {}) {
     this.protectedAgents = new Set(agentIds);
     this.ttlMs = options.ttlMs ?? 30_000;
     if (!Number.isFinite(this.ttlMs) || this.ttlMs <= 0) throw new Error("invalid assistant claim TTL");
     this.now = options.now ?? (() => performance.now());
+    this.warn = options.warn ?? (message => console.warn(message));
   }
 
   capability() {
-    return { capability: ASSISTANT_CLAIMS_CAPABILITY, agentIds: [...this.protectedAgents], ttlMs: this.ttlMs };
+    const now = this.now();
+    const agents = Object.fromEntries([...this.protectedAgents].map(agentId => {
+      const lease = this.leases.get(agentId);
+      const held = !!lease && (lease.deadline > now || lease.admitted > 0);
+      return [agentId, { held, holderId: held ? lease.holderId : null,
+        admitted: lease?.admitted ?? 0,
+        oldestAdmissionAgeMs: lease?.admissions.size
+          ? Math.max(0, now - Math.min(...[...lease.admissions].map(admission => admission.startedAt))) : null }];
+    }));
+    return { capability: ASSISTANT_CLAIMS_CAPABILITY, agentIds: [...this.protectedAgents], ttlMs: this.ttlMs, agents };
   }
 
   acquire(agentId: string, holderId: string) {
@@ -42,7 +53,7 @@ export class BrokerAssistantClaims {
     if (current && (current.deadline > this.now() || current.admitted > 0)) {
       throw new AssistantClaimError("assistant_claim_busy", 409, Math.max(0, current.deadline - this.now()));
     }
-    const lease = { token: randomBytes(32).toString("hex"), holderId, deadline: this.now() + this.ttlMs, admitted: 0 };
+    const lease = { token: randomBytes(32).toString("hex"), holderId, deadline: this.now() + this.ttlMs, admitted: 0, admissions: new Set<{ startedAt: number }>() };
     this.leases.set(agentId, lease);
     return { agentId, token: lease.token, ttlMs: this.ttlMs };
   }
@@ -68,8 +79,35 @@ export class BrokerAssistantClaims {
     if (!agentId || !this.protectedAgents.has(agentId)) return action();
     const lease = this.authorized(agentId);
     lease.admitted++;
+    // Separate objects distinguish simultaneous admissions with the same clock tick.
+    const admission = { startedAt: this.now() };
+    lease.admissions.add(admission);
+    let warned = false;
+    const warn = () => {
+      if (warned) return;
+      warned = true;
+      // Diagnostic only: logging cannot change a mutation's result or ownership.
+      try {
+        this.warn(`[assistant-claims] admitted write outlived TTL agentId=${JSON.stringify(agentId)} holderId=${JSON.stringify(lease.holderId)} admitted=${lease.admitted} ageMs=${Math.max(0, this.now() - admission.startedAt)} ttlMs=${this.ttlMs}`);
+      } catch { /* A failed diagnostic must not fail the canonical write. */ }
+    };
+    let timer: ReturnType<typeof setTimeout>;
+    const check = () => {
+      const remaining = this.ttlMs - (this.now() - admission.startedAt);
+      if (remaining <= 0) { warn(); return; }
+      timer = setTimeout(check, Math.max(1, remaining));
+      timer.unref?.();
+    };
+    timer = setTimeout(check, this.ttlMs);
+    timer.unref?.();
     try { return await action(); }
-    finally { lease.admitted--; }
+    finally {
+      clearTimeout(timer);
+      // Promise settlement can run before a due timer after an event-loop stall.
+      if (this.now() - admission.startedAt >= this.ttlMs) warn();
+      lease.admissions.delete(admission);
+      lease.admitted--;
+    }
   }
 
   commandAgent(command: ControlCommand): string | undefined {
