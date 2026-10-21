@@ -6,9 +6,9 @@ import { describe, expect, test } from "bun:test";
 
 import { createLocalAgentClient } from "@openscout/agent-sessions/local";
 
-// Excluded from the unit run by the `**/*live.test.ts` ignore pattern: this
-// spawns a real `opencode acp` process and spends real tokens. Run it with
-// `bun run --cwd packages/runtime test:live:opencode-acp`.
+// Unit runs exclude this file. Direct file runs also require
+// OPENSCOUT_LIVE_OPENCODE_ACP=1: credentials alone are not consent to spawn
+// a real harness or spend tokens. The test:live:opencode-acp script opts in.
 
 const OPENCODE_AUTH = join(homedir(), ".local", "share", "opencode", "auth.json");
 
@@ -19,7 +19,7 @@ const SMOKE_MODEL = process.env.OPENCODE_SMOKE_MODEL ?? "opencode/laguna-s-2.1-f
 
 const authenticated = existsSync(OPENCODE_AUTH) || Boolean(process.env.OPENCODE_API_KEY);
 
-describe.skipIf(!authenticated)("opencode acp live", () => {
+describe.skipIf(process.env.OPENSCOUT_LIVE_OPENCODE_ACP !== "1" || !authenticated)("opencode acp live", () => {
   test("completes a turn through the local agent client", async () => {
     const client = await createLocalAgentClient({
       harness: "opencode",

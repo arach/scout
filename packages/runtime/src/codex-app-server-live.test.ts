@@ -277,7 +277,8 @@ function isAgentMessageCompletionFor(threadId: string, turnId: string) {
 const liveUrl = process.env.OPENSCOUT_CODEX_APP_SERVER_URL?.trim();
 const liveThreadId = process.env.OPENSCOUT_CODEX_THREAD_ID?.trim();
 const liveCwd = process.env.OPENSCOUT_CODEX_LIVE_CWD?.trim() || process.cwd();
-const runLiveTest = Boolean(liveUrl && liveThreadId);
+// URL/thread selection alone is not consent to write into that live thread.
+const runLiveTest = process.env.OPENSCOUT_LIVE_CODEX_APP_SERVER === "1" && Boolean(liveUrl && liveThreadId);
 const liveTest = runLiveTest ? test : test.skip;
 
 describe("Codex app-server live JSON-RPC", () => {
