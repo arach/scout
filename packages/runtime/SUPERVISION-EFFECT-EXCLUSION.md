@@ -171,13 +171,41 @@ An unfenced legacy owner cannot be excluded by introducing a new lock.
 ## Child-side custody check
 
 An audited carrier adapter uses `permit.spawnChild()` in the committed owner's
-start scope. Its command must select `carrier: "role-lifetime/3"` and an explicit
+start scope. Its command must select `carrier: "role-lifetime/7"` and an explicit
 three-entry `stdio` tuple. Each stdio entry is `"ignore"` or `"inherit"`; pipes,
 numeric FDs and arbitrary extra mappings are not supported. The SDK fills child
-FD 3 from its own retained lifetime description and keeps the sole-reaper handle.
+FDs according to exported `CARRIER_LAYOUT` (`role-custody/1`):
+
+| Child slot | Meaning | Ownership |
+| --- | --- | --- |
+| 0, 1, 2 | Explicit ignore/inherit stdio | No arbitrary caller FD or pipe |
+| 3 | Parent-loss channel, read end | SDK-created EOF-only pipe, never credentials or the fence |
+| 4 | Reserved inherited context | Not implemented; currently ignored |
+| 5, 6 | Unused padding | Ignored |
+| 7 | Anchored role lifetime fence | SDK maps its own locked description |
+
+The SDK retains the sole-reaper handle and the pipe's write end for the
+controller's lifetime, not merely the short ledger transaction. It closes its
+read-end reference after spawn. The writer is never mapped into a child. Both
+host endpoints are close-on-exec. Retirement, role-fence release and controller
+shutdown close the appropriate writer under ledger serialization. Host process
+death also closes it. A worker must install its EOF/close parent-loss guard
+before role work; verification of the fence does not install that guard.
+The pipe carries no bytes or authority. EOF requests cooperative shutdown, not
+proof that every carrier stopped. An uncooperative surviving carrier still
+blocks the fence and the stop receipt.
+
+Both numeric mapping sources are temporary CLOEXEC duplicates above slot 7.
+This avoids ordered dup2 actions overwriting a low-numbered source while Bun
+prepares the target slots. Copies close immediately after the audited borrowed-
+FD spawn; the original host fence and writer remain owned. No lock is unlocked
+or downgraded. Native preparation is synchronous with no JS await, but Darwin
+pipe -> CLOEXEC setup is not atomic. The trusted host must exclude foreign
+native fork/exec during that sequence; this remains a deployment obligation.
+
 The caller supplies no descriptor number and receives no raw process handle.
-The parent description remains close-on-exec; only the explicit child mapping
-is inheritable. The staged raw `lease.carrierDescriptor()` API is removed.
+The staged raw `lease.carrierDescriptor()` API is removed. The former
+`role-lifetime/3` request refuses rather than choosing an alternate layout.
 Raw `atEffect()` starts refuse under a profile, so this is the only supported
 carrier-spawn path. Absence-only commands keep their unmapped, ignored-stdio
 default; an explicit ignore/inherit tuple is also supported there.
@@ -201,7 +229,9 @@ closes the descriptor can defeat advisory participation; unexplained resource
 evidence must still refuse its cohort's retirement.
 
 The child declares the capability when constructing `ChildRoleCustody`. Before
-performing any role work, it calls `check(role, owner, generation, descriptor)`.
+performing any role work, it calls `check(role, owner, generation)`, which defaults
+to fence FD 7. The explicit descriptor argument remains a verification input,
+not a parent-side mapping API.
 Under the ledger mutex, the check:
 
 1. Confirms the selected profile, committed active generation and running
@@ -212,7 +242,11 @@ Under the ledger mutex, the check:
 3. Requires a separately opened description to contend, then requires an
    idempotent exclusive-lock operation on the mapped description. A separately
    opened, unlocked FD on the right inode is not enough.
-4. Revalidates the scope and returns a verification snapshot, not an effect
+4. Sets and verifies FD_CLOEXEC on that descriptor. Deliberate next-hop mapping
+   can pass the description again; an ordinary exec must not leak it to an
+   independent server. This does not prevent inheritance across fork alone.
+5. Revalidates the scope and returns a verification snapshot with
+   `closeOnExec: true`, not an effect
    permit or a promise that later generations remain current.
 
 A wrong inode, stale generation, missing capability or missing lock refuses
@@ -230,6 +264,26 @@ A child's verified result is a carrier claim only once the parent controller
 re-confirms its own retained fence after the child reports (its next lease scope
 does this for free); a verified child whose parent cannot confirm is treated as
 unknown and stopped through the ordinary landing-side gates.
+
+### Reserved inherited context and verification lane
+
+FD 4 reserves space for a later inherited-context contract. No format, credential
+payload or context input is implemented here. A future reviewed extension must
+construct and own the descriptor inside retained `spawnChild`, validate its
+approved format/provenance before child work, and close it on every failure.
+It must not accept caller FDs, arbitrary stdio mappings or raw handles. Context
+and parent channel remain separate from the fence. Unknown command fields,
+including attempted parent/context descriptor inputs, currently refuse.
+
+A hosted mapped-spawn lane must use macOS and the exact audited Bun 1.3.14
+revision. It must exercise FD-3 EOF guarding across ledger scopes and actual
+custodian death, FD-7 identity/lock checks and CLOEXEC, explicit next-hop mapping,
+uncooperative surviving carriers, low-numbered source collisions, spawn-failure
+cleanup, GC after descriptor reuse, and the full start/retire/advance suite.
+It must also run strict SDK typechecking, the execution fence, sanitized scratch
+environments and survivor checks including zombies. A Linux lane or a Bun
+1.3.13 refusal lane does not cover these Darwin mapping behaviors. No CI change
+or hosted dispatch is part of this inactive SDK change.
 
 ## One cohort per generation
 

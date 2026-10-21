@@ -145,7 +145,9 @@ test("a held controller blocks transfer until it closes its lifetime reference",
   const f = await fixture(); await f.enroll();
   const fd = await testFence(f.sdk, f.store);
   // The child-side check validates the exact live description, not a PID file.
-  expect(await new ChildRoleCustody(f.instance, caps).check("web", "R0", 1, fd)).toMatchObject({ state: "verified" });
+  const checked = new ChildRoleCustody(f.instance, caps).check("web", "R0", 1, fd);
+  if (process.platform === "darwin") expect(await checked).toMatchObject({ state: "verified", closeOnExec: true });
+  else await expect(checked).rejects.toThrow("carrier_layout_unsupported");
   const token = await f.drain();
   await expect(f.make().transfer("web", token)).rejects.toThrow("ownership_busy");
   await f.sdk.releaseLifetimeFence("R0", "web", 1);
@@ -160,7 +162,7 @@ test("a held controller blocks transfer until it closes its lifetime reference",
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("OPENSCOUT_") && !key.startsWith("SCOUT_")));
   env.HOME = f.root; env.BUN_RUNTIME_TRANSPILER_CACHE_PATH = "0";
   const child = Bun.spawn([process.execPath, join(import.meta.dir, "exclusion-carrier.fixture.ts"), config], {
-    cwd: f.root, env, stdio: ["pipe", "pipe", "pipe", wrong ?? descriptor],
+    cwd: f.root, env, stdio: ["pipe", "pipe", "pipe", "ignore", "ignore", "ignore", "ignore", wrong ?? descriptor],
   });
   let timer: ReturnType<typeof setTimeout> | undefined;
   const stderr = new Response(child.stderr).text();

@@ -3,12 +3,13 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { SupervisionHandoff, EFFECT_EXCLUSION_CAPABILITY, ChildRoleCustody, profileHash, createProcessEvidenceReader, productionHandoffReadiness, carrierChildCapability,
+import { SupervisionHandoff, EFFECT_EXCLUSION_CAPABILITY, ChildRoleCustody, profileHash, createProcessEvidenceReader, productionHandoffReadiness, carrierChildCapability, CARRIER_LAYOUT,
   type Absence, type DirectChildCommand, type EffectExclusionProfile, type ExactChild, type ExclusionContext, type ExclusionEvidence, type FloorPolicy, type HandoffInspector,
   type Observation, type Readiness } from "./index.js";
 import { nativeDarwinProcessSource } from "./darwin-process-source.js";
 import { CustodyTransaction, HandoffStore } from "./store.js";
 import { DirectChildren } from "./child-custody.js";
+import * as layout from "./carrier-layout.js";
 
 const caps = [EFFECT_EXCLUSION_CAPABILITY];
 const carrierTest = carrierChildCapability().available ? test : test.skip;
@@ -47,7 +48,7 @@ async function fixture() {
   await sdk.activate("web", token, "running"); observation = { state: "unknown" }; observes = 0;
   cleanups.push(async () => {
     for (const run of runs) { writeFileSync(join(run, "exit"), ""); writeFileSync(join(run, "desc-exit"), ""); }
-    const pids = () => runs.flatMap(run => ["spawn-pid", "desc-pid"].filter(file => existsSync(join(run, file))).map(file => Number(readFileSync(join(run, file), "utf8"))));
+    const pids = () => runs.flatMap(run => ["spawn-pid", "desc-pid", "owner-pid"].filter(file => existsSync(join(run, file))).map(file => Number(readFileSync(join(run, file), "utf8"))));
     await waitUntil(() => pids().every(pid => nativeDarwinProcessSource().bsdInfo(pid, true).count === 0), 6500);
     expect(pids().map(pid => nativeDarwinProcessSource().bsdInfo(pid, true).count)).toEqual(pids().map(() => 0));
     for (const controller of controllers) await controller.releaseControllerFences();
@@ -57,11 +58,11 @@ async function fixture() {
     const run = join(root, `run-${generation}`); mkdirSync(run); runs.push(run);
     const config = join(run, "config.json"); writeFileSync(config, JSON.stringify({ instance, generation, mode, root: run }));
     return { argv: [process.execPath, join(import.meta.dir, "cohort-carrier.fixture.ts"), config], cwd: run,
-      env: { HOME: run, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" }, stdio: ["ignore", "ignore", "ignore"], carrier: "role-lifetime/3" };
+      env: { HOME: run, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" }, stdio: ["ignore", "ignore", "ignore"], carrier: "role-lifetime/7" };
   };
-  const start = async (generation = 1, mode = "bounded", crash = false) => {
+  const start = async (generation = 1, mode = "bounded", crash = false, owner = sdk) => {
     const cmd = command(generation, mode); let child!: ExactChild;
-    await sdk.exclusive("R0", "web", generation, async lease => {
+    await owner.exclusive("R0", "web", generation, async lease => {
       lease.begin("start", "start");
       await lease.perform("start", "start", async permit => {
         child = permit.spawnChild(cmd); observation = { state: "owned", child };
@@ -80,7 +81,7 @@ async function fixture() {
     });
     return result!;
   };
-  return { sdk, make, root, instance, store, ready, command, start, readyRun, retire, evidence,
+  return { sdk, make, root, instance, store, ready, inspector, command, start, readyRun, retire, evidence,
     setObservation(value: Observation) { observation = value; }, setInspect(fn: typeof inspect) { inspect = fn; },
     observes: () => observes, approvals: () => approvals };
 }
@@ -95,11 +96,11 @@ carrierTest("profile start uses committed exclusion, retained mapping and one in
     await expect(lease.perform("second", "start", async () => {})).rejects.toThrow("cohort_already_started");
   });
   const receipt = await f.store.exclusive(async tx => tx.state.receipts["web:1:start"]);
-  expect(receipt!.effects[0]).toMatchObject({ state: "confirmed", carrier: "role-lifetime/3", child });
+  expect(receipt!.effects[0]).toMatchObject({ state: "confirmed", carrier: "role-lifetime/7", child });
   expect(productionHandoffReadiness().ready).toBe(false);
 });
 
-test.each(["raw", "missing-mapping", "missing-stdio", "numeric-fd", "pipes", "sparse-stdio"])("profile start refuses unreviewed spawn boundary: %s", async reason => {
+test.each(["raw", "missing-mapping", "missing-stdio", "numeric-fd", "pipes", "sparse-stdio", "raw-parent", "raw-context", "old-layout"])("profile start refuses unreviewed spawn boundary: %s", async reason => {
   const f = await fixture();
   await f.sdk.exclusive("R0", "web", 1, async lease => {
     lease.begin("start", "start");
@@ -111,8 +112,11 @@ test.each(["raw", "missing-mapping", "missing-stdio", "numeric-fd", "pipes", "sp
       if (reason === "numeric-fd") (cmd as any).carrier = 3;
       if (reason === "pipes") (cmd as any).stdio = ["pipe", "ignore", "ignore"];
       if (reason === "sparse-stdio") (cmd as any).stdio = new Array(3);
+      if (reason === "raw-parent") (cmd as any).parentChannel = 3;
+      if (reason === "raw-context") (cmd as any).inheritedContext = 4;
+      if (reason === "old-layout") (cmd as any).carrier = "role-lifetime/3";
       permit.spawnChild(cmd);
-    })).rejects.toThrow(reason === "raw" ? "carrier_spawn_required" : reason === "pipes" || reason === "sparse-stdio" ? "invalid_child_command" : "carrier_mapping_required");
+    })).rejects.toThrow(reason === "raw" ? "carrier_spawn_required" : ["pipes", "sparse-stdio", "raw-parent", "raw-context"].includes(reason) ? "invalid_child_command" : "carrier_mapping_required");
   });
   const result = await f.retire(); expect(result.exclusion).toMatchObject({ carriers: "excluded", descendants: "unproven" });
   expect(await f.store.exclusive(async tx => tx.state.receipts["web:1:start"])).toMatchObject({ state: "done", error: "cohort_retired", effects: [{ state: "retired" }] });
@@ -140,6 +144,8 @@ carrierTest("exact child crash retires and automatically advances without an ope
 carrierTest("a session-independent surviving descendant keeps stop pending and forbids restart", async () => {
   const f = await fixture(); await f.start(1, "descendant"); const run = await f.readyRun();
   const descendant = Number(readFileSync(join(run, "desc-pid"), "utf8"));
+  const nextHop = JSON.parse(readFileSync(join(run, "desc-ready"), "utf8"));
+  expect(nextHop.flagsBefore & 1).toBe(0); expect(nextHop.flagsAfter & 1).toBe(1); // Explicit remap, then child CLOEXEC.
   await expect(f.sdk.retireCohort("R0", "web", 1, "stop")).rejects.toThrow("ownership_busy");
   await waitUntil(() => nativeDarwinProcessSource().bsdInfo(Number(readFileSync(join(run, "spawn-pid"), "utf8")), true).count === 0);
   const surviving = nativeDarwinProcessSource().bsdInfo(descendant, true);
@@ -172,7 +178,7 @@ carrierTest("a reported non-owner can survive a completed stop without being dec
 });
 
 carrierTest("controller reconstruction can retire an uncertain carrier start without adopting a PID or replaying spawn", async () => {
-  const f = await fixture(); await expect(f.start(1, "bounded", true)).rejects.toThrow("fixture_after_spawn");
+  const f = await fixture(); await expect(f.start(1, "ignore-parent", true)).rejects.toThrow("fixture_after_spawn");
   const run = await f.readyRun(); await f.sdk.releaseControllerFences();
   const recovery = f.make();
   await expect(recovery.retireCohort("R0", "web", 1, "stop")).rejects.toThrow("ownership_busy");
@@ -352,6 +358,9 @@ carrierTest("a failed wait cannot invent an exit; independent retirement proof s
 
 test("mapped spawn explicitly refuses the unsafe Bun 1.3.13 extra-FD finalizer backend", async () => {
   const capability = carrierChildCapability();
+  if (process.platform !== "darwin" || !["arm64", "x64"].includes(process.arch)) {
+    expect(capability).toEqual({ available: false, reason: "child_custody_backend_unproven" }); return;
+  }
   if (Bun.revision === "0d9b296af33f2b851fcbf4df3e9ec89751734ba4") {
     expect(capability).toEqual({ available: true, backend: "darwin-borrowed-extra-fd/1" }); return;
   }
@@ -359,4 +368,99 @@ test("mapped spawn explicitly refuses the unsafe Bun 1.3.13 extra-FD finalizer b
   const f = await fixture();
   await expect(f.start()).rejects.toThrow("carrier_mapping_backend_unproven");
   expect(await f.retire()).toMatchObject({ state: "retired" }); // No child was spawned.
+});
+
+test("layout reserves separate parent, future context and fence slots; native pipe endpoints are CLOEXEC", () => {
+  expect(CARRIER_LAYOUT).toEqual({ id: "role-custody/1", parentChannel: 3, reservedContext: 4, fence: 7 });
+  if (process.platform !== "darwin") { expect(() => layout.createParentChannel()).toThrow("carrier_layout_unsupported"); return; }
+  const channel = layout.createParentChannel();
+  try {
+    expect(layout.descriptorFlags(channel.reader) & 1).toBe(1);
+    expect(layout.descriptorFlags(channel.writer) & 1).toBe(1);
+    const mapping = layout.mappingCopy(channel.reader);
+    try { expect(mapping.descriptor).toBeGreaterThan(7); expect(layout.descriptorFlags(mapping.descriptor) & 1).toBe(1); }
+    finally { mapping.close(); }
+    expect(layout.descriptorFlags(channel.reader) & 1).toBe(1); // Closing the mapping copy leaves its source valid.
+  } finally { channel.closeRead(); channel.closeWrite(); }
+  channel.closeRead(); channel.closeWrite(); // One owner, idempotent cleanup, never a delayed GC close.
+  expect(() => layout.markCloseOnExec(-1)).toThrow("carrier_descriptor_flags_failed");
+  expect(() => layout.mappingCopy(-1)).toThrow("carrier_mapping_copy_failed");
+});
+
+carrierTest("FD 3 stays a live parent pipe across ledger scopes while verified fence FD 7 becomes CLOEXEC", async () => {
+  const f = await fixture(), child = await f.start(), run = await f.readyRun();
+  const ready = JSON.parse(readFileSync(join(run, "ready"), "utf8"));
+  expect(ready.parentIsPipe).toBe(true); expect(ready.flagsBefore & 1).toBe(0); expect(ready.flagsAfter & 1).toBe(1);
+  await f.sdk.exclusive("R0", "web", 1, async lease => lease.assertCurrent()); await Bun.sleep(30);
+  expect(nativeDarwinProcessSource().bsdInfo(child.pid, true).count).toBe(136);
+  expect(existsSync(join(run, "parent-eof"))).toBe(false);
+  await f.sdk.releaseControllerFences();
+  await waitUntil(() => existsSync(join(run, "parent-eof")) && nativeDarwinProcessSource().bsdInfo(child.pid, true).count === 0);
+  expect(await f.retire(f.make())).toMatchObject({ state: "retired" });
+});
+
+carrierTest("draining owner release closes its parent channel and preserves the handoff's running intent", async () => {
+  const f = await fixture(), child = await f.start(), run = await f.readyRun();
+  const token = await f.sdk.authorize({ role: "web", source: "R0", target: "P1", generation: 1, action: "handoff" }, async () => true);
+  await f.sdk.drain("web", token); await f.sdk.releaseLifetimeFence("R0", "web", 1);
+  await waitUntil(() => existsSync(join(run, "parent-eof")) && nativeDarwinProcessSource().bsdInfo(child.pid, true).count === 0);
+  f.setObservation({ state: "unknown" });
+  const incoming = f.make(); await incoming.transfer("web", token);
+  expect(await incoming.read("web")).toMatchObject({ owner: "P1", generation: 2, desired: "running" });
+});
+
+carrierTest("spawn failure closes both SDK-owned pipe endpoints without exposing or leaking them", async () => {
+  const f = await fixture(), original = layout.createParentChannel; let reads = 0, writes = 0;
+  const create = spyOn(layout, "createParentChannel").mockImplementationOnce(() => {
+    const channel = original();
+    return { reader: channel.reader, writer: channel.writer,
+      closeRead: () => { reads++; channel.closeRead(); }, closeWrite: () => { writes++; channel.closeWrite(); } };
+  });
+  try {
+    await expect(f.sdk.exclusive("R0", "web", 1, async lease => {
+      lease.begin("failed-spawn", "start");
+      await lease.perform("failed-spawn", "start", async permit => {
+        const command = f.command(); command.argv[0] = join(f.root, "nonexistent-executable"); permit.spawnChild(command);
+      });
+    })).rejects.toThrow();
+    expect(create).toHaveBeenCalledTimes(1); expect(reads).toBe(1); expect(writes).toBe(1);
+  } finally { create.mockRestore(); }
+  expect(await f.retire()).toMatchObject({ state: "retired" });
+});
+
+carrierTest("SIGKILL of the actual custodian closes the SDK writer; child parent-loss guard releases the fence", async () => {
+  const f = await fixture(), command = f.command(), configFile = command.argv[2]!;
+  const config = JSON.parse(readFileSync(configFile, "utf8")); config.readiness = f.ready; writeFileSync(configFile, JSON.stringify(config));
+  await f.sdk.releaseControllerFences();
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("OPENSCOUT_") && !key.startsWith("SCOUT_")));
+  env.HOME = config.root; env.BUN_RUNTIME_TRANSPILER_CACHE_PATH = "0";
+  const owner = Bun.spawn([process.execPath, join(import.meta.dir, "layout-owner.fixture.ts"), configFile], { cwd: config.root, env, stdio: ["pipe", "pipe", "pipe"] });
+  const reader = owner.stdout.getReader(), stderr = new Response(owner.stderr).text(); let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const first = await Promise.race([reader.read(), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`layout owner readiness deadline: ${existsSync(join(config.root, "owner-stage")) ? readFileSync(join(config.root, "owner-stage"), "utf8") : "not-started"}`)), 3000); })]);
+    expect(new TextDecoder().decode(first.value)).toContain("owner-ready"); clearTimeout(timer);
+    const run = await f.readyRun(), worker = Number(readFileSync(join(run, "spawn-pid"), "utf8"));
+    expect(nativeDarwinProcessSource().bsdInfo(worker, true).count).toBe(136);
+    owner.kill("SIGKILL"); await owner.exited; expect(owner.signalCode).toBe("SIGKILL");
+    await waitUntil(() => existsSync(join(run, "parent-eof")) && nativeDarwinProcessSource().bsdInfo(worker, true).count === 0);
+    expect(await f.retire(f.make())).toMatchObject({ state: "retired" });
+    expect(await f.store.exclusive(async tx => tx.state.receipts["web:1:stop"]!.retirement!.signalAttempted)).toBeUndefined();
+    expect(await stderr).toBe("");
+  } finally { clearTimeout(timer); owner.stdin.end(); owner.kill("SIGKILL"); await owner.exited; reader.releaseLock();
+    const errors = await stderr; if (errors) console.error(errors);
+  }
+}, 10_000);
+
+carrierTest("GC of a retired controller cannot close reused parent/fence source descriptors in the next generation", async () => {
+  const f = await fixture(); await f.sdk.releaseControllerFences();
+  let outgoing: SupervisionHandoff | undefined = new SupervisionHandoff(f.instance, f.inspector, {}, { capabilities: caps, enableAuditedDirectChildren: true });
+  try {
+    await outgoing.acquireLifetimeFence("R0", "web", 1); await f.start(1, "bounded", false, outgoing); await f.readyRun();
+    await f.retire(outgoing); outgoing = undefined;
+    await f.sdk.advanceCohort("R0", "web", 1, "stop");
+    for (let index = 0; index < 5; index++) { Bun.gc(true); await Bun.sleep(10); }
+    await f.sdk.exclusive("R0", "web", 2, async lease => lease.assertCurrent());
+    await f.start(2); const run = await f.readyRun(2);
+    expect(existsSync(join(run, "parent-eof"))).toBe(false);
+  } finally { await outgoing?.releaseControllerFences(); }
 });

@@ -13,7 +13,7 @@ test("Node imports the compiled handoff index and gets typed unavailable native 
     mkdirSync(compiled); mkdirSync(supportDirectory, { mode: 0o700 });
     writeFileSync(join(compiled, "package.json"), JSON.stringify({ type: "module" }));
     const transpiler = new Bun.Transpiler({ loader: "ts", target: "node" });
-    for (const name of ["index", "contracts", "store", "process-evidence", "process-sampling", "darwin-process-source", "role-absence", "child-custody", "retained-child", "sigchld-disposition", "exclusion-contracts", "effect-exclusion", "lifetime-fence", "cohort-lifecycle"]) {
+    for (const name of ["index", "contracts", "store", "process-evidence", "process-sampling", "darwin-process-source", "role-absence", "child-custody", "retained-child", "sigchld-disposition", "exclusion-contracts", "effect-exclusion", "lifetime-fence", "cohort-lifecycle", "carrier-layout"]) {
       // Preserve the actual ESM graph instead of bundling or stubbing native imports.
       writeFileSync(join(compiled, name + ".js"), transpiler.transformSync(readFileSync(join(import.meta.dir, name + ".ts"), "utf8")));
     }

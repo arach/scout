@@ -190,9 +190,13 @@ keeps this adapter's descendant result unknown. Its separate lifetime fence and
 child-side descriptor check feed only SDK ownership decisions. They do not
 upgrade a direct child into complete descendant or resource coverage, and this
 adapter passes a lifetime descriptor only through an explicitly selected
-`carrier: "role-lifetime/3"` command under that profile's retained start permit.
+`carrier: "role-lifetime/7"` command under that profile's retained start permit.
 Explicit stdio supports ignore/inherit only; default absence-only commands stay
-unmapped with ignored stdio. No raw descriptor or process handle escapes.
+unmapped with ignored stdio. FD 3 stays an SDK-owned EOF parent channel; FD 7
+carries the fence, with FD 4 reserved but not populated for later context.
+Source copies above the target slots prevent remap collisions. The child's
+fence check restores CLOEXEC before role work; every further carrier hop needs
+deliberate mapping. No raw descriptor or process handle escapes.
 The mapped path is narrower than unmapped custody: its audited backend is
 currently Darwin Bun 1.3.14 only. Bun 1.3.13 mapped starts refuse because its
 extra-FD finalizer closes caller-owned descriptors; see the exclusion contract.

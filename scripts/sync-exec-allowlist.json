@@ -1039,7 +1039,7 @@
     "path": "packages/runtime/src/supervision-handoff/child-custody.ts",
     "symbol": "Bun.spawn",
     "category": "process-lifecycle",
-    "reason": "inactive opt-in retained spawn persists intent before native birth sampling; profile starts map the SDK-held lifetime description to child FD 3 with explicit ignore/inherit stdio only on audited Darwin Bun 1.3.14 (1.3.13 extra-FD finalization refuses); no production caller or discovery",
+    "reason": "inactive retained spawn owns an EOF parent pipe at child FD 3 and lifetime fence at FD 7, stages CLOEXEC source copies above slot 7, and maps no caller FDs; only audited Darwin Bun 1.3.14 borrowed extras, with immediate owned-copy cleanup and retained handle before native birth sampling",
     "owner": "runtime"
   },
   {
@@ -1153,7 +1153,29 @@
     "path": "packages/runtime/src/supervision-handoff/cohort-carrier.fixture.ts",
     "symbol": "Bun.spawn",
     "category": "test",
-    "reason": "entrypoint-only isolated fixture deliberately maps FD 3 to a detached carrier or independent non-owner helper; all processes have five-second bounds, scratch HOME and sanitized environments, file-backed cleanup and zombie-inclusive native survivor checks in the owning test",
+    "reason": "entrypoint-only isolated fixture deliberately remaps verified CLOEXEC fence FD 7 to a detached carrier or non-owner negative helper; cooperative roots guard EOF on separate FD 3; all processes have five-second bounds, sanitized scratch environments, file-backed cleanup and zombie-inclusive survivor checks",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/supervision-handoff/carrier-layout.ts",
+    "symbol": "dlopen",
+    "category": "dlopen",
+    "libraryPaths": ["/usr/lib/libSystem.B.dylib"],
+    "reason": "lazy Darwin-only pipe/dup/FIOCLEX and read-only F_GETFD binding from fixed libSystem; SDK owns both pipe endpoints and temporary CLOEXEC source copies above all targets; child verification sets fence CLOEXEC without unlocking, no discovery or process spawning",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/supervision-handoff/cohort-lifecycle.test.ts",
+    "symbol": "Bun.spawn",
+    "category": "test",
+    "reason": "bounded isolated SDK-owner fixture proves EOF-parent guard after its actual custodian is SIGKILLed; sanitized scratch HOME, exact owned handle awaited, and child/owner PID disappearance checked including zombies",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/supervision-handoff/cohort-lifecycle.test.ts",
+    "symbol": "Subprocess.kill",
+    "category": "test",
+    "reason": "bounded isolated SDK-owner fixture proves EOF-parent guard after its actual custodian is SIGKILLed; sanitized scratch HOME, exact owned handle awaited, and child/owner PID disappearance checked including zombies",
     "owner": "runtime"
   }
 ]

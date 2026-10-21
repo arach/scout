@@ -139,7 +139,7 @@ export class SupervisionHandoff {
   /** Serialize host shutdown with its effect scopes. This closes controller
    * references only; it neither transfers ownership nor settles pending work. */
   releaseControllerFences() {
-    return this.store.exclusive(async tx => { tx.assertCurrent(); this.fences.close(); });
+    return this.store.exclusive(async tx => { tx.assertCurrent(); this.children.closeAllParentChannels(); this.fences.close(); });
   }
   /** Observation-only recovery after host custody loss. This cannot obtain a
    * carrier descriptor or an effect permit and does not substitute exclusion
@@ -178,7 +178,8 @@ export class SupervisionHandoff {
     return this.store.exclusive(async tx => {
       const state = tx.state.roles[role];
       if (!selectedProfile(tx, role, this.capabilities) || state.owner !== owner || state.generation !== generation || state.phase !== "draining") refuse("role_not_draining");
-      noPending(tx, role, generation); this.fences.release(tx, role);
+      noPending(tx, role, generation); this.fences.assertCurrent(tx, role);
+      this.children.closeParentChannels(role, generation); this.fences.release(tx, role);
     });
   }
   /** Profile-only bounded stop initiation/reconciliation. It sends at most one
@@ -379,7 +380,7 @@ export class SupervisionHandoff {
                 && sameChild(effect.child, before.child)));
             if (!known) refuse("identity_unproven");
           }
-          const effect: Effect = { id: randomBytes(16).toString("hex"), kind, state: "intent", ...(profile ? { carrier: "role-lifetime/3" as const } : {}) };
+          const effect: Effect = { id: randomBytes(16).toString("hex"), kind, state: "intent", ...(profile ? { carrier: "role-lifetime/7" as const } : {}) };
           current.effects.push(effect); tx.persist();
           let admitted = false, open = true;
           try {
@@ -398,7 +399,7 @@ export class SupervisionHandoff {
               await runEffect({ effectId: effect.id, ...(before.state === "owned" ? { child: structuredClone(before.child) } : {}), atEffect,
                 spawnChild: command => {
                   if (kind !== "start") refuse("effect_order_invalid");
-                  if (profile ? command.carrier !== "role-lifetime/3" || !command.stdio : command.carrier !== undefined) refuse("carrier_mapping_required");
+                  if (profile ? command.carrier !== "role-lifetime/7" || !command.stdio : command.carrier !== undefined) refuse("carrier_mapping_required");
                   return admit(() => {
                     effect.directChild = this.children.spawn(role, generation, effect.id, command, profile ? this.fences.assertCurrent(tx, role) : undefined);
                     tx.persist(); // Birth is durable before any awaited observation.
@@ -447,5 +448,6 @@ export { directChildCapability, carrierChildCapability, type DirectChildCommand,
 
 export type { ChildSignalResult } from "./retained-child.js";
 export { ChildRoleCustody } from "./lifetime-fence.js";
+export { CARRIER_LAYOUT } from "./carrier-layout.js";
 export { EFFECT_EXCLUSION_CAPABILITY, profileHash, type EffectExclusionProfile, type ProfileSelection,
   type FenceIdentity, type ExclusionContext, type ExclusionEvidence, type RoleEffectExclusion, type SurvivingNonOwner } from "./exclusion-contracts.js";

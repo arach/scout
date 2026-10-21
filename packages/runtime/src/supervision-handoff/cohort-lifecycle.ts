@@ -11,7 +11,7 @@ import { certifyEffectExclusion } from "./effect-exclusion.js";
  * does not settle arbitrary SDK mutation receipts from an external-work claim. */
 function carrierStart(receipt: MutationReceipt) {
   return receipt.operation === "start" && !receipt.retirement
-    && receipt.effects.every(effect => effect.kind === "start" && effect.carrier === "role-lifetime/3");
+    && receipt.effects.every(effect => effect.kind === "start" && effect.carrier === "role-lifetime/7");
 }
 export function cohortStarts(tx: CustodyTransaction, role: HandoffRole, generation: number) {
   return Object.entries(tx.state.receipts).filter(([key]) => key.startsWith(`${role}:${generation}:`))
@@ -52,6 +52,7 @@ export async function retireCohort(tx: CustodyTransaction, role: HandoffRole, ow
   // There is at most one start intent in a schema-3 generation. Lost birth or
   // handle custody is never repaired by PID adoption or by a second spawn.
   if (starts.length > 1) refuse("cohort_start_conflict");
+  children.closeParentChannels(role, generation); // EOF is cooperative revocation, never an exclusion proof.
   const record = starts[0]?.directChild;
   if (record && children.has(record.child)) {
     if (!receipt.retirement!.signalAttempted) {

@@ -32,7 +32,7 @@ export type AuthorizationIntent = { role: HandoffRole; generation: number; sourc
 export type StageApproval = (selection: SelectedInstance, policy: Readonly<FloorPolicy>) => Promise<boolean>;
 export type OperatorApproval = (selection: SelectedInstance, policy: Readonly<FloorPolicy>, intent: Readonly<AuthorizationIntent>) => Promise<boolean>;
 export type Effect = { id: string; kind: "start" | "stop"; state: "intent" | "confirmed" | "retired";
-  carrier?: "role-lifetime/3"; child?: ExactChild; directChild?: DirectChildRecord };
+  carrier?: "role-lifetime/7"; child?: ExactChild; directChild?: DirectChildRecord };
 export type MutationReceipt = { operation: "start" | "stop" | "restart"; state: "pending" | "done"; effects: Effect[]; error?: string;
   retirement?: { policyHash: string; signal: "SIGTERM" | "SIGKILL"; signalAttempted?: true;
     signalResult?: import("./retained-child.js").ChildSignalResult; exclusion?: RoleEffectExclusion; nextGeneration?: number } };

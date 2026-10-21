@@ -4,10 +4,11 @@ import { createProcessEvidenceReader, type ProcessSample } from "./process-evide
 import { refuse, type ExactChild, type HandoffRole, type SelectedInstance } from "./contracts.js";
 import { RetainedChild, type ChildExit } from "./retained-child.js";
 import type { CustodyTransaction } from "./store.js";
+import { createParentChannel, mappingCopy } from "./carrier-layout.js";
 
 export type DirectChildCommand = { argv: string[]; cwd: string; env: Record<string, string>;
   stdio?: readonly ["ignore" | "inherit", "ignore" | "inherit", "ignore" | "inherit"];
-  carrier?: "role-lifetime/3" };
+  carrier?: "role-lifetime/7" };
 export type DirectChildRecord = { format: "bun-darwin-direct-child/1"; child: ExactChild; sample: ProcessSample; exit?: ChildExit };
 export type CurrentChildCoverage = { state: "no_starts" | "unknown";
   reason?: "current_owner_birth_unproven" | "current_owner_exit_unproven" | "current_owner_descendants_unproven";
@@ -41,7 +42,8 @@ function sameChild(a: ExactChild, b: ExactChild) {
 /** Process-local, non-adoptable handles. Construction does no IO. The caller
  * must be the sole reaper of these direct children (no foreign native wait). */
 export class DirectChildren {
-  private readonly held = new Map<string, { retained: RetainedChild; record?: DirectChildRecord }>();
+  private readonly held = new Map<string, { retained: RetainedChild; record?: DirectChildRecord;
+    role: HandoffRole; generation: number; channel?: ReturnType<typeof createParentChannel> }>();
   constructor(private readonly instance: SelectedInstance, private readonly enabled = false) {}
   spawn(role: HandoffRole, generation: number, effectId: string, command: DirectChildCommand, carrierDescriptor?: number): DirectChildRecord {
     if (!this.enabled) refuse("child_custody_not_enabled");
@@ -51,16 +53,27 @@ export class DirectChildren {
       || command.argv.some(arg => typeof arg !== "string" || arg.includes("\0")) || !isAbsolute(command.cwd)
       || !command.env || Object.entries(command.env).some(([key, value]) => !key || /[=\0]/.test(key) || typeof value !== "string" || value.includes("\0"))
       || (command.stdio !== undefined && (!Array.isArray(command.stdio) || command.stdio.length !== 3 || [0, 1, 2].some(index => command.stdio![index] !== "ignore" && command.stdio![index] !== "inherit")))
-      || (command.carrier !== undefined && command.carrier !== "role-lifetime/3")) refuse("invalid_child_command");
+      || (command.carrier !== undefined && (command.carrier !== "role-lifetime/7" || Object.keys(command).some(key => !["argv", "cwd", "env", "stdio", "carrier"].includes(key))))) refuse("invalid_child_command");
     if (command.carrier ? !Number.isSafeInteger(carrierDescriptor) || carrierDescriptor! < 3 : carrierDescriptor !== undefined) refuse("carrier_mapping_required");
     if (command.carrier) { const capability = carrierChildCapability(); if (!capability.available) refuse(capability.reason); }
     const reader = createProcessEvidenceReader(this.instance); // validate selection before spawn
     let reaped = false, waitError = false;
     const stdio = command.stdio ?? ["ignore", "ignore", "ignore"] as const;
-    const handle = Bun.spawn(command.argv, { onExit: (_child, _code, _signal, error) => { reaped = true; waitError = error != null; }, cwd: command.cwd, env: { ...command.env },
-      stdio: command.carrier ? [stdio[0], stdio[1], stdio[2], carrierDescriptor!] : [stdio[0], stdio[1], stdio[2]] });
-    const held = { retained: new RetainedChild(handle, () => waitError), record: undefined as DirectChildRecord | undefined };
-    this.held.set(effectId, held); // Retain even if birth sampling/persistence fails.
+    const channel = command.carrier ? createParentChannel() : undefined;
+    let handle!: ReturnType<typeof Bun.spawn>;
+    let held: { retained: RetainedChild; record?: DirectChildRecord; role: HandoffRole; generation: number; channel?: ReturnType<typeof createParentChannel> } | undefined;
+    let parentMapping: ReturnType<typeof mappingCopy> | undefined, fenceMapping: ReturnType<typeof mappingCopy> | undefined;
+    try {
+      if (channel) { parentMapping = mappingCopy(channel.reader); fenceMapping = mappingCopy(carrierDescriptor!); }
+      handle = Bun.spawn(command.argv, { onExit: (_child, _code, _signal, error) => { reaped = true; waitError = error != null; }, cwd: command.cwd, env: { ...command.env },
+        stdio: channel ? [stdio[0], stdio[1], stdio[2], parentMapping!.descriptor, "ignore", "ignore", "ignore", fenceMapping!.descriptor] : [stdio[0], stdio[1], stdio[2]] });
+      held = { retained: new RetainedChild(handle, () => waitError), record: undefined, role, generation, channel };
+      this.held.set(effectId, held); // Retain even if mapping cleanup, birth sampling or persistence fails.
+    } catch (error) {
+      if (!held) { try { channel?.closeRead(); } finally { channel?.closeWrite(); } }
+      throw error;
+    } finally { try { parentMapping?.close(); } finally { fenceMapping?.close(); } }
+    channel?.closeRead(); // Child FD 3 owns its mapping; host retains only the writer.
     // Synchronous, before the event-loop reaper can run. No sample-then-kill:
     // later signals use only this exact retained handle, never sample.pid.
     if (reaped || handle.exitCode !== null || handle.signalCode !== null) refuse("child_birth_unproven");
@@ -92,6 +105,12 @@ export class DirectChildren {
     const held = this.held.get(record.child.effectId);
     if (!held?.record || !sameChild(held.record.child, record.child)) return undefined;
     return held.retained.pollExit();
+  }
+  closeParentChannels(role: HandoffRole, generation: number) {
+    for (const held of this.held.values()) if (held.role === role && held.generation === generation) held.channel?.closeWrite();
+  }
+  closeAllParentChannels() {
+    for (const held of this.held.values()) held.channel?.closeWrite();
   }
 }
 /** Direct exit is necessary, never sufficient for role absence. There is no

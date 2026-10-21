@@ -6,7 +6,7 @@ const timer = setTimeout(() => process.exit(96), 5_000);
 try {
   const instance = JSON.parse(readFileSync(process.argv[2]!, "utf8"));
   try {
-    const proof = await new ChildRoleCustody(instance, [EFFECT_EXCLUSION_CAPABILITY]).check("web", "R0", 1, 3);
+    const proof = await new ChildRoleCustody(instance, [EFFECT_EXCLUSION_CAPABILITY]).check("web", "R0", 1);
     console.log(JSON.stringify(proof));
     await Bun.stdin.text(); // EOF releases the only deliberately inherited carrier reference.
   } catch (error) {

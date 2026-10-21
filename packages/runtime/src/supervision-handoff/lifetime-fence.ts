@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { acquireOwnershipLock, owned, HandoffStore, type CustodyTransaction } from "./store.js";
 import { refuse, requireRole, type HandoffOwner, type HandoffRole, type SelectedInstance } from "./contracts.js";
 import { EFFECT_EXCLUSION_CAPABILITY, profileHash, type EffectExclusionProfile, type FenceIdentity } from "./exclusion-contracts.js";
+import { CARRIER_LAYOUT, markCloseOnExec } from "./carrier-layout.js";
 
 export function selectedProfile(tx: CustodyTransaction, role: HandoffRole, capabilities: readonly string[]): EffectExclusionProfile | undefined {
   tx.assertCurrent();
@@ -78,7 +79,7 @@ export class ChildRoleCustody {
   constructor(instance: SelectedInstance, capabilities: readonly string[]) {
     this.store = new HandoffStore(Object.freeze({ ...instance })); this.capabilities = Object.freeze([...capabilities]);
   }
-  async check(role: HandoffRole, owner: HandoffOwner, generation: number, descriptor: number) {
+  async check(role: HandoffRole, owner: HandoffOwner, generation: number, descriptor: number = CARRIER_LAYOUT.fence) {
     requireRole(role);
     if (!Number.isSafeInteger(descriptor) || descriptor < 3) refuse("invalid_carrier_descriptor");
     return this.store.exclusive(async tx => {
@@ -98,8 +99,9 @@ export class ChildRoleCustody {
         if (!busy) refuse("carrier_lock_unheld");
       } finally { closeSync(probe); }
       acquireOwnershipLock(descriptor);
+      markCloseOnExec(descriptor); // Subsequent exec needs a deliberate next-hop mapping.
       tx.assertCurrent(); assertFenceIdentity(tx, role, descriptor);
-      return { state: "verified" as const, role, owner, generation, profileId: profile.id, profileHash: profileHash(profile), fence: identity };
+      return { state: "verified" as const, role, owner, generation, profileId: profile.id, profileHash: profileHash(profile), fence: identity, closeOnExec: true as const };
     });
   }
 }
