@@ -88,6 +88,7 @@ imported as first-party Scout messages.
 | Import | Purpose |
 | --- | --- |
 | `@openscout/runtime` | Root broker/runtime surface: registry, broker services, store, setup, config, probes, projections, repo watch/diff, and protocol path re-exports. |
+| `@openscout/runtime/host-attention` | Pure tmux dialog detector and injected machine-local collector; see [the read contract](./HOST-ATTENTION.md). |
 | `@openscout/runtime/broker-api` | HTTP client helpers for talking to an active local broker. |
 | `@openscout/runtime/broker-core-service` | Broker service composition boundary for embedding/testing. |
 | `@openscout/runtime/broker-process-manager` | Service config, status, install/start/stop/restart helpers. |

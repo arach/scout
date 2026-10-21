@@ -6,6 +6,7 @@ import {
   stubs,
   createOpenScoutWebServer,
   makeBrokerDiagnostics,
+  makeA2aBrokerContext,
   makePairingState,
   makeStaticRoot,
   sessionSnapshotWithAttention,
@@ -565,6 +566,7 @@ test("unconfirmed broker actuation remains unconfirmed in the client delivery mo
 
 test("an invalidated old capture cannot overwrite the postdecision attention cache", async () => {
   const attention = await import("../core/attention/operator-attention-state.ts");
+  const broker = makeA2aBrokerContext({ agent: { capabilities: [] } });
   attention.invalidateAgentAttentionSnapshot();
   stubs.queryAgentsResult = [{ id: "agent-race", name: "Claude", harness: "claude", transport: "tmux", state: "waiting", terminalSurface: { backend: "tmux", sessionName: "pane-race" } }];
   let started!: () => void;
@@ -575,13 +577,13 @@ test("an invalidated old capture cannot overwrite the postdecision attention cac
     if (++calls === 1) { started(); return new Promise(resolve => { release = resolve; }); }
     return { body: "ready" };
   }) as Parameters<typeof attention.queryAgentAttentionSnapshot>[1];
-  const old = attention.queryAgentAttentionSnapshot(null, capture);
+  const old = attention.queryAgentAttentionSnapshot(broker, capture);
   await capturing;
   attention.invalidateAgentAttentionSnapshot();
-  const fresh = await attention.queryAgentAttentionSnapshot(null, capture);
+  const fresh = await attention.queryAgentAttentionSnapshot(broker, capture);
   expect(fresh.hostItems).toHaveLength(0);
   release({ body: "Bash command\nls\nPermission rule Bash requires confirmation for this command.\nDo you want to proceed?\n1. Yes\n2. No\nEsc to cancel · Tab to amend" });
   expect((await old).hostItems).toHaveLength(1);
-  expect(await attention.queryAgentAttentionSnapshot(null, capture)).toBe(fresh);
+  expect(await attention.queryAgentAttentionSnapshot(broker, capture)).toBe(fresh);
   expect(calls).toBe(2);
 });
