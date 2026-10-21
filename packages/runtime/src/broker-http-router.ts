@@ -4,6 +4,7 @@ import { ASSISTANT_CLAIM_HEADER } from "./broker-assistant-claims.js";
 import { handleAttachmentRoute, executeHostAttachmentRead, ATTACHMENT_READ_PATH, type AttachmentHttpDeps } from "./broker-attachments-http.js";
 import { createSessionMaterialsRead } from "./broker-session-materials-read.js";
 import { readObservedSessions, type ObservedSessionReadDeps } from "./broker-observed-sessions-read.js";
+import { productionHandoffReadiness } from "./supervision-handoff/contracts.js";
 import { MeshFeedback, MeshFeedbackError } from "./mesh-feedback.js";
 import { MeshBridgeManagement, MeshBridgeManagementError } from "./mesh-bridge-management.js";
 import { MeshPingError, type createMeshPing } from "./mesh-ping.js";
@@ -516,6 +517,16 @@ export function createBrokerHttpRouter(
   const routeRequest = async function(request: RuntimeHttpRequestLike, response: RuntimeHttpResponseLike): Promise<void> {
   const method = request.method ?? "GET";
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? `${host}:${port}`}`);
+  if (method === "GET" && url.pathname === "/v1/supervision-handoff") {
+    const context = request.transportContext;
+    if (!context || !["unix-socket", "loopback"].includes(context.transport) || context.guest || context.scoped
+      || request.headers.origin || request.headers["x-openscout-forwarded-node-id"]) {
+      json(response, 403, { error: "local_only" }); return;
+    }
+    // Metadata only. No locator, store read, enrollment or ownership mutation.
+    json(response, 200, productionHandoffReadiness()); return;
+  }
+
   // Mesh trust cone §4 / §11.9 defense in depth: machine-local mutation
   // handlers re-check the transport context themselves, so a remote caller is
   // refused even while the ingress gate runs in verify-warn. Undefined

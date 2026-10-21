@@ -112,3 +112,12 @@ supported replacement.
    replacements. Entry configuration alone is not an ownership fence.
 
 The private installer owns these writes. The runtime only reads the contract.
+
+## Staged custody contract
+
+Explicit entry configuration selects an artifact; it does not establish role
+ownership. The [R0/P1 handoff SDK](./SUPERVISION-HANDOFF.md) defines the separate
+stable-inode lock, durable generations, effect receipts and operator consent.
+Its production readiness gate is closed. This SDK does not yet fence the
+legacy supervisors described above and must not be advertised as an integrated
+R0 release. Old machines are not enrolled by importing or installing it.

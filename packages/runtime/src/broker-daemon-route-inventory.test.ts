@@ -97,6 +97,7 @@ const expectedRouteInventory = [
   "GET /v1/roles/catalog",
   "GET /v1/runtime-catalog",
   "GET /v1/snapshot",
+  "GET /v1/supervision-handoff",
   "GET /v1/tail/discover",
   "GET /v1/tail/recent",
   "GET /v1/thread-watches/:id/stream",
