@@ -16,6 +16,7 @@ function command(args:string[],env:Record<string,string>={}){return Bun.spawn([p
 async function result(p:ReturnType<typeof command>){return {code:await p.exited,out:await new Response(p.stdout).text(),err:await new Response(p.stderr).text()};}
 test('artifact is relocatable, help-first and contains no runtime paths or stores',async()=>{
   const r=await result(command(['--config',join(dir,'nonexistent'),'--help']));expect(r.code).toBe(0);expect(r.out).toContain('HTTP runtime client');
+  const help=await result(command(['access','--help','--config',join(dir,'nonexistent')]));expect(help.code).toBe(0);expect(help.out).toContain('admin-key create');
   const manifest=JSON.parse(readFileSync(join(dir,'artifact/extension.json'),'utf8'));expect(manifest).toMatchObject({api:1,command:'bin/scout-mesh',name:'mesh'});
   const code=readFileSync(executable,'utf8');for(const forbidden of ['apps/desktop/src','packages/runtime/src/node-identity.ts','packages/runtime/src/support-paths.ts','packages/runtime/src/broker-runtime.ts'])expect(code).not.toContain(forbidden);
 });
@@ -31,6 +32,7 @@ test('bridge fails closed with exit78, no env-token fallback and named tools ref
   let r=await result(command(['bridge'],{OPENSCOUT_MCP_TOKEN:'must-not-appear'}));expect(r.code).toBe(78);expect(r.err).not.toContain('must-not-appear');
   const path=join(dir,'config.json');writeFileSync(path,JSON.stringify({brokerUrl:'http://127.0.0.1:1',relayUrl:'https://relay.invalid',token:'redact-me',tools:['private_desktop_tool']}),{mode:0o600});
   r=await result(command(['bridge','--config',path]));expect(r.code).toBe(78);expect(r.err).toContain('private_desktop_tool');expect(r.err).not.toContain('redact-me');
+  expect((await bridgeLaunch(path,'core')).toolNames).toHaveLength(24);
   chmodSync(path,0o644);await expect(bridgeLaunch(path)).rejects.toThrow();
 });
 test('credential reader rejects symlinks, oversized and world-readable files',()=>{
