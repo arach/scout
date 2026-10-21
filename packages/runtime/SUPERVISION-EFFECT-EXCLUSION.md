@@ -196,6 +196,11 @@ confirmation is not a declaration that the service has passed readiness. A
 production adapter must not deadlock by making its in-scope observation wait
 for a child that is waiting for the same ledger mutex.
 
+A child's verified result is a carrier claim only once the parent controller
+re-confirms its own retained fence after the child reports (its next lease scope
+does this for free); a verified child whose parent cannot confirm is treated as
+unknown and stopped through the ordinary landing-side gates.
+
 ## Open rollout obligations
 
 No production inspector or coverage audit is supplied. Actual PTY, Caddy, Go
