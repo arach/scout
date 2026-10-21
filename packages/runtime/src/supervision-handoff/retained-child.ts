@@ -1,5 +1,6 @@
 import { refuse } from "./contracts.js";
 
+export type ChildSignalResult = "signal_requested" | "already_exited" | "wait_error";
 export type ChildExit = { code: number | null; signal: string | number | null };
 /** Internal seam for deterministic reap-window tests. Never an adoption API. */
 export interface OwnedChildHandle {
@@ -15,7 +16,7 @@ export class RetainedChild {
   private readonly result: Promise<ChildExit | undefined>;
   private settled = false;
   private failed = false;
-  constructor(private readonly handle: OwnedChildHandle) {
+  constructor(private readonly handle: OwnedChildHandle, private readonly waitError: () => boolean = () => false) {
     this.result = handle.exited.then(() => {
       this.settled = true;
       const code = handle.exitCode, signal = handle.signalCode;
@@ -26,14 +27,16 @@ export class RetainedChild {
       return undefined; // A wait error is not an exit proof.
     }, () => { this.settled = true; this.failed = true; return undefined; });
   }
-  signal(signal: "SIGTERM" | "SIGKILL") {
+  signal(signal: "SIGTERM" | "SIGKILL"): ChildSignalResult {
     if (signal !== "SIGTERM" && signal !== "SIGKILL") refuse("invalid_child_signal");
-    if (this.failed) refuse("child_exit_unproven");
+    if (this.failed || this.waitError()) return "wait_error";
     // No await between the status check and the handle call. On the audited
     // backend, JS cannot run between wait4 and publication of terminal status.
     if (this.settled || this.handle.exitCode !== null || this.handle.signalCode !== null) return "already_exited" as const;
     this.handle.kill(signal);
-    return "signalled" as const;
+    // Bun returns void, not a delivery acknowledgment. In particular native
+    // terminal/error statuses make kill inert; never claim a signal was sent.
+    return "signal_requested";
   }
   async exit(): Promise<ChildExit> {
     const result = await this.result;

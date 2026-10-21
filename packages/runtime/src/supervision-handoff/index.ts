@@ -1,3 +1,4 @@
+import type { ChildSignalResult } from "./retained-child.js";
 import { DirectChildren, currentChildCoverage, type DirectChildCommand, type CurrentChildCoverage } from "./child-custody.js";
 import { captureLegacyRole, inspectLegacyRole, type LegacyRoleSources, type RoleAbsence } from "./role-absence.js";
 import { randomBytes } from "node:crypto";
@@ -57,7 +58,7 @@ export interface EffectPermit {
   atEffect<T>(effect: () => T): T;
   /** Opt-in audited direct-child boundary; no raw handle escapes. */
   spawnChild(command: DirectChildCommand): ExactChild;
-  signalChild(signal: "SIGTERM" | "SIGKILL"): "signalled" | "already_exited";
+  signalChild(signal: "SIGTERM" | "SIGKILL"): ChildSignalResult;
 }
 export interface RoleCustody {
   ownership(): Ownership;
@@ -306,3 +307,5 @@ export { createProcessEvidenceReader, type ProcessEvidenceReader, type ProcessSa
 export { LEGACY_ROLE_SURFACES, type LegacyResource, type LegacyRoleCapture, type LegacyRoleContext, type LegacyRoleSources, type RoleAbsence } from "./role-absence.js";
 
 export { directChildCapability, type DirectChildCommand, type DirectChildRecord, type CurrentChildCoverage } from "./child-custody.js";
+
+export type { ChildSignalResult } from "./retained-child.js";

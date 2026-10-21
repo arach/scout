@@ -1,5 +1,7 @@
+import type { Dirent } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { join, relative, posix } from "node:path";
+import ts from "typescript";
 
 type AllowCategory =
   | "boot"
@@ -10,7 +12,8 @@ type AllowCategory =
   | "probe-exec"
   | "repo-service-fallback"
   | "imperative-fallback"
-  | "process-lifecycle";
+  | "process-lifecycle"
+  | "dlopen";
 type AllowEntry = {
   path: string;
   symbol:
@@ -20,10 +23,12 @@ type AllowEntry = {
     | "Bun.spawnSync"
     | "node:child_process"
     | "Bun.spawn"
-    | "Subprocess.kill";
+    | "Subprocess.kill"
+    | "dlopen";
   category: AllowCategory;
   reason: string;
   owner: string;
+  libraryPaths?: string[];
 };
 
 const ROOT = process.cwd();
@@ -37,7 +42,7 @@ const PHASE_B_ROOTS = [
 ];
 const SYNC_SYMBOLS = ["execFileSync", "execSync", "spawnSync", "Bun.spawnSync"] as const;
 const PHASE_B_SYMBOLS = ["node:child_process", "Bun.spawn", "Bun.spawnSync"] as const;
-const SYMBOLS = [...SYNC_SYMBOLS, "node:child_process", "Bun.spawn", "Subprocess.kill"] as const;
+const SYMBOLS = [...SYNC_SYMBOLS, "node:child_process", "Bun.spawn", "Subprocess.kill", "dlopen"] as const;
 const CATEGORIES = new Set<AllowCategory>([
   "boot",
   "cli",
@@ -48,6 +53,7 @@ const CATEGORIES = new Set<AllowCategory>([
   "repo-service-fallback",
   "imperative-fallback",
   "process-lifecycle",
+  "dlopen",
 ]);
 
 function normalizePath(path: string): string {
@@ -55,7 +61,7 @@ function normalizePath(path: string): string {
 }
 
 async function walk(directory: string, out: string[] = []): Promise<string[]> {
-  let entries: Awaited<ReturnType<typeof readdir>>;
+  let entries: Dirent[];
   try {
     entries = await readdir(directory, { withFileTypes: true });
   } catch {
@@ -84,6 +90,47 @@ async function walk(directory: string, out: string[] = []): Promise<string[]> {
   return out;
 }
 
+function fixedLibraryPath(path: unknown): path is string {
+  return typeof path === "string" && posix.isAbsolute(path) && posix.normalize(path) === path
+    && !path.includes("\0") && !path.includes("\\");
+}
+
+// Native loads use syntax-aware argument checking. A reviewed file/symbol pair
+// is not permission to substitute an env/cwd/soname path at that call site.
+function nativeLoads(file: string, source: string) {
+  const out: { index: number; library?: string }[] = [];
+  if (!source.includes("dlopen")) return out;
+  const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+  const inspect = (node: ts.Expression) => {
+    let expression = node;
+    while (ts.isParenthesizedExpression(expression.parent) || ts.isAsExpression(expression.parent)
+      || ts.isTypeAssertionExpression(expression.parent) || ts.isNonNullExpression(expression.parent)) expression = expression.parent;
+    const call = expression.parent;
+    const arg = ts.isCallExpression(call) && call.expression === expression ? call.arguments[0] : undefined;
+    // A non-call reference would let an alias/argument escape this inventory.
+    out.push({ index: node.getStart(tree), library: arg && ts.isStringLiteralLike(arg) ? arg.text : undefined });
+  };
+  const visit = (node: ts.Node) => {
+    if (ts.isIdentifier(node) && node.text === "dlopen") {
+      const parent = node.parent;
+      if (ts.isPropertyAccessExpression(parent) && parent.name === node) { /* inspect the member below */ }
+      else if (ts.isBindingElement(parent) && parent.name === node && !parent.propertyName) { /* const { dlopen } = ffi */ }
+      else if (ts.isImportSpecifier(parent) && parent.name === node && !parent.propertyName) { /* import { dlopen } */ }
+      else inspect(node);
+    } else if (ts.isStringLiteralLike(node) && node.text === "dlopen"
+      && (ts.isBindingElement(node.parent) && node.parent.propertyName === node
+        || ts.isImportSpecifier(node.parent) && node.parent.propertyName === node
+        || ts.isComputedPropertyName(node.parent) && ts.isBindingElement(node.parent.parent))) {
+      out.push({ index: node.getStart(tree) }); // literal/computed destructuring alias
+    } else if (ts.isPropertyAccessExpression(node) && node.name.text === "dlopen"
+      || ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression) && node.argumentExpression.text === "dlopen") {
+      inspect(node);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(tree); return out;
+}
+
 function validateAllowlist(value: unknown): AllowEntry[] {
   if (!Array.isArray(value)) {
     throw new Error("sync exec allowlist must be an array");
@@ -104,12 +151,19 @@ function validateAllowlist(value: unknown): AllowEntry[] {
     if (!CATEGORIES.has(entry.category)) {
       throw new Error(`invalid allowlist category ${entry.category} for ${entry.path}`);
     }
+    if (entry.symbol === "dlopen") {
+      if (entry.category !== "dlopen" || !Array.isArray(entry.libraryPaths) || !entry.libraryPaths.length
+        || entry.libraryPaths.some(path => !fixedLibraryPath(path))) throw new Error(`dlopen requires reviewed fixed absolute libraryPaths for ${entry.path}`);
+    } else if (entry.category === "dlopen" || entry.libraryPaths !== undefined) {
+      throw new Error(`native library policy only applies to dlopen for ${entry.path}`);
+    }
     const normalized: AllowEntry = {
       path: normalizePath(entry.path),
       symbol: entry.symbol,
       category: entry.category,
       reason: entry.reason.trim(),
       owner: entry.owner.trim(),
+      ...(entry.symbol === "dlopen" ? { libraryPaths: [...entry.libraryPaths!] } : {}),
     };
     const key = `${normalized.path}\u0000${normalized.symbol}`;
     if (seen.has(key)) {
@@ -146,6 +200,7 @@ function isUnderAnyRoot(rel: string, roots: readonly string[]): boolean {
 }
 
 function shouldScanSymbol(rel: string, symbol: AllowEntry["symbol"]): boolean {
+  if (symbol === "dlopen") return true;
   // Custody adds a protected signal boundary. Expand this scope deliberately,
   // rather than silently grandfathering every unrelated lifecycle caller.
   if (symbol === "Subprocess.kill") return isUnderAnyRoot(rel, ["packages/runtime/src/supervision-handoff"]);
@@ -158,7 +213,7 @@ function shouldScanSymbol(rel: string, symbol: AllowEntry["symbol"]): boolean {
 
 const allowlistRaw = JSON.parse(await readFile(join(ROOT, "scripts", "sync-exec-allowlist.json"), "utf8")) as unknown;
 const allowlist = validateAllowlist(allowlistRaw);
-const allowed = new Set(allowlist.map((entry) => `${entry.path}\u0000${entry.symbol}`));
+const allowed = new Map(allowlist.map((entry) => [`${entry.path}\u0000${entry.symbol}`, entry]));
 
 const files = (await Promise.all(SCAN_ROOTS.map((root) => walk(join(ROOT, root))))).flat();
 const violations: string[] = [];
@@ -169,18 +224,24 @@ for (const file of files) {
   const source = await readFile(file, "utf8");
   for (const symbol of SYMBOLS) {
     if (!shouldScanSymbol(rel, symbol)) continue;
-    const pattern = symbolPattern(symbol);
-    for (const match of source.matchAll(pattern)) {
+    const matches = symbol === "dlopen" ? nativeLoads(rel, source) : source.matchAll(symbolPattern(symbol));
+    for (const match of matches) {
       const key = `${rel}\u0000${symbol}`;
       observed.add(key);
       if (!allowed.has(key)) {
         violations.push(`${rel}:${lineNumber(source, match.index ?? 0)} uses ${symbol} without scripts/sync-exec-allowlist.json`);
       }
+      if (symbol === "dlopen") {
+        const library = (match as { library?: string }).library;
+        if (!fixedLibraryPath(library) || !allowed.get(key)?.libraryPaths?.includes(library)) {
+          violations.push(`${rel}:${lineNumber(source, match.index ?? 0)} dlopen must use a reviewed fixed absolute library path literal`);
+        }
+      }
     }
   }
 }
 
-const stale = [...allowed].filter((key) => !observed.has(key));
+const stale = [...allowed.keys()].filter((key) => !observed.has(key));
 if (stale.length > 0) {
   violations.push(
     ...stale.map((key) => {

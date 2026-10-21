@@ -160,5 +160,6 @@ releases ownership, resolves a receipt or opens the production gates.
 Production legacy capture producers, integrated protected native exit/custody, complete
 current-owner coverage, real legacy effect wiring, native jobs/registration
 barriers, repair, retention and operator authorization remain open. No app is
-registered, started, stopped, signaled or selected by this PR. There is no new
-native path; the queued `dlopen` fence work remains a separate pass.
+registered, started, stopped, signaled or selected by this capture adapter.
+The later [custody fence pass](SUPERVISION-CHILD-CUSTODY.md) adds the read-only
+SIGCHLD probe and fixed-library-path policy; it does not add role absence proof.
