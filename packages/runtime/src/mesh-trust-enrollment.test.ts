@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 
 import { describe, expect, test } from "bun:test";
+import { EFF_SHORT_WORDLIST } from "./eff-short-wordlist.js";
 
 import {
   buildSignedNodeCard,
@@ -72,7 +73,24 @@ describe("enrollment SAS", () => {
     });
     expect(one).toEqual(two);
     expect(one).toHaveLength(6);
-    expect(formatSas(one)).toMatch(/^[a-z]+(-[a-z]+){5}$/);
+    for (const word of one) expect(EFF_SHORT_WORDLIST).toContain(word);
+    expect(formatSas(one)).toBe(one.join("-"));
+  });
+
+  test("a fixed transcript preserves the hyphenated EFF word yo-yo", () => {
+    const input = {
+      challengeId: "ch-1",
+      keyIdA: "a".repeat(64), keyIdB: "b".repeat(64),
+      publicKeyA: "pk-a", publicKeyB: "pk-b",
+      nodeIdA: "node-a", nodeIdB: "node-b",
+      nonceA: Buffer.alloc(32), nonceB: Buffer.alloc(32),
+    };
+    input.nonceB.writeUInt32BE(153, 28);
+    const words = computeEnrollmentSas(input);
+    expect(words).toEqual(["crop", "yo-yo", "rich", "manor", "guru", "baton"]);
+    expect(formatSas(words)).toBe("crop-yo-yo-rich-manor-guru-baton");
+    // CLI tokenization relies on this fixed EFF v1 compound-word inventory.
+    expect(EFF_SHORT_WORDLIST.filter(word => word.includes("-"))).toEqual(["yo-yo"]);
   });
 
   test("transcript changes produce different codes", () => {

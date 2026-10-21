@@ -123,6 +123,16 @@ describe("mesh trust argument parsing", () => {
     });
   });
 
+  test("confirm-sas preserves yo-yo in space-, dash- and mixed-separated input", () => {
+    const words = "crop yo-yo rich manor guru baton";
+    for (const input of [words, "crop-yo-yo-rich-manor-guru-baton", "  CROP-YO-YO rich MANOR guru\tbaton "]) {
+      expect(normalizeSasWords(input)).toEqual(words.split(" "));
+      expect(parseMeshEnrollArgs(["--confirm-sas", input])).toEqual({ kind: "confirm", words });
+    }
+    expect(normalizeSasWords("yodel-yo-yo-yoga")).toEqual(["yodel", "yo-yo", "yoga"]);
+    expect(() => parseMeshEnrollArgs(["--confirm-sas", "crop yo-yo rich manor guru baton acid"])).toThrow(ScoutCliError);
+  });
+
   test("parseMeshEnrollArgs rejects mixed modes and malformed confirmations", () => {
     expect(() => parseMeshEnrollArgs(["peer.test", "--approve", "x"])).toThrow(ScoutCliError);
     expect(() => parseMeshEnrollArgs(["--confirm-sas", "only three words"])).toThrow(ScoutCliError);
@@ -264,6 +274,22 @@ describe("mesh enrollment handshake", () => {
       tier: "observe",
     }]);
     expect(peer.keyId).toBe(wire.responderCard.keyId);
+  });
+
+  test("confirm accepts a hyphenated EFF word without splitting the local SAS", async () => {
+    const wire = stubbedWire();
+    const handshake = await beginMeshEnrollment({
+      brokerUrl: "http://broker.test", peerUrl: "http://peer.test",
+      tier: "observe", fetchImpl: wire.fetchImpl,
+    });
+    handshake.words = ["crop", "yo-yo", "rich", "manor", "guru", "baton"];
+    await expect(confirmMeshEnrollment("http://broker.test", handshake,
+      "crop yo yo rich manor guru baton", wire.fetchImpl)).rejects.toThrow("do not match");
+    expect(wire.grantBodies).toHaveLength(0);
+    const parsed = parseMeshEnrollArgs(["--confirm-sas", "CROP-YO-YO-rich-manor-guru-baton"]);
+    if (parsed.kind !== "confirm") throw new Error("expected confirmation");
+    await confirmMeshEnrollment("http://broker.test", handshake, parsed.words, wire.fetchImpl);
+    expect(wire.grantBodies).toHaveLength(1);
   });
 
   test("confirm refuses words that do not match the local SAS", async () => {
