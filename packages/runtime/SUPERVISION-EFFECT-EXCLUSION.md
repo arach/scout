@@ -398,6 +398,22 @@ remain untouched. Any pending receipt in the generations to prune blocks
 advance. The checkpoint never settles or drops pending work. `recoverReceipt`
 still refuses retirement receipts; retirement remains the only settlement path.
 
+After that advance snapshot commits, the controller drops its process-local
+held-child entries for this role at or below the advanced-from generation,
+including entries whose birth was never recorded. It defensively closes their
+idempotent parent writers before forgetting the handles. Failed or pending
+advances do not discard custody. A verified persisted advance replay completes
+this cleanup after a lost acknowledgment, without touching the current or future
+generation's child. Other roles' entries remain retained.
+
+This is reference cleanup, not a kill, reap, adoption or new claim of process
+absence. An already-started exact wait can finish; it is not canceled. The SDK's
+ledger mutex prevents an active `recordChildExit` scope from racing advance.
+After advance, the old generation fails ownership checks, and the new generation
+cannot find the pruned old effect. Old-generation retirement also refuses before
+consulting child custody. Controller shutdown closes parent channels by
+iterating only entries still retained; discarded entries need no later lookup.
+
 The global limits remain 256 receipts and 256 authorizations. Routine operation
 with one start and one retirement per generation retains one retirement per
 advanced role, plus the current generations' work, rather than two receipts per

@@ -113,6 +113,14 @@ export class DirectChildren {
   closeParentChannels(role: HandoffRole, generation: number) {
     for (const held of this.held.values()) if (held.role === role && held.generation === generation) held.channel?.closeWrite();
   }
+  /** Internal: call only after a certified advance is durably committed (or
+   * its persisted replay is verified). Forget handles, never kill/reap/adopt.
+   * Closed writers are idempotent; no descriptor or fence is unlocked. */
+  forgetThrough(role: HandoffRole, generation: number) {
+    for (const [id, held] of this.held) if (held.role === role && held.generation <= generation) {
+      held.channel?.closeWrite(); this.held.delete(id);
+    }
+  }
   closeAllParentChannels() {
     for (const held of this.held.values()) held.channel?.closeWrite();
   }

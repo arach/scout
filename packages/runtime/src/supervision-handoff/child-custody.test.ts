@@ -2,12 +2,12 @@ import { afterEach, expect, spyOn, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DirectChildren, directChildCapability } from "./child-custody.js";
+import { DirectChildren, directChildCapability, type DirectChildRecord } from "./child-custody.js";
 import * as sigchld from "./sigchld-disposition.js";
 import { RetainedChild, type OwnedChildHandle } from "./retained-child.js";
 import { nativeDarwinProcessSource } from "./darwin-process-source.js";
 import { SupervisionHandoff, HANDOFF_ROLES, LEGACY_ROLE_SURFACES, productionHandoffReadiness,
-  type Observation, type SelectedInstance, type ExactChild, type EffectPermit } from "./index.js";
+  type Observation, type SelectedInstance, type ExactChild, type EffectPermit, type HandoffRole } from "./index.js";
 import type { DirectChildCommand } from "./child-custody.js";
 
 const roots: string[] = [];
@@ -212,3 +212,56 @@ nativeTest("custody: crash between effect and observation cannot recover a handl
   await f.sdk.exclusive("P1", "web", 2, async lease => { await lease.recordChildExit(child.effectId); });
   expect(productionHandoffReadiness().ready).toBe(false);
 }, 10_000);
+
+
+function registryFixture() {
+  const selected = instance(), registry = new DirectChildren(selected);
+  // Internal-only test seam: never an adoption option on the SDK.
+  const held = (registry as unknown as { held: Map<string, { retained: RetainedChild; record?: DirectChildRecord;
+    role: HandoffRole; generation: number; channel?: { closeWrite(): void } }> }).held;
+  const pending: ReturnType<typeof fake>[] = [];
+  const add = (role: HandoffRole, generation: number, effectId: string, recorded = true) => {
+    const f = fake(); pending.push(f); let closed = false, closes = 0;
+    const child: ExactChild = { uid: selected.uid, instance: selected.id, role, generation, effectId,
+      pid: 123, birth: "fixture-birth", executable: "/fixture-child" };
+    const record = { child } as DirectChildRecord; // Lookup identity only; no native sample or real process is adopted.
+    held.set(effectId, { role, generation, retained: f.retained, record: recorded ? record : undefined,
+      channel: { closeWrite() { if (!closed) { closed = true; closes++; } } } });
+    return { ...f, record, child, closes: () => closes };
+  };
+  const settle = async () => { for (const f of pending) { f.handle.exitCode = 0; f.resolve(0); await f.retained.exit(); } };
+  return { registry, held, add, settle };
+}
+
+test("forget committed generations drops birthless and settled custody, never future or other-role entries", async () => {
+  const f = registryFixture();
+  const old = f.add("web", 1, "old"), birthless = f.add("web", 2, "birthless", false), current = f.add("web", 3, "current");
+  const future = f.add("web", 4, "future"), other = f.add("menu", 1, "other");
+  const alreadyWaiting = f.registry.exit(old.record);
+  try {
+    f.registry.forgetThrough("web", 3);
+    expect([...f.held.keys()]).toEqual(["future", "other"]);
+    for (const entry of [old, birthless, current]) expect(entry.closes()).toBe(1);
+    expect(future.closes()).toBe(0); expect(other.closes()).toBe(0);
+    expect(f.registry.has(old.child)).toBe(false); expect(f.registry.pollExit(old.record)).toBeUndefined();
+    expect(() => f.registry.signal(old.child, "SIGKILL")).toThrow("child_custody_lost");
+    await expect(f.registry.exit(old.record)).rejects.toThrow("child_custody_lost");
+    f.registry.forgetThrough("web", 3); f.registry.closeAllParentChannels(); f.registry.closeAllParentChannels();
+    for (const entry of [old, birthless, current, future, other]) { expect(entry.closes()).toBe(1); expect(entry.signals()).toBe(0); }
+  } finally { await f.settle(); }
+  expect(await alreadyWaiting).toEqual({ code: 0, signal: null }); // Existing exact wait may finish; no new handle is adopted.
+});
+
+test("five-role held registry stays bounded across 1000 generations and 5000 synthetic starts", async () => {
+  const f = registryFixture(); let peak = 0;
+  try {
+    for (let generation = 1; generation <= 1000; generation++) for (const role of HANDOFF_ROLES) {
+      const entry = f.add(role, generation, `${role}-${generation}`); entry.handle.exitCode = 0; entry.resolve(0); await entry.retained.exit();
+      peak = Math.max(peak, f.held.size); f.registry.forgetThrough(role, generation - 1);
+      expect(f.held.size).toBeLessThanOrEqual(5);
+    }
+    expect(peak).toBe(6); expect(f.held.size).toBe(5);
+    for (const role of HANDOFF_ROLES) f.registry.forgetThrough(role, 1000);
+    expect(f.held.size).toBe(0);
+  } finally { await f.settle(); }
+});

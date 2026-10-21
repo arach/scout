@@ -12,6 +12,9 @@ import { DirectChildren, directChildCapability } from "./child-custody.js";
 import * as layout from "./carrier-layout.js";
 import * as sigchld from "./sigchld-disposition.js";
 
+// Test-only inspection/markers, not an SDK handle adoption interface.
+const heldEntries = (sdk: SupervisionHandoff) => (sdk as unknown as { children: { held: Map<string, {
+  role: HandoffRole; generation: number; channel?: { closeWrite(): void } }> } }).children.held;
 const caps = [EFFECT_EXCLUSION_CAPABILITY];
 const carrierTest = carrierChildCapability().available ? test : test.skip;
 const absence: Absence = { state: "absent", processes: "absent", jobs: "disabled", relaunch: "fenced", inFlight: "quiescent" };
@@ -531,8 +534,11 @@ test("advance refuses to prune any historical pending receipt or other roles' wo
     tx.state.receipts["web:0:old-uncertain"] = { operation: "start", state: "pending", effects: [] };
     tx.state.receipts["menu:0:other-work"] = { operation: "start", state: "done", effects: [] }; tx.persist();
   });
+  let closes = 0;
+  heldEntries(f.sdk).set("pending-marker", { role: "web", generation: 1, channel: { closeWrite: () => { closes++; } } });
   const before = readFileSync(f.store.path);
   await expect(f.sdk.advanceCohort("R0", "web", 1, "stop")).rejects.toThrow("outcome_uncertain");
+  expect(heldEntries(f.sdk).has("pending-marker")).toBe(true); expect(closes).toBe(0);
   expect(readFileSync(f.store.path)).toEqual(before);
   expect(await f.store.exclusive(async tx => Object.keys(tx.state.receipts))).toEqual(["web:1:stop", "web:0:old-uncertain", "menu:0:other-work"]);
 });
@@ -543,6 +549,10 @@ test.each(["before-publish", "after-publish", "after-truncate"])("advance checkp
   await f.sdk.exclusive("R0", "web", 1, async lease => { lease.begin("start", "start"); lease.complete("start", "fixture_rejected_before_spawn"); });
   await f.retire();
   const before = await f.store.read("web"), inode = fileIdentity(f.store.path);
+  let closes = 0;
+  heldEntries(f.sdk).set("retired-marker", { role: "web", generation: 1, channel: { closeWrite: () => { closes++; } } });
+  heldEntries(f.sdk).set("future-marker", { role: "web", generation: 2 });
+  heldEntries(f.sdk).set("other-marker", { role: "menu", generation: 1 });
   let restore = () => {};
   if (cut === "before-publish") {
     const mock = spyOn(checkpointIO, "rename").mockImplementationOnce(() => { throw new Error("advance_cut"); }); restore = () => mock.mockRestore();
@@ -554,12 +564,15 @@ test.each(["before-publish", "after-publish", "after-truncate"])("advance checkp
     const mock = spyOn(checkpointIO, "truncate").mockImplementationOnce((...args) => { original(...args); throw new Error("advance_cut"); }); restore = () => mock.mockRestore();
   }
   try { await expect(f.sdk.advanceCohort("R0", "web", 1, "stop")).rejects.toThrow("advance_cut"); } finally { restore(); }
+  expect(heldEntries(f.sdk).has("retired-marker")).toBe(true); expect(closes).toBe(0);
   const reopened = f.make();
   expect(await reopened.read("web")).toMatchObject(cut === "before-publish" ? before : { generation: 2 });
   const advanced = await reopened.advanceCohort("R0", "web", 1, "stop"); expect(advanced.generation).toBe(2);
   expect(await f.store.exclusive(async tx => Object.keys(tx.state.receipts))).toEqual(["web:1:stop"]);
   f.setInspect(async () => { throw new Error("replay_must_not_certify"); });
   expect(await reopened.advanceCohort("R0", "web", 1, "stop")).toEqual(advanced);
+  expect(await f.sdk.advanceCohort("R0", "web", 1, "stop")).toEqual(advanced);
+  expect([...heldEntries(f.sdk).keys()]).toEqual(["future-marker", "other-marker"]); expect(closes).toBe(1);
   expect(await f.store.exclusive(async tx => tx.state.receipts["web:1:stop"]!.retirement!.nextGeneration)).toBe(2);
   expect(fileIdentity(f.store.path)).toEqual(inode);
 });
@@ -573,4 +586,33 @@ test("checkpoint preserves a pending retirement and cannot turn recovery into a 
   await expect(f.make().recoverReceipt("R0", "web", 1, "stop", token)).rejects.toThrow("cohort_retirement_required");
   expect(await f.sdk.pendingReceipts("web", 1)).toMatchObject([{ requestId: "stop", state: "pending" }]);
   await expect(f.sdk.advanceCohort("R0", "web", 1, "stop")).rejects.toThrow("cohort_retirement_required");
+});
+
+
+carrierTest("committed advance forgets the retired handle; stale exit/stop and replay cannot touch the next child", async () => {
+  const f = await fixture(), first = await f.start(); await f.readyRun(); await f.retire();
+  expect(heldEntries(f.sdk).has(first.effectId)).toBe(true); // Retirement alone must not drop custody.
+  await f.sdk.advanceCohort("R0", "web", 1, "stop"); expect(heldEntries(f.sdk).size).toBe(0);
+  await expect(f.sdk.exclusive("R0", "web", 1, lease => lease.recordChildExit(first.effectId))).rejects.toThrow("ownership_changed");
+  await expect(f.sdk.retireCohort("R0", "web", 1, "stop")).rejects.toThrow("ownership_changed");
+  const second = await f.start(2), run = await f.readyRun(2);
+  await expect(f.sdk.exclusive("R0", "web", 2, lease => lease.recordChildExit(first.effectId))).rejects.toThrow("child_birth_unproven");
+  await f.sdk.advanceCohort("R0", "web", 1, "stop"); // Latest advance replay only drops <= 1, not the live generation 2.
+  expect([...heldEntries(f.sdk).keys()]).toEqual([second.effectId]); expect(existsSync(join(run, "parent-eof"))).toBe(false);
+  await f.sdk.releaseControllerFences(); // closeAllParentChannels now sees only the retained new child.
+  await waitUntil(() => existsSync(join(run, "parent-eof")));
+  expect(heldEntries(f.sdk).has(second.effectId)).toBe(true); // Close alone is not certification/advance.
+});
+
+
+test("post-commit child cleanup failure is finished by advance replay, without fresh proof or effects", async () => {
+  const f = await fixture(); await f.retire(); let attempts = 0;
+  heldEntries(f.sdk).set("cleanup-marker", { role: "web", generation: 1, channel: { closeWrite() {
+    if (++attempts === 1) throw new Error("cleanup_interrupted");
+  } } });
+  await expect(f.sdk.advanceCohort("R0", "web", 1, "stop")).rejects.toThrow("cleanup_interrupted");
+  expect(await f.sdk.read("web")).toMatchObject({ generation: 2 }); expect(heldEntries(f.sdk).has("cleanup-marker")).toBe(true);
+  f.setInspect(async () => { throw new Error("replay_must_not_certify"); });
+  expect(await f.sdk.advanceCohort("R0", "web", 1, "stop")).toMatchObject({ generation: 2 });
+  expect(heldEntries(f.sdk).size).toBe(0); expect(attempts).toBe(2);
 });
