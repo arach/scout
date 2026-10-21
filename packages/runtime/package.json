@@ -127,6 +127,12 @@
       "import": "./dist/host-attention.js",
       "default": "./dist/host-attention.js"
     },
+    "./core-report": {
+      "bun": "./src/core-report.ts",
+      "types": "./dist/core-report.d.ts",
+      "import": "./dist/core-report.js",
+      "default": "./dist/core-report.js"
+    },
     "./broker-api": {
       "bun": "./src/broker-api.ts",
       "types": "./dist/broker-api.d.ts",
@@ -560,6 +566,7 @@
     "RELAY-TRANSPORT.md",
     "README.md",
     "DELIVERY.md",
+    "CORE-REPORT.md",
     "LICENSE"
   ],
   "scripts": {
