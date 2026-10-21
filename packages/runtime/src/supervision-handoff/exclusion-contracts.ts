@@ -39,8 +39,8 @@ export type ExclusionEvidence = ExclusionContext & {
   descendants: "unproven";
   nonOwners: SurvivingNonOwner[];
 };
-/** Deliberately not Absence or Observation. Only the SDK transfer decision
- * consumes this certificate; worker absence() still reports unknown. */
+/** Deliberately not Absence or Observation. Only SDK ownership/retirement
+ * decisions consume this certificate; worker absence() still reports unknown. */
 export type RoleEffectExclusion = Omit<ExclusionEvidence, "state"> & {
   state: "role_effect_excluded";
   capability: typeof EFFECT_EXCLUSION_CAPABILITY;

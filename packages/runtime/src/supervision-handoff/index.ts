@@ -3,6 +3,7 @@ import { closeSync } from "node:fs";
 import { EFFECT_EXCLUSION_CAPABILITY, profileHash, profileSelection } from "./exclusion-contracts.js";
 import { LifetimeFences, selectedProfile } from "./lifetime-fence.js";
 import { certifyEffectExclusion } from "./effect-exclusion.js";
+import { cohortStarts, retireCohort } from "./cohort-lifecycle.js";
 import { DirectChildren, currentChildCoverage, type DirectChildCommand, type CurrentChildCoverage } from "./child-custody.js";
 import { captureLegacyRole, inspectLegacyRole, type LegacyRoleSources, type RoleAbsence } from "./role-absence.js";
 import { randomBytes } from "node:crypto";
@@ -70,6 +71,7 @@ async function recoverMutation(tx: CustodyTransaction, role: HandoffRole, owner:
   if (consent.intent.target !== owner || consent.intent.requestId !== id) refuse("invalid_authorization");
   const current = tx.state.receipts[receiptKey(role, generation, id)];
   if (!current || current.state !== "pending") refuse("pending_receipt_required");
+  if (current.retirement) refuse("cohort_retirement_required");
   if (current.effects.length && current.effects.every(effect => effect.state === "confirmed")) {
     current.state = "done"; consent.state = "used"; tx.persist(); return;
   }
@@ -101,10 +103,6 @@ export interface RoleCustody {
   recordChildExit(effectId: string): Promise<void>;
   captureLegacyInventory(captureId: string): Promise<void>;
   inspectLegacyAbsence(): Promise<RoleAbsence>;
-  /** Explicit mapping input for an audited carrier adapter, not a second
-   * effect permit. Only valid in this scope after the owner commit. Never
-   * unlock/downgrade it; use atEffect for the actual spawn boundary. */
-  carrierDescriptor(): number;
   assertCurrent(kind?: "start" | "stop"): void;
   receipt(id: string): MutationReceipt | undefined;
   begin(id: string, operation: MutationReceipt["operation"]): void;
@@ -141,7 +139,7 @@ export class SupervisionHandoff {
   /** Serialize host shutdown with its effect scopes. This closes controller
    * references only; it neither transfers ownership nor settles pending work. */
   releaseControllerFences() {
-    return this.store.exclusive(async tx => { tx.assertCurrent(); this.fences.close(); });
+    return this.store.exclusive(async tx => { tx.assertCurrent(); this.children.closeAllParentChannels(); this.fences.close(); });
   }
   /** Observation-only recovery after host custody loss. This cannot obtain a
    * carrier descriptor or an effect permit and does not substitute exclusion
@@ -166,6 +164,7 @@ export class SupervisionHandoff {
       const state = tx.state.roles[role], profile = selectedProfile(tx, role, this.capabilities);
       if (!profile) refuse("effect_exclusion_not_selected");
       if (state.owner !== owner || state.generation !== generation || !["active", "draining"].includes(state.phase)) refuse("ownership_changed");
+      if (state.retirement) refuse("cohort_retiring");
       await readiness(tx, role, owner, this.inspector, this.capabilities); noPending(tx, role, generation);
       const fd = this.fences.acquire(tx, role);
       try {
@@ -179,7 +178,51 @@ export class SupervisionHandoff {
     return this.store.exclusive(async tx => {
       const state = tx.state.roles[role];
       if (!selectedProfile(tx, role, this.capabilities) || state.owner !== owner || state.generation !== generation || state.phase !== "draining") refuse("role_not_draining");
-      noPending(tx, role, generation); this.fences.release(tx, role);
+      noPending(tx, role, generation); this.fences.assertCurrent(tx, role);
+      this.children.closeParentChannels(role, generation); this.fences.release(tx, role);
+    });
+  }
+  /** Profile-only bounded stop initiation/reconciliation. It sends at most one
+   * exact retained-handle signal, never waits for exit, and leaves a pending
+   * receipt on busy/unknown proof. Retry the same ID; no operator grant needed.
+   * The returned exclusion receipt never asserts that processes are absent. */
+  async retireCohort(owner: HandoffOwner, role: HandoffRole, generation: number, id: string, signal: "SIGTERM" | "SIGKILL" = "SIGTERM") {
+    requireRole(role);
+    return this.store.exclusive(async tx => {
+      const state = tx.state.roles[role], profile = selectedProfile(tx, role, this.capabilities);
+      if (!profile) refuse("effect_exclusion_not_selected");
+      if (state.owner !== owner || state.generation !== generation || !["active", "draining"].includes(state.phase)) refuse("ownership_changed");
+      await readiness(tx, role, owner, this.inspector, this.capabilities);
+      return retireCohort(tx, role, owner, generation, id, signal, profile, this.inspector, this.fences, this.children);
+    });
+  }
+  /** Same-owner automatic restart authority, not a cross-owner transfer grant.
+   * Requires a completed retirement and another fresh full exclusion proof.
+   * Does not spawn. A replay returns the committed ownership, not a new lease. */
+  async advanceCohort(owner: HandoffOwner, role: HandoffRole, generation: number, retirementId: string): Promise<Ownership> {
+    requireRole(role);
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(retirementId)) refuse("invalid_request_id");
+    return this.store.exclusive(async tx => {
+      const state = tx.state.roles[role], profile = selectedProfile(tx, role, this.capabilities);
+      if (!profile) refuse("effect_exclusion_not_selected");
+      const receipt = tx.state.receipts[receiptKey(role, generation, retirementId)], retirement = receipt?.retirement;
+      if (!retirement || receipt!.state !== "done" || !retirement.exclusion) refuse("cohort_retirement_required");
+      if (retirement.policyHash !== policyHash(tx.state.policy)) refuse("policy_changed");
+      if (retirement.nextGeneration !== undefined) {
+        if (state.owner !== owner || state.generation !== retirement.nextGeneration) refuse("ownership_changed");
+        return structuredClone(state);
+      }
+      if (state.owner !== owner || state.generation !== generation || state.phase !== "active"
+        || state.retirement?.requestId !== retirementId || state.retirement.state !== "retired") refuse("ownership_changed");
+      if (generation === Number.MAX_SAFE_INTEGER) refuse("generation_exhausted");
+      await readiness(tx, role, owner, this.inspector, this.capabilities); noPending(tx, role, generation);
+      const fd = this.fences.acquire(tx, role);
+      try {
+        await certifyEffectExclusion(tx, role, fd, profile, this.inspector);
+        const next: Ownership = { owner, generation: generation + 1, phase: "active", desired: "running", proofProfile: profileSelection(profile) };
+        tx.state.roles[role] = next; retirement.nextGeneration = next.generation; tx.persist();
+        this.fences.retain(role, fd, owner, next.generation); return structuredClone(next);
+      } catch (error) { closeSync(fd); throw error; }
     });
   }
   private async commitOwner(tx: CustodyTransaction, role: HandoffRole, next: Ownership, commit: () => void, initialAbsenceVerified = false) {
@@ -271,6 +314,7 @@ export class SupervisionHandoff {
       const assertCurrent = (kind?: "start" | "stop") => {
         tx.assertCurrent();
         if (state.owner !== owner || state.generation !== generation || !["active", "draining"].includes(state.phase)) refuse("ownership_changed");
+        if (state.retirement) refuse("cohort_retiring");
         if (selectedProfile(tx, role, this.capabilities)) this.fences.assertCurrent(tx, role);
         if (kind === "start" && (state.phase !== "active" || state.desired !== "running")) refuse("role_draining_or_stopped");
       };
@@ -283,10 +327,6 @@ export class SupervisionHandoff {
       };
       const receipt = (id: string) => tx.state.receipts[key(id)];
       const lease: RoleCustody = {
-        carrierDescriptor: () => { assertCurrent("start");
-          if (!selectedProfile(tx, role, this.capabilities)) refuse("effect_exclusion_not_selected");
-          return this.fences.assertCurrent(tx, role);
-        },
         childCoverage: () => { assertCurrent(); return currentChildCoverage(tx, role); },
         recordChildExit: async effectId => {
           assertCurrent();
@@ -306,6 +346,7 @@ export class SupervisionHandoff {
         begin: (id, operation) => {
           assertCurrent();
           if (!["start", "stop", "restart"].includes(operation)) refuse("invalid_operation");
+          if (selectedProfile(tx, role, this.capabilities) && operation !== "start") refuse("cohort_retirement_required");
           const prior = receipt(id);
           if (prior) {
             if (prior.operation !== operation) refuse("request_id_conflict");
@@ -320,14 +361,17 @@ export class SupervisionHandoff {
         },
         perform: async (id, kind, runEffect) => {
           assertCurrent(kind);
+          const profile = selectedProfile(tx, role, this.capabilities);
+          if (profile && kind !== "start") refuse("cohort_retirement_required");
           const current = receipt(id);
           if (!current || current.state !== "pending") refuse("pending_receipt_required");
           if (current.effects.some(effect => effect.state === "intent")) refuse("outcome_uncertain");
           if ((current.operation === "stop" && kind !== "stop") || (current.operation === "start" && kind !== "start")
             || current.effects.filter(effect => effect.kind === kind).length) refuse("effect_order_invalid");
           if (current.operation === "restart" && kind === "start" && !current.effects.some(e => e.kind === "stop" && e.state === "confirmed")) refuse("effect_order_invalid");
-          const before = await this.inspector.observe(role); assertCurrent(kind);
-          if (kind === "start" && !absent(before)) refuse("absence_unproven");
+          if (profile && cohortStarts(tx, role, generation).length) refuse("cohort_already_started");
+          const before: Observation = profile ? { state: "unknown" } : await this.inspector.observe(role); assertCurrent(kind);
+          if (!profile && kind === "start" && !absent(before)) refuse("absence_unproven");
           if (kind === "stop" && !absent(before) && before.state !== "owned") refuse("identity_unproven");
           if (before.state === "owned") {
             exact(before.child, tx, role, generation);
@@ -336,23 +380,28 @@ export class SupervisionHandoff {
                 && sameChild(effect.child, before.child)));
             if (!known) refuse("identity_unproven");
           }
-          const effect: Effect = { id: randomBytes(16).toString("hex"), kind, state: "intent" };
+          const effect: Effect = { id: randomBytes(16).toString("hex"), kind, state: "intent", ...(profile ? { carrier: "role-lifetime/7" as const } : {}) };
           current.effects.push(effect); tx.persist();
           let admitted = false, open = true;
           try {
             if (!(kind === "stop" && absent(before))) {
-              const atEffect = <T>(action: () => T): T => {
+              const admit = <T>(action: () => T): T => {
                 assertCurrent(kind); if (!open || admitted) refuse("effect_scope_closed");
                 admitted = true;
                 const result = action();
                 if (result && typeof (result as { then?: unknown }).then === "function") refuse("async_effect_boundary");
                 return result;
               };
+              const atEffect = <T>(action: () => T): T => {
+                if (profile) refuse("carrier_spawn_required");
+                return admit(action);
+              };
               await runEffect({ effectId: effect.id, ...(before.state === "owned" ? { child: structuredClone(before.child) } : {}), atEffect,
                 spawnChild: command => {
                   if (kind !== "start") refuse("effect_order_invalid");
-                  return atEffect(() => {
-                    effect.directChild = this.children.spawn(role, generation, effect.id, command);
+                  if (profile ? command.carrier !== "role-lifetime/7" || !command.stdio : command.carrier !== undefined) refuse("carrier_mapping_required");
+                  return admit(() => {
+                    effect.directChild = this.children.spawn(role, generation, effect.id, command, profile ? this.fences.assertCurrent(tx, role) : undefined);
                     tx.persist(); // Birth is durable before any awaited observation.
                     return structuredClone(effect.directChild.child);
                   });
@@ -395,9 +444,10 @@ export { createProcessEvidenceReader, type ProcessEvidenceReader, type ProcessSa
 
 export { LEGACY_ROLE_SURFACES, type LegacyResource, type LegacyRoleCapture, type LegacyRoleContext, type LegacyRoleSources, type RoleAbsence } from "./role-absence.js";
 
-export { directChildCapability, type DirectChildCommand, type DirectChildRecord, type CurrentChildCoverage } from "./child-custody.js";
+export { directChildCapability, carrierChildCapability, type DirectChildCommand, type DirectChildRecord, type CurrentChildCoverage } from "./child-custody.js";
 
 export type { ChildSignalResult } from "./retained-child.js";
 export { ChildRoleCustody } from "./lifetime-fence.js";
+export { CARRIER_LAYOUT } from "./carrier-layout.js";
 export { EFFECT_EXCLUSION_CAPABILITY, profileHash, type EffectExclusionProfile, type ProfileSelection,
   type FenceIdentity, type ExclusionContext, type ExclusionEvidence, type RoleEffectExclusion, type SurvivingNonOwner } from "./exclusion-contracts.js";

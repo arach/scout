@@ -1,5 +1,5 @@
 import type { DirectChildRecord } from "./child-custody.js";
-import type { EffectExclusionProfile, ExclusionContext, ExclusionEvidence, ProfileSelection } from "./exclusion-contracts.js";
+import type { EffectExclusionProfile, ExclusionContext, ExclusionEvidence, ProfileSelection, RoleEffectExclusion } from "./exclusion-contracts.js";
 /** Temporary, explicitly enrolled custody protocol. Not extension autostart. */
 export const HANDOFF_PROTOCOL = 1;
 export const HANDOFF_CAPABILITY = "supervision-handoff/1";
@@ -11,7 +11,8 @@ export type FloorPolicy = { id: string; minimumRuntimeVersion: string; runtimeAr
   launcherArtifacts: string[]; rollbackArtifacts: string[]; rollbackOpen: boolean;
   effectProfiles?: Partial<Record<HandoffRole, EffectExclusionProfile>> };
 export type Ownership = { owner: HandoffOwner | null; generation: number; phase: "staged" | "active" | "draining";
-  desired: "running" | "stopped"; proofProfile?: ProfileSelection; transition?: { authorization: string; target: HandoffOwner } };
+  desired: "running" | "stopped"; proofProfile?: ProfileSelection; transition?: { authorization: string; target: HandoffOwner };
+  retirement?: { requestId: string; state: "retiring" | "retired" } };
 export type ExactChild = { uid: number; instance: string; role: HandoffRole; generation: number;
   pid: number; birth: string; executable: string; effectId: string };
 export type Absence = { state: "absent"; processes: "absent"; jobs: "disabled"; relaunch: "fenced"; inFlight: "quiescent" };
@@ -30,8 +31,14 @@ export type AuthorizationIntent = { role: HandoffRole; generation: number; sourc
   target: HandoffOwner; action: "enroll" | "handoff" | "recover" | "resume"; desired?: "running" | "stopped"; requestId?: string };
 export type StageApproval = (selection: SelectedInstance, policy: Readonly<FloorPolicy>) => Promise<boolean>;
 export type OperatorApproval = (selection: SelectedInstance, policy: Readonly<FloorPolicy>, intent: Readonly<AuthorizationIntent>) => Promise<boolean>;
-export type Effect = { id: string; kind: "start" | "stop"; state: "intent" | "confirmed"; child?: ExactChild; directChild?: DirectChildRecord };
-export type MutationReceipt = { operation: "start" | "stop" | "restart"; state: "pending" | "done"; effects: Effect[]; error?: string };
+export type Effect = { id: string; kind: "start" | "stop"; state: "intent" | "confirmed" | "retired";
+  carrier?: "role-lifetime/7"; child?: ExactChild; directChild?: DirectChildRecord };
+export type MutationReceipt = { operation: "start" | "stop" | "restart"; state: "pending" | "done"; effects: Effect[]; error?: string;
+  retirement?: { policyHash: string; signal: "SIGTERM" | "SIGKILL"; signalAttempted?: true;
+    signalResult?: import("./retained-child.js").ChildSignalResult; exclusion?: RoleEffectExclusion; nextGeneration?: number } };
+/** A receipt snapshot, not a new observation on replay. Never process absence. */
+export type CohortRetirement = { state: "retired"; role: HandoffRole; owner: HandoffOwner; generation: number;
+  requestId: string; replayed: boolean; exclusion: RoleEffectExclusion };
 /** Recovery discovery only: no authorization token, child custody or effect permit. */
 export type PendingReceipt = { requestId: string; operation: MutationReceipt["operation"]; state: "pending";
   effects: Pick<Effect, "id" | "kind" | "state">[] };

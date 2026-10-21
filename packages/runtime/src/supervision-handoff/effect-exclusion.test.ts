@@ -2,11 +2,18 @@ import { afterEach, expect, spyOn, test } from "bun:test";
 import { closeSync, constants, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, renameSync, statSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SupervisionHandoff, ChildRoleCustody, EFFECT_EXCLUSION_CAPABILITY, profileHash, productionHandoffReadiness,
+import { SupervisionHandoff, ChildRoleCustody, EFFECT_EXCLUSION_CAPABILITY, profileHash, productionHandoffReadiness, carrierChildCapability,
   type Absence, type EffectExclusionProfile, type ExclusionContext, type ExclusionEvidence, type FloorPolicy,
   type HandoffInspector, type Observation, type Readiness } from "./index.js";
 import { CustodyTransaction, HandoffStore, policyHash } from "./store.js";
 import { nativeDarwinProcessSource } from "./darwin-process-source.js";
+import type { LifetimeFences } from "./lifetime-fence.js";
+
+// Proof-boundary tests only. The supported SDK no longer exposes its FD;
+// production mapping must use the retained permit.spawnChild path.
+function testFence(sdk: SupervisionHandoff, store: HandoffStore) {
+  return store.exclusive(async tx => (sdk as unknown as { fences: LifetimeFences }).fences.assertCurrent(tx, "web"));
+}
 
 const caps = [EFFECT_EXCLUSION_CAPABILITY];
 const absent: Absence = { state: "absent", processes: "absent", jobs: "disabled", relaunch: "fenced", inFlight: "quiescent" };
@@ -59,7 +66,7 @@ test("staging prepares separate anchored inodes but enrolls nothing; production 
   expect(entries.owner).toEqual({ owner: null, generation: 0, phase: "staged", desired: "stopped" });
   expect(entries.identity?.ino).not.toBe(String(statSync(join(f.root, 'supervision-handoff-v1/custody.log')).ino)); // distinct from transaction lock
   expect(productionHandoffReadiness()).toMatchObject({ ready: false, integratedRoles: [] });
-  await expect(f.sdk.exclusive("R0", "web", 0, async lease => lease.carrierDescriptor())).rejects.toThrow("ownership_changed");
+  await expect(f.sdk.exclusive("R0", "web", 0, async lease => lease.assertCurrent())).rejects.toThrow("ownership_changed");
 });
 test("enrollment persists a hash-bound selection and holds the lifetime fence after the ledger scope", async () => {
   const f = await fixture(); const result = await f.enroll();
@@ -136,24 +143,26 @@ test("transfer reports living non-owners without turning worker absence into abs
 
 test("a held controller blocks transfer until it closes its lifetime reference", async () => {
   const f = await fixture(); await f.enroll();
-  const fd = await f.sdk.exclusive("R0", "web", 1, async lease => lease.carrierDescriptor());
+  const fd = await testFence(f.sdk, f.store);
   // The child-side check validates the exact live description, not a PID file.
-  expect(await new ChildRoleCustody(f.instance, caps).check("web", "R0", 1, fd)).toMatchObject({ state: "verified" });
+  const checked = new ChildRoleCustody(f.instance, caps).check("web", "R0", 1, fd);
+  if (process.platform === "darwin") expect(await checked).toMatchObject({ state: "verified", closeOnExec: true });
+  else await expect(checked).rejects.toThrow("carrier_layout_unsupported");
   const token = await f.drain();
   await expect(f.make().transfer("web", token)).rejects.toThrow("ownership_busy");
   await f.sdk.releaseLifetimeFence("R0", "web", 1);
   expect(await f.make().transfer("web", token)).toMatchObject({ carriers: "excluded" });
 });
 
-test.each(["mapped", "wrong-inode"])("bounded child-side custody check and carrier retention: %s", async mode => {
+(carrierChildCapability().available ? test : test.skip).each(["mapped", "wrong-inode"])("bounded child-side custody check and carrier retention: %s", async mode => {
   const f = await fixture(); await f.enroll();
-  const descriptor = await f.sdk.exclusive("R0", "web", 1, async lease => lease.carrierDescriptor());
+  const descriptor = await testFence(f.sdk, f.store);
   const config = join(f.root, "child-instance.json"); writeFileSync(config, JSON.stringify(f.instance));
   const wrong = mode === "wrong-inode" ? openSync(join(f.root, "other-inode"), constants.O_CREAT | constants.O_RDWR, 0o600) : undefined;
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("OPENSCOUT_") && !key.startsWith("SCOUT_")));
   env.HOME = f.root; env.BUN_RUNTIME_TRANSPILER_CACHE_PATH = "0";
   const child = Bun.spawn([process.execPath, join(import.meta.dir, "exclusion-carrier.fixture.ts"), config], {
-    cwd: f.root, env, stdio: ["pipe", "pipe", "pipe", wrong ?? descriptor],
+    cwd: f.root, env, stdio: ["pipe", "pipe", "pipe", "ignore", "ignore", "ignore", "ignore", wrong ?? descriptor],
   });
   let timer: ReturnType<typeof setTimeout> | undefined;
   const stderr = new Response(child.stderr).text();
@@ -188,7 +197,8 @@ test("lost controller custody requires the full proof before re-acquiring effect
   f.setInspect(async c => { const e = evidence(c); e.resources.unexplained = ["stray-listener"]; return e; });
   await expect(reopened.acquireLifetimeFence("R0", "web", 1)).rejects.toThrow("effect_exclusion_unproven");
   f.setInspect(async c => evidence(c)); await reopened.acquireLifetimeFence("R0", "web", 1);
-  await reopened.exclusive("R0", "web", 1, async lease => expect(lease.carrierDescriptor()).toBeGreaterThanOrEqual(3));
+  await reopened.exclusive("R0", "web", 1, async lease => lease.assertCurrent());
+  expect(await testFence(reopened, f.store)).toBeGreaterThanOrEqual(3);
 });
 
 test("a pending receipt cannot be bypassed by closing all controller references", async () => {
@@ -215,7 +225,8 @@ test("candidate fence is retained across proof awaits and only the committed own
   const activated = f.enroll(); await enteredGate;
   try { await expect(f.make().read("web")).rejects.toThrow("ownership_busy"); }
   finally { release(); await activated; }
-  await f.sdk.exclusive("R0", "web", 1, async lease => expect(lease.carrierDescriptor()).toBeGreaterThanOrEqual(3));
+  await f.sdk.exclusive("R0", "web", 1, async lease => lease.assertCurrent());
+  expect(await testFence(f.sdk, f.store)).toBeGreaterThanOrEqual(3);
 });
 
 test("child refuses wrong inode, right inode with a different description, stale generation and missing capability", async () => {
@@ -252,8 +263,8 @@ test("selection cannot name the custody host as a role or omit the inventory", a
 test("profile stores use a one-way schema gate; older absence-only readers must refuse", async () => {
   const f = await fixture();
   const text = readFileSync(join(f.root, "supervision-handoff-v1/custody.log"), "utf8");
-  expect(JSON.parse(text.trim()).state.version).toBe(2);
-  expect(await f.store.exclusive(async tx => tx.state.version)).toBe(2);
+  expect(JSON.parse(text.trim()).state.version).toBe(3);
+  expect(await f.store.exclusive(async tx => tx.state.version)).toBe(3);
 });
 
 test("replaying a completed enrollment still requires the declared profile capability", async () => {

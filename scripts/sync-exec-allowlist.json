@@ -1039,14 +1039,14 @@
     "path": "packages/runtime/src/supervision-handoff/child-custody.ts",
     "symbol": "Bun.spawn",
     "category": "process-lifecycle",
-    "reason": "inactive opt-in SDK boundary persists intent before synchronous owned-child spawn and native birth sampling; audited Darwin backend only, no production caller or discovery",
+    "reason": "inactive retained spawn owns an EOF parent pipe at child FD 3 and lifetime fence at FD 7, stages CLOEXEC source copies above slot 7, and maps no caller FDs; only audited Darwin Bun 1.3.14 borrowed extras, with immediate owned-copy cleanup and retained handle before native birth sampling",
     "owner": "runtime"
   },
   {
     "path": "packages/runtime/src/supervision-handoff/retained-child.ts",
     "symbol": "Subprocess.kill",
     "category": "process-lifecycle",
-    "reason": "inactive SDK signals only its private retained direct-child handle under an effect permit; refuses after terminal status/reap and never calls kill(pid)",
+    "reason": "inactive SDK signals only its private retained direct-child handle under an effect permit or serialized durable cohort-retirement intent; refuses after terminal status/reap and never calls kill(pid)",
     "owner": "runtime"
   },
   {
@@ -1147,6 +1147,35 @@
     "symbol": "Subprocess.kill",
     "category": "test",
     "reason": "bounded isolated carrier fixture validates mapped inode against durable custody, retains the shared lock after its controller closes, and is always ended and awaited; sanitized environment and scratch HOME, no installed services",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/supervision-handoff/cohort-carrier.fixture.ts",
+    "symbol": "Bun.spawn",
+    "category": "test",
+    "reason": "entrypoint-only isolated fixture deliberately remaps verified CLOEXEC fence FD 7 to a detached carrier or non-owner negative helper; cooperative roots guard EOF on separate FD 3; all processes have five-second bounds, sanitized scratch environments, file-backed cleanup and zombie-inclusive survivor checks",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/supervision-handoff/carrier-layout.ts",
+    "symbol": "dlopen",
+    "category": "dlopen",
+    "libraryPaths": ["/usr/lib/libSystem.B.dylib"],
+    "reason": "lazy Darwin-only pipe/dup/FIOCLEX and read-only F_GETFD binding from fixed libSystem; SDK owns both pipe endpoints and temporary CLOEXEC source copies above all targets; child verification sets fence CLOEXEC without unlocking, no discovery or process spawning",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/supervision-handoff/cohort-lifecycle.test.ts",
+    "symbol": "Bun.spawn",
+    "category": "test",
+    "reason": "bounded isolated SDK-owner fixture proves EOF-parent guard after its actual custodian is SIGKILLed; sanitized scratch HOME, exact owned handle awaited, and child/owner PID disappearance checked including zombies",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/supervision-handoff/cohort-lifecycle.test.ts",
+    "symbol": "Subprocess.kill",
+    "category": "test",
+    "reason": "bounded isolated SDK-owner fixture proves EOF-parent guard after its actual custodian is SIGKILLed; sanitized scratch HOME, exact owned handle awaited, and child/owner PID disappearance checked including zombies",
     "owner": "runtime"
   }
 ]
