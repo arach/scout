@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { createAgentWorkspace, SCOUT_WORKSPACES_DIRNAME } from "./agent-workspace.js";
 
@@ -77,9 +78,59 @@ describe("createAgentWorkspace", () => {
 
   test("returns null when the project is not a git repo", async () => {
     const root = makeNonGitDir();
-    const result = await createAgentWorkspace(root, "explorer");
+    const previousCeiling = process.env.GIT_CEILING_DIRECTORIES;
+    // TMPDIR may itself be inside a checkout. Stop discovery before its parent
+    // so this case cannot create a branch or worktree in the enclosing repo.
+    process.env.GIT_CEILING_DIRECTORIES = realpathSync(dirname(root));
+    try {
+      const result = await createAgentWorkspace(root, "explorer");
 
-    expect(result).toBeNull();
-    expect(existsSync(join(root, SCOUT_WORKSPACES_DIRNAME))).toBe(false);
+      expect(result).toBeNull();
+      expect(existsSync(join(root, SCOUT_WORKSPACES_DIRNAME))).toBe(false);
+    } finally {
+      if (previousCeiling === undefined) delete process.env.GIT_CEILING_DIRECTORIES;
+      else process.env.GIT_CEILING_DIRECTORIES = previousCeiling;
+    }
   });
+
+  test("temporary workspace and setup fixtures leave an enclosing TMPDIR repository unchanged", async () => {
+    const repo = makeGitRepo();
+    const nestedTmp = join(repo, "tmp");
+    mkdirSync(nestedTmp);
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: repo }).toString();
+    const branchesBefore = git("for-each-ref", "refs/heads");
+    const worktreesBefore = git("worktree", "list", "--porcelain");
+    const env = { ...process.env, TMPDIR: nestedTmp, TMP: nestedTmp, TEMP: nestedTmp };
+    // The subprocess must supply its own ceiling, not inherit one from us.
+    delete env.GIT_CEILING_DIRECTORIES;
+
+    const child = Bun.spawn([
+      process.execPath,
+      "test", fileURLToPath(import.meta.url),
+      fileURLToPath(new URL("./setup.test.ts", import.meta.url)),
+      "--test-name-pattern", "^(createAgentWorkspace returns null when the project is not a git repo|setup inventory creates a project manifest directly in the explicit Relay context root)$",
+    ], { env, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+    const timeout = setTimeout(() => child.kill("SIGKILL"), 15_000);
+    try {
+      const [exitCode, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
+      expect({ exitCode, output: stdout + stderr }).toMatchObject({ exitCode: 0 });
+      // A renamed test must not turn this into a successful zero-test run.
+      expect(stderr).toContain("2 pass");
+      expect(stderr).toContain("0 fail");
+    } finally {
+      clearTimeout(timeout);
+      child.kill("SIGKILL");
+      await child.exited;
+    }
+
+    expect(git("for-each-ref", "refs/heads")).toBe(branchesBefore);
+    expect(git("worktree", "list", "--porcelain")).toBe(worktreesBefore);
+    expect(existsSync(join(repo, ".git", "worktrees"))).toBe(false);
+    expect(existsSync(join(repo, ".openscout"))).toBe(false);
+    expect(existsSync(join(repo, ".gitignore"))).toBe(false);
+  }, 20_000);
 });

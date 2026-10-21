@@ -691,6 +691,8 @@ describe("setup inventory", () => {
 
     testDirectories.add(home);
     mkdirSync(sourceRoot, { recursive: true });
+    // Bound project discovery to this fixture even when TMPDIR is in a checkout.
+    mkdirSync(join(sourceRoot, ".git"));
 
     process.env.HOME = home;
     process.env.OPENSCOUT_SUPPORT_DIRECTORY = join(home, "Library", "Application Support", "OpenScout");
