@@ -331,6 +331,12 @@
       "import": "./dist/local-config.js",
       "default": "./dist/local-config.js"
     },
+    "./path-trust": {
+      "bun": "./src/path-trust.ts",
+      "types": "./dist/path-trust.d.ts",
+      "import": "./dist/path-trust.js",
+      "default": "./dist/path-trust.js"
+    },
     "./scout-home": {
       "bun": "./src/scout-home.ts",
       "types": "./dist/scout-home.d.ts",

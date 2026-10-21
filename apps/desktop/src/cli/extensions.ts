@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { constants as osConstants } from "node:os";
 import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { resolveScoutHome, scoutHomeReadRoots } from "@openscout/runtime/scout-home";
+import { untrustedPathMetadata } from "@openscout/runtime/path-trust";
 
 /**
  * Scout CLI extensions. `scout <verb>` runs an installed extension when no
@@ -92,15 +93,7 @@ function ancestors(path: string): string[] {
 function untrusted(path: string, allowSticky = false): string | undefined {
   let info: ReturnType<typeof statSync>;
   try { info = statSync(path); } catch { return `Scout cannot read the permissions of ${path}`; }
-  if (!allowSticky) {
-    const uid = process.getuid?.();
-    if (uid === undefined || (info.uid !== uid && info.uid !== 0)) {
-      return `${path} is not owned by the current user or root`;
-    }
-  }
-  const mode = info.mode;
-  if ((mode & 0o002) === 0 || (allowSticky && (mode & 0o1000) !== 0)) return undefined;
-  return `anyone on this machine can write to ${path}`;
+  return untrustedPathMetadata(path, info, allowSticky);
 }
 
 /**

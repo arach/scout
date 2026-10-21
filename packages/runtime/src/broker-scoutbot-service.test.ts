@@ -23,7 +23,7 @@ class FakeChild extends EventEmitter {
   unref() {}
 }
 
-function service(env: Record<string, string> = {}) {
+function service(env: Record<string, string> = { OPENSCOUT_SCOUTBOT_PROCESS: "1" }) {
   const spawned: Array<{ command: string; args: readonly string[]; options: any; child: FakeChild }> = [];
   const logPath = join(mkdtempSync(join(tmpdir(), "scoutbot-service-")), "scoutbot.log");
   const scoutbot = new BrokerScoutbotService({
@@ -69,7 +69,11 @@ describe("BrokerScoutbotService", () => {
     expect(spawned).toHaveLength(2);
   });
 
-  test("OPENSCOUT_SCOUTBOT_PROCESS=0 turns it off", () => {
-    expect(service({ OPENSCOUT_SCOUTBOT_PROCESS: "0" }).scoutbot.enabled()).toBe(false);
+  test.each([{}, { OPENSCOUT_SCOUTBOT_PROCESS: "0" }])("requires explicit enablement (%j)", (env) => {
+    // Give the unset case an isolated config location too.
+    const { scoutbot, spawned } = service({ OPENSCOUT_SUPPORT_DIRECTORY: mkdtempSync(join(tmpdir(), "scoutbot-disabled-")), ...env });
+    expect(scoutbot.enabled()).toBe(false);
+    scoutbot.start();
+    expect(spawned).toHaveLength(0);
   });
 });
