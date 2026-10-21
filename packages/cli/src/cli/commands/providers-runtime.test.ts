@@ -72,7 +72,7 @@ describe("passive runtime provider quota consumer", () => {
     expect(parseScoutArgv(args)).toMatchObject({ command: "providers", args: args.slice(1, -1), outputMode: "json" });
     const report = buildProviderUsageReport(quota([window(), window({ id: "case", accountId: "account a" })]), format);
     expect(report.providers.map(pool => pool.identity.accountId)).toEqual(["Account A", "account a"]);
-    for (const args of [["usage", "--account", "Account A"], ["map", "--endpoint", "endpoint-1"]]) expect(() => parseProvidersCommandOptions(args)).toThrow("unknown providers option");
+    for (const args of [["usage", "--account", "Account A"], ["map", "--endpoint", "endpoint-1"]]) expect(() => parseProvidersCommandOptions(args)).toThrow(`unknown providers ${args[0]} option: ${args[1]}`);
   });
   test("ambiguous map refuses instead of last-account-wins or an average", async () => {
     await fixture(async ({ context, lines }) => {
