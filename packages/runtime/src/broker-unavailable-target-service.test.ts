@@ -355,13 +355,25 @@ test("only physical local Codex liveness overrides a historical offline latch", 
 });
 
 
-test("live Codex recovery never overrides explicit endpoint retirement", () => {
+test("retired endpoints never reach a liveness probe or recover via a launcher", () => {
   const target = agent();
   const service = new BrokerUnavailableTargetService({ nodeId: "node-local", describeRemoteAuthorityIssue: () => null,
-    isEndpointAlive: () => true });
-  for (const metadata of [{ replacedByAgentId: "replacement" }, { staleLocalRegistration: true }]) {
-    const candidate = endpoint({ transport: "codex_app_server", state: "offline", metadata });
-    const snapshot = createRuntimeRegistrySnapshot({ agents: { [target.id]: target }, endpoints: { old: candidate } });
-    expect(service.evaluate(snapshot, target, candidate.sessionId!).state).toBe("gone");
+    isEndpointAlive: () => { throw new Error("retired endpoint must not be probed"); },
+    verifiedLaunchRoute: () => ({ projectRoot: "/repo", harness: "codex" }) });
+  for (const transport of ["codex_app_server", "tmux"] as const) {
+    for (const retirement of [
+      { state: "offline", metadata: { replacedByAgentId: "replacement" } },
+      { state: "offline", metadata: { staleLocalRegistration: true } },
+      { state: "idle", metadata: { staleLocalRegistration: true } },
+      { state: "active", metadata: { staleLocalRegistration: true } },
+    ] as const) {
+      const candidate = endpoint({ transport, ...retirement });
+      const snapshot = createRuntimeRegistrySnapshot({ agents: { [target.id]: target }, endpoints: { old: candidate } });
+      for (const selector of [undefined, candidate.id, candidate.sessionId!]) {
+        expect(service.evaluate(snapshot, target, selector)).toEqual(expect.objectContaining({
+          state: "gone", reason: "stale_registration", supportedActions: [], selectedRoute: null,
+        }));
+      }
+    }
   }
 });

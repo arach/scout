@@ -77,10 +77,10 @@ export function createBrokerDaemonTestHarness() {
   const harnesses = new Set<BrokerHarness>();
   const adminKeys = new Map<string, string>();
   const brokerKeys = new Map<string, string>();
-  const adminHeaders = async (url: string, method: string, path: string, body?: string): Promise<Record<string, string>> => {
+  const adminHeaders = async (url: string, method: string, path: string, body?: string, signal?: AbortSignal): Promise<Record<string, string>> => {
     if (!adminKeys.has(url)) return {};
     if (!brokerKeys.has(url)) {
-      const response = await fetch(url + "/v1/node");
+      const response = await fetch(url + "/v1/node", { signal });
       const node = await response.json() as { card: { keyId: string } };
       brokerKeys.set(url, node.card.keyId);
     }
@@ -125,6 +125,7 @@ export function createBrokerDaemonTestHarness() {
     waitForMutationReady?: boolean;
     protectedLocal?: boolean;
     preload?: string;
+    startupTimeoutMs?: number;
   } = {}): Promise<BrokerHarness> {
     const controlHome = input.controlHome ?? mkdtempSync(join(tmpdir(), "openscout-runtime-test-"));
     const port = freePort();
@@ -134,7 +135,7 @@ export function createBrokerDaemonTestHarness() {
     if (localAdminKey) { writeFileSync(adminKeyFile, localAdminKey, { mode: 0o600 }); adminKeys.set(baseUrl, localAdminKey); }
     const derivedNodeId = `node-${basename(controlHome).toLowerCase().replace(/[^a-z0-9-]+/g, "-")}`;
     const child = Bun.spawn({
-      cmd: ["bun", "run", "--preload", join(import.meta.dir, "broker-storage-preload.ts"),
+      cmd: [process.execPath, "run", "--preload", join(import.meta.dir, "broker-storage-preload.ts"),
         ...(input.preload ? ["--preload", input.preload] : []), "src/broker-daemon.ts"],
       cwd: runtimeDir,
       env: {
@@ -169,7 +170,7 @@ export function createBrokerDaemonTestHarness() {
     const outputDrain = [drainProcessOutput(child.stdout, retainOutput), drainProcessOutput(child.stderr, retainOutput)];
 
     try {
-      await waitForHealth(baseUrl, input.waitForMutationReady !== false);
+      await waitForHealth(baseUrl, input.waitForMutationReady !== false, input.startupTimeoutMs ?? 6000);
     } catch (error) {
       child.kill();
       const exited = await Promise.race([child.exited.then(() => true), Bun.sleep(2_000).then(() => false)]);
@@ -260,11 +261,14 @@ export function createBrokerDaemonTestHarness() {
     } catch {} finally { reader.releaseLock(); }
   }
 
-  async function waitForHealth(baseUrl: string, waitForMutationReady: boolean): Promise<void> {
+  async function waitForHealth(baseUrl: string, waitForMutationReady: boolean, timeoutMs: number): Promise<void> {
+    if (!Number.isFinite(timeoutMs) || timeoutMs < 1000 || timeoutMs > 30_000) throw new Error("invalid fixture startup deadline");
     let lastError: unknown;
-    for (let attempt = 0; attempt < 60; attempt += 1) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
       try {
-        const response = await fetch(`${baseUrl}/health`, { headers: await adminHeaders(baseUrl, "GET", "/health") });
+        const signal = AbortSignal.timeout(Math.max(1, Math.min(1000, deadline - Date.now())));
+        const response = await fetch(`${baseUrl}/health`, { headers: await adminHeaders(baseUrl, "GET", "/health", undefined, signal), signal });
         if (response.ok) {
           const health = await response.json() as {
             ok?: boolean;

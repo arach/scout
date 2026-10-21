@@ -83,8 +83,11 @@ export class MeshBridgeManagement {
           : config.tokenKeychainService ? "unverified" : tokenFileValid ? "configured" : "missing",
       },
       observed: {
-        state: ["running", "idle", "restarting", "unconfigured"].includes(String(observed?.state)) ? observed!.state : "unavailable",
+        state: ["running", "idle", "restarting", "unconfigured", "refused"].includes(String(observed?.state)) ? observed!.state : "unavailable",
         pid: typeof observed?.pid === "number" && Number.isInteger(observed.pid) && observed.pid > 1 ? observed.pid : null,
+        extensionState: ["ready","absent","refused"].includes(String(observed?.extensionState)) ? observed!.extensionState : "unavailable",
+        artifactDigest: typeof observed?.artifactDigest === "string" && /^[a-f0-9]{64}$/.test(observed.artifactDigest) ? observed.artifactDigest : null,
+        extensionVersion: typeof observed?.extensionVersion === "string" && /^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][a-zA-Z0-9.-]+)?$/.test(observed.extensionVersion) ? observed.extensionVersion : null,
         updatedAt, ageMs: updatedAt === null ? null : Math.max(0, now - updatedAt),
         stale: updatedAt === null || updatedAt > now || now - updatedAt > 10_000,
       },

@@ -11,6 +11,7 @@ const cursors = new Map<string, { fileIdentity: string; endByte: number }>();
 const replay = { fullReplays: 0, tailReplays: 0, bytes: 0 };
 let nextSourceId = 0;
 const sourceRequests = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>();
+let stopped = false;
 function source(operation: "boundary" | "threadEvents", value: unknown): Promise<any> {
   if (stopped) return Promise.reject(new Error("SQLite projection parent port is unavailable"));
   const id = ++nextSourceId;
@@ -48,7 +49,6 @@ const publish = async (events: ThreadEventEnvelope[]) => {
   await source("threadEvents", events);
 };
 function state() { return { status: projection.statusSnapshot(), health: projection.health(), replay, progress: projection.progressRevision() }; }
-let stopped = false;
 function stop(cause: unknown): void {
   if (stopped) return;
   stopped = true;

@@ -447,7 +447,7 @@ describe("mesh peer client", () => {
       endpoints: [],
       lastSeenAt: 1,
     };
-    // The real router handler, with only the deps GET /v1/node touches.
+    // The real router handler also composes the materials reader at startup.
     const routed = createBrokerHttpRouter({
       host: "127.0.0.1",
       port: 43110,
@@ -455,6 +455,7 @@ describe("mesh peer client", () => {
       meshId: "openscout",
       operatorActorId: "operator",
       brokerService: { readNode: async () => node },
+      runtime: { peek: () => ({ endpoints: {} }) },
       meshTrust: {
         enrollment: {},
         rateLimiter: {},

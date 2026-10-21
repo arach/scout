@@ -75,6 +75,7 @@ type RuntimeRecordStore = {
 
 export type BrokerDurableRecordStoreOptions = {
   localNodeId?: string;
+  assertMessageAdmission?: (message: MessageRecord) => void;
   completionCurrentFlight?: (invocationId: string) => FlightRecord | undefined;
   completionFlight?: (id: string) => FlightRecord | undefined;
   completionInvocation?: (id: string) => InvocationRequest | undefined;
@@ -631,6 +632,11 @@ export class BrokerDurableRecordStore {
       return next;
     });
 
+  private assertMessageAdmission(message: MessageRecord): void {
+    if (this.options.assertMessageAdmission) return this.options.assertMessageAdmission(message);
+    if (message.attachments?.some(a => a.blob !== undefined)) throw new Error("attachment_inline_write_required");
+  }
+
   readonly recordMessage = async (
     message: MessageRecord,
     options: {
@@ -640,6 +646,7 @@ export class BrokerDurableRecordStore {
     } = {},
   ): Promise<{ deliveries: DeliveryIntent[]; entries: BrokerJournalEntry[]; duplicate?: MessageRecord }> => {
     return this.options.durableStore.runWrite(async () => {
+      this.assertMessageAdmission(message);
       if (options.dedupeExisting) {
         const messages = this.options.runtime.peek().messages;
         if (!messages) throw new Error("Message history is unavailable for duplicate validation");
@@ -690,6 +697,7 @@ export class BrokerDurableRecordStore {
     } = {},
   ): Promise<{ flight: FlightRecord; dispatchJob?: BrokerInvocationDispatchJob; entries: BrokerJournalEntry[] }> => {
     return this.options.durableStore.runWrite(async () => {
+      for (const message of [options.message, options.receiptMessage]) if (message) this.assertMessageAdmission(message);
       const runtimeSnapshot = this.options.runtime.peek();
       const relatedParentId = (invocation.metadata?.completionRelation as { parentFlightId?: string } | undefined)?.parentFlightId;
       const durableParent = relatedParentId ? this.options.completionFlight?.(relatedParentId) : undefined;
