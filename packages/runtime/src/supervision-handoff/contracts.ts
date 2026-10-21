@@ -1,4 +1,5 @@
 import type { DirectChildRecord } from "./child-custody.js";
+import type { EffectExclusionProfile, ExclusionContext, ExclusionEvidence, ProfileSelection } from "./exclusion-contracts.js";
 /** Temporary, explicitly enrolled custody protocol. Not extension autostart. */
 export const HANDOFF_PROTOCOL = 1;
 export const HANDOFF_CAPABILITY = "supervision-handoff/1";
@@ -7,19 +8,23 @@ export type HandoffRole = typeof HANDOFF_ROLES[number];
 export type HandoffOwner = "R0" | "P1";
 export type SelectedInstance = Readonly<{ uid: number; id: string; supportDirectory: string }>;
 export type FloorPolicy = { id: string; minimumRuntimeVersion: string; runtimeArtifacts: string[];
-  launcherArtifacts: string[]; rollbackArtifacts: string[]; rollbackOpen: boolean };
+  launcherArtifacts: string[]; rollbackArtifacts: string[]; rollbackOpen: boolean;
+  effectProfiles?: Partial<Record<HandoffRole, EffectExclusionProfile>> };
 export type Ownership = { owner: HandoffOwner | null; generation: number; phase: "staged" | "active" | "draining";
-  desired: "running" | "stopped"; transition?: { authorization: string; target: HandoffOwner } };
+  desired: "running" | "stopped"; proofProfile?: ProfileSelection; transition?: { authorization: string; target: HandoffOwner } };
 export type ExactChild = { uid: number; instance: string; role: HandoffRole; generation: number;
   pid: number; birth: string; executable: string; effectId: string };
 export type Absence = { state: "absent"; processes: "absent"; jobs: "disabled"; relaunch: "fenced"; inFlight: "quiescent" };
 export type Observation = Absence | { state: "owned"; child: ExactChild } | { state: "occupied" | "unknown" };
 export type Readiness = { protocol: 1; ready: boolean; runtimeVersion: string; runtimeArtifact: string;
-  launcherArtifact: string; assistantClaims: boolean; integratedRoles: HandoffRole[] };
+  launcherArtifact: string; assistantClaims: boolean; integratedRoles: HandoffRole[];
+  capabilities?: string[];
+  roleEffectCoverage?: Partial<Record<HandoffRole, { profileId: string; profileHash: string; coverageId: string }>> };
 /** Trusted host observations, never evidence accepted from request JSON. */
 export interface HandoffInspector {
   readiness(role: HandoffRole): Promise<Readiness>;
   observe(role: HandoffRole): Promise<Observation>;
+  exclusion?(context: ExclusionContext): Promise<ExclusionEvidence | { state: "unknown" | "occupied" }>;
 }
 export type AuthorizationIntent = { role: HandoffRole; generation: number; source: HandoffOwner | null;
   target: HandoffOwner; action: "enroll" | "handoff" | "recover" | "resume"; desired?: "running" | "stopped"; requestId?: string };

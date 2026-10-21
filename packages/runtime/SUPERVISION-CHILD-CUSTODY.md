@@ -184,3 +184,9 @@ only libSystem, lazily, and queries without mutating SIGCHLD. Default, ignored,
 no-child-wait and changed-back dispositions are tested in owned isolated child
 processes, never by changing the test runner. There is no native build, lifecycle
 discovery, automatic enrollment or production selection.
+
+The optional [role-effect exclusion profile](SUPERVISION-EFFECT-EXCLUSION.md)
+keeps this adapter's descendant result unknown. Its separate lifetime fence and
+child-side descriptor check feed only SDK ownership decisions. They do not
+upgrade a direct child into complete descendant or resource coverage, and this
+adapter does not automatically pass its child a lifetime descriptor.
