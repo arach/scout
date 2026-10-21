@@ -62,7 +62,7 @@ test('fence never signals a reused PID after the old bridge exits',async()=>{
 });
 test('fence confirms SIGKILL exit or refuses to launch a second process',async()=>{
   record();let now=0,alive=true;const identity={args:'/opt/scout-mesh bridge',startedAt:'expected'},signals:string[]=[];
-  await fenceRecordedMeshBridge(support,{readIdentity:()=>alive?identity:null,signal:(_pid,signal)=>{signals.push(signal);if(signal==='SIGKILL')alive=false;},now:()=>now,sleep:async ms=>{now+=ms;},timeoutMs:100});expect(signals).toEqual(['SIGTERM','SIGKILL']);
+  await fenceRecordedMeshBridge(support,{readIdentity:()=>alive?identity:null,isAlive:()=>alive,signal:(_pid,signal)=>{signals.push(signal);if(signal==='SIGKILL')alive=false;},now:()=>now,sleep:async ms=>{now+=ms;},timeoutMs:100});expect(signals).toEqual(['SIGTERM','SIGKILL']);
   now=0;await expect(fenceRecordedMeshBridge(support,{readIdentity:()=>identity,signal:()=>{},now:()=>now,sleep:async ms=>{now+=ms;},timeoutMs:100})).rejects.toThrow('has not exited');
 });
 test('built artifact installs and the supervisor plan executes that command directly',async()=>{
@@ -72,4 +72,12 @@ test('built artifact installs and the supervisor plan executes that command dire
   const path=config(),launchPath=writeMeshBridgeLaunchConfig({supportDirectory:support,configPath:path,configDigest:desired().configDigest,brokerUrl:'http://127.0.0.1:1',parentPid:process.pid,eventsEnabled:false});
   const plan=meshBridgeExtensionCommand({selected,configPath:launchPath,env,brokerUrl:'http://127.0.0.1:1',cliVersion:'1.0.0'});
   const child=Bun.spawn([plan.command,'--help'],{env:plan.env,cwd:root,stdout:'pipe',stderr:'pipe'});expect(await child.exited).toBe(0);expect(await new Response(child.stdout).text()).toContain('HTTP runtime client');expect(plan.args[0]).toBe('bridge');
+});
+
+test('unavailable process identity is never mistaken for an absent bridge',async()=>{
+  record();const signals:string[]=[];
+  await expect(fenceRecordedMeshBridge(support,{readIdentity:()=>null,isAlive:()=>true,signal:(_pid,s)=>signals.push(s)})).rejects.toThrow('identity unavailable');
+  expect(signals).toEqual([]);
+  await fenceRecordedMeshBridge(support,{readIdentity:()=>null,isAlive:()=>false,signal:(_pid,s)=>signals.push(s)});
+  expect(signals).toEqual([]);
 });

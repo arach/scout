@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -212,16 +212,26 @@ function runLaunchctl(args: string[]): { status: number | null; output: string }
 /** Fence only the recorded process incarnation, and confirm exit before spawning. */
 export async function fenceRecordedMeshBridge(supportDirectory:string, options:{
   readIdentity?:(pid:number)=>ProcessIdentity|null; signal?:(pid:number,signal:NodeJS.Signals)=>void;
-  sleep?:(ms:number)=>Promise<void>; now?:()=>number; timeoutMs?:number;
+  isAlive?:(pid:number)=>boolean; sleep?:(ms:number)=>Promise<void>; now?:()=>number; timeoutMs?:number;
 }={}):Promise<void> {
   const read=options.readIdentity??readProcessIdentity, now=options.now??Date.now;
   const sleep=options.sleep??(ms=>new Promise(r=>setTimeout(r,ms)));
   const signal=options.signal??((pid,signal)=>process.kill(pid,signal));
-  let expected:ProcessIdentity|null=null;
-  const pid=findRecordedLiveMeshBridgePid(supportDirectory,p=>{expected=read(p);return expected;});
-  if(pid===null || pid===process.pid || !expected)return;
-  const incarnation=expected as ProcessIdentity;
-  const same=()=>{const current=read(pid);return !!current&&current.startedAt===incarnation.startedAt&&current.args===incarnation.args&&isMeshBridgeCommand(current.args);};
+  const alive=options.isAlive??((pid:number)=>{try{process.kill(pid,0);return true;}catch(error){if((error as NodeJS.ErrnoException).code==='ESRCH')return false;throw new Error('previous mesh bridge liveness unavailable');}});
+  const path=meshBridgeStatePath(supportDirectory);
+  if(!existsSync(path))return;
+  let record:Record<string,unknown>;
+  try{record=readMeshBridgeConfigSnapshot(path).value;}catch{throw new Error('previous mesh bridge state unavailable');}
+  const pid=record.pid, startedAt=record.processStartedAt;
+  if(typeof pid!=='number'||!Number.isInteger(pid)||pid<=1||pid===process.pid)return;
+  if(typeof startedAt!=='string'||!startedAt){if(alive(pid))throw new Error('previous mesh bridge identity unavailable');return;}
+  const same=()=>{
+    const current=read(pid);
+    if(!current){if(alive(pid))throw new Error('previous mesh bridge identity unavailable');return false;}
+    if(current.startedAt!==startedAt)return false; // A reused PID is never signalled.
+    if(!isMeshBridgeCommand(current.args))throw new Error('previous mesh bridge identity unavailable');
+    return true;
+  };
   const send=(kind:NodeJS.Signals)=>{if(!same())return false;try{signal(pid,kind);return true;}catch(error){if((error as NodeJS.ErrnoException).code==='ESRCH')return false;throw new Error('previous mesh bridge cannot be fenced');}};
   if(!send('SIGTERM'))return;
   const deadline=now()+(options.timeoutMs??6000);

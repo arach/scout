@@ -978,6 +978,7 @@ async function reconcileMeshBridgeOnce(): Promise<void> {
       await terminateChildProcess(running, "mesh bridge", MESH_BRIDGE_STOP_TIMEOUT_MS);
       if (!isChildExited(running)) throw new Error("previous mesh bridge has not exited");
     }
+    if (!running) await fencePreviousMeshBridge();
     if (meshBridgeLastIdleReason !== desired.reason) {
       meshBridgeLastIdleReason = desired.reason;
       if (desired.reason === "legacy-launch-agent") {

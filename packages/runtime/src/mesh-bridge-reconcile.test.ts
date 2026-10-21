@@ -62,3 +62,10 @@ test('failure to stop or fence old child prevents another process',async()=>{
 test('running observation refreshes timestamps without another process or entrypoint lookup',async()=>{
  const {h,supervisor}=harness();await supervisor.tick();h.now+=5000;await supervisor.tick();expect(h.children).toHaveLength(1);expect(h.states.at(-1)).toMatchObject({state:'running',artifactDigest:'a',extensionVersion:'1.0.0',extensionState:'ready',pid:100,processStartedAt:'expected'});
 });
+
+test('disabled reconciliation fences recorded orphans before overwriting observed state',async()=>{
+ const {h,supervisor}=harness();h.desired={run:false,reason:'disabled-in-config'};
+ h.fence=async()=>{throw new Error('identity unavailable');};
+ await expect(supervisor.tick()).rejects.toThrow('identity unavailable');expect(h.states).toHaveLength(0);expect(h.children).toHaveLength(0);
+ h.fence=undefined;await supervisor.tick();expect(h.states.at(-1)).toMatchObject({state:'idle',pid:null,reason:'disabled-in-config'});
+});
