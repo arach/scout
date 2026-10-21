@@ -41,6 +41,53 @@ function findWorkspaceDirs() {
     });
 }
 
+// This reviewed install surface is intentionally smaller than the build graph.
+// Bundled source inputs belong in CLI devDependencies, not npm dependencies.
+export const SCOUT_INSTALL_DEPENDENCIES = Object.freeze({
+  "@lydell/node-pty": "1.2.0-beta.12",
+  "bonjour-service": "^1.4.4",
+  "picomatch": "^4.0.4",
+  "reflect-metadata": "0.2.2",
+  "ws": "^8.18.3",
+});
+export const PUBLISHED_WORKSPACE_PACKAGES = Object.freeze([
+  "@openscout/protocol", "@openscout/scout",
+]);
+
+/** Audit the manifest extracted from the tarball, after workspace normalization. */
+export function findPublishDependencyFailures(pkg) {
+  if (pkg.name !== "@openscout/scout") return [];
+  const failures = [];
+  const deps = pkg.dependencies;
+  if (!deps || typeof deps !== "object" || Array.isArray(deps)) {
+    return ["dependencies must match the reviewed Scout install policy"];
+  }
+  for (const [name, range] of Object.entries(deps)) {
+    if (!Object.hasOwn(SCOUT_INSTALL_DEPENDENCIES, name)) {
+      const unpublished = name.startsWith("@openscout/") && !PUBLISHED_WORKSPACE_PACKAGES.includes(name)
+        ? "; workspace package is outside the publish set (protocol, cli)" : "";
+      failures.push(`unreviewed dependencies.${name}=${range}${unpublished}`);
+    } else if (range !== SCOUT_INSTALL_DEPENDENCIES[name]) {
+      failures.push(`dependencies.${name}=${range}; reviewed range is ${SCOUT_INSTALL_DEPENDENCIES[name]}`);
+    }
+  }
+  for (const name of Object.keys(SCOUT_INSTALL_DEPENDENCIES)) {
+    if (!Object.hasOwn(deps, name)) failures.push(`missing reviewed dependencies.${name}`);
+  }
+  // A peer, optional or bundled edge must not bypass the reviewed install list.
+  for (const section of ["peerDependencies", "optionalDependencies"]) {
+    if (pkg[section] && Object.keys(pkg[section]).length > 0) {
+      failures.push(`unreviewed ${section}; Scout install policy has no ${section}`);
+    }
+  }
+  for (const section of ["bundleDependencies", "bundledDependencies"]) {
+    if (pkg[section] === true || (Array.isArray(pkg[section]) && pkg[section].length > 0)) {
+      failures.push(`unreviewed ${section}; Scout install policy has no bundled dependencies`);
+    }
+  }
+  return failures;
+}
+
 function findWorkspaceLeaks(pkg) {
   const leaks = [];
 
@@ -230,6 +277,7 @@ function auditTarball(tarballPath, packageDir = repoRoot) {
   return {
     name: pkg.name,
     leaks: findWorkspaceLeaks(pkg),
+    dependencyFailures: findPublishDependencyFailures(pkg),
     missingFiles,
     forbiddenFiles,
     footprint,
@@ -263,7 +311,8 @@ async function inspectPackedManifest(packageDir, tempDir) {
 
 function reportFailures(results) {
   const failures = results.filter((result) =>
-    result.leaks.length > 0
+    result.dependencyFailures.length > 0
+    || result.leaks.length > 0
     || result.missingFiles.length > 0
     || result.forbiddenFiles.length > 0
     || result.footprintFailures.length > 0
@@ -277,6 +326,10 @@ function reportFailures(results) {
     }
   }
   for (const failure of failures) {
+    if (failure.dependencyFailures.length > 0) {
+      console.error(`${failure.name} violates the reviewed packed dependency policy:`);
+      for (const error of failure.dependencyFailures) console.error(`  - ${error}`);
+    }
     if (failure.leaks.length > 0) {
       console.error(`${failure.name} packed with workspace dependencies:`);
       for (const leak of failure.leaks) console.error(`  - ${leak}`);
@@ -304,6 +357,18 @@ function reportFailures(results) {
 }
 
 async function main() {
+  // Manifest-only inspection does not build native artifacts or certify a full
+  // release archive. The regular --tarball/default audits enforce this too.
+  if (process.argv[2] === "--publish-dependencies") {
+    if (process.argv.length !== 4) throw new Error("--publish-dependencies requires one exact tarball");
+    const tarball = path.resolve(process.argv[3]);
+    const pkg = JSON.parse(execFileSync("tar", ["-xOf", tarball, "package/package.json"], { encoding: "utf8" }));
+    console.log(JSON.stringify({ name: pkg.name, version: pkg.version, dependencies: pkg.dependencies }, null, 2));
+    const failures = [...findWorkspaceLeaks(pkg), ...findPublishDependencyFailures(pkg)];
+    if (failures.length) { console.error(failures.join("\n")); process.exitCode = 1; }
+    else console.log("Packed dependency policy passed (manifest-only; not a full archive audit).");
+    return;
+  }
   // Independent of native packaging: validate a named JS-only or full candidate
   // against freshly collected source/output metadata. Never refresh on check.
   if (process.argv[2] === "--private-inventory") {

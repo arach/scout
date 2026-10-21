@@ -14,7 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
-import { findFootprintFailures, findBasicPackedClientFailures } from "./check-packed-manifests.mjs";
+import { findFootprintFailures, findBasicPackedClientFailures, SCOUT_INSTALL_DEPENDENCIES } from "./check-packed-manifests.mjs";
 
 const repoRoot = new URL("..", import.meta.url);
 const currentVersion = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"))
@@ -1017,6 +1017,7 @@ test("the isolated retained Scout candidate is normalized and passes the exact a
         version: "0.2.99",
         files: ["bin", "dist", "README.md"],
         bin: { scout: "./bin/scout" },
+        dependencies: { ...SCOUT_INSTALL_DEPENDENCIES },
         devDependencies: { "@openscout/runtime": "workspace:*" },
       }),
     );
