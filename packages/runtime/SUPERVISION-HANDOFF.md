@@ -105,6 +105,15 @@ rollback is outside this protocol, just as deliberately running an unfenced
 binary is. Restoring the broker DB cannot change this separate authority store
 and is not a supported supervision rollback.
 
+There is one pre-authority staging exception. If a crash interrupts `stage`
+before its first complete journal record persists, the updater may explicitly
+remove and re-prepare that incomplete staging directory. No automatic deletion
+or retry does this. The updater must establish from its staging provenance that
+no authority ever existed, verify the exact directory and files from that
+attempt, exclude concurrent controllers, and obtain operator consent. An empty,
+missing or corrupt journal alone is not that proof. Unknown history, or any
+store that reached its first complete record, remains subject to the rule above.
+
 The lock assumes a host-local filesystem with working `flock` and `fsync`
 semantics, not a shared network home or mesh store. The SDK loads the existing
 system library (`libSystem.B.dylib` on macOS, `libc.so.6` on supported Linux).
