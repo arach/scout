@@ -8,9 +8,10 @@ package export requires public API review before merge.
 
 `@openscout/runtime/relay-transport` owns the Bun WebSocket room server.
 `startRelay(port, options?)` returns `{ stop(): void }`. Each invocation owns
-its own rooms, connection IDs, routing index and timers. The server binds to
-`0.0.0.0`. Optional `tls: { cert, key }` values are certificate and key file
-paths read by Bun. Node execution is not supported.
+its own rooms, connection IDs, routing index and timers. The optional `hostname`
+selects the bind address; its default is `0.0.0.0` for compatibility with both
+existing wrappers. Optional `tls: { cert, key }` values are certificate and key
+file paths read by Bun. Node execution is not supported.
 
 The module has no value imports. It does not depend on a web server, pairing
 implementation, local configuration, native service, broker or tail watcher.
@@ -76,7 +77,8 @@ null unless the indexed bridge is connected.
 `POST /resolve` accepts JSON `{ bridgePublicKey }`. A live mapping returns
 `{ room }`. Missing or invalid keys return 400; an unknown key or disconnected
 bridge returns 404; invalid JSON returns 400. Bridge key labels enter the
-routing index before upgrade, as before.
+routing index only after a successful upgrade. Failed upgrades neither retain
+fresh key labels nor repoint existing labels.
 
 Room names, key labels and client IDs are routing metadata, not credentials.
 The relay must carry opaque application frames. Callers supply end-to-end
@@ -84,6 +86,14 @@ encryption and authenticate endpoints outside this module. The relay neither
 implements nor verifies encryption. It stores no pairing private keys, trusted
 identities, approvals or custody state. TLS does not substitute for endpoint
 authentication. This is not a hardened untrusted multi-tenant relay.
+
+Room occupation and key-index repointing are unauthenticated by design. Any
+reachable peer can take a room's bridge slot or repoint `/resolve` for a key
+label it knows. Callers' authenticated end-to-end encryption protects payload
+confidentiality; the relay does not protect availability or routing direction.
+Run the relay where only trusted peers can reach it, such as a restricted
+tailnet, a trusted-peer LAN, or TLS behind a network ACL. Treat `/resolve`
+answers as routing hints that the caller must verify end to end.
 
 ## Private phone HTTP composition
 

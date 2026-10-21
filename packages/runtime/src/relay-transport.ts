@@ -39,6 +39,8 @@ export type RelayHttpHandler = (
 ) => Response | Promise<Response> | undefined;
 
 export interface RelayTransportOptions {
+  /** Bind address. Defaults to all interfaces for compatibility. */
+  hostname?: string;
   tls?: {
     cert: string;  // path to .crt file
     key: string;   // path to .key file
@@ -55,7 +57,7 @@ export function startRelay(port: number, options: RelayTransportOptions = {}): {
 
   const server = Bun.serve<SocketData>({
     port,
-    hostname: "0.0.0.0",
+    hostname: options.hostname ?? "0.0.0.0",
     ...(options.tls
       ? {
           tls: {
@@ -94,11 +96,6 @@ export function startRelay(port: number, options: RelayTransportOptions = {}): {
         return new Response("Missing ?room=ID&role=bridge|client", { status: 400 });
       }
 
-      // Register bridge public key → room mapping before upgrade.
-      if (role === "bridge" && bridgeKey) {
-        roomByBridgeKey.set(bridgeKey, roomId);
-      }
-
       const upgraded = server.upgrade(req, {
         data: role === "client"
           ? { roomId, role, clientId: crypto.randomUUID() }
@@ -106,6 +103,11 @@ export function startRelay(port: number, options: RelayTransportOptions = {}): {
       });
       if (!upgraded) {
         return new Response("WebSocket upgrade failed", { status: 500 });
+      }
+      // Only successful upgrades may enter the routing index. Failed requests
+      // create no room whose cleanup could remove an orphaned key label.
+      if (role === "bridge" && bridgeKey) {
+        roomByBridgeKey.set(bridgeKey, roomId);
       }
     },
 

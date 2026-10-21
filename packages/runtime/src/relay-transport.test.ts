@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { createServer } from "node:net";
 
 import { startRelay, type RelayTransportOptions as RelayOptions } from "./relay-transport.js";
@@ -325,4 +325,44 @@ test("trusted HTTP composition is explicit and undefined delegates to the unchan
   }));
   const custom = await fetch(`http://127.0.0.1:${port}/custom`); expect(custom.status).toBe(201); expect(await custom.text()).toBe("composed");
   expect((await fetch(`http://127.0.0.1:${port}/healthz`)).status).toBe(200);
+});
+
+
+test("hostname is caller-selectable while existing wrappers keep the all-interface default", async () => {
+  const serve = spyOn(Bun, "serve");
+  try {
+    activeRelays.push(startRelay(await getFreePort(), { hostname: "127.0.0.1" }));
+    expect(serve.mock.calls.at(-1)?.[0].hostname).toBe("127.0.0.1");
+    activeRelays.push(startRelay(await getFreePort()));
+    expect(serve.mock.calls.at(-1)?.[0].hostname).toBe("0.0.0.0");
+  } finally {
+    serve.mockRestore();
+  }
+});
+
+test("failed upgrades do not retain fresh bridge key labels", async () => {
+  const port = await getFreePort();
+  activeRelays.push(startRelay(port));
+  for (const key of ["failed-one", "failed-two", "failed-three"]) {
+    const failed = await fetch(`http://127.0.0.1:${port}/?room=never-created&role=bridge&key=${key}`);
+    expect(failed.status).toBe(500);
+    const resolve = await fetch(`http://127.0.0.1:${port}/resolve`, {
+      method: "POST", body: JSON.stringify({ bridgePublicKey: key }),
+    });
+    expect(resolve.status).toBe(404);
+    expect(await resolve.json()).toEqual({ error: "bridge not found" });
+  }
+});
+
+test("failed upgrades cannot repoint an existing bridge key label", async () => {
+  const port = await getFreePort();
+  activeRelays.push(startRelay(port));
+  await connect(port, "original", "bridge", "known-key");
+  const failed = await fetch(`http://127.0.0.1:${port}/?room=never-created&role=bridge&key=known-key`);
+  expect(failed.status).toBe(500);
+  const resolve = await fetch(`http://127.0.0.1:${port}/resolve`, {
+    method: "POST", body: JSON.stringify({ bridgePublicKey: "known-key" }),
+  });
+  expect(resolve.status).toBe(200);
+  expect(await resolve.json()).toEqual({ room: "original" });
 });
