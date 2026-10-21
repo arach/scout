@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from "node:http";
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -85,6 +85,8 @@ async function fixture(legacy = false, leaseOptions: { ttlMs?: number; now?: () 
   };
 }
 
+// These integration tests include HTTP stream cancellation and Unix socket
+// teardown. Ownership is the contract; teardown latency is not an assertion.
 for (const legacy of [false, true]) {
   test(`public in-process web registers and answers with ${legacy ? "an old runtime" : "a claim"}`, async () => {
     const f = await fixture(legacy);
@@ -109,7 +111,7 @@ for (const legacy of [false, true]) {
       expect(warnings).toEqual([]);
     } finally { await web.stop(); await f.close(); }
     expect(f.claims.capability().agents.scoutbot.held).toBe(false);
-  });
+  }, 15_000);
 
   test(`standalone process registration, brain reply and MCP socket use ${legacy ? "legacy mode" : "one claim"}`, async () => {
     const f = await fixture(legacy); let complete = false; let proxySocket: string | undefined;
@@ -146,7 +148,7 @@ for (const legacy of [false, true]) {
     } finally { await answerer.stop(); await f.close(); }
     expect(f.claims.capability().agents.scoutbot.held).toBe(false);
     expect(await stat(proxySocket!).catch(() => null)).toBeNull();
-  });
+  }, 15_000);
 }
 
 test("a stray web without managed stands down before registration or event consumption", async () => {
@@ -169,7 +171,7 @@ test("a stray web without managed stands down before registration or event consu
     if (env === undefined) delete process.env.OPENSCOUT_SCOUTBOT_PROCESS; else process.env.OPENSCOUT_SCOUTBOT_PROCESS = env;
     await web?.stop(); f.claims.withToken(owner.token, () => f.claims.release("scoutbot")); await f.close();
   }
-});
+}, 15_000);
 
 test("a stopped generation's proxy cannot submit under a later holder", async () => {
   const f = await fixture(); let proxy: Awaited<ReturnType<typeof createAssistantBrokerProxy>> | undefined;
@@ -181,13 +183,21 @@ test("a stopped generation's proxy cannot submit under a later holder", async ()
   });
   try {
     await until(() => !!proxy);
+    // Send raw dot segments (fetch normalizes them before sending). The tool
+    // socket must not turn them into an authorized claim-management request.
+    const managementStatus = await new Promise<number>(resolve => {
+      const request = httpRequest({ socketPath: proxy!.socketPath, path: "/v1/unused/../assistant-claims/release", method: "POST",
+        headers: { "content-type": "application/json" } }, response => { response.resume(); response.on("end", () => resolve(response.statusCode!)); });
+      request.end(JSON.stringify({ agentId: "scoutbot" }));
+    });
+    expect(managementStatus).toBe(403);
     await answerer.stop();
     f.claims.acquire("scoutbot", "replacement:pid:fixture");
     expect(() => lateHeaders()).toThrow("assistant_claim_lost");
     const result = await fetch("http://localhost/v1/messages", { unix: proxy!.socketPath, method: "POST", body: JSON.stringify({ actorId: "scoutbot", body: "late" }) });
     expect(result.status).toBe(409); expect(f.posts).toEqual([]);
   } finally { await answerer.stop(); await proxy?.close(); await f.close(); }
-});
+}, 15_000);
 
 test("runtime HTTP fences a dead holder's delayed post after a standby web takes over", async () => {
   let now = 100;
@@ -215,4 +225,4 @@ test("runtime HTTP fences a dead holder's delayed post after a standby web takes
     expect(stale.status).toBe(409); expect(await stale.json()).toMatchObject({ error: "assistant_claim_lost" });
     expect(f.posts.filter(p => p.path === "/v1/messages")).toEqual([]);
   } finally { await dead.stop(); await web?.stop(); await f.close(); }
-});
+}, 15_000);

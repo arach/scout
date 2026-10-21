@@ -14,7 +14,8 @@ export async function createAssistantBrokerProxy(brokerSocketPath: string) {
   const server = createServer(bindAssistantClaim(async (request, response) => {
     try {
       const proof = assistantClaimHeaders(); // Refuse new child work as soon as the lease is lost.
-      if (request.url?.startsWith("/v1/assistant-claims")) {
+      const destination = new URL(request.url ?? "/", "http://localhost");
+      if (destination.pathname.startsWith("/v1/assistant-claims")) {
         response.writeHead(403); response.end(); return;
       }
       const chunks: Buffer[] = [];
@@ -33,7 +34,7 @@ export async function createAssistantBrokerProxy(brokerSocketPath: string) {
       for (const [key, value] of Object.entries(proof)) headers.set(key, value);
       // Recheck after reading the body, without switching to a successor's scope.
       assistantClaimHeaders();
-      const result = await fetch(`http://localhost${request.url}`, {
+      const result = await fetch(destination, {
         unix: brokerSocketPath, method: request.method, headers,
         ...(chunks.length ? { body: Buffer.concat(chunks) } : {}),
         signal: AbortSignal.timeout(45_000),
