@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import type { Worker } from "node:worker_threads";
 import type { DeliveryAttempt, DeliveryIntent, FlightRecord, InvocationRequest } from "@openscout/protocol";
 import { FileBackedBrokerJournal, type BrokerJournalEntry } from "./broker-journal.js";
 import { WorkerSQLiteProjection, type WorkerSQLiteProjectionOptions } from "./sqlite-projection-worker.js";
@@ -31,11 +32,45 @@ async function setup(workerSource?: string, options: WorkerSQLiteProjectionOptio
   const journal = new FileBackedBrokerJournal(journalPath); await journal.load();
   await journal.appendEntries([...parents, message("old")]);
   let workerUrl: URL | undefined;
-  if (workerSource) { const path = join(root, "worker.ts"); await writeFile(path, workerSource); workerUrl = pathToFileURL(path); }
+  if (workerSource) {
+    const path = join(root, "worker.ts");
+    // Signal only after the wrapper has imported the real entry and installed
+    // every listener. An interception listener alone can consume an early warm.
+    await writeFile(path, workerSource + `
+      import { parentPort as fixturePort } from "node:worker_threads";
+      fixturePort!.postMessage({ kind: "testFixtureReady" });`);
+    workerUrl = pathToFileURL(path);
+  }
   const projection = new WorkerSQLiteProjection(dbPath, journalPath, journal, { historyDirectory: join(root, "history"), ...options, workerUrl });
   cleanup.push(() => projection.close());
   const published: unknown[] = [];
   const durable = new BrokerDurableStore({ journal, projection, threadEvents: { publish: events => { published.push(...events); } } });
+  if (workerSource) {
+    // Gate this fixture's transport for every worker generation, including a
+    // watchdog restart. RPC deadlines still start at the original call time.
+    const transport = projection as unknown as { postMessage(worker: Worker, packet: unknown): void };
+    const post = transport.postMessage.bind(projection);
+    const startups = new WeakMap<Worker, { ready: boolean; pending: unknown[] }>();
+    transport.postMessage = (worker, packet) => {
+      let startup = startups.get(worker);
+      if (!startup) {
+        const state = { ready: false, pending: [] as unknown[] };
+        startups.set(worker, state); startup = state;
+        const detach = () => {
+          worker.off("message", ready); worker.off("error", abandoned); worker.off("exit", abandoned);
+        };
+        const ready = (message: unknown) => {
+          if (!message || typeof message !== "object" || !("kind" in message) || message.kind !== "testFixtureReady") return;
+          detach(); state.ready = true;
+          for (const queued of state.pending.splice(0)) post(worker, queued);
+        };
+        const abandoned = () => { detach(); state.pending.length = 0; };
+        worker.on("message", ready); worker.once("error", abandoned); worker.once("exit", abandoned);
+      }
+      if (startup.ready) post(worker, packet);
+      else startup.pending.push(packet);
+    };
+  }
   return { root, journalPath, dbPath, journal, projection, durable, published };
 }
 
