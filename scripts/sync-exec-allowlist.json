@@ -232,6 +232,13 @@
   },
   {
     "path": "packages/runtime/src/agent-workspace.test.ts",
+    "symbol": "Bun.spawn",
+    "category": "test",
+    "reason": "Runs two named test cases with TMPDIR inside an owned scratch repository; captures both streams, enforces a 15-second deadline and awaits the child before fixture cleanup.",
+    "owner": "tests"
+  },
+  {
+    "path": "packages/runtime/src/agent-workspace.test.ts",
     "symbol": "execFileSync",
     "category": "test",
     "reason": "git fixture setup",
