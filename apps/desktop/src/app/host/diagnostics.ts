@@ -11,8 +11,8 @@ import {
   resolveOpenScoutSupportPaths,
 } from "@openscout/runtime/support-paths";
 
-import { getRuntimeBrokerServiceStatus } from "./runtime-service-client.ts";
-import { resolveScoutAppRoot, resolveScoutWorkspaceRoot } from "../../shared/paths.ts";
+import { getRuntimeBrokerServiceStatus } from "../../../../../packages/cli/src/lib/app/host/runtime-service-client.ts";
+import { resolveScoutAppRoot, resolveScoutWorkspaceRoot } from "../../../../../packages/cli/src/lib/shared/paths.ts";
 import { getScoutDesktopPairingState, resolveScoutPairingPaths } from "./pairing.ts";
 import { getScoutDesktopAppSettings } from "./settings.ts";
 

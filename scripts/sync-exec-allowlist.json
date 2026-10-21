@@ -21,133 +21,133 @@
     "owner": "desktop"
   },
   {
-    "path": "apps/desktop/src/cli/app-lifecycle.ts",
+    "path": "packages/cli/src/cli/app-lifecycle.ts",
     "symbol": "spawnSync",
     "category": "process-lifecycle",
     "reason": "owns the app/service ownership model: one-shot ps process-table reads and launchctl bootout/bootstrap/kickstart, which must be ordered and observed synchronously",
     "owner": "desktop"
   },
   {
-    "path": "apps/desktop/src/cli/commands/app.ts",
+    "path": "packages/cli/src/cli/commands/app.ts",
     "symbol": "spawnSync",
     "category": "cli",
     "reason": "app lifecycle CLI one-shot bundle discovery and launch commands",
     "owner": "desktop"
   },
   {
-    "path": "apps/desktop/src/cli/commands/install.ts",
+    "path": "packages/cli/src/cli/commands/install.ts",
     "symbol": "spawnSync",
     "category": "cli",
     "reason": "interactive installer one-shot commands",
     "owner": "desktop"
   },
   {
-    "path": "apps/desktop/src/cli/commands/mcp-install.ts",
+    "path": "packages/cli/src/cli/commands/mcp-install.ts",
     "symbol": "spawnSync",
     "category": "cli",
     "reason": "interactive MCP installer one-shot commands",
     "owner": "desktop"
   },
   {
-    "path": "apps/desktop/src/cli/commands/menu.ts",
+    "path": "packages/cli/src/cli/commands/menu.ts",
     "symbol": "spawnSync",
     "category": "cli",
     "reason": "desktop menu CLI one-shot launch command",
     "owner": "desktop"
   },
   {
-    "path": "apps/desktop/src/cli/commands/mesh-bridge-linux.test.ts",
+    "path": "packages/cli/src/cli/commands/mesh-bridge-linux.test.ts",
     "symbol": "spawnSync",
     "category": "test",
     "reason": "spies on Bun.spawnSync only to assert the Linux self-service path never shells out; nothing is spawned",
     "owner": "desktop"
   },
   {
-    "path": "apps/desktop/src/cli/commands/mesh-bridge.ts",
+    "path": "packages/cli/src/cli/commands/mesh-bridge.ts",
     "symbol": "Bun.spawnSync",
     "category": "cli",
     "reason": "launchctl wrapper for one-shot bridge service install/uninstall commands",
     "owner": "desktop"
   },
   {
-    "path": "apps/desktop/src/cli/commands/session.ts",
+    "path": "packages/cli/src/cli/commands/session.ts",
     "symbol": "spawnSync",
     "category": "cli",
     "reason": "terminal session CLI owns foreground attach/create commands",
     "owner": "desktop"
   },
   {
-    "path": "apps/desktop/src/cli/commands/tui-distribution.test.ts",
+    "path": "packages/cli/src/cli/commands/tui-distribution.test.ts",
     "symbol": "spawnSync",
     "category": "test",
     "reason": "packs a fixture release archive with tar and injects a fake spawnSync to assert the downloaded scout-tui launch argv",
     "owner": "desktop"
   },
   {
-    "path": "apps/desktop/src/cli/commands/tui.test.ts",
+    "path": "packages/cli/src/cli/commands/tui.test.ts",
     "symbol": "spawnSync",
     "category": "test",
     "reason": "injects a fake spawnSync to assert scout-tui launch argv without starting the binary",
     "owner": "desktop"
   },
   {
-    "path": "apps/desktop/src/cli/commands/tui.ts",
+    "path": "packages/cli/src/cli/commands/tui.ts",
     "symbol": "spawnSync",
     "category": "cli",
     "reason": "scout tui launches the ratatui binary as a one-shot inherited process",
     "owner": "desktop"
   },
   {
-    "path": "apps/desktop/src/cli/release-binary.ts",
+    "path": "packages/cli/src/cli/release-binary.ts",
     "symbol": "spawnSync",
     "category": "cli",
     "reason": "one-shot tar extract of a sha256-verified release download (scout tui first run / scout tui install)",
     "owner": "desktop"
   },
   {
-    "path": "apps/desktop/src/cli/machine-update-remote.test.ts",
+    "path": "packages/cli/src/cli/machine-update-remote.test.ts",
     "symbol": "spawnSync",
     "category": "test",
     "reason": "Runs the remote staging Python fixture with an isolated temporary HOME and a 10-second timeout; never a server request path.",
     "owner": "desktop"
   },
   {
-    "path": "apps/desktop/src/cli/main-dispatch.ts",
+    "path": "packages/cli/src/cli/main-dispatch.ts",
     "symbol": "spawnSync",
     "category": "cli",
     "reason": "desktop CLI launchctl/scout discovery one-shots",
     "owner": "desktop"
   },
   {
-    "path": "apps/desktop/src/cli/commands/web.test.ts",
+    "path": "packages/cli/src/cli/commands/web.test.ts",
     "symbol": "spawnSync",
     "category": "test",
     "reason": "packs and lists test tarballs for the `scout web install` tests",
     "owner": "desktop"
   },
   {
-    "path": "apps/desktop/src/cli/commands/web.ts",
+    "path": "packages/cli/src/cli/commands/web.ts",
     "symbol": "spawnSync",
     "category": "cli",
     "reason": "one-shot `scout web` commands: credential-store reads/writes (security, secret-tool) with the download key on stdin, and the tar extract of a verified download",
     "owner": "desktop"
   },
   {
-    "path": "apps/desktop/src/cli/commands/setup-completion-process.test.ts",
+    "path": "packages/cli/src/cli/commands/setup-completion-process.test.ts",
     "symbol": "Bun.spawnSync",
     "category": "test",
     "reason": "runs `scout setup` in an isolated child Bun process against a temp HOME with a 20-second timeout to assert the completion output and exit code",
     "owner": "tests"
   },
   {
-    "path": "apps/desktop/src/core/broker/service.ts",
+    "path": "packages/cli/src/lib/core/broker/service.ts",
     "symbol": "node:child_process",
     "category": "process-lifecycle",
     "reason": "owns optional ffplay audio process lifecycle for voice preview",
     "owner": "desktop"
   },
   {
-    "path": "apps/desktop/src/core/mcp/mesh-bridge.ts",
+    "path": "packages/cli/src/mcp/mesh-bridge.ts",
     "symbol": "Bun.spawnSync",
     "category": "boot",
     "reason": "one-shot keychain token read at bridge startup before any server loop exists",
@@ -707,7 +707,7 @@
     "owner": "web"
   },
   {
-    "path": "apps/desktop/src/core/mcp/mesh-bridge-connect.ts",
+    "path": "packages/cli/src/mcp/mesh-bridge-connect.ts",
     "symbol": "Bun.spawnSync",
     "category": "cli",
     "reason": "one-shot Keychain writes during `scout login`: `security -i` takes the secret on stdin so it never appears in the process list",
@@ -749,7 +749,7 @@
     "owner": "web"
   },
   {
-    "path": "apps/desktop/src/cli/lifecycle-preflight.test.ts",
+    "path": "packages/cli/src/cli/lifecycle-preflight.test.ts",
     "symbol": "spawnSync",
     "category": "test",
     "reason": "bounded isolated source CLI processes mock broker maintenance before any service action",
@@ -994,7 +994,7 @@
     "owner": "runtime"
   },
   {
-    "path": "apps/desktop/src/cli/extensions.test.ts",
+    "path": "packages/cli/src/cli/extensions.test.ts",
     "symbol": "spawnSync",
     "category": "test",
     "reason": "uses /bin/chmod to preserve the sticky bit while testing extension ancestor permissions; Bun chmodSync drops it",

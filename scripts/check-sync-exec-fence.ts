@@ -31,6 +31,8 @@ const PHASE_B_ROOTS = [
   "packages/web/server",
   "packages/runtime/src",
   "apps/desktop/src/core",
+  "packages/cli/src/lib/core",
+  "packages/cli/src/mcp",
 ];
 const SYNC_SYMBOLS = ["execFileSync", "execSync", "spawnSync", "Bun.spawnSync"] as const;
 const PHASE_B_SYMBOLS = ["node:child_process", "Bun.spawn", "Bun.spawnSync"] as const;

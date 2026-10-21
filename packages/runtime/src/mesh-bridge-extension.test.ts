@@ -67,7 +67,7 @@ test('fence confirms SIGKILL exit or refuses to launch a second process',async()
 });
 test('built artifact installs and the supervisor plan executes that command directly',async()=>{
   const artifactPath=join(root,'artifact');const build=Bun.spawn([process.execPath,'run',resolve(import.meta.dir,'../../mesh-extension/scripts/build.ts'),artifactPath],{stdout:'ignore',stderr:'pipe'});expect(await build.exited).toBe(0);
-  const {mutateScoutExtension}=await import('../../../apps/desktop/src/cli/extension-install.ts');await mutateScoutExtension('install','mesh',artifactPath,env);
+  const {mutateScoutExtension}=await import('../../cli/src/cli/extension-install.ts');await mutateScoutExtension('install','mesh',artifactPath,env);
   const selected=resolveMeshBridgeExtension(env);if(selected.state!=='ready')throw new Error(JSON.stringify(selected));
   const path=config(),launchPath=writeMeshBridgeLaunchConfig({supportDirectory:support,configPath:path,configDigest:desired().configDigest,brokerUrl:'http://127.0.0.1:1',parentPid:process.pid,eventsEnabled:false});
   const plan=meshBridgeExtensionCommand({selected,configPath:launchPath,env,brokerUrl:'http://127.0.0.1:1',cliVersion:'1.0.0'});

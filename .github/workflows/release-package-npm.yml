@@ -266,7 +266,7 @@ jobs:
             throw new Error(`Manifest versions must match ${tag}: ${drift.join(", ")}`);
           }
 
-          const productSource = readFileSync("apps/desktop/src/shared/product.ts", "utf8");
+          const productSource = readFileSync("packages/cli/src/lib/shared/product.ts", "utf8");
           const productMatch = /export const SCOUT_APP_VERSION = process\.env\.SCOUT_APP_VERSION\?\.trim\(\) \|\| "([^"]+)";/.exec(productSource);
           if (!productMatch || productMatch[1] !== expected) {
             throw new Error(

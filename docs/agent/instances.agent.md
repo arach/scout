@@ -231,7 +231,7 @@ when lingering is off.
 | launchd label, /tmp persistence boundary, systemd lifecycle | `packages/runtime/src/broker-process-manager.ts` |
 | unit render/write/systemctl | `packages/runtime/src/systemd-user-service.ts` |
 | mesh gate | `broker-daemon.ts` (discovery/rendezvous), `mesh-bind-controller.ts`, `resolveAdvertiseScope` |
-| CLI flag | `packages/cli/bin/lifecycle-preflight.mjs` (`applyInstanceFlag`), `apps/desktop/src/cli/main.ts` |
+| CLI flag | `packages/cli/bin/lifecycle-preflight.mjs` (`applyInstanceFlag`), `packages/cli/src/cli/main.ts` |
 | dev loop | `packages/web/scripts/dev.mjs` |
 
 ## Verification

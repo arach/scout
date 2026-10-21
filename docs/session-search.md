@@ -120,7 +120,7 @@ path is available. Do **not** bulk-import transcripts into Scout messages.
 - Checkpoints: `docs/archive/eng/session-search-checkpoint-1.md`, `docs/archive/eng/session-search-checkpoint-2.md`
 - Design: `docs/eng/sco-062-qmd-knowledge-search-and-context-index.md`
 - Runtime: `packages/runtime/src/knowledge/`
-- CLI: `apps/desktop/src/cli/commands/search.ts`
+- CLI: `packages/cli/src/cli/commands/search.ts`
 
 ## Scoutbot read-only tools
 

@@ -1,1 +1,1 @@
-import "../../../apps/desktop/src/cli/main.ts";
+import "./cli/main.ts";

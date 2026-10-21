@@ -31,7 +31,7 @@ const RELEASE_MANIFESTS = [
 
 const RELEASE_VERSION_SOURCES = [
   {
-    path: "apps/desktop/src/shared/product.ts",
+    path: "packages/cli/src/lib/shared/product.ts",
     pattern: /(export const SCOUT_APP_VERSION = process\.env\.SCOUT_APP_VERSION\?\.trim\(\) \|\| ")([^"]+)(";)/,
   },
 ];

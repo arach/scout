@@ -5,7 +5,7 @@ import path from "node:path";
 
 import type { SessionState } from "@openscout/agent-sessions";
 import { epochMs, type AgentEndpoint } from "@openscout/protocol";
-import { loadScoutBrokerContext } from "../../core/broker/service.ts";
+import { loadScoutBrokerContext } from "../../../../../packages/cli/src/lib/core/broker/service.ts";
 import {
   answerLocalAgentSessionQuestion,
   getLocalAgentConfig,

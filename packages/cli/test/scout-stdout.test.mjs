@@ -19,7 +19,7 @@ const stderr = "diagnostic\n".repeat(30_000);
 // Use the real CLI writer. Its isTTY check initializes process.stdout before
 // output, which exposes Bun's native console buffering difference.
 const contextModule = join(fixture, "dist/context.mjs");
-execFileSync("bun", ["build", resolve(packageDirectory, "../../apps/desktop/src/cli/context.ts"), "--target=node", "--format=esm", "--outfile", contextModule], { stdio: "pipe" });
+execFileSync("bun", ["build", resolve(packageDirectory, "../../packages/cli/src/cli/context.ts"), "--target=node", "--format=esm", "--outfile", contextModule], { stdio: "pipe" });
 // Deliberately leave a live handle: simply removing process.exit would hang.
 const entry = `import { createScoutCommandContext } from ${JSON.stringify(pathToFileURL(contextModule).href)};\nconst context = createScoutCommandContext({ outputMode: "json" });\ncontext.output.writeValue(${JSON.stringify(payload)});\nif (!process.env.TEST_STDOUT_ONLY) context.stderr(${JSON.stringify(stderr.slice(0, -1))});\nprocess.exitCode = Number(process.env.TEST_EXIT_CODE ?? "0");\nif (!process.env.TEST_NATURAL_EXIT) setInterval(() => {}, 1000);\nif (process.env.TEST_PERSISTENT) setTimeout(() => { context.stdout("after import"); process.exit(0); }, 150);\n`;
 for (const file of ["main.mjs", "node/main.mjs", "chat.mjs"]) writeFileSync(join(fixture, "dist", file), entry);

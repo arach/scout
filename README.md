@@ -351,9 +351,9 @@ The broker remains the canonical writer of coordination records.
 
 ### Implementation and verification
 
-- [MCP server implementation](./apps/desktop/src/core/mcp/scout-mcp.ts): SDK imports, tool registrations, and stdio transport.
-- [CLI entry point](./apps/desktop/src/cli/commands/mcp.ts): the `scout mcp` command.
-- [MCP tests](./apps/desktop/src/core/mcp/scout-mcp.test.ts): client/server connection, `tools/list`, and tool behavior.
+- [MCP server implementation](./packages/cli/src/mcp/scout-mcp.ts): SDK imports, tool registrations, and stdio transport.
+- [CLI entry point](./packages/cli/src/cli/commands/mcp.ts): the `scout mcp` command.
+- [MCP tests](./packages/cli/src/mcp/scout-mcp.test.ts): client/server connection, `tools/list`, and tool behavior.
 - [Package registry metadata](./packages/cli/server.json): `io.github.oscout/scout`, npm package, and stdio launch arguments.
 - [MCP API guide](./docs/mcp-api-posture.md) and [CLI setup guide](./packages/cli/README.md#mcp-server).
 

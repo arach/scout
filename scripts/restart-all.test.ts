@@ -11,7 +11,7 @@ import {
 
 // Process-ownership coverage moved with the model itself; the tree, the stop
 // order, and the verification rules now live in
-// apps/desktop/src/cli/app-lifecycle.ts and are tested alongside it. What stays
+// packages/cli/src/cli/app-lifecycle.ts and are tested alongside it. What stays
 // here is what this script still owns: its own dev-only flags.
 describe("scout:up", () => {
   test("fresh rebuilds preserve the Scout app bundle identity", () => {

@@ -18,7 +18,7 @@ import {
   watchScoutMessages,
   type ScoutBrokerConversationLifecycleRecord,
   type ScoutBrokerMessageRecord,
-} from "../../../broker/service.ts";
+} from "../../../../../../../packages/cli/src/lib/core/broker/service.ts";
 import {
   SecureTransport,
   type SocketLike,

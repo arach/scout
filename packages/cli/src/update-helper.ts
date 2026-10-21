@@ -1,7 +1,7 @@
 /** Portable remote entrypoint: the normal native installer, with node/activity gates. */
-import { readScoutBrokerHealth, readScoutBrokerSnapshot } from "../../../apps/desktop/src/core/broker/service.ts";
-import { createScoutCommandContext } from "../../../apps/desktop/src/cli/context.ts";
-import { runInstallCommand } from "../../../apps/desktop/src/cli/commands/install.ts";
+import { readScoutBrokerHealth, readScoutBrokerSnapshot } from "./lib/core/broker/service.ts";
+import { createScoutCommandContext } from "./cli/context.ts";
+import { runInstallCommand } from "./cli/commands/install.ts";
 
 const terminal = new Set(["completed", "failed", "cancelled", "canceled", "expired"]);
 
