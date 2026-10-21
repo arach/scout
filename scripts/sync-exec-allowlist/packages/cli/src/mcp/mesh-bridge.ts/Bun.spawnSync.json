@@ -1,0 +1,7 @@
+{
+  "path": "packages/cli/src/mcp/mesh-bridge.ts",
+  "symbol": "Bun.spawnSync",
+  "category": "boot",
+  "reason": "one-shot keychain token read at bridge startup before any server loop exists",
+  "owner": "desktop"
+}

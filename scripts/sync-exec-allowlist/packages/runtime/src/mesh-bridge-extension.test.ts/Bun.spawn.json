@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/mesh-bridge-extension.test.ts",
+  "symbol": "Bun.spawn",
+  "category": "test",
+  "reason": "isolated test fixtures build the portable JS artifact and execute installed --help; never start Scout runtime, relay or services",
+  "owner": "runtime"
+}

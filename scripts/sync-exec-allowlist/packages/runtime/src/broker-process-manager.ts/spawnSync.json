@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/broker-process-manager.ts",
+  "symbol": "spawnSync",
+  "category": "boot",
+  "reason": "broker process manager startup scout binary discovery",
+  "owner": "runtime"
+}

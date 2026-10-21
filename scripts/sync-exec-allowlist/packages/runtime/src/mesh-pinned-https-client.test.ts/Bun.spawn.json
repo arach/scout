@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/mesh-pinned-https-client.test.ts",
+  "symbol": "Bun.spawn",
+  "category": "test",
+  "reason": "test spawns a Node driver to verify the pinned HTTPS client outside Bun",
+  "owner": "tests"
+}

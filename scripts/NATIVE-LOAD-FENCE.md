@@ -2,8 +2,7 @@
 
 `bun run sync-exec:fence` inventories native `dlopen` references in the same
 TypeScript/TSX source roots as the execution fence (`packages` and `apps`).
-A native load requires a `dlopen` symbol/category entry in
-`sync-exec-allowlist.json`, with an owner, reason and explicit `libraryPaths`.
+To add an allowance, put one JSON object per `(path, symbol)` at `scripts/sync-exec-allowlist/<path>/<percent-encoded-symbol>.json`, with category, owner and reason; native loads require category `dlopen` and explicit `libraryPaths`.
 
 Each call must name a reviewed, normalized **absolute path literal**. Sonames,
 relative paths, cwd/environment/configuration-derived paths, interpolation and

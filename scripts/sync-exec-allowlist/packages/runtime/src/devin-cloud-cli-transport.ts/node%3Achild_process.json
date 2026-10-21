@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/devin-cloud-cli-transport.ts",
+  "symbol": "node:child_process",
+  "category": "process-lifecycle",
+  "reason": "async spawn of the Devin cloud CLI (ACP stdio and one-shot resume); no sync exec",
+  "owner": "runtime"
+}

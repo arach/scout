@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/supervision-handoff/sigchld-disposition.test.ts",
+  "symbol": "Subprocess.kill",
+  "category": "test",
+  "reason": "bounded cleanup signals only the owned disposition fixture handle and awaits its exit",
+  "owner": "runtime"
+}

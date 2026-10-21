@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/supervision-handoff/contract.test.ts",
+  "symbol": "Subprocess.kill",
+  "category": "test",
+  "reason": "signals only the exact fixture handle already admitted by the spawn fence and awaits fixture cleanup",
+  "owner": "runtime"
+}

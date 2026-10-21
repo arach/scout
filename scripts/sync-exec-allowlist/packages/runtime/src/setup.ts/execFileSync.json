@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/setup.ts",
+  "symbol": "execFileSync",
+  "category": "boot",
+  "reason": "explicit setup/bootstrap one-shot checks",
+  "owner": "runtime"
+}

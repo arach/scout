@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/room-listening-supervisor.test.ts",
+  "symbol": "node:child_process",
+  "category": "test",
+  "reason": "ChildProcess type for fake injected supervisor children",
+  "owner": "runtime"
+}

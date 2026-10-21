@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/jetstream/test-support.ts",
+  "symbol": "node:child_process",
+  "category": "test",
+  "reason": "Owns isolated NATS subprocess fixtures and cleanup",
+  "owner": "tests"
+}

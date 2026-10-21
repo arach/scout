@@ -1,0 +1,7 @@
+{
+  "path": "packages/cli/src/cli/commands/mesh-bridge.ts",
+  "symbol": "Bun.spawnSync",
+  "category": "cli",
+  "reason": "launchctl wrapper for one-shot bridge service install/uninstall commands",
+  "owner": "desktop"
+}

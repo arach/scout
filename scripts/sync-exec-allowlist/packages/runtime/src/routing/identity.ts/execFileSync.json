@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/routing/identity.ts",
+  "symbol": "execFileSync",
+  "category": "cli",
+  "reason": "git reads for the routing index refresh, which only `scout route` runs; not on a broker or server path",
+  "owner": "runtime"
+}

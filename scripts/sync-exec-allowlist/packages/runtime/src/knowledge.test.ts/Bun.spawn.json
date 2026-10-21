@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/knowledge.test.ts",
+  "symbol": "Bun.spawn",
+  "category": "test",
+  "reason": "Owned SQLite reader child verifies read-only startup contention with bounded termination and reaping.",
+  "owner": "tests"
+}

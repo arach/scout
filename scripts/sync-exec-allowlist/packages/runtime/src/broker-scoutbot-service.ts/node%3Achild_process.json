@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/broker-scoutbot-service.ts",
+  "symbol": "node:child_process",
+  "category": "process-lifecycle",
+  "reason": "owns the Scoutbot brain child process: spawned once, stopped with SIGTERM then SIGKILL",
+  "owner": "runtime"
+}

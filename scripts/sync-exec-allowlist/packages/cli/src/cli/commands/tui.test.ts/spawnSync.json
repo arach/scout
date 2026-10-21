@@ -1,0 +1,7 @@
+{
+  "path": "packages/cli/src/cli/commands/tui.test.ts",
+  "symbol": "spawnSync",
+  "category": "test",
+  "reason": "injects a fake spawnSync to assert scout-tui launch argv without starting the binary",
+  "owner": "desktop"
+}

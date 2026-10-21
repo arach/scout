@@ -1,0 +1,7 @@
+{
+  "path": "packages/cli/src/cli/commands/session.ts",
+  "symbol": "spawnSync",
+  "category": "cli",
+  "reason": "terminal session CLI owns foreground attach/create commands",
+  "owner": "desktop"
+}

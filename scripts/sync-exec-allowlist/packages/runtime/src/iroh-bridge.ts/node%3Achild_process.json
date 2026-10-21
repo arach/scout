@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/iroh-bridge.ts",
+  "symbol": "node:child_process",
+  "category": "process-lifecycle",
+  "reason": "owns native iroh bridge process lifecycle",
+  "owner": "runtime"
+}

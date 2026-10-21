@@ -1,0 +1,7 @@
+{
+  "path": "packages/web/vite.config.ts",
+  "symbol": "execSync",
+  "category": "build-script",
+  "reason": "Vite config build-time git metadata",
+  "owner": "web"
+}

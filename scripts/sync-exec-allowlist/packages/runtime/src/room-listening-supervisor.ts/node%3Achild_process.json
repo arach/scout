@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/room-listening-supervisor.ts",
+  "symbol": "node:child_process",
+  "category": "process-lifecycle",
+  "reason": "ChildProcess type for injectable base-owned listening supervision; no direct spawn",
+  "owner": "runtime"
+}

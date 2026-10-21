@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/terminal-environment.test.ts",
+  "symbol": "Bun.spawnSync",
+  "category": "test",
+  "reason": "drives a private tmux server (own -S socket) to prove panes do not inherit instance env",
+  "owner": "runtime"
+}

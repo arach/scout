@@ -1,0 +1,7 @@
+{
+  "path": "packages/agent-sessions/src/codex-executable.ts",
+  "symbol": "execFileSync",
+  "category": "boot",
+  "reason": "Codex executable inventory/version check used as capability discovery",
+  "owner": "agent-sessions"
+}

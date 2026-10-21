@@ -1,0 +1,7 @@
+{
+  "path": "packages/cli/src/cli/commands/mesh-bridge-linux.test.ts",
+  "symbol": "spawnSync",
+  "category": "test",
+  "reason": "spies on Bun.spawnSync only to assert the Linux self-service path never shells out; nothing is spawned",
+  "owner": "desktop"
+}

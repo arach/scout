@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/broker-process-manager.ts",
+  "symbol": "node:child_process",
+  "category": "process-lifecycle",
+  "reason": "owns scoutd/broker service child process lifecycle",
+  "owner": "runtime"
+}

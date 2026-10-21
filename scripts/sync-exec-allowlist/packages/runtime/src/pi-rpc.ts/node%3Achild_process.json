@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/pi-rpc.ts",
+  "symbol": "node:child_process",
+  "category": "imperative",
+  "reason": "local secret lookup command remains explicit imperative outside server verb set",
+  "owner": "runtime"
+}

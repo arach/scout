@@ -1,0 +1,7 @@
+{
+  "path": "packages/web/server/world-live.ts",
+  "symbol": "Bun.spawn",
+  "category": "process-lifecycle",
+  "reason": "owns the ssh tail child for World live events, SIGKILLed on its timer",
+  "owner": "web"
+}

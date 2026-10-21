@@ -1,0 +1,7 @@
+{
+  "path": "packages/cli/src/cli/commands/menu.ts",
+  "symbol": "spawnSync",
+  "category": "cli",
+  "reason": "desktop menu CLI one-shot launch command",
+  "owner": "desktop"
+}

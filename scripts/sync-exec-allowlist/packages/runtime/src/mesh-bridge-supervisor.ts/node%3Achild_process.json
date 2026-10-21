@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/mesh-bridge-supervisor.ts",
+  "symbol": "node:child_process",
+  "category": "process-lifecycle",
+  "reason": "mesh bridge supervisor reads process identity and retires the legacy launchd agent",
+  "owner": "runtime"
+}

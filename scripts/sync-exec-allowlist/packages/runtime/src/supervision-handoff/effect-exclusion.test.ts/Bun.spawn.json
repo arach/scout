@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/supervision-handoff/effect-exclusion.test.ts",
+  "symbol": "Bun.spawn",
+  "category": "test",
+  "reason": "bounded isolated carrier fixture validates mapped inode against durable custody, retains the shared lock after its controller closes, and is always ended and awaited; sanitized environment and scratch HOME, no installed services",
+  "owner": "runtime"
+}

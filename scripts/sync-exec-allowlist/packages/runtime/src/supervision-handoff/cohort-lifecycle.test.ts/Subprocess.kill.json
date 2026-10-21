@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/supervision-handoff/cohort-lifecycle.test.ts",
+  "symbol": "Subprocess.kill",
+  "category": "test",
+  "reason": "bounded isolated SDK-owner fixture proves EOF-parent guard after its actual custodian is SIGKILLed; sanitized scratch HOME, exact owned handle awaited, and child/owner PID disappearance checked including zombies",
+  "owner": "runtime"
+}

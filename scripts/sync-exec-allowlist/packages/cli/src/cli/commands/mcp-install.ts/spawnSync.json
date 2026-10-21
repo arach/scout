@@ -1,0 +1,7 @@
+{
+  "path": "packages/cli/src/cli/commands/mcp-install.ts",
+  "symbol": "spawnSync",
+  "category": "cli",
+  "reason": "interactive MCP installer one-shot commands",
+  "owner": "desktop"
+}

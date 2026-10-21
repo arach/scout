@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/jetstream/sidecar.ts",
+  "symbol": "node:child_process",
+  "category": "process-lifecycle",
+  "reason": "Owns opt-in NATS sidecar asynchronous spawn and shutdown lifecycle",
+  "owner": "runtime"
+}

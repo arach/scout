@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/tailscale.ts",
+  "symbol": "execFileSync",
+  "category": "boot",
+  "reason": "startup origin resolution sync tailscale status path from BOOT-OK census",
+  "owner": "runtime"
+}

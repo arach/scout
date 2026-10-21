@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/mcp-discovery.ts",
+  "symbol": "node:child_process",
+  "category": "process-lifecycle",
+  "reason": "owns MCP server discovery child process lifecycle",
+  "owner": "runtime"
+}

@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/knowledge/session-indexer.test.ts",
+  "symbol": "Bun.spawn",
+  "category": "test",
+  "reason": "warms the owned ripgrep fixture outside its strict collection deadline; waits for its successful exit",
+  "owner": "runtime"
+}

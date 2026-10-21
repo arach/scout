@@ -1,0 +1,10 @@
+{
+  "path": "packages/runtime/src/supervision-handoff/carrier-layout.ts",
+  "symbol": "dlopen",
+  "category": "dlopen",
+  "libraryPaths": [
+    "/usr/lib/libSystem.B.dylib"
+  ],
+  "reason": "lazy Darwin-only pipe/dup/FIOCLEX and read-only F_GETFD binding from fixed libSystem; SDK owns both pipe endpoints and temporary CLOEXEC source copies above all targets; child verification sets fence CLOEXEC without unlocking, no discovery or process spawning",
+  "owner": "runtime"
+}
