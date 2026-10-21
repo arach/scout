@@ -91,15 +91,19 @@ Symlinks, changed identity, unsafe modes and hard links refuse. Nothing opens th
 canonical broker database. Private service receipts here are not broker messages,
 flights, delivery receipts or global coordination records.
 
-`custody.log` is both the stable-inode `flock(LOCK_EX | LOCK_NB)` target and an
-append-only hash-chained sequence of complete state snapshots. Writes loop over
+`custody.log` is both the stable-inode `flock(LOCK_EX | LOCK_NB)` target and a
+hash-chained sequence of complete state snapshots. Version 1 is append-only;
+version 4 additionally supports the staged in-place checkpoint protocol.
+Writes loop over
 short writes and fsync before returning; creation also fsyncs the directory.
 A failed persistence poisons the current effect scope. A reopened reader fsyncs
 and validates the chain before using it. Replacement inode, partial/torn record,
 unknown schema or invalid hash fails closed. The anchor prevents ordinary
 rename-and-replace journal restoration from being mistaken for this lock.
 
-Do not unlink, rotate, truncate, restore or recreate these authority files.
+Do not administratively unlink, rotate, truncate, restore or recreate these
+authority files. Only the version-4 SDK checkpoint protocol below can overwrite
+and truncate the journal while retaining its anchored inode and exclusive lock.
 The tests' prefix images are failure simulation only. An in-place administrative
 rollback is outside this protocol, just as deliberately running an unfenced
 binary is. Restoring the broker DB cannot change this separate authority store
@@ -123,11 +127,13 @@ Only `EWOULDBLOCK` or `EAGAIN` maps to `ownership_busy`. Unsupported locking
 `ownership_lock_unsupported`. Other `flock` failures, including `EBADF`, refuse
 with `ownership_lock_failed`. Neither failure means another owner holds the lock.
 
-The staged implementation bounds the file at 16 MiB and receipts/authorizations
-at 256 each. Capacity refuses rather than evicting replay protection. There is
-no compactor or partial-tail repair. A production retention/repair policy needs
-review before an integrated floor opens long-lived service operation. These
-limits are not a shipping steady-state supervisor database design.
+The staged implementation bounds the journal at 16 MiB and receipts and
+authorizations at 256 each. Absence-only stores retain their lifetime append
+budget. Profile stores use [settled-generation retention and crash-safe
+anchored-inode checkpoints](SUPERVISION-EFFECT-EXCLUSION.md#receipt-retention-and-anchored-inode-checkpoints)
+to remove routine restart growth while preserving the latest retirement replay.
+Capacity still refuses oversized live state or grants. No general partial-tail
+repair exists, and this inactive SDK is not a shipping supervisor database.
 
 ## SDK handshake, floor and operator authorization
 
@@ -353,7 +359,7 @@ this does not open readiness, P1 or reverse handoff.
 [Role-effect exclusion](SUPERVISION-EFFECT-EXCLUSION.md) adds a distinct,
 policy-bound transfer proof and a separate per-role lifetime fence. It does not
 turn unknown worker descendants into absent processes or open production
-readiness. Stores with selected profiles use the one-way version-3 state gate;
+readiness. Stores with selected profiles use the one-way version-4 state gate;
 absence-only stores keep version 1. The runtime remains the unenrolled custody
 host, including the enrolled roles' broker-mediated generation checks.
 Profile effects use one retained carrier start per generation, certified cohort

@@ -210,6 +210,7 @@ export class SupervisionHandoff {
       if (retirement.policyHash !== policyHash(tx.state.policy)) refuse("policy_changed");
       if (retirement.nextGeneration !== undefined) {
         if (state.owner !== owner || state.generation !== retirement.nextGeneration) refuse("ownership_changed");
+        this.children.forgetThrough(role, generation); // Finish cleanup after a lost persistence acknowledgment.
         return structuredClone(state);
       }
       if (state.owner !== owner || state.generation !== generation || state.phase !== "active"
@@ -220,7 +221,17 @@ export class SupervisionHandoff {
       try {
         await certifyEffectExclusion(tx, role, fd, profile, this.inspector);
         const next: Ownership = { owner, generation: generation + 1, phase: "active", desired: "running", proofProfile: profileSelection(profile) };
+        // Prune only this role's settled generations, atomically with advance.
+        // The latest retirement (including nextGeneration) remains the replay
+        // certificate until a later advance replaces it. Pending is never GC.
+        const obsolete = Object.entries(tx.state.receipts).filter(([key]) => {
+          const [storedRole, storedGeneration] = key.split(":");
+          return storedRole === role && Number(storedGeneration) <= generation;
+        });
+        if (obsolete.some(([, value]) => value.state === "pending")) refuse("outcome_uncertain");
+        for (const [key] of obsolete) if (key !== receiptKey(role, generation, retirementId)) delete tx.state.receipts[key];
         tx.state.roles[role] = next; retirement.nextGeneration = next.generation; tx.persist();
+        this.children.forgetThrough(role, generation); // Never discard custody before the advance commits.
         this.fences.retain(role, fd, owner, next.generation); return structuredClone(next);
       } catch (error) { closeSync(fd); throw error; }
     });

@@ -5,13 +5,16 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { SupervisionHandoff, EFFECT_EXCLUSION_CAPABILITY, ChildRoleCustody, profileHash, createProcessEvidenceReader, productionHandoffReadiness, carrierChildCapability, CARRIER_LAYOUT,
   type Absence, type DirectChildCommand, type EffectExclusionProfile, type ExactChild, type ExclusionContext, type ExclusionEvidence, type FloorPolicy, type HandoffInspector,
-  type Observation, type Readiness } from "./index.js";
+  type HandoffRole, type Observation, type Readiness } from "./index.js";
 import { nativeDarwinProcessSource } from "./darwin-process-source.js";
-import { CustodyTransaction, HandoffStore } from "./store.js";
+import { checkpointIO, fileIdentity, CustodyTransaction, HandoffStore } from "./store.js";
 import { DirectChildren, directChildCapability } from "./child-custody.js";
 import * as layout from "./carrier-layout.js";
 import * as sigchld from "./sigchld-disposition.js";
 
+// Test-only inspection/markers, not an SDK handle adoption interface.
+const heldEntries = (sdk: SupervisionHandoff) => (sdk as unknown as { children: { held: Map<string, {
+  role: HandoffRole; generation: number; channel?: { closeWrite(): void } }> } }).children.held;
 const caps = [EFFECT_EXCLUSION_CAPABILITY];
 const carrierTest = carrierChildCapability().available ? test : test.skip;
 const absence: Absence = { state: "absent", processes: "absent", jobs: "disabled", relaunch: "fenced", inFlight: "quiescent" };
@@ -28,13 +31,13 @@ async function waitUntil(predicate: () => boolean | Promise<boolean>, ms = 2500)
     await Bun.sleep(10);
   }
 }
-async function fixture() {
+async function fixture(roles: HandoffRole[] = ["web"]) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "r0-cohort-effects-"))), runs: string[] = [];
   const instance = { uid: process.geteuid!(), id: "cohort-effects", supportDirectory: root };
   const store = new HandoffStore(instance), controllers: SupervisionHandoff[] = [];
   let observation: Observation = structuredClone(absence), observes = 0, approvals = 0;
   const ready: Readiness = { protocol: 1, ready: true, runtimeVersion: "900.0.0", runtimeArtifact: "r0", launcherArtifact: "p1", assistantClaims: true,
-    integratedRoles: ["web"], capabilities: caps, roleEffectCoverage: { web: { profileId: profile.id, profileHash: profileHash(profile), coverageId: profile.coverageId } } };
+    integratedRoles: roles, capabilities: caps, roleEffectCoverage: Object.fromEntries(roles.map(role => [role, { profileId: profile.id, profileHash: profileHash(profile), coverageId: profile.coverageId }])) };
   const evidence = (context: ExclusionContext): ExclusionEvidence => ({ ...context, state: "observed", coverageId: profile.coverageId,
     resources: { inventoryId: "resources", entries: [{ id: "endpoint", kind: "listener", state: "released" }], unexplained: [] },
     legacy: { evidenceId: "legacy", state: "settled" }, delegated: "settled", relaunch: "fenced", inFlight: "quiescent", descendants: "unproven", nonOwners: [] });
@@ -44,9 +47,12 @@ async function fixture() {
     const sdk = new SupervisionHandoff(instance, inspector, {}, { capabilities, enableAuditedDirectChildren: true }); controllers.push(sdk); return sdk;
   };
   const sdk = make(); mkdirSync(join(root, "supervision-handoff-v1"), { mode: 0o700 });
-  await sdk.stage(floor, async () => { approvals++; return true; });
-  const token = await sdk.authorize({ role: "web", source: null, target: "R0", generation: 0, action: "enroll", desired: "running" }, async () => { approvals++; return true; });
-  await sdk.activate("web", token, "running"); observation = { state: "unknown" }; observes = 0;
+  await sdk.stage({ ...floor, effectProfiles: Object.fromEntries(roles.map(role => [role, profile])) }, async () => { approvals++; return true; });
+  for (const role of roles) {
+    const token = await sdk.authorize({ role, source: null, target: "R0", generation: 0, action: "enroll", desired: "running" }, async () => { approvals++; return true; });
+    await sdk.activate(role, token, "running");
+  }
+  observation = { state: "unknown" }; observes = 0;
   cleanups.push(async () => {
     for (const run of runs) { writeFileSync(join(run, "exit"), ""); writeFileSync(join(run, "desc-exit"), ""); }
     const pids = () => runs.flatMap(run => ["spawn-pid", "desc-pid", "owner-pid"].filter(file => existsSync(join(run, file))).map(file => Number(readFileSync(join(run, file), "utf8"))));
@@ -335,12 +341,12 @@ test("generic receipt recovery cannot substitute Absence for a pending retiremen
   expect((await f.sdk.pendingReceipts("web", 1))[0]!.state).toBe("pending");
 });
 
-test("version-2 profile stores remain inspectable but cannot acquire new lifecycle authority", async () => {
+test.each([2, 3] as const)("version-%i profile stores remain inspectable and never writable", async version => {
   const f = await fixture(), path = join(f.root, "supervision-handoff-v1/custody.log"), original = readFileSync(path);
   // Test-only old-format snapshot. Production never rewrites a journal.
   let previous = "";
   const image = original.toString().trimEnd().split("\n").map(line => {
-    const record = JSON.parse(line); record.state.version = 2; record.previous = previous;
+    const record = JSON.parse(line); record.state.version = version; record.previous = previous;
     record.hash = createHash("sha256").update(JSON.stringify([record.sequence, previous, record.state], (_key, item) => item && typeof item === "object" && !Array.isArray(item)
       ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item)).digest("hex");
     previous = record.hash; return JSON.stringify(record);
@@ -351,6 +357,10 @@ test("version-2 profile stores remain inspectable but cannot acquire new lifecyc
     await expect(f.sdk.exclusive("R0", "web", 1, async () => {})).rejects.toThrow("cohort_store_version_required");
     await expect(f.sdk.retireCohort("R0", "web", 1, "stop")).rejects.toThrow("cohort_store_version_required");
     await expect(f.sdk.authorize({ role: "web", source: "R0", target: "P1", generation: 1, action: "handoff" }, async () => true)).rejects.toThrow("cohort_store_version_required");
+    await expect(f.sdk.closeRollback(async () => true)).rejects.toThrow("cohort_store_version_required");
+    await expect(f.store.exclusive(async tx => tx.persist())).rejects.toThrow("cohort_store_version_required");
+    await expect(f.store.exclusive(async tx => { tx.state.version = 4; tx.persist(); })).rejects.toThrow("cohort_store_version_required");
+    expect(readFileSync(path, "utf8")).toBe(image);
   } finally { writeFileSync(path, original); }
 });
 
@@ -471,4 +481,143 @@ carrierTest("GC of a retired controller cannot close reused parent/fence source 
     await f.start(2); const run = await f.readyRun(2);
     expect(existsSync(join(run, "parent-eof"))).toBe(false);
   } finally { await outgoing?.releaseControllerFences(); }
+});
+
+test("retention budget: repeated pre-spawn interruption and certified restart", async () => {
+  const f = await fixture();
+  let cycles = 0, failure = "", peak = 0;
+  const { statSync } = await import("node:fs");
+  try {
+    for (let generation = 1; generation <= 1100; generation++) {
+      await f.sdk.exclusive("R0", "web", generation, async lease => {
+        lease.begin("start", "start");
+        // A real SDK start intent, interrupted before any OS spawn. The
+        // trusted fixture inventory can honestly exclude this empty cohort.
+        await expect(lease.perform("start", "start", async () => { throw new Error("pre_spawn_interruption"); })).rejects.toThrow("pre_spawn_interruption");
+      });
+      await f.sdk.retireCohort("R0", "web", generation, "stop");
+      peak = Math.max(peak, statSync(f.store.path).size);
+      await f.sdk.advanceCohort("R0", "web", generation, "stop");
+      cycles++;
+    }
+  } catch (error) { failure = (error as { code?: string }).code ?? String(error); }
+  console.log("RETENTION_BUDGET", JSON.stringify({ cycles, failure, peak, bytes: statSync(f.store.path).size,
+    receipts: await f.store.exclusive(async tx => Object.keys(tx.state.receipts).length) }));
+  expect(cycles).toBe(1100);
+  expect(failure).toBe("");
+  expect(await f.make().advanceCohort("R0", "web", 1100, "stop")).toMatchObject({ generation: 1101 });
+  await expect(f.sdk.advanceCohort("R0", "web", 1099, "stop")).rejects.toThrow("cohort_retirement_required");
+}, 120_000);
+
+
+test("all five roles share bounded retention without pruning each other's certificates", async () => {
+  const roles: HandoffRole[] = ["web", "scoutbot", "phone-controller", "app-edge", "menu"];
+  const f = await fixture(roles), inode = fileIdentity(f.store.path);
+  const generations = Object.fromEntries(roles.map(role => [role, 1])) as Record<HandoffRole, number>;
+  for (let cycle = 0; cycle < 500; cycle++) {
+    const role = roles[cycle % roles.length]!, generation = generations[role];
+    await f.sdk.exclusive("R0", role, generation, async lease => { lease.begin("start", "start"); lease.complete("start", "fixture_rejected_before_spawn"); });
+    await f.sdk.retireCohort("R0", role, generation, "stop");
+    await f.sdk.advanceCohort("R0", role, generation, "stop"); generations[role]++;
+    const receipts = await f.store.exclusive(async tx => Object.keys(tx.state.receipts));
+    expect(receipts.length).toBeLessThanOrEqual(5);
+    for (const other of roles) if (generations[other] > 1) expect(receipts).toContain(`${other}:${generations[other] - 1}:stop`);
+  }
+  expect(fileIdentity(f.store.path)).toEqual(inode);
+  const reopened = f.make();
+  for (const role of roles) expect(await reopened.advanceCohort("R0", role, generations[role] - 1, "stop")).toMatchObject({ generation: generations[role] });
+}, 120_000);
+
+test("advance refuses to prune any historical pending receipt or other roles' work", async () => {
+  const f = await fixture(); await f.retire();
+  await f.store.exclusive(async tx => {
+    tx.state.receipts["web:0:old-uncertain"] = { operation: "start", state: "pending", effects: [] };
+    tx.state.receipts["menu:0:other-work"] = { operation: "start", state: "done", effects: [] }; tx.persist();
+  });
+  let closes = 0;
+  heldEntries(f.sdk).set("pending-marker", { role: "web", generation: 1, channel: { closeWrite: () => { closes++; } } });
+  const before = readFileSync(f.store.path);
+  await expect(f.sdk.advanceCohort("R0", "web", 1, "stop")).rejects.toThrow("outcome_uncertain");
+  expect(heldEntries(f.sdk).has("pending-marker")).toBe(true); expect(closes).toBe(0);
+  expect(readFileSync(f.store.path)).toEqual(before);
+  expect(await f.store.exclusive(async tx => Object.keys(tx.state.receipts))).toEqual(["web:1:stop", "web:0:old-uncertain", "menu:0:other-work"]);
+});
+
+test.each(["before-publish", "after-publish", "after-truncate"])("advance checkpoint lost acknowledgment remains idempotent: %s", async cut => {
+  const f = await fixture();
+  await f.store.exclusive(async tx => { tx.state.policy.id += "x".repeat(700_000); tx.persist(); });
+  await f.sdk.exclusive("R0", "web", 1, async lease => { lease.begin("start", "start"); lease.complete("start", "fixture_rejected_before_spawn"); });
+  await f.retire();
+  const before = await f.store.read("web"), inode = fileIdentity(f.store.path);
+  let closes = 0;
+  heldEntries(f.sdk).set("retired-marker", { role: "web", generation: 1, channel: { closeWrite: () => { closes++; } } });
+  heldEntries(f.sdk).set("future-marker", { role: "web", generation: 2 });
+  heldEntries(f.sdk).set("other-marker", { role: "menu", generation: 1 });
+  let restore = () => {};
+  if (cut === "before-publish") {
+    const mock = spyOn(checkpointIO, "rename").mockImplementationOnce(() => { throw new Error("advance_cut"); }); restore = () => mock.mockRestore();
+  } else if (cut === "after-publish") {
+    const original = checkpointIO.write; let count = 0;
+    const mock = spyOn(checkpointIO, "write").mockImplementation((...args) => { if (++count === 2) throw new Error("advance_cut"); return original(...args); }); restore = () => mock.mockRestore();
+  } else {
+    const original = checkpointIO.truncate;
+    const mock = spyOn(checkpointIO, "truncate").mockImplementationOnce((...args) => { original(...args); throw new Error("advance_cut"); }); restore = () => mock.mockRestore();
+  }
+  try { await expect(f.sdk.advanceCohort("R0", "web", 1, "stop")).rejects.toThrow("advance_cut"); } finally { restore(); }
+  expect(heldEntries(f.sdk).has("retired-marker")).toBe(true); expect(closes).toBe(0);
+  const reopened = f.make();
+  expect(await reopened.read("web")).toMatchObject(cut === "before-publish" ? before : { generation: 2 });
+  const advanced = await reopened.advanceCohort("R0", "web", 1, "stop"); expect(advanced.generation).toBe(2);
+  expect(await f.store.exclusive(async tx => Object.keys(tx.state.receipts))).toEqual(["web:1:stop"]);
+  f.setInspect(async () => { throw new Error("replay_must_not_certify"); });
+  expect(await reopened.advanceCohort("R0", "web", 1, "stop")).toEqual(advanced);
+  expect(await f.sdk.advanceCohort("R0", "web", 1, "stop")).toEqual(advanced);
+  expect([...heldEntries(f.sdk).keys()]).toEqual(["future-marker", "other-marker"]); expect(closes).toBe(1);
+  expect(await f.store.exclusive(async tx => tx.state.receipts["web:1:stop"]!.retirement!.nextGeneration)).toBe(2);
+  expect(fileIdentity(f.store.path)).toEqual(inode);
+});
+
+test("checkpoint preserves a pending retirement and cannot turn recovery into a second settlement path", async () => {
+  const f = await fixture();
+  await f.store.exclusive(async tx => { tx.state.policy.id += "x".repeat(700_000); tx.persist(); });
+  f.setInspect(async () => ({ state: "unknown" }));
+  await expect(f.sdk.retireCohort("R0", "web", 1, "stop")).rejects.toThrow("effect_exclusion_unproven");
+  const token = await f.sdk.authorize({ role: "web", source: "R0", target: "R0", generation: 1, action: "recover", requestId: "stop" }, async () => true);
+  await expect(f.make().recoverReceipt("R0", "web", 1, "stop", token)).rejects.toThrow("cohort_retirement_required");
+  expect(await f.sdk.pendingReceipts("web", 1)).toMatchObject([{ requestId: "stop", state: "pending" }]);
+  await expect(f.sdk.advanceCohort("R0", "web", 1, "stop")).rejects.toThrow("cohort_retirement_required");
+});
+
+
+carrierTest("committed advance forgets the retired handle; stale exit/stop and replay cannot touch the next child", async () => {
+  const f = await fixture(), first = await f.start(); await f.readyRun(); await f.retire();
+  expect(heldEntries(f.sdk).has(first.effectId)).toBe(true); // Retirement alone must not drop custody.
+  await f.sdk.advanceCohort("R0", "web", 1, "stop"); expect(heldEntries(f.sdk).size).toBe(0);
+  await expect(f.sdk.exclusive("R0", "web", 1, lease => lease.recordChildExit(first.effectId))).rejects.toThrow("ownership_changed");
+  await expect(f.sdk.retireCohort("R0", "web", 1, "stop")).rejects.toThrow("ownership_changed");
+  const second = await f.start(2), run = await f.readyRun(2);
+  await expect(f.sdk.exclusive("R0", "web", 2, lease => lease.recordChildExit(first.effectId))).rejects.toThrow("child_birth_unproven");
+  await f.sdk.advanceCohort("R0", "web", 1, "stop"); // Latest advance replay only drops <= 1, not the live generation 2.
+  expect([...heldEntries(f.sdk).keys()]).toEqual([second.effectId]); expect(existsSync(join(run, "parent-eof"))).toBe(false);
+  await f.sdk.releaseControllerFences(); // closeAllParentChannels now sees only the retained new child.
+  await waitUntil(() => existsSync(join(run, "parent-eof")));
+  expect(heldEntries(f.sdk).has(second.effectId)).toBe(true); // Close alone is not certification/advance.
+});
+
+
+test("writer-close failure cannot fail committed advance, retain old entries or lose the new fence", async () => {
+  const f = await fixture(); await f.retire(); let attempts = 0, laterCloses = 0;
+  heldEntries(f.sdk).set("cleanup-marker", { role: "web", generation: 1, channel: { closeWrite() {
+    attempts++; throw new Error("cleanup_interrupted");
+  } } });
+  heldEntries(f.sdk).set("later-marker", { role: "web", generation: 1, channel: { closeWrite() { laterCloses++; } } });
+  const advanced = await f.sdk.advanceCohort("R0", "web", 1, "stop");
+  expect(advanced).toMatchObject({ generation: 2 }); expect(await f.sdk.read("web")).toEqual(advanced);
+  expect(heldEntries(f.sdk).size).toBe(0); expect(attempts).toBe(1); expect(laterCloses).toBe(1);
+  f.setInspect(async () => { throw new Error("must_not_recertify"); });
+  expect(await f.sdk.exclusive("R0", "web", 2, async lease => lease.ownership())).toEqual(advanced);
+  await expect(f.make().acquireLifetimeFence("R0", "web", 2)).rejects.toThrow("ownership_busy");
+  expect(await f.sdk.advanceCohort("R0", "web", 1, "stop")).toEqual(advanced);
+  expect(await f.sdk.exclusive("R0", "web", 2, async lease => lease.ownership())).toEqual(advanced);
+  expect(attempts).toBe(1); // The failed writer is forgotten, not retried by replay or shutdown.
 });

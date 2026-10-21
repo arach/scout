@@ -80,16 +80,18 @@ matching per-role profile/hash/audit coverage for the pinned running artifacts.
 Missing capability, including on a transition replay, refuses. Read-only
 ownership inspection does not grant this capability.
 
-**One-way store format:** a store staged with selected profiles writes state
-version 3 from its first journal record. Absence-only stores remain version 1.
-Version 3 adds durable cohort retirement and the one-start rule; older
-absence-only and version-2 profile SDKs refuse it structurally. This prevents an
-older SDK from ignoring retirement state and admitting another cohort.
-The new SDK can inspect version-2 stores, but refuses profile authority there.
-Rolling back such a store requires an approved artifact that understands version 3.
-Do not edit a journal version or restore an earlier store to downgrade it.
-There is no in-place migration from version 1 or 2; operator-reviewed re-staging
-remains a separate cutover obligation. A journal's version cannot change.
+**One-way store format:** a newly staged profile store writes state version 4
+from its first record. Version 4 adds retention and checkpoint redo to version
+3's cohort retirement and one-start rule. The earlier version-3 SDK must refuse
+**before** a checkpoint publishes redo: an older writer that ignored a pending
+redo file could otherwise append authority to the pre-checkpoint chain.
+Absence-only stores remain version 1. This SDK can inspect version-2 and
+version-3 stores, but cannot write them, including through administrative APIs.
+A write cannot change the store's version. No automatic in-place upgrade exists.
+Operator-reviewed re-staging is a separate cutover obligation, not permission to
+replace an inode that might still carry authority. Rollback artifacts must
+understand version 4, including redo recovery. Do not edit a version or restore
+an earlier image to downgrade a store.
 
 ## Lifetime fence and ledger serialization
 
@@ -359,7 +361,8 @@ carrier. That carrier also has the current generation. Closing the reference,
 certifying retirement and advancing the generation are all required. Automatic
 restart needs no new operator grant, but it still needs carriers to release and
 the complete audit to pass. The cost is a full certification at retirement and
-again at advance. Receipt capacity and storage-retention limits still apply.
+again at advance. The receipt and snapshot bounds still apply; retention below
+removes the routine-restart lifetime budget.
 
 ## Open rollout obligations
 
@@ -380,3 +383,95 @@ legacy inspectors, delegated-work contracts, shutdown/receipt integration,
 crash-boundary tests, and reviewed storage retention/repair. Boot provenance and
 the coverage definition of the compatibility floor remain operator policy.
 Nothing in this contract authorizes a live handoff.
+
+
+## Receipt retention and anchored-inode checkpoints
+
+A successful `advanceCohort` removes this role's settled receipts through the
+retired generation. It keeps the just-used retirement certificate, including
+its persisted `nextGeneration`, until a later advance replaces it. The prune,
+new ownership and replay marker persist together. A replay of that latest
+advance returns committed ownership only, without another generation, proof,
+spawn or acquired fence. An older, pruned retirement ID refuses; it does not
+reopen its old generation. Other roles' receipts and all future generations
+remain untouched. Any pending receipt in the generations to prune blocks
+advance. The checkpoint never settles or drops pending work. `recoverReceipt`
+still refuses retirement receipts; retirement remains the only settlement path.
+
+After that advance snapshot commits, the controller drops its process-local
+held-child entries for this role at or below the advanced-from generation,
+including entries whose birth was never recorded. It defensively closes their
+idempotent parent writers before forgetting the handles. Failed or pending
+advances do not discard custody. A verified persisted advance replay completes
+this cleanup after a lost acknowledgment, without touching the current or future
+generation's child. Other roles' entries remain retained. Writer-close cleanup
+is best-effort: a close error still deletes the entry and must not fail the
+committed advance or prevent retention of the new generation's fence. A failed
+close can leave its writer descriptor open until the host exits.
+
+This is reference cleanup, not a kill, reap, adoption or new claim of process
+absence. An already-started exact wait can finish; it is not canceled. The SDK's
+ledger mutex prevents an active `recordChildExit` scope from racing advance.
+After advance, the old generation fails ownership checks, and the new generation
+cannot find the pruned old effect. Old-generation retirement also refuses before
+consulting child custody. Controller shutdown closes parent channels by
+iterating only entries still retained; discarded entries need no later lookup.
+
+The global limits remain 256 receipts and 256 authorizations. Routine operation
+with one start and one retirement per generation retains one retirement per
+advanced role, plus the current generations' work, rather than two receipts per
+restart forever. Grants are not pruned. Large live state, repeated failed
+requests within one generation and repeated operator grants still have bounded
+capacity; this is not an unbounded database or a recovery route for an already
+exhausted older store. Restart frequency and backoff remain supervisor policy
+above the SDK; advance grants authority, not a schedule.
+
+Version-4 writes checkpoint when the next append would take the journal above
+1 MiB. A single checkpoint snapshot may exceed that target, but never 16 MiB.
+Version-1 stores keep the existing append-only 16 MiB limit. The SDK keeps the
+same `custody.log` inode and its exclusive flock throughout these steps:
+
+1. Write `checkpoint.prepare`, an exclusively created owned 0600 one-link file.
+   It contains base64 images of the complete old chain and the new checkpoint
+   root, the journal device/inode and a SHA-256 digest over those fields. Fsync
+   the preparation file. An unpublished preparation is not authority.
+2. Rename that sidecar to `checkpoint.pending`, then fsync the custody directory.
+   No journal byte changes before this redo barrier succeeds. The rename is for
+   the sidecar only; the authority/lock inode never moves or gets recreated.
+3. Write the new root at offset zero of the already locked journal, handling
+   short writes. Fsync it, truncate that same inode to the root length, then
+   fsync it again. A torn overwrite does not have to be a prefix: recovery uses
+   the independently durable redo image.
+4. Unlink `checkpoint.pending` and fsync the directory before permitting any
+   later append. A failure poisons the transaction; no effect follows a failed
+   persistence acknowledgment.
+
+On open, the SDK takes the anchored inode's exclusive flock before inspecting
+redo. It checks sidecar ownership, mode, link count, size (at most 48 MiB),
+identity binding, digest, both complete chains and the old-to-new sequence/hash
+link. A valid unrelated later journal refuses stale redo. A torn journal is
+replaced **in place** from valid redo, not reconstructed from process evidence.
+Recovery re-fsyncs the redo file and directory before destructive IO, so a
+previous failure just after rename is safe to retry. Recovery uses the same
+write/fsync/truncate/fsync/unlink/directory-fsync sequence and can itself be
+interrupted and retried. An orphan preparation is ignored on reads and safely
+removed at the next checkpoint. Missing or replaced authority/lock inodes still
+refuse even if redo exists. There is no timeout, PID adoption or lock stealing.
+
+The checkpoint root preserves the global sequence and previous committed hash,
+and hashes the next complete state as before. Its `checkpoint` base names the
+discarded prefix's last sequence/hash. Subsequent records extend that root with
+the same hash-chain rules. This retains verifiable suffix continuity, **not** the
+discarded audit history. The temporary redo retains the full old chain only
+until installation completes. Hashes detect corruption, not malicious rollback
+by the trusted local owner; restoring old files remains outside the protocol.
+The latest retirement and `nextGeneration` are ordinary snapshot data, so redo
+replays a lost advance acknowledgment without inventing an effect outcome.
+Version-2 and version-3 data cannot become a redo base or checkpoint root.
+
+The crash fixtures inject faults before and after every filesystem boundary,
+including redo recovery, partial writes and non-prefix torn pages. These are
+filesystem-state simulations, not physical power-loss certification. Durability
+still requires the existing host-local `fsync`/`flock` filesystem assumptions.
+A torn ordinary append without published redo still fails closed; this work
+does not implement general tail repair or open any production integration gate.
