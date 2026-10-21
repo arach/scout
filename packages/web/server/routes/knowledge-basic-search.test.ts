@@ -3,6 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
+import { Database } from "bun:sqlite";
+import { resolveOpenScoutKnowledgePaths, SQLiteKnowledgeStore } from "@openscout/runtime/knowledge";
 
 import { mountKnowledgeRoutes, createSessionKnowledgeIndexer } from "./knowledge.ts";
 
@@ -67,6 +69,37 @@ test("search answers from a basic transcript scan while no index exists", async 
   const filtered = await app.request("/api/knowledge/search?q=before%20index&project=elsewhere");
   expect(((await filtered.json()) as { hits: unknown[] }).hits).toHaveLength(0);
 });
+
+for (const missing of ["index_jobs", "warm_spans", "storage_state"]) {
+  test(`status and search return JSON for a cache missing ${missing}, without DDL on GET`, async () => {
+    const root = useTempKnowledgeEnv(), paths = resolveOpenScoutKnowledgePaths();
+    new SQLiteKnowledgeStore(paths.sqlitePath, paths).close();
+    const legacy = new Database(paths.sqlitePath);
+    legacy.exec(`INSERT INTO collections VALUES ('legacy','sessions','legacy','[]','unused','ready','hash','v1','v1',1,1,'{}')`);
+    legacy.exec(`DROP TABLE ${missing}`);
+    const schema = legacy.query("SELECT name, sql FROM sqlite_master ORDER BY name").all();
+    const version = legacy.query("PRAGMA schema_version").get();
+    const app = new Hono(); mountKnowledgeRoutes(app, { currentDirectory: root });
+    try {
+      const response = await app.request("/api/knowledge/status");
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toContain("application/json");
+      const status = await response.json();
+      expect(status.collections).toBe(0);
+      expect(status.activeJobs).toEqual([]);
+      expect(status.warmSpans).toEqual([]);
+      for (const path of ["/api/knowledge/search?q=before%20index", "/api/knowledge/search-primitives?q=before%20index"]) {
+        const search = await app.request(path);
+        expect(search.status).toBe(200);
+        const body = await search.json();
+        expect(body.status.collections).toBe(0);
+        expect(body.status.chunks).toBe(0);
+      }
+      expect(legacy.query("SELECT name, sql FROM sqlite_master ORDER BY name").all()).toEqual(schema);
+      expect(legacy.query("PRAGMA schema_version").get()).toEqual(version);
+    } finally { legacy.close(); }
+  });
+}
 
 test("background indexing returns at once and status follows the run", async () => {
   const root = useTempKnowledgeEnv();

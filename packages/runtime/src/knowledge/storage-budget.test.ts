@@ -141,9 +141,11 @@ test("legacy duplicated facets migrate to one collection fact without losing fil
   expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]); db.close();
 });
 
-test("read-only legacy coverage does not require the new storage metadata table", () => {
+test("read-only legacy cache without storage metadata is empty until a writer upgrades it", () => {
   const paths = fixture(); const first = new SQLiteKnowledgeStore(paths.sqlitePath, paths); put(first, paths, "old-reader", 1); first.close();
   const legacy = new Database(paths.sqlitePath); legacy.exec("DROP TABLE storage_state"); legacy.close();
   const reader = new SQLiteKnowledgeStore(paths.sqlitePath, paths, { readonly: true });
-  try { expect(reader.assessCoverage().kind).toBe("not_warmed"); } finally { reader.close(); }
+  try { expect(reader.assessCoverage().kind).toBe("empty_index"); } finally { reader.close(); }
+  const upgraded = new SQLiteKnowledgeStore(paths.sqlitePath, paths);
+  try { expect(upgraded.getCollection("old-reader")).not.toBeNull(); } finally { upgraded.close(); }
 });

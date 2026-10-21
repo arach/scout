@@ -372,7 +372,7 @@ async function runQuery(context: ScoutCommandContext, args: string[]): Promise<v
       lookbackMs,
     });
 
-    if (coverage.kind === "empty_index" || coverage.kind === "not_warmed") {
+    if (coverage.kind === "index_off" || coverage.kind === "empty_index" || coverage.kind === "not_warmed") {
       const payload = {
         q,
         hitCount: 0,
@@ -420,7 +420,9 @@ async function runQuery(context: ScoutCommandContext, args: string[]): Promise<v
         return [
           ...header,
           "",
-          "Warmed for this span, but no matching chunks.",
+          coverage.kind === "bounded"
+            ? "No matching chunks in retained history; evicted history was not searched."
+            : "Warmed for this span, but no matching chunks.",
           "Try different terms, drop a facet, or re-index if the work is newer than the last warm-up.",
         ].join("\n");
       }

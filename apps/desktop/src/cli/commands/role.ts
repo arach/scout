@@ -1,6 +1,7 @@
 import type { ScoutCommandContext } from "../context.ts";
 import { ScoutCliError } from "../errors.ts";
-import { readScoutWebJson, resolveScoutWebApiBaseUrl } from "../web-api.ts";
+import { requestScoutBrokerJson, ScoutBrokerHttpError } from "@openscout/runtime/broker-api";
+import { resolveBrokerControlUrl } from "@openscout/runtime/local-config";
 
 const HELP_FLAGS = new Set(["--help", "-h", "help"]);
 
@@ -194,24 +195,30 @@ export function parseRoleCommandOptions(args: string[]): RoleCommand {
   }
 }
 
-async function postScoutWebJson<T>(
+// Roles and the mission log live in the runtime, so these commands need no web app.
+async function requestRoleJson<T>(
   context: ScoutCommandContext,
   path: string,
-  body: unknown,
+  body?: unknown,
 ): Promise<T> {
-  const baseUrl = resolveScoutWebApiBaseUrl(context.env);
-  const response = await fetch(new URL(path, baseUrl), {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const payload = await response.json().catch(() => ({})) as { error?: string } & T;
-  if (!response.ok) {
-    throw new ScoutCliError(
-      typeof payload.error === "string" ? payload.error : `web API ${response.status}`,
-    );
+  const baseUrl = context.env.OPENSCOUT_BROKER_URL?.trim() || resolveBrokerControlUrl();
+  try {
+    return await requestScoutBrokerJson<T>(baseUrl, path, {
+      method: body === undefined ? "GET" : "POST",
+      body,
+      socketPath: context.env.OPENSCOUT_BROKER_SOCKET_PATH?.trim() || undefined,
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch (error) {
+    if (!(error instanceof ScoutBrokerHttpError)) throw error;
+    const detail = /returned \d+: (.*)$/s.exec(error.message)?.[1] ?? "";
+    let parsed: { error?: unknown; detail?: unknown } = {};
+    try { parsed = JSON.parse(detail); } catch {}
+    if (parsed.error === "roles_unavailable") {
+      throw new ScoutCliError("Roles are unavailable: the runtime has no roles store open (HTTP 503).");
+    }
+    throw new ScoutCliError(typeof parsed.error === "string" ? parsed.error : `runtime returned HTTP ${error.status}`);
   }
-  return payload as T;
 }
 
 export async function runRoleCommand(
@@ -225,9 +232,9 @@ export async function runRoleCommand(
   }
 
   if (options.command === "catalog") {
-    const data = await readScoutWebJson<{ roles: Array<{ id: string; label: string; summary: string }> }>(
+    const data = await requestRoleJson<{ roles: Array<{ id: string; label: string; summary: string }> }>(
       context,
-      "/api/roles/catalog",
+      "/v1/roles/catalog",
     );
     if (options.json) {
       context.output.writeText(JSON.stringify(data, null, 2));
@@ -246,9 +253,9 @@ export async function runRoleCommand(
     if (options.roleId) params.set("roleId", options.roleId);
     if (!options.activeOnly) params.set("activeOnly", "0");
     const qs = params.toString();
-    const data = await readScoutWebJson<{ assignments: Array<Record<string, unknown>> }>(
+    const data = await requestRoleJson<{ assignments: Array<Record<string, unknown>> }>(
       context,
-      `/api/roles/assignments${qs ? `?${qs}` : ""}`,
+      `/v1/roles/assignments${qs ? `?${qs}` : ""}`,
     );
     if (options.json) {
       context.output.writeText(JSON.stringify(data, null, 2));
@@ -280,9 +287,9 @@ export async function runRoleCommand(
         : options.scope === "project"
           ? { kind: "project" as const, projectRoot: options.projectRoot! }
           : { kind: "agent" as const };
-    const data = await postScoutWebJson<{ assignment: Record<string, unknown> }>(
+    const data = await requestRoleJson<{ assignment: Record<string, unknown> }>(
       context,
-      "/api/roles/assignments",
+      "/v1/roles/assignments",
       {
         roleId: options.roleId,
         agentId: options.agentId,
@@ -302,9 +309,9 @@ export async function runRoleCommand(
   }
 
   if (options.command === "revoke") {
-    const data = await postScoutWebJson<{ assignment: Record<string, unknown> }>(
+    const data = await requestRoleJson<{ assignment: Record<string, unknown> }>(
       context,
-      `/api/roles/assignments/${encodeURIComponent(options.assignmentId)}/revoke`,
+      `/v1/roles/assignments/${encodeURIComponent(options.assignmentId)}/revoke`,
       { revokedById: options.revokedById },
     );
     if (options.json) {
@@ -319,12 +326,12 @@ export async function runRoleCommand(
     const params = new URLSearchParams();
     if (options.limit) params.set("limit", String(options.limit));
     const qs = params.toString();
-    const data = await readScoutWebJson<{
+    const data = await requestRoleJson<{
       missionId: string;
       entries: Array<Record<string, unknown>>;
     }>(
       context,
-      `/api/missions/${encodeURIComponent(options.missionId)}/log${qs ? `?${qs}` : ""}`,
+      `/v1/missions/${encodeURIComponent(options.missionId)}/log${qs ? `?${qs}` : ""}`,
     );
     if (options.json) {
       context.output.writeText(JSON.stringify(data, null, 2));
@@ -343,9 +350,9 @@ export async function runRoleCommand(
   }
 
   if (options.command === "log-append") {
-    const data = await postScoutWebJson<{ entry: Record<string, unknown> }>(
+    const data = await requestRoleJson<{ entry: Record<string, unknown> }>(
       context,
-      `/api/missions/${encodeURIComponent(options.missionId)}/log`,
+      `/v1/missions/${encodeURIComponent(options.missionId)}/log`,
       {
         actorId: options.actorId,
         kind: options.kind,
