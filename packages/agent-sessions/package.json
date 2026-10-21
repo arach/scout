@@ -170,6 +170,12 @@
       "import": "./dist/codex-executable.js",
       "default": "./dist/codex-executable.js"
     },
+    "./protocol/cost": {
+      "bun": "./src/protocol/cost.ts",
+      "types": "./dist/protocol/cost.d.ts",
+      "import": "./dist/protocol/cost.js",
+      "default": "./dist/protocol/cost.js"
+    },
     "./protocol/primitives": {
       "bun": "./src/protocol/primitives.ts",
       "types": "./dist/protocol/primitives.d.ts",

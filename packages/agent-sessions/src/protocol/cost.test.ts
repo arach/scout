@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { estimateAdapterCost } from "./cost";
+import { estimateAdapterCost } from "@openscout/agent-sessions/protocol/cost";
 
 describe("adapter cost estimates", () => {
   test("prices OpenAI tokens with cached input and output split", () => {

@@ -2,10 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
-// Browser-safety guard for the `./client` subpath. Web and mobile trace
+// Browser-safety guard for the `./client` and `./protocol/cost` subpaths. Web and mobile trace
 // consumers import from "@openscout/agent-sessions/client" and must never pull
 // Node/Bun runtime code into their bundle. This walks the RUNTIME import graph
-// from client.ts — statement-level type-only imports are erased by the compiler,
+// from their entries — statement-level type-only imports are erased by the compiler,
 // so they are intentionally not followed — and asserts every reached module is
 // browser-safe. It mirrors the boundary-enforcement style of local.test.ts.
 
@@ -70,24 +70,39 @@ function walkRuntimeGraph(entry: string): Set<string> {
   return reached;
 }
 
-describe("@openscout/agent-sessions/client browser-safety", () => {
-  const reached = walkRuntimeGraph("client.ts");
-
-  test("runtime graph stays within the browser-safe allowlist", () => {
-    const unexpected = [...reached].filter((file) => !ALLOWLIST.has(file)).sort();
-    expect(unexpected).toEqual([]);
-  });
-
-  test("no reached module uses Node/Bun runtime APIs", () => {
-    const offenders: string[] = [];
-    for (const rel of reached) {
-      // Scan the runtime surface: type-only imports are erased, so a type-only
-      // node: import would not ship to the browser and must not false-positive.
-      const source = stripTypeOnlyImports(readFileSync(join(SRC, rel), "utf8"));
-      for (const pattern of BROWSER_UNSAFE) {
-        if (pattern.test(source)) offenders.push(`${rel} matched ${pattern}`);
-      }
-    }
-    expect(offenders).toEqual([]);
+test("cost export selects the browser-safe leaf for source, types and release imports", () => {
+  const manifest = JSON.parse(readFileSync(join(SRC, "../package.json"), "utf8"));
+  expect(manifest.exports["./protocol/cost"]).toEqual({
+    bun: "./src/protocol/cost.ts",
+    types: "./dist/protocol/cost.d.ts",
+    import: "./dist/protocol/cost.js",
+    default: "./dist/protocol/cost.js",
   });
 });
+
+for (const { subpath, entry, allowlist } of [
+  { subpath: "client", entry: "client.ts", allowlist: ALLOWLIST },
+  { subpath: "protocol/cost", entry: "protocol/cost.ts", allowlist: new Set(["protocol/cost.ts"]) },
+]) {
+  describe(`@openscout/agent-sessions/${subpath} browser-safety`, () => {
+    const reached = walkRuntimeGraph(entry);
+
+    test("runtime graph stays within the browser-safe allowlist", () => {
+      const unexpected = [...reached].filter((file) => !allowlist.has(file)).sort();
+      expect(unexpected).toEqual([]);
+    });
+
+    test("no reached module uses Node/Bun runtime APIs", () => {
+      const offenders: string[] = [];
+      for (const rel of reached) {
+        // Scan the runtime surface: type-only imports are erased, so a type-only
+        // node: import would not ship to the browser and must not false-positive.
+        const source = stripTypeOnlyImports(readFileSync(join(SRC, rel), "utf8"));
+        for (const pattern of BROWSER_UNSAFE) {
+          if (pattern.test(source)) offenders.push(`${rel} matched ${pattern}`);
+        }
+      }
+      expect(offenders).toEqual([]);
+    });
+  });
+}
