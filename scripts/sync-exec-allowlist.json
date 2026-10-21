@@ -966,6 +966,13 @@
     "owner": "tests"
   },
   {
+    "path": "packages/runtime/src/sqlite-projection-worker-retirement.test.ts",
+    "symbol": "Bun.spawn",
+    "category": "test",
+    "reason": "isolates fatal worker-retirement regressions in owned Bun children with a 15s kill deadline and awaited cleanup; no broker or service starts",
+    "owner": "runtime"
+  },
+  {
     "path": "packages/runtime/src/sqlite-adapter.test.ts",
     "symbol": "Bun.spawn",
     "category": "test",

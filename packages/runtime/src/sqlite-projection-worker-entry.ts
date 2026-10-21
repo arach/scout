@@ -12,10 +12,11 @@ const replay = { fullReplays: 0, tailReplays: 0, bytes: 0 };
 let nextSourceId = 0;
 const sourceRequests = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>();
 function source(operation: "boundary" | "threadEvents", value: unknown): Promise<any> {
+  if (stopped) return Promise.reject(new Error("SQLite projection parent port is unavailable"));
   const id = ++nextSourceId;
   return new Promise((resolve, reject) => {
     sourceRequests.set(id, { resolve, reject });
-    port.postMessage({ kind: "source", id, operation, value });
+    postMessage({ kind: "source", id, operation, value });
   });
 }
 // This reader never loads/compacts the journal or maintains a second hot state.
@@ -47,10 +48,31 @@ const publish = async (events: ThreadEventEnvelope[]) => {
   await source("threadEvents", events);
 };
 function state() { return { status: projection.statusSnapshot(), health: projection.health(), replay, progress: projection.progressRevision() }; }
-const stateTimer = setInterval(() => port.postMessage({ kind: "state", ...state() }), data.heartbeatMs ?? 250);
+let stopped = false;
+function stop(cause: unknown): void {
+  if (stopped) return;
+  stopped = true;
+  clearInterval(stateTimer);
+  const error = cause instanceof Error ? cause : new Error(String(cause));
+  for (const request of sourceRequests.values()) request.reject(error);
+  sourceRequests.clear();
+  // The parent observes worker exit and degrades the projection. Never turn
+  // a failed reply into a second post to the same closed MessagePort.
+  try { projection.close(); } catch { /* Best-effort worker-local cleanup. */ }
+  try { port.close(); } catch { /* Already closed. */ }
+}
+function postMessage(packet: unknown): void {
+  if (stopped) return;
+  try { port.postMessage(packet); } catch (error) { stop(error); }
+}
+const stateTimer = setInterval(() => {
+  try { postMessage({ kind: "state", ...state() }); } catch (error) { stop(error); }
+}, data.heartbeatMs ?? 250);
 stateTimer.unref();
+port.on("close", () => stop(new Error("SQLite projection parent port closed")));
 
-port.on("message", async (packet: { kind: string; id: number; method?: string; args?: unknown[]; value?: unknown; error?: string }) => {
+async function onMessage(packet: { kind: string; id: number; method?: string; args?: unknown[]; value?: unknown; error?: string }): Promise<void> {
+  if (stopped) return;
   if (packet.kind === "sourceResult") {
     const request = sourceRequests.get(packet.id); if (!request) return;
     sourceRequests.delete(packet.id);
@@ -58,6 +80,7 @@ port.on("message", async (packet: { kind: string; id: number; method?: string; a
     return;
   }
   if (packet.kind !== "request" || typeof packet.method !== "string") return;
+  let reply: { kind: "result"; id: number; value?: unknown; error?: string };
   try {
     let value: unknown;
     if (packet.method === "catchUpStartup") {
@@ -67,8 +90,11 @@ port.on("message", async (packet: { kind: string; id: number; method?: string; a
       if (typeof method !== "function" || packet.method.startsWith("_") || packet.method === "constructor") throw new Error("Unknown projection operation");
       value = await method.apply(projection, packet.args ?? []);
     }
-    port.postMessage({ kind: "result", id: packet.id, value, ...state() });
+    reply = { kind: "result", id: packet.id, value };
   } catch (error) {
-    port.postMessage({ kind: "result", id: packet.id, error: error instanceof Error ? error.message : String(error), ...state() });
+    reply = { kind: "result", id: packet.id, error: error instanceof Error ? error.message : String(error) };
   }
-});
+  if (stopped) return;
+  postMessage({ ...reply, ...state() });
+}
+port.on("message", packet => { void onMessage(packet).catch(stop); });
