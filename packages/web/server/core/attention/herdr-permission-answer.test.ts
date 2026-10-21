@@ -68,13 +68,13 @@ describe("answerHerdrPermission", () => {
     );
     // The dialog deliberately remains present; this is a transport receipt only.
     expect(result).toEqual({ ok: true, keys: ["enter"], location: "Herdr scout · w1:p2",
-      message: "Herdr accepted the keys. Prompt disappearance has not been verified." });
+      message: "Herdr accepted the keys. Scout has not checked that the prompt closed." });
     expect(captures).toBe(1); expect(sent).toEqual([["enter"]]);
     // Existing phone decoders still receive their ok/location/code/message fields.
     const wire = JSON.parse(JSON.stringify(result));
     expect({ ok: wire.ok, location: wire.location, code: wire.code, message: wire.message }).toEqual({
       ok: true, location: "Herdr scout · w1:p2", code: undefined,
-      message: "Herdr accepted the keys. Prompt disappearance has not been verified.",
+      message: "Herdr accepted the keys. Scout has not checked that the prompt closed.",
     });
   });
   test("deny presses No", async () => {

@@ -8,7 +8,7 @@
  * same dialog is still up. Approve presses the dialog's plain Yes (never
  * "don't ask again"); Deny presses its No, or Esc when it shows none. Every
  * send is written to the continuation audit log first. A success receipt means
- * Herdr accepted the keys; prompt disappearance has not been verified.
+ * Herdr accepted the keys; Scout has not checked that the prompt closed.
  */
 
 import type { HerdrPaneProjection } from "@openscout/protocol";
@@ -105,7 +105,7 @@ export async function answerHerdrPermission(
     return { ok: false, code: "send_failed", message: `Couldn't press the key in ${location}.` };
   }
   try { record("sent"); } catch { /* the attempt row already stands */ }
-  return { ok: true, keys, location, message: "Herdr accepted the keys. Prompt disappearance has not been verified." };
+  return { ok: true, keys, location, message: "Herdr accepted the keys. Scout has not checked that the prompt closed." };
 }
 
 export function keysFor(dialog: ContinuationDialog, decision: HerdrPermissionDecision): string[] {
