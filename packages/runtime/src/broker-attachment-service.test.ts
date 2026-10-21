@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync, symlinkSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ConversationDefinition, MessageRecord } from "@openscout/protocol";
@@ -75,6 +75,37 @@ test("dedup shares a file, never membership or owning message; retries retain ca
   await expect(f.service.read(f.read(b.message), { actorId: "a", nodeId: "peer" })).rejects.toThrow("attachment_forbidden");
   f.conversations.delete("c2"); await expect(f.service.read(f.read(b.message), f.principal)).rejects.toThrow("attachment_forbidden");
 });
+test("retention GC removes a deduplicated blob only after its last message binding leaves retention", async () => {
+  const f = fixture(); await f.journal.load();
+  const first = await f.service.postWithAttachments(f.input("first", "c1"), f.principal);
+  const second = await f.service.postWithAttachments(f.input("second", "c2"), f.principal);
+  const hash = f.read(first.message).blobId;
+  expect(f.read(second.message).blobId).toBe(hash);
+  const path = join(f.root, "blobs/sha256", hash);
+  f.advance(); // Both bindings and the shared file are older than the write window.
+  // The fixture's map is the authoritative retained-message source, not just hot state.
+  f.messages.delete(first.message.id);
+  await f.store.collect();
+  expect(existsSync(path)).toBe(true);
+  expect(await f.service.read(f.read(second.message), f.principal)).toMatchObject({ text: "hello" });
+  f.messages.delete(second.message.id);
+  await f.store.collect();
+  expect(existsSync(path)).toBe(false);
+});
+test("journal replay without auxiliary blob files preserves the canonical ref and reads unavailable", async () => {
+  const source = fixture(); await source.journal.load();
+  const accepted = await source.service.postWithAttachments(source.input(), source.principal);
+  const restored = fixture();
+  copyFileSync(join(source.root, "journal.jsonl"), join(restored.root, "journal.jsonl"));
+  // A journal-only restore on another machine must not require or synthesize CAS bytes.
+  await restored.journal.load();
+  const replayed = restored.journal.snapshot().messages[accepted.message.id]!;
+  expect(replayed.attachments?.[0]?.blob).toEqual(accepted.message.attachments?.[0]?.blob);
+  restored.messages.set(replayed.id, replayed);
+  await expect(restored.service.read(restored.read(replayed), restored.principal)).rejects.toThrow("attachment_unavailable");
+  expect(restored.journal.snapshot().messages[replayed.id]?.attachments?.[0]?.blob).toEqual(replayed.attachments?.[0]?.blob);
+  expect(existsSync(join(restored.root, "blobs/sha256", restored.read(replayed).blobId))).toBe(false);
+});
 test("conflicting retries cannot attach different bytes or adopt existing ids", async () => {
   const f = fixture(); await f.journal.load(); await f.service.postWithAttachments(f.input(), f.principal);
   await expect(f.service.postWithAttachments(f.input("r1", "c1", "different"), f.principal)).rejects.toThrow("attachment_request_conflict");
@@ -148,6 +179,18 @@ test("corrupt or symlinked backing files are unavailable, never file-read proxie
   const path = join(f.root,"blobs/sha256",f.read(result.message).blobId);
   writeFileSync(path,"other"); await expect(f.service.read(f.read(result.message), f.principal)).rejects.toThrow("attachment_unavailable");
   rmSync(path); symlinkSync("/etc/passwd",path); await expect(f.service.read(f.read(result.message), f.principal)).rejects.toThrow("attachment_unavailable");
+});
+test("every read rechecks the content address even after a successful read and same-size corruption", async () => {
+  const f = fixture(); await f.journal.load();
+  const accepted = await f.service.postWithAttachments(f.input(), f.principal);
+  const request = f.read(accepted.message);
+  expect(await f.service.read(request, f.principal)).toMatchObject({ text: "hello" });
+  const corrupt = Buffer.from("other");
+  expect(corrupt.length).toBe(accepted.message.attachments![0]!.blob!.byteSize);
+  expect(attachmentHash(corrupt)).not.toBe(request.blobId);
+  writeFileSync(join(f.root, "blobs/sha256", request.blobId), corrupt);
+  await expect(f.service.read(request, f.principal)).rejects.toThrow("attachment_unavailable");
+  expect(f.messages.get(accepted.message.id)?.attachments?.[0]?.blob?.sha256).toBe(request.blobId);
 });
 test("raw canonical writers cannot create managed bindings from caller-supplied hashes", async () => {
   const f = fixture(); await f.journal.load(); const result = await f.service.postWithAttachments(f.input(),f.principal);
