@@ -96,9 +96,15 @@ function elementParts(element: MarkupElement): PromptPart[] {
   }
 }
 
-/** Bare text between elements: AGENTS.md headings and the app's request
- *  framing are Codex's; whatever is left is the operator's. */
-function textParts(chunk: string): PromptPart[] {
+/** Bare text between elements: AGENTS.md headings and app request framing.
+ *  The app stores pasted files as attachments with one-line heading previews,
+ *  then writes its request heading last, even for an empty request. Keep the
+ *  pasted section raw up to that last heading: earlier request headings and
+ *  XML-looking content belong to context, not to the operator's words. With no
+ *  following request heading, the rest stays context (truncated framing).
+ *  After the last heading, resume normal classification: attachments and other
+ *  harness elements there are still context, not operator words. */
+function textParts(chunk: string, rest: string): { parts: PromptPart[]; consumeRest: boolean } {
   const parts: PromptPart[] = [];
   let words: string[] = [];
   let section: { name: string; lines: string[] } | null = null;
@@ -116,7 +122,8 @@ function textParts(chunk: string): PromptPart[] {
     section = null;
   };
 
-  for (const line of chunk.split("\n")) {
+  const lines = chunk.split("\n");
+  for (const [index, line] of lines.entries()) {
     const agents = line.match(AGENTS_HEADING);
     if (agents) {
       flushWords();
@@ -129,6 +136,19 @@ function textParts(chunk: string): PromptPart[] {
       flushWords();
       flushSection();
       section = { name: app[1]!, lines: [] };
+      if (section.name === "Files pasted by the user") {
+        // Include text beyond the next scanned element without parsing it:
+        // a pasted preview must not manufacture context/words boundaries.
+        const tail = (lines.slice(index + 1).join("\n") + rest).split("\n");
+        let request = tail.length - 1;
+        while (request >= 0 && !REQUEST_HEADING.test(tail[request]!)) request -= 1;
+        section.lines = request < 0 ? tail : tail.slice(0, request);
+        flushSection();
+        if (request >= 0) {
+          parts.push(...classifyMarkup(tail.slice(request + 1).join("\n")).parts);
+        }
+        return { parts, consumeRest: true };
+      }
       continue;
     }
     if (REQUEST_HEADING.test(line)) {
@@ -140,7 +160,7 @@ function textParts(chunk: string): PromptPart[] {
   }
   flushSection();
   flushWords();
-  return parts;
+  return { parts, consumeRest: false };
 }
 
 function classifyMarkup(text: string): ClassifiedPrompt {
@@ -148,7 +168,9 @@ function classifyMarkup(text: string): ClassifiedPrompt {
   let cursor = 0;
   while (cursor < text.length) {
     const element = nextMarkupElement(text, cursor, SCAN);
-    parts.push(...textParts(text.slice(cursor, element ? element.start : text.length)));
+    const chunk = textParts(text.slice(cursor, element ? element.start : text.length), element ? text.slice(element.start) : "");
+    parts.push(...chunk.parts);
+    if (chunk.consumeRest) break;
     if (!element) break;
     cursor = element.end;
     // The AGENTS.md body follows its heading as <INSTRUCTIONS>: fold it in.

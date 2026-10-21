@@ -55,11 +55,17 @@ export function nextMarkupElement(text: string, from: number, options: MarkupSca
     const openEnd = match.index + match[0].length;
     const attrs = parseMarkupAttrs(match[2] ?? "");
     if (match[3] === "/") return { name, attrs, body: "", start: match.index, end: openEnd };
-    // A close may carry attributes (`</pasted_content id="…">`).
-    const close = new RegExp(`</${name.replace(/[.]/g, "\\.")}(?:\\s[^<>]*)?>`, "g");
+    // Claude's pasted_content close repeats the opener's random id. A bare
+    // or foreign-id close inside the pasted material must not end the block.
+    // Compare parsed values, not interpolated regexes; no id matches no id
+    // only (legacy wrappers). An unmatched known wrapper consumes the rest.
+    const close = new RegExp(`</${name.replace(/[.]/g, "\\.")}(\\s[^<>]*)?>`, "g");
     close.lastIndex = openEnd;
-    const closed = close.exec(text);
-    if (closed) return { name, attrs, body: text.slice(openEnd, closed.index), start: match.index, end: closed.index + closed[0].length };
+    for (let closed = close.exec(text); closed; closed = close.exec(text)) {
+      const closeAttrs = parseMarkupAttrs(closed[1] ?? "");
+      if (closeAttrs.id !== attrs.id) continue;
+      return { name, attrs, body: text.slice(openEnd, closed.index), start: match.index, end: closed.index + closed[0].length };
+    }
     if (!placed) continue;
     if (options.openOnly?.has(name)) return { name, attrs, body: "", start: match.index, end: openEnd };
     if (known) return { name, attrs, body: text.slice(openEnd), start: match.index, end: text.length };
