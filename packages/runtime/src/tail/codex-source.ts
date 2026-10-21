@@ -1,10 +1,11 @@
-import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync, type Dirent } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 import { classifyCodexPrompt } from "@openscout/agent-sessions/adapters/codex/prompt-markup";
 import { compactClassifiedPrompt, type ClassifiedPrompt } from "@openscout/agent-sessions";
 
+import { resolveOpenScoutSupportPaths } from "../support-paths.js";
 import {
   buildParentChain,
   classifyAttribution,
@@ -81,13 +82,23 @@ function discoveryLimit(scope: TailDiscoveryScope): number {
   return readPositiveIntEnv([scopedName, "OPENSCOUT_TAIL_DISCOVERY_LIMIT"], fallback);
 }
 
-function codexSessionRoots(): string[] {
+/**
+ * Every store Codex writes rollouts to on this machine. Scout runs background
+ * Codex work under its own home (`codexHomeForEndpoint` in local-agents.ts),
+ * so a reader that only knows ~/.codex never sees a background task at all:
+ * not live, not in discovery, not in a finished task's history.
+ */
+export function codexSessionRoots(): string[] {
   const explicit = process.env.OPENSCOUT_TAIL_CODEX_SESSIONS_ROOT;
   if (explicit?.trim()) return [explicit.trim()];
-  return [
+  const codexHome = process.env.CODEX_HOME?.trim();
+  const roots = [
     join(homedir(), ".codex", "sessions"),
     join(homedir(), ".openai-codex", "sessions"),
-  ].filter((root) => existsSync(root));
+    ...(codexHome ? [join(resolve(codexHome), "sessions")] : []),
+    join(resolveOpenScoutSupportPaths().runtimeDirectory, "codex-background-home", "sessions"),
+  ];
+  return [...new Set(roots)].filter((root) => existsSync(root));
 }
 
 function isCodexAppServerProcess(command: string): boolean {
@@ -280,10 +291,92 @@ function codexTranscriptForFile(file: TranscriptFileStat, titles?: Map<string, s
   };
 }
 
+/** Rollouts end in the thread UUID. Thread ids passed `019…` in 2026, so match any UUID. */
 function sessionIdFromCodexPath(filePath: string): string {
   const name = basename(filePath).replace(/\.jsonl$/, "");
-  const match = name.match(/(019[0-9a-f-]+)$/);
+  const match = name.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
   return match?.[1] ?? name;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Codex files a rollout under `sessions/YYYY/MM/DD` (local date) and names its
+ * threads with UUIDv7, whose first 48 bits are the creation time. Try that day
+ * and its neighbours first so a lookup reads three folders, not every day.
+ */
+function codexDayFoldersForThread(threadId: string): string[] {
+  const hex = threadId.replace(/-/g, "");
+  if (!/^[0-9a-f]{32}$/i.test(hex) || hex[12] !== "7") return [];
+  const createdAt = Number.parseInt(hex.slice(0, 12), 16);
+  if (!Number.isFinite(createdAt)) return [];
+  return [0, -DAY_MS, DAY_MS].map((offset) => {
+    const day = new Date(createdAt + offset);
+    return join(
+      String(day.getFullYear()),
+      String(day.getMonth() + 1).padStart(2, "0"),
+      String(day.getDate()).padStart(2, "0"),
+    );
+  });
+}
+
+function rolloutInFolder(folder: string, threadId: string): string | null {
+  let entries: string[];
+  try {
+    entries = readdirSync(folder);
+  } catch {
+    return null;
+  }
+  const suffix = `-${threadId}.jsonl`;
+  const match = entries.find((entry) => entry.endsWith(suffix) || entry === `${threadId}.jsonl`);
+  return match ? join(folder, match) : null;
+}
+
+/** Every folder under a root, by name only: no stat per rollout file. */
+function findRolloutByName(root: string, threadId: string): string | null {
+  const stack = [root];
+  while (stack.length > 0) {
+    const dir = stack.pop()!;
+    const found = rolloutInFolder(dir, threadId);
+    if (found) return found;
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory()) stack.push(join(dir, entry.name));
+    }
+  }
+  return null;
+}
+
+/** One thread's rollout across every Codex store, regardless of its age. */
+export function findCodexTranscript(threadId: string): DiscoveredTranscript | null {
+  const ref = threadId.trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(ref)) return null;
+  const roots = codexSessionRoots();
+  const hinted = codexDayFoldersForThread(ref);
+  let path: string | null = null;
+  for (const root of roots) {
+    for (const folder of hinted) {
+      path = rolloutInFolder(join(root, folder), ref);
+      if (path) break;
+    }
+    if (path) break;
+  }
+  for (const root of path ? [] : roots) {
+    path = findRolloutByName(root, ref);
+    if (path) break;
+  }
+  if (!path) return null;
+  try {
+    const stats = statSync(path);
+    return codexTranscriptForFile({ path, mtimeMs: stats.mtimeMs, size: stats.size });
+  } catch {
+    return null;
+  }
 }
 
 function clip(text: string, max = MAX_SUMMARY_LEN): string {
@@ -552,5 +645,8 @@ export const CodexSource: TranscriptSource = {
   },
   parseLine(line: string, ctx: TailContext): TailEvent | null {
     return parseCodexLine(line, ctx);
+  },
+  findTranscript(sessionRef: string): DiscoveredTranscript | null {
+    return findCodexTranscript(sessionRef);
   },
 };
