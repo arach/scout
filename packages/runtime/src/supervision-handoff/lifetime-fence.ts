@@ -9,7 +9,7 @@ export function selectedProfile(tx: CustodyTransaction, role: HandoffRole, capab
   tx.assertCurrent();
   const profile = tx.state.policy.effectProfiles?.[role], selection = tx.state.roles[role].proofProfile;
   if (!profile) { if (selection) refuse("proof_profile_changed"); return; }
-  if (tx.state.version !== 3) refuse("cohort_store_version_required");
+  if (tx.state.version !== 4) refuse("cohort_store_version_required");
   if (!capabilities.includes(EFFECT_EXCLUSION_CAPABILITY)) refuse("proof_capability_required");
   if (tx.state.roles[role].owner !== null && (!selection || selection.id !== profile.id
     || selection.hash !== profileHash(profile) || selection.capability !== EFFECT_EXCLUSION_CAPABILITY)) refuse("proof_profile_changed");

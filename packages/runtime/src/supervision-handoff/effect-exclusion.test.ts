@@ -263,8 +263,8 @@ test("selection cannot name the custody host as a role or omit the inventory", a
 test("profile stores use a one-way schema gate; older absence-only readers must refuse", async () => {
   const f = await fixture();
   const text = readFileSync(join(f.root, "supervision-handoff-v1/custody.log"), "utf8");
-  expect(JSON.parse(text.trim()).state.version).toBe(3);
-  expect(await f.store.exclusive(async tx => tx.state.version)).toBe(3);
+  expect(JSON.parse(text.trim()).state.version).toBe(4);
+  expect(await f.store.exclusive(async tx => tx.state.version)).toBe(4);
 });
 
 test("replaying a completed enrollment still requires the declared profile capability", async () => {
@@ -353,10 +353,10 @@ test("the correct inode without any held lifetime lock is not child custody", as
 test("a journal cannot downgrade its format after profile staging", async () => {
   const f = await fixture(), path = join(f.root, "supervision-handoff-v1/custody.log"), original = readFileSync(path);
   try {
-    // Test-only malformed history, not a supported migration/repair path.
-    await f.store.exclusive(async tx => {
+    await expect(f.store.exclusive(async tx => {
       tx.state.version = 1; delete tx.state.policy.effectProfiles; delete tx.state.lifetimeFences; tx.persist();
-    });
-    await expect(f.sdk.read("web")).rejects.toThrow("ownership_store_corrupt");
+    })).rejects.toThrow("ownership_store_version_changed");
+    expect(readFileSync(path)).toEqual(original);
+    expect(await f.store.exclusive(async tx => tx.state.version)).toBe(4);
   } finally { writeFileSync(path, original); }
 });
