@@ -63,3 +63,14 @@ function findLastIndex(values: readonly string[], predicate: (value: string, ind
   for (let index = values.length - 1; index >= 0; index--) if (predicate(values[index]!, index)) return index;
   return -1;
 }
+
+export function claudePermissionAnswerKeys(dialog: ClaudePermissionDialog, option: "approve" | "deny"): readonly string[] | null {
+  const options = dialog.content.options.map(line => line.match(/^(\d)\.\s+(.+)$/u));
+  if (!options.length || options.some((entry, i) => !entry || Number(entry[1]) !== i + 1)) return null;
+  const yes = options.filter(entry => /^Yes$/iu.test(entry![2]!));
+  const no = options.filter(entry => /^No$/iu.test(entry![2]!));
+  if (yes.length !== 1 || no.length > 1) return null;
+  // Numeric selection never depends on a cursor that can move without changing
+  // the content hash. Never choose don't-ask-again, and never append Enter.
+  return option === "approve" ? [yes[0]![1]!] : no.length ? [no[0]![1]!] : ["Escape"];
+}

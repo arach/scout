@@ -242,8 +242,8 @@ Protocol now exports `HostAttentionAnswerResult`. `TmuxHostAttentionAnswer` and
 `heldForMs`. The shared reason union adds `authority_refused`,
 `claimed_elsewhere`, `claim_unavailable`, `audit_failed` and `target_changed`;
 no existing reason is renamed. These names do not implement admission or
-actuation. Herdr's answer factory, exact-terminal transport and shared durable
-claim/audit integration remain separate, inactive work.
+actuation. Herdr's injected factory is described below and remains inactive; exact-terminal
+transport and shared durable claim/audit implementation remain gated work.
 
 ## Strict injected Herdr observations
 
@@ -296,4 +296,86 @@ production answer adapter is supplied: exact-terminal dispatch (or an expected
 terminal check atomic with dispatch) must be measured and reviewed first.
 Native input acceptance is not permission acknowledgement; a future answerer
 also needs complete post-send verification and the shared durable claim/audit
-protocol, including legacy writers. None is enabled by this read-only slice.
+protocol, including legacy writers. This read-only collector enables none of those actuation capabilities.
+
+## Inactive injected Herdr answer factory
+
+Import `createHerdrHostAttentionAnswerer`,
+`HERDR_HOST_ATTENTION_ANSWER_LIMITS` and its input/dependency/attempt/claim types
+from the existing host-attention subpath. Its result is the protocol's
+`HostAttentionAnswerResult` through the `HerdrHostAttentionAnswer` alias.
+Construction requires **all five callbacks**: `capture`, `admit`,
+`writeSendIntent`, `sendKeys` and `finalize`. There are no defaults, native
+commands, claim files, broker writes, grants or caller migrations. The
+exact-terminal capability and shared durable claim/audit gates still apply.
+Injected tests do not measure a native Herdr dispatch capability.
+
+`capture` consumes slice 1's unchanged complete live before/after envelope.
+The two read paths share its pure interpretation and content-version function.
+The tmux and Herdr send paths share the same strict Claude option grammar.
+Herdr translates semantic Escape to `esc`; it sends numeric choices without
+Enter and never selects persistent approval. The legacy numeric version is
+invalid input, and a tmux content version fails the Herdr freshness check.
+
+Retain one factory per local operator/transport owner. It serializes aliases
+by local node, exact Herdr session and opaque terminal ID, independently of
+movable pane coordinates. The attempt key adds the observed content version,
+not the decision: changing approve to deny cannot bypass an uncertain attempt.
+The factory snapshots target, version, decision, keys and callback contexts.
+
+The operation reads once, admits a prepared claim, reads again, records send
+intent plus its audit row, and reads once more immediately before transport.
+Each asynchronous admission/intent step is followed by a fresh read within
+the same preflight budget. No authority, no claim or no audit row means no
+transport entry. Pre-send refusal/failure has `not_sent`, never a fabricated
+unknown transport effect. Target replacement is `stale/target_changed/not_sent`
+before send and `unverified/target_changed/sent` after transport resolves.
+
+`admit` must authenticate or recheck the operator/grant and obtain an exclusive
+prepared claim. Its owner token is `{id, attemptId}`; the attempt ID is generated
+by the factory and must match admission's returned token. `writeSendIntent`
+must durably commit that owned intent and the required audit before returning
+`ok: true`. A callback may have committed even when it rejects or times out.
+The local latch therefore starts **before attempting send-intent persistence**,
+more conservatively than tmux's transport-stage latch. Any failure from that
+stage onward retains the incident, including a `not_sent` ending. It does not
+turn permission to inspect an incident into permission to resend it.
+
+A resolved send is input acceptance only. The factory polls without another
+send, and requires a complete read of the same terminal with no recognized
+dialog before proposing `answered/sent`. A remaining dialog, changed dialog,
+missing/error/truncated read, timeout or cancellation never becomes answered.
+
+`finalize` receives a copied owner token, attempt, result and disposition:
+
+- `cancel_unsent`: release only this preparation, before the intent stage.
+- `retain_unresolved`: preserve the intent and record the unresolved ending.
+- `verified_answer`: record verified completion and release only this owner.
+
+The callback must atomically compare **both** token fields against the current
+owner, including after an await. A late finalizer must never delete a replacement
+claim by terminal/key alone. Factory context copies do not replace this required
+owner-token CAS in the durable implementation. Finalization has its own bounded
+signal so caller disconnect does not skip recording an ending.
+
+Only a verified disappearance **and** finalization's `status: "settled"` returns
+`answered` and evicts the local latch. Failed, unavailable, timed-out or unowned
+finalization after disappearance returns `unverified/claim_unavailable/sent`
+and retains the latch. Other unsuccessful endings keep their original reason
+and effect; durable state remains unresolved if their finalization fails.
+
+The factory implements no durable store. Its required admission/finalization
+contract must preserve unresolved intent across time, disconnect and restart;
+constructing a new factory is not recovery. Legacy autonomous and operator
+writers must use that same protocol before adoption. The old 30-second claim
+helper is not an implementation of this contract. Durable audit/claim storage,
+crash consistency and exact-terminal dispatch remain slice 3 work.
+
+Bounds: two seconds for the **whole** preflight, two seconds for send, two
+seconds for verification and two seconds for finalization; 48 KiB reads, at
+most eight verification captures with 50 ms spacing, six held answers and 256
+unresolved attempts. Caller limits only lower these ceilings. Busy exposes
+`heldForMs` with the same semantics as tmux. Callback timeouts signal abort but
+hold the terminal/global slot until actual settlement. Late callback completion
+cannot resume intent or transport. Adapters must honor abort or bound their own
+outstanding work globally, including admission and finalization.
