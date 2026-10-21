@@ -5,11 +5,12 @@ import { homedir } from "node:os";
 import { parseScoutArgv } from "./argv.ts";
 import { createScoutCommandContext, defaultScoutContextDirectory } from "./context.ts";
 import { ScoutCliError } from "./errors.ts";
+import { resolveReservedScoutExtension, ScoutCommandUnavailableError, renderScoutCommandUnavailable } from "./command-unavailable.ts";
 import { runAskWithOptions } from "./commands/ask.ts";
 import { loadScoutCommandHandler } from "./commands/index.ts";
 import { renderScoutHelp } from "./help.ts";
 import { parseImplicitAskCommandOptions } from "./options.ts";
-import { findScoutCommandRegistration, missingScoutExtensionMessage, unknownScoutCommandMessage } from "./registry.ts";
+import { findScoutCommandRegistration, unknownScoutCommandMessage } from "./registry.ts";
 import { findScoutExtension, runScoutExtension, scoutExtensionEnv } from "./extensions.ts";
 import { resolveBrokerControlUrl } from "@openscout/runtime/local-config";
 import {
@@ -55,6 +56,11 @@ async function main() {
     }
   }
 
+  // Resolve reserved extensions before maintenance can refresh/restart core.
+  const registration = findScoutCommandRegistration(command);
+  const reservedExtension = registration?.provider === "extension"
+    ? resolveReservedScoutExtension(registration, context.env) : undefined;
+
   // Help and diagnostics must not refresh/restart the service they describe.
   if (shouldEnsureBrokerUptodateForCommand(command, commandArgs)) {
     await ensureBrokerUptodate({
@@ -67,7 +73,6 @@ async function main() {
     });
   }
 
-  const registration = findScoutCommandRegistration(command);
   if (!registration && (command === "need" || command === "attention")) {
     throw new ScoutCliError(command === "need"
       ? "scout need has been replaced by scout operator --question <text>"
@@ -75,7 +80,7 @@ async function main() {
   }
   if (!registration || registration.provider === "extension") {
     // Built-ins are never shadowed; extensions fill verbs the core does not own.
-    const extension = findScoutExtension(command, context.env);
+    const extension = reservedExtension ?? findScoutExtension(command, context.env);
     if (extension?.refused) throw new ScoutCliError(extension.refused);
     if (extension) {
       process.exitCode = await runScoutExtension(extension, commandArgs, scoutExtensionEnv({
@@ -87,7 +92,6 @@ async function main() {
       }));
       return;
     }
-    if (registration) throw new ScoutCliError(missingScoutExtensionMessage(registration));
   }
   if (!registration) {
     if (commandArgs.includes("--help") || commandArgs.includes("-h")) {
@@ -169,6 +173,14 @@ function cliMtimeCheckpointPath(): string {
 try {
   await main();
 } catch (error) {
+  if (error instanceof ScoutCommandUnavailableError) {
+    if (process.argv.includes("--json")) {
+      process.stderr.write(JSON.stringify(error.toJSON()) + "\n");
+    } else {
+      console.error(renderScoutCommandUnavailable(error, false));
+    }
+    process.exit(error.exitCode);
+  }
   const message = error instanceof Error ? error.message : String(error);
   console.error(`error: ${message}`);
   process.exit(1);
