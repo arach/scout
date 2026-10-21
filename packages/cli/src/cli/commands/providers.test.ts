@@ -6,16 +6,42 @@ import {
 } from "@openscout/protocol";
 import { createScoutCommandContext, type ScoutCommandContext } from "../context.ts";
 import {
-  buildProviderUsageReport,
+  buildProviderUsageReport as buildPublicProviderUsageReport,
   parseProvidersCommandOptions,
   renderProviderUsageReport,
   renderProvidersCommandHelp,
   runProvidersCommand,
-  type ServiceBudgetsPayload,
 } from "./providers.ts";
 
 const NOW = Date.UTC(2026, 7, 11, 18, 0, 0);
 const GENERATED_AT = NOW - 2_000;
+
+// Preserve the existing formatting/pacing scenarios while feeding the new
+// public observation contract. Legacy dashboard-shaped data is test input only.
+type FixtureWindow = { label?: string; fill?: number; usedLabel?: string; resetAt?: number; windowMs?: number; capturedAt?: number; source?: string };
+type FixtureGauge = FixtureWindow & { id: string; kind?: string; windows?: FixtureWindow[]; unitLabel?: string; plan?: string };
+type ServiceBudgetsPayload = { generatedAt?: number; gauges?: unknown[] };
+function publicFixture(payload: ServiceBudgetsPayload) {
+  const generatedAt = payload.generatedAt ?? NOW;
+  const windows = (payload.gauges ?? []).flatMap(value => {
+    const gauge = value as FixtureGauge;
+    if (gauge.kind !== "quota") return [];
+    const entries = Array.isArray(gauge.windows) && gauge.windows.length ? gauge.windows : [{ ...gauge, label: gauge.unitLabel }];
+    return entries.flatMap((window: FixtureWindow, index: number) => {
+      const usedPercent = typeof window.fill === "number" ? Math.round(Math.max(0, Math.min(1, window.fill)) * 1000) / 10 : Number.parseFloat(window.usedLabel ?? "NaN");
+      if (!Number.isFinite(usedPercent)) return [];
+      const capturedAt = window.capturedAt ?? gauge.capturedAt ?? generatedAt;
+      return [{ id: `${gauge.id}:${index}`, provider: gauge.id, source: "provider_reported" as const,
+        accountId: `account:${gauge.id}`, endpointId: `endpoint:${gauge.id}`, sessionId: `session:${gauge.id}`,
+        label: window.label ?? "quota", usedPercent, percentRemaining: Math.round((100 - usedPercent) * 10) / 10,
+        resetAt: window.resetAt ?? gauge.resetAt, windowMs: window.windowMs, capturedAt, ageMs: Math.max(0, generatedAt - capturedAt),
+        planType: gauge.plan, observationSource: window.source ?? gauge.source ?? "provider report" }];
+    });
+  });
+  return { schema: "scout.provider-quotas/v1" as const, generatedAt, availability: windows.length ? "available" as const : "unknown" as const,
+    refresh: "unsupported" as const, windows, coverage: { endpointsScanned: (payload.gauges ?? []).length, truncated: false } };
+}
+const buildProviderUsageReport = (payload: ServiceBudgetsPayload, options: Parameters<typeof buildPublicProviderUsageReport>[1]) => buildPublicProviderUsageReport(publicFixture(payload), options);
 
 const serviceBudgetsPayload: ServiceBudgetsPayload = {
   generatedAt: GENERATED_AT,
@@ -122,7 +148,7 @@ const formatOptions = {
 } as const;
 
 describe("providers command", () => {
-  test("documents the live usage view and structured output", () => {
+  test("documents the passive usage view and structured output", () => {
     const help = renderProvidersCommandHelp();
 
     expect(help).toContain("scout providers usage");
@@ -132,7 +158,7 @@ describe("providers command", () => {
     expect(help).toContain("--json");
   });
 
-  test("defaults to a forced refresh and accepts an explicit cached read", () => {
+  test("defaults to requesting refresh and accepts an explicit cached read", () => {
     expect(parseProvidersCommandOptions(["usage"])).toEqual({
       command: "usage",
       forceRefresh: true,
@@ -490,7 +516,7 @@ describe("providers command", () => {
     expect(rendered).not.toContain("Cursor");
   });
 
-  test("requests a forced pipeline refresh and emits structured JSON", async () => {
+  test("requests refresh without claiming a poll and emits public structured JSON", async () => {
     const stdout: string[] = [];
     const paths: string[] = [];
     const context = createScoutCommandContext({
@@ -506,11 +532,12 @@ describe("providers command", () => {
       ...formatOptions,
       readJson: async <T>(_context: Pick<ScoutCommandContext, "env">, path: string): Promise<T> => {
         paths.push(path);
-        return serviceBudgetsPayload as T;
+        return publicFixture(serviceBudgetsPayload) as T;
       },
     });
 
-    expect(paths).toEqual(["/api/service-budgets?refresh=1"]);
+    expect(paths).toEqual(["/v1/provider-quotas?limit=200&refresh=1"]);
+    expect(JSON.parse(stdout[0]!).refresh).toBe("unsupported");
     const report = JSON.parse(stdout.join("\n"));
     expect(report).toMatchObject({
       generatedAt: GENERATED_AT,
@@ -536,7 +563,8 @@ describe("providers command", () => {
       gauges: [],
     }, formatOptions));
 
-    expect(rendered).toContain("No provider quota windows");
-    expect(rendered).toContain("scout providers usage --refresh");
+    expect(rendered).toContain("Provider quota availability unknown");
+    expect(rendered).not.toContain("0 windows");
+    expect(rendered).toContain("--refresh cannot poll");
   });
 });
