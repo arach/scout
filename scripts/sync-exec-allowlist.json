@@ -1062,5 +1062,77 @@
     "category": "test",
     "reason": "signals only the owned Node import fixture handle already admitted by the spawn fence and awaits cleanup",
     "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/supervision-handoff/store.ts",
+    "symbol": "dlopen",
+    "category": "dlopen",
+    "libraryPaths": [
+      "/usr/lib/libSystem.B.dylib",
+      "/lib/x86_64-linux-gnu/libc.so.6",
+      "/lib/aarch64-linux-gnu/libc.so.6",
+      "/lib64/libc.so.6"
+    ],
+    "reason": "lazy stable-inode flock and errno binding from fixed system libraries only; unknown Linux layouts refuse without soname or env lookup",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/supervision-handoff/darwin-process-source.ts",
+    "symbol": "dlopen",
+    "category": "dlopen",
+    "libraryPaths": [
+      "/usr/lib/libproc.dylib",
+      "/usr/lib/libSystem.B.dylib"
+    ],
+    "reason": "lazy read-only Darwin process/boot sampling from fixed system libraries; no process effects",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/supervision-handoff/sigchld-disposition.ts",
+    "symbol": "dlopen",
+    "category": "dlopen",
+    "libraryPaths": [
+      "/usr/lib/libSystem.B.dylib"
+    ],
+    "reason": "lazy read-only sigaction query for the audited Darwin custody backend; no disposition mutation or foreign-reaper claim",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/supervision-handoff/sigchld-disposition.fixture.ts",
+    "symbol": "dlopen",
+    "category": "dlopen",
+    "libraryPaths": [
+      "/usr/lib/libSystem.B.dylib"
+    ],
+    "reason": "test-only setter runs inside an owned isolated child and changes no test-runner or installed-service disposition",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/supervision-handoff/sigchld-disposition.test.ts",
+    "symbol": "Bun.spawn",
+    "category": "test",
+    "reason": "owns and awaits isolated native disposition fixtures; unsafe SIGCHLD modes are never set in the test runner and fixtures spawn no children",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/supervision-handoff/sigchld-disposition.test.ts",
+    "symbol": "Subprocess.kill",
+    "category": "test",
+    "reason": "bounded cleanup signals only the owned disposition fixture handle and awaits its exit",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/supervision-handoff/native-load-fence.test.ts",
+    "symbol": "Bun.spawn",
+    "category": "test",
+    "reason": "executes only the static fence CLI in an owned temporary source tree; a bounded exact child handle is awaited and no native fixture expression is evaluated",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/supervision-handoff/native-load-fence.test.ts",
+    "symbol": "Subprocess.kill",
+    "category": "test",
+    "reason": "executes only the static fence CLI in an owned temporary source tree; a bounded exact child handle is awaited and no native fixture expression is evaluated",
+    "owner": "runtime"
   }
 ]

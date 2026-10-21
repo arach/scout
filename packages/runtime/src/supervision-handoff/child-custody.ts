@@ -1,3 +1,4 @@
+import { probeSigchldDisposition } from "./sigchld-disposition.js";
 import { isAbsolute } from "node:path";
 import { createProcessEvidenceReader, type ProcessSample } from "./process-evidence.js";
 import { refuse, type ExactChild, type HandoffRole, type SelectedInstance } from "./contracts.js";
@@ -11,10 +12,15 @@ export type CurrentChildCoverage = { state: "no_starts" | "unknown";
   starts: number; exited: number };
 const audited = new Set(["bf2e2cecf27e800962b1e7f03d66278f9d5d2e79", "0d9b296af33f2b851fcbf4df3e9ec89751734ba4"]);
 export function directChildCapability() {
-  return process.platform === "darwin" && ["arm64", "x64"].includes(process.arch)
-    && typeof Bun !== "undefined" && audited.has(Bun.revision)
-    ? { available: true as const, backend: "darwin-event-loop-wait4/1" as const }
-    : { available: false as const, reason: "child_custody_backend_unproven" as const };
+  if (process.platform !== "darwin" || !["arm64", "x64"].includes(process.arch)
+    || typeof Bun === "undefined" || !audited.has(Bun.revision)) return { available: false as const, reason: "child_custody_backend_unproven" as const };
+  const disposition = probeSigchldDisposition();
+  return disposition.safe ? { available: true as const, backend: "darwin-event-loop-wait4/1" as const }
+    : { available: false as const, reason: disposition.reason };
+}
+function requireDirectChildCapability() {
+  const capability = directChildCapability();
+  if (!capability.available) refuse(capability.reason);
 }
 function sameChild(a: ExactChild, b: ExactChild) {
   return (["uid", "instance", "role", "generation", "pid", "birth", "executable", "effectId"] as const).every(key => a[key] === b[key]);
@@ -26,15 +32,15 @@ export class DirectChildren {
   constructor(private readonly instance: SelectedInstance, private readonly enabled = false) {}
   spawn(role: HandoffRole, generation: number, effectId: string, command: DirectChildCommand): DirectChildRecord {
     if (!this.enabled) refuse("child_custody_not_enabled");
-    if (!directChildCapability().available) refuse("child_custody_backend_unproven");
+    requireDirectChildCapability();
     if (this.held.has(effectId)) refuse("child_effect_already_started");
     if (!Array.isArray(command.argv) || !command.argv.length || !isAbsolute(command.argv[0]!)
       || command.argv.some(arg => typeof arg !== "string" || arg.includes("\0")) || !isAbsolute(command.cwd)
       || !command.env || Object.entries(command.env).some(([key, value]) => !key || /[=\0]/.test(key) || typeof value !== "string" || value.includes("\0"))) refuse("invalid_child_command");
     const reader = createProcessEvidenceReader(this.instance); // validate selection before spawn
-    let reaped = false;
-    const handle = Bun.spawn(command.argv, { onExit: () => { reaped = true; }, cwd: command.cwd, env: { ...command.env }, stdin: "ignore", stdout: "ignore", stderr: "ignore" });
-    const held = { retained: new RetainedChild(handle), record: undefined as DirectChildRecord | undefined };
+    let reaped = false, waitError = false;
+    const handle = Bun.spawn(command.argv, { onExit: (_child, _code, _signal, error) => { reaped = true; waitError = error != null; }, cwd: command.cwd, env: { ...command.env }, stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+    const held = { retained: new RetainedChild(handle, () => waitError), record: undefined as DirectChildRecord | undefined };
     this.held.set(effectId, held); // Retain even if birth sampling/persistence fails.
     // Synchronous, before the event-loop reaper can run. No sample-then-kill:
     // later signals use only this exact retained handle, never sample.pid.
@@ -51,6 +57,7 @@ export class DirectChildren {
   signal(child: ExactChild, signal: "SIGTERM" | "SIGKILL") {
     const held = this.held.get(child.effectId);
     if (!held?.record || !sameChild(held.record.child, child)) refuse("child_custody_lost");
+    requireDirectChildCapability();
     return held.retained.signal(signal);
   }
   async exit(record: DirectChildRecord) {

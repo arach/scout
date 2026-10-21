@@ -25,10 +25,23 @@ function openNative() {
   if (process.platform !== "darwin" && process.platform !== "linux") refuse("ownership_lock_unsupported");
   try {
     const { dlopen, read } = createRequire(import.meta.url)("bun:ffi") as typeof import("bun:ffi");
-    const library = dlopen(process.platform === "darwin" ? "/usr/lib/libSystem.B.dylib" : "libc.so.6", {
+    const symbols = {
       flock: { args: ["i32", "i32"], returns: "i32" },
       [process.platform === "darwin" ? "__error" : "__errno_location"]: { args: [], returns: "ptr" },
-    });
+    } as const;
+    // Fixed system paths only: no soname, cwd, environment or configured library.
+    const library = (() => {
+      if (process.platform === "darwin") return dlopen("/usr/lib/libSystem.B.dylib", symbols);
+      if (process.arch === "x64") {
+        try { return dlopen("/lib/x86_64-linux-gnu/libc.so.6", symbols); }
+        catch { return dlopen("/lib64/libc.so.6", symbols); }
+      }
+      if (process.arch === "arm64") {
+        try { return dlopen("/lib/aarch64-linux-gnu/libc.so.6", symbols); }
+        catch { return dlopen("/lib64/libc.so.6", symbols); }
+      }
+      refuse("ownership_lock_unsupported");
+    })();
     // The computed symbol key widens Bun's inferred return to include flock's
     // integer; its FFI descriptor above is always the errno pointer signature.
     const errnoPointer = library.symbols[process.platform === "darwin" ? "__error" : "__errno_location"] as () => Pointer | null;

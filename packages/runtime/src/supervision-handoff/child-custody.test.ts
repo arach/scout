@@ -16,16 +16,16 @@ function instance(): SelectedInstance {
 }
 function fake() {
   let resolve!: (value: number) => void, reject!: (error: Error) => void;
-  let signals = 0;
+  let signals = 0, waitError = false;
   const handle: OwnedChildHandle & { exitCode: number | null; signalCode: string | number | null } = {
     pid: 123, exitCode: null, signalCode: null,
     exited: new Promise((yes, no) => { resolve = yes; reject = no; }), kill: () => { signals++; },
   };
-  return { handle, retained: new RetainedChild(handle), resolve, reject, signals: () => signals };
+  return { handle, retained: new RetainedChild(handle, () => waitError), resolve, reject, signals: () => signals, setWaitError: () => { waitError = true; } };
 }
 
 test("custody: signal before reap uses the retained child handle", async () => {
-  const f = fake(); expect(f.retained.signal("SIGTERM")).toBe("signalled"); expect(f.signals()).toBe(1);
+  const f = fake(); expect(f.retained.signal("SIGTERM")).toBe("signal_requested"); expect(f.signals()).toBe(1);
   f.handle.signalCode = "SIGTERM"; f.resolve(143);
   expect(await f.retained.exit()).toEqual({ code: null, signal: "SIGTERM" });
   expect(f.retained.signal("SIGKILL")).toBe("already_exited"); expect(f.signals()).toBe(1);
@@ -39,15 +39,25 @@ test("custody: PID reuse after reap, before exited resolves, cannot signal the r
   expect(resolved).toBe(false);
   expect(old.retained.signal("SIGKILL")).toBe("already_exited");
   expect(old.signals()).toBe(0); expect(replacement.signals()).toBe(0);
-  expect(replacement.retained.signal("SIGTERM")).toBe("signalled"); expect(replacement.signals()).toBe(1);
+  expect(replacement.retained.signal("SIGTERM")).toBe("signal_requested"); expect(replacement.signals()).toBe(1);
   old.resolve(0); replacement.handle.signalCode = "SIGTERM"; replacement.resolve(143);
   expect(await old.retained.exit()).toEqual({ code: 0, signal: null }); await replacement.retained.exit();
+});
+
+test("wait-error status before exited rejects reports no signal request", async () => {
+  const f = fake(); f.setWaitError();
+  let settled = false; f.handle.exited.catch(() => { settled = true; });
+  expect(settled).toBe(false);
+  expect(f.retained.signal("SIGTERM")).toBe("wait_error"); expect(f.signals()).toBe(0);
+  f.reject(new Error("native wait failed"));
+  await expect(f.retained.exit()).rejects.toThrow("child_exit_unproven");
+  expect(f.retained.signal("SIGKILL")).toBe("wait_error"); expect(f.signals()).toBe(0);
 });
 
 test.each(["reject", "no-status"])("a wait failure (%s) never becomes exit proof or a later signal", async kind => {
   const f = fake(); if (kind === "reject") f.reject(new Error("wait failed")); else f.resolve(-1);
   await expect(f.retained.exit()).rejects.toThrow("child_exit_unproven");
-  expect(() => f.retained.signal("SIGTERM")).toThrow("child_exit_unproven"); expect(f.signals()).toBe(0);
+  expect(f.retained.signal("SIGTERM")).toBe("wait_error"); expect(f.signals()).toBe(0);
 });
 
 test("direct child custody is opt-in, does not adopt PIDs and leaves readiness closed", () => {
@@ -78,7 +88,7 @@ nativeTest("Darwin custody: unreaped zombie reserves the PID, signal before reap
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2);
     }
     expect(zombie).toBe(true);
-    expect(registry.signal(record.child, "SIGTERM")).toBe("signalled");
+    expect(registry.signal(record.child, "SIGTERM")).toBe("signal_requested");
     expect(await registry.exit(record)).toEqual({ code: 0, signal: null });
     expect(registry.signal(record.child, "SIGKILL")).toBe("already_exited");
     expect(() => registry.signal({ ...record.child, birth: "replacement" }, "SIGKILL")).toThrow("child_custody_lost");
@@ -123,7 +133,7 @@ nativeTest("birth is durable before observation; exact exit survives reopen, des
       expect(() => escaped.spawnChild(command(f.selected))).toThrow("effect_scope_closed");
       lease.begin("stop", "stop");
       await lease.perform("stop", "stop", async permit => {
-        expect(permit.signalChild("SIGTERM")).toBe("signalled");
+        expect(permit.signalChild("SIGTERM")).toBe("signal_requested");
         await lease.recordChildExit(child.effectId); f.observe(f.absent);
       }); lease.complete("stop");
       expect(lease.childCoverage()).toEqual({ state: "unknown", reason: "current_owner_descendants_unproven", starts: 1, exited: 1 });
