@@ -347,3 +347,12 @@ It is opt-in and restricted to audited Darwin Bun backends. Lost handles cannot
 be adopted by PID. Linux custody remains unproven. Every started role still
 returns unknown without complete current-owner descendant/resource coverage;
 this does not open readiness, P1 or reverse handoff.
+
+## Optional staged effect-exclusion profile
+
+[Role-effect exclusion](SUPERVISION-EFFECT-EXCLUSION.md) adds a distinct,
+policy-bound transfer proof and a separate per-role lifetime fence. It does not
+turn unknown worker descendants into absent processes or open production
+readiness. Stores with selected profiles use the one-way version-2 state gate;
+absence-only stores keep version 1. The runtime remains the unenrolled custody
+host, including the enrolled roles' broker-mediated generation checks.

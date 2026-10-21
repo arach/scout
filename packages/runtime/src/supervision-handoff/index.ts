@@ -1,4 +1,8 @@
 import type { ChildSignalResult } from "./retained-child.js";
+import { closeSync } from "node:fs";
+import { EFFECT_EXCLUSION_CAPABILITY, profileHash, profileSelection } from "./exclusion-contracts.js";
+import { LifetimeFences, selectedProfile } from "./lifetime-fence.js";
+import { certifyEffectExclusion } from "./effect-exclusion.js";
 import { DirectChildren, currentChildCoverage, type DirectChildCommand, type CurrentChildCoverage } from "./child-custody.js";
 import { captureLegacyRole, inspectLegacyRole, type LegacyRoleSources, type RoleAbsence } from "./role-absence.js";
 import { randomBytes } from "node:crypto";
@@ -20,13 +24,20 @@ function exact(child: ExactChild, tx: CustodyTransaction, role: HandoffRole, gen
     || child.generation !== generation || !Number.isSafeInteger(child.pid) || child.pid < 1
     || typeof child.birth !== "string" || !child.birth || typeof child.executable !== "string" || !child.executable || typeof child.effectId !== "string" || !child.effectId || (effectId && child.effectId !== effectId)) refuse("identity_unproven");
 }
-async function readiness(tx: CustodyTransaction, role: HandoffRole, target: HandoffOwner, inspector: HandoffInspector) {
+async function readiness(tx: CustodyTransaction, role: HandoffRole, target: HandoffOwner, inspector: HandoffInspector, capabilities: readonly string[]) {
+  const profile = selectedProfile(tx, role, capabilities);
   const proof = await inspector.readiness(role); tx.assertCurrent();
   const policy = tx.state.policy;
   if (proof.protocol !== HANDOFF_PROTOCOL || proof.ready !== true || !proof.integratedRoles.includes(role)
     || !Bun.semver.satisfies(proof.runtimeVersion, `>=${policy.minimumRuntimeVersion}`)
     || (role === "scoutbot" && proof.assistantClaims !== true)
     || !policy.runtimeArtifacts.includes(proof.runtimeArtifact) || !policy.launcherArtifacts.includes(proof.launcherArtifact)) refuse("r0_contract_unavailable");
+  if (profile) {
+    const coverage = proof.roleEffectCoverage?.[role];
+    if (!proof.capabilities?.includes(EFFECT_EXCLUSION_CAPABILITY) || coverage?.profileId !== profile.id
+      || coverage.profileHash !== profileHash(profile) || coverage.coverageId !== profile.coverageId
+      || !profile.runtimeArtifacts.includes(proof.runtimeArtifact) || !profile.launcherArtifacts.includes(proof.launcherArtifact)) refuse("role_effect_coverage_unavailable");
+  }
   if (target === "R0" && tx.state.roles[role].owner === "P1"
     && (!policy.rollbackOpen || !policy.rollbackArtifacts.includes(proof.runtimeArtifact))) refuse("rollback_unavailable");
 }
@@ -41,6 +52,7 @@ function grant(tx: CustodyTransaction, token: string, role: HandoffRole, action:
 function completedTransition(tx: CustodyTransaction, token: string, role: HandoffRole, action: AuthorizationIntent["action"]) {
   const found = tx.state.authorizations[authorizationHash(token)];
   if (found?.state !== "used") return false;
+  if (found.policy !== policyHash(tx.state.policy)) refuse("invalid_authorization");
   const current = tx.state.roles[role];
   if (found.intent.role !== role || found.intent.action !== action || found.intent.target !== current.owner
     || found.intent.generation + 1 !== current.generation) refuse("ownership_changed");
@@ -49,6 +61,29 @@ function completedTransition(tx: CustodyTransaction, token: string, role: Handof
 function noPending(tx: CustodyTransaction, role: HandoffRole, generation: number) {
   const prefix = `${role}:${generation}:`;
   if (Object.entries(tx.state.receipts).some(([key, value]) => key.startsWith(prefix) && value.state === "pending")) refuse("outcome_uncertain");
+}
+async function recoverMutation(tx: CustodyTransaction, role: HandoffRole, owner: HandoffOwner, generation: number,
+  id: string, authorization: string, inspector: HandoffInspector, assertCurrent: () => void) {
+  assertCurrent();
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) refuse("invalid_request_id");
+  const consent = grant(tx, authorization, role, "recover");
+  if (consent.intent.target !== owner || consent.intent.requestId !== id) refuse("invalid_authorization");
+  const current = tx.state.receipts[receiptKey(role, generation, id)];
+  if (!current || current.state !== "pending") refuse("pending_receipt_required");
+  if (current.effects.length && current.effects.every(effect => effect.state === "confirmed")) {
+    current.state = "done"; consent.state = "used"; tx.persist(); return;
+  }
+  const proof = await inspector.observe(role); assertCurrent();
+  const pending = current.effects.find(effect => effect.state === "intent");
+  if (pending && pending.kind === "start" && proof.state === "owned") {
+    exact(proof.child, tx, role, generation, pending.id);
+    if (pending.directChild && !sameChild(pending.directChild.child, proof.child)) refuse("identity_unproven");
+    pending.child = structuredClone(proof.child); pending.state = "confirmed";
+  } else if (absent(proof)) {
+    if (pending) pending.state = "confirmed";
+    if (current.operation !== "stop") current.error = "recovered_absent";
+  } else refuse("outcome_uncertain");
+  current.state = "done"; consent.state = "used"; tx.persist(); // Observation only; never repeat the effect.
 }
 export interface EffectPermit {
   readonly effectId: string;
@@ -66,6 +101,10 @@ export interface RoleCustody {
   recordChildExit(effectId: string): Promise<void>;
   captureLegacyInventory(captureId: string): Promise<void>;
   inspectLegacyAbsence(): Promise<RoleAbsence>;
+  /** Explicit mapping input for an audited carrier adapter, not a second
+   * effect permit. Only valid in this scope after the owner commit. Never
+   * unlock/downgrade it; use atEffect for the actual spawn boundary. */
+  carrierDescriptor(): number;
   assertCurrent(kind?: "start" | "stop"): void;
   receipt(id: string): MutationReceipt | undefined;
   begin(id: string, operation: MutationReceipt["operation"]): void;
@@ -78,9 +117,12 @@ export interface RoleCustody {
 export class SupervisionHandoff {
   private readonly store: HandoffStore;
   private readonly children: DirectChildren;
-  constructor(readonly instance: SelectedInstance, private readonly inspector: HandoffInspector, private readonly legacySources: LegacyRoleSources = {}, options: { enableAuditedDirectChildren?: true } = {}) {
+  private readonly fences = new LifetimeFences();
+  private readonly capabilities: readonly string[];
+  constructor(readonly instance: SelectedInstance, private readonly inspector: HandoffInspector, private readonly legacySources: LegacyRoleSources = {}, options: { enableAuditedDirectChildren?: true; capabilities?: readonly string[] } = {}) {
     this.children = new DirectChildren(Object.freeze({ ...instance }), options.enableAuditedDirectChildren === true);
     this.instance = Object.freeze({ ...instance }); this.store = new HandoffStore(this.instance); this.legacySources = Object.freeze({ ...legacySources });
+    this.capabilities = Object.freeze([...(options.capabilities ?? [])]);
   }
   stage(policy: FloorPolicy, approve: StageApproval) { return this.store.stage(policy, approve); }
   handshake(hello: { protocol: number; instance: SelectedInstance }) { return this.store.handshake(hello); }
@@ -93,13 +135,75 @@ export class SupervisionHandoff {
     }).catch(() => ({ state: "unknown" as const }));
   }
   pendingReceipts(role: HandoffRole, generation: number) { return this.store.pendingReceipts(role, generation); }
-  authorize(intent: AuthorizationIntent, approve: OperatorApproval) { return this.store.authorize(intent, approve); }
+  authorize(intent: AuthorizationIntent, approve: OperatorApproval) { return this.store.authorize(intent, approve, this.capabilities); }
   closeRollback(approve: StageApproval) { return this.store.closeRollback(approve); }
   revoke(token: string) { return this.store.revoke(token); }
+  /** Serialize host shutdown with its effect scopes. This closes controller
+   * references only; it neither transfers ownership nor settles pending work. */
+  releaseControllerFences() {
+    return this.store.exclusive(async tx => { tx.assertCurrent(); this.fences.close(); });
+  }
+  /** Observation-only recovery after host custody loss. This cannot obtain a
+   * carrier descriptor or an effect permit and does not substitute exclusion
+   * for the existing exact-owned/absence recovery evidence. */
+  async recoverReceipt(owner: HandoffOwner, role: HandoffRole, generation: number, id: string, authorization: string) {
+    requireRole(role);
+    return this.store.exclusive(async tx => {
+      const assertCurrent = () => {
+        tx.assertCurrent(); selectedProfile(tx, role, this.capabilities);
+        const state = tx.state.roles[role];
+        if (state.owner !== owner || state.generation !== generation || !["active", "draining"].includes(state.phase)) refuse("ownership_changed");
+      };
+      assertCurrent(); await readiness(tx, role, owner, this.inspector, this.capabilities); assertCurrent();
+      await recoverMutation(tx, role, owner, generation, id, authorization, this.inspector, assertCurrent);
+    });
+  }
+  /** Reopen after lost controller custody only with the complete exclusion
+   * proof, not a free lock alone. No pending mutation can be bypassed. */
+  async acquireLifetimeFence(owner: HandoffOwner, role: HandoffRole, generation: number) {
+    requireRole(role);
+    return this.store.exclusive(async tx => {
+      const state = tx.state.roles[role], profile = selectedProfile(tx, role, this.capabilities);
+      if (!profile) refuse("effect_exclusion_not_selected");
+      if (state.owner !== owner || state.generation !== generation || !["active", "draining"].includes(state.phase)) refuse("ownership_changed");
+      await readiness(tx, role, owner, this.inspector, this.capabilities); noPending(tx, role, generation);
+      const fd = this.fences.acquire(tx, role);
+      try {
+        const proof = await certifyEffectExclusion(tx, role, fd, profile, this.inspector);
+        this.fences.retain(role, fd, owner, generation); return proof;
+      } catch (error) { closeSync(fd); throw error; }
+    });
+  }
+  async releaseLifetimeFence(owner: HandoffOwner, role: HandoffRole, generation: number) {
+    requireRole(role);
+    return this.store.exclusive(async tx => {
+      const state = tx.state.roles[role];
+      if (!selectedProfile(tx, role, this.capabilities) || state.owner !== owner || state.generation !== generation || state.phase !== "draining") refuse("role_not_draining");
+      noPending(tx, role, generation); this.fences.release(tx, role);
+    });
+  }
+  private async commitOwner(tx: CustodyTransaction, role: HandoffRole, next: Ownership, commit: () => void, initialAbsenceVerified = false) {
+    const profile = selectedProfile(tx, role, this.capabilities);
+    if (!profile) {
+      if (!initialAbsenceVerified) {
+        const proof = await this.inspector.observe(role); tx.assertCurrent();
+        if (!absent(proof)) refuse("absence_unproven");
+      }
+      tx.state.roles[role] = next; commit(); tx.persist(); return;
+    }
+    const fd = this.fences.acquire(tx, role);
+    try {
+      const proof = await certifyEffectExclusion(tx, role, fd, profile, this.inspector);
+      if (!next.owner) refuse("ownership_changed");
+      tx.state.roles[role] = { ...next, proofProfile: profileSelection(profile) }; commit(); tx.persist();
+      this.fences.retain(role, fd, next.owner, next.generation); return proof;
+    } catch (error) { closeSync(fd); throw error; }
+  }
   async activate(role: HandoffRole, authorization: string, desired: "running" | "stopped") {
     requireRole(role);
     if (!["running", "stopped"].includes(desired)) refuse("invalid_desired_state");
     return this.store.exclusive(async tx => {
+      selectedProfile(tx, role, this.capabilities);
       if (completedTransition(tx, authorization, role, "enroll")) {
         if (tx.state.authorizations[authorizationHash(authorization)]!.intent.desired !== desired) refuse("request_id_conflict");
         return;
@@ -107,16 +211,16 @@ export class SupervisionHandoff {
       const owner = tx.state.roles[role], consent = grant(tx, authorization, role, "enroll");
       if (consent.intent.desired !== desired) refuse("invalid_authorization");
       if (owner.owner !== null || owner.phase !== "staged" || consent.intent.target !== "R0") refuse("ownership_changed");
-      await readiness(tx, role, "R0", this.inspector);
+      await readiness(tx, role, "R0", this.inspector, this.capabilities);
       const proof = await this.inspector.observe(role); tx.assertCurrent();
       if (!absent(proof)) refuse("absence_unproven");
-      tx.state.roles[role] = { owner: "R0", generation: 1, phase: "active", desired };
-      consent.state = "used"; tx.persist();
+      return this.commitOwner(tx, role, { owner: "R0", generation: 1, phase: "active", desired }, () => { consent.state = "used"; }, true);
     });
   }
   async drain(role: HandoffRole, authorization: string) {
     requireRole(role);
     return this.store.exclusive(async tx => {
+      selectedProfile(tx, role, this.capabilities);
       if (completedTransition(tx, authorization, role, "handoff")) return;
       const owner = tx.state.roles[role], consent = grant(tx, authorization, role, "handoff", true);
       if (!owner.owner || consent.intent.target === owner.owner || !["active", "draining"].includes(owner.phase)) refuse("ownership_changed");
@@ -124,7 +228,7 @@ export class SupervisionHandoff {
         if (owner.transition?.authorization !== authorizationHash(authorization)) refuse("ownership_changed");
         return;
       }
-      await readiness(tx, role, consent.intent.target, this.inspector);
+      await readiness(tx, role, consent.intent.target, this.inspector, this.capabilities);
       noPending(tx, role, owner.generation);
       owner.phase = "draining"; owner.transition = { authorization: authorizationHash(authorization), target: consent.intent.target };
       consent.state = "reserved"; tx.persist(); // All old-owner restart gates must read this before an effect.
@@ -133,33 +237,31 @@ export class SupervisionHandoff {
   async transfer(role: HandoffRole, authorization: string) {
     requireRole(role);
     return this.store.exclusive(async tx => {
+      selectedProfile(tx, role, this.capabilities);
       if (completedTransition(tx, authorization, role, "handoff")) return;
       const owner = tx.state.roles[role], consent = grant(tx, authorization, role, "handoff", true);
       if (owner.phase !== "draining" || owner.transition?.authorization !== authorizationHash(authorization)) refuse("ownership_changed");
-      await readiness(tx, role, consent.intent.target, this.inspector);
+      await readiness(tx, role, consent.intent.target, this.inspector, this.capabilities);
       noPending(tx, role, owner.generation);
-      const proof = await this.inspector.observe(role); tx.assertCurrent();
-      if (!absent(proof)) refuse("absence_unproven");
       if (owner.generation === Number.MAX_SAFE_INTEGER) refuse("generation_exhausted");
-      tx.state.roles[role] = { owner: consent.intent.target, generation: owner.generation + 1, phase: "active", desired: owner.desired };
-      consent.state = "used"; tx.persist(); // Commit authority, not an instruction to spawn.
+      return this.commitOwner(tx, role, { owner: consent.intent.target, generation: owner.generation + 1, phase: "active", desired: owner.desired }, () => { consent.state = "used"; });
     });
   }
   async resume(role: HandoffRole, authorization: string) {
     requireRole(role);
     return this.store.exclusive(async tx => {
+      selectedProfile(tx, role, this.capabilities);
       if (completedTransition(tx, authorization, role, "resume")) return;
       const owner = tx.state.roles[role], consent = grant(tx, authorization, role, "resume");
       if (owner.phase !== "draining" || owner.owner !== consent.intent.target) refuse("ownership_changed");
-      await readiness(tx, role, consent.intent.target, this.inspector);
+      await readiness(tx, role, consent.intent.target, this.inspector, this.capabilities);
       noPending(tx, role, owner.generation);
-      const proof = await this.inspector.observe(role); tx.assertCurrent();
-      if (!absent(proof)) refuse("absence_unproven");
       if (owner.generation === Number.MAX_SAFE_INTEGER) refuse("generation_exhausted");
-      const old = owner.transition && tx.state.authorizations[owner.transition.authorization];
-      if (old) old.state = "revoked";
-      tx.state.roles[role] = { owner: owner.owner, generation: owner.generation + 1, phase: "active", desired: owner.desired };
-      consent.state = "used"; tx.persist();
+      return this.commitOwner(tx, role, { owner: owner.owner, generation: owner.generation + 1, phase: "active", desired: owner.desired }, () => {
+        const old = owner.transition && tx.state.authorizations[owner.transition.authorization];
+        if (old) old.state = "revoked";
+        consent.state = "used";
+      });
     });
   }
   async exclusive<T>(owner: HandoffOwner, role: HandoffRole, generation: number, run: (lease: RoleCustody) => Promise<T>): Promise<T> {
@@ -169,10 +271,11 @@ export class SupervisionHandoff {
       const assertCurrent = (kind?: "start" | "stop") => {
         tx.assertCurrent();
         if (state.owner !== owner || state.generation !== generation || !["active", "draining"].includes(state.phase)) refuse("ownership_changed");
+        if (selectedProfile(tx, role, this.capabilities)) this.fences.assertCurrent(tx, role);
         if (kind === "start" && (state.phase !== "active" || state.desired !== "running")) refuse("role_draining_or_stopped");
       };
       assertCurrent();
-      await readiness(tx, role, owner, this.inspector);
+      await readiness(tx, role, owner, this.inspector, this.capabilities);
       assertCurrent();
       const key = (id: string) => {
         if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) refuse("invalid_request_id");
@@ -180,6 +283,10 @@ export class SupervisionHandoff {
       };
       const receipt = (id: string) => tx.state.receipts[key(id)];
       const lease: RoleCustody = {
+        carrierDescriptor: () => { assertCurrent("start");
+          if (!selectedProfile(tx, role, this.capabilities)) refuse("effect_exclusion_not_selected");
+          return this.fences.assertCurrent(tx, role);
+        },
         childCoverage: () => { assertCurrent(); return currentChildCoverage(tx, role); },
         recordChildExit: async effectId => {
           assertCurrent();
@@ -277,25 +384,7 @@ export class SupervisionHandoff {
           if (error && !/^[A-Za-z0-9_]{1,64}$/.test(error)) refuse("invalid_error_code");
           current.state = "done"; if (error) current.error = error; tx.persist();
         },
-        recover: async (id, authorization) => {
-          assertCurrent(); const consent = grant(tx, authorization, role, "recover");
-          if (consent.intent.target !== owner || consent.intent.requestId !== id) refuse("invalid_authorization");
-          const current = receipt(id); if (!current || current.state !== "pending") refuse("pending_receipt_required");
-          if (current.effects.length && current.effects.every(effect => effect.state === "confirmed")) {
-            current.state = "done"; consent.state = "used"; tx.persist(); return;
-          }
-          const proof = await this.inspector.observe(role); assertCurrent();
-          const pending = current.effects.find(effect => effect.state === "intent");
-          if (pending && pending.kind === "start" && proof.state === "owned") {
-            exact(proof.child, tx, role, generation, pending.id);
-            if (pending.directChild && !sameChild(pending.directChild.child, proof.child)) refuse("identity_unproven");
-            pending.child = structuredClone(proof.child); pending.state = "confirmed";
-          } else if (absent(proof)) {
-            if (pending) pending.state = "confirmed";
-            if (current.operation !== "stop") current.error = "recovered_absent";
-          } else refuse("outcome_uncertain");
-          current.state = "done"; consent.state = "used"; tx.persist(); // Never repeat the effect.
-        },
+        recover: (id, authorization) => recoverMutation(tx, role, owner, generation, id, authorization, this.inspector, assertCurrent),
       };
       return run(lease);
     });
@@ -309,3 +398,6 @@ export { LEGACY_ROLE_SURFACES, type LegacyResource, type LegacyRoleCapture, type
 export { directChildCapability, type DirectChildCommand, type DirectChildRecord, type CurrentChildCoverage } from "./child-custody.js";
 
 export type { ChildSignalResult } from "./retained-child.js";
+export { ChildRoleCustody } from "./lifetime-fence.js";
+export { EFFECT_EXCLUSION_CAPABILITY, profileHash, type EffectExclusionProfile, type ProfileSelection,
+  type FenceIdentity, type ExclusionContext, type ExclusionEvidence, type RoleEffectExclusion, type SurvivingNonOwner } from "./exclusion-contracts.js";

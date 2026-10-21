@@ -1,4 +1,5 @@
 import type { LegacyRoleCapture } from "./role-absence.js";
+import { EFFECT_EXCLUSION_CAPABILITY, validateProfile, type FenceIdentity } from "./exclusion-contracts.js";
 import type { Pointer } from "bun:ffi";
 import { createRequire } from "node:module";
 import { createHash, randomBytes } from "node:crypto";
@@ -9,10 +10,11 @@ import { HANDOFF_CAPABILITY, HANDOFF_PROTOCOL, HANDOFF_ROLES, requireRole, refus
   type AuthorizationIntent, type FloorPolicy, type HandoffRole, type Ownership, type MutationReceipt,
   type OperatorApproval, type PendingReceipt, type StageApproval, type SelectedInstance } from "./contracts.js";
 
-export type CustodyState = { version: 1; instance: SelectedInstance; policy: FloorPolicy;
+export type CustodyState = { version: 1 | 2; instance: SelectedInstance; policy: FloorPolicy;
   roles: Record<HandoffRole, Ownership>;
   authorizations: Record<string, { intent: AuthorizationIntent; state: "issued" | "reserved" | "used" | "revoked"; policy: string }>;
-  receipts: Record<string, MutationReceipt>; legacyCaptures?: Record<string, { manifest: LegacyRoleCapture; authorization: string }> };
+  receipts: Record<string, MutationReceipt>; legacyCaptures?: Record<string, { manifest: LegacyRoleCapture; authorization: string }>;
+  lifetimeFences?: Partial<Record<HandoffRole, FenceIdentity>> };
 const MAX_BYTES = 16 * 1024 * 1024;
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value, (_key, item) =>
   item && typeof item === "object" && !Array.isArray(item)
@@ -64,11 +66,11 @@ export function acquireOwnershipLock(fd: number) {
   if (native.flock(fd, 2 | 4) !== 0) refuse(ownershipLockFailure(native.errno())); // LOCK_EX | LOCK_NB; no TTL/PID stealing.
 }
 function unlock(fd: number) { native!.flock(fd, 8); }
-function fileIdentity(pathOrFd: string | number) {
+export function fileIdentity(pathOrFd: string | number) {
   const stat = typeof pathOrFd === "number" ? fstatSync(pathOrFd, { bigint: true }) : lstatSync(pathOrFd, { bigint: true });
   return { dev: stat.dev.toString(), ino: stat.ino.toString() };
 }
-function owned(path: string, directory: boolean, uid: number) {
+export function owned(path: string, directory: boolean, uid: number) {
   const info = lstatSync(path);
   if (info.isSymbolicLink() || (directory ? !info.isDirectory() : !info.isFile()) || info.uid !== uid
     || (info.mode & 0o7777) !== (directory ? 0o700 : 0o600) || (!directory && info.nlink !== 1)) refuse("unsafe_ownership_path");
@@ -86,6 +88,11 @@ function policyValid(policy: FloorPolicy) {
     || !policy.runtimeArtifacts.length || !policy.launcherArtifacts.length
     || ![...policy.runtimeArtifacts, ...policy.launcherArtifacts, ...policy.rollbackArtifacts].every(v => typeof v === "string" && !!v.trim())
     || typeof policy.rollbackOpen !== "boolean") refuse("invalid_floor_policy");
+  if (policy.effectProfiles !== undefined) {
+    if (!policy.effectProfiles || typeof policy.effectProfiles !== "object" || Array.isArray(policy.effectProfiles)
+      || Object.keys(policy.effectProfiles).some(role => !HANDOFF_ROLES.includes(role as HandoffRole))) refuse("invalid_exclusion_profile");
+    for (const profile of Object.values(policy.effectProfiles)) validateProfile(profile!);
+  }
 }
 /** Same stable inode for OS lock and append-only authority journal. Never
  * rename/unlink/recreate it; no canonical broker DB or process lifecycle IO. */
@@ -111,9 +118,18 @@ export class HandoffStore {
         if (writeSync(anchor, bytes) !== bytes.length) refuse("ownership_store_write_failed");
         fsyncSync(anchor);
       } finally { closeSync(anchor); }
-      const state: CustodyState = { version: 1, instance: this.instance, policy: structuredClone(policy),
+      // Older SDKs ignore unknown policy fields. Version 2 makes them refuse
+      // this store structurally instead of silently reverting to Absence.
+      const state: CustodyState = { version: Object.keys(policy.effectProfiles ?? {}).length ? 2 : 1, instance: this.instance, policy: structuredClone(policy),
         roles: Object.fromEntries(HANDOFF_ROLES.map(role => [role, { owner: null, generation: 0, phase: "staged", desired: "stopped" }])) as CustodyState["roles"],
         authorizations: {}, receipts: {} };
+      // Preparation only, under the ledger mutex. No role is enrolled and no
+      // lifetime lock is held. Re-preparation never replaces an existing inode.
+      for (const role of HANDOFF_ROLES) if (policy.effectProfiles?.[role]) {
+        const fence = openSync(join(this.directory, `lifetime-${role}.lock`), constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | constants.O_NOFOLLOW, 0o600);
+        try { fsyncSync(fence); (state.lifetimeFences ??= {})[role] = fileIdentity(fence); }
+        finally { closeSync(fence); }
+      }
       new CustodyTransaction(this, fd, state, 0, "").persist();
       const dir = openSync(this.directory, "r"); try { fsyncSync(dir); } finally { closeSync(dir); }
     } finally { closeSync(fd); }
@@ -163,9 +179,10 @@ export class HandoffStore {
       reason: "r0_effect_integration_unavailable",
       instance: structuredClone(this.instance), floor: structuredClone(tx.state.policy), roles: structuredClone(tx.state.roles) }));
   }
-  async authorize(intent: AuthorizationIntent, approve: OperatorApproval): Promise<string> {
+  async authorize(intent: AuthorizationIntent, approve: OperatorApproval, capabilities: readonly string[] = []): Promise<string> {
     intent = structuredClone(intent); requireRole(intent.role);
     const snapshot = await this.exclusive(async tx => structuredClone(tx.state.policy));
+    if (snapshot.effectProfiles?.[intent.role] && !capabilities.includes(EFFECT_EXCLUSION_CAPABILITY)) refuse("proof_capability_required");
     if (!await approve(this.instance, snapshot, structuredClone(intent))) refuse("operator_authorization_required");
     return this.exclusive(async tx => {
       if (digest(snapshot) !== digest(tx.state.policy)) refuse("policy_changed");
@@ -197,12 +214,15 @@ function readJournal(fd: number): { state: CustodyState; sequence: number; hash:
   if (fstatSync(fd).size > MAX_BYTES) refuse("ownership_store_capacity");
   const text = readFileSync(fd, "utf8");
   if (!text || !text.endsWith("\n")) refuse("ownership_store_corrupt");
-  let previous = ""; let sequence = 0; let state!: CustodyState;
+  let previous = ""; let sequence = 0; let state!: CustodyState; let version: number | undefined;
   try {
     for (const line of text.trimEnd().split("\n")) {
       const record = JSON.parse(line);
       if (record.sequence !== sequence + 1 || record.previous !== previous
-        || record.hash !== digest([record.sequence, record.previous, record.state]) || record.state.version !== 1) refuse("ownership_store_corrupt");
+        || record.hash !== digest([record.sequence, record.previous, record.state]) || ![1, 2].includes(record.state.version)
+        || (version !== undefined && record.state.version !== version)
+        || record.state.version !== (Object.keys(record.state.policy?.effectProfiles ?? {}).length ? 2 : 1)) refuse("ownership_store_corrupt");
+      version = record.state.version; // No in-place upgrade or downgrade of this journal.
       previous = record.hash; sequence++; state = record.state; policyValid(state.policy);
       for (const role of HANDOFF_ROLES) {
         const value = state.roles[role];
