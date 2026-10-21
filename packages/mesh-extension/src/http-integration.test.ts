@@ -1,11 +1,18 @@
 import { expect, test } from 'bun:test';
+import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { createBrokerDaemonTestHarness } from '../../runtime/src/test-helpers/broker-daemon-harness.test.ts';
 import { RuntimeHttpClient } from './http-client.ts';
 import { CoreHttpAdapter } from './core-http-mcp.ts';
 import { localAdminProof } from './local-admin-proof.ts';
 const broker = createBrokerDaemonTestHarness();
 test('core HTTP adapter reaches a protected isolated broker and records real operator/work/reply mutations', async()=>{
-  const h = await broker.startBroker({protectedLocal:true});
+  const controlHome=mkdtempSync(join(tmpdir(),'mesh-http-fixture-'));
+  const preload=join(controlHome,'version-preload.ts'), versionFile=join(controlHome,'child-version');
+  writeFileSync(preload,`import { writeFileSync } from 'node:fs';writeFileSync(${JSON.stringify(versionFile)},Bun.version);`);
+  const h = await broker.startBroker({protectedLocal:true,controlHome,preload,startupTimeoutMs:15_000});
+  expect(readFileSync(versionFile,'utf8')).toBe(Bun.version);
   const bare = new RuntimeHttpClient({brokerUrl:h.baseUrl});
   const card = await bare.request('/v1/node');
   const client = new RuntimeHttpClient({brokerUrl:h.baseUrl,proof:localAdminProof(h.localAdminKey!,card.card.keyId)});
@@ -33,4 +40,4 @@ test('core HTTP adapter reaches a protected isolated broker and records real ope
   expect(updated.workItem.state).toBe('working');
   const events = await client.request('/v1/collaboration/events?recordId=test-work');
   expect(events.some((e:any)=>e.kind==='claimed' && e.actorId===p.agentId)).toBe(true);
-}, 20_000);
+}, 30_000);

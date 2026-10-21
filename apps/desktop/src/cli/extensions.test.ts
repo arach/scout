@@ -146,17 +146,26 @@ process.exitCode = await runScoutExtension(extension, [], process.env);`);
     const scout = spawn(process.execPath, [runner], { stdio: "ignore" });
     const exited = new Promise<number | null>((resolveExit) => scout.once("exit", (code) => resolveExit(code)));
     let childPid = 0;
-    for (let i = 0; i < 100 && !childPid; i += 1) {
-      await Bun.sleep(50);
-      try { childPid = Number(readFileSync(pidFile, "utf8").trim()); } catch { /* not started yet */ }
+    try {
+      // Source cold starts can exceed five seconds on a memory-constrained
+      // shared host. Readiness is explicit; the whole fixture is still bounded.
+      const deadline = Date.now() + 15_000;
+      while (!childPid && Date.now() < deadline) {
+        if (scout.exitCode !== null) throw new Error("fixture runner exited before child readiness");
+        await Bun.sleep(50);
+        try { childPid = Number(readFileSync(pidFile, "utf8").trim()); } catch { /* not started yet */ }
+      }
+      expect(childPid).toBeGreaterThan(0);
+      scout.kill("SIGTERM");
+      expect(await exited).toBe(143);
+      const alive = (() => { try { process.kill(childPid, 0); return true; } catch { return false; } })();
+      expect(alive).toBe(false);
+    } finally {
+      // A failed readiness assertion must not leave a fixture child behind.
+      if (scout.exitCode === null) scout.kill("SIGKILL");
+      if (childPid) try { process.kill(childPid, "SIGKILL"); } catch { /* already exited */ }
     }
-    expect(childPid).toBeGreaterThan(0);
-    scout.kill("SIGTERM");
-    expect(await exited).toBe(143);
-    const alive = (() => { try { process.kill(childPid, 0); return true; } catch { return false; } })();
-    if (alive) process.kill(childPid, "SIGKILL");
-    expect(alive).toBe(false);
-  }, 15_000);
+  }, 30_000);
 
 
   test("strict path components must belong to the current user or root", () => {
