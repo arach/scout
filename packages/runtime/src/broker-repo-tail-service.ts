@@ -1,3 +1,4 @@
+import { tailEventMatches, type TailRecentFilter } from "./tail/recent-filter.js";
 import { performance } from "node:perf_hooks";
 
 import type {
@@ -74,6 +75,20 @@ export type BrokerRepoTailServiceOptions<TBrokerSnapshot> = {
   warn?: (message: string) => void;
   now?: () => number;
 };
+
+export function parseTailRecentFilters(url: URL): TailRecentFilter {
+  const lists = Object.fromEntries(["sources", "kinds"].map(key => {
+    const values = url.searchParams.getAll(key);
+    if (values.length > 64 || values.some(value => value.length > 512)) throw new Error("invalid tail filters");
+    return [key, values];
+  }));
+  const text = Object.fromEntries(["sessionId", "project", "cwd", "query"].map(key => {
+    const value = url.searchParams.get(key) ?? undefined;
+    if (value && value.length > 2048) throw new Error("invalid tail filters");
+    return [key, value];
+  }));
+  return { ...lists, ...text };
+}
 
 export function parseTailLimit(url: URL): number {
   const limit = Number.parseInt(url.searchParams.get("limit") ?? "500", 10);
@@ -285,7 +300,7 @@ export class BrokerRepoTailService<TBrokerSnapshot> {
 
   async readTailRecentPayloadWithTiming(url: URL): Promise<TimedTailRecentPayload> {
     const cacheTtlMs = this.options.tailRecentServeCacheTtlMs ?? 0;
-    const cacheKey = `${parseTailLimit(url)}:${url.searchParams.get("transcripts") === "true"
+    const cacheKey = `${JSON.stringify(parseTailRecentFilters(url))}:${parseTailLimit(url)}:${url.searchParams.get("transcripts") === "true"
       || url.searchParams.get("transcripts") === "1"}:${isAssistantRepliesMode(url) ? TAIL_RECENT_ASSISTANT_REPLIES_MODE : "all"}:${parsePositiveIntParam(url, "windowMs", MAX_TAIL_RECENT_WINDOW_MS) ?? "all"}:${JSON.stringify(url.searchParams.get("sessionId")?.trim() || null)}`;
     const now = this.now();
     if (cacheTtlMs > 0 && this.tailRecentCache?.key === cacheKey && this.tailRecentCache.expiresAtMs > now) {
@@ -336,6 +351,7 @@ export class BrokerRepoTailService<TBrokerSnapshot> {
         timings.push({ name, dur: performance.now() - start });
       }
     };
+    const filters = parseTailRecentFilters(url);
     const limit = parseTailLimit(url);
     const assistantRepliesOnly = isAssistantRepliesMode(url);
     const kinds: TailEventKind[] | undefined = assistantRepliesOnly ? ["assistant"] : undefined;
@@ -350,7 +366,7 @@ export class BrokerRepoTailService<TBrokerSnapshot> {
       const session = await measure("tail-session", () =>
         (this.options.readTailEventsForSession ?? readTailEventsForSession)(sessionId, { limit, includeAllSources: true }));
       const scoped = filterTailEventsForDisplay(session?.events ?? [])
-        .filter((event) => event.sessionId === sessionId && (since === undefined || event.ts >= since));
+        .filter((event) => event.sessionId === sessionId && (since === undefined || event.ts >= since) && tailEventMatches(event, filters));
       const events = (assistantRepliesOnly ? latestAssistantReplies(scoped) : scoped)
         .sort((left, right) => left.ts - right.ts || left.id.localeCompare(right.id))
         .slice(-limit);
@@ -407,7 +423,7 @@ export class BrokerRepoTailService<TBrokerSnapshot> {
       ? latestAssistantReplies(eventsById.values())
       : [...eventsById.values()];
     const events = candidates
-      .filter((event) => since === undefined || event.ts >= since)
+      .filter((event) => (since === undefined || event.ts >= since) && tailEventMatches(event, filters))
       .sort((left, right) => {
         if (left.ts === right.ts) return left.id.localeCompare(right.id);
         return left.ts - right.ts;

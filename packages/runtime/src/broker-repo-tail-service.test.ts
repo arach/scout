@@ -512,3 +512,19 @@ describe("BrokerRepoTailService tail/recent serve-cache", () => {
     expect(harness.transcriptCallCount).toBe(2);
   });
 });
+
+test("HTTP tail filters share tRPC matching semantics and separate cached results", async () => {
+  const liveEvents = [tailEvent({ id: "one", ts: 1, source: "codex", project: "PROJECT", cwd: "/repo", summary: "Hello World" }),
+    tailEvent({ id: "two", ts: 2, source: "claude", kind: "tool", summary: "Different" })];
+  const h = createHarness({ liveEvents, tailRecentServeCacheTtlMs: 10_000 });
+  const first = await h.service.readTailRecentPayload(new URL("http://test/v1/tail/recent?sources=CODEX&kinds=assistant&project=project&cwd=REPO&query=hello"));
+  expect(first.events.map(e => e.id)).toEqual(["one"]);
+  const second = await h.service.readTailRecentPayload(new URL("http://test/v1/tail/recent?sources=claude&kinds=tool"));
+  expect(second.events.map(e => e.id)).toEqual(["two"]);
+});
+
+test("HTTP named-session tail also applies the remaining filters", async () => {
+  const h = createHarness({ sessionEvents: [tailEvent({ id: "one", ts: 1 }), tailEvent({ id: "two", ts: 2, source: "claude" })] });
+  const payload = await h.service.readTailRecentPayload(new URL("http://test/v1/tail/recent?sessionId=session-1&sources=claude"));
+  expect(payload.events.map(e => e.id)).toEqual(["two"]);
+});
