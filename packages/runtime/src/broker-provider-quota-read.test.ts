@@ -46,7 +46,7 @@ class Response extends EventEmitter {
 }
 test("router is machine-local, refuses remote/scoped/guest, and has no refresh IO", async () => {
   let reads = 0;
-  const route = createBrokerHttpRouter({ host: "local", port: 1, nodeId: "node-1", runtime: { snapshot: () => { reads++; return { endpoints: {} }; } },
+  const route = createBrokerHttpRouter({ host: "local", port: 1, nodeId: "node-1", runtime: { peek: () => { reads++; return { endpoints: {} }; }, snapshot: () => { throw new Error("quota read must not detach/message-scan the registry"); } },
     webControl: new Proxy({}, { get() { throw new Error("no web access"); } }),
   } as unknown as BrokerHttpRouterDeps);
   for (const transportContext of [undefined, { transport: "remote" }, { transport: "local", scoped: {} }, { transport: "local", guest: {} }]) {
@@ -58,4 +58,14 @@ test("router is machine-local, refuses remote/scoped/guest, and has no refresh I
   expect(reads).toBe(1);
   const tier = meshRouteTierFor("GET", "/v1/provider-quotas"); expect(tier).toBe("local");
   expect(grantSatisfiesRouteTier("observe", tier)).toBe(false); expect(grantSatisfiesRouteTier("control", tier)).toBe(false);
+});
+
+test("missing endpoint metadata reader is unavailable, never an empty success or a snapshot scan", async () => {
+  const route = createBrokerHttpRouter({ host: "local", port: 1, nodeId: "node-1",
+    runtime: { snapshot: () => { throw new Error("must not scan snapshot"); } },
+  } as unknown as BrokerHttpRouterDeps);
+  const response = new Response();
+  await route({ method: "GET", url: "/v1/provider-quotas", headers: {} } as any, response as any);
+  expect(response.status).toBe(503);
+  expect(JSON.parse(response.body)).toEqual({ error: "provider_quotas_unavailable" });
 });

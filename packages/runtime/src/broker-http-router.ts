@@ -2036,7 +2036,8 @@ export function createBrokerHttpRouter(
     if (request.transportContext?.transport === "remote" || request.transportContext?.guest) {
       json(response, 403, { error: "forbidden" }); return;
     }
-    try { json(response, 200, readProviderQuotas(runtime.snapshot().endpoints, nodeId, url)); }
+    if (!runtime.peek) { json(response, 503, { error: "provider_quotas_unavailable" }); return; }
+    try { json(response, 200, readProviderQuotas(runtime.peek().endpoints, nodeId, url)); }
     catch (error) { json(response, error instanceof TypeError ? 400 : 503, { error: error instanceof TypeError ? "invalid_quota_query" : "provider_quotas_unavailable" }); }
     return;
   }
