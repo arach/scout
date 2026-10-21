@@ -51,8 +51,10 @@ outcome. `scout doctor` remains optional later troubleshooting.
 
 ## Worktree and observed-session reads
 
-`diff` and `session touched` read the selected runtime broker, not the local web
-app. They do not bootstrap browser cookies or start an app.
+`diff` and `session touched` use runtime read handlers instead of the local web
+API. These handlers do not bootstrap browser cookies or start an app. Existing
+CLI-wide broker maintenance is unchanged; this is not yet a cold-start or
+app-absence guarantee.
 
 ```bash
 scout diff worktree . --file src/main.ts --json

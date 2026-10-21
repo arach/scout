@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import type { ObservedSessionMaterials } from "@openscout/protocol";
 import { createScoutCommandContext } from "./context.ts";
+import { parseScoutArgv } from "./argv.ts";
 import { parseObservedSessionSelector, readScoutRuntimeJson } from "./runtime-read.ts";
 import { runDiffCommand } from "./commands/diff.ts";
 import { runSessionCommand } from "./commands/session.ts";
@@ -38,6 +39,8 @@ describe("runtime read consumers without web", () => {
   });
   test("requires an exact tuple and preserves opaque case-sensitive ids", () => {
     expect(parseObservedSessionSelector(tuple)).toEqual(identity);
+    expect(parseScoutArgv(["session", "touched", ...tuple, "--json"])).toMatchObject({ command: "session", args: ["touched", ...tuple], outputMode: "json" });
+    expect(parseScoutArgv(["diff", "session", ...tuple])).toMatchObject({ command: "diff", args: ["session", ...tuple] });
     for (const args of [["ref"], ["ref", "--node", "node"], [...tuple, "extra"], [...tuple, "--node", "again"], [...tuple, "--harness", "claude"], ["x", "--node", "n", "--harness", "unknown"], [...tuple, "--typo"]]) expect(() => parseObservedSessionSelector(args)).toThrow();
   });
   test("worktree diff uses only the public route and retains file/raw/JSON modes", async () => {
