@@ -1006,5 +1006,12 @@
     "category": "test",
     "reason": "validates the owned no-op bridge fixture before its unchanged endpoint startup deadline and waits for its exit",
     "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/mesh-bridge-extension.test.ts",
+    "symbol": "Bun.spawn",
+    "category": "test",
+    "reason": "isolated test fixtures build the portable JS artifact and execute installed --help; never start Scout runtime, relay or services",
+    "owner": "runtime"
   }
 ]

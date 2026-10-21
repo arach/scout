@@ -33,3 +33,43 @@ belong in the artifact.
 
 Built-ins still win. Installing `mesh` does **not** flip `scout mesh`, and does
 not pre-install anything in the native app. That cutover is a later step.
+
+## Runtime-owned mesh bridge
+
+The runtime's existing scout-base supervisor selects an installed `mesh`
+extension with the same discovery and trust rules as the CLI loader. It launches
+that executable directly as one child: `scout-mesh bridge --config <owned-file>`.
+It does not launch a second supervisor or use `scout mesh bridge` as a wrapper.
+The foreground built-in verb remains registered until the later flip.
+
+A missing installation is **absent**. Absence retains the legacy source/global
+bridge during this transition. An unsafe, invalid or removed installation is
+**refused**. Refusal stops the prior bridge and backs off, with no older-root or
+built-in fallback. Repairing the installation lifts the refusal. Installer
+removal leaves a disabled marker, so removal is not mistaken for absence.
+
+Reconciliation includes the manifest/executable digest, bounded configuration
+content digest and configuration mtime. An artifact update or configuration
+change stops and awaits the old child before launch. The runtime checks again
+before spawning so a configuration changed during descriptor preparation cannot
+launch a stale generation. Exit 78 receives the existing five-minute cooldown;
+changed configuration or artifact content lifts it. Stable processes reset crash
+backoff. Refusal, absence and installed selection are distinct redacted observed
+states with timestamps; observations are not relay-authentication assertions.
+
+The fixed `runtime/mesh-bridge.launch.json` file is written atomically with mode
+0600. It supplies the loopback broker origin, fixed working directory, explicit
+credential references (or the write-only configured token), direct parent PID
+and MCP Events opt-in. The extension receives no ambient Scout secrets. User
+local-admin proof is opt-in through the base process's explicit key-file setting;
+only a reference and the public node-card destination ID enter the descriptor.
+The runtime never gives its machine private key to an extension. Credential
+values are not included in status responses or lifecycle logs.
+
+The extension checks its actual parent PID, handles SIGTERM/SIGINT/SIGHUP and
+uses a bounded shutdown budget. Scout-base retains its legacy launchd exclusion
+and recorded-process fencing. Fencing rechecks the exact process incarnation
+before signals, confirms exit and refuses a second process if exit cannot be
+confirmed. All tests use fixtures; this change does not install, start or restart
+an operator bridge. App pre-install, OAuth connect UX and the built-in-verb flip
+remain separate work.

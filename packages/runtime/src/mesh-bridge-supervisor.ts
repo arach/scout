@@ -3,6 +3,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
+import { readMeshBridgeConfigSnapshot } from "./mesh-bridge-extension.js";
 import { isMeshBridgeCommand } from "./scout-bridge-command.js";
 
 /**
@@ -27,7 +28,7 @@ export function legacyMeshBridgeLaunchAgentPath(home = homedir()): string {
 }
 
 export type MeshBridgeDesiredState =
-  | { run: true; configPath: string; configMtimeMs: number }
+  | { run: true; configPath: string; configMtimeMs: number; configDigest: string }
   | { run: false; reason: "disabled-by-env" | "no-config" | "disabled-in-config" | "invalid-config" | "legacy-launch-agent" };
 
 export function resolveMeshBridgeDesiredState(input: {
@@ -43,10 +44,13 @@ export function resolveMeshBridgeDesiredState(input: {
     return { run: false, reason: "no-config" };
   }
   let configMtimeMs: number;
+  let configDigest: string;
   let parsed: unknown;
   try {
-    configMtimeMs = statSync(configPath).mtimeMs;
-    parsed = JSON.parse(readFileSync(configPath, "utf8"));
+    const snapshot = readMeshBridgeConfigSnapshot(configPath);
+    configMtimeMs = snapshot.mtimeMs;
+    configDigest = snapshot.digest;
+    parsed = snapshot.value;
   } catch {
     return { run: false, reason: "invalid-config" };
   }
@@ -58,7 +62,7 @@ export function resolveMeshBridgeDesiredState(input: {
   if (existsSync(legacyMeshBridgeLaunchAgentPath(input.home))) {
     return { run: false, reason: "legacy-launch-agent" };
   }
-  return { run: true, configPath, configMtimeMs };
+  return { run: true, configPath, configMtimeMs, configDigest };
 }
 
 export type MeshBridgeCommand = { entrypoint: string; args: string[] };
@@ -203,4 +207,27 @@ export function runLaunchctlProbe(
 
 function runLaunchctl(args: string[]): { status: number | null; output: string } {
   return runLaunchctlProbe(args);
+}
+
+/** Fence only the recorded process incarnation, and confirm exit before spawning. */
+export async function fenceRecordedMeshBridge(supportDirectory:string, options:{
+  readIdentity?:(pid:number)=>ProcessIdentity|null; signal?:(pid:number,signal:NodeJS.Signals)=>void;
+  sleep?:(ms:number)=>Promise<void>; now?:()=>number; timeoutMs?:number;
+}={}):Promise<void> {
+  const read=options.readIdentity??readProcessIdentity, now=options.now??Date.now;
+  const sleep=options.sleep??(ms=>new Promise(r=>setTimeout(r,ms)));
+  const signal=options.signal??((pid,signal)=>process.kill(pid,signal));
+  let expected:ProcessIdentity|null=null;
+  const pid=findRecordedLiveMeshBridgePid(supportDirectory,p=>{expected=read(p);return expected;});
+  if(pid===null || pid===process.pid || !expected)return;
+  const incarnation=expected as ProcessIdentity;
+  const same=()=>{const current=read(pid);return !!current&&current.startedAt===incarnation.startedAt&&current.args===incarnation.args&&isMeshBridgeCommand(current.args);};
+  const send=(kind:NodeJS.Signals)=>{if(!same())return false;try{signal(pid,kind);return true;}catch(error){if((error as NodeJS.ErrnoException).code==='ESRCH')return false;throw new Error('previous mesh bridge cannot be fenced');}};
+  if(!send('SIGTERM'))return;
+  const deadline=now()+(options.timeoutMs??6000);
+  while(same()&&now()<deadline)await sleep(100);
+  if(!same()||!send('SIGKILL'))return;
+  const killedDeadline=now()+1000;
+  while(same()&&now()<killedDeadline)await sleep(50);
+  if(same())throw new Error('previous mesh bridge has not exited');
 }

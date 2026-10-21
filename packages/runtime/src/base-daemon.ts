@@ -51,7 +51,7 @@ import {
 } from "./jetstream/index.js";
 import {
   MESH_BRIDGE_EXIT_UNCONFIGURED,
-  findRecordedLiveMeshBridgePid,
+  fenceRecordedMeshBridge,
   inspectLaunchdJob,
   legacyMeshBridgeLaunchdTarget,
   meshBridgeArgs,
@@ -65,6 +65,9 @@ import { openScoutNetworkServiceEnvironment } from "./open-scout-network.js";
 import { readTailscaleSelfWebHostsSync } from "./tailscale.js";
 import { resolveOpenScoutLocalEdgeDirectory } from "./support-paths.js";
 import { selectInstanceAwareEntrypoint } from "./instance.js";
+
+import { loadOpenScoutRuntimeBuildIdentity } from "./build-info.js";
+import { resolveMeshBridgeExtension, meshBridgeLaunchKey, meshBridgeExtensionCommand, writeMeshBridgeLaunchConfig, readMeshBridgeDestinationKeyId, type MeshBridgeExtension } from "./mesh-bridge-extension.js";
 
 const RESTART_MIN_DELAY_MS = 1_000;
 const RESTART_MAX_DELAY_MS = 30_000;
@@ -120,7 +123,9 @@ let pairingRestartDelayMs = RESTART_MIN_DELAY_MS;
 let pairingNextStartAt = 0;
 let pairingSupervisionClaimed = false;
 let meshBridgeProcess: ChildProcess | null = null;
-let meshBridgeConfigMtimeMs = 0;
+let meshBridgeRunningKey: string | null = null;
+let meshBridgeSelectionKey: string | null = null;
+let meshBridgeObservedLaunch: Record<string, unknown> = {};
 let meshBridgeRestartDelayMs = RESTART_MIN_DELAY_MS;
 let meshBridgeNextStartAt = 0;
 let meshBridgeReconcileTimer: NodeJS.Timeout | null = null;
@@ -862,41 +867,67 @@ function writeMeshBridgeState(state: Record<string, unknown>): void {
   }
 }
 
-function spawnMeshBridge(desired: Extract<MeshBridgeDesiredState, { run: true }>): void {
+async function spawnMeshBridge(desired: Extract<MeshBridgeDesiredState, { run: true }>, selected: Exclude<MeshBridgeExtension, {state: "refused"}>): Promise<void> {
   if (shuttingDown || meshBridgeProcess) return;
   const moduleDirectory = dirname(fileURLToPath(import.meta.url));
   const repoRoot = resolveOpenScoutRepoRoot({
     startDirectories: [process.env.OPENSCOUT_SETUP_CWD, process.cwd(), moduleDirectory],
   });
-  const entrypoint = resolveMeshBridgeEntrypoint({
-    repoRoot,
-    moduleDirectory,
-    serviceMode: config.mode,
-    env: process.env,
-  });
   const bun = resolveBunExecutable();
-  if (!entrypoint || !bun) {
-    warn("mesh bridge entrypoint or Bun executable could not be resolved");
-    meshBridgeNextStartAt = Date.now() + meshBridgeRestartDelayMs;
-    meshBridgeRestartDelayMs = Math.min(meshBridgeRestartDelayMs * 2, RESTART_MAX_DELAY_MS);
+  let launch: {command:string;args:string[];env:NodeJS.ProcessEnv};
+  let entrypoint: string | null = null;
+  try {
+    if (selected.state === "ready") {
+      let localAdmin: {keyFile:string;destinationKeyId:string} | undefined;
+      if (process.env.OPENSCOUT_LOCAL_ADMIN_KEY_FILE) {
+        // Public identity only. Never copy the node key or user admin-key value.
+        localAdmin = {keyFile:process.env.OPENSCOUT_LOCAL_ADMIN_KEY_FILE,
+          destinationKeyId:await readMeshBridgeDestinationKeyId(brokerControlUrl)};
+      }
+      const launchPath = writeMeshBridgeLaunchConfig({supportDirectory:config.supportDirectory,configPath:desired.configPath,
+        configDigest:desired.configDigest,brokerUrl:brokerControlUrl,parentPid:process.pid,
+        eventsEnabled:process.env.OPENSCOUT_MCP_EVENTS === "1",localAdmin});
+      launch = meshBridgeExtensionCommand({selected,configPath:launchPath,env:process.env,brokerUrl:brokerControlUrl,
+        cliVersion:loadOpenScoutRuntimeBuildIdentity().version ?? "dev",runtimeDir:dirname(bun?.path ?? process.execPath)});
+      entrypoint = launch.command;
+    } else {
+      // Absence alone retains the old bridge until app pre-install and the
+      // separate built-in mesh flip. A refused installation never reaches here.
+      entrypoint = resolveMeshBridgeEntrypoint({repoRoot,moduleDirectory,serviceMode:config.mode,env:process.env});
+      if (!entrypoint || !bun) throw new Error();
+      launch = {command:bun.path,args:meshBridgeArgs(entrypoint,desired.configPath),
+        env:{...process.env,OPENSCOUT_PARENT_PID:String(process.pid)}};
+    }
+  } catch {
+    meshBridgeNextStartAt = Date.now() + MESH_BRIDGE_UNCONFIGURED_RETRY_MS;
+    meshBridgeUnconfiguredMtimeMs = desired.configMtimeMs;
+    writeMeshBridgeState({state:"unconfigured",pid:null,reason:"launch-configuration",extensionState:selected.state});
+    warn("mesh bridge launch configuration unavailable; retrying later");
     return;
   }
-
-  const child = spawn(bun.path, meshBridgeArgs(entrypoint, desired.configPath), {
-    cwd: repoRoot ?? process.cwd(),
-    env: { ...process.env, OPENSCOUT_PARENT_PID: String(process.pid) },
+  if (shuttingDown) return;
+  // Do not launch a stale generation after preparing its descriptor.
+  const fresh = resolveMeshBridgeDesiredState({supportDirectory:config.supportDirectory,env:process.env});
+  const latest = resolveMeshBridgeExtension(process.env);
+  if (!fresh.run || meshBridgeLaunchKey(fresh,latest) !== meshBridgeLaunchKey(desired,selected)) return;
+  const child = spawn(launch.command, launch.args, {
+    cwd: selected.state === "ready" ? config.supportDirectory : repoRoot ?? process.cwd(), env:launch.env,
     stdio: ["ignore", logFile("mesh-bridge.stdout.log"), logFile("mesh-bridge.stderr.log")],
   });
+  meshBridgeRunningKey = meshBridgeLaunchKey(desired,selected);
+  meshBridgeObservedLaunch = {extensionState:selected.state,
+    ...(selected.state === "ready" ? {artifactDigest:selected.digest,extensionVersion:selected.extension.version ?? null} : {})};
   meshBridgeProcess = child;
   meshBridgeStartedAt = Date.now();
   meshBridgeUnconfiguredMtimeMs = null;
-  meshBridgeConfigMtimeMs = desired.configMtimeMs;
   meshBridgeLastIdleReason = null;
   log("mesh bridge started", { pid: child.pid, entrypoint });
   // The start time lets a later base fence exactly this process, never a
   // process that inherited its pid.
   const processStartedAt = child.pid ? readProcessIdentity(child.pid)?.startedAt ?? null : null;
+  meshBridgeObservedLaunch.processStartedAt = processStartedAt;
   writeMeshBridgeState({
+    ...meshBridgeObservedLaunch,
     state: "running",
     pid: child.pid ?? null,
     processStartedAt,
@@ -909,13 +940,13 @@ function spawnMeshBridge(desired: Extract<MeshBridgeDesiredState, { run: true }>
     meshBridgeProcess = null;
     if (shuttingDown) return;
     if (code === MESH_BRIDGE_EXIT_UNCONFIGURED) {
-      warn("mesh bridge has no relay token; retrying later", { retryInMs: MESH_BRIDGE_UNCONFIGURED_RETRY_MS });
+      warn("mesh bridge configuration refused (exit 78); retrying later", { retryInMs: MESH_BRIDGE_UNCONFIGURED_RETRY_MS });
       meshBridgeNextStartAt = Date.now() + MESH_BRIDGE_UNCONFIGURED_RETRY_MS;
       meshBridgeUnconfiguredMtimeMs = desired.configMtimeMs;
-      writeMeshBridgeState({ state: "unconfigured", pid: null, reason: "no relay token" });
+      writeMeshBridgeState({ state: "unconfigured", pid: null, reason: "configuration-refused", ...meshBridgeObservedLaunch });
       return;
     }
-    warn(error ? "mesh bridge failed to start" : "mesh bridge exited", error ?? { code, signal });
+    warn(error ? "mesh bridge failed to start" : "mesh bridge exited", { code, signal });
     meshBridgeNextStartAt = Date.now() + meshBridgeRestartDelayMs;
     meshBridgeRestartDelayMs = Math.min(meshBridgeRestartDelayMs * 2, RESTART_MAX_DELAY_MS);
     writeMeshBridgeState({ state: "restarting", pid: null, lastExit: { code, signal }, nextStartAt: meshBridgeNextStartAt });
@@ -945,6 +976,7 @@ async function reconcileMeshBridgeOnce(): Promise<void> {
       log("stopping mesh bridge", { reason: desired.reason });
       meshBridgeProcess = null;
       await terminateChildProcess(running, "mesh bridge", MESH_BRIDGE_STOP_TIMEOUT_MS);
+      if (!isChildExited(running)) throw new Error("previous mesh bridge has not exited");
     }
     if (meshBridgeLastIdleReason !== desired.reason) {
       meshBridgeLastIdleReason = desired.reason;
@@ -958,16 +990,43 @@ async function reconcileMeshBridgeOnce(): Promise<void> {
     return;
   }
 
+  const selected = resolveMeshBridgeExtension(process.env);
+  const selectionKey = meshBridgeLaunchKey(desired,selected);
+  if (selectionKey !== meshBridgeSelectionKey) {
+    meshBridgeSelectionKey = selectionKey;
+    meshBridgeNextStartAt = 0;
+    meshBridgeUnconfiguredMtimeMs = null;
+    meshBridgeRestartDelayMs = RESTART_MIN_DELAY_MS;
+  }
+  if (selected.state === "refused") {
+    if (running) {
+      meshBridgeProcess = null;
+      await terminateChildProcess(running,"mesh bridge",MESH_BRIDGE_STOP_TIMEOUT_MS);
+      if (!isChildExited(running)) throw new Error("previous mesh bridge has not exited");
+    }
+    if (!running) await fencePreviousMeshBridge();
+    if (Date.now() >= meshBridgeNextStartAt) {
+      meshBridgeNextStartAt = Date.now() + meshBridgeRestartDelayMs;
+      meshBridgeRestartDelayMs = Math.min(meshBridgeRestartDelayMs*2,RESTART_MAX_DELAY_MS);
+      warn("installed mesh extension refused; no legacy fallback",{reason:selected.reason});
+    }
+    writeMeshBridgeState({state:"refused",pid:null,extensionState:"refused",reason:selected.reason,nextStartAt:meshBridgeNextStartAt});
+    return;
+  }
+
   if (running) {
-    if (desired.configMtimeMs !== meshBridgeConfigMtimeMs) {
-      log("mesh bridge config changed; restarting it");
+    if (selectionKey !== meshBridgeRunningKey) {
+      log("mesh bridge configuration or installed digest changed; restarting it");
       meshBridgeProcess = null;
       await terminateChildProcess(running, "mesh bridge", MESH_BRIDGE_STOP_TIMEOUT_MS);
+      if (!isChildExited(running)) throw new Error("previous mesh bridge has not exited");
       meshBridgeNextStartAt = 0;
     } else {
       if (Date.now() - meshBridgeStartedAt >= MESH_BRIDGE_STABLE_AFTER_MS) {
         meshBridgeRestartDelayMs = RESTART_MIN_DELAY_MS;
       }
+      writeMeshBridgeState({...meshBridgeObservedLaunch,state:"running",pid:running.pid ?? null,
+        startedAt:meshBridgeStartedAt});
       return;
     }
   }
@@ -999,32 +1058,11 @@ async function reconcileMeshBridgeOnce(): Promise<void> {
   // Fence it before starting ours so two never hold this node's connection.
   await fencePreviousMeshBridge();
   if (shuttingDown) return;
-  spawnMeshBridge(desired);
+  await spawnMeshBridge(desired,selected);
 }
 
 async function fencePreviousMeshBridge(): Promise<void> {
-  const pid = findRecordedLiveMeshBridgePid(config.supportDirectory);
-  if (pid === null || pid === process.pid) return;
-  warn("stopping a mesh bridge left by a previous scout-base", { pid });
-  try {
-    process.kill(pid, "SIGTERM");
-  } catch {
-    return;
-  }
-  const deadline = Date.now() + MESH_BRIDGE_STOP_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    try {
-      process.kill(pid, 0);
-    } catch {
-      return;
-    }
-    await sleep(100);
-  }
-  try {
-    process.kill(pid, "SIGKILL");
-  } catch {
-    // Exited between the last probe and the signal.
-  }
+  await fenceRecordedMeshBridge(config.supportDirectory,{timeoutMs:MESH_BRIDGE_STOP_TIMEOUT_MS});
 }
 
 function startMeshBridgeSupervision(): void {

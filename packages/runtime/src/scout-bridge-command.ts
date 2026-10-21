@@ -27,12 +27,22 @@ const SCOUT_BRIDGE_BINARY = new RegExp(
   String.raw`^(?:${RUNTIME}\s+(?:${SCRIPT_PREFIX}\/)?|\S*\/)?scout-mcp(?:\s|$)`,
 );
 
+// Direct installed mesh executable, with spaced absolute directories allowed.
+// Each directory segment must end before whitespace, so a command/prompt plus
+// a later path cannot masquerade as argv[0]. Runtime launches retain the same
+// eval/other-script exclusions as the core CLI classifier.
+const DIRECT_DIR = String.raw`(?:\/[^\s/](?:[^/\r\n]*[^\s/])?)*\/`;
+const SCOUT_MESH_BINARY = new RegExp(
+  String.raw`^(?:${RUNTIME}\s+(?:${SCRIPT_PREFIX}\/)?|${DIRECT_DIR})?scout-mesh\s+bridge(?:\s|$)`,
+);
+
 export type ScoutBridgeKind = "mcp" | "channel" | "mesh";
 
 export function classifyScoutBridgeCommand(args: string): ScoutBridgeKind | null {
   const lowered = args.trim().toLowerCase();
   const match = SCOUT_BRIDGE_COMMAND.exec(lowered);
   if (match) return match[1]!.startsWith("mesh") ? "mesh" : (match[1] as ScoutBridgeKind);
+  if (SCOUT_MESH_BINARY.test(lowered)) return "mesh";
   return SCOUT_BRIDGE_BINARY.test(lowered) ? "mcp" : null;
 }
 
