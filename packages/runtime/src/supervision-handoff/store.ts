@@ -4,7 +4,7 @@ import { closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readFi
 import { isAbsolute, join } from "node:path";
 import { HANDOFF_CAPABILITY, HANDOFF_PROTOCOL, HANDOFF_ROLES, requireRole, refuse,
   type AuthorizationIntent, type FloorPolicy, type HandoffRole, type Ownership, type MutationReceipt,
-  type OperatorApproval, type StageApproval, type SelectedInstance } from "./contracts.js";
+  type OperatorApproval, type PendingReceipt, type StageApproval, type SelectedInstance } from "./contracts.js";
 
 export type CustodyState = { version: 1; instance: SelectedInstance; policy: FloorPolicy;
   roles: Record<HandoffRole, Ownership>;
@@ -107,6 +107,19 @@ export class HandoffStore {
     if (identity.dev !== info.dev || identity.ino !== info.ino) refuse("ownership_path_changed");
   }
   async read(role: HandoffRole) { requireRole(role); return this.exclusive(async tx => structuredClone(tx.state.roles[role])); }
+  async pendingReceipts(role: HandoffRole, generation: number): Promise<PendingReceipt[]> {
+    requireRole(role);
+    if (!Number.isSafeInteger(generation) || generation < 0) refuse("invalid_generation");
+    return this.exclusive(async tx => {
+      if (tx.state.roles[role].generation !== generation) refuse("ownership_changed");
+      const prefix = `${role}:${generation}:`;
+      return Object.entries(tx.state.receipts)
+        .filter(([key, receipt]) => key.startsWith(prefix) && receipt.state === "pending")
+        .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
+        .map(([key, receipt]) => ({ requestId: key.slice(prefix.length), operation: receipt.operation, state: "pending",
+          effects: receipt.effects.map(({ id, kind, state }) => ({ id, kind, state })) }));
+    });
+  }
   async handshake(hello: { protocol: number; instance: SelectedInstance }) {
     if (Object.keys(hello).some(key => !["protocol", "instance"].includes(key))) refuse("invalid_handshake");
     if (hello.protocol !== HANDOFF_PROTOCOL) refuse("protocol_incompatible");

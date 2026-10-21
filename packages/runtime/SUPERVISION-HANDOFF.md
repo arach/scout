@@ -222,6 +222,15 @@ owned-start or full-exit proof. Restart confirms stop before starting replacemen
 Draining stops preserve desired intent. `complete` cannot conceal an uncertain
 effect. Completed replay performs no new effect; operation conflict refuses.
 
+`pendingReceipts(role, generation)` lists pending receipts for the selected
+role's current generation. Each result contains `requestId`, `operation`,
+`state: "pending"` and `effects: [{ id, kind, state }]`. An empty effects array
+means no effect intent was persisted. The accessor omits completed receipts,
+child custody and authorization tokens. It grants no authority or effect
+permission. A stale generation refuses with `ownership_changed`. A controller
+that lost its local attempt journal can discover the exact recovery request ID,
+then obtain separate operator authorization for that receipt.
+
 | Private ownership adapter concept | Shared SDK mapping / required change |
 | --- | --- |
 | `read(role)` | `sdk.read(role)`; never infer authority from status/child handle. |

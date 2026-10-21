@@ -331,3 +331,38 @@ test("effective-UID drift or root cannot borrow the real user's selection", asyn
   } finally { mock.mockRestore(); }
   expect(readdirSync(join(f.path, "supervision-handoff-v1"))).toEqual([]);
 });
+
+test("pending receipt discovery survives controller journal loss without granting authority", async () => {
+  const f = await fixture(); await f.activate();
+  await f.sdk.exclusive("R0", "web", 1, lease => f.start(lease, "completed-start"));
+  await f.sdk.exclusive("R0", "web", 1, lease => f.stop(lease, "completed-stop"));
+  const menu = await f.sdk.authorize({ role: "menu", generation: 0, source: null, target: "R0", action: "enroll", desired: "stopped" }, async () => true);
+  await f.sdk.activate("menu", menu, "stopped");
+  await f.sdk.exclusive("R0", "menu", 1, async lease => lease.begin("other-role", "start"));
+  expect(await f.reopen().pendingReceipts("menu", 1)).toEqual([
+    { requestId: "other-role", operation: "start", state: "pending", effects: [] },
+  ]);
+  await expect(f.sdk.exclusive("R0", "web", 1, async lease => {
+    lease.begin("lost-attempt-journal", "start");
+    await lease.perform("lost-attempt-journal", "start", async permit => {
+      permit.atEffect(() => f.setObservation({ state: "owned", child: { uid: f.instance.uid, instance: f.instance.id,
+        role: "web", generation: 1, pid: 789, birth: "fixture-discovery", executable: "fixture-worker", effectId: permit.effectId } }));
+      throw new Error("lost-ack");
+    });
+  })).rejects.toThrow("lost-ack");
+  const pending = await f.reopen().pendingReceipts("web", 1);
+  const child = (f.observe() as { state: "owned"; child: ExactChild }).child;
+  expect(pending).toEqual([{ requestId: "lost-attempt-journal", operation: "start", state: "pending",
+    effects: [{ id: child.effectId, kind: "start", state: "intent" }] }]);
+  pending[0]!.effects[0]!.id = "caller-mutated";
+  expect((await f.sdk.pendingReceipts("web", 1))[0]!.effects[0]!.id).toBe(child.effectId);
+  await expect(f.sdk.pendingReceipts("web", 0)).rejects.toThrow("ownership_changed");
+  await expect(f.sdk.pendingReceipts("web", -1)).rejects.toThrow("invalid_generation");
+  await expect(f.sdk.pendingReceipts("invalid" as never, 1)).rejects.toThrow("invalid_role");
+  await expect(f.sdk.exclusive("P1", "web", 1, async () => {})).rejects.toThrow("ownership_changed");
+  const token = await f.authorize("recover", "R0", "lost-attempt-journal");
+  expect(JSON.stringify(await f.sdk.pendingReceipts("web", 1))).not.toContain(token);
+  await f.reopen().exclusive("R0", "web", 1, lease => lease.recover("lost-attempt-journal", token));
+  expect(await f.sdk.pendingReceipts("web", 1)).toEqual([]);
+  expect((await f.sdk.pendingReceipts("menu", 1))[0]!.requestId).toBe("other-role");
+});

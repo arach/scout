@@ -73,6 +73,7 @@ export class SupervisionHandoff {
   stage(policy: FloorPolicy, approve: StageApproval) { return this.store.stage(policy, approve); }
   handshake(hello: { protocol: number; instance: SelectedInstance }) { return this.store.handshake(hello); }
   read(role: HandoffRole) { return this.store.read(role); }
+  pendingReceipts(role: HandoffRole, generation: number) { return this.store.pendingReceipts(role, generation); }
   authorize(intent: AuthorizationIntent, approve: OperatorApproval) { return this.store.authorize(intent, approve); }
   closeRollback(approve: StageApproval) { return this.store.closeRollback(approve); }
   revoke(token: string) { return this.store.revoke(token); }

@@ -26,6 +26,9 @@ export type StageApproval = (selection: SelectedInstance, policy: Readonly<Floor
 export type OperatorApproval = (selection: SelectedInstance, policy: Readonly<FloorPolicy>, intent: Readonly<AuthorizationIntent>) => Promise<boolean>;
 export type Effect = { id: string; kind: "start" | "stop"; state: "intent" | "confirmed"; child?: ExactChild };
 export type MutationReceipt = { operation: "start" | "stop" | "restart"; state: "pending" | "done"; effects: Effect[]; error?: string };
+/** Recovery discovery only: no authorization token, child custody or effect permit. */
+export type PendingReceipt = { requestId: string; operation: MutationReceipt["operation"]; state: "pending";
+  effects: Pick<Effect, "id" | "kind" | "state">[] };
 export class HandoffError extends Error {
   constructor(readonly code: string) { super(code); this.name = "HandoffError"; }
 }
