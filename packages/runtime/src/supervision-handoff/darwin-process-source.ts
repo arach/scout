@@ -4,7 +4,7 @@ import { constants } from "node:os";
 /** Read-only ABI boundary. No process enumeration, signals, handles or jobs. */
 export interface DarwinProcessSource {
   bootSession(): string;
-  bsdInfo(pid: number): { bytes: Buffer; count: number; errno: number };
+  bsdInfo(pid: number, includeZombies?: boolean): { bytes: Buffer; count: number; errno: number };
   executable(pid: number): { bytes: Buffer; count: number; errno: number };
 }
 // Public Darwin proc_bsdinfo ABI: 48 bytes of scalars, 48 bytes of names,
@@ -34,9 +34,9 @@ export function nativeDarwinProcessSource(): DarwinProcessSource {
       if (count < 2 || count > bytes.length || bytes[count - 1] !== 0) return "";
       return bytes.subarray(0, count - 1).toString("utf8");
     },
-    bsdInfo(pid) {
+    bsdInfo(pid, includeZombies = false) {
       const bytes = Buffer.alloc(BSD_INFO_BYTES);
-      const count = proc.symbols.proc_pidinfo(pid, 3, 0, ptr(bytes), bytes.length); // PROC_PIDTBSDINFO
+      const count = proc.symbols.proc_pidinfo(pid, 3, includeZombies ? 1 : 0, ptr(bytes), bytes.length); // PROC_PIDTBSDINFO, arg=1 includes zombies
       return { bytes, count, errno: count === 0 ? errno() : 0 };
     },
     executable(pid) {

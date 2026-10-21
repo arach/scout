@@ -288,6 +288,7 @@ test("a recovered P1 start without a recorded child still counts as a birth atte
     expect(receipt.effects).toHaveLength(1);
     expect(receipt.effects[0]!.state).toBe("confirmed");
     expect(receipt.effects[0]!.child).toBeUndefined();
+    expect(lease.childCoverage()).toEqual({ state: "unknown", reason: "current_owner_birth_unproven", starts: 1, exited: 0 });
     // Settling the receipt cannot certify descendants or erase the birth attempt.
     expect(await lease.inspectLegacyAbsence()).toEqual({ state: "unknown" });
   });

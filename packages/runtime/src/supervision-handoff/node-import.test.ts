@@ -13,7 +13,7 @@ test("Node imports the compiled handoff index and gets typed unavailable native 
     mkdirSync(compiled); mkdirSync(supportDirectory, { mode: 0o700 });
     writeFileSync(join(compiled, "package.json"), JSON.stringify({ type: "module" }));
     const transpiler = new Bun.Transpiler({ loader: "ts", target: "node" });
-    for (const name of ["index", "contracts", "store", "process-evidence", "process-sampling", "darwin-process-source", "role-absence"]) {
+    for (const name of ["index", "contracts", "store", "process-evidence", "process-sampling", "darwin-process-source", "role-absence", "child-custody", "retained-child"]) {
       // Preserve the actual ESM graph instead of bundling or stubbing native imports.
       writeFileSync(join(compiled, name + ".js"), transpiler.transformSync(readFileSync(join(import.meta.dir, name + ".ts"), "utf8")));
     }
@@ -28,6 +28,7 @@ test("Node imports the compiled handoff index and gets typed unavailable native 
       assert.deepEqual(result, { state: "unavailable", reason: process.platform === "darwin" && ["arm64", "x64"].includes(process.arch)
         ? "native_binding_unavailable" : "unsupported_platform" });
       assert.equal(sdk.productionHandoffReadiness().ready, false);
+      assert.deepEqual(sdk.directChildCapability(), { available: false, reason: "child_custody_backend_unproven" });
       assert.deepEqual(readdirSync(instance.supportDirectory), []);
       const store = await import(${JSON.stringify(pathToFileURL(join(compiled, "store.js")).href)});
       assert.throws(() => store.acquireOwnershipLock(-1), error => error.code === "ownership_lock_unsupported");

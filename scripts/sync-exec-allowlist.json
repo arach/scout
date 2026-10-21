@@ -1034,5 +1034,33 @@
     "category": "test",
     "reason": "isolated Node child imports the actual transpiled custody SDK graph to prove optional native binding refusal; owns and awaits only that fixture handle, never an installed entrypoint",
     "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/supervision-handoff/child-custody.ts",
+    "symbol": "Bun.spawn",
+    "category": "process-lifecycle",
+    "reason": "inactive opt-in SDK boundary persists intent before synchronous owned-child spawn and native birth sampling; audited Darwin backend only, no production caller or discovery",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/supervision-handoff/retained-child.ts",
+    "symbol": "Subprocess.kill",
+    "category": "process-lifecycle",
+    "reason": "inactive SDK signals only its private retained direct-child handle under an effect permit; refuses after terminal status/reap and never calls kill(pid)",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/supervision-handoff/contract.test.ts",
+    "symbol": "Subprocess.kill",
+    "category": "test",
+    "reason": "signals only the exact fixture handle already admitted by the spawn fence and awaits fixture cleanup",
+    "owner": "runtime"
+  },
+  {
+    "path": "packages/runtime/src/supervision-handoff/node-import.test.ts",
+    "symbol": "Subprocess.kill",
+    "category": "test",
+    "reason": "signals only the owned Node import fixture handle already admitted by the spawn fence and awaits cleanup",
+    "owner": "runtime"
   }
 ]
