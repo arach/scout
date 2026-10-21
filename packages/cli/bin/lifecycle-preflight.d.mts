@@ -5,6 +5,8 @@ export type ScoutSetupOptions = { currentDirectory: string; sourceRoots: string[
 export const DEFAULT_DRAIN_TIMEOUT_MS: number;
 export const UP_HELP: string;
 export const SETUP_HELP: string;
+export const DOCTOR_HELP: string;
+export const NODE_DOCTOR_HELP: string;
 export const INSTALL_HELP: string;
 export const QUICK_LINKS: string;
 export function parseScoutArgv(argv: string[]): ScoutCliInput;
@@ -13,6 +15,6 @@ export function renderAppCommandHelp(): string;
 export function parseAppCommand(args: string[]): ScoutAppCommand;
 export function parseUpCommandOptions(args: string[]): ScoutUpOptions;
 export function parseSetupCommandOptions(args: string[], defaultCurrentDirectory: string): ScoutSetupOptions;
-export function preflightLifecycle(argv: string[], currentDirectory?: string): string | null;
+export function preflightLifecycle(argv: string[], currentDirectory?: string, options?: { runtimeHost?: "auto" | "node" | "bun" }): string | null;
 export function extractInstanceFlag(argv: string[]): { argv: string[]; instance: string | null };
 export function applyInstanceFlag(processLike?: { argv: string[]; env: Record<string, string | undefined> }): string | null;

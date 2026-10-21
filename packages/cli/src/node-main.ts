@@ -69,7 +69,7 @@ const args = [input.command ?? "help", ...input.args, ...(input.outputMode === "
 const command = args[0];
 
 try {
-  const help = preflightLifecycle(process.argv.slice(2));
+  const help = preflightLifecycle(process.argv.slice(2), process.cwd(), { runtimeHost: "node" });
   if (help !== null) { console.log(help); }
   else if (input.helpRequested) { writeHelp(); }
   else switch (command) {
