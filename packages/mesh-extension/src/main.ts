@@ -59,9 +59,9 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env) 
   switch(command){
     case 'status':case 'doctor': {
       const [health,node,nodes,diagnostics]=await Promise.all([client.request('/health'),client.request('/v1/node'),client.request('/v1/mesh/nodes'),client.request('/v1/mesh/diagnostics')]);
-      write({health,node,nodes:visibleMeshNodes(nodes,{localNodeId:node.nodeId,all:rest.includes('--all')}),diagnostics});break;
+      write({health,node,nodes:visibleMeshNodes(nodes,{localNodeId:node.id,all:rest.includes('--all')}),diagnostics});break;
     }
-    case 'nodes': {const nodes=await client.request('/v1/mesh/nodes');const node=await client.request('/v1/node');write(visibleMeshNodes(nodes,{localNodeId:node.nodeId,all:rest.includes('--all')}));break;}
+    case 'nodes': {const nodes=await client.request('/v1/mesh/nodes');const node=await client.request('/v1/node');write(visibleMeshNodes(nodes,{localNodeId:node.id,all:rest.includes('--all')}));break;}
     case 'discover':write(await client.request('/v1/mesh/discover',{}));break;
     case 'ping':if(rest.length!==1)throw new Error('ping needs one target');write(await client.request('/v1/mesh/ping',{target:rest[0]}));break;
     case 'join':case 'announce':case 'leave':case 'bind': {
