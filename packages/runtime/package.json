@@ -385,6 +385,12 @@
       "import": "./dist/otlp/index.js",
       "default": "./dist/otlp/index.js"
     },
+    "./relay-transport": {
+      "bun": "./src/relay-transport.ts",
+      "types": "./dist/relay-transport.d.ts",
+      "import": "./dist/relay-transport.js",
+      "default": "./dist/relay-transport.js"
+    },
     "./tail": {
       "bun": "./src/tail/index.ts",
       "types": "./dist/tail/index.d.ts",
@@ -539,6 +545,7 @@
     "!src/**/*.test.ts",
     "!src/**/test-helpers/**",
     "drizzle",
+    "RELAY-TRANSPORT.md",
     "README.md",
     "DELIVERY.md",
     "LICENSE"

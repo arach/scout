@@ -136,6 +136,13 @@
       ]
     },
     {
+      "source": "apps/desktop/src/core/pairing/runtime/relay/pair-http-proxy.ts",
+      "packagedDestinations": [
+        "package/dist/main.mjs",
+        "package/dist/pairing-runtime-controller.mjs"
+      ]
+    },
+    {
       "source": "apps/desktop/src/core/pairing/runtime/relay/relay.ts",
       "packagedDestinations": [
         "package/dist/main.mjs"
