@@ -69,7 +69,7 @@ export function readScoutExtensionInstallReceipt(name: string, env: NodeJS.Proce
     let record: ScoutExtensionInstallReceipt;
     try {
       const info = fstatSync(fd), uid = process.getuid?.();
-      if (!info.isFile() || uid === undefined || (info.uid !== uid && info.uid !== 0) || (info.mode & 0o002)) throw new Error("unsafe receipt file");
+      if (!info.isFile() || uid === undefined || (info.uid !== uid && info.uid !== 0) || (info.mode & 0o022)) throw new Error("unsafe receipt file");
       const data = Buffer.alloc(MAX_RECEIPT_BYTES + 1); let size = 0, n: number;
       while (size < data.length && (n = readSync(fd, data, size, data.length - size, null))) size += n;
       if (size > MAX_RECEIPT_BYTES) throw new Error("receipt too large");

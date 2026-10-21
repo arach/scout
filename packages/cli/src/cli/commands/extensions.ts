@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { mutateScoutExtension, readScoutExtensionInstallReceipt, ScoutExtensionInstallError, type ScoutExtensionInstallOptions } from "../extension-install.ts";
 import type { ScoutCommandContext } from "../context.ts";
 import { ScoutCliError } from "../errors.ts";
@@ -57,6 +58,19 @@ export async function runExtensionsCommand(context: ScoutCommandContext, args: s
         : mutateScoutExtension(action as "install" | "update" | "remove", name, action === "remove" ? undefined : source, context.env, mutationOptions(args.slice(count)));
       context.output.writeValue(receipt, value => `${value.name}: ${value.status}${value.version ? ` (${value.version})` : ""}`);
     } catch (error) {
+      if (error instanceof ScoutExtensionInstallError && context.output.mode === "json") {
+        // Only expose a pointer after the read-only reader verifies the live selection.
+        let lastReceipt: string | undefined;
+        try {
+          const current = readScoutExtensionInstallReceipt(name, context.env);
+          lastReceipt = join(current.home, ".receipts", name, `${current.publishedGeneration.split("/").pop()}.json`);
+        } catch { /* Unknown or unsafe metadata is not a recovery pointer. */ }
+        // context.stderr uses a raw stream write, never a color-aware console formatter.
+        context.stderr(JSON.stringify({ schema: "scout.cli.extension-install-error/v1", error: error.code, message: error.message,
+          ...(lastReceipt === undefined ? {} : { lastReceipt }) }));
+        process.exitCode = 1;
+        return;
+      }
       throw new ScoutCliError(error instanceof ScoutExtensionInstallError ? `${error.code}: ${error.message}` : error instanceof Error ? error.message : "extension installation failed");
     }
     return;

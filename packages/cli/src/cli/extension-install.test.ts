@@ -182,6 +182,16 @@ test("receipt recovery refuses torn, symlinked, stale or missing records without
   conditionFailure(() => readScoutExtensionInstallReceipt("mesh", f.env), "EXTENSION_RECEIPT_UNAVAILABLE");
   expect(realpathSync(selected)).toBe(receipt.publishedGeneration);
 });
+test("receipt recovery refuses group-writable correlation metadata", () => {
+  const f = fixture(), receipt = f.change("install");
+  const record = join(f.home, ".receipts", "mesh", `${receipt.publishedGeneration.split("/").pop()}.json`);
+  expect(readScoutExtensionInstallReceipt("mesh", f.env)).toEqual(receipt);
+  chmodSync(record, 0o620); // Group-write without world-write must still refuse.
+  conditionFailure(() => readScoutExtensionInstallReceipt("mesh", f.env), "EXTENSION_RECEIPT_UNAVAILABLE");
+  expect(realpathSync(join(f.home, "mesh"))).toBe(receipt.publishedGeneration);
+  chmodSync(record, 0o600);
+  expect(readScoutExtensionInstallReceipt("mesh", f.env)).toEqual(receipt);
+});
 test("unconditional receipts use null operation ID; remove retains only its selected receipt", () => {
   const f = fixture(), first = f.change("install");
   expect(first.operationId).toBeNull(); expect(readScoutExtensionInstallReceipt("mesh", f.env)).toEqual(first);

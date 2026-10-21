@@ -17,6 +17,8 @@ scout --json extensions install mesh /trusted/artifacts/mesh \
 writable extension home. An installed generation, tombstone, unmanaged folder
 or dangling link fails the condition. The installer checks after acquiring its
 existing per-verb lock, before staging the candidate or publishing a generation.
+`--expect-absent` deliberately treats a tombstone as not absent, because a
+person's removal outranks any automatic reinstall.
 A tombstone created after the caller's inspection therefore stays removed.
 This condition concerns the writable home, not absence from legacy read roots.
 
@@ -61,7 +63,7 @@ JSON success keeps `action`, `name`, `home`, `status`, `version`, `digest` and
 | `operationId` | Exact caller-supplied correlation ID, or `null` when omitted. |
 
 Before publishing the selection link, the installer writes a complete
-same-user/root-owned, non-world-writable record under
+same-user/root-owned, non-group/world-writable record under
 `<home>/.receipts/<verb>/<generation-id>.json`. It is installer metadata, not a
 file added to the artifact. Candidate validation never executes the candidate.
 The public installer remains the only writer of managed generations.
@@ -95,7 +97,7 @@ origin nor a user capability grant and must not be used as either.
 ## Refusals
 
 These commands exit 1 on refusal, produce no success receipt on stdout, and
-include a stable code followed by `:` in the existing textual stderr error:
+report one of these stable refusal codes:
 
 | Code | Meaning and recovery |
 | --- | --- |
@@ -103,9 +105,19 @@ include a stable code followed by `:` in the existing textual stderr error:
 | `EXTENSION_PRECONDITION_FAILED` | Current state differs from the expectation or cannot be verified. Preserve it; inspect the current selection and receipt, then form a new authorized operation. |
 | `EXTENSION_RECEIPT_UNAVAILABLE` | Readback cannot verify a receipt for the selected generation. Inspect the selected home and metadata; no mutation was attempted by readback. |
 
-`--json` selects JSON **success output**; these refusal codes do not introduce a
-new JSON error envelope. Existing trust, candidate validation, busy-lock and
-retention errors keep their current behavior. A failed comparison leaves the
+In JSON mode, these three codes produce exactly one UTF-8 JSON object and LF
+on stderr, with no ANSI color or textual prefix. The object has `schema` set to
+`scout.cli.extension-install-error/v1`, `error` set to the stable code, and a
+human-readable `message`. If read-only verification finds the current selected
+publication receipt, `lastReceipt` contains its absolute metadata-file path;
+otherwise the field is omitted. This pointer is a recovery hint, not proof that
+the refused operation published anything. Re-read through `extensions receipt`
+and compare its operation ID before forming a new authorized condition.
+
+Human mode keeps the existing `error: CODE: message` format. Both modes exit 1.
+This operation-refusal schema is separate from an unavailable-verb refusal.
+Existing trust, candidate validation, busy-lock and retention errors keep their
+current behavior. A failed comparison leaves the
 selection, artifact generations and receipt history unchanged. The installer
 can still create/validate its control directories and take/release its lock.
 It never overwrites an unmanaged target or treats a tombstone as absence.
