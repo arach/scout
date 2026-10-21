@@ -4,9 +4,9 @@ import { selectRuntimeClient, runtimeClient, resolveScoutBrokerUrl, type ScoutCo
 import { loadLaunchConfig, bridgeLaunch } from './bridge-config.ts';
 import { startScoutMeshMcpBridge } from './mesh-bridge.ts';
 import * as trust from './mesh-trust.ts';
-import { runMeshGuestsCommand } from './mesh-guests.ts';
-import { runMeshAccessCommand } from './mesh-access.ts';
-import { runMeshApprovalsCommand } from './mesh-approvals.ts';
+import { runMeshGuestsCommand, MESH_GUESTS_HELP } from './mesh-guests.ts';
+import { runMeshAccessCommand, MESH_ACCESS_HELP } from './mesh-access.ts';
+import { runMeshApprovalsCommand, MESH_APPROVALS_HELP } from './mesh-approvals.ts';
 import { visibleMeshNodes } from '@openscout/runtime/mesh-peer-filter';
 
 export const HELP = `scout mesh — portable mesh extension (HTTP runtime client)
@@ -23,7 +23,11 @@ Machine-key operations go through runtime HTTP; user-owned keys and SSH stay loc
 `;
 export async function run(args: string[], env: NodeJS.ProcessEnv = process.env) {
   // Help must work in a detached artifact with no state, credentials or runtime.
-  if (args.some(a=>a==='--help'||a==='-h') || args[0]==='help') { console.log(HELP); return; }
+  if (args.some(a=>a==='--help'||a==='-h') || args[0]==='help') {
+    const detail = args[0]==='access'?MESH_ACCESS_HELP:args[0]==='approvals'?MESH_APPROVALS_HELP:args[0]==='guests'?MESH_GUESTS_HELP:
+      ['trust','peers','grant','revoke','card','enroll'].includes(args[0]??'')?trust.MESH_TRUST_HELP:HELP;
+    console.log(detail); return;
+  }
   const json = args.includes('--json');args=args.filter(a=>a!=='--json');
   let configFile: string|undefined;
   const i=args.indexOf('--config');if(i>=0){configFile=args[i+1];if(!configFile||configFile.startsWith('--'))throw new Error('--config needs a file');args.splice(i,2);}
@@ -33,8 +37,8 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env) 
   if(command==='bridge' && !['status','configure','enable','disable','request-restart'].includes(rest[0]??'')) {
     try {
       if(!configFile)throw new Error('bridge requires --config');
-      let tools:string[]|undefined;
-      if(rest.length){if(rest[0]!=='--tools'||!rest[1]||rest.length!==2)throw new Error('bridge accepts only --config and --tools');tools=rest[1]==='core'?undefined:rest[1].split(',');}
+      let tools:'core'|string[]|undefined;
+      if(rest.length){if(rest[0]!=='--tools'||!rest[1]||rest.length!==2)throw new Error('bridge accepts only --config and --tools');tools=rest[1]==='core'?'core':rest[1].split(',');}
       const launch=await bridgeLaunch(configFile,tools);
       const handle=await startScoutMeshMcpBridge({client:launch.client,relayUrl:launch.relayUrl,token:launch.token,senderId:launch.config.sender??'bridge',currentDirectory:launch.currentDirectory,toolNames:launch.toolNames,eventsEnabled:launch.config.eventsEnabled,log:t=>console.error(t)});
       await new Promise<void>(resolve=>{

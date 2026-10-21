@@ -40,12 +40,12 @@ export function loadLaunchConfig(file: string) {
     proof: config.localAdmin ? localAdminProof(readSecretFile(filePath(config.localAdmin.keyFile)).trim(),config.localAdmin.destinationKeyId) : undefined });
   return { config, client, filePath, currentDirectory: config.dir ? filePath(config.dir) : base };
 }
-export async function bridgeLaunch(file: string, overrideTools?: string[]) {
+export async function bridgeLaunch(file: string, overrideTools?: 'core' | string[]) {
   const loaded = loadLaunchConfig(file), {config} = loaded;
   if (config.enabled === false || !config.relayUrl) throw new Error('bridge is disabled or has no relay URL');
   const relay = new URL(config.relayUrl);
   if (relay.protocol !== 'https:' || relay.username || relay.password || relay.search || relay.hash || relay.pathname !== '/') throw new Error('bridge relay must be an HTTPS origin');
-  if (overrideTools?.some(name=>!/^[a-zA-Z0-9_.-]{1,128}$/.test(name))) throw new Error('invalid bridge tool selection');
+  if (Array.isArray(overrideTools) && overrideTools.some(name=>!/^[a-zA-Z0-9_.-]{1,128}$/.test(name))) throw new Error('invalid bridge tool selection');
   const toolNames = selectCoreTools(overrideTools ?? config.tools).map(t=>t.name);
   let token = config.token;
   if (!token && config.tokenFile) token = readSecretFile(loaded.filePath(config.tokenFile)).trim();
