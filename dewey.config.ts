@@ -34,13 +34,13 @@ export default {
       { pattern: "process spawning or shell execution", instruction: "Run bun run sync-exec:fence before committing shell-execution changes." },
     ],
 
-    sections: ["overview", "quickstart"],
+    sections: ["overview", "quickstart", "extensions"],
   },
 
   docs: {
     path: "./docs",
     output: "./",
-    required: ["overview", "quickstart"],
+    required: ["overview", "quickstart", "extensions"],
   },
 
   install: {

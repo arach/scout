@@ -1,6 +1,6 @@
 import { untrustedPathMetadata } from "./path-trust.js";
 import { createHash } from "node:crypto";
-import { accessSync, constants, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { accessSync, closeSync, constants, fstatSync, openSync, readSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { resolveScoutHome, scoutHomeReadRoots } from "./scout-home.js";
 
@@ -30,6 +30,11 @@ export type ScoutExtension = {
   root: string;
   version?: string;
   removed?: boolean;
+  /** Static completion words, or a trusted executable in `complete` (exclusive). */
+  completion?: string[];
+  complete?: string;
+  /** Resolved, trusted Markdown file. Help never executes the extension. */
+  docs?: string;
   /** Set when the extension is installed but must not run, with the reason. */
   refused?: string;
 };
@@ -117,6 +122,45 @@ function untrustedChain(root: string, dir: string, command: string): string | un
   return undefined;
 }
 
+/** Bounded regular-file reads also refuse FIFOs and final symlinks. */
+function readExtensionFile(path: string, limit: number): string {
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    if (!fstatSync(fd).isFile()) throw new Error("not a regular file");
+    const buffer = Buffer.alloc(limit + 1);
+    let size = 0;
+    while (size < buffer.length) {
+      const n = readSync(fd, buffer, size, buffer.length - size, null);
+      if (!n) break;
+      size += n;
+    }
+    if (size > limit) throw new Error("file exceeds size limit");
+    return buffer.subarray(0, size).toString("utf8");
+  } finally { closeSync(fd); }
+}
+
+export const SCOUT_EXTENSION_DOCS_MAX_BYTES = 64 * 1024;
+/** One line per word; never shell source. Delimiters and control characters are forbidden. */
+// Use an absolute end assertion: JavaScript `$` also accepts a final newline.
+export const SCOUT_COMPLETION_WORD = /^[a-zA-Z0-9_./:@%+=,-]{1,128}(?![\s\S])/;
+
+function artifactAsset(root: string, dir: string, value: unknown, executable: boolean): string {
+  if (typeof value !== "string" || value.length > 512 || isAbsolute(value)
+    || value.split(/[\\/]/).some(part => !part || part === "." || part === "..")) throw new Error("invalid artifact-relative path");
+  const path = realpathSync(resolve(dir, value));
+  if (!isInside(dir, path)) throw new Error("asset outside artifact");
+  const problem = untrustedChain(root, dir, path) ?? (executable ? executableProblem(path) : undefined);
+  if (problem) throw new Error(problem);
+  return path;
+}
+
+/** Re-resolve at read time; callers cannot use an old object to bypass current trust checks. */
+export function readScoutExtensionDocs(extension: ScoutExtension, env: Env = process.env): string | undefined {
+  const current = findScoutExtension(extension.name, env);
+  if (!current || current.refused) throw new Error("extension documentation is unavailable or refused");
+  return current.docs ? readExtensionFile(current.docs, SCOUT_EXTENSION_DOCS_MAX_BYTES) : undefined;
+}
+
 function readInstalled(root: string, name: string): ScoutExtension | undefined {
   const dir = join(root, name);
   const manifestPath = join(dir, "extension.json");
@@ -132,9 +176,9 @@ function readInstalled(root: string, name: string): ScoutExtension | undefined {
       ? `cannot read its extension.json: permission denied (${code}).`
       : `cannot read its extension.json (${manifestPath}).`);
   }
-  let manifest: { summary?: unknown; command?: unknown; api?: unknown; version?: unknown; disabled?: unknown };
+  let manifest: { summary?: unknown; command?: unknown; api?: unknown; version?: unknown; disabled?: unknown; completion?: unknown; complete?: unknown; docs?: unknown };
   try {
-    manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    manifest = JSON.parse(readExtensionFile(realpathSync(manifestPath), 16 * 1024));
   } catch (error) {
     return refuse(manifestPath, permissionDenied(error)
       ? `cannot read its extension.json: permission denied (${(error as NodeJS.ErrnoException).code}).`
@@ -163,7 +207,27 @@ function readInstalled(root: string, name: string): ScoutExtension | undefined {
   }
   const problem = untrustedChain(realRoot, realDir, realCommand);
   if (problem) return refuse(command, `cannot be trusted: ${problem}. Fix its ownership and remove write permission for others before Scout will run it.`, summary);
-  return { name, command, summary, root, ...(typeof manifest.version === "string" ? { version: manifest.version } : {}) };
+  let docs: string | undefined, complete: string | undefined, completion: string[] | undefined;
+  try {
+    // The manifest and optional assets share the executable's ownership/containment checks.
+    const realManifest = realpathSync(manifestPath);
+    if (!isInside(realDir, realManifest) || untrustedChain(realRoot, realDir, realManifest)) throw new Error("untrusted manifest");
+    if (manifest.completion !== undefined) {
+      if (!Array.isArray(manifest.completion) || manifest.completion.length > 256
+        || !manifest.completion.every(word => typeof word === "string" && SCOUT_COMPLETION_WORD.test(word))
+        || manifest.complete !== undefined) throw new Error("invalid completion words or conflicting complete entry");
+      completion = [...new Set(manifest.completion as string[])];
+    }
+    if (manifest.complete !== undefined) complete = artifactAsset(realRoot, realDir, manifest.complete, true);
+    if (manifest.docs !== undefined) {
+      if (typeof manifest.docs !== "string" || !/\.md$/i.test(manifest.docs)) throw new Error("docs must name a Markdown file");
+      docs = artifactAsset(realRoot, realDir, manifest.docs, false);
+      readExtensionFile(docs, SCOUT_EXTENSION_DOCS_MAX_BYTES);
+    }
+  } catch {
+    return refuse(command, "has invalid or untrusted completion/documentation metadata.", summary);
+  }
+  return { name, command, summary, root, docs, complete, completion, ...(typeof manifest.version === "string" ? { version: manifest.version } : {}) };
 }
 
 /** The installed extension for one verb, if any. ~/.scout wins over ~/.openscout. */
