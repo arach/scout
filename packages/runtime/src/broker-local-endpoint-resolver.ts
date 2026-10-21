@@ -12,6 +12,7 @@ import { isA2AHttpEndpoint } from "./a2a-http-endpoint.js";
 import { isCodexThreadHeldExternallyError } from "./codex-app-server.js";
 import {
   compareLocalEndpointPreference,
+  hasRetiredEndpointRegistration,
   endpointMatchesTargetSession,
 } from "./broker-endpoint-selection.js";
 import {
@@ -149,7 +150,10 @@ export class BrokerLocalEndpointResolver {
     const candidates = this.options.runtime.endpointsForAgent(agentId, {
       nodeId: this.options.nodeId,
       harness,
+      includeOffline: true,
     }).filter((endpoint) => {
+      if (endpoint.state === "offline"
+        && (endpoint.transport !== "codex_app_server" || hasRetiredEndpointRegistration(endpoint))) return false;
       if (endpoint.metadata?.staleLocalRegistration === true) {
         return false;
       }
@@ -174,12 +178,18 @@ export class BrokerLocalEndpointResolver {
     const sessionPreference = invocation.execution?.session ?? "new";
     const shouldUseExistingSession = Boolean(targetSessionId);
     const hasExplicitRuntime = invocationHasExplicitRuntime(invocation);
-    const existing = await this.activeLocalEndpointForInvocation(
+    let existing = await this.activeLocalEndpointForInvocation(
       invocation.targetAgentId,
       requestedHarness,
       targetSessionId,
       { includeWakeable: invocation.ensureAwake },
     );
+    if (existing?.transport === "codex_app_server" && existing.state === "offline") {
+      // Only the physical connection probe admits this offline candidate.
+      // Repair historical turn-failure latches without replacing the session.
+      existing = { ...existing, state: "idle", metadata: clearEndpointFailureMetadata(existing.metadata) };
+      await this.options.persistEndpoint(existing);
+    }
     if (
       hasExplicitRuntime
       && !shouldUseExistingSession
@@ -229,10 +239,14 @@ export class BrokerLocalEndpointResolver {
 
     const staleEndpoints = shouldUseExistingSession
       ? this.options.runtime.endpointsForAgent(invocation.targetAgentId, {
+          // Exact wake/recovery must see endpoints previously marked offline.
+          // The registry otherwise filters them out before revival can run.
+          includeOffline: true,
           nodeId: this.options.nodeId,
           harness: requestedHarness,
         }).filter((endpoint) =>
           endpoint.id !== existing?.id
+          && !(endpoint.state === "offline" && hasRetiredEndpointRegistration(endpoint))
           && endpointMatchesTargetSession(endpoint, targetSessionId!)
         )
       : [];
@@ -263,6 +277,12 @@ export class BrokerLocalEndpointResolver {
             // The thread is open in another app, not dead — surface the truth
             // so the caller parks delivery instead of latching this endpoint
             // offline as if the session were gone.
+            throw error;
+          }
+          // Preparation can fail independently of an already-live Codex
+          // connection. Surface that error, but do not latch its route offline.
+          if (endpoint.transport === "codex_app_server" && await this.endpointIsAlive(endpoint)) {
+            await this.options.persistEndpoint({ ...endpoint, state: "idle" });
             throw error;
           }
           await this.options.persistEndpoint({
@@ -519,7 +539,10 @@ ForInvocation` settles that debt for the transports that can be asked directly
     const candidates = this.options.runtime.endpointsForAgent(agentId, {
       nodeId: this.options.nodeId,
       harness,
+      includeOffline: true,
     }).filter((endpoint) => {
+      if (endpoint.state === "offline"
+        && (endpoint.transport !== "codex_app_server" || hasRetiredEndpointRegistration(endpoint))) return false;
       if (endpoint.metadata?.staleLocalRegistration === true) {
         return false;
       }

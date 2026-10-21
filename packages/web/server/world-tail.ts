@@ -35,10 +35,14 @@ export function sessionOf(harness: string, rel: string, file: string): LiveSessi
 
 async function* walk(d: string): AsyncGenerator<string> {
   let entries; try { entries = await readdir(d, { withFileTypes: true }); } catch { return; }
+  // Match the snapshot collector: deterministic code-unit names, with each
+  // directory's parent transcripts emitted before its subagent folders.
+  entries.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
   for (const e of entries) {
-    const p = join(d, e.name);
-    if (e.isDirectory()) yield* walk(p);
-    else if (e.isFile() && e.name.endsWith(".jsonl")) yield p;
+    if (e.isFile() && e.name.endsWith(".jsonl")) yield join(d, e.name);
+  }
+  for (const e of entries) {
+    if (e.isDirectory()) yield* walk(join(d, e.name));
   }
 }
 

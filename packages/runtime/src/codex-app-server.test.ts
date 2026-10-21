@@ -15,6 +15,7 @@ import {
   getCodexAppServerAgentSnapshot,
   invokeCodexAppServerAgent,
   isCodexAppServerExitError,
+  isCodexAppServerAgentAlive,
   normalizeCodexAppServerLaunchArgs,
   readCodexAppServerModelFromLaunchArgs,
   readCodexAppServerReasoningEffortFromLaunchArgs,
@@ -73,7 +74,7 @@ async function readTextFileEventually(
   throw new Error(`Timed out waiting for ${filePath}`);
 }
 
-function writeFakeCodexExecutable(baseDirectory: string): string {
+function writeFakeCodexExecutable(baseDirectory: string, firstTurnFailure?: string): string {
   const executablePath = join(baseDirectory, "fake-codex");
   writeFileSync(executablePath, `#!/usr/bin/env bun
 import readline from "node:readline";
@@ -82,6 +83,8 @@ const rl = readline.createInterface({
   input: process.stdin,
   crlfDelay: Infinity,
 });
+let turns = 0;
+const firstTurnFailure = ${JSON.stringify(firstTurnFailure ?? null)};
 
 for await (const line of rl) {
   const trimmed = line.trim();
@@ -112,6 +115,11 @@ for await (const line of rl) {
 
   if (method === "turn/start") {
     const threadId = String(params.threadId ?? "thread-unknown");
+    if (++turns === 1 && firstTurnFailure) {
+      console.log(JSON.stringify({ id, result: { turn: { id: "turn-1" } } }));
+      console.log(JSON.stringify({ method: "turn/completed", params: { threadId, turn: { id: "turn-1", status: "failed", error: { message: firstTurnFailure } } } }));
+      continue;
+    }
     console.log(JSON.stringify({ id, result: { turn: { id: "turn-1" } } }));
     console.log(JSON.stringify({ method: "turn/started", params: { threadId, turn: { id: "turn-1", status: "inProgress", items: [] } } }));
     console.log(JSON.stringify({ method: "item/started", params: { threadId, turnId: "turn-1", item: { type: "agentMessage", id: "msg-1", text: "" } } }));
@@ -1374,6 +1382,25 @@ describe("ensureCodexAppServerAgentOnline", () => {
     const stderr = readFileSync(join(logsDirectory, "stderr.log"), "utf8");
     expect(stderr).toContain(`Codex app-server cwd does not exist for codex-missing-cwd: ${missingCwd}`);
   });
+
+  for (const reason of ["Selected model is at capacity (serverOverloaded)", "Provider refused this turn's content"]) {
+    test(`a rejected turn leaves the same Codex process ready for its next turn: ${reason}`, async () => {
+      const root = mkdtempSync(join(tmpdir(), "codex-failed-turn-")); tempPaths.add(root);
+      process.env.OPENSCOUT_CODEX_BIN = writeFakeCodexExecutable(root, reason);
+      const options = { agentName: "failed-turn", sessionId: "failed-turn", cwd: root, systemPrompt: "Fixture",
+        threadId: "thread-fixture", requireExistingThread: true, runtimeDirectory: join(root, "runtime"), logsDirectory: join(root, "logs") };
+      try {
+        const first = await ensureCodexAppServerAgentOnline(options);
+        expect(first.codexAppServer?.pid).toBeGreaterThan(0);
+        await expect(invokeCodexAppServerAgent({ ...options, prompt: "Fail this turn" })).rejects.toThrow(reason);
+        expect(isCodexAppServerAgentAlive(options)).toBe(true);
+        const next = await ensureCodexAppServerAgentOnline(options);
+        expect(next.codexAppServer?.pid).toBe(first.codexAppServer?.pid);
+        const result = await invokeCodexAppServerAgent({ ...options, prompt: "Deliver the next turn" });
+        expect(result.output).toBe("Attached session reply");
+      } finally { await shutdownCodexAppServerAgent(options); }
+    });
+  }
 
   test("keeps a new thread provisional until its first rollout-backed turn", async () => {
     const tempRoot = mkdtempSync(join(tmpdir(), "openscout-codex-provisional-thread-test-"));

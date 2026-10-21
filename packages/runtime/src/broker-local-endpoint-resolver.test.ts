@@ -77,6 +77,8 @@ function testInvocation(input: Partial<InvocationRequest> = {}): InvocationReque
 
 function createResolver(input: {
   bindings?: Record<string, LocalAgentBinding | null>;
+  onlineError?: Error;
+  alive?: (endpoint: AgentEndpoint) => boolean;
   onlineSession?: {
     externalSessionId?: string | null;
     metadata?: Record<string, unknown>;
@@ -96,9 +98,10 @@ function createResolver(input: {
   const resolver = new BrokerLocalEndpointResolver({
     nodeId: "node-1",
     runtime,
-    isLocalAgentEndpointAlive: (endpoint) => endpoint.metadata?.alive === true,
+    isLocalAgentEndpointAlive: input.alive ?? ((endpoint) => endpoint.metadata?.alive === true),
     async ensureLocalSessionEndpointOnline(endpoint) {
       ensuredSessionEndpoints.push(endpoint);
+      if (input.onlineError) throw input.onlineError;
       return input.onlineSession ?? { externalSessionId: "revived-session" };
     },
     async ensureLocalAgentBindingOnline(agentId, _nodeId, options) {
@@ -249,6 +252,64 @@ describe("BrokerLocalEndpointResolver", () => {
     expect(endpoint?.metadata?.lastFailedAt).toBeUndefined();
     expect(harness.persistedEndpoints).toHaveLength(1);
   });
+
+  test("a physically live offline Codex endpoint is repaired without restarting, including unqualified aliases", async () => {
+    for (const targetSessionId of [undefined, "local-codex", "session-codex", "thread-codex"]) {
+      const harness = createResolver({ alive: () => true });
+      await harness.runtime.upsertEndpoint(testEndpoint({ id: "local-codex", state: "offline", sessionId: "session-codex",
+        metadata: { threadId: "thread-codex", lastError: "Selected model is at capacity" } }));
+      const recovered = await harness.resolver.resolveLocalEndpointForInvocation(testInvocation({
+        execution: targetSessionId ? { session: "existing", targetSessionId } : undefined,
+      }));
+      expect(recovered).toMatchObject({ id: "local-codex", state: "idle" });
+      expect(recovered?.metadata?.lastError).toBeUndefined();
+      expect(harness.ensuredSessionEndpoints).toEqual([]);
+    }
+  });
+
+  test("a live but explicitly replaced offline Codex endpoint is not resurrected", async () => {
+    const harness = createResolver({ alive: () => true });
+    await harness.runtime.upsertEndpoint(testEndpoint({ state: "offline", metadata: { replacedByAgentId: "replacement" } }));
+    await expect(harness.resolver.resolveLocalEndpointForInvocation(testInvocation({
+      execution: { session: "existing", targetSessionId: "session-1" }, ensureAwake: true,
+    }))).rejects.toThrow("not currently reachable");
+    expect(harness.ensuredSessionEndpoints).toEqual([]);
+    expect(harness.persistedEndpoints).toEqual([]);
+  });
+
+  for (const targetSessionId of ["local-codex", "session-codex", "thread-codex"]) {
+    test(`exact wake recovers a latched-offline Codex endpoint by ${targetSessionId}`, async () => {
+      const harness = createResolver({ onlineSession: { externalSessionId: "thread-codex" } });
+      await harness.runtime.upsertEndpoint(testEndpoint({ id: "local-codex", state: "offline", sessionId: "session-codex",
+        metadata: { threadId: "thread-codex", externalSessionId: "thread-codex", lastError: "Selected model is at capacity" } }));
+      const recovered = await harness.resolver.resolveLocalEndpointForInvocation(testInvocation({
+        execution: { session: "existing", targetSessionId }, ensureAwake: true,
+      }));
+      expect(recovered).toMatchObject({ id: "local-codex", state: "idle" });
+      expect(recovered?.metadata?.lastError).toBeUndefined();
+      expect(harness.ensuredSessionEndpoints).toHaveLength(1);
+    });
+  }
+
+  for (const liveAfterFailure of [false, true]) {
+    test(`failed exact Codex warmup preserves physical liveness (${liveAfterFailure})`, async () => {
+      const harness = createResolver({ onlineError: new Error("Preparation failed"),
+        // First lookup is dead; a failed warmup may still leave a live connection.
+        alive: () => harness.ensuredSessionEndpoints.length > 0 && liveAfterFailure });
+      await harness.runtime.upsertEndpoint(testEndpoint({ state: "waiting", sessionId: "session-codex" }));
+      const work = harness.resolver.resolveLocalEndpointForInvocation(testInvocation({
+        execution: { session: "existing", targetSessionId: "session-codex" }, ensureAwake: true,
+      }));
+      if (liveAfterFailure) {
+        await expect(work).rejects.toThrow("Preparation failed");
+        expect(harness.persistedEndpoints.at(-1)?.state).toBe("idle");
+        expect(harness.persistedEndpoints.some(endpoint => endpoint.state === "offline")).toBe(false);
+      } else {
+        await expect(work).rejects.toThrow("not currently reachable");
+        expect(harness.persistedEndpoints.at(-1)?.state).toBe("offline");
+      }
+    });
+  }
 
   test("rejects placement changes before reviving an exact session", async () => {
     const harness = createResolver();

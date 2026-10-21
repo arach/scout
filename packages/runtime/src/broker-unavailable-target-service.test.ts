@@ -338,3 +338,30 @@ test("direct queue safety preserves independent external mailbox and bridge queu
     expect(localEndpointSupportsQueue(candidate, denyDirect)).toBe(true);
   }
 });
+
+
+test("only physical local Codex liveness overrides a historical offline latch", () => {
+  const candidate = endpoint({ id: "codex", transport: "codex_app_server", state: "offline", sessionId: "scout-session",
+    metadata: { threadId: "native-thread", lastSeenAt: 100, lastError: "Selected model is at capacity" } });
+  for (const remote of [false, true]) for (const alive of [false, true]) {
+    const target = agent({ authorityNodeId: remote ? "node-remote" : "node-local" });
+    const service = new BrokerUnavailableTargetService({ nodeId: "node-local", describeRemoteAuthorityIssue: () => null,
+      isEndpointAlive: () => alive, now: () => 101 });
+    const snapshot = createRuntimeRegistrySnapshot({ agents: { [target.id]: target }, endpoints: { codex: candidate } });
+    for (const selector of [undefined, "codex", "scout-session", "native-thread"]) {
+      expect(service.evaluate(snapshot, target, selector).state).toBe(!remote && alive ? "ready" : "gone");
+    }
+  }
+});
+
+
+test("live Codex recovery never overrides explicit endpoint retirement", () => {
+  const target = agent();
+  const service = new BrokerUnavailableTargetService({ nodeId: "node-local", describeRemoteAuthorityIssue: () => null,
+    isEndpointAlive: () => true });
+  for (const metadata of [{ replacedByAgentId: "replacement" }, { staleLocalRegistration: true }]) {
+    const candidate = endpoint({ transport: "codex_app_server", state: "offline", metadata });
+    const snapshot = createRuntimeRegistrySnapshot({ agents: { [target.id]: target }, endpoints: { old: candidate } });
+    expect(service.evaluate(snapshot, target, candidate.sessionId!).state).toBe("gone");
+  }
+});

@@ -17,22 +17,15 @@ import {
   type VerifiedLaunchRoute,
   endpointCandidateState,
   homeEndpointForAgent,
+  hasRetiredEndpointRegistration,
   latestEndpointForAgent,
-  isEndpointOnlineState,
 } from "./broker-endpoint-selection.js";
 import { isA2AHttpEndpoint } from "./a2a-http-endpoint.js";
 import { isExternalSessionEndpoint } from "./external-session-transport.js";
 import { isBrokerRunnableLocalAgentTransport, isDirectLocalAgentTransport } from "./local-agent-transports.js";
 import type { RuntimeRegistrySnapshot } from "./registry.js";
 
-/** Transport-owned receive evidence; a cloud/mailbox route is not a tmux process. */
-export function localEndpointCanReceive(endpoint: AgentEndpoint, localProcessAlive: (endpoint: AgentEndpoint) => boolean): boolean {
-  if (isExternalSessionEndpoint(endpoint) || isA2AHttpEndpoint(endpoint)) {
-    return isEndpointOnlineState(endpoint.state)
-      || (endpoint.transport === "mcp_poll" && endpoint.state === "registered");
-  }
-  return localProcessAlive(endpoint);
-}
+export { localEndpointCanReceive } from "./local-endpoint-liveness.js";
 
 /** These adapters execute behind the broker's endpoint-owner lane or durable mailbox. */
 export function localEndpointSupportsQueue(
@@ -122,11 +115,17 @@ export class BrokerUnavailableTargetService {
     // endpoint refresh timestamp; no heartbeat, card mutation or new lease.
     const freshRemoteEndpoint = typeof lastSeenAt === "number"
       && lastSeenAt <= checkedAt && checkedAt - lastSeenAt <= 90_000;
+    const alive = endpoint ? (remote ? freshRemoteEndpoint : this.#deps.isEndpointAlive?.(endpoint)) : false;
+    // A local Codex connection is stronger evidence than an old turn-failure
+    // latch. Admit recovery; the resolver durably repairs the endpoint state.
+    // A remote refresh timestamp is NOT physical process evidence.
+    const evaluatedEndpoint = !remote && endpoint?.transport === "codex_app_server"
+      && endpoint.state === "offline" && alive === true && !hasRetiredEndpointRegistration(endpoint) ? { ...endpoint, state: "idle" as const } : endpoint;
     return evaluateBrokerAvailability({
-      agent, endpoint, authority: agent.authorityNodeId,
+      agent, endpoint: evaluatedEndpoint, authority: agent.authorityNodeId,
       authorityAvailable, checkedAt,
       targetSessionId,
-      alive: endpoint ? (remote ? freshRemoteEndpoint : this.#deps.isEndpointAlive?.(endpoint)) : false,
+      alive,
       queueSupported: endpoint ? this.#deps.supportsQueue?.(endpoint) === true : false,
       launchRoute: this.#deps.verifiedLaunchRoute?.(agent, endpoint) ?? null,
     });

@@ -2123,6 +2123,7 @@ function recoverInvocationResultReplies(): void {
 
 const localInvocationService = new BrokerLocalInvocationService({
   nodeId,
+  isLocalAgentEndpointAlive,
   runtime,
   endpointResolver: localEndpointResolver,
   activeInvocationTasks,

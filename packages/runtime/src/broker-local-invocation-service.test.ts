@@ -164,6 +164,7 @@ function createHarness(input: {
   resolveError?: Error;
   invokeResult?: { output: string; externalSessionId?: string; metadata?: Record<string, unknown> };
   invokeError?: Error;
+  isLocalAgentEndpointAlive?: (endpoint: AgentEndpoint) => boolean;
   invokeEndpoint?: (
     endpoint: AgentEndpoint,
     invocation: InvocationRequest,
@@ -289,6 +290,7 @@ function createHarness(input: {
       },
     },
     activeInvocationTasks,
+    isLocalAgentEndpointAlive: input.isLocalAgentEndpointAlive ?? (() => false),
     // Mirrors the daemon's transitionInvocation: read the invocation's current
     // flight, apply the patch with the real merge helper, persist the result.
     async transitionInvocation(invocationId, patch) {
@@ -1068,6 +1070,43 @@ describe("BrokerLocalInvocationService", () => {
       metadata: expect.objectContaining({ lastFailureStage: "harness_not_logged_in" }),
     }));
     expect(harness.statusMessages).toHaveLength(1);
+  });
+
+  for (const reason of ["Selected model is at capacity (serverOverloaded)", "Provider refused this turn's content"]) {
+    for (const targetSessionId of ["endpoint-codex", "session-codex", "thread-codex"]) {
+      test(`a live Codex turn failure stays routable for ${targetSessionId}: ${reason}`, async () => {
+        const endpoint = testEndpoint({ id: "endpoint-codex", transport: "codex_app_server", sessionId: "session-codex",
+          metadata: { threadId: "thread-codex", externalSessionId: "thread-codex" } });
+        let submissions = 0;
+        const harness = createHarness({ endpoint, isLocalAgentEndpointAlive: () => true,
+          async resolveEndpoint() {
+            const current = harness.persistedEndpoints.at(-1) ?? endpoint;
+            // A failed endpoint would be refused by availability before submit.
+            return current.state === "offline" ? undefined : current;
+          },
+          async invokeEndpoint() {
+            if (++submissions === 1) throw new Error(reason);
+            return { output: "Next turn delivered", externalSessionId: "thread-codex" };
+          },
+        });
+        harness.seedFlight(testFlight());
+        await harness.service.execute(testInvocation({ execution: { session: "existing", targetSessionId } }));
+        expect(harness.persistedFlights.at(-1)).toMatchObject({ state: "failed", error: reason });
+        expect(harness.persistedEndpoints.at(-1)).toMatchObject({ state: "idle", metadata: { lastError: reason } });
+        harness.seedFlight(testFlight({ id: "flight-2", invocationId: "invocation-2" }));
+        await harness.service.execute(testInvocation({ id: "invocation-2", execution: { session: "existing", targetSessionId } }));
+        expect(submissions).toBe(2);
+        expect(harness.flightForInvocation("invocation-2")).toMatchObject({ state: "completed", output: "Next turn delivered" });
+      });
+    }
+  }
+
+  test("a failed turn on a dead Codex process still takes its endpoint offline", async () => {
+    const harness = createHarness({ endpoint: testEndpoint({ transport: "codex_app_server" }),
+      isLocalAgentEndpointAlive: () => false, invokeError: new Error("app-server connection closed") });
+    harness.seedFlight(testFlight());
+    await harness.service.execute(testInvocation());
+    expect(harness.persistedEndpoints.at(-1)).toMatchObject({ state: "offline" });
   });
 
   test("a late transport error does not overwrite a broker-reply completion", async () => {
