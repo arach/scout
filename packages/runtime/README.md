@@ -22,6 +22,12 @@ Bun monorepo checkout, the package export map keeps the `bun` condition pointed
 at `src/` so local development can type-check without building `dist` first.
 Published Node/ESM consumers resolve `dist/`.
 
+## Transitional app supervision
+
+Web and Scoutbot source entries require explicit configuration. See the
+[durable entry contract](./SUPERVISION.md) for installer ordering, reload
+boundaries and the temporary installed-npm web compatibility exception.
+
 ## Quickstart: embed the in-memory runtime
 
 For tests, tools, and small local integrations, start with the in-memory runtime
