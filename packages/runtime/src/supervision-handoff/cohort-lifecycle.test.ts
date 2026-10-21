@@ -605,14 +605,19 @@ carrierTest("committed advance forgets the retired handle; stale exit/stop and r
 });
 
 
-test("post-commit child cleanup failure is finished by advance replay, without fresh proof or effects", async () => {
-  const f = await fixture(); await f.retire(); let attempts = 0;
+test("writer-close failure cannot fail committed advance, retain old entries or lose the new fence", async () => {
+  const f = await fixture(); await f.retire(); let attempts = 0, laterCloses = 0;
   heldEntries(f.sdk).set("cleanup-marker", { role: "web", generation: 1, channel: { closeWrite() {
-    if (++attempts === 1) throw new Error("cleanup_interrupted");
+    attempts++; throw new Error("cleanup_interrupted");
   } } });
-  await expect(f.sdk.advanceCohort("R0", "web", 1, "stop")).rejects.toThrow("cleanup_interrupted");
-  expect(await f.sdk.read("web")).toMatchObject({ generation: 2 }); expect(heldEntries(f.sdk).has("cleanup-marker")).toBe(true);
-  f.setInspect(async () => { throw new Error("replay_must_not_certify"); });
-  expect(await f.sdk.advanceCohort("R0", "web", 1, "stop")).toMatchObject({ generation: 2 });
-  expect(heldEntries(f.sdk).size).toBe(0); expect(attempts).toBe(2);
+  heldEntries(f.sdk).set("later-marker", { role: "web", generation: 1, channel: { closeWrite() { laterCloses++; } } });
+  const advanced = await f.sdk.advanceCohort("R0", "web", 1, "stop");
+  expect(advanced).toMatchObject({ generation: 2 }); expect(await f.sdk.read("web")).toEqual(advanced);
+  expect(heldEntries(f.sdk).size).toBe(0); expect(attempts).toBe(1); expect(laterCloses).toBe(1);
+  f.setInspect(async () => { throw new Error("must_not_recertify"); });
+  expect(await f.sdk.exclusive("R0", "web", 2, async lease => lease.ownership())).toEqual(advanced);
+  await expect(f.make().acquireLifetimeFence("R0", "web", 2)).rejects.toThrow("ownership_busy");
+  expect(await f.sdk.advanceCohort("R0", "web", 1, "stop")).toEqual(advanced);
+  expect(await f.sdk.exclusive("R0", "web", 2, async lease => lease.ownership())).toEqual(advanced);
+  expect(attempts).toBe(1); // The failed writer is forgotten, not retried by replay or shutdown.
 });

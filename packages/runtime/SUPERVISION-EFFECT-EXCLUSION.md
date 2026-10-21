@@ -404,7 +404,10 @@ including entries whose birth was never recorded. It defensively closes their
 idempotent parent writers before forgetting the handles. Failed or pending
 advances do not discard custody. A verified persisted advance replay completes
 this cleanup after a lost acknowledgment, without touching the current or future
-generation's child. Other roles' entries remain retained.
+generation's child. Other roles' entries remain retained. Writer-close cleanup
+is best-effort: a close error still deletes the entry and must not fail the
+committed advance or prevent retention of the new generation's fence. A failed
+close can leave its writer descriptor open until the host exits.
 
 This is reference cleanup, not a kill, reap, adoption or new claim of process
 absence. An already-started exact wait can finish; it is not canceled. The SDK's

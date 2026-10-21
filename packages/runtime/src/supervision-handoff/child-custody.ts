@@ -118,7 +118,8 @@ export class DirectChildren {
    * Closed writers are idempotent; no descriptor or fence is unlocked. */
   forgetThrough(role: HandoffRole, generation: number) {
     for (const [id, held] of this.held) if (held.role === role && held.generation <= generation) {
-      held.channel?.closeWrite(); this.held.delete(id);
+      try { held.channel?.closeWrite(); } catch { /* Best effort after commit; a writer may remain open until host exit. */ }
+      this.held.delete(id);
     }
   }
   closeAllParentChannels() {
