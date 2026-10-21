@@ -49,10 +49,10 @@ a separately reviewed protected implementation exists. See the corresponding
 **Narrowed adapter obligation:** (a) no non-Bun native reaper runs in the host;
 (b) SIGCHLD is neither `SIG_IGN` nor flagged `SA_NOCLDWAIT`, throughout child
 custody. On the audited Darwin revisions Bun reaps only PIDs it spawned:
-1.3.13 has no `wait4(-1)`; the two in
-1.3.14 at [2439](https://github.com/oven-sh/bun/blob/0d9b296af33f2b851fcbf4df3e9ec89751734ba4/src/runtime/api/bun/process.zig#L2439)
-and [2837](https://github.com/oven-sh/bun/blob/0d9b296af33f2b851fcbf4df3e9ec89751734ba4/src/runtime/api/bun/process.zig#L2837)
-are Linux-only (the second is in the Linux signalfd loop). Thus a Bun
+1.3.13 has no reap-any site; every reap-any site in 1.3.14 is comptime-Linux:
+[process.zig:2439](https://github.com/oven-sh/bun/blob/0d9b296af33f2b851fcbf4df3e9ec89751734ba4/src/runtime/api/bun/process.zig#L2439),
+[process.zig:2837](https://github.com/oven-sh/bun/blob/0d9b296af33f2b851fcbf4df3e9ec89751734ba4/src/runtime/api/bun/process.zig#L2837), and
+[ParentDeathWatchdog.zig:341](https://github.com/oven-sh/bun/blob/0d9b296af33f2b851fcbf4df3e9ec89751734ba4/src/aio/ParentDeathWatchdog.zig#L341). Thus a Bun
 `spawnSync` does not violate (a) on Darwin. This audit does not authorize adding
 another native wait loop to the host.
 
