@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import {
   verifySignedNodeCard,
   type SignedNodeCard,
-} from "./node-identity.js";
+} from "./node-identity-wire.js";
 import type { MeshPeerTier } from "./mesh-peer-auth.js";
 import type { TrustedPeerGrant } from "./mesh-trust-enrollment.js";
 

@@ -4,7 +4,7 @@
  * resource enrollment are separate local acts; an imported key grants nothing.
  */
 import { createHash, createPublicKey } from "node:crypto";
-import { canonicalJson, nodeKeyId, signNodePayload, verifyNodeSignature, type NodeIdentity } from "./node-identity.js";
+import { canonicalJson, nodeKeyId, signNodePayload, verifyNodeSignature, type NodeIdentity } from "./node-identity-wire.js";
 
 export const ACCESS_PROTOCOL = "scout-access/1" as const;
 export const ACCESS_POLICY_TTL_MS = 30 * 24 * 60 * 60_000;

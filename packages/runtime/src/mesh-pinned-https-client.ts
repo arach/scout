@@ -2,7 +2,7 @@ import { Agent as HttpsAgent, request as httpsRequest } from "node:https";
 import type { Socket } from "node:net";
 import { connect as tlsConnect, type ConnectionOptions, type TLSSocket } from "node:tls";
 
-import { tlsSpkiFingerprintFromCertificateDer } from "./node-tls-identity.js";
+import { tlsSpkiFingerprintFromCertificateDer } from "./node-tls-wire.js";
 
 /**
  * Mesh trust cone P1.5 §11.4: the client-side pinned TLS path for peer calls.
