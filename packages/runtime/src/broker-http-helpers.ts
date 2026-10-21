@@ -1,3 +1,4 @@
+import { AssistantClaimError } from "./broker-assistant-claims.js";
 import { BrokerRecordCacheUnavailable } from "./broker-record-reader.js";
 import { BrokerMessageBodyCacheUnavailable } from "./broker-message-body-cache.js";
 import type { RuntimeHttpRequestLike, RuntimeHttpResponseLike } from "./portable-types.js";
@@ -231,6 +232,10 @@ export function storageFailureStatus(error: unknown): { status: 503 | 507; error
 }
 
 export function badRequest(response: RuntimeHttpResponseLike, error: unknown): void {
+  if (error instanceof AssistantClaimError) {
+    json(response, error.status, { error: error.code, ...(error.retryAfterMs !== undefined ? { retryAfterMs: error.retryAfterMs } : {}) });
+    return;
+  }
   if (error instanceof BrokerMessageBodyCacheUnavailable || error instanceof BrokerRecordCacheUnavailable) {
     json(response, 503, { error: error.code, detail: error.message });
     return;
