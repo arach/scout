@@ -513,8 +513,8 @@ export class ScoutBrokerHttpError extends Error {
     path: string,
     /** Raw response text, including non-JSON and empty bodies. */
     public readonly body: string,
-    /** Top-level JSON `error` string, supplied by the request helper when present.
-     * Preserved verbatim; not necessarily a machine-readable token. */
+    /** Machine-readable top-level JSON `error` token, or absent.
+     * Supplied by the request helper when present. */
     public readonly code?: string,
   ) {
     super(`${path} returned ${status}: ${body}`);
@@ -543,8 +543,11 @@ export async function requestScoutBrokerJsonWithTrace<T>(
     if (parsedJson && options.acceptErrorJson?.(parsed)) {
       return { value: parsed, trace };
     }
+    // The census includes t3_* codes. Require absolute end-of-input too:
+    // JavaScript's `$` would also accept a token followed by a line break.
     const code = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
       && Object.hasOwn(parsed, "error") && "error" in parsed && typeof parsed.error === "string"
+      && /^[a-z_][a-z0-9_]{0,127}(?![\s\S])/.test(parsed.error)
       ? parsed.error : undefined;
     throw new ScoutBrokerHttpError(response.status, path, response.text, code);
   }

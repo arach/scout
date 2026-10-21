@@ -31,8 +31,18 @@ describe("broker HTTP error fields", () => {
         { body: "null" },
         { body: '"roles_unavailable"' },
         { body: '[{"error":"not_top_level"}]' },
-        { body: '{"error":""}', code: "" },
-        { body: '{"error":"  unknown conversation  "}', code: "  unknown conversation  " },
+        { body: '{"error":""}' },
+        { body: '{"error":"  unknown conversation  "}' },
+        { body: '{"error":"unknown conversation"}' },
+        { body: '{"error":" "}' },
+        { body: '{"error":"t3_local_only"}', code: "t3_local_only" },
+        { body: '{"error":"t3_unavailable"}', code: "t3_unavailable" },
+        { body: '{"error":"Roles_unavailable"}' },
+        { body: '{"error":"roles-unavailable"}' },
+        { body: '{"error":"roles_unavailable\\n"}' },
+        { body: JSON.stringify({ error: "a".repeat(128) }), code: "a".repeat(128) },
+        { body: JSON.stringify({ error: "a".repeat(129) }) },
+        { body: '{"error":"3_invalid"}' },
       ];
       const directory = await mkdtemp(join(tmpdir(), "scout-broker-error-"));
       const socketPath = join(directory, "broker.sock");
