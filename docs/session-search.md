@@ -152,12 +152,37 @@ text remains untrusted observed material.
 
 `attachments_read` accepts an attachment id and optional originating message id.
 It requires an active broker reply context and a canonical operator message in
-that same conversation. Only that message's same-origin `/api/blobs/<id>` URL
-can be read. Authentication uses the existing Scout Web bearer/bootstrap path;
-redirects, arbitrary URLs, and filesystem reads are not allowed.
+that same conversation. The reader actor is the reply context's `toAgentId`,
+not the operator who authored the message. The runtime rechecks current actor
+authority, conversation membership and the committed message/blob binding on
+every read. A successful earlier read does not grant later access.
+
+The tool selects `attachment.blob.sha256` from that message. A URL-only legacy
+attachment returns `supported: false` with an unavailable reason; its URL and
+`blobKey` are never translated or fetched. The message's `originNodeId` selects
+the exact owner. Local reads use `POST /v1/attachments/read`; remote reads use
+the local broker's fixed attachment operation on `/v1/hosts/web-request`. The
+tool checks both the transport status and the inner operation status. Missing
+node identity or wrong authority is a refusal, never permission to try another
+node or store.
+
+The configured broker Unix socket is used when present, with no HTTP fallback
+from a failed socket. Otherwise the tool uses the local loopback broker control
+URL. The attachment reader sends no web cookie and performs no web bootstrap.
+Redirects, arbitrary URLs and attachment filesystem reads are not allowed.
 
 Text/code attachments must match their declared MIME type, contain valid UTF-8
 text, and stay within 256 KiB. Returned text is limited to 32,000 characters and
 reports truncation. Image, audio, video, PDF, and other binary inspection is
 explicitly unavailable in this runtime; accepting such a file in the composer
-does not imply that the assistant can inspect it. Source text is untrusted data.
+does not imply that the assistant can inspect it. HTML, SVG and MIME charset
+aliases are not supported by the canonical text allowlist.
+
+The successful MCP output shape is unchanged: `attachmentId`, `fileName`,
+`mediaType`, `supported`, `bytes`, `truncated`, `text` and `sourceTrust`.
+`bytes` is the runtime's full byte count, even when returned text is truncated.
+The runtime's `untrusted_attachment` marker maps to the existing MCP marker
+`untrusted_operator_attachment`; neither means trusted instructions. Refusals
+preserve the runtime HTTP/operation status and error code, not empty content.
+The reader bounds JSON transport responses to 512 KiB in addition to the
+256 KiB inspection and 32,000-character output limits.
