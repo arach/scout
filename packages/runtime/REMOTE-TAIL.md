@@ -51,7 +51,7 @@ Null means no event has been yielded, not an unknown server cursor. Generation
 | retry_exhausted | true | Attempt or elapsed outage budget exhausted. |
 | protocol_error | true | Invalid text protocol or mismatched tracked IDs. |
 | auth_denied | false | Observable HTTP 401/403 or structured tRPC authorization denial. |
-| handshake_error | false | Bun cannot classify a failed pre-open handshake safely. |
+| handshake_error | false | A live listener rejected the upgrade, or the diagnostic probe was inconclusive. |
 | invalid_options | false | Invalid policy/origin or repeated iterator ownership. |
 | unsupported_ingress | false | Ingress other than trusted-loopback requested. |
 
@@ -60,12 +60,21 @@ metadata. In particular, the broker's StreamResyncRequired arrives as a generic
 tRPC internal error, not a stable `resync_required` wire field.
 
 Bun 1.3.13/1.3.14's ws shim does not expose failed-upgrade HTTP status. Its
-opaque pre-open failures stop as handshake_error rather than retrying possible
-authentication denials or guessing from text. Node distinguishes HTTP refusal
-statuses and retries 503 within budget. Both engines resume post-open losses
-and recognize structured tRPC authorization errors. This is an explicit
-portability refusal, not an authentication fallback. Mesh-peer ingress is a
-separate slice and requires review before any credential API is added.
+opaque pre-open failures trigger a plain TCP probe to the same validated loopback
+host and port. The probe sends no bytes, closes immediately on connect, and has
+a 250 ms limit within the existing outage budget. Only error code ECONNREFUSED
+proves an outage and earns bounded retry. A successful connection is a live
+listener rejection: terminal handshake_error, with no second upgrade attempt.
+Timeout or any other probe error also fails closed as handshake_error; no error
+message is parsed. Abort, return and budget exhaustion cancel a pending probe.
+
+If the runtime appears between the failed upgrade and the probe, the probe can
+connect and conservatively stop. Inspect the listener and resubscribe to recover
+from handshake_error; it does not prove an authorization denial. Node retains
+its HTTP status classification and retries 503 within budget. Both engines
+resume post-open losses and recognize structured tRPC authorization errors.
+This is not an authentication fallback. Mesh-peer ingress is a separate slice
+and requires review before any credential API is added.
 
 ## Verify on both engines
 

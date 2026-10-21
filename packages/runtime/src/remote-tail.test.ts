@@ -1,6 +1,7 @@
 import { afterEach, test } from "bun:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
+import { createServer as createTCPServer } from "node:net";
 import { WebSocketServer, WebSocket } from "ws";
 import { initTRPC, tracked, TRPCError } from "@trpc/server";
 import { applyWSSHandler } from "@trpc/server/adapters/ws";
@@ -27,6 +28,7 @@ function event(id: string, source = "claude", summary = id): TailEvent {
 
 type FixtureOptions = {
   backlog?: TailEvent[];
+  port?: number;
   status?: number;
   mutate?: (frame: any) => any;
   dropStarted?: boolean;
@@ -93,7 +95,7 @@ async function fixture(options: FixtureOptions = {}) {
     assert.equal(req.headers.cookie, undefined);
     wss.handleUpgrade(req, socket, head, ws => wss.emit("connection", ws, req));
   });
-  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>(resolve => server.listen(options.port ?? 0, "127.0.0.1", resolve));
   const address = server.address(); assert(address && typeof address !== "string");
   let closed = false;
   const close = async () => {
@@ -256,6 +258,51 @@ test("drain time counts against reconnect deadline and error preserves the yield
   await sleep(110);
   const error = await terminal(iterator); assert.equal(error.reason, "retry_exhausted"); assert.equal(error.lastDeliveredId, "a");
   assert.equal(f.connections(), 1);
+});
+
+test("refused connection retries within budget and succeeds when the listener returns", async () => {
+  const reservation = await fixture();
+  const url = reservation.url, port = Number(new URL(url).port);
+  await reservation.close();
+  const { iterator } = subscription(url, { reconnect: { maxAttempts: 4, maxElapsedMs: 5_000 } });
+  // Observe the second physical attempt, then restore during its backoff. The
+  // initial two WS/probe pairs see a genuinely closed port, not a rejected HTTP response.
+  for (;;) {
+    const item = await deadline(iterator.next()); assert(!item.done);
+    if (item.value.type === "connection" && item.value.generation === 2) break;
+  }
+  const restore = async () => {
+    await sleep(200);
+    return fixture({ port, backlog: [event("restored")] });
+  };
+  const [item, f] = await Promise.all([nextEvent(iterator), restore()]);
+  assert.equal(item.id, "restored"); assert.equal(item.generation, 3);
+  assert.equal(f.connections(), 1);
+});
+
+test("live listener rejecting the upgrade is terminal with no second attempt", async () => {
+  const peers: Array<{ bytes: number; closed: boolean }> = [];
+  const server = createTCPServer(socket => {
+    const peer = { bytes: 0, closed: false }; peers.push(peer);
+    socket.on("data", data => {
+      peer.bytes += data.length;
+      socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+    });
+    socket.on("close", () => { peer.closed = true; });
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  cleanups.push(() => new Promise<void>(resolve => server.close(() => resolve())));
+  const address = server.address(); assert(address && typeof address !== "string");
+  const { iterator } = subscription(`http://127.0.0.1:${address.port}`, { reconnect: { maxAttempts: 3, maxElapsedMs: 1_000 } });
+  const error = await terminal(iterator);
+  assert.equal(error.reason, process.versions.bun ? "handshake_error" : "auth_denied");
+  assert.equal(error.generation, 1); assert.equal(error.lastDeliveredId, null);
+  assert.equal(error.resyncRequired, false);
+  await until(() => peers.every(peer => peer.closed));
+  await sleep(30);
+  assert.equal(peers.length, process.versions.bun ? 2 : 1);
+  assert(peers[0]!.bytes > 0); // Exactly one actual upgrade request.
+  if (process.versions.bun) assert.equal(peers[1]!.bytes, 0); // Probe writes nothing.
 });
 
 for (const status of [401, 403, 302, 503]) {

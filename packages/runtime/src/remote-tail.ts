@@ -2,6 +2,7 @@
  * Continuity is always unverified: the broker has no cursor-found/gap marker.
  * This first slice accepts only literal trusted-loopback origins. */
 import WebSocket from "ws";
+import { Socket } from "node:net";
 import type { IncomingMessage } from "node:http";
 import type { TailEvent } from "./tail/types.js";
 
@@ -32,7 +33,7 @@ const messages: Record<RemoteTailErrorReason, string> = {
   retry_exhausted: "Remote tail reconnect budget exhausted.",
   protocol_error: "Remote tail received an invalid protocol frame.",
   invalid_options: "Invalid remote tail options or iterator ownership.",
-  handshake_error: "Remote tail handshake failed without a usable HTTP status.",
+  handshake_error: "Remote tail upgrade was rejected by a live listener or could not be classified safely.",
   unsupported_ingress: "Only trusted-loopback remote tail ingress is supported.",
 };
 
@@ -40,7 +41,8 @@ const messages: Record<RemoteTailErrorReason, string> = {
  * lastDeliveredId is null until an event was yielded (not the initial since).
  * resyncRequired means recovery is required, not that a gap was proven.
  * Bun exposes no HTTP status for failed native upgrades: handshake_error is
- * terminal, without retry or auth-status guessing. Node can distinguish HTTP
+ * terminal unless a bounded zero-byte TCP probe proves ECONNREFUSED. A live
+ * listener or inconclusive probe never earns retry. Node can distinguish HTTP
  * 401/403 (auth_denied) and 503 (bounded retry). No server message is parsed. */
 export class RemoteTailError extends Error {
   override readonly name = "RemoteTailError";
@@ -57,6 +59,7 @@ const MAX_BYTES = 1024 * 1024;
 const MAX_AGE_MS = 30_000;
 const MAX_FRAME_BYTES = MAX_BYTES + 64 * 1024;
 const REQUEST_ID = 1;
+const PROBE_TIMEOUT_MS = 250;
 
 type RecordLike = Record<string, unknown>;
 function record(value: unknown): value is RecordLike {
@@ -95,6 +98,9 @@ function validate(options: RemoteTailOptions): { url: string; sources?: string[]
  * Invalid options refuse synchronously at generation 0. */
 export function subscribeRemoteTail(options: RemoteTailOptions): AsyncIterable<RemoteTailItem> {
   const { url, sources } = validate(options);
+  const authority = new URL(url);
+  const probeHost = authority.hostname.replace(/^\[|\]$/g, "");
+  const probePort = Number(authority.port || (authority.protocol === "wss:" ? 443 : 80));
   // Snapshot the policy: later mutation cannot change the selected authority.
   const signal = options.signal, initialSince = options.since;
   const { maxAttempts, maxElapsedMs } = options.reconnect;
@@ -103,6 +109,7 @@ export function subscribeRemoteTail(options: RemoteTailOptions): AsyncIterable<R
   let failure: RemoteTailError | undefined;
   let socket: WebSocket | null = null;
   let releaseSocket: (() => void) | undefined;
+  let releaseProbe: (() => void) | undefined;
   let notices: RemoteTailItem[] = [];
   const queue: Array<{ item: Extract<RemoteTailItem, { type: "event" }>; bytes: number; at: number }> = [];
   let bytes = 0;
@@ -125,6 +132,7 @@ export function subscribeRemoteTail(options: RemoteTailOptions): AsyncIterable<R
     reconnectPending = false;
     queue.length = 0; bytes = 0; notices = [];
     disposeSocket();
+    releaseProbe?.(); releaseProbe = undefined;
     notify();
   };
   const fail = (reason: RemoteTailErrorReason) => {
@@ -243,14 +251,47 @@ export function subscribeRemoteTail(options: RemoteTailOptions): AsyncIterable<R
     };
     const error = (error: Error & { code?: string }) => {
       if (!active()) return;
-      // Bun's ws shim has no unexpected-response/status event. Before open,
-      // never retry an opaque failure that could be an authorization denial.
-      if (process.versions.bun && !opened) { fail("handshake_error"); return; }
+      // Bun's opaque pre-open errors include both refusal and denied upgrades.
+      if (process.versions.bun && !opened) { probeFailure(); return; }
       if (error.code === "WS_ERR_UNSUPPORTED_MESSAGE_LENGTH") fail("consumer_lag");
       else if (error.code?.startsWith("WS_ERR_")) fail("protocol_error");
       else lost();
     };
-    const close = () => { if (active()) lost(); };
+    const probeFailure = () => {
+      if (!active()) return;
+      // Retire the WS before probing: its later close/error cannot retry or
+      // start another probe. Only this validated literal authority is touched.
+      disposeSocket();
+      const probe = new Socket();
+      let settled = false;
+      const finish = (refused: boolean) => {
+        if (settled) return;
+        releaseProbe?.(); releaseProbe = undefined;
+        if (done || generation !== currentGeneration) return;
+        if (refused) lost();
+        else fail("handshake_error");
+      };
+      const timer = setTimeout(() => finish(false), PROBE_TIMEOUT_MS);
+      releaseProbe = () => {
+        settled = true;
+        clearTimeout(timer);
+        probe.removeAllListeners();
+        // A retired pending connect may still deliver its error asynchronously.
+        probe.on("error", () => {});
+        probe.destroy(); // Never send bytes, including after a successful connect.
+      };
+      probe.once("connect", () => finish(false));
+      probe.once("error", (error: NodeJS.ErrnoException) => finish(error.code === "ECONNREFUSED"));
+      try { probe.connect(probePort, probeHost); }
+      catch { finish(false); }
+      // The existing episode deadline can preempt this timer; stop/abort/return
+      // cancel the probe as well. It neither resets the budget nor adds a generation.
+    };
+    const close = () => {
+      if (!active()) return;
+      if (process.versions.bun && !opened) probeFailure();
+      else lost();
+    };
     const unexpected = (_req: unknown, response: IncomingMessage) => {
       if (!active()) return;
       response.resume();
