@@ -24,8 +24,9 @@ export async function runScoutDiscovery(argv: string[], version: string, env = p
       if (!/^\d{1,2}$/.test(args[1] ?? "") || args[2] !== "--") throw new Error("invalid completion query");
       const candidates = await scoutCompletionCandidates(args.slice(3), Number(args[1]), env, version);
       if (candidates.length) write(candidates.join("\n"));
-    } else if (args.length === 1 && ["--help", "-h"].includes(args[0]!)) {
-      write("Usage: scout completion zsh|bash|fish\nGenerate a shell script. See scout help completion --json and the Extensions documentation.");
+    } else if (argv.slice(0, start).some(arg => arg === "--help" || arg === "-h") || args.some(arg => arg === "--help" || arg === "-h")) {
+      if (argv.includes("--json")) write(JSON.stringify(scoutCommandHelp(["completion"], version, env)));
+      else write("Usage: scout completion zsh|bash|fish\nGenerate a shell script. See scout help completion --json and the Extensions documentation.");
     } else {
       if (args.length !== 1) throw new Error("usage: scout completion zsh|bash|fish");
       write(renderScoutCompletion(args[0]!));

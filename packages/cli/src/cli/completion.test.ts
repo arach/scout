@@ -232,3 +232,18 @@ test("updates activate documentation and completion with the same generation", a
   expect(await f.query(["sample", ""])).toEqual(["new"]);
   expect(scoutCommandHelp(["sample"], "test", f.env).markdown).toBe("# New help\n");
 });
+
+
+test("completion honors global help and structured help without treating query argv as flags", async () => {
+  const f = fixture();
+  for (const argv of [["--help", "completion"], ["completion", "bash", "--help"], ["--json", "--help", "completion"], ["completion", "--help", "--json"]]) {
+    const output: string[] = [];
+    expect(await runScoutDiscovery(argv, "test", f.env, s => output.push(s))).toBe(true);
+    if (argv.includes("--json")) {
+      const data = JSON.parse(output[0]!); expect(data.schemaVersion).toBe(1); expect(data.subcommands.fish).toBeDefined();
+    } else expect(output[0]).toContain("Usage: scout completion zsh|bash|fish");
+  }
+  const output: string[] = [];
+  expect(await runScoutDiscovery(["completion", "--query", "1", "--", "ask", "--help"], "test", f.env, s => output.push(s))).toBe(true);
+  expect(output).toEqual(["--help"]);
+});

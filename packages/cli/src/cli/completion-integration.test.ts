@@ -34,6 +34,7 @@ test("actual CLI serves completion and structured help without local state or ma
     }));`);
   for (const args of [["completion", "bash"], ["completion", "zsh"], ["completion", "fish"],
     ["completion", "--query", "2", "--", "mesh", "approvals", "w"],
+    ["--help", "completion"], ["completion", "--help", "--json"],
     ["help", "ask", "--json"], ["help", "--json"], ["help", "mesh", "approvals", "--json"],
     ["--json", "app", "restart", "--help"], ["help", "install", "--json"],
   ]) {
