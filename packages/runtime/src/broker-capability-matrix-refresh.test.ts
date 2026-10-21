@@ -558,7 +558,7 @@ test("stop is not subtree absence: direct probe exits while its pipe-owning desc
     descendantFile = join(dir, "descendant"),
     release = join(dir, "release"),
     shell = join(dir, "sh");
-  const descendant = `import{writeFileSync,existsSync}from'node:fs';writeFileSync(${JSON.stringify(descendantFile)},String(process.pid));const end=Date.now()+10000;setInterval(()=>{if(existsSync(${JSON.stringify(release)})||Date.now()>end)process.exit(0)},5);`;
+  const descendant = `import{writeFileSync,existsSync,fstatSync}from'node:fs';const out=fstatSync(1);writeFileSync(${JSON.stringify(descendantFile)},JSON.stringify({pid:process.pid,stdoutIsPipe:out.isFIFO()||out.isSocket()}));const end=Date.now()+10000;setInterval(()=>{if(existsSync(${JSON.stringify(release)})||Date.now()>end)process.exit(0)},5);`;
   writeFileSync(
     shell,
     `#!${process.execPath}\nimport{spawn}from'node:child_process';import{writeFileSync}from'node:fs';spawn(process.execPath,['-e',${JSON.stringify(descendant)}],{stdio:'inherit'});writeFileSync(${JSON.stringify(parentFile)},String(process.pid));setInterval(()=>{},1000);`,
@@ -573,10 +573,9 @@ test("stop is not subtree absence: direct probe exits while its pipe-owning desc
         ...findHarnessEntry("cursor")!,
         name: "fixture",
         readiness: undefined,
-        install: { binary: "fixture", verify: "held" },
+        install: { binary: "fixture" },
       };
       work = evaluateHarnessReadinessAsync(entry, {
-        whichBinary: () => "/fixture",
         signal,
       })
         .then(() => catalog(now()))
@@ -601,7 +600,10 @@ test("stop is not subtree absence: direct probe exits while its pipe-owning desc
   try {
     await until(() => existsSync(parentFile) && existsSync(descendantFile));
     parent = Number(readFileSync(parentFile, "utf8"));
-    child = Number(readFileSync(descendantFile, "utf8"));
+    child = JSON.parse(readFileSync(descendantFile, "utf8")).pid;
+    expect(JSON.parse(readFileSync(descendantFile, "utf8")).stdoutIsPipe).toBe(
+      true,
+    );
     f.service.stop();
     expect(await observed).toMatchObject({ name: "AbortError" });
     await until(() => !alive(parent));
@@ -623,7 +625,7 @@ test("stop is not subtree absence: direct probe exits while its pipe-owning desc
     if (!parent && existsSync(parentFile))
       parent = Number(readFileSync(parentFile, "utf8"));
     if (!child && existsSync(descendantFile))
-      child = Number(readFileSync(descendantFile, "utf8"));
+      child = JSON.parse(readFileSync(descendantFile, "utf8")).pid;
     if (parent && alive(parent)) process.kill(parent, "SIGKILL");
     await work?.catch(() => undefined);
     if (child) await until(() => !alive(child));
