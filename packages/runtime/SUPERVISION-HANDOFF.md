@@ -158,6 +158,10 @@ There is no broker HTTP lifecycle or arbitrary-spawn surface here.
 Readiness is not broker liveness: the integrated adapter must retain verifiable
 pinned artifact/startup-barrier evidence across a broker restart. An offline
 broker does not release P1 custody or make the app a child of the broker.
+Pinned readiness evidence across a runtime restart is a required adapter
+obligation for reverse handoff. Re-establish the verified artifact and startup
+fences before a reverse transfer; if that evidence is unavailable or stale,
+refuse reverse handoff instead of treating a matching version as readiness.
 
 The **operator supplies**, rather than this PR choosing:
 
@@ -234,6 +238,10 @@ effect intent before its synchronous boundary, then confirms only after exact
 owned-start or full-exit proof. Restart confirms stop before starting replacement.
 Draining stops preserve desired intent. `complete` cannot conceal an uncertain
 effect. Completed replay performs no new effect; operation conflict refuses.
+In an active role, `begin` changes desired state before any effect: `stop` sets
+stopped intent, while `start` and `restart` set running intent. Adapters must
+distinguish that persisted intent from proof of a running or stopped process.
+An uncertain effect does not undo intent or authorize a replacement attempt.
 
 `pendingReceipts(role, generation)` lists pending receipts for the selected
 role's current generation. Each result contains `requestId`, `operation`,
@@ -243,6 +251,13 @@ child custody and authorization tokens. It grants no authority or effect
 permission. A stale generation refuses with `ownership_changed`. A controller
 that lost its local attempt journal can discover the exact recovery request ID,
 then obtain separate operator authorization for that receipt.
+
+All SDK reads, including `read`, `handshake` and `pendingReceipts`, take the same
+nonblocking lock as effects. During a long effect scope they return
+`ownership_busy`, even to the current owner. Adapters must not interpret this
+as competing ownership, generation change or permission to take over. Report
+the read as temporarily unavailable and retry without creating a new mutation
+ID or changing authority.
 
 | Private ownership adapter concept | Shared SDK mapping / required change |
 | --- | --- |
