@@ -1,4 +1,4 @@
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { chmod, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,7 +11,7 @@ export async function createAssistantBrokerProxy(brokerSocketPath: string) {
   const directory = await mkdtemp(join(tmpdir(), "scout-answerer-"));
   await chmod(directory, 0o700);
   const socketPath = join(directory, "broker.sock");
-  const server = createServer(bindAssistantClaim(async (request, response) => {
+  const server = createServer(bindAssistantClaim(async (request: IncomingMessage, response: ServerResponse) => {
     try {
       const proof = assistantClaimHeaders(); // Refuse new child work as soon as the lease is lost.
       const destination = new URL(request.url ?? "/", "http://localhost");
