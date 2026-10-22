@@ -53,6 +53,7 @@ mock.module(join(runtimeDirectory, "tail/index.js"), () => ({
   readRecentTranscriptEvents: async () => [],
 }));
 mock.module(join(runtimeDirectory, "tail/service.js"), () => ({
+  tailReplayEpoch: () => buffer.epoch,
   attachTailReplay: (options: {
     limit: number;
     sources?: string[];
