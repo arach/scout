@@ -4,9 +4,10 @@ import {
   renderHerdrWorkspaceDigest,
   type HerdrDigestPane,
   type HerdrWorkspaceDigest,
+  type HerdrWorkspacesRead,
 } from "@openscout/protocol";
 
-import { readScoutWebJson } from "../cli/web-api.ts";
+import { HerdrWorkspacesReadError, readRuntimeHerdrWorkspaces } from "./herdr-workspaces-runtime.ts";
 
 /**
  * `herdr_workspaces` — the read side of Scout's herdr coordination layer.
@@ -14,7 +15,7 @@ import { readScoutWebJson } from "../cli/web-api.ts";
  * Herdr owns workspaces, tabs and panes; Scout coordinates over whatever host
  * is present and never becomes a second layout manager. So this tool reads a
  * ranked digest and stops there. It has no mutation verb, and it deliberately
- * does not shell `herdr` itself: the web server already owns that probe and its
+ * does not shell `herdr` itself: the broker already owns that probe and its
  * cache, and a caller that cannot reach the server should learn that rather
  * than quietly open a second path to the same binary.
  *
@@ -29,6 +30,10 @@ export type HerdrWorkspacesDependencies = {
     digests: HerdrWorkspaceDigest[];
     truncated: boolean;
     available: boolean;
+    runtimeRead?: Omit<HerdrWorkspacesRead, "digests"> & {
+      sessions: Array<{ session: string; availability: HerdrWorkspacesRead["availability"] }>;
+    };
+    readError?: { status: number | null; code: string };
   }>;
 };
 
@@ -66,29 +71,22 @@ export function matchesHerdrPanel(panel: HerdrPanelIdentity, query: string): boo
 }
 
 export function herdrWorkspacesDependencies(
-  webOrigin: string,
   options: { env?: NodeJS.ProcessEnv; fetchImpl?: typeof fetch } = {},
 ): HerdrWorkspacesDependencies {
-  const fetchImpl = options.fetchImpl ?? fetch;
-  const boundedFetch = ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
-    fetchImpl(input, { ...init, signal: AbortSignal.timeout(8_000) })) as typeof fetch;
-  const context = { env: { ...(options.env ?? process.env), OPENSCOUT_WEB_URL: webOrigin } };
+  const env = { ...(options.env ?? process.env) };
   return {
     readDigests: async (session) => {
-      const path = session
-        ? `/api/terminal-hosts/herdr/workspaces?session=${encodeURIComponent(session)}`
-        : "/api/terminal-hosts/herdr/workspaces";
       try {
-        const result = await readScoutWebJson<{
-          digests?: HerdrWorkspaceDigest[];
-          truncated?: boolean;
-        }>(context, path, { fetchImpl: boundedFetch });
-        if (!Array.isArray(result.digests)) return { digests: [], truncated: false, available: false };
-        return { digests: result.digests, truncated: result.truncated === true, available: true };
-      } catch {
-        // Herdr not installed, or the web server unreachable. Both are "we
-        // cannot answer", which is a different claim from "no workspaces".
-        return { digests: [], truncated: false, available: false };
+        const { digests, ...metadata } = await readRuntimeHerdrWorkspaces({ ...options, env, session });
+        return {
+          digests, available: ["available", "partial"].includes(metadata.availability),
+          truncated: metadata.truncated || metadata.availability === "partial",
+          runtimeRead: { ...metadata, sessions: digests.map(({ session, availability }) => ({ session, availability })) },
+        };
+      } catch (error) {
+        return { digests: [], truncated: false, available: false,
+          readError: { status: error instanceof HerdrWorkspacesReadError ? error.status : null,
+            code: error instanceof HerdrWorkspacesReadError ? error.code : "herdr_workspaces_unavailable" } };
       }
     },
   };
@@ -114,13 +112,15 @@ export function registerHerdrWorkspaceTools(server: McpServer, deps: HerdrWorksp
     }),
     annotations: { readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false },
   }, async ({ session, query, limit }) => {
-    const { digests, truncated, available } = await deps.readDigests(session);
+    const { digests, truncated, available, runtimeRead, readError } = await deps.readDigests(session);
+    const provenance = { ...(runtimeRead ? { runtimeRead } : {}), ...(readError ? { readError } : {}) };
     if (!available) {
       const structuredContent = {
         source: "herdr_topology_projection",
         available: false,
         reason: "herdr_unavailable",
-        note: "Could not read herdr on this host: it may not be installed, or the Scout web server is unreachable. This is not evidence that there are no workspaces.",
+        note: "Could not read an available Herdr observation from the local broker. The broker or host probes may be unavailable or not scanned. This is not evidence that there are no workspaces.",
+        ...provenance,
         sessions: [] as HerdrWorkspaceDigest[],
       };
       return { content: [{ type: "text" as const, text: structuredContent.note }], structuredContent };
@@ -134,6 +134,7 @@ export function registerHerdrWorkspaceTools(server: McpServer, deps: HerdrWorksp
         source: "herdr_topology_projection", available: true, coverage: "this_host_only",
         query, truncated: bounded, candidateCount: candidates.length,
         selection: "candidates_only", results,
+        ...provenance,
         note: "Names are Herdr panel labels, not Scout addresses. Session references are reported by Herdr, not independently verified against transcripts. Idle is ready for input, not proof of completed work. Recheck the mapping before reading if the pane has changed since observedAt. A bounded miss is not proof of absence; scope by Herdr session to narrow coverage.",
       };
       return { content: [{ type: "text" as const, text: JSON.stringify(structuredContent) }], structuredContent };
@@ -148,13 +149,14 @@ export function registerHerdrWorkspaceTools(server: McpServer, deps: HerdrWorksp
     const sessions = ordered.slice(0, limit);
     const text = sessions.length
       ? sessions.map(renderHerdrWorkspaceDigest).join("\n\n")
-      : "No herdr sessions on this host.";
+      : truncated ? "No herdr sessions in this incomplete observation; absence is not established." : "No herdr sessions on this host.";
     const structuredContent = {
       source: "herdr_topology_projection",
       available: true,
       coverage: "this_host_only",
       truncated: truncated || ordered.length > sessions.length || sessions.some((digest) => digest.truncated),
       sessions,
+      ...provenance,
     };
     return { content: [{ type: "text" as const, text }], structuredContent };
   });

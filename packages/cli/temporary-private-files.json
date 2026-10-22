@@ -387,12 +387,6 @@
       ]
     },
     {
-      "source": "packages/cli/src/cli/web-api.ts",
-      "packagedDestinations": [
-        "package/dist/main.mjs"
-      ]
-    },
-    {
       "source": "packages/cli/src/lib/core/setup/service.ts",
       "packagedDestinations": [
         "package/dist/main.mjs"
@@ -4582,7 +4576,8 @@
   ],
   "removedSources": [
     "apps/desktop/src/core/setup/local-edge-dependencies.ts",
-    "apps/desktop/src/core/setup/terminal-pty-dependencies.ts"
+    "apps/desktop/src/core/setup/terminal-pty-dependencies.ts",
+    "packages/cli/src/cli/web-api.ts"
   ],
   "removedOutputs": []
 }
