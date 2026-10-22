@@ -70,7 +70,7 @@ stores or pairing keys. Existing bootstrap and local-config readers remain
 responsible for selection. The snapshot captures only named inputs after the
 non-production mesh/push fence. Changing a client pointer later cannot retarget
 it. Logical paths support operation; canonical artifact/root identity is kept
-separately. No consent store is implemented.
+separately. Separate exact-tree grant management does not enable an input channel.
 
 ## Named configuration
 
@@ -121,12 +121,12 @@ command work or launching descendants. It must not print command output before
 that validation. These are trusted-provider obligations, not confinement of a
 malicious executable.
 
-**No host or revision is currently qualified. API 2 is dormant:** every dispatch
+**No context host is approved for activation. API 2 is dormant:** every dispatch
 refuses with `context_backend_unproven` before spawning a provider or creating
-an extra pipe. API 1 is unchanged. The frame and lifecycle above describe the
+a channel. API 1 is unchanged. The frame and lifecycle above describe the
 held contract, not an enabled delivery capability.
 
-The former exact-1.3.14 qualification is withdrawn on both macOS and Linux.
+The former Node-extra-pipe qualification is withdrawn on both macOS and Linux.
 The Node wrapper and native subprocess retain ownership of the same extra-pipe
 number. After the socket destroys it, the native finalizer can close a regular
 file or a new channel that reused that number. This was measured on macOS at
@@ -152,8 +152,19 @@ W5 delivery requires a corrected-witness-qualified transport on its CI's exact
 pinned revision and platform. A pin move alone buys no capability. Any later Bun
 revision is subject to that same rule; there is no semver-based qualification.
 
-Deadline, write failure, early child exit or cancellation closes pending writes
-and owned streams. Failure cleanup sends TERM to only the invocation child,
+The dormant executor instead uses the qualified numeric transport through the
+[host facade](./extension-channel-host.md). The source adapter closes in the
+synchronous spawn scope, before any await. The parent adapter alone closes its
+endpoint after the frame to produce EOF. The parent never wraps either number
+in a stream, Socket, FileHandle or Bun.file. Slot 6 stays ignored.
+
+The adapter's final cooperative yield can finish after a child has read the
+whole frame and exited. The runner distinguishes complete kernel write progress
+from genuinely pending bytes before cancelling on child close. This is still
+not a provider acknowledgement. The race is tested in both directions.
+
+Deadline, write failure, early child exit with pending bytes or cancellation
+closes pending work through its adapter. Failure cleanup sends TERM to only the invocation child,
 then escalates to KILL after 250 ms if needed, and reaps it. Process listeners
 are removed. No service tree or unrelated descendants are guessed or swept.
 API 2 dispatch never performs automatic broker upkeep. Static JSON help never

@@ -7,3 +7,14 @@ export function scoutExtensionContextBackend(): boolean {
   // only by passing the corrected reclaim witness with a single descriptor owner.
   return false;
 }
+
+/** Internal fixed resolver. No user flag or environment override can load code.
+ * Source runs use the runtime sibling; installed CLI runs use a fixed sidecar.
+ * Loading this module never opens the product gate or allocates a descriptor.
+ */
+export async function loadScoutExtensionChannelHost(): Promise<typeof import("@openscout/runtime/extension-channel-host")> {
+  const location = import.meta.url.endsWith(".ts")
+    ? new URL("../../../runtime/src/extension-channel-host.ts", import.meta.url)
+    : new URL("./extension-channel-host.mjs", import.meta.url);
+  return await import(location.href);
+}

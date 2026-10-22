@@ -22,6 +22,9 @@ export async function checkReclaimedDescriptors(input: {
   former: number[]; directory: string; emit?: (event: WitnessEvent) => void; staleClose?: boolean;
   /** Test-control ownership handoff, only AFTER every reclaim/GC identity check passes. */
   reserveFormer?: (fd: number) => void;
+  // Optional bounded finalizer observation: keep the reclaimed victims OPEN
+  // until collection is observed, rather than assuming GC rounds imply it.
+  collected?: () => boolean;
 }) {
   const files: Array<{ fd: number; identity: Identity }> = [];
   try {
@@ -35,12 +38,19 @@ export async function checkReclaimedDescriptors(input: {
     if (input.former.some(fd => !files.some(file => file.fd === fd))) throw Error("former pipe number was not reclaimed");
     input.emit?.({ event: "reclaimed", former: input.former, files });
     if (input.staleClose) closeSync(files.find(file => input.former.includes(file.fd))!.fd);
-    for (let round = 0; round < 8; round++) {
+    let collectionObserved = false;
+    for (let round = 0; round < (input.collected ? 64 : 8); round++) {
       Bun.gc(true); await Bun.sleep(5);
       const losses = files.filter(file => !same(file.identity, identity(file.fd)));
       input.emit?.({ event: "reclaim-check", round, losses });
       if (losses.length) throw Error(`reclaimed descriptor lost: ${losses.map(file => file.fd).join(",")}`);
+      if (round >= 7 && input.collected?.()) {
+        input.emit?.({event: "collection-observed", gcRounds: round + 1});
+        collectionObserved = true;
+        break;
+      }
     }
+    if (input.collected && !collectionObserved) throw Error("native subprocess collection was not observed within 64 GC rounds");
     if (input.reserveFormer) {
       const index = files.findIndex(file => input.former.includes(file.fd));
       if (index < 0) throw Error("no reclaimed former descriptor to reserve");

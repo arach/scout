@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { createHash } from "node:crypto";
 import { ATTACHMENT_LIMITS, type AttachmentReadResult, type ConversationDefinition, type MessageRecord, type PostWithAttachments, type ReadAttachment } from "@openscout/protocol";
 import { AttachmentBlobStore, attachmentHash } from "./attachment-blob-store.js";
@@ -12,10 +13,14 @@ export type BrokerAttachmentServiceOptions = {
   authorizeActor: (principal: AttachmentPrincipal) => boolean;
   message: (id: string) => Promise<MessageRecord | undefined>;
   post: (message: MessageRecord) => Promise<unknown>;
+  /** Fixed broker composition, never a caller-selected notification target. */
+  operatorActorId?: string;
+  operatorReturnAddress?: (message: MessageRecord) => unknown;
   now?: () => number;
 };
 export class BrokerAttachmentService {
   private readonly admitted = new WeakSet<MessageRecord>();
+  private readonly notifications = new WeakSet<MessageRecord>();
   private uploadActive = false;
   constructor(private readonly options: BrokerAttachmentServiceOptions) {}
   private available(): AttachmentBlobStore {
@@ -29,12 +34,38 @@ export class BrokerAttachmentService {
     if (conversation.authorityNodeId !== this.options.nodeId) throw new AttachmentError("attachment_wrong_node", 409);
     return conversation;
   }
+  assertLocalActor(principal: AttachmentPrincipal): void {
+    this.available();
+    if (principal.nodeId !== this.options.nodeId || !this.options.authorizeActor(principal))
+      throw new AttachmentError("attachment_forbidden", 403);
+  }
+  async postOperatorNotification(input: PostWithAttachments, principal: AttachmentPrincipal) {
+    const operator = this.options.operatorActorId;
+    this.assertLocalActor(principal);
+    const parsed = postWithAttachmentsSchema.safeParse(input);
+    if (!parsed.success) throw new AttachmentError("invalid_attachment_request", 400);
+    this.notificationConversation(parsed.data.conversationId, principal);
+    if (parsed.data.replyToMessageId !== undefined || parsed.data.attachments.length !== 1
+      || !imageMimes.has(parsed.data.attachments[0]!.mediaType) || !parsed.data.body.trim()) throw new AttachmentError("invalid_attachment_notification", 400);
+    if (this.uploadActive) throw new AttachmentError("attachments_busy");
+    this.uploadActive = true;
+    try { return await this.postAdmitted({ ...parsed.data, body: parsed.data.body.trim() }, principal, operator); }
+    finally { this.uploadActive = false; }
+  }
+  private notificationConversation(id: string, principal: AttachmentPrincipal) {
+    const conversation = this.member(id, principal);
+    const operator = this.options.operatorActorId;
+    if (!operator || conversation.kind !== "direct" || !conversation.participantIds.includes(operator)
+      || conversation.participantIds.some(id => id !== operator && id !== principal.actorId))
+      throw new AttachmentError("invalid_attachment_notification", 400);
+  }
   /** Called INSIDE the broker's serialized canonical writer, after file barriers.
    * Every other local write path refuses typed refs, even a caller who knows a hash. */
   assertMessageAdmission = (message: MessageRecord): void => {
     if (!message.attachments?.some(a => a.blob !== undefined)) return;
     if (!this.admitted.has(message)) throw new AttachmentError("attachment_inline_write_required", 400);
     this.member(message.conversationId, { actorId: message.actorId, nodeId: this.options.nodeId });
+    if (this.notifications.has(message)) this.notificationConversation(message.conversationId, { actorId: message.actorId, nodeId: this.options.nodeId });
     for (const attachment of message.attachments) {
       const ref = blobRefSchema.parse(attachment.blob);
       if (attachment.mediaType !== ref.mediaType || attachment.url !== undefined || attachment.blobKey !== undefined) throw new AttachmentError("invalid_attachment_binding", 400);
@@ -46,7 +77,7 @@ export class BrokerAttachmentService {
     try { return await this.postAdmitted(input, principal); }
     finally { this.uploadActive = false; }
   }
-  private async postAdmitted(input: PostWithAttachments, principal: AttachmentPrincipal) {
+  private async postAdmitted(input: PostWithAttachments, principal: AttachmentPrincipal, notifyOperator?: string) {
     const store = this.available();
     const parsed = postWithAttachmentsSchema.safeParse(input);
     if (!parsed.success) throw new AttachmentError("invalid_attachment_request", 400);
@@ -67,14 +98,24 @@ export class BrokerAttachmentService {
       originNodeId: this.options.nodeId, class: "agent", body: request.body,
       ...(request.replyToMessageId ? { replyToMessageId: request.replyToMessageId } : {}),
       visibility: conversation.visibility, policy: "durable", createdAt: (this.options.now ?? Date.now)(),
-      metadata: { clientMessageId: id },
+      metadata: { clientMessageId: id, ...(notifyOperator ? {
+        source: "scout-notify", operatorSignal: { kind: "notify", blocking: false, replyExpectation: "none" },
+        operatorSignalId: id, relayChannel: "dm", relayTarget: notifyOperator,
+        relayTargetIds: principal.actorId === notifyOperator ? [] : [notifyOperator], relayMessageId: id,
+      } : {}) },
+      ...(notifyOperator ? { mentions: [{ actorId: notifyOperator, label: "@operator" }],
+        audience: { reason: "direct_message" as const, notify: principal.actorId === notifyOperator ? [] : [notifyOperator] } } : {}),
       attachments: blobs.map((blob,i) => ({ id: `${id}.attachment.${i}`, mediaType: blob.ref.mediaType, blob: blob.ref,
         ...(request.attachments[i]!.fileName ? { fileName: request.attachments[i]!.fileName } : {}) })),
     };
     const retry = async () => {
       this.member(conversation.id, principal);
+      if (notifyOperator) this.notificationConversation(conversation.id, principal);
       const existing = await this.options.message(id);
-      if (existing && !isIdempotentMessageRetry(existing, message)) throw new AttachmentError("attachment_request_conflict", 409);
+      if (existing && (!isIdempotentMessageRetry(existing, message)
+        || existing.originNodeId !== message.originNodeId
+        || !isDeepStrictEqual(existing.metadata?.operatorSignal ?? null, message.metadata?.operatorSignal ?? null)
+        || (notifyOperator && existing.metadata?.relayTarget !== notifyOperator))) throw new AttachmentError("attachment_request_conflict", 409);
       return existing;
     };
     const existing = await retry();
@@ -86,11 +127,15 @@ export class BrokerAttachmentService {
     return store.withBlobs(blobs, async () => {
       const accepted = await retry();
       if (accepted) return { ok: true as const, message: accepted, duplicate: true };
+      if (notifyOperator) {
+        message.metadata!.returnAddress = this.options.operatorReturnAddress?.(message);
+        this.notifications.add(message);
+      }
       this.admitted.add(message);
       try {
         await this.options.post(message);
         return { ok: true as const, message, duplicate: false };
-      } finally { this.admitted.delete(message); }
+      } finally { this.admitted.delete(message); this.notifications.delete(message); }
     });
   }
   async read(input: ReadAttachment, principal: AttachmentPrincipal): Promise<AttachmentReadResult> {

@@ -244,6 +244,7 @@ const MESH_ROUTE_MATRIX: Record<string, MeshRouteTier> = {
   "GET /v1/attachments/capability": "local",
   "POST /v1/attachments/read": "local",
   "POST /v1/messages/with-attachments": "local",
+  "POST /v1/operator/notify-with-attachment": "local",
   "GET /v1/history/records": "local",
   "GET /v1/history/records/:kind/:id": "local",
   "GET /v1/quarantine": "local",

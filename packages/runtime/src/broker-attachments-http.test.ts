@@ -89,3 +89,48 @@ test("public attachment subpath is import-safe and does not expose an unscoped b
   expect("AttachmentBlobStore" in api).toBe(false);
   expect("readPairingAttachmentBlob" in api).toBe(false);
 });
+
+const notifyPath="/v1/operator/notify-with-attachment";
+const notifyInput={actorId:"agent",requestId:"notify",body:"Ready",attachment:{data:"iVBORw0KGgo=",mediaType:"image/png",fileName:"screen.png"}};
+test("fixed local operator attachment route cannot select a target, answer or blocking state",async()=>{
+  const calls:unknown[]=[]; const d={...deps(),notifyOperator:async(input:unknown,principal:unknown)=>{calls.push({input,principal});return {ok:true};}};
+  for(const extra of [{conversationId:"other"},{target:"other"},{nodeId:"remote"},{replyToMessageId:"question"},{operatorSignal:{kind:"need"}},{permission:true},{metadata:{source:"answer"}},{attachments:[]},{url:"https://evil.test"}]) {
+    const res=response();await handleAttachmentRoute(request({...notifyInput,...extra},notifyPath),res,new URL(`http://localhost${notifyPath}`),d);
+    expect(res.status).toBe(400);
+  }
+  for(const attachment of [{...notifyInput.attachment,url:"https://evil.test"},{...notifyInput.attachment,blob:{sha256:"a".repeat(64)}},{data:"YQ==",mediaType:"text/plain"}]) {
+    const res=response();await handleAttachmentRoute(request({...notifyInput,attachment},notifyPath),res,new URL(`http://localhost${notifyPath}`),d);expect(res.status).toBe(400);
+  }
+  expect(calls).toEqual([]);
+  const res=response();await handleAttachmentRoute(request(notifyInput,notifyPath),res,new URL(`http://localhost${notifyPath}`),d);
+  expect(res.status).toBe(200);expect(calls).toEqual([{input:notifyInput,principal:{actorId:"agent",nodeId:"n"}}]);
+});
+test("operator attachment route refuses remote, missing, peer, scoped and forwarded authority before effects",async()=>{
+  let calls=0; const d={...deps(),notifyOperator:async()=>{calls++;return {ok:true};}};
+  for(const context of [undefined,{transport:"remote"},{transport:"loopback",peer:{keyId:"verified",tier:"control"}},{transport:"loopback",scoped:{}},{transport:"unix-socket",guest:{keyId:"g",grantId:"g"}}]) {
+    const req=request(notifyInput,notifyPath);req.transportContext=context as RuntimeRequestTransportContext|undefined;
+    const res=response();await handleAttachmentRoute(req,res,new URL(`http://localhost${notifyPath}`),d);expect(res.status).toBe(403);
+  }
+  for(const name of ["origin","forwarded","x-forwarded-for","x-openscout-forwarded-node-id"]) {
+    const req=request(notifyInput,notifyPath);req.headers[name]="untrusted";const res=response();
+    await handleAttachmentRoute(req,res,new URL(`http://localhost${notifyPath}`),d);expect(res.status).toBe(403);
+  }
+  expect(calls).toBe(0);
+});
+test("operator attachment upload obeys the existing protected ingress budget and shares admission",async()=>{
+  let calls=0;const d={...deps(),uploadRequestBytes:64,notifyOperator:async()=>{calls++;return {ok:true};}};
+  const res=response();await handleAttachmentRoute(request(notifyInput,notifyPath),res,new URL(`http://localhost${notifyPath}`),d);
+  expect(res.status).toBe(413);expect(calls).toBe(0);
+  const unavailable=response();await handleAttachmentRoute(request(notifyInput,notifyPath),unavailable,new URL(`http://localhost${notifyPath}`),deps());expect(unavailable.status).toBe(503);
+  let release!:()=>void,entered!:()=>void;
+  const gate=new Promise<void>(r=>{release=r}),started=new Promise<void>(r=>{entered=r});
+  const busy={...deps(),notifyOperator:async()=>{entered();await gate;return {ok:true};}};
+  const first=handleAttachmentRoute(request(notifyInput,notifyPath),response(),new URL(`http://localhost${notifyPath}`),busy);await started;
+  const second=response();await handleAttachmentRoute(request(notifyInput,notifyPath),second,new URL(`http://localhost${notifyPath}`),busy);
+  expect(second.status).toBe(503);expect(second.body).toEqual({error:"attachments_busy"});release();await first;
+});
+test("operator notification write is local-only even for a control mesh grant",async()=>{
+  const {meshRouteTierFor,grantSatisfiesRouteTier}=await import("./mesh-route-matrix.js");
+  expect(meshRouteTierFor("POST",notifyPath)).toBe("local");
+  expect(grantSatisfiesRouteTier("control",meshRouteTierFor("POST",notifyPath))).toBe(false);
+});

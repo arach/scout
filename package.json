@@ -40,7 +40,7 @@
     "test": "bun run test:unit",
     "test:unit": "bun run test:cli && bun run test:unit:source",
     "test:cli": "bun run --cwd packages/cli test:happy",
-    "test:unit:source": "bun run --cwd packages/protocol test && bun run --cwd packages/agent-sessions test && bun test ./packages/runtime/src --path-ignore-patterns='**/*live.test.ts' --path-ignore-patterns='**/scenario-suite.test.ts' && bun run --cwd packages/cli test:source && bun run --cwd apps/desktop test && bun run --cwd packages/web test && bun run --cwd packages/session-trace test && bun run --cwd packages/session-trace-react test && node --test scripts/ship-release.test.mjs scripts/bundle-scout-web.test.mjs scripts/check-packed-dependencies.test.mjs && bun run --cwd packages/mesh-extension test",
+    "test:unit:source": "bun run --cwd packages/protocol test && bun run --cwd packages/agent-sessions test && bun run --cwd packages/runtime test && bun run --cwd packages/cli test:source && bun run --cwd apps/desktop test && bun run --cwd packages/web test && bun run --cwd packages/session-trace test && bun run --cwd packages/session-trace-react test && node --test scripts/ship-release.test.mjs scripts/bundle-scout-web.test.mjs scripts/check-packed-dependencies.test.mjs && bun run --cwd packages/mesh-extension test",
     "test:happy": "cd apps/desktop && bun run test:happy && cd ../../packages/cli && bun run test:happy",
     "test:scenarios": "bun run --cwd packages/runtime test:scenarios",
     "test:e2e": "bun run check && bun run test:scenarios && bun run test:e2e:agents",
@@ -90,7 +90,8 @@
     "bump": "node scripts/bump-version.mjs",
     "scout:tui:check": "bash scripts/cargo.sh check --manifest-path crates/scout-tui/Cargo.toml",
     "scout:tui:build": "bash scripts/cargo.sh build --release --manifest-path crates/scout-tui/Cargo.toml",
-    "scout:tui:install": "bash scripts/cargo.sh install --locked --path crates/scout-tui"
+    "scout:tui:install": "bash scripts/cargo.sh install --locked --path crates/scout-tui",
+    "test:extension-channel:qualification": "bun scripts/extension-channel-qualification.ts"
   },
   "ignoreScripts": [
     "sharp",

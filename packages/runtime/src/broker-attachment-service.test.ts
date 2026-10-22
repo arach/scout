@@ -17,7 +17,7 @@ import { markAttachmentReferences } from "./attachment-retention.js";
 const roots: string[] = [];
 const journals: FileBackedBrokerJournal[] = [];
 afterEach(async () => { for (const j of journals.splice(0)) await j.close(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); }, 30_000);
-function fixture(options: { cap?: number; beforeRename?: () => Promise<void>; failCommit?: boolean } = {}) {
+function fixture(options: { cap?: number; beforeRename?: () => Promise<void>; failCommit?: boolean; beforeCommit?: () => void } = {}) {
   const root = mkdtempSync(join(tmpdir(), "scout-attachments-")); roots.push(root);
   const messages = new Map<string, MessageRecord>();
   const conversation = (id: string): ConversationDefinition => ({ id, kind: "direct", title: id, participantIds: ["a", "b"], visibility: "private", shareMode: "local", authorityNodeId: "n" });
@@ -27,9 +27,9 @@ function fixture(options: { cap?: number; beforeRename?: () => Promise<void>; fa
   const store = new AttachmentBlobStore({ supportDirectory: root, maxBytes: options.cap, now: () => time, beforeRename: options.beforeRename,
     references: async candidates => markAttachmentReferences(candidates, [(async function* () { yield* messages.values(); })()], id => conversations.has(id)) });
   let service: BrokerAttachmentService;
-  service = new BrokerAttachmentService({ nodeId: "n", store, conversation: id => conversations.get(id),
+  service = new BrokerAttachmentService({ nodeId: "n", store, operatorActorId: "b", operatorReturnAddress: m => ({ actorId: m.actorId, replyToMessageId: m.id }), conversation: id => conversations.get(id),
     authorizeActor: p => (p.actorId === "a" && p.nodeId === "n") || (p.actorId === "b" && p.nodeId === "peer"), message: async id => messages.get(id),
-    post: async message => { service.assertMessageAdmission(message); if (options.failCommit) throw new Error("disk failed"); await journal.appendEntries([{ kind: "message.record", message }]); messages.set(message.id, message); }, now: () => time });
+    post: async message => { options.beforeCommit?.(); service.assertMessageAdmission(message); if (options.failCommit) throw new Error("disk failed"); await journal.appendEntries([{ kind: "message.record", message }]); messages.set(message.id, message); }, now: () => time });
   const input = (requestId = "r1", conversationId = "c1", text = "hello") => ({ requestId, conversationId, body: "Attached", attachments: [{ data: Buffer.from(text).toString("base64"), mediaType: "text/plain", fileName: "note.txt" }] });
   const principal = { actorId: "a", nodeId: "n" };
   const read = (message: MessageRecord, mode: "text" | "image" = "text") => ({ messageId: message.id, conversationId: message.conversationId, blobId: message.attachments![0]!.blob!.sha256, mode });
@@ -238,3 +238,62 @@ test("a full 25 MiB image writes without entering the journal; its JSON fits ord
   expect(readFileSync(join(f.root,"journal.jsonl")).length).toBeLessThan(4096);
   await expect(f.service.read(f.read(accepted.message,"image"),f.principal)).rejects.toThrow("attachment_too_large");
 }, 30_000);
+
+const notifyImage = { data: Buffer.from([137,80,78,71,13,10,26,10]).toString("base64"), mediaType: "image/png", fileName: "screen.png" };
+test("operator image notification is one durable authorized message/blob binding, not an answer", async () => {
+  const f=fixture(); await f.journal.load();
+  const input={requestId:"notify",conversationId:"c1",body:" Ready ",attachments:[notifyImage]};
+  const result=await f.service.postOperatorNotification(input,f.principal);
+  expect(result).toMatchObject({ok:true,duplicate:false,message:{actorId:"a",body:"Ready",originNodeId:"n",metadata:{
+    operatorSignal:{kind:"notify",blocking:false,replyExpectation:"none"},relayTarget:"b",returnAddress:{actorId:"a",replyToMessageId:result.message.id}},
+    mentions:[{actorId:"b",label:"@operator"}],audience:{reason:"direct_message",notify:["b"]}}});
+  expect(result.message.replyToMessageId).toBeUndefined();
+  expect(result.message.attachments?.[0]?.url).toBeUndefined();
+  expect(result.message.attachments?.[0]?.blobKey).toBeUndefined();
+  expect(await f.service.read(f.read(result.message,"image"),f.principal)).toMatchObject({data:notifyImage.data,mediaType:"image/png"});
+  expect(readFileSync(join(f.root,"journal.jsonl"),"utf8")).not.toContain(notifyImage.data);
+  expect(await f.service.postOperatorNotification(input,f.principal)).toMatchObject({duplicate:true,message:{id:result.message.id}});
+  await expect(f.service.postWithAttachments({...input,body:"Ready"},f.principal)).rejects.toThrow("attachment_request_conflict");
+  expect(f.messages.size).toBe(1);
+});
+test("operator image notification refuses impersonation, wrong node, target, replies and question metadata", async () => {
+  const f=fixture(); await f.journal.load();
+  const input={requestId:"notify",conversationId:"c1",body:"Ready",attachments:[notifyImage]};
+  for(const principal of [{actorId:"unknown",nodeId:"n"},{actorId:"a",nodeId:"peer"},{actorId:"b",nodeId:"peer"}])
+    await expect(f.service.postOperatorNotification(input,principal)).rejects.toThrow("attachment_forbidden");
+  for(const change of [{replyToMessageId:"question"},{operatorSignal:{kind:"need"}},{attachments:[notifyImage,notifyImage]},{attachments:[{data:"YQ==",mediaType:"text/plain"}]},{body:" "}])
+    await expect(f.service.postOperatorNotification({...input,...change},f.principal)).rejects.toThrow(/invalid_attachment/);
+  for(const participants of [["a"],["a","b","other"]]) {
+    f.conversations.get("c1")!.participantIds=participants;
+    await expect(f.service.postOperatorNotification(input,f.principal)).rejects.toThrow("invalid_attachment_notification");
+  }
+  f.conversations.get("c1")!.participantIds=["a","b"]; f.conversations.get("c1")!.kind="group";
+  await expect(f.service.postOperatorNotification(input,f.principal)).rejects.toThrow("invalid_attachment_notification");
+  expect(f.messages.size).toBe(0);
+});
+test("operator membership and notification target are rechecked after durable image IO", async () => {
+  for(const change of [()=>["a"],()=>["a","b","other"]]) {
+    const f=fixture({beforeRename:async()=>{f.conversations.get("c1")!.participantIds=change();}}); await f.journal.load();
+    await expect(f.service.postOperatorNotification({requestId:"notify",conversationId:"c1",body:"Ready",attachments:[notifyImage]},f.principal)).rejects.toThrow("invalid_attachment_notification");
+    expect(f.messages.size).toBe(0);
+  }
+});
+test("failed notification image commit never reports a recorded message", async()=>{
+  const f=fixture({failCommit:true});await f.journal.load();
+  await expect(f.service.postOperatorNotification({requestId:"notify",conversationId:"c1",body:"Ready",attachments:[notifyImage]},f.principal)).rejects.toThrow("attachment_unavailable");
+  expect(f.messages.size).toBe(0);
+});
+
+test("serialized notification admission refuses a changed operator DM even after the last IO recheck",async()=>{
+  const f=fixture({beforeCommit:()=>{f.conversations.get("c1")!.participantIds=["a"];}});await f.journal.load();
+  await expect(f.service.postOperatorNotification({requestId:"notify",conversationId:"c1",body:"Ready",attachments:[notifyImage]},f.principal)).rejects.toThrow("invalid_attachment_notification");
+  expect(f.messages.size).toBe(0);
+});
+test("notification retry cannot adopt a retained blocking signal or a different image",async()=>{
+  const f=fixture();await f.journal.load();const input={requestId:"notify",conversationId:"c1",body:"Ready",attachments:[notifyImage]};
+  const {message}=await f.service.postOperatorNotification(input,f.principal);
+  await expect(f.service.postOperatorNotification({...input,attachments:[{...notifyImage,data:Buffer.concat([Buffer.from(notifyImage.data,"base64"),Buffer.from("different")]).toString("base64")}]},f.principal)).rejects.toThrow("attachment_request_conflict");
+  message.metadata!.operatorSignal={kind:"need",blocking:true,replyExpectation:"required"};
+  await expect(f.service.postOperatorNotification(input,f.principal)).rejects.toThrow("attachment_request_conflict");
+  expect(f.messages.size).toBe(1);
+});
