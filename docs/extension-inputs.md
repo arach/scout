@@ -105,11 +105,15 @@ its device/inode identity, verb, full `treeDigest`, complete normalized
 covers requirements, input set, destination and purpose. A declaration change
 invalidates consent independently of the tree axis.
 
-Each explicit grant/revoke appends a revisioned metadata-only audit event.
+Each effective explicit grant/revoke appends a revisioned metadata-only audit
+event. Revoking an already absent grant is a no-op.
 Replacement uses a same-directory exclusive 0600 staging file, file fsync,
 atomic rename and directory fsync, under the policy lock. Failed persistence
 refuses. Limits are 512 KiB, 256 active grants and 1024 audit events; records
-are not silently discarded or compacted. Inspect/recover policy before retrying
+are not silently discarded or compacted. Issuance reserves one audit position
+per active grant, so the capacity limit cannot prevent revoking all active
+grants. A policy without that reserve refuses rather than authorizing inputs.
+Inspect/recover policy before retrying
 when those bounds are reached. There are no credential values in policy.
 
 ## Provenance

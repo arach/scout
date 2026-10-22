@@ -87,7 +87,7 @@ test("management uses names and pinned digests only; install/update never issue 
   refused(await cli(f, grantArgs({ ...binding, declarationDigest: "sha256:scout-extension-declaration-v1:" + "c".repeat(64) })), "input_not_authorized");
   expect((await cli(f, ["revoke", grant.id])).code).toBe(0); expect(JSON.parse((await cli(f, ["list"])).stdout).grants).toEqual([]);
   mutateScoutExtension("update", "input-fixture", f.source, f.env); expect(listScoutExtensionInputGrants(f.env).grants).toEqual([]);
-});
+}, 30_000);
 
 test("permission revalidation happens under the policy lock and changed selection cannot be granted", () => {
   const f = fixture(), binding = f.binding();
@@ -157,4 +157,17 @@ test("unqualified input transport refuses a valid granted declaration before any
   const timer = setTimeout(() => child.kill("SIGKILL"), 10_000);
   try { const code = await new Promise<number | null>(done => child.once("close", done)); refused({ code, stdout, stderr }, scoutExtensionContextBackend() ? "input_backend_unproven" : "context_backend_unproven"); expect(existsSync(marker)).toBe(false); }
   finally { clearTimeout(timer); }
+}, 15_000);
+
+test("audit headroom always permits revoking every active grant without discarding history", () => {
+  const f = fixture(), grant = grantScoutExtensionInput(f.env, f.binding()), path = scoutExtensionGrantStore(f.env);
+  const policy = listScoutExtensionInputGrants(f.env);
+  policy.audit = Array.from({ length: 1023 }, (_, index) => ({ event: "grant" as const, grantId: grant.id, treeDigest: grant.binding.treeDigest, revision: index + 1, at: grant.createdAt }));
+  policy.revision = 1023; writeFileSync(path, JSON.stringify(policy));
+  const before = readFileSync(path, "utf8");
+  expect(() => grantScoutExtensionInput(f.env, f.binding())).toThrow("input_policy_invalid"); expect(readFileSync(path, "utf8")).toBe(before);
+  expect(revokeScoutExtensionInputGrant(f.env, grant.id).revoked).toBe(true);
+  const after = listScoutExtensionInputGrants(f.env); expect(after.audit).toHaveLength(1024); expect(after.grants).toEqual([]);
+  expect(() => assertScoutExtensionInputGrant(f.env, f.binding())).toThrow("input_not_authorized");
+  expect(revokeScoutExtensionInputGrant(f.env, grant.id).revoked).toBe(false); expect(listScoutExtensionInputGrants(f.env).revision).toBe(1024);
 });

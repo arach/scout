@@ -109,7 +109,7 @@ function readPolicy(path: string): ExtensionGrantPolicy {
     const policy = JSON.parse(data.toString("utf8"));
     if (!exactKeys(policy, ["schema", "revision", "grants", "audit"]) || policy.schema !== EXTENSION_GRANT_SCHEMA
       || !Number.isSafeInteger(policy.revision) || (policy.revision as number) < 0 || !Array.isArray(policy.grants) || policy.grants.length > 256
-      || !Array.isArray(policy.audit) || policy.audit.length > 1024) throw new Error();
+      || !Array.isArray(policy.audit) || policy.audit.length + policy.grants.length > 1024) throw new Error();
     const ids = new Set<string>();
     for (const grant of policy.grants) {
       if (!exactKeys(grant, ["id", "binding", "createdAt"]) || !text(grant.id) || !GRANT_ID.test(grant.id) || !validBinding(grant.binding)
@@ -164,7 +164,10 @@ export function grantScoutExtensionInput(env: NodeJS.ProcessEnv, binding: Extens
   return underPolicyLock(env, true, binding.verb, (policy, path) => {
     if (canonical(revalidate()) !== canonical(binding)) inputRefusal(binding.verb, "selection_changed");
     const grant = { id: scoutExtensionGrantId(binding), binding, createdAt: new Date().toISOString() };
-    policy.grants = [...policy.grants.filter(item => item.id !== grant.id), grant];
+    const nextGrants = [...policy.grants.filter(item => item.id !== grant.id), grant];
+    // Reserve one audit position per active grant so capacity cannot prevent revocation.
+    if (policy.audit.length + 1 + nextGrants.length > 1024) inputRefusal(binding.verb, "input_policy_invalid");
+    policy.grants = nextGrants;
     policy.audit.push({ event: "grant", grantId: grant.id, treeDigest: binding.treeDigest, revision: ++policy.revision, at: grant.createdAt });
     replacePolicy(path!, policy); return grant;
   });
@@ -173,6 +176,7 @@ export function revokeScoutExtensionInputGrant(env: NodeJS.ProcessEnv, id: strin
   if (!GRANT_ID.test(id)) inputRefusal("extensions", "input_policy_invalid");
   return underPolicyLock(env, true, "extensions", (policy, path) => {
     const grant = policy.grants.find(item => item.id === id);
+    if (!grant) return { id, revoked: false };
     policy.grants = policy.grants.filter(item => item.id !== id);
     policy.audit.push({ event: "revoke", grantId: id, treeDigest: grant?.binding.treeDigest ?? null, revision: ++policy.revision, at: new Date().toISOString() });
     replacePolicy(path!, policy); return { id, revoked: !!grant };
