@@ -560,6 +560,13 @@
     "owner": "runtime"
   },
   {
+    "path": "packages/runtime/src/live-test-opt-in.test.ts",
+    "symbol": "Bun.spawn",
+    "category": "test",
+    "reason": "bounded child Bun test runners prove exact live-test opt-in against isolated HOME, fake harness executables and owned loopback stubs; child handles are killed and awaited",
+    "owner": "tests"
+  },
+  {
     "path": "packages/runtime/src/test-helpers/broker-daemon-harness.test.ts",
     "symbol": "Bun.spawn",
     "category": "test",

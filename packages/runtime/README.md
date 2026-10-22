@@ -289,8 +289,30 @@ Also verify an external ESM scratch project with `skipLibCheck: false` and no
 `@types/node`; this catches published declaration leaks that monorepo checks can
 miss.
 
+## Unit and scenario checks
+
+`bun run --cwd packages/runtime test` recursively runs `src`, including the
+scenario suite and nested probe suites. It excludes every `*live.test.ts` file,
+even when live credentials or opt-in variables exist in the environment.
+`test:scenarios` runs just the scenario suite. Scenario brokers wait for
+`/health` to report `ok: true`, `startup.state: "ready"` and
+`startup.mutationsAdmitted: true` before fixture setup sends mutations. An HTTP
+200 during restore is not readiness. The existing startup budget is six seconds;
+no mutation is retried on a restoring response.
+
+The scenario pairing bridge is an owned loopback-only plaintext fake. Its
+throwaway config declares `secure: false`; production secure defaults do not
+change. Simulated reviewers answer through this fake, not real native harnesses.
+
 ## Live and e2e checks
 
+Being signed in is not consent to a live run. Direct OpenCode and Codex test
+file runs require `OPENSCOUT_LIVE_OPENCODE_ACP=1` and
+`OPENSCOUT_LIVE_CODEX_APP_SERVER=1`, respectively. Other values do not opt in.
+The named `test:live:*` scripts below set their respective opt-in variables:
+
+- `bun run --cwd packages/runtime test:live:opencode-acp` requires OpenCode
+  authentication, spawns a real OpenCode process and can spend tokens.
 - `bun run --cwd packages/runtime test:live:codex-app-server` uses
   [README-live-codex-app-server-test.md](./README-live-codex-app-server-test.md)
   for a direct Codex JSON-RPC check against an existing app-server listener.
