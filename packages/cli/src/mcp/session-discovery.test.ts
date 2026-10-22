@@ -6,7 +6,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { SQLiteKnowledgeStore, type KnowledgeSearchHit } from "@openscout/runtime";
-import { digestHerdrTopology, type HerdrSessionTopology } from "@openscout/protocol";
+import { digestHerdrTopology, type HerdrSessionTopology, type ObservedSessionInventory } from "@openscout/protocol";
 import { registerSessionDiscoveryTools, sessionDiscoveryDependencies, type SessionDiscoveryDependencies } from "./session-discovery.ts";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -29,6 +29,17 @@ const hit: KnowledgeSearchHit = {
 };
 function dependencies(overrides: Partial<SessionDiscoveryDependencies> = {}): SessionDiscoveryDependencies {
   return { webOrigin: "http://localhost:43120", openStore: () => ({ assessCoverage: () => warmed, searchLexical: () => [hit], close() {} }), readInventory: async () => ({ sessions: [], terminals: [] }), ...overrides };
+}
+
+function runtimeFixture(overrides: Partial<ObservedSessionInventory> = {}): ObservedSessionInventory {
+  return { schema: "scout.observed-sessions/v1", nodeId: "node-one", scannedAt: 123, availability: "available",
+    sources: [{ harness: "codex", availability: "available", processes: "unknown" }],
+    sessions: [{ identity: { nodeId: "node-one", harness: "codex", nativeSessionId: "native-1" }, links: [{ kind: "agent", id: "not-a-session" }], cwd: "/work", title: "Runtime title", observedAt: 123, availability: "available", identityConflict: false }],
+    coverage: { kind: "cached_window", scope: "recent", truncated: false, links: { agents: "available", conversations: "unsupported", terminals: "unsupported" } }, ...overrides };
+}
+function runtimeDeps(value: ObservedSessionInventory) {
+  return sessionDiscoveryDependencies("http://web-must-not-be-read.invalid", { env: { OPENSCOUT_BROKER_URL: "http://localhost:43121" },
+    fetchImpl: Object.assign(async () => Response.json(value), { preconnect: () => undefined }), readNativeApp: async () => ({ threads: [], available: false, truncated: false }) });
 }
 
 function herdrInventory(options: { live?: boolean; harness?: string; kind?: string } = {}) {
@@ -72,13 +83,8 @@ describe("Scoutbot read-only session tools", () => {
   });
 
   test("panel discovery survives unavailable canonical views and declares those gaps", async () => {
-    const fetchImpl = (async (input: string | URL | Request) => {
-      const url = new URL(input instanceof Request ? input.url : String(input));
-      return url.pathname.endsWith("/herdr/workspaces")
-        ? Response.json(herdrInventory())
-        : new Response("unavailable", { status: 503 });
-    }) as typeof fetch;
-    const deps = sessionDiscoveryDependencies("http://localhost:43120", { fetchImpl, env: {} });
+    const deps = dependencies({ readInventory: async () => ({ sessions: [], terminals: [],
+      sources: { sessions: "unavailable", terminals: "unavailable" }, herdr: herdrInventory() }) });
     const client = await clientFor(deps);
     const result = await client.callTool({ name: "sessions_inventory", arguments: { query: "devon-2" } });
     expect(result.structuredContent).toMatchObject({
@@ -259,34 +265,31 @@ describe("Scoutbot read-only session tools", () => {
     expect(closed).toBe(true);
   });
 
-  test("inventory bootstraps local authentication on 401 and retries with its cookie", async () => {
-    const reads: Array<{ path: string; cookie: string | null }> = [];
-    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
-      const url = new URL(input instanceof Request ? input.url : input.toString());
-      const cookie = new Headers(init?.headers).get("cookie");
-      reads.push({ path: url.pathname, cookie });
-      if (url.pathname === "/api/bootstrap.js") return new Response("// bootstrap", { headers: { "set-cookie": "openscout_web_session=example; Path=/; HttpOnly" } });
-      if (!cookie) return Response.json({ error: "unauthorized" }, { status: 401 });
-      if (url.pathname === "/api/sessions") return Response.json([{ id: "chat_one", title: "One", harness: "codex", sessionId: "s1", harnessSessionId: "s1", workspaceRoot: "/work" }]);
-      return Response.json({ ok: true, sessions: [] });
+  test("runtime 401 stays unavailable and never bootstraps web authentication", async () => {
+    const paths: string[] = [];
+    const fetchImpl = (async (input: string | URL | Request) => {
+      paths.push(new URL(String(input)).pathname);
+      return Response.json({ error: "forbidden" }, { status: 401 });
     }) as typeof fetch;
-    const deps = sessionDiscoveryDependencies("http://localhost:43120", { env: {}, fetchImpl });
+    const deps = sessionDiscoveryDependencies("http://localhost:43120", { env: { OPENSCOUT_BROKER_URL: "http://localhost:43121" }, fetchImpl,
+      readNativeApp: async () => ({ threads: [], available: false, truncated: false }) });
     const inventory = await deps.readInventory();
-    expect(inventory.sessions[0]?.id).toBe("chat_one");
-    expect(inventory.terminals).toEqual([]);
-    expect(reads.filter((read) => read.path === "/api/bootstrap.js")).toHaveLength(3);
-    expect(reads.filter((read) => read.cookie === "openscout_web_session=example")).toHaveLength(3);
+    expect(inventory).toMatchObject({ sessions: [], terminals: [], runtime: null,
+      runtimeError: { status: 401, code: "forbidden" }, sources: { sessions: "unavailable", terminals: "unavailable" }, herdr: { available: false } });
+    expect(paths).toEqual(["/v1/observed-sessions"]);
   });
-  test("inventory uses configured bearer auth without local bootstrap", async () => {
+  test("configured web bearer/origin are never sent to the runtime inventory", async () => {
     const paths: string[] = [];
     const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
-      const url = new URL(input instanceof Request ? input.url : input.toString());
-      paths.push(url.pathname);
-      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer configured-token");
-      return Response.json(url.pathname === "/api/sessions" ? [] : { sessions: [] });
+      const url = new URL(String(input)); paths.push(url.pathname);
+      expect(url.origin).toBe("http://localhost:43121");
+      expect(new Headers(init?.headers).get("authorization")).toBeNull();
+      expect(new Headers(init?.headers).get("cookie")).toBeNull();
+      return Response.json(runtimeFixture());
     }) as typeof fetch;
-    await sessionDiscoveryDependencies("http://localhost:43120", { env: { OPENSCOUT_WEB_AUTH_TOKEN: "configured-token" }, fetchImpl }).readInventory();
-    expect(paths).not.toContain("/api/bootstrap.js");
+    await sessionDiscoveryDependencies("https://web-must-not-be-read.invalid", { env: { OPENSCOUT_BROKER_URL: "http://localhost:43121", OPENSCOUT_WEB_AUTH_TOKEN: "configured-token" }, fetchImpl,
+      readNativeApp: async () => ({ threads: [], available: false, truncated: false }) }).readInventory();
+    expect(paths).toEqual(["/v1/observed-sessions"]);
   });
 
   test("a missing on-disk index returns empty coverage without creating any database", async () => {
@@ -321,5 +324,57 @@ describe("Scoutbot read-only session tools", () => {
     available: true, truncated: false, threads: [{ sessionId: "native-app-1", harness: "codex", title: "Native review", cwd: "/work", location: "native_codex_app", deliveryModes: ["draft", "submit"] }],
   } }) }));
   const result = await client.callTool({ name: "sessions_inventory", arguments: { query: "native-app-1" } });
-  expect(result.structuredContent).toMatchObject({ candidateCount: 1, results: [{ sessionId: "native-app-1", reachable: true, deliveryModes: ["draft", "submit"] }] });
+  expect(result.structuredContent).toMatchObject({ candidateCount: 1, results: [{ sessionId: "native-app-1", identity: null, nodeId: null, nativeSessionId: null, terminalId: null, reachable: true, deliveryModes: ["draft", "submit"] }] });
  });
+
+
+test("runtime inventory exposes exact opaque tuple and facts without fabricated host/web links", async () => {
+  const value = runtimeFixture(); value.sessions[0]!.identity.nativeSessionId = "Native:Opaque/1";
+  value.sessions[0]!.cwd = null; value.sessions[0]!.title = null;
+  const client = await clientFor(runtimeDeps(value));
+  const reply = await client.callTool({ name: "sessions_inventory", arguments: {} });
+  expect(reply.structuredContent).toMatchObject({ source: "runtime_observed_sessions_and_optional_host_overlays",
+    runtimeInventory: { nodeId: "node-one", availability: "available", scannedAt: 123, coverage: { kind: "cached_window", scope: "recent", links: { terminals: "unsupported", conversations: "unsupported" } } },
+    sources: { sessions: "available", terminals: "unavailable", herdr: "unavailable" }, inventoryStatus: "partial", results: [{
+      identity: { nodeId: "node-one", harness: "codex", nativeSessionId: "Native:Opaque/1" }, nodeId: "node-one", nativeSessionId: "Native:Opaque/1", sessionId: "Native:Opaque/1", identityStatus: "observed", observedAt: 123, availability: "available", identityConflict: false,
+      links: [{ kind: "agent", id: "not-a-session" }], terminalId: null, cwd: null, title: null, actions: [], panels: [], state: "unknown" }] });
+});
+test.each(["not_scanned", "unavailable", "unknown"] as const)("runtime %s coverage is visible, never available empty", async availability => {
+  const client = await clientFor(runtimeDeps(runtimeFixture({ availability, scannedAt: availability === "not_scanned" ? null : 123, sessions: [] })));
+  const reply = await client.callTool({ name: "sessions_inventory", arguments: {} });
+  expect(reply.structuredContent).toMatchObject({ available: false, inventoryStatus: "unavailable", runtimeInventory: { availability }, results: [] });
+});
+test("runtime partial/truncated/conflicted rows retain facts, never imply attachability or uniqueness", async () => {
+  const value = runtimeFixture({ availability: "partial" }); value.coverage.truncated = true; value.sessions[0]!.identityConflict = true;
+  const client = await clientFor(runtimeDeps(value));
+  const reply = await client.callTool({ name: "sessions_inventory", arguments: {} });
+  expect(reply.structuredContent).toMatchObject({ available: true, inventoryStatus: "partial", truncated: true, runtimeInventory: { availability: "partial", coverage: { truncated: true } }, results: [{ identityStatus: "conflict", identityConflict: true, state: "unknown", actions: [] }] });
+});
+test("runtime coverage replaces the legacy 80-session heuristic and query matches node tuple", async () => {
+  const value = runtimeFixture(); value.sessions = Array.from({ length: 85 }, (_, n) => ({ ...value.sessions[0]!, identity: { nodeId: "node-one", harness: "codex", nativeSessionId: `native-${n}` } }));
+  const client = await clientFor(runtimeDeps(value));
+  const reply = await client.callTool({ name: "sessions_inventory", arguments: { query: "native-84" } });
+  expect(reply.structuredContent).toMatchObject({ truncated: false, candidateCount: 1, results: [{ identity: { nativeSessionId: "native-84" } }] });
+  expect((await client.callTool({ name: "sessions_inventory", arguments: { query: "node-one", limit: 1 } })).structuredContent).toMatchObject({ truncated: true, candidateCount: 85 });
+});
+test("search keeps index coordinates and adds only an exact matched runtime tuple, not links or liveness", async () => {
+  const client = await clientFor({ ...runtimeDeps(runtimeFixture()), openStore: dependencies().openStore });
+  const reply = await client.callTool({ name: "sessions_search", arguments: { query: "build" } });
+  expect(reply.structuredContent).toMatchObject({ indexedOnly: true, coverage: { kind: "warmed", stale: true }, inventoryStatus: "partial", results: [{
+    identity: { nodeId: "node-one", harness: "codex", nativeSessionId: "native-1" }, sessionId: "native-1", state: "unknown", actions: [], source: { kind: "harness_transcript" }, freshness: "stale" }] });
+});
+test("search missing or conflicting runtime identity never guesses a node or picks the first row", async () => {
+  for (const sessions of [[], [runtimeFixture().sessions[0]!, { ...runtimeFixture().sessions[0]!, identity: { nodeId: "node-two", harness: "codex", nativeSessionId: "native-1" } }]]) {
+    const base = dependencies();
+    const inventory = await runtimeDeps(runtimeFixture()).readInventory();
+    const client = await clientFor({ ...base, readInventory: async () => ({ ...inventory, sessions: sessions.map(row => ({ id: JSON.stringify(row.identity), harness: row.identity.harness, sessionId: row.identity.nativeSessionId, harnessSessionId: row.identity.nativeSessionId, workspaceRoot: row.cwd, ...row })) }) });
+    const reply = await client.callTool({ name: "sessions_search", arguments: { query: "build" } });
+    expect(reply.structuredContent).toMatchObject({ results: [{ identity: null, nodeId: null, nativeSessionId: null, identityStatus: sessions.length ? "ambiguous" : "unavailable", actions: [], state: "unknown" }] });
+  }
+});
+test("runtime refusal does not erase indexed hits or masquerade as no matches", async () => {
+  const factory = sessionDiscoveryDependencies("http://web.invalid", { env: { OPENSCOUT_BROKER_URL: "http://localhost:1" }, fetchImpl: Object.assign(async () => Response.json({ error: "forbidden" }, { status: 403 }), { preconnect: () => undefined }), readNativeApp: async () => ({ threads: [], available: false, truncated: false }) });
+  const client = await clientFor({ ...factory, openStore: dependencies().openStore });
+  const reply = await client.callTool({ name: "sessions_search", arguments: { query: "build" } });
+  expect(reply.structuredContent).toMatchObject({ inventoryStatus: "unavailable", runtimeError: { status: 403, code: "forbidden" }, results: [{ sessionId: "native-1", identity: null, nodeId: null, actions: [] }] });
+});
