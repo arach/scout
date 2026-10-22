@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 
 import type { ScoutCommandContext } from "../context.ts";
 import { ScoutCliError } from "../errors.ts";
-import { readScoutWebJson } from "../web-api.ts";
+import { readScoutRuntimeJson, parseObservedSessionSelector, readObservedSessionMaterials } from "../runtime-read.ts";
 
 type DiffLayer = {
   kind: string;
@@ -27,12 +27,12 @@ const DIFF_HELP = `scout diff — inspect local worktree or session-scoped diffs
 
 Usage:
   scout diff worktree [path] [--file <path>] [--raw] [--json]
-  scout diff session <session-id> [--all] [--raw] [--json]
+  scout diff session <native-session-id> --node <node-id> --harness <claude|codex|pi> [--all] [--raw] [--json]
 
 Examples:
   scout diff worktree .
   scout diff worktree ~/dev/openscout --file apps/macos/Sources/Scout/ScoutRootView.swift --json
-  scout diff session relay-openscout-card-t-39kmsa-codex --json`;
+  scout diff session native-id --node node-id --harness codex --json`;
 
 export async function runDiffCommand(context: ScoutCommandContext, args: string[]): Promise<void> {
   const action = args[0];
@@ -85,12 +85,12 @@ async function runWorktreeDiff(context: ScoutCommandContext, args: string[]): Pr
   const worktreePath = resolve(context.cwd, targetPath ?? ".");
   const params = new URLSearchParams({ path: worktreePath });
   for (const file of files) params.append("file", file);
-  const snapshot = await readScoutWebJson<DiffSnapshot>(context, `/api/repo-diff/worktree?${params.toString()}`);
+  const snapshot = await readScoutRuntimeJson<DiffSnapshot>(context, `/v1/repo-diff/worktree?${params.toString()}`);
   writeDiffOutput(context, snapshot, raw);
 }
 
 async function runSessionDiff(context: ScoutCommandContext, args: string[]): Promise<void> {
-  let sessionId: string | undefined;
+  const selector: string[] = [];
   let include: "changed" | "all" = "changed";
   let raw = false;
 
@@ -112,14 +112,33 @@ async function runSessionDiff(context: ScoutCommandContext, args: string[]): Pro
       include = "changed";
       continue;
     }
-    if (arg.startsWith("--")) throw new ScoutCliError(`unknown option for diff session: ${arg}`);
-    if (sessionId) throw new ScoutCliError(`unexpected extra session id: ${arg}`);
-    sessionId = arg;
+    if (arg === "--node" || arg === "--harness") {
+      const value = args[++index];
+      if (!value || value.startsWith("--")) throw new ScoutCliError(`${arg} needs a value`);
+      selector.push(arg, value);
+      continue;
+    }
+    selector.push(arg);
   }
-  if (!sessionId) throw new ScoutCliError("diff session needs a <session-id>");
-
-  const params = new URLSearchParams({ sessionId, include });
-  const snapshot = await readScoutWebJson<DiffSnapshot>(context, `/api/repo-diff/session?${params.toString()}`);
+  const identity = parseObservedSessionSelector(selector);
+  const materials = await readObservedSessionMaterials(context, identity);
+  // A bounded/unverified history is not evidence of an empty or complete diff.
+  if (!materials.coverage.complete) throw new ScoutCliError("session_materials_incomplete: cannot select a complete session diff");
+  const paths = [...new Set(materials.files.filter(file => include === "all" || file.state === "modified").map(file => file.path))];
+  if (paths.length > 200) throw new ScoutCliError("session_diff_too_many_files: at most 200 observed paths are supported");
+  const params = new URLSearchParams({ path: materials.worktreePath });
+  for (const path of paths) params.append("file", path);
+  // Never omit an empty filter and accidentally return the entire worktree.
+  const worktree = paths.length
+    ? await readScoutRuntimeJson<DiffSnapshot>(context, `/v1/repo-diff/worktree?${params}`)
+    : { worktreePath: materials.worktreePath, layers: [] };
+  const snapshot = {
+    ...worktree,
+    identity,
+    coverage: materials.coverage,
+    scope: { kind: "session" as const, label: `Session ${identity.nativeSessionId}`, filteredPaths: paths,
+      touchedFiles: materials.counts.files, changedFiles: materials.counts.changedFiles },
+  };
   writeDiffOutput(context, snapshot, raw);
 }
 

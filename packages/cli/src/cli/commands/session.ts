@@ -35,7 +35,8 @@ import type { ScoutCommandContext } from "../context.ts";
 import { defaultScoutContextDirectory } from "../context.ts";
 import { ScoutCliError } from "../errors.ts";
 import { readCliInputFile } from "../input-file.ts";
-import { readScoutWebJson } from "../web-api.ts";
+import { parseObservedSessionSelector, readObservedSessionMaterials } from "../runtime-read.ts";
+import type { ObservedSessionMaterials } from "@openscout/protocol";
 import {
   attachScoutManagedLocalSession,
   ensureScoutCodexChatWork,
@@ -59,7 +60,8 @@ Usage:
                                             Copyable sess.<token>@<host> addresses
   scout session fork <session-id> [prompt]   Fork a recorded session into a new one
   scout session fork --last [prompt]         Fork the most recent recorded session
-  scout session touched <session-id>         Show files observed in a session
+  scout session touched <native-session-id> --node <node-id> --harness <claude|codex|pi>
+                                            Show observed files for an exact session tuple
   scout session send <session-id> <text>      Type into a live session (--draft fills; --request-reply stamps return address)
   scout session transfer [<pid>] [--name <tmux>] [--alias @x] [--dry-run] [--no-reattach]
                                             Move a live Claude/Grok TUI into tmux, same session
@@ -298,15 +300,6 @@ function renderSessionAddresses(payload: SessionAddressPayload): string {
   ].join("  ").trimEnd()).join("\n");
 }
 
-type SessionTouchedPayload = {
-  refId: string | null;
-  agentId: string | null;
-  sessionId: string | null;
-  worktreePath: string | null;
-  counts: { files: number; changedFiles: number; readFiles: number };
-  files: Array<{ path: string; state: string; touches: number }>;
-};
-
 type SessionPinPayload = {
   ok: true;
   action: "session_pin";
@@ -411,23 +404,19 @@ function codexRolloutExists(dir: string, threadId: string, depth = 0): boolean {
 }
 
 async function runSessionTouchedAction(context: ScoutCommandContext, args: string[]): Promise<void> {
-  const refId = args.find((arg) => arg !== "--help" && arg !== "-h");
-  if (!refId || args.includes("--help") || args.includes("-h")) {
+  if (!args.length || args.includes("--help") || args.includes("-h")) {
     context.output.writeText(SESSION_HELP);
     return;
   }
-  const payload = await readScoutWebJson<SessionTouchedPayload>(
-    context,
-    `/api/session-ref/${encodeURIComponent(refId)}/touched`,
-  );
+  const payload = await readObservedSessionMaterials(context, parseObservedSessionSelector(args));
   context.output.writeValue(payload, renderTouchedFiles);
 }
 
-function renderTouchedFiles(payload: SessionTouchedPayload): string {
+function renderTouchedFiles(payload: ObservedSessionMaterials): string {
   const lines = [
-    `session ${payload.refId ?? payload.sessionId ?? "(unknown)"}`,
+    `session ${payload.identity.nodeId}/${payload.identity.harness}/${payload.identity.nativeSessionId}`,
     `worktree ${payload.worktreePath ?? "(unknown)"}`,
-    `${payload.counts.changedFiles} changed · ${payload.counts.readFiles} read · ${payload.counts.files} touched`,
+    `${payload.counts.changedFiles} changed · ${payload.counts.readFiles} read · ${payload.counts.files} touched (observed tool paths${payload.coverage.complete ? "" : "; incomplete coverage"})`,
   ];
   for (const file of payload.files) {
     lines.push(`${file.state.padEnd(8)} ${file.path} ×${file.touches}`);
