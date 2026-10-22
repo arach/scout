@@ -1,3 +1,4 @@
+import { numericWitness } from "../../../../scripts/extension-numeric-spike/witness.ts";
 import { checkReclaimedDescriptors } from "./extension-descriptor-witness.ts";
 import { scoutExtensionContextBackend } from "./extension-context-host.ts";
 import { afterAll, beforeAll, expect, test } from "bun:test";
@@ -206,6 +207,17 @@ test("dormant context refuses eight invocations without creating an extra pipe",
  expect(scoutExtensionContextBackend()).toBe(false);
  for(let i=0;i<8;i++)await expect(runScoutExtensionWithContext(extension,["fail"],scoutExtensionEnv({env:f.env,extension,cliVersion:"1",outputMode:"json",brokerUrl:input.brokerUrl}),frame,f.env)).rejects.toThrow("context_backend_unproven");
 });
+// Candidate apparatus only: exercise real numeric channels AFTER context work,
+// without reopening the product gate or treating this run as qualification.
+const numericCandidateTest = Bun.revision === "0d9b296af33f2b851fcbf4df3e9ec89751734ba4" && ["darwin", "linux"].includes(process.platform) ? test : test.skip;
+numericCandidateTest("after-context numeric candidate: both registry forms survive reclaim and GC", async () => {
+ for (const form of ["context", "credential"] as const) {
+  const events: Record<string, unknown>[] = [];
+  await numericWitness(form, event => events.push(event));
+  expect(events.filter(event => event.event === "native-collected")).toHaveLength(9);
+  expect(events.filter(event => event.event === "collection-observed")).toHaveLength(1);
+ }
+}, 30_000);
 // This MUST follow the context tests in the same process. Fresh files can reclaim numbers
 // released by earlier tests; a bystander opened before those tests cannot see a stale close.
 test("after-context sentinel keeps fresh descriptor identities through repeated GC",async()=>{
