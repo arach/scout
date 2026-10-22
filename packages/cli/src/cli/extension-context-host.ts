@@ -1,8 +1,9 @@
-/** Bun 1.3.13 does not expose extra Node pipes at the reserved context target.
- * New hosts need independent transport qualification, not a version guess.
- * API 1 is deliberately outside this new capability gate.
- */
+/** API 1 is deliberately outside this new capability gate. */
 export function scoutExtensionContextBackend(): boolean {
-  return typeof Bun !== "undefined" && Bun.revision === "0d9b296af33f2b851fcbf4df3e9ec89751734ba4"
-    && (process.platform === "darwin" || process.platform === "linux");
+  // No qualified host. At exact 1.3.14 (0d9b296a) the native subprocess retains
+  // ownership of a Node-wrapped extra pipe's number and closes it again at GC
+  // after the wrapper's socket destroyed it — a measured double owner (macOS),
+  // with the finalizer path in shared non-Windows source. A backend qualifies
+  // only by passing the corrected reclaim witness with a single descriptor owner.
+  return false;
 }

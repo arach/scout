@@ -117,23 +117,44 @@ command work or launching descendants. It must not print command output before
 that validation. These are trusted-provider obligations, not confinement of a
 malicious executable.
 
-This draft takes the safe runtime-owned extra-pipe path and introduces no native
-loads or borrowed numeric descriptors. Bun 1.3.13 does not expose that pipe at
-the required target. A tested numeric-FD workaround also reproduced its known
-GC double-close, so it was rejected, not shipped. The provisional transport gate
-admits only Bun revision `0d9b296af33f2b851fcbf4df3e9ec89751734ba4` on macOS/Linux.
-API 1 is not gated. **Approval of that new API-2 floor is pending; delivery
-parity on both requested Bun versions is not achieved.** Tests on 1.3.13 check
-safe refusal instead of claiming successful context delivery. Hosted Linux
-qualification remains an independent gate.
+**No host or revision is currently qualified. API 2 is dormant:** every dispatch
+refuses with `context_backend_unproven` before spawning a provider or creating
+an extra pipe. API 1 is unchanged. The frame and lifecycle above describe the
+held contract, not an enabled delivery capability.
+
+The former exact-1.3.14 qualification is withdrawn on both macOS and Linux.
+The Node wrapper and native subprocess retain ownership of the same extra-pipe
+number. After the socket destroys it, the native finalizer can close a regular
+file or a new channel that reused that number. This was measured on macOS at
+revision `0d9b296af33f2b851fcbf4df3e9ec89751734ba4`; the identified finalizer
+path is shared non-Windows code. A previous green Linux run does not qualify
+that mechanism. Two extra simplex pipes inherit the same defect. Retaining
+native objects to suppress GC is not an accepted workaround. Numeric descriptor
+mapping on 1.3.13 remains rejected.
+
+A new transport must have one descriptor owner and pass the corrected reclaim
+witness on its exact revision and platform. Both context-target5 simplex and
+credential-target6 duplex forms require at least eight sequential exchanges,
+fresh regular files reclaiming each released parent number, identity checks
+(file kind, device and inode) across repeated GC, and a second spawn that
+reuses the first exchange's number without a stale close. The in-tree
+post-context sentinel opens fresh files after context tests, not before them.
+Stale-second-close controls must demonstrate sensitivity to that same failure.
+With the product dormant, standard-stdio controls validate only the instrument;
+they do not qualify an API-2 backend. No known-broken extra-pipe mechanism runs
+as a passing product test.
+
+W5 delivery requires a corrected-witness-qualified transport on its CI's exact
+pinned revision and platform. A pin move alone buys no capability. Any later Bun
+revision is subject to that same rule; there is no semver-based qualification.
 
 Deadline, write failure, early child exit or cancellation closes pending writes
 and owned streams. Failure cleanup sends TERM to only the invocation child,
 then escalates to KILL after 250 ms if needed, and reaps it. Process listeners
 are removed. No service tree or unrelated descendants are guessed or swept.
 API-2 dispatch never performs automatic broker upkeep. Static JSON help never
-executes the provider; direct provider help gets context but no credential
-channel.
+executes the provider; direct provider help currently refuses with
+`context_backend_unproven`, as does every other API-2 invocation.
 
 Pre-spawn/context failures use #66's raw-stderr
 `scout.cli.command-unavailable/v1` envelope and exit 69, with reasons

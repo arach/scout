@@ -1,3 +1,4 @@
+import { checkReclaimedDescriptors } from "./extension-descriptor-witness.ts";
 import { scoutExtensionContextBackend } from "./extension-context-host.ts";
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
@@ -192,18 +193,22 @@ test("spawn failure is a typed context refusal with empty stdout",async()=>{
 },10_000);
 
 test("unqualified context backends refuse before descriptor creation",()=>{
- const expected=Bun.revision==="0d9b296af33f2b851fcbf4df3e9ec89751734ba4"&&["darwin","linux"].includes(process.platform);expect(scoutExtensionContextBackend()).toBe(expected);
- if(!expected)expect(scoutExtensionContextBackend()).toBe(false);
+ expect(scoutExtensionContextBackend()).toBe(false); // No revision/platform is qualified.
 });
 
 test("unqualified host emits the versioned backend refusal without starting a provider",async()=>{
  if(scoutExtensionContextBackend())return;const f=fixture();await installed(f);typed(await cli(f,["--json","context-fixture"]),"context_backend_unproven");
 });
 
-test("runtime-owned context streams or host refusal cannot close unrelated descriptors during GC",async()=>{
+test("dormant context refuses eight invocations without creating an extra pipe",async()=>{
  const f=fixture();mutateScoutExtension("install","context-fixture",f.source,f.env);const extension=findScoutExtension("context-fixture",f.env)!;const {input}=pure(f);
  const frame=prepareScoutExtensionContext({extension,env:f.env,selection:input.selection,cli:input.cli,brokerUrl:input.brokerUrl});
- const fd=openSync(join(f.base,"gc-owned"),"w");
- try{for(let i=0;i<3;i++){const run=runScoutExtensionWithContext(extension,["fail"],scoutExtensionEnv({env:f.env,extension,cliVersion:"1",outputMode:"json",brokerUrl:input.brokerUrl}),frame,f.env);Bun.gc(true);if(scoutExtensionContextBackend())expect(await run).toBe(23);else await expect(run).rejects.toThrow("context_backend_unproven");Bun.gc(true);expect(fstatSync(fd).isFile()).toBe(true);}}
- finally{closeSync(fd);}
+ expect(scoutExtensionContextBackend()).toBe(false);
+ for(let i=0;i<8;i++)await expect(runScoutExtensionWithContext(extension,["fail"],scoutExtensionEnv({env:f.env,extension,cliVersion:"1",outputMode:"json",brokerUrl:input.brokerUrl}),frame,f.env)).rejects.toThrow("context_backend_unproven");
+});
+// This MUST follow the context tests in the same process. Fresh files can reclaim numbers
+// released by earlier tests; a bystander opened before those tests cannot see a stale close.
+test("after-context sentinel keeps fresh descriptor identities through repeated GC",async()=>{
+ const directory=join(root,"after-context-reclaim");mkdirSync(directory);
+ await checkReclaimedDescriptors({former:[],directory});
 });
