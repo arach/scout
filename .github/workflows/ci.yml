@@ -1,104 +1,47 @@
+# Diagnostic-only side branch; never merge this replacement into the product CI.
+# Reuse the existing default-branch workflow identity so the operator can dispatch this ref.
 name: CI
-
 on:
-  # CI runs only at explicit checkpoints, not on every commit, PR, branch
-  # push, or tag. Dispatch it manually when a coherent batch is ready for
-  # validation so a series of small PRs costs one run instead of one each.
-  #
-  # Deliberately NOT on pull_request or push: a stacked series produced ~3
-  # runs per PR, most cancelling each other before finishing.
-  #
-  # Local exact-head/base validation is the default review evidence. Hosted
-  # execution is optional and must be explicitly requested; required repository
-  # rules and blocking review feedback still apply to every merge.
   workflow_dispatch:
-  # Release Candidate deliberately reuses these checks as one lane of its
-  # explicitly initiated validation workflow. This is callable, not ambient.
-  workflow_call:
-
 permissions:
   contents: read
-
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  checks:
-    name: Typecheck and unit tests
+  record:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
-
+    timeout-minutes: 5
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Set up Node for CLI launcher tests
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: "24.x"
-          package-manager-cache: false
-
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3.14"
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Sync exec fence
-        run: bun run sync-exec:fence
-
-      - name: Public repository presentation
-        run: bun run check:presentation
-
-      - name: Typecheck
+      - run: bun install --frozen-lockfile
+      - name: Context target5 simplex, rejected mechanism
+        id: context
+        continue-on-error: true
         run: |
-          bun run --cwd packages/protocol check
-          bun run --cwd packages/agent-sessions check
-          bun run --cwd packages/runtime check
-          bun run --cwd packages/session-trace check
-          bun run --cwd packages/session-trace-react check
-          bun run --cwd apps/desktop check
-
-      - name: CLI launcher and package tests
-        run: bun run test:cli
-
-      - name: Unit tests
+          set -o pipefail
+          mkdir -p descriptor-record
+          bun scripts/extension-descriptor-record.ts context 2>&1 | tee descriptor-record/context.jsonl
+      - name: Credential target6 duplex, rejected mechanism
+        id: credential
+        if: always()
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          mkdir -p descriptor-record
+          bun scripts/extension-descriptor-record.ts credential 2>&1 | tee descriptor-record/credential.jsonl
+      - name: Save the record even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rejected-extra-pipe-ownership-record
+          path: descriptor-record/
+      - name: Record meaning
+        if: always()
         env:
-          OPENSCOUT_CONFORMANCE: "1"
+          CONTEXT_OUTCOME: ${{ steps.context.outcome }}
+          CREDENTIAL_OUTCOME: ${{ steps.credential.outcome }}
         run: |
-          if bun -e "const pkg = require('./package.json'); process.exit(pkg.scripts?.['test:unit:source'] ? 0 : 1)"; then
-            bun run test:unit:source
-          else
-            bun run --cwd packages/protocol test
-            bun run --cwd packages/agent-sessions test
-            bun test ./packages/runtime/src/**/*.test.ts --path-ignore-patterns='**/*live.test.ts' --path-ignore-patterns='**/scenario-suite.test.ts'
-            bun run --cwd apps/desktop test:happy
-            bun run --cwd packages/web test:happy
-            bun test packages/session-trace/src/*.test.ts packages/session-trace-react/src/*.test.tsx
-          fi
-
-  rust-scoutd:
-    name: scoutd verification
-    runs-on: macos-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Verify portable voice core
-        run: |
-          cargo check --manifest-path crates/openscout-voice-core/Cargo.toml --all-features
-          cargo test --manifest-path crates/openscout-voice-core/Cargo.toml --all-features
-
-      - name: Verify scout-tui
-        run: cargo check --manifest-path crates/scout-tui/Cargo.toml
-
-      - name: Verify
-        run: bash scripts/scoutd-verify.sh
+          echo "Rejected extra-pipe mechanism; this run decides no qualification." >> "$GITHUB_STEP_SUMMARY"
+          echo "Context: $CONTEXT_OUTCOME; credential: $CREDENTIAL_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+          test "$CONTEXT_OUTCOME" = success && test "$CREDENTIAL_OUTCOME" = success
