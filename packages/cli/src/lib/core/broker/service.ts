@@ -1,3 +1,4 @@
+import { assertLocalAttachmentBroker, postOperatorAttachment } from "../../../cli/notify-attachment-runtime.ts";
 import { setTimeout as delay } from "node:timers/promises";
 import { resolveScoutMachines } from "../mesh/machine-selector.ts";
 import type { LiveTerminalSession } from "@openscout/runtime/live-terminal-session";
@@ -3237,6 +3238,19 @@ async function ensureBrokerDirectConversationBetween(
     conversation: definition,
     existed: Boolean(existing),
   };
+}
+
+/** Preserve the ordinary sender enrichment; the broker alone chooses the operator DM. */
+export async function sendScoutOperatorAttachment(input: {
+  senderId: string; currentDirectory: string; body: string; attachment: import("@openscout/protocol").AttachmentUpload;
+}): Promise<MessageRecord> {
+  assertLocalAttachmentBroker(resolveScoutBrokerUrl());
+  const contextResult = await loadScoutBrokerContextResult(undefined, { scope: "identity" });
+  if (!contextResult.ok) throw new Error("operator attachment broker is unavailable");
+  const { baseUrl, snapshot, node } = contextResult.context;
+  const senderId = await resolveConversationActorId(baseUrl, snapshot, node.id, input.senderId, input.currentDirectory);
+  return await postOperatorAttachment({ baseUrl, socketPath: resolveBrokerSocketPathForBaseUrl(baseUrl), actorId: senderId,
+    requestId: `notify-${randomUUID()}`, body: input.body, attachment: input.attachment });
 }
 
 export async function sendScoutMessage(input: {

@@ -3,6 +3,7 @@ import { openScoutCheckoutInstanceDefault, openScoutInstanceBootstrap } from "./
 import { readAttachmentHostResponse } from "./attachment-host-response.js";
 import { AttachmentBlobStore } from "./attachment-blob-store.js";
 import { BrokerAttachmentService } from "./broker-attachment-service.js";
+import { createOperatorAttachmentNotifier } from "./broker-operator-attachment-notifier.js";
 import { AttachmentError } from "./attachment-contract.js";
 import { markAttachmentReferences } from "./attachment-retention.js";
 import { iterateMessageRecordsAsync } from "./broker-message-records.js";
@@ -2059,7 +2060,8 @@ if (process.env.OPENSCOUT_ATTACHMENTS_DISABLED !== "1" && !sqliteDisabled) {
     });
     attachmentBlobStore = store;
     attachmentService = new BrokerAttachmentService({
-      nodeId, store,
+      nodeId, store, operatorActorId,
+      operatorReturnAddress: message => buildBrokerReturnAddressForActor(runtime.snapshot(), message.actorId, { conversationId: message.conversationId, replyToMessageId: message.id }),
       conversation: id => runtime.conversation(id),
       authorizeActor: principal => {
         // Mesh host reads never inherit this broker's local operator privileges.
@@ -3144,6 +3146,17 @@ async function forwardAttachmentHostRead(input: import("./host-web-request.js").
 const routeRequest = createBrokerHttpRouter({
   attachments: {
     service: attachmentService, nodeId,
+    notifyOperator: createOperatorAttachmentNotifier({
+      service: () => attachmentService, operatorActorId,
+      ensureOperator: () => ensureBrokerActorForDelivery(operatorActorId),
+      conversation: (requesterId, targetAgentId) => ensureBrokerDeliveryConversation({ requesterId, targetAgentId }),
+      requester: actorId => {
+        const snapshot = runtime.snapshot();
+        const endpoint = Object.values(snapshot.endpoints).find(e => e.agentId === actorId && (e.projectRoot || e.cwd));
+        return { requesterName: brokerActorDisplayName(snapshot, actorId), projectRoot: endpoint?.projectRoot ?? endpoint?.cwd };
+      },
+      queueSignal: input => operatorAttentionService.queueOperatorSignal(input),
+    }),
     uploadRequestBytes: localAdminKey ? 16 * 1024 * 1024 : 36 * 1024 * 1024,
     peerNode: keyId => {
       const peer = trustedPeerStore?.trustedPeer(keyId);
