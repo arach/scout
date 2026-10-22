@@ -13,6 +13,17 @@ test("package unit selection includes nested tests and scenarios but excludes ev
   expect(pkg.scripts["test:live:codex-app-server"]).toContain("OPENSCOUT_LIVE_CODEX_APP_SERVER=1");
 });
 
+test("root and hosted CI delegate runtime selection to the scenario-inclusive package script", () => {
+  const root = join(runtime, "..", "..");
+  const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+  const command = "bun run --cwd packages/runtime test";
+  expect(pkg.scripts["test:unit:source"].split(" && ").filter((part: string) => part.includes("packages/runtime"))).toEqual([command]);
+  const workflow = readFileSync(join(root, ".github", "workflows", "ci.yml"), "utf8");
+  expect(workflow).toContain("            bun run test:unit:source");
+  expect(workflow.split("\n").filter((line: string) => line.trim() === command)).toHaveLength(1);
+  expect(workflow).not.toContain("--path-ignore-patterns='**/scenario-suite.test.ts'");
+});
+
 test("direct live files refuse credentials and target settings without exact opt-in", async () => {
   const home = mkdtempSync(join(tmpdir(), "scout-live-opt-in-"));
   const marker = join(home, "harness-launched");

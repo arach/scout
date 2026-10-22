@@ -66,6 +66,8 @@ jobs:
       - name: CLI launcher and package tests
         run: bun run test:cli
 
+      # Keep runtime selection in its package script: nested units and scenarios,
+      # excluding opt-in live tests. Both the root chain and fallback delegate.
       - name: Unit tests
         env:
           OPENSCOUT_CONFORMANCE: "1"
@@ -75,7 +77,7 @@ jobs:
           else
             bun run --cwd packages/protocol test
             bun run --cwd packages/agent-sessions test
-            bun test ./packages/runtime/src/**/*.test.ts --path-ignore-patterns='**/*live.test.ts' --path-ignore-patterns='**/scenario-suite.test.ts'
+            bun run --cwd packages/runtime test
             bun run --cwd apps/desktop test:happy
             bun run --cwd packages/web test:happy
             bun test packages/session-trace/src/*.test.ts packages/session-trace-react/src/*.test.tsx
