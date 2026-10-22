@@ -560,7 +560,12 @@ describe("loadResolvedRelayAgents (dev-like fixtures)", () => {
       "openscout",
       "ranger",
     ]);
-    expect(registry.agents["openscout.test-node"]?.projectConfigPath).toBeNull();
+    // Concrete IDs include a discovered branch when this fixture is nested in
+    // a checkout. The preservation contract concerns the manual definition,
+    // not the ambient branch qualifier. Its null field must still be present.
+    const manual = Object.values(registry.agents).find(agent => agent.definitionId === "openscout");
+    expect(manual).toBeDefined();
+    expect(manual?.projectConfigPath).toBeNull();
   });
 
   test("resolves relative runtime cwd against the project root and collapses same-id agents across repos", async () => {

@@ -28,7 +28,7 @@ import {
 } from "node:fs";
 import { createConnection } from "node:net";
 import { homedir, hostname as osHostname } from "node:os";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 type Env = Record<string, string | undefined>;
 
@@ -1709,9 +1709,17 @@ export type OpenScoutCheckout = {
   isLinkedWorktree: boolean;
 };
 
-/** Walk up from `start` to the nearest `.git` (directory: main checkout, file: linked worktree). */
-export function findOpenScoutCheckout(start: string): OpenScoutCheckout | null {
+/** Walk up from `start` to the nearest Scout checkout. An optional inclusive
+ * ancestor bounds discovery without changing the default filesystem-root walk. */
+export function findOpenScoutCheckout(start: string, searchRoot?: string): OpenScoutCheckout | null {
   let current = resolve(start);
+  const boundary = searchRoot === undefined ? undefined : resolve(searchRoot);
+  if (boundary !== undefined) {
+    const path = relative(boundary, current);
+    if (path === ".." || path.startsWith(`..${sep}`) || isAbsolute(path)) {
+      throw new Error("Checkout search root must contain the starting directory");
+    }
+  }
   for (;;) {
     const gitPath = join(current, ".git");
     if (existsSync(gitPath) && existsSync(join(current, "packages", "runtime", "src", "instance.ts"))) {
@@ -1723,6 +1731,7 @@ export function findOpenScoutCheckout(start: string): OpenScoutCheckout | null {
       }
       return { root: current, isLinkedWorktree };
     }
+    if (current === boundary) return null;
     const parent = dirname(current);
     if (parent === current) return null;
     current = parent;
@@ -1778,9 +1787,11 @@ export function applyCheckoutOpenScoutInstanceDefault(
   moduleDirectory: string,
   env: Env = process.env,
   home: string = homedir(),
+  /** Optional inclusive ancestor for bounded checkout discovery. */
+  checkoutSearchRoot?: string,
 ): string | null {
   if (env.OPENSCOUT_INSTANCE?.trim()) return null;
-  const checkout = findOpenScoutCheckout(moduleDirectory);
+  const checkout = findOpenScoutCheckout(moduleDirectory, checkoutSearchRoot);
   if (!checkout) return null;
   const name = resolveCheckoutOpenScoutInstanceName(checkout, readOpenScoutInstanceLedger(env, home));
   env.OPENSCOUT_INSTANCE = name;

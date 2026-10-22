@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -184,24 +184,51 @@ test("verification pages a large plan and compares an individually oversized bod
 });
 
 test("watchdog rejects a stalled live worker and restarts against the same historical database", async () => {
-  const entry = new URL("./sqlite-projection-worker-entry.ts", import.meta.url).href;
-  const source = `import {parentPort, workerData} from "node:worker_threads";
-    import {existsSync, writeFileSync} from "node:fs";
-    parentPort.on("message", packet => { if (packet.method === "catchUpStartup" && !existsSync(workerData.journalPath+".stalled")) {
-      writeFileSync(workerData.journalPath+".stalled", "once"); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,60000);
-    } }); await import(${JSON.stringify(entry)});`;
-  const { projection, durable, dbPath } = await setup(source, { requestTimeoutMs: 400 });
-  await projection.warm(); await projection.flush();
-  const store = new SQLiteControlPlaneStore(dbPath);
-  try { store.recordMessage(message("historical-only").message); } finally { store.close(); }
-  await durable.runWrite(() => durable.commitEntries(message("accepted-before-stall"), async () => {}));
-  await expect(projection.flush()).rejects.toThrow("stalled");
-  expect(projection.statusSnapshot().state).toBe("degraded");
-  const start = performance.now();
-  await durable.runWrite(() => durable.commitEntries(message("accepted-after-stall"), async () => {}));
-  expect(performance.now() - start).toBeLessThan(250);
-  await projection.flush();
-  expect((await projection.readMessages(["historical-only", "accepted-before-stall", "accepted-after-stall"])).size).toBe(3);
+  // Hold watchdog time still while proving acknowledgement order, not speed.
+  // The worker has its own clock; a real message proves it entered the stall.
+  const now = Date.now(), clock = spyOn(Date, "now").mockReturnValue(now);
+  try {
+    const entry = new URL("./sqlite-projection-worker-entry.ts", import.meta.url).href;
+    const source = `import {parentPort, workerData} from "node:worker_threads";
+      import {existsSync, writeFileSync} from "node:fs";
+      parentPort.on("message", packet => { if (packet.method === "catchUpStartup" && !existsSync(workerData.journalPath+".stalled")) {
+        writeFileSync(workerData.journalPath+".stalled", "once");
+        parentPort.postMessage({kind:"fixture-stalled"});
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0);
+      } }); await import(${JSON.stringify(entry)});`;
+    const { projection, durable, journal, dbPath } = await setup(source, { requestTimeoutMs: 400 });
+    await projection.warm(); await projection.flush();
+    const store = new SQLiteControlPlaneStore(dbPath);
+    try { store.recordMessage(message("historical-only").message); } finally { store.close(); }
+    const worker = (projection as unknown as { worker: import("node:worker_threads").Worker }).worker;
+    const stalled = new Promise<void>(resolve => {
+      const entered = (packet: { kind?: string }) => {
+        if (packet.kind === "fixture-stalled") { worker.off("message", entered); resolve(); }
+      };
+      worker.on("message", entered);
+    });
+    await durable.runWrite(() => durable.commitEntries(message("accepted-before-stall"), async () => {}));
+    let settled = false;
+    const flush = projection.flush().finally(() => { settled = true; });
+    void flush.catch(() => {}); // Observe the intentional later watchdog failure.
+    await stalled;
+    const failures = projection.health().failures;
+    // This commit must resolve with the original worker still blocked and the
+    // flush still pending, even if its own durable I/O or scheduling is slow.
+    await durable.runWrite(() => durable.commitEntries(message("accepted-after-stall"), async () => {}));
+    expect(journal.snapshot().messages["accepted-after-stall"]).toBeDefined();
+    expect(settled).toBe(false);
+    expect((projection as unknown as { worker: unknown }).worker).toBe(worker);
+    expect(projection.health().failures).toBe(failures);
+    expect(projection.statusSnapshot().worker.pendingRequests).toBeGreaterThan(0);
+
+    // Only now make the real watchdog eligible to retire the stalled worker.
+    clock.mockReturnValue(now + 400);
+    await expect(flush).rejects.toThrow("stalled");
+    expect(projection.statusSnapshot().state).toBe("degraded");
+    await projection.flush();
+    expect((await projection.readMessages(["historical-only", "accepted-before-stall", "accepted-after-stall"])).size).toBe(3);
+  } finally { clock.mockRestore(); }
 });
 
 test("watchdog extends an operation only when reported replay progress advances", async () => {
