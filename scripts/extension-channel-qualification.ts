@@ -30,7 +30,7 @@ for(const form of ["context","credential"]) {
 for(const name of ["compiled helper collection refuses retained wrapper","compiled helper collection cannot close reclaimed endpoint numbers"]) if(!matrix.includes(`(pass) ${name}`)) throw Error("compiler collection control missing");
 await command([process.execPath,"test","packages/runtime/src/extension-channel-io.test.ts","packages/runtime/src/extension-channel-qualification.test.ts","scripts/extension-numeric-spike/pipe-pressure.test.ts","scripts/check-native-compile-fence.test.ts","scripts/check-native-load-fence.test.ts","packages/cli/src/cli/extension-context.test.ts"],warmEnv);
 const runner = await command([process.execPath,"test","packages/cli/src/cli/extension-context-executor.test.ts","packages/cli/src/cli/extension-context-reclaim.test.ts"],warmEnv);
-if (Number(runner.match(/\b(\d+) pass\b/)?.[1]??0)<24 || /\b[1-9]\d* skip\b/.test(runner)) throw Error("actual-runner positive cohort incomplete/skipped");
+if (Number(runner.match(/\b(\d+) pass\b/)?.[1]??0)<25 || /\b[1-9]\d* skip\b/.test(runner)) throw Error("actual-runner positive cohort incomplete/skipped");
 await command(["node","--test","packages/cli/test/extension-channel-package.test.mjs"],warmEnv);
 for(const control of controls) if(!runner.includes(`(pass) actual context runner sensitivity: ${control}`)) throw Error("actual-runner sensitivity control missing");
 const allowance = JSON.parse(readFileSync("scripts/sync-exec-allowlist/packages/runtime/src/extension-channel-io.ts/cc.json","utf8"));

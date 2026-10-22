@@ -113,3 +113,11 @@ measured("real missing executable closes both native adapters on spawn failure",
  await expect(executeScoutExtensionContext({...input,command:"/nonexistent-scout-extension-context-fixture"},()=>channel=allocateExtensionChannel("context"))).rejects.toThrow();
  expect(channel!.parent.stats.closeCalls).toBe(1);expect(channel!.source.stats.closeCalls).toBe(1);
 });
+test("five-second delivery bound is not a command lifetime",async()=>{
+ const f=doubles(),child=fakeChild();let settled=false;
+ const pending=executeScoutExtensionContext(input,()=>f.channel,(()=>child) as typeof spawn);
+ void pending.then(()=>settled=true,()=>settled=true);
+ await Bun.sleep(5050);expect(settled).toBe(false);expect(child.exitCode).toBeNull();expect(child.signalCode).toBeNull();
+ expect(f.channel.parent.closed).toBe(true);expect(f.channel.source.closed).toBe(true);
+ Object.assign(child,{exitCode:19});child.emit("close",19,null);expect(await pending).toBe(19);closes(f.calls);
+},10000);
