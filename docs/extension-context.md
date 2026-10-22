@@ -31,7 +31,7 @@ candidate. `credentialInputs` can be omitted or empty for context-only operation
 [declared-input draft](./extension-inputs.md) additionally recognizes one exact
 credential declaration and its schemas/destination. Its transport is held; a
 recognized nonempty declaration cannot run without a qualified channel.
-Currently every API-2 invocation refuses `context_backend_unproven` before
+Currently every API 2 invocation refuses `context_backend_unproven` before
 spawn; its independent input gate remains closed as well. Executable
 completion also refuses under API 2; static completion and Markdown help remain
 read-only. No declaration grants inputs or service authority.

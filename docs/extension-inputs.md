@@ -1,15 +1,15 @@
 # Declared extension inputs
 
-The API-2 declaration names one future credential source: the caller's
+The API 2 declaration names one future credential source: the caller's
 environment `SCOUT_DIST_KEY`. It is optional and opaque; future delivery must
 use an explicitly declared, single-request input channel. Installation, updates, receipts and automatic
 reconciliation do not issue grants. A manifest cannot request arbitrary
 environment names, files, keychain labels, credential helpers or network lookups.
 
 **No context or credential transport is qualified on any host.** This slice is
-permission-store and management preparation, not key delivery. Every API-2
+permission-store and management preparation, not key delivery. Every API 2
 invocation refuses with `context_backend_unproven` before provider spawn.
-Credential target6 remains ignored. The independent input gate also remains
+Credential slot 6 remains ignored. The independent input gate also remains
 closed; the metadata-only parent session's `request` always refuses with
 `input_backend_unproven`, even with an exact grant. It retains no raw value in
 the returned session and implements no request-time authorization or response
@@ -17,8 +17,8 @@ server. Protocol/lifecycle sections below specify the proposed future slice.
 
 The prior exact-1.3.14 qualification is withdrawn on macOS and Linux. The old
 pre-opened-FD witness could not detect a second close of a reused number;
-hosted run39717881161 is void as transport qualification. Isolated positive
-exchanges and old parent-model successes do not qualify a channel. API1 stays
+hosted run 39717881161 is void as transport qualification. Isolated positive
+exchanges and old parent-model successes do not qualify a channel. API 1 stays
 unchanged. No verb flip or service authority is enabled.
 
 W5 delivery requires a single-owner transport passing the corrected witness on
@@ -54,7 +54,7 @@ qualified; a pin move alone does not meet that gate.
 
 The loader accepts exactly this source, input ID and destination projection.
 Purpose is a nonempty disclosure of at most 240 characters, without controls.
-Unknown fields, schemas, IDs, sources and executable API-2 completion refuse
+Unknown fields, schemas, IDs, sources and executable API 2 completion refuse
 before provider execution. An empty/omitted credential list retains the
 context-only contract and gets no credential channel. Nonempty declarations
 require the exact `inputSchema`, one matching destination and the endpoint
