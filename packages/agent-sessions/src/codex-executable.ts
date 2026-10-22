@@ -1,4 +1,4 @@
-import { execFile, execFileSync } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import { accessSync, constants } from "node:fs";
 import { delimiter, join } from "node:path";
 
@@ -221,6 +221,52 @@ export function resolveCodexExecutableInventory(
     selected,
     candidates,
   };
+}
+
+/** Full inventory with the synchronous inventory's ordering, metadata and deadline.
+ * Unlike the path-only selector, explicit overrides do not skip version probes.
+ */
+export async function resolveCodexExecutableInventoryAsync(
+  env: Record<string, string | undefined> = process.env,
+  options: { signal?: AbortSignal } = {},
+): Promise<CodexExecutableInventory> {
+  const signal = options.signal;
+  signal?.throwIfAborted();
+  const capturedEnv = { ...env };
+  const candidates: CodexExecutableCandidate[] = [];
+  for (const candidate of resolveCodexExecutableCandidateInputs(capturedEnv)) {
+    signal?.throwIfAborted();
+    const executable = isExecutable(candidate.path);
+    const raw = executable ? await new Promise<string | null>((resolve, reject) => {
+      const child = spawn(candidate.path, ["--version"], {
+        env: capturedEnv, stdio: ["ignore", "pipe", "ignore"], signal,
+      });
+      let failed = false;
+      let size = 0;
+      const chunks: Buffer[] = [];
+      // Match execFileSync's existing default stdout budget and 3s deadline.
+      const timer = setTimeout(() => { failed = true; child.kill(); }, 3_000);
+      child.stdout.on("data", (chunk: Buffer) => {
+        size += chunk.length;
+        if (size > 1024 * 1024) { failed = true; child.kill(); }
+        else chunks.push(chunk);
+      });
+      child.once("error", () => { failed = true; });
+      child.once("close", (code) => {
+        clearTimeout(timer);
+        if (signal?.aborted) { reject(signal.reason); return; }
+        resolve(failed || code !== 0 ? null : Buffer.concat(chunks).toString("utf8").trim() || null);
+      });
+    }) : null;
+    signal?.throwIfAborted();
+    candidates.push({
+      ...candidate, executable,
+      version: raw?.match(/\b(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\b/)?.[1] ?? null,
+      versionRaw: raw,
+    });
+  }
+  const selected = selectCodexCandidate(candidates);
+  return { selectedPath: selected?.path ?? "codex", selected, candidates };
 }
 
 export function resolveCodexExecutable(env: Record<string, string | undefined> = process.env): string {
