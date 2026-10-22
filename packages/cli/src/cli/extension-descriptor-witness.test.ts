@@ -23,8 +23,21 @@ for (const form of ["context", "credential"] as DescriptorForm[]) {
     expect(events.filter(event => event.event === "spawn")).toHaveLength(8);
     expect(events.filter(event => event.event === "reclaim-check")).toHaveLength(64);
     expect(events.filter(event => event.event === "second-spawn-reuse")).toHaveLength(1);
+    const spawns=events.filter(event=>event.event==="spawn");
+    expect(events.find(event=>event.event==="second-spawn-reuse")).toMatchObject({construction:"identified-reservation-dup2",reused:spawns[0]!.ports});
+    expect(events.filter(event=>event.event==="reaped"&&event.code===0)).toHaveLength(8);
+    expect(events.filter(event=>event.event==="reclaim-check").every(event=>Array.isArray(event.losses)&&event.losses.length===0)).toBe(true);
     expect(events.every(event => event.target === (form === "context" ? 5 : 6))).toBe(true);
   }, 30_000);
+  test(`reclaim instrument forces ${form} reuse even when unrelated files consume free numbers`, async()=>{
+    const events:Array<Record<string,unknown>>=[];
+    await runDescriptorReclaimWitness({form,mechanism:"standard-control",controlChurn:true,emit:e=>events.push(e)});
+    const spawns=events.filter(e=>e.event==="spawn");
+    expect(spawns).toHaveLength(8);
+    expect(spawns.every(e=>JSON.stringify(e.ports)===JSON.stringify(spawns[0]!.ports))).toBe(true);
+    expect(events.filter(e=>e.event==="reclaim-check")).toHaveLength(64);
+    expect(events.filter(e=>e.event==="reaped"&&e.code===0)).toHaveLength(8);
+  },30_000);
   test(`reclaim instrument catches a stale second close in ${form} form`, async () => {
     await negative(form, "stale-second-close", "reclaimed descriptor lost");
   }, 30_000);

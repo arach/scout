@@ -16,11 +16,12 @@ function identity(fd: number): Identity | null {
 function same(a: Identity | null, b: Identity | null) {
   return a !== null && b !== null && a.dev === b.dev && a.ino === b.ino && a.file === b.file && a.socket === b.socket && a.fifo === b.fifo;
 }
-function census() { return Array.from({ length: 2048 }, (_, fd) => identity(fd)); }
 
 /** Open AFTER teardown, including the former pipe numbers; never close a recycled non-owned FD. */
 export async function checkReclaimedDescriptors(input: {
   former: number[]; directory: string; emit?: (event: WitnessEvent) => void; staleClose?: boolean;
+  /** Test-control ownership handoff, only AFTER every reclaim/GC identity check passes. */
+  reserveFormer?: (fd: number) => void;
 }) {
   const files: Array<{ fd: number; identity: Identity }> = [];
   try {
@@ -40,6 +41,11 @@ export async function checkReclaimedDescriptors(input: {
       input.emit?.({ event: "reclaim-check", round, losses });
       if (losses.length) throw Error(`reclaimed descriptor lost: ${losses.map(file => file.fd).join(",")}`);
     }
+    if (input.reserveFormer) {
+      const index = files.findIndex(file => input.former.includes(file.fd));
+      if (index < 0) throw Error("no reclaimed former descriptor to reserve");
+      input.reserveFormer(files[index]!.fd); files.splice(index, 1);
+    }
   } finally {
     for (const file of files) if (same(file.identity, identity(file.fd))) closeSync(file.fd);
   }
@@ -51,29 +57,30 @@ export async function checkReclaimedDescriptors(input: {
  */
 export async function runDescriptorReclaimWitness(input: {
   form: DescriptorForm; mechanism: "standard-control" | "node-extra-record";
-  emit?: (event: WitnessEvent) => void; fault?: "stale-second-close" | "second-spawn-close";
+  emit?: (event: WitnessEvent) => void; fault?: "stale-second-close" | "second-spawn-close"; controlChurn?: boolean;
 }) {
+  if (input.mechanism === "standard-control") {
+    const { runStandardDescriptorControl } = await import("../../../../scripts/extension-descriptor-control.ts");
+    return runStandardDescriptorControl({ ...input, check: checkReclaimedDescriptors });
+  }
   const home = mkdtempSync(join(tmpdir(), "scout-descriptor-reclaim-"));
   const failures: string[] = []; let previous: number[] = [], reuse = false, exchanges = 0;
   const slot = INHERITED_DESCRIPTOR_LAYOUTS.extensionApi2[input.form === "context" ? "context" : "credential"];
-  const raw = input.mechanism === "node-extra-record", duplex = input.form === "credential";
+  const duplex = input.form === "credential";
   const emit = (event: WitnessEvent) => input.emit?.({ form: input.form, mechanism: input.mechanism, target: slot, ...event });
   try {
     for (let iteration = 0; iteration < 8; iteration++) {
-      const before = census();
-      const stdio: Array<"pipe" | "ignore" | "inherit"> = raw ? Array(MAX_INHERITED_DESCRIPTOR_SLOT + 1).fill("ignore") : ["pipe", duplex ? "pipe" : "ignore", "inherit"];
-      if (raw) { stdio[0] = stdio[1] = stdio[2] = "inherit"; stdio[slot] = "pipe"; }
-      const readSlot = raw ? slot : 0, writeSlot = raw ? slot : 1;
+      const stdio: Array<"pipe" | "ignore" | "inherit"> = Array(MAX_INHERITED_DESCRIPTOR_SLOT + 1).fill("ignore");
+      stdio[0] = stdio[1] = stdio[2] = "inherit"; stdio[slot] = "pipe";
+      const readSlot = slot, writeSlot = slot;
       const script = `import{createReadStream,writeSync}from'node:fs';${duplex ? `writeSync(${writeSlot},'request\\n');` : ""}let wire='';for await(const part of createReadStream(null,{fd:${readSlot},autoClose:true}))wire+=part;if(wire!=='response\\n')process.exit(91);`;
       let child: ReturnType<typeof spawn> | null = spawn(process.execPath, ["-e", script], { stdio, env: { HOME: home, PATH: process.env.PATH } });
       const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((done, reject) => {
         child!.once("exit", (code, signal) => done({ code, signal })); child!.once("error", reject);
       });
-      let channel = (child.stdio as unknown[])[raw ? slot : 0] as Writable | null;
-      let reader = duplex ? (child.stdio as unknown[])[raw ? slot : 1] as Duplex | null : null;
-      const after = census();
-      const ports = raw ? [(channel as unknown as { _handle?: { fd?: number } })?._handle?.fd].filter((fd): fd is number => Number.isInteger(fd))
-        : after.flatMap((value, fd) => fd > 2 && value && (value.fifo || value.socket) && !same(before[fd], value) ? [fd] : []);
+      let channel = (child.stdio as unknown[])[slot] as Writable | null;
+      let reader = duplex ? (child.stdio as unknown[])[slot] as Duplex | null : null;
+      const ports = [(channel as unknown as { _handle?: { fd?: number } })?._handle?.fd].filter((fd): fd is number => Number.isInteger(fd));
       const active = ports.map(fd => ({ fd, identity: identity(fd) }));
       let timer: ReturnType<typeof setTimeout> | undefined;
       const deadline = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(Error("exchange deadline")), 5000); });
