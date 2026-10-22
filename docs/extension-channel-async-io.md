@@ -1,10 +1,10 @@
-# Dormant extension channel I/O candidate
+# Qualified extension channel I/O
 
-This is not an enabled context or credential backend. The dormant context
-executor now consumes the [qualified host facade](./extension-channel-host.md),
-which adds exact runtime checks and fixed artifact verification. The adapter
-and C shim remain byte-identical to their qualified tuple. The context product
-gate is still literal false everywhere. API 1 is unchanged.
+Context-only delivery uses the [qualified host facade](./extension-channel-host.md)
+on its exact runtime coordinates. The facade adds fixed artifact verification.
+The adapter and C shim remain byte-identical to their qualified tuple. API 1 is
+unchanged; credential delivery remains disabled. Transport qualification does
+not authorize credential policy or a new runtime coordinate.
 
 ## Ownership and native boundary
 
@@ -186,8 +186,8 @@ beside the existing full-JIT unit matrix. The operator dispatches the same
 executed by this source change. The cold step runs immediately after dependency
 installation so an unrelated later suite failure cannot hide that record.
 
-Remaining integration gates: obtain an independent qualification ruling on both lanes
-and the new Linux record; verify compiler/header behavior and frozen source/ESM/
-bundled asset paths; review runner cancellation and child cleanup. The prior
-Linux apparatus run does not qualify this adapter. No package release, PR,
-merge, retarget, runner integration or gate change is automatic.
+The two transport lanes have a qualification ruling; the host and activation
+remain separately reviewed. Activation evidence must cover compiler/header
+behavior, source/ESM/unpacked assets, runner cancellation and cleanup on each
+exact supported coordinate. Historical apparatus runs alone are not host
+qualification. No package release, merge or hosted dispatch is automatic.
