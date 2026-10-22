@@ -25,7 +25,7 @@ if (expected === "negative") {
   const base = mkdtempSync(join(tmpdir(), "scout-detector-")), source = join(base, "provider"), home = join(base, "home");
   mkdirSync(source); mkdirSync(home);
   const env = {HOME:home,PATH:process.env.PATH,SCOUT_HOME:join(home,"scout"),OPENSCOUT_EXTENSIONS_HOME:join(home,"extensions"),OPENSCOUT_INSTANCE:"prod"};
-  writeFileSync(join(source,"extension.json"),JSON.stringify({api:2,command:"run",invocation:{context:"scout.extension-context/v1",requires:["selection/v1"]}}));
+  writeFileSync(join(source,"extension.json"),JSON.stringify({api:2,version:"1.0.0",command:"run",invocation:{context:"scout.extension-context/v1",requires:["selection/v1"]}}));
   writeFileSync(join(source,"run"),"#!/bin/sh\nexit 91\n",{mode:0o700});
   try {
     mutateScoutExtension("install","detector-fixture",source,env);
