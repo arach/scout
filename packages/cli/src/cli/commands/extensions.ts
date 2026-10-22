@@ -1,3 +1,4 @@
+import { runExtensionInputPermissions } from "../extension-input-permissions.ts";
 import { join } from "node:path";
 import { scoutExtensionTreeDigest } from "../extension-tree-digest.ts";
 import { mutateScoutExtension, readScoutExtensionInstallReceipt, ScoutExtensionInstallError, type ScoutExtensionInstallOptions } from "../extension-install.ts";
@@ -14,13 +15,20 @@ scout extensions update <verb> <dir>     Atomically activate a new artifact
 scout extensions remove <verb>           Remove a managed install; block legacy fallback
 scout extensions receipt <verb>          Read the selected generation's publication receipt
 scout extensions tree-digest <directory> Read the canonical full-tree identity (no install)
+scout extensions permissions list|inspect|grant|revoke  Manage explicit exact-tree input grants
+
+Inspect: permissions inspect <verb>
+Grant: permissions grant <verb> --tree-digest <digest> --declaration-digest <digest>
+       --input distribution-key --destination <URL> --acknowledge-unknown-origin
+Revoke: permissions revoke <grant-id>
+No key literals, automatic grants or publisher continuity are supported.
 
 Conditional install: --expect-absent --operation-id <id>
 Conditional update:  --expect-generation <absolute-dir> --expect-tree-digest <tree-digest> --operation-id <id>
 Conditions are checked under the installer lock. Without them, explicit install,
 update and re-enable behavior is unchanged. --operation-id is also optional alone.
 
-Artifacts need extension.json (api: 1, version, summary, command) and a bundled
+Artifacts need extension.json (api: 1 or 2, version, summary, command) and a bundled
 executable inside the directory. No downloads, install hooks or PATH search.
 Built-ins still win; installing mesh does not flip scout mesh. Updates retain
 old generations for explicit rollback via update <verb> <old-artifact-dir>.
@@ -49,6 +57,7 @@ export async function runExtensionsCommand(context: ScoutCommandContext, args: s
     context.output.writeText(EXTENSIONS_HELP);
     return;
   }
+  if (args[0] === "permissions") { runExtensionInputPermissions(context, args.slice(1)); return; }
   if (args[0] === "tree-digest") {
     if (args.length !== 2) throw new ScoutCliError("usage: scout extensions tree-digest <directory>");
     context.output.writeValue({ treeDigest: scoutExtensionTreeDigest(args[1]!) }, value => value.treeDigest);

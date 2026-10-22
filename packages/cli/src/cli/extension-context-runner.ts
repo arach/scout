@@ -1,3 +1,4 @@
+import { inputRefusal } from "./extension-input-grants.ts";
 import { scoutExtensionContextBackend } from "./extension-context-host.ts";
 import { spawn, type ChildProcess } from "node:child_process";
 import { realpathSync } from "node:fs";
@@ -74,6 +75,8 @@ export async function runScoutExtensionWithContext(extension: ScoutExtension, ar
   const wire = encodeScoutExtensionContext(frame);
   if (!sameSelection(extension, frame, selectionEnv)) contextRefusal(extension.name, "selection_changed");
   if (!scoutExtensionContextBackend()) contextRefusal(extension.name, "context_backend_unproven");
+  // Credential transport is independently unqualified. Never run a declaration with an absent channel.
+  if (extension.invocation?.credentialInputs?.length) inputRefusal(extension.name, "input_backend_unproven");
   const child = spawn(extension.command, args, { env, cwd: frame.cli.cwd, stdio: scoutExtensionContextStdio() });
   const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(resolveExit => child.once("close", (code, signal) => resolveExit({ code, signal })));
   let spawnError = false;
