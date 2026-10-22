@@ -3284,8 +3284,11 @@ export function createScoutMcpServer(options: {
   registerFlightCancelTool(server, id => cancelScoutFlight(deps.resolveBrokerUrl(), id));
   registerAttachmentReaderTool(server, {
     currentContext: () => parseScoutReplyContextFromEnv(env),
-    message: async (id) => (await loadScoutBrokerContext(deps.resolveBrokerUrl()))?.snapshot.messages?.[id] ?? null,
-    webOrigin: resolveScoutWebOrigin(env),
+    lookupMessage: async (id) => {
+      const broker = await loadScoutBrokerContext(deps.resolveBrokerUrl());
+      return { message: broker?.snapshot.messages?.[id] ?? null, localNodeId: broker?.node.id ?? null };
+    },
+    brokerUrl: deps.resolveBrokerUrl(),
     env,
   });
 
