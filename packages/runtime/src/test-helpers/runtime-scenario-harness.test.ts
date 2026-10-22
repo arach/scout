@@ -234,6 +234,9 @@ export class RuntimeScenarioHarness {
       env: {
         ...process.env,
         OPENSCOUT_CONTROL_HOME: controlHome,
+        // NODE_ENV=test is inherited by the real daemon. Its user-data guard
+        // requires this explicit redirect even when HOME is already temporary.
+        OPENSCOUT_SUPPORT_DIRECTORY: join(controlHome, "support"),
         OPENSCOUT_BROKER_HOST: DEFAULT_BROKER_HOST,
         OPENSCOUT_BROKER_PORT: String(port),
         OPENSCOUT_BROKER_URL: baseUrl,

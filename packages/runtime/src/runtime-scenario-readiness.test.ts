@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { RuntimeScenarioHarness, waitForScenarioMutationReady } from "./test-helpers/runtime-scenario-harness.test.js";
 
 const ready = { ok: true, startup: { state: "ready", mutationsAdmitted: true } };
@@ -52,15 +54,18 @@ test("scenario readiness tolerates connection/JSON/status bootstrap failures wit
   expect(reads).toBe(4);
 });
 
+// The six-second startup deadline must expire before the test runner cancels
+// the body; allow time for the boundary assertions and owned-child cleanup.
 test("real scenario start returns only after the advertised restore boundary", async () => {
   const scenario = new RuntimeScenarioHarness();
   const home = scenario.configurePairingHome(0);
   try {
-    const broker = await scenario.startBroker({ env: { HOME: home, OPENSCOUT_TEST_STARTUP_BOUNDARY_DELAY_MS: "100" } });
+    const broker = await scenario.startBroker({ env: { HOME: home, NODE_ENV: "test", OPENSCOUT_TEST_STARTUP_BOUNDARY_DELAY_MS: "100" } });
+    expect(existsSync(join(broker.controlHome, "support", "rpc-runtime-cutover-v1"))).toBe(true);
     const health = await scenario.get<{ startup: typeof ready.startup }>(broker, "/health");
     expect(health.startup).toMatchObject(ready.startup);
     await scenario.seedOperator(broker);
     const conversation = await scenario.registerConversation(broker, { id: "ready-boundary", kind: "direct", title: "Ready", participantIds: ["operator"] });
     expect(conversation.id).toBe("ready-boundary");
   } finally { await scenario.dispose(); }
-});
+}, 15_000);
