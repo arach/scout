@@ -9,6 +9,10 @@ export const ATTACHMENT_READ_PATH = "/v1/attachments/read";
 const actorId = z.string().min(1).max(256);
 export const attachmentPostHttpSchema = postWithAttachmentsSchema.extend({ actorId }).strict();
 export const attachmentReadHttpSchema = readAttachmentSchema.extend({ actorId }).strict();
+export const attachmentNotifyHttpSchema = z.object({
+  actorId, requestId: z.string().min(1).max(256), body: z.string().trim().min(1).max(64_000),
+  attachment: postWithAttachmentsSchema.shape.attachments.element.refine(a => ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(a.mediaType)),
+}).strict();
 const hostSchema = z.object({ path: z.literal(ATTACHMENT_READ_PATH), method: z.literal("POST"), nodeId: actorId.optional(), body: attachmentReadHttpSchema }).strict();
 export type AttachmentHttpDeps = {
   service?: BrokerAttachmentService;
@@ -17,6 +21,7 @@ export type AttachmentHttpDeps = {
   nodeId: string;
   peerNode: (keyId: string) => string | undefined;
   forward?: (input: HostWebRequest & { nodeId: string }) => Promise<HostWebResponse>;
+  notifyOperator?: (input: z.infer<typeof attachmentNotifyHttpSchema>, principal: { actorId: string; nodeId: string }) => Promise<unknown>;
 };
 export function attachmentHttpError(response: RuntimeHttpResponseLike, error: unknown) {
   if (error instanceof AttachmentError) json(response, error.status, { error: error.code });
@@ -29,19 +34,29 @@ function local(request: RuntimeHttpRequestLike) {
 const uploads = new WeakSet<AttachmentHttpDeps>();
 export async function handleAttachmentRoute(request: RuntimeHttpRequestLike, response: RuntimeHttpResponseLike, url: URL, deps: AttachmentHttpDeps): Promise<boolean> {
   const post = request.method === "POST" && url.pathname === "/v1/messages/with-attachments";
+  const notify = request.method === "POST" && url.pathname === "/v1/operator/notify-with-attachment";
   const read = request.method === "POST" && url.pathname === ATTACHMENT_READ_PATH;
   const capability = request.method === "GET" && url.pathname === "/v1/attachments/capability";
-  if (!post && !read && !capability) return false;
+  if (!post && !notify && !read && !capability) return false;
   let admittedUpload = false;
   try {
     local(request);
+    if (notify && Object.keys(request.headers).some(name => /^(origin|forwarded|x-forwarded-.*|x-openscout-forwarded-.*)$/i.test(name)))
+      throw new AttachmentError("attachment_forbidden", 403);
     if (!deps.service) { request.resume(); throw new AttachmentError("attachments_unavailable"); }
     if (capability) { json(response, 200, { available: true, ...ATTACHMENT_LIMITS, requestBytes: deps.uploadRequestBytes ?? ATTACHMENT_LIMITS.requestBytes }); return true; }
-    if (post) {
+    if (post || notify) {
       if (uploads.has(deps)) { request.resume(); throw new AttachmentError("attachments_busy"); }
       uploads.add(deps); admittedUpload = true;
     }
-    const raw = await readRequestBody(request, { maxBytes: post ? (deps.uploadRequestBytes ?? ATTACHMENT_LIMITS.requestBytes) : 4096, requireJsonContentType: true });
+    const raw = await readRequestBody(request, { maxBytes: post || notify ? (deps.uploadRequestBytes ?? ATTACHMENT_LIMITS.requestBytes) : 4096, requireJsonContentType: true });
+    if (notify) {
+      const input = attachmentNotifyHttpSchema.safeParse(raw);
+      if (!input.success) throw new AttachmentError("invalid_attachment_request", 400);
+      if (!deps.notifyOperator) throw new AttachmentError("attachments_unavailable");
+      json(response, 200, await deps.notifyOperator(input.data, { actorId: input.data.actorId, nodeId: deps.nodeId }));
+      return true;
+    }
     const parsed = (post ? attachmentPostHttpSchema : attachmentReadHttpSchema).safeParse(raw);
     if (!parsed.success) throw new AttachmentError("invalid_attachment_request", 400);
     const { actorId, ...input } = parsed.data;

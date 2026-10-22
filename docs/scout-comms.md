@@ -48,9 +48,13 @@ running, with a persisted delivery cursor; initial installation starts with new
 signals rather than replaying history. Remote iOS push carries generic text and
 opaque message/conversation references. Open Scout for the authored content.
 There is no image embedded directly in the remote push payload. PNG/JPEG/GIF/WebP
-images up to 25 MiB use the existing local paired attachment store, require the
-local broker and pairing file server, and expire after six hours; the receipt
-includes that expiry. Text remains in the durable conversation.
+images up to 25 MiB use the local broker's authorized message/blob binding.
+They do not require a pairing file server. Image availability follows broker
+blob retention; `imageExpiresAt` is `null`, not a six-hour promise. A protected
+broker can impose a smaller upload-request limit. Reading images requires a
+client that supports canonical blob references. Text remains in the durable
+conversation. See [operator image attachments](./operator-image-attachments.md)
+for the write contract and failure behavior.
 
 The former public commands `need` and `attention` are retired. Use
 `ask --operator`, `status`, and `diff` for their distinct purposes.
