@@ -1,4 +1,5 @@
 import { basename } from "node:path";
+import { TailReplayBuffer, type TailReplayCapture } from "./replay-buffer.js";
 import { open, stat, type FileHandle } from "node:fs/promises";
 import type { Stats } from "node:fs";
 import { StringDecoder } from "node:string_decoder";
@@ -204,7 +205,7 @@ type Watcher = {
 const sources: TranscriptSource[] = [GrokSource, KimiSource, ClaudeSource, CodexSource, CursorSource, OpenCodeSource, PiSource, DevinSource];
 
 const watchers = new Map<string, Watcher>(); // key = `${source}:${transcriptPath}` (one watcher per file, regardless of how many processes share it)
-const aggregateBuffer: TailEvent[] = [];
+const aggregateBuffer = new TailReplayBuffer(AGGREGATE_BUFFER_LIMIT);
 const assistantBuffer: TailEvent[] = [];
 const perSessionBuffer = new Map<string, TailEvent[]>();
 const subscribers = new Set<Subscriber>();
@@ -445,10 +446,7 @@ function pushEvent(rawEvent: TailEvent): TailEvent {
   // responsible for deciding whether an observation changes material state.
   const event = pushInternalEvent(rawEvent);
   if (shouldCoalesceQuietTailEvent(event)) return event;
-  aggregateBuffer.push(event);
-  if (aggregateBuffer.length > AGGREGATE_BUFFER_LIMIT) {
-    aggregateBuffer.splice(0, aggregateBuffer.length - AGGREGATE_BUFFER_LIMIT);
-  }
+  if (!aggregateBuffer.publish(event)) return event;
   if (event.kind === "assistant") {
     assistantBuffer.push(event);
     if (assistantBuffer.length > ASSISTANT_BUFFER_LIMIT) {
@@ -807,7 +805,7 @@ function pumpWatcher(watcher: Watcher, observedAt = Date.now()): Promise<void> {
 
 function selectWatchersForCurrentDemand(now = Date.now()): Watcher[] {
   const all = [...watchers.values()];
-  if (subscribers.size > 0) return all;
+  if (publicSubscriberCount() > 0) return all;
   if (internalSubscribers.size === 0) return [];
 
   const hot: Watcher[] = [];
@@ -1072,7 +1070,7 @@ async function refreshDiscovery(
 
       let watcher = watchers.get(sessionKey);
       if (!watcher) {
-        if (subscribers.size === 0 && internalSubscribers.size === 0) continue;
+        if (publicSubscriberCount() === 0 && internalSubscribers.size === 0) continue;
         watcher = {
           source,
           process: primary,
@@ -1221,7 +1219,7 @@ function ensureLoopRunning(): void {
 }
 
 function stopLoopIfIdle(): void {
-  if (subscribers.size > 0 || internalSubscribers.size > 0) return;
+  if (publicSubscriberCount() > 0 || internalSubscribers.size > 0) return;
   if (pollTimer) {
     clearInterval(pollTimer);
     pollTimer = null;
@@ -1278,6 +1276,30 @@ export async function refreshTailDiscovery(
   return runDiscovery(scope, { pruneMissing: scope !== "hot" });
 }
 
+function publicSubscriberCount(): number {
+  return subscribers.size + aggregateBuffer.subscriberCount;
+}
+
+/** Internal router seam: register, capture one replay image, then start shared demand. */
+export function attachTailReplay(
+  options: { limit: number; sources?: string[]; signal?: AbortSignal },
+  start: () => void = startTailLoopForSubscriber,
+): TailReplayCapture {
+  const filter = options.sources?.length ? new Set(options.sources) : null;
+  const capture = aggregateBuffer.attach({
+    ...options,
+    accepts: (event) => !filter || filter.has(event.source),
+    onClose: stopLoopIfIdle,
+  });
+  try {
+    if (capture.check()) start();
+    return capture;
+  } catch (error) {
+    capture.close();
+    throw error;
+  }
+}
+
 export function subscribeTail(handler: Subscriber): () => void {
   subscribers.add(handler);
   startTailLoopForSubscriber();
@@ -1317,7 +1339,7 @@ export function subscribeTailInternal(handler: InternalSubscriber): () => void {
 }
 
 export function snapshotRecentEvents(limit = 500): TailEvent[] {
-  return aggregateBuffer.slice(-limit);
+  return aggregateBuffer.recent(limit);
 }
 
 async function installWatcherForTest(input: {
@@ -1370,7 +1392,7 @@ export const __testing = {
   resetTranscriptReplayMemo,
   memoizedTranscriptReplay,
   resetTailEventBuffers: () => {
-    aggregateBuffer.length = 0;
+    aggregateBuffer.reset();
     assistantBuffer.length = 0;
     perSessionBuffer.clear();
   },
@@ -1442,7 +1464,7 @@ export const __testing = {
   },
   tailLoopState: () => ({
     running: pollTimer !== null,
-    publicSubscriberCount: subscribers.size,
+    publicSubscriberCount: publicSubscriberCount(),
     internalSubscriberCount: internalSubscribers.size,
   }),
 };
@@ -1457,12 +1479,11 @@ export async function readRecentLiveEvents(
   // inventory-refresh semantics. Coupling every HTTP read to watcher pumping
   // made one `/tail/recent` request stat every retained transcript.
   const kinds = options?.kinds?.length ? new Set(options.kinds) : null;
-  const source = kinds?.size === 1 && kinds.has("assistant")
+  if (!kinds) return snapshotRecentEvents(limit);
+  const source = kinds.size === 1 && kinds.has("assistant")
     ? assistantBuffer
-    : aggregateBuffer;
-  return kinds
-    ? source.filter((event) => kinds.has(event.kind)).slice(-limit)
-    : snapshotRecentEvents(limit);
+    : aggregateBuffer.recent(AGGREGATE_BUFFER_LIMIT);
+  return source.filter((event) => kinds.has(event.kind)).slice(-limit);
 }
 
 async function readRecentTranscriptLines(
@@ -1811,7 +1832,7 @@ function snapshotSessionEvents(
     const sourceEvents = bucket.filter((event) => event.source === source);
     if (sourceEvents.length > 0) return sourceEvents.slice(-limit);
   }
-  return aggregateBuffer
+  return aggregateBuffer.recent(AGGREGATE_BUFFER_LIMIT)
     .filter((event) => event.sessionId === sessionId && event.source === source)
     .slice(-limit);
 }
