@@ -287,7 +287,8 @@ test("verification pages a large plan and compares an individually oversized bod
 test("watchdog rejects a stalled live worker and restarts against the same historical database", async () => {
   // Hold watchdog time still until both worker entry and journal acknowledgement
   // are proven. Startup/recovery load must not consume the fixture's budget.
-  const now = Date.now(), clock = spyOn(Date, "now").mockReturnValue(now);
+  let now = Date.now();
+  const clock = spyOn(Date, "now").mockImplementation(() => now);
   try {
     const { projection, durable, journal, dbPath } = await setup(withheldWorkerSource(), { requestTimeoutMs: 400 });
     await projection.warm(); await projection.flush();
@@ -317,7 +318,7 @@ test("watchdog rejects a stalled live worker and restarts against the same histo
         acknowledgedWhileHeld = true;
       });
     // Only the confirmed stall advances the real watchdog predicate.
-    clock.mockReturnValue(now + 400);
+    now += 400;
     await expect(flush).rejects.toThrow("stalled");
     expect(projection.statusSnapshot().state).toBe("degraded");
     // The watchdog has retired the held worker. A recovery dependency is still
