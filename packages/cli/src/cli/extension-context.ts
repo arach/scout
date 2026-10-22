@@ -1,3 +1,4 @@
+import type { ExtensionInputMetadata } from "./extension-input-session.ts";
 import { resolve, join, isAbsolute } from "node:path";
 import type { OpenScoutInstanceLayout } from "@openscout/runtime/instance";
 import { resolveScoutHome } from "@openscout/runtime/scout-home";
@@ -96,7 +97,7 @@ export function projectScoutExtensionContext(input: {
     broker: { controlUrl: input.brokerUrl, internalUrl, socketPath: path(["OPENSCOUT_BROKER_SOCKET_PATH"], layout.brokerSocketPath) },
     services: { appSocket: path(["OPENSCOUT_APP_SOCKET"], layout.appSocketPath), probesSocket: path(["OPENSCOUT_PROBES_SOCKET"], layout.probesSocketPath),
       label: raw(["OPENSCOUT_SERVICE_LABEL", "OPENSCOUT_BROKER_SERVICE_LABEL"], layout.isProd && raw(["OPENSCOUT_BROKER_SERVICE_MODE"])?.toLowerCase() === "custom" ? "app.openscout.custom" : layout.serviceLabel)!, systemdUnit,
-      mode, ports }, configuration, credentialInputs: [] as never[],
+      mode, ports }, configuration, credentialInputs: [] as ExtensionInputMetadata[],
   };
   const stringsSafe = (value: unknown): boolean => typeof value === "string" ? safeText(value)
     : Array.isArray(value) ? value.every(stringsSafe) : value && typeof value === "object" ? Object.values(value).every(stringsSafe) : true;

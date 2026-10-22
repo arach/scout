@@ -1,6 +1,6 @@
 import { parseScoutExtensionInvocation, type ScoutExtensionInvocation } from "./scout-extension-invocation.js";
-export { SCOUT_EXTENSION_CONTEXT_SCHEMA, SCOUT_EXTENSION_CONTEXT_FEATURES } from "./scout-extension-invocation.js";
-export type { ScoutExtensionInvocation, ScoutExtensionContextFeature } from "./scout-extension-invocation.js";
+export { SCOUT_EXTENSION_CONTEXT_SCHEMA, SCOUT_EXTENSION_CONTEXT_FEATURES, SCOUT_EXTENSION_INPUT_SCHEMA, normalizeScoutExtensionDestination } from "./scout-extension-invocation.js";
+export type { ScoutExtensionInvocation, ScoutExtensionContextFeature, ScoutExtensionCredentialDeclaration, ScoutExtensionDestinationDeclaration } from "./scout-extension-invocation.js";
 import { normalizeOpenScoutInstanceName, resolveOpenScoutInstanceName } from "./instance.js";
 import { untrustedPathMetadata } from "./path-trust.js";
 import { createHash } from "node:crypto";
@@ -26,7 +26,7 @@ import { resolveScoutHome, scoutHomeReadRoots } from "./scout-home.js";
 /** The contract version in extension.json's "api" field. Bump it on any breaking change to scoutExtensionEnv. */
 export const SCOUT_EXTENSION_API_VERSION = 1;
 
-export type ScoutExtensionRefusalReason = "refused" | "incompatible" | "corrupt" | "wrong_instance" | "context_invalid" | "selection_changed" | "context_delivery_failed" | "context_backend_unproven";
+export type ScoutExtensionRefusalReason = "refused" | "incompatible" | "corrupt" | "wrong_instance" | "context_invalid" | "selection_changed" | "context_delivery_failed" | "context_backend_unproven" | "input_not_authorized" | "input_protocol_invalid" | "input_delivery_failed" | "input_source_changed" | "input_value_invalid" | "input_policy_invalid" | "input_policy_busy" | "input_provenance_unverified" | "input_backend_unproven";
 
 export type ScoutExtension = {
   name: string;

@@ -27,8 +27,11 @@ The supported API set is `[1, 2]`. API 1 remains the environment default for
 historical objects. API 2 requires the exact context schema, a unique array of
 at most seven supported feature IDs, and no unknown invocation keys. Unknown
 APIs, schemas, required features or declarations refuse before executing a
-candidate. `credentialInputs` can be omitted or empty; any nonempty declaration
-refuses because this slice implements no credential channel. Executable
+candidate. `credentialInputs` can be omitted or empty for context-only operation. The
+[declared-input draft](./extension-inputs.md) additionally recognizes one exact
+credential declaration and its schemas/destination. Its transport is held; a
+recognized nonempty declaration refuses before spawn with
+`input_backend_unproven`, rather than silently running without its channel. Executable
 completion also refuses under API 2; static completion and Markdown help remain
 read-only. No declaration grants inputs or service authority.
 
@@ -161,4 +164,5 @@ Pre-spawn/context failures use #66's raw-stderr
 `context_invalid`, `selection_changed`, `context_delivery_failed` or
 `context_backend_unproven`.
 Unsupported declarations retain `incompatible`. Provider command failures keep
-their own output and exit status. No credential/grant/store protocol is enabled.
+their own output and exit status. No credential channel is enabled. The separate
+draft grant-management actions do not activate delivery.

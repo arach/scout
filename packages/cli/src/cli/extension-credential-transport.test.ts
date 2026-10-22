@@ -7,45 +7,49 @@ import type { Duplex } from "node:stream";
 import { INHERITED_DESCRIPTOR_LAYOUTS, MAX_INHERITED_DESCRIPTOR_SLOT } from "@openscout/runtime/inherited-descriptors";
 import { scoutExtensionContextBackend } from "./extension-context-host.ts";
 
-/** Capability witness only: no key, policy store, environment override or native mapping. */
+/** Mirror foreground stdio, not auxiliary stdout pipes. Exit is the reap boundary. */
 test("runtime-owned credential slot is duplex and GC never closes an unrelated descriptor", async () => {
   const home = mkdtempSync(join(tmpdir(), "scout-credential-duplex-"));
   const unrelated = openSync(join(home, "unrelated"), "w");
+  const identity = fstatSync(unrelated); let completed = false;
   try {
     for (let iteration = 0; iteration < 5; iteration++) {
       const slot = INHERITED_DESCRIPTOR_LAYOUTS.extensionApi2.credential;
-      const stdio: Array<"pipe" | "ignore"> = Array(MAX_INHERITED_DESCRIPTOR_SLOT + 1).fill("ignore");
-      stdio[1] = "pipe"; stdio[2] = "pipe"; stdio[slot] = "pipe";
-      const script = `import{createReadStream,writeSync,fstatSync}from'node:fs';const fd=Number(process.argv[1]);try{writeSync(fd,'request\\n')}catch(e){console.error(e.code);process.exit(92)}let data='';try{for await(const part of createReadStream(null,{fd,autoClose:true}))data+=part;}catch(e){console.error(e.code);process.exit(93)}if(data!=='response\\n')process.exit(91);console.log('duplex-eof');`;
+      const stdio: Array<"pipe" | "ignore" | "inherit"> = Array(MAX_INHERITED_DESCRIPTOR_SLOT + 1).fill("ignore");
+      stdio[0] = stdio[1] = stdio[2] = "inherit"; stdio[slot] = "pipe";
+      const script = `import{createReadStream,writeSync,fstatSync}from'node:fs';const fd=Number(process.argv[1]);try{writeSync(fd,'request\\n')}catch(e){console.error(JSON.stringify({phase:'request-write',fd,code:e.code}));process.exit(92)}let data='';try{for await(const part of createReadStream(null,{fd,autoClose:true}))data+=part;}catch(e){console.error(JSON.stringify({phase:'response-read',fd,code:e.code}));process.exit(93)}if(data!=='response\\n')process.exit(91);`;
       const child = spawn(process.execPath, ["-e", script, String(slot)], { stdio, env: { HOME: home, PATH: process.env.PATH } });
-      const closed = new Promise<number | null>(done => child.once("close", done));
+      const exited = new Promise<number | null>((done, reject) => { child.once("exit", done); child.once("error", reject); });
       const channel = (child.stdio as unknown[])[slot] as Duplex | null;
-      let output = "", errors = "";
-      child.stdout?.on("data", chunk => output += chunk); child.stderr?.on("data", chunk => errors += chunk);
-      const timer = setTimeout(() => {
-        console.error(JSON.stringify({ witnessDeadline: true, exitCode: child.exitCode, signal: child.signalCode, output, errors, readable: channel?.readable, writable: channel?.writable }));
-        channel?.destroy(); child.kill("SIGKILL");
-      }, 5000);
+      let request = "", timer: ReturnType<typeof setTimeout> | undefined;
+      const deadline = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`duplex deadline: exit=${child.exitCode}, signal=${child.signalCode}, requestBytes=${request.length}`)), 5000); });
       try {
         if (!scoutExtensionContextBackend()) {
-          expect(channel).toBeNull(); child.kill("SIGKILL"); await closed;
+          expect(channel).toBeNull(); child.kill("SIGKILL"); await Promise.race([exited, deadline]);
         } else {
           expect(channel?.readable).toBe(true); expect(channel?.writable).toBe(true);
-          let request = "";
           channel!.on("error", () => {});
           channel!.on("data", chunk => { request += chunk; if (request === "request\n") channel!.end("response\n", () => channel!.destroy()); });
           Bun.gc(true);
-          const status = await closed; expect(errors).toBe(""); expect(status).toBe(0); expect(request).toBe("request\n"); expect(output.trim()).toBe("duplex-eof"); expect(errors).toBe("");
+          expect(await Promise.race([exited, deadline])).toBe(0); expect(request).toBe("request\n");
         }
       } finally {
         clearTimeout(timer); channel?.destroy();
         if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
-        await closed;
+        await Promise.race([exited, Bun.sleep(1000).then(() => { if (child.exitCode === null && child.signalCode === null) throw new Error("owned witness child not reaped"); })]);
       }
       Bun.gc(true); await Bun.sleep(5); Bun.gc(true);
-      expect(fstatSync(unrelated).isFile()).toBe(true);
+      const current = fstatSync(unrelated);
+      expect(current.isFile()).toBe(true); expect(current.dev).toBe(identity.dev); expect(current.ino).toBe(identity.ino);
     }
+    completed = true;
     console.error(JSON.stringify({ witness: "scout.credential-duplex/v1", version: Bun.version, revision: Bun.revision, platform: process.platform,
       qualified: scoutExtensionContextBackend(), iterations: 5, unrelatedDescriptorSurvived: true }));
-  } finally { closeSync(unrelated); rmSync(home, { recursive: true, force: true }); }
+  } finally {
+    let lost = false;
+    try { const current = fstatSync(unrelated); if (current.dev === identity.dev && current.ino === identity.ino) closeSync(unrelated); else lost = true; }
+    catch { lost = true; }
+    rmSync(home, { recursive: true, force: true });
+    if (lost) { console.error("credential witness: unrelated descriptor ownership was lost"); if (completed) throw new Error("unrelated descriptor lost during final cleanup"); }
+  }
 }, 35_000);
