@@ -255,4 +255,104 @@ process.exitCode = await runScoutExtension(extension, [], process.env);`);
     expect(missingScoutExtensionMessage({ name: "mesh", summary: "Mesh", provider: "extension", install: "Install it from oscout/scout." }))
       .toBe("scout mesh is provided by an extension that is not installed. Install it from oscout/scout.");
   });
+
+  async function cli(args: string[], selected: string, discardStdout = false, plain = false) {
+    const child = spawn(process.execPath, [join(import.meta.dir, "main.ts"), ...(plain ? [] : ["--json"]), "extensions", ...args], {
+      env: { PATH: process.env.PATH, HOME: root, SCOUT_HOME: join(root, "cli-state"), OPENSCOUT_HOME: join(root, "cli-state"),
+        OPENSCOUT_EXTENSIONS_HOME: selected, OPENSCOUT_INSTANCE: "prod", FORCE_COLOR: "3" },
+      stdio: ["ignore", discardStdout ? "ignore" : "pipe", "pipe"],
+    });
+    let stdout = "", stderr = "";
+    child.stdout?.on("data", chunk => { stdout += chunk; }); child.stderr?.on("data", chunk => { stderr += chunk; });
+    const timer = setTimeout(() => child.kill("SIGKILL"), 20_000);
+    try {
+      const code = await new Promise<number | null>((resolveExit, reject) => {
+        child.once("error", reject); child.once("close", resolveExit);
+      });
+      return { code, stdout, stderr };
+    } finally { clearTimeout(timer); }
+  }
+  function refusal(result: { code: number | null; stdout: string; stderr: string }, error: string) {
+    expect(result.code).toBe(1); expect(result.stdout).toBe("");
+    expect(result.stderr).not.toContain("\x1b");
+    expect(result.stderr.split("\n")).toHaveLength(2); // Exactly one object plus LF, no outer catch prefix.
+    const value = JSON.parse(result.stderr);
+    expect(typeof value.message).toBe("string"); expect(value.message.length).toBeGreaterThan(0);
+    expect(value.schema).toBe("scout.cli.extension-install-error/v1"); expect(value.error).toBe(error);
+    return value;
+  }
+  function cliArtifact(label: string) {
+    const parent = join(root, label), selected = join(parent, "extensions"), source = join(parent, "artifact");
+    install(parent, "artifact", "exit 0", { version: "1.0.0" });
+    return { selected, source };
+  }
+  test("public CLI: paused absent inspection cannot resurrect a subsequently removed verb", async () => {
+    const f = cliArtifact("absent-race");
+    const automaticArgs = ["install", "mesh", f.source, "--expect-absent", "--operation-id", "auto-fresh"];
+    expect(fs.existsSync(join(f.selected, "mesh"))).toBe(false); // Caller pauses here, with its already-formed condition.
+    expect((await cli(["install", "mesh", f.source], f.selected)).code).toBe(0);
+    expect((await cli(["remove", "mesh"], f.selected)).code).toBe(0);
+    const tombstone = realpathSync(join(f.selected, "mesh"));
+    const refused = await cli(automaticArgs, f.selected);
+    const error = refusal(refused, "EXTENSION_PRECONDITION_FAILED");
+    const selected = JSON.parse((await cli(["receipt", "mesh"], f.selected)).stdout);
+    expect(error.lastReceipt).toBe(join(selected.home, ".receipts", "mesh", `${selected.publishedGeneration.split("/").pop()}.json`));
+    expect(realpathSync(join(f.selected, "mesh"))).toBe(tombstone);
+    expect(findScoutExtension("mesh", { OPENSCOUT_EXTENSIONS_HOME: f.selected })?.removed).toBe(true);
+    expect((await cli(["install", "mesh", f.source], f.selected)).code).toBe(0); // Explicit consent is unchanged.
+  }, 30_000);
+  test("public CLI: paused update inspection cannot replace another selected generation", async () => {
+    const f = cliArtifact("update-race");
+    const inspected = JSON.parse((await cli(["install", "mesh", f.source], f.selected)).stdout);
+    const automaticArgs = ["update", "mesh", f.source, "--expect-generation", inspected.publishedGeneration,
+      "--expect-digest", inspected.digest, "--operation-id", "auto-update"];
+    const replacement = JSON.parse((await cli(["update", "mesh", f.source], f.selected)).stdout);
+    const refused = await cli(automaticArgs, f.selected);
+    const error = refusal(refused, "EXTENSION_PRECONDITION_FAILED");
+    const selected = JSON.parse((await cli(["receipt", "mesh"], f.selected)).stdout);
+    expect(error.lastReceipt).toBe(join(selected.home, ".receipts", "mesh", `${selected.publishedGeneration.split("/").pop()}.json`));
+    expect(realpathSync(join(f.selected, "mesh"))).toBe(replacement.publishedGeneration);
+    expect((await cli(["receipt", "mesh"], f.selected)).code).toBe(0);
+  }, 30_000);
+  test("public CLI: lost stdout recovers publication correlation and forms a conditional update", async () => {
+    const f = cliArtifact("lost-stdout");
+    const installed = await cli(["install", "mesh", f.source, "--expect-absent", "--operation-id", "lost:install"], f.selected, true);
+    expect(installed.code).toBe(0); expect(installed.stdout).toBe("");
+    const recovered = await cli(["receipt", "mesh"], f.selected);
+    expect(recovered.code).toBe(0);
+    const receipt = JSON.parse(recovered.stdout);
+    expect(receipt.operationId).toBe("lost:install");
+    expect(receipt.publishedGeneration).toBe(realpathSync(join(f.selected, "mesh")));
+    const updated = await cli(["update", "mesh", f.source, "--expect-generation", receipt.publishedGeneration,
+      "--expect-digest", receipt.digest, "--operation-id", "lost:update"], f.selected, true);
+    expect(updated.code).toBe(0);
+    const next = JSON.parse((await cli(["receipt", "mesh"], f.selected)).stdout);
+    expect(next.operationId).toBe("lost:update");
+    expect(next.previousArtifact).toBe(receipt.publishedGeneration);
+    expect(next.publishedGeneration).toBe(realpathSync(join(f.selected, "mesh")));
+    expect(next.publishedGeneration).not.toBe(receipt.publishedGeneration);
+  }, 30_000);
+  test("public CLI: human refusal keeps its existing code prefix and exit status", async () => {
+    const f = cliArtifact("human-refusal");
+    const result = await cli(["install", "mesh", f.source, "--expect-absent"], f.selected, false, true);
+    expect(result.code).toBe(1); expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("error: EXTENSION_CONDITION_INVALID:");
+    expect(result.stderr).not.toContain("scout.cli.extension-install-error/v1");
+    expect(fs.existsSync(f.selected)).toBe(false);
+  }, 30_000);
+  test("public CLI: malformed conditions refuse before creating a selected home", async () => {
+    const f = cliArtifact("bad-options");
+    for (const flags of [
+      ["--expect-absent"], ["--expect-generation", "/absolute", "--operation-id", "x"],
+      ["--expect-absent", "--expect-digest", "0".repeat(64), "--operation-id", "x"],
+      ["--expect-absent", "--expect-absent", "--operation-id", "x"], ["--operation-id", "../bad"],
+    ]) {
+      const result = await cli(["install", "mesh", f.source, ...flags], f.selected);
+      expect(refusal(result, "EXTENSION_CONDITION_INVALID").lastReceipt).toBeUndefined();
+      expect(fs.existsSync(f.selected)).toBe(false);
+    }
+    const missing = await cli(["receipt", "mesh"], f.selected);
+    expect(refusal(missing, "EXTENSION_RECEIPT_UNAVAILABLE").lastReceipt).toBeUndefined();
+    expect(fs.existsSync(f.selected)).toBe(false);
+  }, 30_000);
 });

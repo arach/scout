@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mutateScoutExtension } from "./extension-install.ts";
+import { mutateScoutExtension, readScoutExtensionInstallReceipt, ScoutExtensionInstallError, type ScoutExtensionInstallOptions } from "./extension-install.ts";
 import { findScoutExtension, scoutExtensionDigest } from "./extensions.ts";
 import { findScoutCommandRegistration } from "./registry.ts";
 const dirs: string[] = [];
@@ -77,4 +77,125 @@ test("updates repair a refused managed install", () => {
 test("retained generation storage is bounded", () => {
   const f = fixture();f.change("install");for (let i = 0; i < 7; i++) f.change("update");
   expect(() => f.change("update")).toThrow("generation limit");f.change("remove");expect(readdirSync(join(f.home, ".installed", "mesh"))).toHaveLength(1);
+});
+
+function conditionFailure(run: () => unknown, code: ScoutExtensionInstallError["code"] = "EXTENSION_PRECONDITION_FAILED") {
+  try { run(); throw new Error("expected refusal"); }
+  catch (error) { expect(error).toBeInstanceOf(ScoutExtensionInstallError); expect((error as ScoutExtensionInstallError).code).toBe(code); }
+}
+test("conditional install refuses a tombstone created after inspection; explicit reinstall still works", () => {
+  const f = fixture();
+  const inspected = { expected: { absent: true }, operationId: "fresh-1" } as const;
+  expect(existsSync(join(f.home, "mesh"))).toBe(false);
+  f.change("install"); f.change("remove");
+  const tombstone = realpathSync(join(f.home, "mesh"));
+  const before = readdirSync(join(f.home, ".installed", "mesh"));
+  conditionFailure(() => mutateScoutExtension("install", "mesh", f.source, f.env, inspected));
+  expect(realpathSync(join(f.home, "mesh"))).toBe(tombstone);
+  expect(readdirSync(join(f.home, ".installed", "mesh"))).toEqual(before);
+  expect(findScoutExtension("mesh", f.env)?.removed).toBe(true);
+  expect(f.change("install").status).toBe("installed");
+});
+test("conditional update refuses a changed generation even when its digest is identical", () => {
+  const f = fixture(), inspected = f.change("install");
+  const replacement = f.change("update");
+  expect(replacement.digest).toBe(inspected.digest);
+  expect(replacement.publishedGeneration).not.toBe(inspected.publishedGeneration);
+  const before = readdirSync(join(f.home, ".installed", "mesh"));
+  conditionFailure(() => mutateScoutExtension("update", "mesh", f.source, f.env, {
+    expected: { generation: inspected.publishedGeneration, digest: inspected.digest! }, operationId: "update-race",
+  }));
+  expect(realpathSync(join(f.home, "mesh"))).toBe(replacement.publishedGeneration);
+  expect(readdirSync(join(f.home, ".installed", "mesh"))).toEqual(before);
+});
+test("conditional update requires the digest too, and cannot repair unknown or removed state", () => {
+  const f = fixture(), installed = f.change("install");
+  const options = { expected: { generation: installed.publishedGeneration, digest: installed.digest! }, operationId: "checked-update" };
+  writeFileSync(join(f.home, "mesh", "bin/scout-mesh"), "#!/bin/sh\nexit 2\n");
+  conditionFailure(() => mutateScoutExtension("update", "mesh", f.source, f.env, options));
+  writeFileSync(join(f.home, "mesh", "extension.json"), "not JSON");
+  conditionFailure(() => mutateScoutExtension("update", "mesh", f.source, f.env, options));
+  expect(f.change("update").status).toBe("installed"); // Explicit repair remains supported.
+  f.change("remove");
+  conditionFailure(() => mutateScoutExtension("update", "mesh", f.source, f.env, options));
+  expect(findScoutExtension("mesh", f.env)?.removed).toBe(true);
+});
+test("conditional install never replaces unmanaged or dangling entries", () => {
+  const f = fixture(), options = { expected: { absent: true }, operationId: "unknown" } as const;
+  mkdirSync(join(f.home, "mesh"), { recursive: true });
+  conditionFailure(() => mutateScoutExtension("install", "mesh", f.source, f.env, options));
+  expect(lstatSync(join(f.home, "mesh")).isDirectory()).toBe(true);
+  rmSync(join(f.home, "mesh"), { recursive: true }); symlinkSync(join(f.root, "missing"), join(f.home, "mesh"));
+  conditionFailure(() => mutateScoutExtension("install", "mesh", f.source, f.env, options));
+  expect(lstatSync(join(f.home, "mesh")).isSymbolicLink()).toBe(true);
+});
+test("conditional successes persist a receipt before stdout and support the next precondition", () => {
+  const f = fixture();
+  const first = mutateScoutExtension("install", "mesh", f.source, f.env, { expected: { absent: true }, operationId: "install:1" });
+  expect(first).toMatchObject({ operationId: "install:1", publishedGeneration: realpathSync(join(f.home, "mesh")) });
+  expect(readScoutExtensionInstallReceipt("mesh", f.env)).toEqual(first);
+  f.manifest({ version: "2.0.0" });
+  const next = mutateScoutExtension("update", "mesh", f.source, f.env, {
+    expected: { generation: first.publishedGeneration, digest: first.digest! }, operationId: "update:2",
+  });
+  expect(next.previousArtifact).toBe(first.publishedGeneration);
+  expect(readScoutExtensionInstallReceipt("mesh", f.env)).toEqual(next);
+  const rollback = mutateScoutExtension("update", "mesh", first.publishedGeneration, f.env, {
+    expected: { generation: next.publishedGeneration, digest: next.digest! }, operationId: "rollback:3",
+  });
+  expect(rollback.digest).toBe(first.digest);
+  expect(rollback.publishedGeneration).not.toBe(first.publishedGeneration);
+  expect(readScoutExtensionInstallReceipt("mesh", f.env)).toEqual(rollback);
+});
+test("a busy public lock wins over the caller's condition", () => {
+  const f = fixture(); mkdirSync(join(f.home, ".locks", "mesh"), { recursive: true });
+  expect(() => mutateScoutExtension("install", "mesh", f.source, f.env, { expected: { absent: true }, operationId: "busy" })).toThrow("busy");
+  expect(existsSync(join(f.home, "mesh"))).toBe(false);
+  expect(existsSync(join(f.home, ".receipts"))).toBe(false);
+});
+test("invalid conditions and correlation IDs fail before creating installation state", () => {
+  const f = fixture();
+  for (const options of [
+    { expected: { absent: true } }, { expected: { absent: false }, operationId: "x" },
+    { expected: { generation: "relative", digest: "a".repeat(64) }, operationId: "x" },
+    { expected: { generation: "/absolute", digest: "bad" }, operationId: "x" },
+    { operationId: "../../bad" }, { operationId: "a\nb" }, { operationId: "x\n" }, { operationId: "x".repeat(129) },
+  ]) conditionFailure(() => mutateScoutExtension("install", "mesh", f.source, f.env, options as ScoutExtensionInstallOptions), "EXTENSION_CONDITION_INVALID");
+  conditionFailure(() => mutateScoutExtension("remove", "mesh", undefined, f.env, { expected: { absent: true }, operationId: "x" }), "EXTENSION_CONDITION_INVALID");
+  conditionFailure(() => mutateScoutExtension("update", "mesh", f.source, f.env, { expected: { generation: "/absolute", digest: "a".repeat(64) + "\n" }, operationId: "x" }), "EXTENSION_CONDITION_INVALID");
+  expect(existsSync(f.home)).toBe(false);
+});
+test("receipt recovery refuses torn, symlinked, stale or missing records without mutating selection", () => {
+  const f = fixture(), receipt = f.change("install"), selected = join(f.home, "mesh");
+  const record = join(f.home, ".receipts", "mesh", `${receipt.publishedGeneration.split("/").pop()}.json`);
+  const good = readFileSync(record);
+  for (const content of ["{", JSON.stringify({ ...receipt, operationId: "../bad" }), JSON.stringify({ ...receipt, digest: "0".repeat(64) }), " ".repeat(32769)]) {
+    writeFileSync(record, content);
+    conditionFailure(() => readScoutExtensionInstallReceipt("mesh", f.env), "EXTENSION_RECEIPT_UNAVAILABLE");
+    expect(realpathSync(selected)).toBe(receipt.publishedGeneration);
+  }
+  writeFileSync(record, good); chmodSync(record, 0o666);
+  conditionFailure(() => readScoutExtensionInstallReceipt("mesh", f.env), "EXTENSION_RECEIPT_UNAVAILABLE");
+  chmodSync(record, 0o600); rmSync(record); symlinkSync(join(f.source, "extension.json"), record);
+  conditionFailure(() => readScoutExtensionInstallReceipt("mesh", f.env), "EXTENSION_RECEIPT_UNAVAILABLE");
+  rmSync(record);
+  conditionFailure(() => readScoutExtensionInstallReceipt("mesh", f.env), "EXTENSION_RECEIPT_UNAVAILABLE");
+  expect(realpathSync(selected)).toBe(receipt.publishedGeneration);
+});
+test("receipt recovery refuses group-writable correlation metadata", () => {
+  const f = fixture(), receipt = f.change("install");
+  const record = join(f.home, ".receipts", "mesh", `${receipt.publishedGeneration.split("/").pop()}.json`);
+  expect(readScoutExtensionInstallReceipt("mesh", f.env)).toEqual(receipt);
+  chmodSync(record, 0o620); // Group-write without world-write must still refuse.
+  conditionFailure(() => readScoutExtensionInstallReceipt("mesh", f.env), "EXTENSION_RECEIPT_UNAVAILABLE");
+  expect(realpathSync(join(f.home, "mesh"))).toBe(receipt.publishedGeneration);
+  chmodSync(record, 0o600);
+  expect(readScoutExtensionInstallReceipt("mesh", f.env)).toEqual(receipt);
+});
+test("unconditional receipts use null operation ID; remove retains only its selected receipt", () => {
+  const f = fixture(), first = f.change("install");
+  expect(first.operationId).toBeNull(); expect(readScoutExtensionInstallReceipt("mesh", f.env)).toEqual(first);
+  f.change("update"); const removed = f.change("remove");
+  expect(readScoutExtensionInstallReceipt("mesh", f.env)).toEqual(removed);
+  expect(readdirSync(join(f.home, ".receipts", "mesh"))).toHaveLength(1);
 });
