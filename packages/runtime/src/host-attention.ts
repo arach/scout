@@ -1,7 +1,7 @@
 /** Machine-local operator operations. No enumeration, capture or process work
  * happens on import. A rendered prompt is an observation, not answer authority. */
 import { createHash } from "node:crypto";
-import { CLAUDE_PERMISSION_DIALOG_LIMITS, detectClaudePermissionDialog, type ClaudePermissionDialog } from "./claude-permission-dialog.js";
+import { CLAUDE_PERMISSION_DIALOG_LIMITS, claudePermissionAnswerKeys, detectClaudePermissionDialog, type ClaudePermissionDialog } from "./claude-permission-dialog.js";
 import { formatTerminalSurfaceId } from "@openscout/protocol";
 import type { TmuxHostAttentionAnswer, HostReadAvailability, TmuxHostAttentionObservation, TmuxHostAttentionRead, TmuxHostAttentionTarget } from "@openscout/protocol";
 
@@ -210,7 +210,7 @@ export function createTmuxHostAttentionAnswerer(deps: {
       if (signal?.aborted) return result("failed", "aborted");
       if (!before.dialog) return result("gone", "prompt_gone");
       if (tmuxPromptVersion(target, before.dialog) !== expected) return result("stale", "prompt_changed");
-      const keys = tmuxAnswerKeys(before.dialog, option);
+      const keys = claudePermissionAnswerKeys(before.dialog, option);
       if (!keys) return result("refused", "unsupported_options");
       if (attempted.size >= limits.maxAttempts) return result("refused", "attempt_capacity");
       // Consume before transport: a rejected/timed-out send may still have acted.
@@ -246,16 +246,6 @@ export function createTmuxHostAttentionAnswerer(deps: {
     }
   };
 }
-function tmuxAnswerKeys(dialog: ClaudePermissionDialog, option: "approve" | "deny"): readonly string[] | null {
-  const options = dialog.content.options.map(line => line.match(/^(\d)\.\s+(.+)$/u));
-  if (!options.length || options.some((entry, i) => !entry || Number(entry[1]) !== i + 1)) return null;
-  const yes = options.filter(entry => /^Yes$/iu.test(entry![2]!));
-  const no = options.filter(entry => /^No$/iu.test(entry![2]!));
-  if (yes.length !== 1 || no.length > 1) return null;
-  // Numeric selection never depends on a cursor that can move without changing
-  // the content hash. Never choose don't-ask-again, and never append Enter.
-  return option === "approve" ? [yes[0]![1]!] : no.length ? [no[0]![1]!] : ["Escape"];
-}
 function validRef(ref: TmuxHostAttentionTarget["ref"]): boolean {
   return ref.backend === "tmux" && [ref.nodeId, ref.hostSession, ...(ref.paneId === undefined ? [] : [ref.paneId])]
     .every(validIdentity);
@@ -274,3 +264,8 @@ function clamp(value: string, max: number): string {
 
 export { collectHerdrHostAttention, HERDR_HOST_ATTENTION_LIMITS } from "./herdr-host-attention.js";
 export type { HerdrHostAttentionCapture, HerdrHostAttentionCaptureEvidence } from "./herdr-host-attention.js";
+
+export { createHerdrHostAttentionAnswerer, HERDR_HOST_ATTENTION_ANSWER_LIMITS } from "./herdr-host-attention-answer.js";
+export type { HerdrHostAttentionAnswerInput, HerdrHostAttentionAttempt, HerdrHostAttentionClaim,
+  HerdrHostAttentionAdmission, HerdrHostAttentionIntent, HerdrHostAttentionFinalization,
+  HerdrHostAttentionAdmissionFailure, HerdrHostAttentionAnswerDependencies } from "./herdr-host-attention-answer.js";
