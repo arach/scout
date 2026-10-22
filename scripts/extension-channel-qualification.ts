@@ -1,6 +1,6 @@
 /** Explicit checkpoint runner; never dispatches CI or opens a product gate. */
 import {readFileSync} from "node:fs";
-import {checkpointFiles, command} from "./extension-channel-checkpoint-command.ts";
+import {checkpointFiles, command, verifyFenceInventory} from "./extension-channel-checkpoint-command.ts";
 import {currentExtensionChannelCoordinate, EXTENSION_CHANNEL_QUALIFICATION as Q} from "../packages/runtime/src/extension-channel-qualification.ts";
 if (!currentExtensionChannelCoordinate()) throw Error("qualification job requires the exact supported host; skips are not evidence");
 console.log(JSON.stringify({event:"qualification-host",coordinate:currentExtensionChannelCoordinate(),version:Bun.version,revision:Bun.revision,ruling:Q.ruling,sourceHead:Q.head,adapter:Q.adapter,shim:Q.shim}));
@@ -33,4 +33,4 @@ const allowance = JSON.parse(readFileSync("scripts/sync-exec-allowlist/packages/
 if (allowance.path!=="packages/runtime/src/extension-channel-io.ts" || allowance.symbol!=="cc" || allowance.category!=="native-compile"
   || JSON.stringify(allowance.sourceFiles)!==JSON.stringify(["packages/runtime/src/extension-channel-native.c"])) throw Error("fixed-source fence restriction changed");
 const fence = await command([process.execPath,...checkpointFiles("scripts/check-sync-exec-fence.ts")]);
-if (Number(fence.match(/\((\d+) allowlisted/)?.[1]??0)<174) throw Error("fence inventory regressed");
+console.log(JSON.stringify({event:"fence-inventory",pairs:verifyFenceInventory(fence)}));

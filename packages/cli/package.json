@@ -81,7 +81,7 @@
     "postpack": "node ../../scripts/restore-publish-manifest.mjs .",
     "postpublish": "node ../../scripts/restore-publish-manifest.mjs .",
     "check": "tsc -p tsconfig.json",
-    "test:source": "bun test --isolate src"
+    "test:source": "bun ./scripts/test-source.ts"
   },
   "publishConfig": {
     "access": "public"

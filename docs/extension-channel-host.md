@@ -34,7 +34,12 @@ The independent macOS/Linux jobs retain the cold no-DFG read-timeout process,
 the warm full-JIT matrix, pure/pressure tests, context companion/sentinel,
 artifact tests and fences. Positive skips refuse qualification. The existing
 manual/callable CI model is unchanged. The per-key cc allowance must keep its
-exact fixed-source restriction and the fence inventory must stay at least 174.
+exact fixed-source restriction. The fence must pass over the full source inventory,
+and its reported count must equal the current per-key allowance files on disk.
+A legitimate retirement can reduce that count; missing/partial/vacuous reports
+refuse. CLI source units run reuse-sensitive suites in separate processes; Bun
+JS-realm isolation alone does not isolate the descriptor table. No witness
+assertion, bound or sensitivity control is relaxed.
 
 The credential reader still lacks the 4-KiB partial-frame/idle distinction
 required by the input protocol. This facade does not implement credential
