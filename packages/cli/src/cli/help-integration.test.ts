@@ -1,9 +1,8 @@
 import { expect, test } from "bun:test";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runDoctorCheck } from "./doctor-checks.ts";
 
 const entry = fileURLToPath(new URL("../../../../apps/desktop/bin/scout.ts", import.meta.url));
 
@@ -28,20 +27,36 @@ test("help and plain status never enter startup maintenance", async () => {
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-test("source worker round trip only requests service status", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "scout-worker-test-"));
+test("source worker round trip observes only selected core health", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "scout-core-worker-test-"));
   try {
-    const runtime = join(directory, "runtime.mjs");
-    await writeFile(runtime, `if (JSON.stringify(process.argv.slice(2)) !== JSON.stringify(["service", "status", "--json"])) process.exit(42);
-      console.log(JSON.stringify({health:{reachable:true,ok:true}}));`);
-    await chmod(runtime, 0o755);
-    const check = await runDoctorCheck("broker", {
-      timeoutMs: 2_000, cwd: directory, env: { ...process.env, OPENSCOUT_RUNTIME_BIN: runtime },
-      command: [process.execPath, entry, "__doctor-check", "broker"],
-    });
-    expect(check).toEqual({ name: "broker", state: "working", detail: "Broker health responded OK." });
+    const fixture = join(directory, "fixture.ts");
+    await writeFile(fixture, `import { expect } from "bun:test";
+      import { runDoctorCheck } from ${JSON.stringify(fileURLToPath(new URL("./doctor-checks.ts", import.meta.url)))};
+      import { healthyCoreReport } from ${JSON.stringify(fileURLToPath(new URL("./test-fixtures/core-report.ts", import.meta.url)))};
+      let reads = 0;
+      const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch(request) {
+        expect(new URL(request.url).pathname).toBe("/health"); reads++;
+        return Response.json(healthyCoreReport().service.health.payload);
+      } });
+      try {
+        const check = await runDoctorCheck("broker", {
+          timeoutMs: 2000, cwd: process.cwd(),
+          env: { ...process.env, OPENSCOUT_BROKER_URL: server.url.href, OPENSCOUT_BROKER_SOCKET_PATH: "", OPENSCOUT_NODE_ID: "node-test" },
+          command: [process.execPath, ${JSON.stringify(entry)}, "__doctor-check", "broker"],
+        });
+        expect(check).toMatchObject({ name: "broker", state: "working" });
+        expect(check.detail).toContain("Scout core is available."); expect(reads).toBe(1);
+      } finally { server.stop(true); }
+      process.exit(0);`);
+    const child = Bun.spawn([process.execPath, fixture], { cwd: directory, stdout: "pipe", stderr: "pipe" });
+    const timer = setTimeout(() => child.kill("SIGKILL"), 5000);
+    try {
+      const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+      expect({ stdout, stderr, code }).toEqual({ stdout: "", stderr: "", code: 0 });
+    } finally { clearTimeout(timer); child.kill(); }
   } finally { await rm(directory, { recursive: true, force: true }); }
-});
+}, 10_000);
 
 test("default doctor streams partial results and finishes with a concise assessment", async () => {
   const directory = await mkdtemp(join(tmpdir(), "scout-doctor-output-test-"));
@@ -53,12 +68,12 @@ test("default doctor streams partial results and finishes with a concise assessm
       import * as actual from ${JSON.stringify(checksModule)};
       const runCheck = actual.runDoctorCheck;
       mock.module(${JSON.stringify(checksModule)}, () => ({ ...actual,
-        runDoctorCheck: (name, input) => runCheck(name, { ...input, timeoutMs: 4000 }),
+        runDoctorCheck: (name, input) => runCheck(name, { ...input, timeoutMs: 1000 }),
         collectDoctorCheck: async name => {
           if (name === "native") return new Promise(() => setInterval(() => {}, 1000));
-          return {name, state: name === "terminal" ? "impaired" : "working",
-            detail: name === "terminal" ? "Terminal binding is missing." : "Check completed.",
-            ...(name === "terminal" ? {next: "scout doctor --detail"} : {})};
+          return {name, state: name === "probes" ? "impaired" : "working",
+            detail: name === "probes" ? "Probe observation failed." : "Check completed.",
+            ...(name === "probes" ? {next: "scout doctor --detail"} : {})};
         },
       }));
       await import(${JSON.stringify(mainModule)});`);
@@ -66,10 +81,10 @@ test("default doctor streams partial results and finishes with a concise assessm
     const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
     expect({ stderr, code }).toEqual({ stderr: "", code: 0 });
     expect(stdout).toContain("OK broker: Check completed.");
-    expect(stdout).toContain("FAIL terminal: Terminal binding is missing.");
-    expect(stdout).toContain("? native: No result within 4s");
+    expect(stdout).toContain("FAIL probes: Probe observation failed.");
+    expect(stdout).toContain("? native: No result within 1s");
     expect(stdout.indexOf("OK broker:")).toBeLessThan(stdout.indexOf("? native:"));
-    expect(stdout).toContain("4 working, 1 impaired, 1 inconclusive");
+    expect(stdout).toContain("2 working, 1 impaired, 1 inconclusive");
     expect(stdout).toContain("Next: scout doctor --detail");
     expect(stdout.split("\n").length).toBeLessThan(17);
     expect(stdout).not.toContain("Discovering projects");

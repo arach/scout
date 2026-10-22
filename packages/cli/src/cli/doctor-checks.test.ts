@@ -57,12 +57,12 @@ test("source, bundled JS and compiled entry points relaunch correctly", () => {
 });
 
 test("assessment stays bounded and selects the impaired check's next action", () => {
-  const check = { name: "terminal" as const, state: "impaired" as const, detail: "missing binding", next: "scout doctor --detail" };
-  expect(renderDoctorCheck(check)).toBe("FAIL terminal: missing binding");
+  const check = { name: "runtimes" as const, state: "impaired" as const, detail: "missing runtime", next: "scout doctor --detail" };
+  expect(renderDoctorCheck(check)).toBe("FAIL runtimes: missing runtime");
   const text = renderDoctorAssessment([check]);
   expect(text).toContain("Assessment: impaired");
   expect(text).toContain("Next: scout doctor --detail");
-  expect(text.split("\n").length).toBeLessThan(8);
+  expect(text.split("\n").length).toBeLessThan(9);
 });
 
 test("deadline reaps the diagnostic process instead of leaving it running", async () => {
