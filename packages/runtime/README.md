@@ -337,3 +337,10 @@ wire fences, uncertainty handling, and embedded-broker requirements.
 The broker requires an exclusive claim for Scoutbot registration and answers.
 See [assistant answerer claims](./ASSISTANT-CLAIMS.md) for the API, expiry rules
 and the paired app/runtime adoption gate. Operator asks do not require a claim.
+
+## Attachment image previews
+
+The existing authorized image-mode read supports the 25 MiB image admission
+budget. Text inspection remains limited to 256 KiB. See the
+[attachment read contract](../../docs/attachments.md) for authority, bounded
+file/response buffering and read backpressure.

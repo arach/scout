@@ -3,7 +3,8 @@ import { constants } from "node:fs";
 import { lstat, mkdir, open, opendir, rename, unlink, type FileHandle } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { ATTACHMENT_LIMITS, type MessageBlobRef } from "@openscout/protocol";
-import { AttachmentError } from "./attachment-contract.js";
+import { readAttachmentFile } from "./attachment-file-read.js";
+import { AttachmentError, imageMimes } from "./attachment-contract.js";
 import { assertTestIsolatedUserData, resolveOpenScoutSupportPaths } from "./support-paths.js";
 
 export const attachmentHash = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
@@ -103,7 +104,7 @@ export class AttachmentBlobStore {
           const file = await open(join(this.root, ref.sha256), constants.O_RDONLY | constants.O_NOFOLLOW);
           try {
             const stat = await file.stat();
-            if (!stat.isFile() || stat.size !== ref.byteSize || attachmentHash(await file.readFile()) !== ref.sha256) throw new AttachmentError("attachment_unavailable");
+            if (!stat.isFile() || stat.size !== ref.byteSize || attachmentHash(await readAttachmentFile(file, ref.byteSize)) !== ref.sha256) throw new AttachmentError("attachment_unavailable");
           } finally { await file.close(); }
           // A recovered orphan's rename might not have reached disk. Reassert
           // both barriers before allowing a later canonical message to commit.
@@ -123,15 +124,17 @@ export class AttachmentBlobStore {
     });
   }
   async read(ref: MessageBlobRef): Promise<Buffer> {
-    if (ref.byteSize > ATTACHMENT_LIMITS.readBytes) throw new AttachmentError("attachment_too_large", 413);
+    const limit = imageMimes.has(ref.mediaType) ? ATTACHMENT_LIMITS.imageBytes : ATTACHMENT_LIMITS.readBytes;
+    if (!Number.isSafeInteger(ref.byteSize) || ref.byteSize < 1) throw new AttachmentError("invalid_attachment_binding", 400);
+    if (ref.byteSize > limit) throw new AttachmentError("attachment_too_large", 413);
     return this.serial(async () => {
       await this.ready();
       if (!/^[a-f0-9]{64}$/.test(ref.sha256)) throw new AttachmentError("invalid_attachment_binding", 400);
       const file = await open(join(this.root, ref.sha256), constants.O_RDONLY | constants.O_NOFOLLOW);
       try {
         const stat = await file.stat();
-        if (!stat.isFile() || stat.size !== ref.byteSize || stat.size > ATTACHMENT_LIMITS.readBytes) throw new AttachmentError("attachment_unavailable");
-        const bytes = await file.readFile();
+        if (!stat.isFile() || stat.size !== ref.byteSize || stat.size > limit) throw new AttachmentError("attachment_unavailable");
+        const bytes = await readAttachmentFile(file, ref.byteSize);
         if (bytes.length !== ref.byteSize || attachmentHash(bytes) !== ref.sha256) throw new AttachmentError("attachment_unavailable");
         return bytes;
       } finally { await file.close(); }

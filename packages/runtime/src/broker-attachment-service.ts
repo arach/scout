@@ -22,6 +22,7 @@ export class BrokerAttachmentService {
   private readonly admitted = new WeakSet<MessageRecord>();
   private readonly notifications = new WeakSet<MessageRecord>();
   private uploadActive = false;
+  private activeImageReads = 0;
   constructor(private readonly options: BrokerAttachmentServiceOptions) {}
   private available(): AttachmentBlobStore {
     if (!this.options.store) throw new AttachmentError("attachments_unavailable");
@@ -139,6 +140,14 @@ export class BrokerAttachmentService {
     });
   }
   async read(input: ReadAttachment, principal: AttachmentPrincipal): Promise<AttachmentReadResult> {
+    if (input?.mode !== "image") return this.readAdmitted(input, principal);
+    // Hold image admission through post-I/O authorization and encoding, not just file I/O.
+    if (this.activeImageReads >= 2) throw new AttachmentError("attachments_busy");
+    this.activeImageReads++;
+    try { return await this.readAdmitted(input, principal); }
+    finally { this.activeImageReads--; }
+  }
+  private async readAdmitted(input: ReadAttachment, principal: AttachmentPrincipal): Promise<AttachmentReadResult> {
     const store = this.available();
     const parsed = readAttachmentSchema.safeParse(input);
     if (!parsed.success) throw new AttachmentError("invalid_attachment_request", 400);
@@ -157,8 +166,9 @@ export class BrokerAttachmentService {
     // Recheck both membership and the current binding after asynchronous IO.
     const current = await this.options.message(request.messageId);
     this.member(request.conversationId, principal);
-    if (current?.conversationId !== message.conversationId || !current.attachments?.some(a => a.blob?.sha256 === ref.data.sha256 && a.blob.mediaType === ref.data.mediaType && a.blob.byteSize === ref.data.byteSize)) throw new AttachmentError("attachment_unavailable");
-    const base = { blobId: request.blobId, messageId: message.id, mediaType: ref.data.mediaType, byteSize: bytes.length, ...(attachment.fileName ? { fileName: attachment.fileName } : {}) };
+    if (current?.id !== request.messageId || current.originNodeId !== this.options.nodeId
+      || current.conversationId !== request.conversationId || !current.attachments?.some(a => a.mediaType === ref.data.mediaType && a.blob?.sha256 === ref.data.sha256 && a.blob.mediaType === ref.data.mediaType && a.blob.byteSize === ref.data.byteSize)) throw new AttachmentError("attachment_unavailable");
+    const base = { blobId: request.blobId, messageId: request.messageId, mediaType: ref.data.mediaType, byteSize: bytes.length, ...(attachment.fileName ? { fileName: attachment.fileName } : {}) };
     if (request.mode === "image") return { ...base, mode: "image", data: bytes.toString("base64") };
     const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     return { ...base, mode: "text", text: text.slice(0, ATTACHMENT_LIMITS.textCharacters), truncated: text.length > ATTACHMENT_LIMITS.textCharacters, sourceTrust: "untrusted_attachment" };

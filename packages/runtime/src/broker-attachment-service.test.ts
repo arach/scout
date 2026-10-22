@@ -161,7 +161,7 @@ test("text inspection enforces byte/MIME/UTF-8 bounds and truncates at 32000 cha
   }
   for (const data of ["data:image/png;base64,YQ==", "YQ", "Y Q==", "YQ===", "YR==", "===="]) expect(() => decodeAttachment(data)).toThrow();
 });
-test("image types have signature checks; the 25 MiB write ceiling does not weaken the 256 KiB read ceiling", async () => {
+test("image signature checks and MIME separation survive the larger image read budget", async () => {
   const f = fixture(); await f.journal.load();
   const png = Buffer.from([137,80,78,71,13,10,26,10]);
   const message = await f.service.postWithAttachments({ ...f.input(), attachments: [{ data: png.toString("base64"), mediaType: "image/png" }] }, f.principal);
@@ -171,7 +171,10 @@ test("image types have signature checks; the 25 MiB write ceiling does not weake
   expect(() => validateAttachmentBytes(large,"image/png")).not.toThrow();
   expect(() => validateAttachmentBytes(Buffer.alloc(ATTACHMENT_LIMITS.imageBytes+1),"image/png")).toThrow("attachment_too_large");
   const ref = { sha256: attachmentHash(large), mediaType: "image/png", byteSize: large.length };
-  await expect(f.store.read(ref)).rejects.toThrow("attachment_too_large");
+  await f.store.withBlobs([{ ref, bytes: large }], async () => {});
+  expect(attachmentHash(await f.store.read(ref))).toBe(ref.sha256);
+  await expect(f.store.read({ ...ref, byteSize: ATTACHMENT_LIMITS.imageBytes + 1 })).rejects.toThrow("attachment_too_large");
+  await expect(f.store.read({ ...ref, mediaType: "text/plain" })).rejects.toThrow("attachment_too_large");
   expect(() => validateAttachmentBytes(Buffer.from("not png"),"image/png")).toThrow("attachment_mime_mismatch");
 });
 test("corrupt or symlinked backing files are unavailable, never file-read proxies", async () => {
@@ -236,7 +239,12 @@ test("a full 25 MiB image writes without entering the journal; its JSON fits ord
   const accepted=await f.service.postWithAttachments(input,f.principal);
   expect(accepted.message.attachments?.[0]?.blob?.byteSize).toBe(25*1024*1024);
   expect(readFileSync(join(f.root,"journal.jsonl")).length).toBeLessThan(4096);
-  await expect(f.service.read(f.read(accepted.message,"image"),f.principal)).rejects.toThrow("attachment_too_large");
+  const result = await f.service.read(f.read(accepted.message,"image"),f.principal);
+  expect(result.mode).toBe("image");
+  if (result.mode === "image") {
+    expect(result.byteSize).toBe(ATTACHMENT_LIMITS.imageBytes);
+    expect(attachmentHash(Buffer.from(result.data,"base64"))).toBe(f.read(accepted.message).blobId);
+  }
 }, 30_000);
 
 const notifyImage = { data: Buffer.from([137,80,78,71,13,10,26,10]).toString("base64"), mediaType: "image/png", fileName: "screen.png" };
