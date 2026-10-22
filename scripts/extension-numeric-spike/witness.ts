@@ -199,6 +199,14 @@ export async function numericWitness(form: DescriptorForm, emit: (e: WitnessEven
       }});
     } catch (error) {
       event({event: "collection-incomplete", observations: last.pending.map(entry => ({iteration: entry.iteration, callback: tracker.seen.has(entry.ref), alive: entry.ref.deref() !== undefined}))});
+      // Diagnostic only, AFTER the witness has refused. A fresh macrotask ends
+      // deref's keepalive job; snapshotting must not create an observer pin.
+      const snapshot = process.env.SCOUT_DESCRIPTOR_HEAP_SNAPSHOT;
+      if (snapshot) {
+        await Bun.sleep(0);
+        await Bun.write(snapshot, JSON.stringify(Bun.generateHeapSnapshot()));
+        event({event: "retainer-snapshot", path: snapshot, classification: "unclassified"});
+      }
       throw error;
     }
     if (!same(last.channel.parent.fd, last.expected[0]!)) throw Error("finalizer closed runtime-owned number");
@@ -224,7 +232,7 @@ if (import.meta.main) {
   const form = process.argv[2] as DescriptorForm, fault = (process.argv[3] === "none" ? undefined : process.argv[3]) as AnyFault | undefined;
   const options: AsyncWitnessOptions | undefined = process.argv[4] === "async" ? {io: "async", mode: process.argv[5] as AsyncWitnessOptions["mode"]} : undefined;
   if (form !== "context" && form !== "credential") throw Error("choose context or credential");
-  console.log(JSON.stringify({ event: "host", platform: process.platform, arch: process.arch, version: Bun.version, revision: Bun.revision }));
+  console.log(JSON.stringify({ event: "host", platform: process.platform, arch: process.arch, version: Bun.version, revision: Bun.revision, requestedDfgJit: process.env.BUN_JSC_useDFGJIT ?? "default" }));
   try { await numericWitness(form, e => console.log(JSON.stringify(e)), fault, options); }
   catch (error) { console.log(JSON.stringify({ event: "failure", form, fault, error: String(error) })); process.exitCode = 1; }
 }

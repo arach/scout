@@ -53,6 +53,12 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # Separate cold process; never disable DFG for the warm full-JIT matrix.
+      - name: Cold no-DFG extension read-timeout witness
+        env:
+          BUN_JSC_useDFGJIT: "0"
+        run: bun scripts/extension-numeric-spike/witness.ts credential none async read-timeout
+
       - name: Sync exec fence
         run: bun run sync-exec:fence
 
