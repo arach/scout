@@ -67,7 +67,7 @@ executable. Ship a prebuilt command for the target machine. No runtime state or
 credentials belong in the artifact. The artifact digest covers the manifest
 and main command. Change the manifest version when you change another asset.
 
-`docs`, `completion` and `complete` are optional API-1 additions. An API-1
+`docs`, `completion` and `complete` are optional API 1 additions. An API 1
 manifest without them still loads. These additions do not change argv or the
 environment contract, so they do not require an API version change. Older
 loaders ignore these fields and do not provide the new help or completion.
@@ -111,10 +111,10 @@ An unregistered verb retains extension lookup followed by implicit-ask parsing.
 
 ### Optional instance binding
 
-An API-1 manifest can declare `"instance": "prod"` or another canonical Scout
+An API 1 manifest can declare `"instance": "prod"` or another canonical Scout
 instance name. If present, it must match the selected CLI instance. The installer
 checks it before publishing a generation; the loader checks it again before
-execution or documentation lookup. Unbound API-1 artifacts remain portable.
+execution or documentation lookup. Unbound API 1 artifacts remain portable.
 This field is a local selection guard, not authentication or broker identity.
 Older loaders ignore it; use a CLI with this contract when binding is required.
 The field does not add environment variables to the extension runner contract.

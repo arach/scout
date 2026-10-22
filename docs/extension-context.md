@@ -1,4 +1,4 @@
-# API-2 extension invocation context
+# API 2 extension invocation context
 
 API 2 adds a bounded selected-instance snapshot to the foreground extension
 runner. API 1 keeps its existing filtered environment, inherited stdio, working
@@ -7,7 +7,7 @@ contract, not a released provider capability floor or permission to flip a verb.
 
 ## Manifest negotiation
 
-An API-2 artifact declares its required context explicitly:
+An API 2 artifact declares its required context explicitly:
 
 ```json
 {
@@ -92,7 +92,7 @@ characters and invalid selected service ports refuse without printing their valu
 accepted credential-bearing URLs are a held cohort, not silently rewritten
 connections. The current context-only URL forms are HTTP(S) and WS(S).
 
-The frame is non-secret; the inherited API-1 environment filter is not a
+The frame is non-secret; the inherited API 1 environment filter is not a
 sandbox or a general secret scrubber. Other non-Scout environment variables
 still have their existing disposition. A trusted provider retains ordinary
 same-user OS rights. Neither context paths nor a publication receipt authorize
@@ -133,15 +133,15 @@ native objects to suppress GC is not an accepted workaround. Numeric descriptor
 mapping on 1.3.13 remains rejected.
 
 A new transport must have one descriptor owner and pass the corrected reclaim
-witness on its exact revision and platform. Both context-target5 simplex and
-credential-target6 duplex forms require at least eight sequential exchanges,
+witness on its exact revision and platform. Both the context simplex form on slot 5 and
+the credential duplex form on slot 6 require at least eight sequential exchanges,
 fresh regular files reclaiming each released parent number, identity checks
 (file kind, device and inode) across repeated GC, and a second spawn that
 reuses the first exchange's number without a stale close. The in-tree
 post-context sentinel opens fresh files after context tests, not before them.
 Stale-second-close controls must demonstrate sensitivity to that same failure.
 With the product dormant, standard-stdio controls validate only the instrument;
-they do not qualify an API-2 backend. No known-broken extra-pipe mechanism runs
+they do not qualify an API 2 backend. No known-broken extra-pipe mechanism runs
 as a passing product test.
 
 W5 delivery requires a corrected-witness-qualified transport on its CI's exact
@@ -152,9 +152,9 @@ Deadline, write failure, early child exit or cancellation closes pending writes
 and owned streams. Failure cleanup sends TERM to only the invocation child,
 then escalates to KILL after 250 ms if needed, and reaps it. Process listeners
 are removed. No service tree or unrelated descendants are guessed or swept.
-API-2 dispatch never performs automatic broker upkeep. Static JSON help never
+API 2 dispatch never performs automatic broker upkeep. Static JSON help never
 executes the provider; direct provider help currently refuses with
-`context_backend_unproven`, as does every other API-2 invocation.
+`context_backend_unproven`, as does every other API 2 invocation.
 
 Pre-spawn/context failures use #66's raw-stderr
 `scout.cli.command-unavailable/v1` envelope and exit 69, with reasons

@@ -12,7 +12,7 @@ union, including a provider/role-worker overlap at the pairing boundary:
 | stdio | stderr | 2 | Standard process ABI |
 | roleCustody | parentChannel | 3 | Existing SDK-owned EOF parent channel |
 | roleCustody | reservedContext | 4 | Reserved, ignored by current workers |
-| extensionApi2 | context | 5 | API-2 context-only loader target |
+| extensionApi2 | context | 5 | API 2 context-only loader target |
 | extensionApi2 | credential | 6 | Reserved only; credential transport comes last |
 | roleCustody | fence | 7 | Existing anchored role lifetime fence |
 
@@ -21,7 +21,7 @@ union, including a provider/role-worker overlap at the pairing boundary:
 Do not unify two different context schemas merely because both are named
 context. Keep the shipped `role-custody/1` values **3, 4, 7** unchanged. Replace
 the unimplemented extension proposal's 3/4 allocation with **5/6**, using its
-previously unused padding. No released API-1 provider receives an extra channel.
+previously unused padding. No released API 1 provider receives an extra channel.
 No current carrier inherits context or credential data: slots 4, 5 and 6 remain
 ignored in that spawn. The reserved role-context schema remains unimplemented.
 
@@ -64,7 +64,7 @@ this pure registry with Bun-source, built-ESM and declaration targets. Its
 presence in a packed artifact must be verified; a source export alone is not a
 released package capability. Internal SDK imports remain relative. The CLI's
 context-only slice uses the extension target, without importing custody or
-changing the API-1 runner's transport. See
+changing the API 1 runner's transport. See
 [the invocation contract](../../docs/extension-context.md). No credential channel
 is enabled by this registry or the context-only slice.
 
