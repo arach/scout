@@ -269,3 +269,9 @@ export { createHerdrHostAttentionAnswerer, HERDR_HOST_ATTENTION_ANSWER_LIMITS } 
 export type { HerdrHostAttentionAnswerInput, HerdrHostAttentionAttempt, HerdrHostAttentionClaim,
   HerdrHostAttentionAdmission, HerdrHostAttentionIntent, HerdrHostAttentionFinalization,
   HerdrHostAttentionAdmissionFailure, HerdrHostAttentionAnswerDependencies } from "./herdr-host-attention-answer.js";
+
+export type { HerdrHostAttentionJournal, HerdrHostAttentionJournalClaim,
+  HerdrHostAttentionJournalIntent, HerdrHostAttentionJournalAudit } from "./herdr-host-attention-journal.js";
+export { herdrHostAttentionJournalConformanceCases } from "./herdr-host-attention-journal-conformance.js";
+export type { HerdrHostAttentionJournalConformanceHarness, HerdrHostAttentionJournalConformanceFactory,
+  HerdrHostAttentionJournalConformanceCase } from "./herdr-host-attention-journal-conformance.js";

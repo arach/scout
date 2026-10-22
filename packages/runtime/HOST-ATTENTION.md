@@ -385,3 +385,74 @@ unresolved attempts. Caller limits only lower these ceilings. Busy exposes
 hold the terminal/global slot until actual settlement. Late callback completion
 cannot resume intent or transport. Adapters must honor abort or bound their own
 outstanding work globally, including admission and finalization.
+
+## Dormant Herdr journal protocol and conformance
+
+The `@openscout/runtime/host-attention` subpath exports these added APIs:
+
+- `HerdrHostAttentionJournal`: the existing three injected persistence callbacks.
+- `HerdrHostAttentionJournalClaim`, `HerdrHostAttentionJournalIntent` and
+  `HerdrHostAttentionJournalAudit`: logical durable records. Each binds the
+  complete attempt to both owner-token fields. The audit also requires the
+  actual authenticated device ID and a commit time. These are data types,
+  not a storage implementation, authentication mechanism or disk format.
+- `herdrHostAttentionJournalConformanceCases`: named, opt-in asynchronous cases.
+- `HerdrHostAttentionJournalConformanceHarness`,
+  `HerdrHostAttentionJournalConformanceFactory` and
+  `HerdrHostAttentionJournalConformanceCase`: the host's test adapter contract.
+
+The private pairing/attention host owns production composition, including
+admission policy and the real journal. That host owns `bridge/router.ts` and
+`terminal-hosts/herdr.ts`. It must bind callbacks to the authenticated caller
+and recheck admission under the journal lock. The phone and continuation
+writers must adopt the same journal together. No factory, journal, native
+transport, endpoint or policy is enabled by these exports. The kernel is
+unchanged and still requires all five injected callbacks.
+
+Register each case against an isolated instance of the host's real store:
+
+```ts
+import { herdrHostAttentionJournalConformanceCases } from "@openscout/runtime/host-attention";
+
+for (const entry of herdrHostAttentionJournalConformanceCases) {
+  test(entry.name, () => entry.run(createIsolatedRealJournalHarness));
+}
+```
+
+The harness must implement the following test controls:
+
+1. `connect(deviceId)` binds a new caller to the same store. This is a test
+   identity, not production admission. It must not create a per-device store.
+2. `crash()` drops uncommitted and un-synced writes and reconstructs the store
+   without a graceful flush. Use an actual crash/fault-injected storage adapter.
+3. `advanceTime(ms)` advances the store clock without sleeping.
+4. `readAudit()` and `readIntents()` inspect the stored records. Do not generate
+   them from the test's request or a callback log.
+5. `failNextSync(operation)` fails the next real claim or intent/audit durability
+   barrier. Do not fail at callback entry, which would hide a missing fsync.
+6. `close()` removes only this case's isolated resources, including on failure.
+
+Successful claim acknowledgement must survive a crash. Successful intent
+acknowledgement means both intent and matching audit reached crash-safe storage
+before any input. An append without the required file and directory syncs, or
+a TTL-only claim, does not meet this contract. Equivalent transactional
+storage barriers are permitted. A rejected write can have persisted; it must
+never imply that input is safe to repeat. Only owned, never-sent cancellation
+or verified completion releases a claim. Unresolved effects never expire.
+
+The cases cover cross-writer exclusion, both-field owner CAS, late old owners,
+abort, reconstructed kernels, ambiguous-send crash/age, stale/replaced prompts
+on all three pre-send reads, device/attempt/owner audit correlation, durable
+claim/intent/audit/cancellation and sync failures. The stale checks exercise the
+unchanged kernel using a candidate journal, not a new journal admission policy.
+
+The public tests contain a synthetic sync/crash model and deliberately weak
+memory, TTL, un-synced audit, un-synced intent, key-only CAS, generic-device and
+ignored-sync variants. Each weak variant must fail its named obligations.
+This proves the instrument detects those faults in the model. It does not
+measure a real filesystem's fsync behavior, authenticated pairing, live Herdr
+capture or exact-terminal dispatch. A host that fakes the crash/sync hooks
+cannot use a passing result as durability evidence. The private host must run
+these cases against its real implementation before adoption. Production
+activation remains separate and blocked on reviewed live capture and exact
+terminal dispatch; this work does not gate the public/private cutover.
