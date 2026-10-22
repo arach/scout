@@ -218,6 +218,15 @@ numericCandidateTest("after-context numeric candidate: both registry forms survi
   expect(events.filter(event => event.event === "collection-observed")).toHaveLength(1);
  }
 }, 30_000);
+const asyncCandidateTest = Bun.revision === "0d9b296af33f2b851fcbf4df3e9ec89751734ba4" && (process.platform === "darwin" && process.arch === "arm64" || process.platform === "linux" && process.arch === "x64") ? test : test.skip;
+asyncCandidateTest("after-context production async candidate: both registry forms pass the whole witness", async () => {
+ for (const form of ["context", "credential"] as const) {
+  const events: Record<string, unknown>[] = [];
+  await numericWitness(form, event => events.push(event), undefined, {io: "async"});
+  expect(events.filter(event => event.event === "native-collected")).toHaveLength(9);
+  expect(events.filter(event => event.event === "async-io")).toHaveLength(9);
+ }
+}, 30_000);
 // This MUST follow the context tests in the same process. Fresh files can reclaim numbers
 // released by earlier tests; a bystander opened before those tests cannot see a stale close.
 test("after-context sentinel keeps fresh descriptor identities through repeated GC",async()=>{

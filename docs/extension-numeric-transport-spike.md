@@ -101,3 +101,7 @@ Do not qualify a different Bun revision or Linux from the Darwin measurement.
 The Linux operator should run the same product-free commands from the evidence
 branch and route the resulting exact revision/platform record for review. No
 pin change, registry release or gate edit follows automatically from green tests.
+
+The later [dormant asynchronous candidate](./extension-channel-async-io.md)
+implements bounded raw I/O and describes its separate evidence and deployment
+gates. The old apparatus's Linux record does not qualify that new adapter.
