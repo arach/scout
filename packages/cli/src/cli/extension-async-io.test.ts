@@ -19,7 +19,21 @@ for (const form of ["context", "credential"] as DescriptorForm[]) {
   for (const mode of [...["normal", "timeout", "cancel", "crash"], ...(form === "credential" ? ["read-timeout", "read-cancel"] : [])] as AsyncWitnessOptions["mode"][]) {
     measured(`async ${form}: whole witness, ${mode}, 64 KiB, reclaim/reuse/collection`, async () => {
       const events: WitnessEvent[] = [];
-      await numericWitness(form, e => events.push(e), undefined, {io: "async", mode});
+      try { await numericWitness(form, e => events.push(e), undefined, {io: "async", mode}); }
+      catch (error) {
+        // Keep the refusal. The test reporter otherwise discards the witness's
+        // collection observations, making a VM pin indistinguishable from a
+        // late finalization callback or a descriptor-identity loss in CI logs.
+        console.error(JSON.stringify({event: "async-positive-refused", form, mode,
+          version: Bun.version, revision: Bun.revision, platform: process.platform, arch: process.arch,
+          collection: events.filter(e => e.event === "collection-incomplete"),
+          ports: events.filter(e => e.event === "copy-discipline"),
+          reuse: events.filter(e => e.event === "second-spawn-reuse"),
+          reclaimChecks: events.filter(e => e.event === "reclaim-check").length,
+          losses: events.filter(e => e.event === "reclaim-check" && (e.losses as unknown[]).length),
+        }));
+        throw error;
+      }
       expect(events.filter(e => e.event === "native-collected")).toHaveLength(9);
       expect(events.filter(e => e.event === "second-spawn-reuse")).toHaveLength(1);
       expect(events.filter(e => e.event === "reap-before-close-survived")).toHaveLength(1);

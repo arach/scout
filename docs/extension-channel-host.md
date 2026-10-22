@@ -41,6 +41,11 @@ refuse. CLI source units run reuse-sensitive suites in separate processes; Bun
 JS-realm isolation alone does not isolate the descriptor table. No witness
 assertion, bound or sensitivity control is relaxed.
 
+Process separation addresses shared descriptor-table activity, not collection
+timing. A positive collection miss still refuses the checkpoint after 64 GC
+rounds. Positive failures log the collection observations, reuse and identity
+losses; they do not retry, take a heap snapshot or turn a refusal into a pass.
+
 The credential reader still lacks the 4-KiB partial-frame/idle distinction
 required by the input protocol. This facade does not implement credential
 policy, a live credential server or a delivered-key capability. Those changes
