@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { RuntimeScenarioHarness, waitForScenarioMutationReady } from "./test-helpers/runtime-scenario-harness.test.js";
+import { RuntimeScenarioHarness, runIsolatedScenarioTest, waitForScenarioMutationReady } from "./test-helpers/runtime-scenario-harness.test.js";
 
 const ready = { ok: true, startup: { state: "ready", mutationsAdmitted: true } };
 
@@ -63,4 +63,12 @@ test("real scenario start returns only after the advertised restore boundary", a
     const conversation = await scenario.registerConversation(broker, { id: "ready-boundary", kind: "direct", title: "Ready", participantIds: ["operator"] });
     expect(conversation.id).toBe("ready-boundary");
   } finally { await scenario.dispose(); }
-});
+}, 20_000); // Six-second admission plus requests/cleanup, matching scenarioTest's budget.
+
+test("real scenario startup isolates support paths without ambient test setup", async () => {
+  // A fresh test process cannot borrow isolation from another test file.
+  const result = await runIsolatedScenarioTest(import.meta.path,
+    "^real scenario start returns only after the advertised restore boundary$");
+  expect(result).toMatchObject({ code: 0 });
+  expect(result.output).toContain("1 pass");
+}, 30_000);

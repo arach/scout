@@ -189,6 +189,28 @@ export async function waitForScenarioMutationReady(baseUrl: string, deps: {
   throw new Error("broker did not admit mutations within 6000ms", { cause: lastError });
 }
 
+/** Regression control: launch one scenario test without ambient Scout paths. */
+export async function runIsolatedScenarioTest(testFile: string, testNamePattern: string) {
+  const home = mkdtempSync(join(tmpdir(), "scout-scenario-isolation-"));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
+    !key.startsWith("OPENSCOUT_") && !key.startsWith("SCOUT_")));
+  const child = Bun.spawn([process.execPath, "test", testFile, "--test-name-pattern", testNamePattern], {
+    env: { ...env, HOME: home, NODE_ENV: "test" }, stdin: "ignore", stdout: "pipe", stderr: "pipe",
+  });
+  const deadline = setTimeout(() => child.kill("SIGKILL"), 25_000);
+  try {
+    const [stdout, stderr, code] = await Promise.all([
+      new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited,
+    ]);
+    return { code, output: stdout + stderr };
+  } finally {
+    clearTimeout(deadline);
+    if (child.exitCode === null) child.kill("SIGKILL");
+    await child.exited;
+    rmSync(home, { recursive: true, force: true });
+  }
+}
+
 export class RuntimeScenarioHarness {
   private readonly brokers = new Set<ScenarioBroker>();
   private readonly servers = new Set<ReturnType<typeof Bun.serve>>();
@@ -234,6 +256,11 @@ export class RuntimeScenarioHarness {
       env: {
         ...process.env,
         OPENSCOUT_CONTROL_HOME: controlHome,
+        // NODE_ENV=test reaches the daemon too. Its user-data guard requires an
+        // explicit support root; HOME alone neither satisfies it nor overrides
+        // an ambient support/relay root left by another test or developer shell.
+        OPENSCOUT_SUPPORT_DIRECTORY: join(controlHome, "support"),
+        OPENSCOUT_RELAY_HUB: join(controlHome, "relay"),
         OPENSCOUT_BROKER_HOST: DEFAULT_BROKER_HOST,
         OPENSCOUT_BROKER_PORT: String(port),
         OPENSCOUT_BROKER_URL: baseUrl,
