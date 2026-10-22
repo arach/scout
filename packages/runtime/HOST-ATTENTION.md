@@ -1,5 +1,11 @@
 # Machine-local tmux attention
 
+`detectClaudePermissionDialog` reads Claude's permission-dialog grammar in a
+backend-neutral module. `detectClaudeTmuxHostAttention` and
+`ClaudeTmuxAttentionDialog` remain compatibility aliases of that detector and
+`ClaudePermissionDialog`. Both collectors depend on the shared leaf module;
+the Herdr collector does not import the tmux entrypoint.
+
 Import `detectClaudeTmuxHostAttention`, `collectTmuxHostAttention` and
 `TMUX_HOST_ATTENTION_LIMITS` from `@openscout/runtime/host-attention`.
 Importing this subpath does not enumerate hosts, capture panes, spawn processes
@@ -231,4 +237,63 @@ answer authority. Keep Herdr extraction/adoption after that read-contract line
 and a separately reviewed answer/claim/audit adapter. Do not silently map its
 numeric version to this SHA-256 observation or route phone input through tmux.
 
-When the Herdr answer adapter arrives, its result type will match this outcome/effect/reason shape field for field, and the shared vocabulary will then move into protocol as the generic answer-result type.
+Protocol now exports `HostAttentionAnswerResult`. `TmuxHostAttentionAnswer` and
+`HerdrHostAttentionAnswer` are field-for-field aliases, including busy-only
+`heldForMs`. The shared reason union adds `authority_refused`,
+`claimed_elsewhere`, `claim_unavailable`, `audit_failed` and `target_changed`;
+no existing reason is renamed. These names do not implement admission or
+actuation. Herdr's answer factory, exact-terminal transport and shared durable
+claim/audit integration remain separate, inactive work.
+
+## Strict injected Herdr observations
+
+Import `collectHerdrHostAttention`, `HERDR_HOST_ATTENTION_LIMITS`,
+`HerdrHostAttentionCapture` and `HerdrHostAttentionCaptureEvidence` from the
+same runtime subpath. Protocol exports `HerdrHostAttentionBinding`,
+`HerdrHostAttentionTarget`, `HerdrHostAttentionObservation` and
+`HerdrHostAttentionRead`. This collector has no default capture, enumeration,
+process execution, send callback or answer function. It does not call #64's
+cached workspace route. It observes only supplied refs on the known local node.
+
+A target requires an exact Herdr session/pane, native terminal ID, workspace,
+tab and harness. Its optional native session reference preserves Herdr's
+agent/kind/source/value, not a verified Scout identity. The injected capture
+must return an explicit `herdr_visible`, `live` envelope: complete visible
+`body`, boolean `truncated`, and uncached live `before`/`after` bindings.
+Both bindings must match the snapshotted target, including any supplied native
+session. Plain strings, missing/error envelopes, saved/cached reads and unknown
+metadata fail closed. Changed bindings return `target_changed` without a prompt.
+These fields are trusted adapter evidence, not proof against a lying adapter.
+Do not manufacture them by copying the input target around a cached read.
+
+The collector checks local identity, backend, all binding fields and native
+session consistency before capture. Missing or malformed bindings are unknown;
+nonlocal targets are unavailable. Only Claude's reviewed detector is supported.
+Null/throw/malformed reads are unavailable, never evidence of no prompt.
+Truncation/overflow is partial and produces no version. A complete successful
+empty capture is available with no recognized prompt. Timeout/abort is explicit;
+a worker whose callback is still pending retires instead of starting more I/O.
+Across collections, callbacks must honor abort or globally bound their own I/O;
+callers must not overlap pending abort-ignoring collections.
+
+Hard limits are 24 provided targets, six captures, two seconds per whole injected
+binding/capture operation, and 48 KiB per capture. Caller limits only lower the
+candidate, concurrency and timeout bounds. Coverage describes provided refs,
+not a complete host scan; omitted/unstarted refs remain explicit.
+
+Herdr prompt versions use SHA-256 over the separate
+`claude-herdr-permission-v1` domain, the full exact binding/native session tuple,
+null native prompt identity and the complete normalized dialog content. The
+legacy numeric fingerprint is never converted. Presentation labels, agent IDs,
+cursor decoration and observation time do not enter the hash. Full commands
+beyond preview limits do. Identical content can recur with the same version;
+the version is neither an incarnation ID nor answer authority.
+
+The inspected Herdr v0.9.5 agent resolver accepts a public pane or agent name,
+not the opaque terminal ID that another resolver understands. A topology read
+followed by a movable-pane send is not exact-terminal dispatch. No permissive
+production answer adapter is supplied: exact-terminal dispatch (or an expected
+terminal check atomic with dispatch) must be measured and reviewed first.
+Native input acceptance is not permission acknowledgement; a future answerer
+also needs complete post-send verification and the shared durable claim/audit
+protocol, including legacy writers. None is enabled by this read-only slice.

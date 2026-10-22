@@ -1,67 +1,21 @@
 /** Machine-local operator operations. No enumeration, capture or process work
  * happens on import. A rendered prompt is an observation, not answer authority. */
 import { createHash } from "node:crypto";
+import { CLAUDE_PERMISSION_DIALOG_LIMITS, detectClaudePermissionDialog, type ClaudePermissionDialog } from "./claude-permission-dialog.js";
 import { formatTerminalSurfaceId } from "@openscout/protocol";
-import type { HostReadAvailability, TmuxHostAttentionObservation, TmuxHostAttentionRead, TmuxHostAttentionTarget } from "@openscout/protocol";
+import type { TmuxHostAttentionAnswer, HostReadAvailability, TmuxHostAttentionObservation, TmuxHostAttentionRead, TmuxHostAttentionTarget } from "@openscout/protocol";
 
 export const TMUX_HOST_ATTENTION_LIMITS = Object.freeze({
   maxCandidates: 24, captureConcurrency: 6, captureTimeoutMs: 2_000,
-  maxCaptureBytes: 48 * 1024, summaryChars: 200, detailChars: 500,
+  ...CLAUDE_PERMISSION_DIALOG_LIMITS,
 });
 export type TmuxHostAttentionCapture = (
   ref: TmuxHostAttentionTarget["ref"],
   options: { signal: AbortSignal; maxBytes: number; target: Omit<TmuxHostAttentionTarget, "ref"> },
 ) => Promise<string | null | { body: string; truncated?: boolean }>;
 
-/** Unclamped normalized fields bind the content version, not just its preview. */
-export type ClaudeTmuxAttentionDialog = {
-  title: string;
-  summary: string;
-  detail: string | null;
-  content: { dialog: string; header: string | null; command: string | null; permissionRule: string; question: string; options: string[]; footer: string };
-};
-const CLAUDE_CONFIRMATION_FOOTER = /\bEsc to cancel\b.*\bTab to amend\b/i;
-const CLAUDE_PERMISSION_RULE = /\bPermission\s+rule\s+(.+?)\s+requires confirmation for this command\./i;
-const CLAUDE_PROCEED_QUESTION = /\bDo you want to proceed\?/i;
-const CLAUDE_POST_PROMPT_ACTIVITY = /(?:^|\n)\s*(?:⏺|●)\s+(?:Bash|Edit|Glob|Grep|Read|Search|Task|Update|WebFetch|WebSearch|Write)\b/imu;
-const CLAUDE_READY_COMPOSER = /^\s*(?:[❯›]\s*|[│┃]\s*[>❯]\s*)/mu;
-const ANSI_CSI = /\x1B\[[0-?]*[ -/]*[@-~]/gu;
-const ANSI_OSC = /\x1B\][^\x07]*(?:\x07|\x1B\\)/gu;
-
-/** Pure detection over bounded pane text; no host or native session is invented. */
-export function detectClaudeTmuxHostAttention(paneBody: string): ClaudeTmuxAttentionDialog | null {
-  if (Buffer.byteLength(paneBody) > TMUX_HOST_ATTENTION_LIMITS.maxCaptureBytes) return null;
-  const lines = paneBody.replace(ANSI_OSC, "").replace(ANSI_CSI, "").replaceAll("\r", "").split("\n");
-  const lastContentIndex = findLastIndex(lines, line => line.trim().length > 0);
-  if (lastContentIndex < 0) return null;
-  const footerIndex = findLastIndex(lines, line => CLAUDE_CONFIRMATION_FOOTER.test(line));
-  if (footerIndex < 0) return null;
-  const after = lines.slice(footerIndex + 1, lastContentIndex + 1).join("\n");
-  if (CLAUDE_POST_PROMPT_ACTIVITY.test(after) || CLAUDE_READY_COMPOSER.test(after)) return null;
-  const questionIndex = findLastIndex(lines, (line, i) => i < footerIndex && CLAUDE_PROCEED_QUESTION.test(line));
-  if (questionIndex < 0 || footerIndex - questionIndex > 12) return null;
-  const permissionIndex = findLastIndex(lines, (line, i) => i < questionIndex && CLAUDE_PERMISSION_RULE.test(line));
-  if (permissionIndex < 0 || questionIndex - permissionIndex > 8) return null;
-  const permission = lines[permissionIndex]?.match(CLAUDE_PERMISSION_RULE)?.[1]?.trim();
-  if (!permission) return null;
-  const foundHeader = findLastIndex(lines, (line, i) => i < permissionIndex && /^\s*(?:Bash command|Edit file|Write file)\s*$/i.test(line));
-  const headerIndex = foundHeader >= 0 && permissionIndex - foundHeader <= 12 ? foundHeader : -1;
-  const commandLines = headerIndex < 0 ? [] : lines.slice(headerIndex + 1, permissionIndex);
-  const detail = commandLines.map(line => line.trim()).find(Boolean);
-  return {
-    title: "Claude needs permission",
-    summary: clamp(`Permission rule ${permission} requires confirmation.`, TMUX_HOST_ATTENTION_LIMITS.summaryChars),
-    detail: detail ? clamp(detail, TMUX_HOST_ATTENTION_LIMITS.detailChars) : null,
-    content: {
-      dialog: normalize(lines.slice(headerIndex < 0 ? permissionIndex : headerIndex, footerIndex + 1).map(stripOptionCursor).join("\n")),
-      header: headerIndex < 0 ? null : normalize(lines[headerIndex]!),
-      command: commandLines.length ? normalize(commandLines.join("\n")) : null,
-      permissionRule: normalize(permission), question: normalize(lines[questionIndex]!),
-      options: lines.slice(questionIndex + 1, footerIndex).map(line => normalize(stripOptionCursor(line))).filter(Boolean),
-      footer: normalize(lines[footerIndex]!),
-    },
-  };
-}
+export { detectClaudePermissionDialog, detectClaudePermissionDialog as detectClaudeTmuxHostAttention } from "./claude-permission-dialog.js";
+export type { ClaudePermissionDialog, ClaudePermissionDialog as ClaudeTmuxAttentionDialog } from "./claude-permission-dialog.js";
 
 /** Call only from a trusted same-machine operator context. A null local node
  * means identity is unavailable, not permission to capture another machine. */
@@ -81,7 +35,7 @@ export async function collectTmuxHostAttention(input: {
     ...target, ref: { ...target.ref }, nativeSession: target.nativeSession ? { ...target.nativeSession } : undefined,
   }));
   const rows: TmuxHostAttentionObservation[] = targets.map(target => ({
-    ...target, label: clamp(target.label, limits.summaryChars), ref: { ...target.ref }, nativeSession: target.nativeSession ? { ...target.nativeSession } : undefined,
+    ...target, label: typeof target.label === "string" ? clamp(target.label, limits.summaryChars) : "", ref: { ...target.ref }, nativeSession: target.nativeSession ? { ...target.nativeSession } : undefined,
     observedAt: now, source: "tmux_pane", provenance: "inferred", detector: target.harness === "claude" ? "claude_permission_dialog" : null, availability: "not_scanned",
     reason: "capture_capacity", coverage: { capturedBytes: 0, maxBytes: limits.maxCaptureBytes, truncated: false }, prompt: null,
   }));
@@ -90,7 +44,7 @@ export async function collectTmuxHostAttention(input: {
     while (next < targets.length) {
       const index = next++, target = targets[index]!, row = rows[index]!;
       if (!nodeId?.trim()) { row.availability = "unknown"; row.reason = "local_identity_unknown"; continue; }
-      if (!validRef(target.ref) || (target.nativeSession && (target.nativeSession.nodeId !== target.ref.nodeId
+      if (typeof target.label !== "string" || !validRef(target.ref) || (target.nativeSession && (target.nativeSession.nodeId !== target.ref.nodeId
         || target.nativeSession.harness !== target.harness || !validIdentity(target.nativeSession.nativeSessionId)))) {
         row.availability = "unknown"; row.reason = "invalid_ref"; continue;
       }
@@ -125,7 +79,7 @@ export async function collectTmuxHostAttention(input: {
           continue; // Incomplete text cannot bind a complete dialog version.
         }
         row.availability = "available"; row.reason = null;
-        const dialog = detectClaudeTmuxHostAttention(body);
+        const dialog = detectClaudePermissionDialog(body);
         if (dialog) row.prompt = {
           title: dialog.title, summary: dialog.summary, detail: dialog.detail, promptIdentity: null,
           promptVersion: tmuxPromptVersion(target, dialog),
@@ -149,7 +103,7 @@ export async function collectTmuxHostAttention(input: {
       scanned, omitted, complete, maxCandidates, captureConcurrency: concurrency, captureTimeoutMs: timeoutMs, maxCaptureBytes: limits.maxCaptureBytes },
   };
 }
-function tmuxPromptVersion(target: TmuxHostAttentionTarget, dialog: ClaudeTmuxAttentionDialog): string {
+function tmuxPromptVersion(target: TmuxHostAttentionTarget, dialog: ClaudePermissionDialog): string {
   return `sha256:${createHash("sha256").update(JSON.stringify([
     "claude-tmux-permission-v1", formatTerminalSurfaceId(target.ref),
     target.nativeSession ? [target.nativeSession.nodeId, target.nativeSession.harness, target.nativeSession.nativeSessionId] : null,
@@ -161,17 +115,7 @@ export const TMUX_HOST_ATTENTION_ANSWER_LIMITS = Object.freeze({
   captureTimeoutMs: 2_000, sendTimeoutMs: 2_000, verificationTimeoutMs: 2_000,
   verificationIntervalMs: 50, maxVerificationCaptures: 8, maxConcurrentAnswers: 6, maxAttempts: 256,
 });
-export type TmuxHostAttentionAnswer = {
-  outcome: "answered" | "stale" | "gone" | "unverified" | "failed" | "refused";
-  /** `sent` means the injected transport resolved, not a native harness acknowledgement. */
-  effect: "not_sent" | "sent" | "unknown";
-  /** Present only on busy: this pane’s hold age, or the oldest hold at global capacity. */
-  heldForMs?: number;
-  reason: "dialog_disappeared" | "prompt_changed" | "prompt_gone" | "dialog_still_present"
-    | "different_dialog" | "capture_failed" | "capture_truncated" | "capture_timeout"
-    | "send_failed" | "send_timeout" | "aborted" | "invalid_request" | "nonlocal_ref"
-    | "local_identity_unknown" | "unsupported_options" | "busy" | "already_attempted" | "attempt_capacity";
-};
+export type { TmuxHostAttentionAnswer, HerdrHostAttentionAnswer } from "@openscout/protocol";
 export type TmuxHostAttentionAnswerInput = {
   target: TmuxHostAttentionTarget;
   promptVersion: string;
@@ -246,7 +190,7 @@ export function createTmuxHostAttentionAnswerer(deps: {
       try { return await Promise.race([task.then(value => ({ state: "ok" as const, value }), () => ({ state: "failed" as const })), stop]); }
       finally { clearTimeout(timer); signal?.removeEventListener("abort", abort); }
     }
-    async function snapshot(ms: number): Promise<{ dialog: ClaudeTmuxAttentionDialog | null } | { reason: TmuxHostAttentionAnswer["reason"] }> {
+    async function snapshot(ms: number): Promise<{ dialog: ClaudePermissionDialog | null } | { reason: TmuxHostAttentionAnswer["reason"] }> {
       const read = await bounded(s => capture({ ...target.ref }, { signal: s, maxBytes: TMUX_HOST_ATTENTION_LIMITS.maxCaptureBytes,
         target: { harness: target.harness, label: target.label, agentId: target.agentId,
           nativeSession: target.nativeSession ? { ...target.nativeSession } : undefined } }), ms);
@@ -258,7 +202,7 @@ export function createTmuxHostAttentionAnswerer(deps: {
       if ((typeof value !== "string" && value.truncated) || Buffer.byteLength(body) > TMUX_HOST_ATTENTION_LIMITS.maxCaptureBytes) {
         return { reason: "capture_truncated" };
       }
-      return { dialog: detectClaudeTmuxHostAttention(body) };
+      return { dialog: detectClaudePermissionDialog(body) };
     }
     try {
       const before = await snapshot(limits.captureTimeoutMs);
@@ -302,7 +246,7 @@ export function createTmuxHostAttentionAnswerer(deps: {
     }
   };
 }
-function tmuxAnswerKeys(dialog: ClaudeTmuxAttentionDialog, option: "approve" | "deny"): readonly string[] | null {
+function tmuxAnswerKeys(dialog: ClaudePermissionDialog, option: "approve" | "deny"): readonly string[] | null {
   const options = dialog.content.options.map(line => line.match(/^(\d)\.\s+(.+)$/u));
   if (!options.length || options.some((entry, i) => !entry || Number(entry[1]) !== i + 1)) return null;
   const yes = options.filter(entry => /^Yes$/iu.test(entry![2]!));
@@ -322,13 +266,11 @@ function validIdentity(value: string): boolean {
 function ceiling(value: number | undefined, maximum: number, minimum: number): number {
   return value !== undefined && Number.isFinite(value) ? Math.min(maximum, Math.max(minimum, Math.floor(value))) : maximum;
 }
-function stripOptionCursor(line: string): string { return line.replace(/^\s*[❯›>]\s*(?=\d+\.)/u, ""); }
 function normalize(value: string): string { return value.replace(/\s+/gu, " ").trim(); }
 function clamp(value: string, max: number): string {
   const text = normalize(value);
   return text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
 }
-function findLastIndex(values: readonly string[], predicate: (value: string, index: number) => boolean): number {
-  for (let index = values.length - 1; index >= 0; index--) if (predicate(values[index]!, index)) return index;
-  return -1;
-}
+
+export { collectHerdrHostAttention, HERDR_HOST_ATTENTION_LIMITS } from "./herdr-host-attention.js";
+export type { HerdrHostAttentionCapture, HerdrHostAttentionCaptureEvidence } from "./herdr-host-attention.js";
