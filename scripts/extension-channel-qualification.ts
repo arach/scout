@@ -2,7 +2,7 @@
 import {readFileSync} from "node:fs";
 import {currentExtensionChannelCoordinate, EXTENSION_CHANNEL_QUALIFICATION as Q} from "../packages/runtime/src/extension-channel-qualification.ts";
 if (!currentExtensionChannelCoordinate()) throw Error("qualification job requires the exact supported host; skips are not evidence");
-console.log(JSON.stringify({event:"qualification-host",coordinate:currentExtensionChannelCoordinate(),version:Bun.version,revision:Bun.revision,ruling:Q.ruling}));
+console.log(JSON.stringify({event:"qualification-host",coordinate:currentExtensionChannelCoordinate(),version:Bun.version,revision:Bun.revision,ruling:Q.ruling,sourceHead:Q.head,adapter:Q.adapter,shim:Q.shim}));
 async function command(args: string[], env = process.env) {
   const child = Bun.spawn(args,{env,stdout:"pipe",stderr:"pipe"});
   const [out,err,code] = await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited]);
@@ -18,8 +18,21 @@ if (events.filter(e=>e.event==="native-collected").length !== 9 || events.filter
 const warmEnv = {...process.env}; delete warmEnv.BUN_JSC_useDFGJIT;
 const matrix = await command([process.execPath,"test","packages/cli/src/cli/extension-async-io.test.ts"],warmEnv);
 if (!/\b(\d+) pass\b/.test(matrix) || Number(matrix.match(/\b(\d+) pass\b/)![1]) < 28 || /\b[1-9]\d* skip\b/.test(matrix) || !/\b0 fail\b/.test(matrix)) throw Error("warm matrix incomplete/skipped");
+const controls=["stale-second-close","second-spawn-close","finalizer-close","mapping","eof","cloexec","collection-retained","cancel-double-close"];
+// Freeze case identities, not just totals: replacing a deleted control with an
+// unrelated passing test must not keep this checkpoint green.
+for(const form of ["context","credential"]) {
+  for(const mode of ["normal","timeout","cancel","crash",...(form==="credential"?["read-timeout","read-cancel"]:[])]) {
+    if(!matrix.includes(`(pass) async ${form}: whole witness, ${mode}, 64 KiB, reclaim/reuse/collection`)) throw Error("required exchange case missing");
+  }
+  for(const control of controls) if(!matrix.includes(`(pass) async ${form} sensitivity: ${control}`)) throw Error("required sensitivity control missing");
+}
+for(const name of ["compiled helper collection refuses retained wrapper","compiled helper collection cannot close reclaimed endpoint numbers"]) if(!matrix.includes(`(pass) ${name}`)) throw Error("compiler collection control missing");
 await command([process.execPath,"test","packages/runtime/src/extension-channel-io.test.ts","packages/runtime/src/extension-channel-qualification.test.ts","scripts/extension-numeric-spike/pipe-pressure.test.ts","scripts/check-native-compile-fence.test.ts","scripts/check-native-load-fence.test.ts","packages/cli/src/cli/extension-context.test.ts"],warmEnv);
+const runner = await command([process.execPath,"test","packages/cli/src/cli/extension-context-executor.test.ts","packages/cli/src/cli/extension-context-reclaim.test.ts"],warmEnv);
+if (Number(runner.match(/\b(\d+) pass\b/)?.[1]??0)<25 || /\b[1-9]\d* skip\b/.test(runner)) throw Error("actual-runner positive cohort incomplete/skipped");
 await command(["node","--test","packages/cli/test/extension-channel-package.test.mjs"],warmEnv);
+for(const control of controls) if(!runner.includes(`(pass) actual context runner sensitivity: ${control}`)) throw Error("actual-runner sensitivity control missing");
 const allowance = JSON.parse(readFileSync("scripts/sync-exec-allowlist/packages/runtime/src/extension-channel-io.ts/cc.json","utf8"));
 if (allowance.path!=="packages/runtime/src/extension-channel-io.ts" || allowance.symbol!=="cc" || allowance.category!=="native-compile"
   || JSON.stringify(allowance.sourceFiles)!==JSON.stringify(["packages/runtime/src/extension-channel-native.c"])) throw Error("fixed-source fence restriction changed");
