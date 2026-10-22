@@ -292,6 +292,7 @@ async function hostCommand(
     raw?: string;
     status?: unknown;
     noise?: boolean;
+    ignoreTerm?: boolean;
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "openscout-tailscale-async-"));
@@ -310,6 +311,7 @@ async function hostCommand(
     `import { appendFileSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 if (process.argv[2] !== '--fixture-warmup') {
   appendFileSync(${JSON.stringify(count)}, JSON.stringify(process.argv.slice(2))+'\\n');
+  ${initial.ignoreTerm ? "process.on('SIGTERM', ()=>{});" : ""}
   writeFileSync(${JSON.stringify(started)}, String(process.pid));
   const config=JSON.parse(readFileSync(${JSON.stringify(config)},'utf8'));
   while(config.gate && !existsSync(${JSON.stringify(gate)})) await new Promise(r=>setTimeout(r,1));
@@ -546,6 +548,38 @@ describe("asynchronous Tailscale host reader", () => {
       ]);
       expect(child.count()).toHaveLength(2);
     });
+  }, 20_000);
+
+  test("timeout settles even when the held child ignores SIGTERM", async () => {
+    const child = await hostCommand({ gate: true, ignoreTerm: true });
+    const work = readTailscaleSelfWebHosts({
+      ...child.env,
+      OPENSCOUT_TAILSCALE_STATUS_TIMEOUT_MS: "1500",
+    });
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await untilHost(() => existsSync(child.started));
+      const result = await Promise.race([
+        work.then((hosts) => ({ hosts, settled: true })),
+        new Promise<{ hosts: string[]; settled: boolean }>((resolve) => {
+          deadline = setTimeout(() => resolve({ hosts: [], settled: false }), 4000);
+        }),
+      ]);
+      expect(result.settled).toBe(true);
+      expect(result.hosts).toEqual([]);
+      const pid = Number(readFileSync(child.started, "utf8"));
+      expect(() => process.kill(pid, 0)).toThrow();
+    } finally {
+      clearTimeout(deadline);
+      if (existsSync(child.started)) {
+        const pid = Number(readFileSync(child.started, "utf8"));
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {} // The timeout should already have reaped this owned child.
+      }
+      child.release();
+      await work;
+    }
   }, 20_000);
 
   test("configured timeout fails closed and reaps the exact held child", async () => {

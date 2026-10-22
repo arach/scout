@@ -165,6 +165,7 @@ async function readStatusJsonAsync(
           {
             encoding: "utf8",
             timeout: statusTimeoutMs(env),
+            killSignal: "SIGKILL",
             windowsHide: true,
           },
           (error, stdout) => {
