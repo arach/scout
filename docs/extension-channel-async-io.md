@@ -121,18 +121,56 @@ bun scripts/extension-numeric-spike/witness.ts credential none async read-timeou
 bun test ./scripts/check-native-compile-fence.test.ts
 ```
 
-The local full matrix passes 28 tests, including read-timeout. However, a cold
-standalone credential read-timeout run repeatedly refuses collection evidence:
-wrapper 1 is still observable after 64 rounds, although every sampled fresh-file
-identity survives. The reason for the warm/cold difference is unresolved. A green
-warm run is not a mechanism-level explanation and does not erase the refused
-record. This candidate is not qualified for integration.
+## Read-timeout completion: two measurement lanes
 
-The current local measurement, including that refused collection observation,
-is recorded separately in the lane's review report. Do not infer a green matrix
-from this design description. Before integration: obtain Fable's ruling on the
-new evidence, resolve any inconclusive mode, measure this exact implementation
-on Linux under separate operator authorization, verify compiler/header behavior
-on supported installations and frozen source/ESM/bundled artifact paths, and
-review runner cancellation/child cleanup. No package release or gate change is
-automatic. No CI dispatch, merge or retarget is part of these commands.
+Darwin retainer diagnostics classify the cold discrepancy as a VM CodeBlock
+pin, not a descriptor owner. Disabling only DFG removes the pin. Qualification
+still awaits the completion record and execution of this implementation on
+Linux; no product gate is changed by this note.
+
+Keep both lanes, with the same witness and unchanged collection/loss bounds:
+
+1. Full-JIT warm matrix: all modes, both forms and every sensitivity control run
+   in `extension-async-io.test.ts`. Do not disable DFG for that matrix.
+2. Cold read-timeout: a NEW process runs
+   `BUN_JSC_useDFGJIT=0 bun scripts/extension-numeric-spike/witness.ts credential none async read-timeout`.
+   All eight read-timeout exchanges plus reap-first must complete with all nine
+   wrappers observed collected. This flag is instrument configuration only,
+   never a product setting or native-retention workaround.
+
+Every mode must pass the whole witness in at least one configuration with
+observed collection. A cold full-JIT refusal is acceptable as a CLASSIFIED
+record only when every loss check reached is clean and a retainer diagnostic
+proves the survivor is held exclusively by VM code-cache roots, not by witness
+or adapter objects. Warm green totals alone cannot satisfy that rule.
+
+Independent and restacked cold snapshots show the same shortest path:
+`FunctionCodeBlock -> JSLexicalEnvironment (this) -> ChildProcess -> #handle -> Subprocess`.
+Disabling only DFG releases all nine wrappers in the same cold witness. The
+subprocess has exited; the surviving wrapper's finalizer has no opportunity
+while it is pinned. This explains an incomplete hazard window, not a lost FD.
+
+For a refusal-only diagnostic, set `SCOUT_DESCRIPTOR_HEAP_SNAPSHOT` to an owned
+local path before the cold full-JIT command. The witness still exits 1; after
+refusal it yields a fresh macrotask before taking a snapshot, so the last
+WeakRef observation does not supply a job-local pin. Then run
+`bun scripts/extension-numeric-spike/walk-retainers.ts <snapshot>`.
+The walker validates Inspector-v3's FOUR-field node layout, excludes the
+Subprocess prototype and WeakRef's internal non-retaining target edge, and
+exhausts the remaining ancestor graph. Custom properties/registry held values
+are strong and remain traversable. Unexpected formats or non-VM roots refuse
+classification. Synthetic sensitivity cases cover those distinctions. Heap
+snapshots can contain private process material: retain locally and inspect
+before sharing; no snapshot is committed or uploaded automatically.
+
+The CI checks job has an independent no-DFG cold step, scoped to that step only,
+beside the existing full-JIT unit matrix. The operator dispatches the same
+`ci.yml` workflow on the exact restacked async branch head. No workflow is
+executed by this source change. The cold step runs immediately after dependency
+installation so an unrelated later suite failure cannot hide that record.
+
+Remaining integration gates: obtain an independent qualification ruling on both lanes
+and the new Linux record; verify compiler/header behavior and frozen source/ESM/
+bundled asset paths; review runner cancellation and child cleanup. The prior
+Linux apparatus run does not qualify this adapter. No package release, PR,
+merge, retarget, runner integration or gate change is automatic.

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, openSync, closeSync, rmSync } from "node:fs";
+import { mkdtempSync, openSync, closeSync, fstatSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkReclaimedDescriptors, runDescriptorReclaimWitness, type DescriptorForm } from "./extension-descriptor-witness.ts";
@@ -50,4 +50,29 @@ test("after-context sentinel detects a recycled number closed by an earlier owne
   const old = openSync(join(root, "old"), "wx"); closeSync(old);
   try { await expect(checkReclaimedDescriptors({ former: [old], directory: root, staleClose: true })).rejects.toThrow("reclaimed descriptor lost"); }
   finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// Restacking composes collection observation with E1's reservation handoff.
+// Neither may bypass the other's checks, even if a future control uses both.
+test("reclaim handoff follows observed collection, never bypassed by early success", async () => {
+  const root = mkdtempSync(join(tmpdir(), "scout-reclaim-handoff-"));
+  const old = openSync(join(root, "old"), "wx"); closeSync(old);
+  let reserved: {fd: number; dev: number; ino: number} | undefined;
+  try {
+    await checkReclaimedDescriptors({former: [old], directory: root, collected: () => true,
+      reserveFormer(fd) { const stat = fstatSync(fd); reserved = {fd, dev: stat.dev, ino: stat.ino}; }});
+    expect(reserved?.fd).toBe(old); expect(fstatSync(reserved!.fd).isFile()).toBe(true);
+  } finally {
+    if (reserved) {const stat = fstatSync(reserved.fd); if (stat.dev === reserved.dev && stat.ino === reserved.ino) closeSync(reserved.fd);}
+    rmSync(root, {recursive: true, force: true});
+  }
+});
+test("reclaim handoff is refused when collection was never observed", async () => {
+  const root = mkdtempSync(join(tmpdir(), "scout-reclaim-no-handoff-"));
+  const old = openSync(join(root, "old"), "wx"); closeSync(old); let handedOff = false;
+  try {
+    await expect(checkReclaimedDescriptors({former: [old], directory: root, collected: () => false,
+      reserveFormer() {handedOff = true;}})).rejects.toThrow("collection was not observed within 64 GC rounds");
+    expect(handedOff).toBe(false);
+  } finally {rmSync(root, {recursive: true, force: true});}
 });
