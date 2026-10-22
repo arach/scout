@@ -1,9 +1,22 @@
 import { closeSync } from "node:fs";
 import { createRequire } from "node:module";
 import { refuse } from "./contracts.js";
+import { INHERITED_DESCRIPTOR_LAYOUTS, MAX_INHERITED_DESCRIPTOR_SLOT } from "../inherited-descriptors.js";
 
 /** Fixed SDK-owned slots. Reserved context is not implemented or populated. */
-export const CARRIER_LAYOUT = Object.freeze({ id: "role-custody/1", parentChannel: 3, reservedContext: 4, fence: 7 } as const);
+export const CARRIER_LAYOUT = Object.freeze({ id: "role-custody/1", ...INHERITED_DESCRIPTOR_LAYOUTS.roleCustody } as const);
+
+/** Pure construction of the same role-custody/1 mapping. Slots reserved for
+ * extension channels are ignored here, never implicitly forwarded to workers. */
+export function carrierStdio(stdio: readonly ["ignore" | "inherit", "ignore" | "inherit", "ignore" | "inherit"], parentChannel: number, fence: number) {
+  type Entry = "ignore" | "inherit" | number;
+  const mapping: [Entry, Entry, Entry, ...Entry[]] = [stdio[0], stdio[1], stdio[2]];
+  while (mapping.length <= MAX_INHERITED_DESCRIPTOR_SLOT) mapping.push("ignore");
+  const standard = INHERITED_DESCRIPTOR_LAYOUTS.stdio;
+  mapping[standard.stdin] = stdio[0]; mapping[standard.stdout] = stdio[1]; mapping[standard.stderr] = stdio[2];
+  mapping[CARRIER_LAYOUT.parentChannel] = parentChannel; mapping[CARRIER_LAYOUT.fence] = fence;
+  return mapping;
+}
 let native: ReturnType<typeof openNative> | undefined;
 function openNative() {
   if (process.platform !== "darwin") refuse("carrier_layout_unsupported");
@@ -57,7 +70,7 @@ export function mappingCopy(fd: number) {
       const next = native.library.symbols.dup(fd);
       if (next < 0) refuse("carrier_mapping_copy_failed");
       copy = next; markCloseOnExec(copy);
-      if (copy > CARRIER_LAYOUT.fence) break;
+      if (copy > MAX_INHERITED_DESCRIPTOR_SLOT) break;
       low.push(copy); copy = undefined;
     }
     let owned: number | undefined = copy; copy = undefined;
