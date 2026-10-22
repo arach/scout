@@ -1,8 +1,9 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import type { Worker } from "node:worker_threads";
 import type { DeliveryAttempt, DeliveryIntent, FlightRecord, InvocationRequest } from "@openscout/protocol";
 import { FileBackedBrokerJournal, type BrokerJournalEntry } from "./broker-journal.js";
 import { WorkerSQLiteProjection, type WorkerSQLiteProjectionOptions } from "./sqlite-projection-worker.js";
@@ -31,12 +32,112 @@ async function setup(workerSource?: string, options: WorkerSQLiteProjectionOptio
   const journal = new FileBackedBrokerJournal(journalPath); await journal.load();
   await journal.appendEntries([...parents, message("old")]);
   let workerUrl: URL | undefined;
-  if (workerSource) { const path = join(root, "worker.ts"); await writeFile(path, workerSource); workerUrl = pathToFileURL(path); }
+  if (workerSource) {
+    const path = join(root, "worker.ts");
+    // Signal only after the wrapper has imported the real entry and installed
+    // every listener. An interception listener alone can consume an early warm.
+    await writeFile(path, workerSource + `
+      import { parentPort as fixturePort } from "node:worker_threads";
+      fixturePort!.postMessage({ kind: "testFixtureReady" });`);
+    workerUrl = pathToFileURL(path);
+  }
   const projection = new WorkerSQLiteProjection(dbPath, journalPath, journal, { historyDirectory: join(root, "history"), ...options, workerUrl });
   cleanup.push(() => projection.close());
   const published: unknown[] = [];
   const durable = new BrokerDurableStore({ journal, projection, threadEvents: { publish: events => { published.push(...events); } } });
+  if (workerSource) {
+    // Gate this fixture's transport for every worker generation, including a
+    // watchdog restart. RPC deadlines still start at the original call time.
+    const transport = projection as unknown as { postMessage(worker: Worker, packet: unknown): void };
+    const post = transport.postMessage.bind(projection);
+    const startups = new WeakMap<Worker, { ready: boolean; pending: unknown[] }>();
+    transport.postMessage = (worker, packet) => {
+      let startup = startups.get(worker);
+      if (!startup) {
+        const state = { ready: false, pending: [] as unknown[] };
+        startups.set(worker, state); startup = state;
+        const detach = () => {
+          worker.off("message", ready); worker.off("error", abandoned); worker.off("exit", abandoned);
+        };
+        const ready = (message: unknown) => {
+          if (!message || typeof message !== "object" || !("kind" in message) || message.kind !== "testFixtureReady") return;
+          detach(); state.ready = true;
+          for (const queued of state.pending.splice(0)) post(worker, queued);
+        };
+        const abandoned = () => { detach(); state.pending.length = 0; };
+        worker.on("message", ready); worker.once("error", abandoned); worker.once("exit", abandoned);
+      }
+      if (startup.ready) post(worker, packet);
+      else startup.pending.push(packet);
+    };
+  }
   return { root, journalPath, dbPath, journal, projection, durable, published };
+}
+
+function withheldWorkerSource(): string {
+  const entry = new URL("./sqlite-projection-worker-entry.ts", import.meta.url).href;
+  return `import {parentPort} from "node:worker_threads";
+    let gate;
+    parentPort.on("message", packet => {
+      if (packet.kind === "test-arm-hold") {
+        gate = new Int32Array(packet.gate);
+        parentPort.postMessage({kind:"test-hold-armed"});
+      } else if (packet.method === "catchUpStartup" && gate && Atomics.load(gate,0) === 0) {
+        Atomics.store(gate,1,1);
+        parentPort.postMessage({kind:"test-worker-held"});
+        while (Atomics.load(gate,0) === 0) Atomics.wait(gate,0,0);
+        Atomics.store(gate,2,1);
+      }
+    });
+    await import(${JSON.stringify(entry)});`;
+}
+
+async function armWorkerHold(projection: WorkerSQLiteProjection) {
+  const worker = (projection as unknown as { worker: Worker }).worker;
+  const gate = new Int32Array(new SharedArrayBuffer(3 * Int32Array.BYTES_PER_ELEMENT));
+  let armed!: () => void, entered!: () => void;
+  const ready = new Promise<void>(resolve => { armed = resolve; });
+  const held = new Promise<void>(resolve => { entered = resolve; });
+  const receive = (packet: { kind?: string }) => {
+    if (packet.kind === "test-hold-armed") armed();
+    if (packet.kind === "test-worker-held") entered();
+  };
+  const release = () => { Atomics.store(gate, 0, 1); Atomics.notify(gate, 0); };
+  worker.on("message", receive);
+  cleanup.push(() => { release(); worker.off("message", receive); });
+  worker.postMessage({ kind: "test-arm-hold", gate: gate.buffer });
+  await ready;
+  return { worker, gate, held, release };
+}
+
+async function expectJournalAcknowledgement(
+  projection: WorkerSQLiteProjection, write: () => Promise<unknown>, release: () => void,
+  inspect: () => void = () => {},
+) {
+  // A held promise alone would make a broken writer hang. Observe consumption
+  // of the real projection promises as the alternate causal failure event.
+  let waited!: () => void;
+  const projectionWait = new Promise<"projection-awaited">(resolve => { waited = () => resolve("projection-awaited"); });
+  const observe = <T extends Promise<unknown>>(promise: T): T => new Proxy(promise, {
+    get(target, key) {
+      if (key === "then") return (...args: unknown[]) => { waited(); return Reflect.apply(target.then, target, args); };
+      const value = Reflect.get(target, key, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  const flush = projection.flush, applyEntries = projection.applyEntries;
+  projection.flush = () => observe(flush.call(projection));
+  projection.applyEntries = entries => observe(applyEntries.call(projection, entries));
+  let pending: Promise<unknown> | undefined;
+  try {
+    pending = write();
+    expect(await Promise.race([pending.then(() => "journal-acknowledged"), projectionWait])).toBe("journal-acknowledged");
+    inspect();
+  } finally {
+    projection.flush = flush; projection.applyEntries = applyEntries;
+    release();
+    await pending?.catch(() => {});
+  }
 }
 
 test("worker replays the canonical journal, follows committed suffixes and verifies exact history", async () => {
@@ -55,24 +156,24 @@ test("worker replays the canonical journal, follows committed suffixes and verif
 });
 
 test("withheld worker work leaves acknowledgement responsive and pending payloads on disk", async () => {
-  const entry = new URL("./sqlite-projection-worker-entry.ts", import.meta.url).href;
-  const source = `import {parentPort} from "node:worker_threads";
-    parentPort.on("message", packet => { if (packet.method === "catchUpStartup") Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,350); });
-    await import(${JSON.stringify(entry)});`;
-  const { projection, durable, journal } = await setup(source);
+  const { projection, durable, journal } = await setup(withheldWorkerSource());
   await projection.warm(); await projection.flush();
-  const started = performance.now();
-  await durable.runWrite(() => durable.commitEntries(message("trigger"), async () => {}));
-  // Allow the pump's request to enter the worker before more commands arrive.
-  await new Promise(resolve => setTimeout(resolve, 25));
-  const later = performance.now();
-  await Promise.all(Array.from({ length: 40 }, (_, i) => durable.runWrite(() => durable.commitEntries(message(`queued-${i}`), async () => {}))));
-  expect(performance.now() - later).toBeLessThan(250);
-  expect(performance.now() - started).toBeLessThan(300);
-  expect(projection.statusSnapshot().worker.pendingRequests).toBeLessThanOrEqual(2);
-  expect(projection.statusSnapshot().worker.dirty).toBe(true);
-  expect(journal.snapshot().messages["queued-39"]).toBeDefined();
+  const hold = await armWorkerHold(projection);
+  projection.notifyCommitted(); await hold.held;
+  await expectJournalAcknowledgement(projection, async () => {
+    await durable.runWrite(() => durable.commitEntries(message("trigger"), async () => {}));
+    await Promise.all(Array.from({ length: 40 }, (_, i) => durable.runWrite(() => durable.commitEntries(message(`queued-${i}`), async () => {}))));
+  }, hold.release, () => {
+    expect(Atomics.load(hold.gate, 0)).toBe(0); // Test has not released the worker.
+    expect(Atomics.load(hold.gate, 1)).toBe(1); // Worker confirmed entry.
+    expect(Atomics.load(hold.gate, 2)).toBe(0); // Worker has not resumed.
+    expect((projection as unknown as { worker: Worker }).worker).toBe(hold.worker);
+    expect(projection.statusSnapshot().worker.pendingRequests).toBeLessThanOrEqual(2);
+    expect(projection.statusSnapshot().worker.dirty).toBe(true);
+    expect(journal.snapshot().messages["queued-39"]).toBeDefined();
+  });
   await projection.flush();
+  expect(Atomics.load(hold.gate, 2)).toBe(1);
   expect((await projection.readMessages(["queued-39"])).has("queued-39")).toBe(true);
 });
 
@@ -184,24 +285,51 @@ test("verification pages a large plan and compares an individually oversized bod
 });
 
 test("watchdog rejects a stalled live worker and restarts against the same historical database", async () => {
-  const entry = new URL("./sqlite-projection-worker-entry.ts", import.meta.url).href;
-  const source = `import {parentPort, workerData} from "node:worker_threads";
-    import {existsSync, writeFileSync} from "node:fs";
-    parentPort.on("message", packet => { if (packet.method === "catchUpStartup" && !existsSync(workerData.journalPath+".stalled")) {
-      writeFileSync(workerData.journalPath+".stalled", "once"); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,60000);
-    } }); await import(${JSON.stringify(entry)});`;
-  const { projection, durable, dbPath } = await setup(source, { requestTimeoutMs: 400 });
-  await projection.warm(); await projection.flush();
-  const store = new SQLiteControlPlaneStore(dbPath);
-  try { store.recordMessage(message("historical-only").message); } finally { store.close(); }
-  await durable.runWrite(() => durable.commitEntries(message("accepted-before-stall"), async () => {}));
-  await expect(projection.flush()).rejects.toThrow("stalled");
-  expect(projection.statusSnapshot().state).toBe("degraded");
-  const start = performance.now();
-  await durable.runWrite(() => durable.commitEntries(message("accepted-after-stall"), async () => {}));
-  expect(performance.now() - start).toBeLessThan(250);
-  await projection.flush();
-  expect((await projection.readMessages(["historical-only", "accepted-before-stall", "accepted-after-stall"])).size).toBe(3);
+  // Hold watchdog time still until both worker entry and journal acknowledgement
+  // are proven. Startup/recovery load must not consume the fixture's budget.
+  let now = Date.now();
+  const clock = spyOn(Date, "now").mockImplementation(() => now);
+  try {
+    const { projection, durable, journal, dbPath } = await setup(withheldWorkerSource(), { requestTimeoutMs: 400 });
+    await projection.warm(); await projection.flush();
+    const store = new SQLiteControlPlaneStore(dbPath);
+    try { store.recordMessage(message("historical-only").message); } finally { store.close(); }
+    const hold = await armWorkerHold(projection);
+    await journal.appendEntries(message("accepted-before-stall"));
+    projection.notifyCommitted(); await hold.held;
+    let settled = false;
+    const flush = projection.flush().finally(() => { settled = true; });
+    void flush.catch(() => {}); // Observe the intentional later watchdog failure.
+    const failures = projection.health().failures;
+    let acknowledgedWhileHeld = false;
+    await expectJournalAcknowledgement(projection,
+      () => durable.runWrite(() => durable.commitEntries(message("accepted-while-stalled"), async () => {})),
+      // Keep a successful hold for the watchdog. A failed causal proof must
+      // still release the worker so the helper's cleanup cannot hang.
+      () => { if (!acknowledgedWhileHeld) hold.release(); }, () => {
+        expect(journal.snapshot().messages["accepted-while-stalled"]).toBeDefined();
+        expect(settled).toBe(false);
+        expect((projection as unknown as { worker: Worker }).worker).toBe(hold.worker);
+        expect(projection.health().failures).toBe(failures);
+        expect(projection.statusSnapshot().worker.pendingRequests).toBeGreaterThan(0);
+        expect(Atomics.load(hold.gate, 0)).toBe(0);
+        expect(Atomics.load(hold.gate, 1)).toBe(1);
+        expect(Atomics.load(hold.gate, 2)).toBe(0);
+        acknowledgedWhileHeld = true;
+      });
+    // Only the confirmed stall advances the real watchdog predicate.
+    now += 400;
+    await expect(flush).rejects.toThrow("stalled");
+    expect(projection.statusSnapshot().state).toBe("degraded");
+    // The watchdog has retired the held worker. A recovery dependency is still
+    // forbidden on acknowledgement, even if a replacement could answer quickly.
+    expect((projection as unknown as { worker: Worker | null }).worker).toBeNull();
+    await expectJournalAcknowledgement(projection,
+      () => durable.runWrite(() => durable.commitEntries(message("accepted-after-stall"), async () => {})), hold.release,
+      () => { expect(journal.snapshot().messages["accepted-after-stall"]).toBeDefined(); });
+    await projection.flush();
+    expect((await projection.readMessages(["historical-only", "accepted-before-stall", "accepted-while-stalled", "accepted-after-stall"])).size).toBe(4);
+  } finally { clock.mockRestore(); }
 });
 
 test("watchdog extends an operation only when reported replay progress advances", async () => {

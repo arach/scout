@@ -35,7 +35,7 @@ import {
   askScoutQuestion,
   resolveScoutSenderId,
   sendScoutMessage,
-} from "../core/broker/service.ts";
+} from "../../../../packages/cli/src/lib/core/broker/service.ts";
 import { resolveBrokerPort } from "@openscout/runtime/local-config";
 
 export type { ScoutWebAssetMode } from "./server-core.ts";

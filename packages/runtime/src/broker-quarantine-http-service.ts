@@ -18,10 +18,15 @@ export async function handleBrokerQuarantineRoute(request: RuntimeHttpRequestLik
     json(response, 403, { error: "forbidden", detail: "Quarantine evidence is machine-local." }); return true;
   }
   const method = request.method ?? "GET";
-  const exact = url.pathname.match(/^\/v1\/quarantine\/([^/]+)(\/acknowledge)?$/);
-  const list = url.pathname === "/v1/quarantine";
-  if (!list && !exact) { json(response, 404, { error: "quarantine_route_not_found" }); return true; }
-  if (method !== (exact?.[2] ? "POST" : "GET")) { json(response, 405, { error: "method_not_allowed" }); return true; }
+  const exact = method === "GET" ? url.pathname.match(/^\/v1\/quarantine\/([^/]+)$/) : null;
+  const acknowledge = method === "POST" ? url.pathname.match(/^\/v1\/quarantine\/([^/]+)\/acknowledge$/) : null;
+  const list = method === "GET" && url.pathname === "/v1/quarantine";
+  if (!list && !exact && !acknowledge) {
+    // Preserve the namespace's previous 404/405 precedence, including when
+    // queries are unavailable. Successful dispatch uses explicit method/path pairs.
+    const known = url.pathname === "/v1/quarantine" || /^\/v1\/quarantine\/([^/]+)(\/acknowledge)?$/.test(url.pathname);
+    json(response, known ? 405 : 404, { error: known ? "method_not_allowed" : "quarantine_route_not_found" }); return true;
+  }
   if (!queries) { json(response, 503, { error: "quarantine_unavailable" }); return true; }
   try {
     if (list) {
@@ -35,9 +40,9 @@ export async function handleBrokerQuarantineRoute(request: RuntimeHttpRequestLik
       const records = await queries.list({ limit, status, ...(sessionId ? { sessionId } : {}) });
       json(response, 200, { status: await queries.status(), records });
     } else {
-      const id = decodeURIComponent(exact![1]!);
+      const id = decodeURIComponent((exact ?? acknowledge)![1]!);
       if (!/^quarantine-[a-f0-9]{64}$/.test(id)) { json(response, 400, { error: "invalid_quarantine_identity" }); return true; }
-      const record = exact![2] ? await queries.acknowledge(id) : await queries.read(id);
+      const record = acknowledge ? await queries.acknowledge(id) : await queries.read(id);
       json(response, record ? 200 : 404, record ? { record } : { error: "quarantine_record_not_found" });
     }
   } catch (error) {

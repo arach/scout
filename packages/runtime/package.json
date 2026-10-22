@@ -13,6 +13,12 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./inherited-descriptors": {
+      "bun": "./src/inherited-descriptors.ts",
+      "types": "./dist/inherited-descriptors.d.ts",
+      "import": "./dist/inherited-descriptors.js",
+      "default": "./dist/inherited-descriptors.js"
+    },
     "./jetstream": {
       "bun": "./src/jetstream/index.ts",
       "types": "./dist/jetstream/index.d.ts",
@@ -120,6 +126,18 @@
       "types": "./dist/mesh-join.d.ts",
       "import": "./dist/mesh-join.js",
       "default": "./dist/mesh-join.js"
+    },
+    "./host-attention": {
+      "bun": "./src/host-attention.ts",
+      "types": "./dist/host-attention.d.ts",
+      "import": "./dist/host-attention.js",
+      "default": "./dist/host-attention.js"
+    },
+    "./core-report": {
+      "bun": "./src/core-report.ts",
+      "types": "./dist/core-report.d.ts",
+      "import": "./dist/core-report.js",
+      "default": "./dist/core-report.js"
     },
     "./broker-api": {
       "bun": "./src/broker-api.ts",
@@ -385,6 +403,12 @@
       "import": "./dist/otlp/index.js",
       "default": "./dist/otlp/index.js"
     },
+    "./relay-transport": {
+      "bun": "./src/relay-transport.ts",
+      "types": "./dist/relay-transport.d.ts",
+      "import": "./dist/relay-transport.js",
+      "default": "./dist/relay-transport.js"
+    },
     "./tail": {
       "bun": "./src/tail/index.ts",
       "types": "./dist/tail/index.d.ts",
@@ -518,11 +542,23 @@
       "import": "./dist/delivery-client.js",
       "default": "./dist/delivery-client.js"
     },
+    "./remote-tail": {
+      "bun": "./src/remote-tail.ts",
+      "types": "./dist/remote-tail.d.ts",
+      "import": "./dist/remote-tail.js",
+      "default": "./dist/remote-tail.js"
+    },
     "./attachments": {
       "bun": "./src/attachments.ts",
       "types": "./dist/attachments.d.ts",
       "import": "./dist/attachments.js",
       "default": "./dist/attachments.js"
+    },
+    "./supervision-handoff": {
+      "bun": "./src/supervision-handoff/index.ts",
+      "types": "./dist/supervision-handoff/index.d.ts",
+      "import": "./dist/supervision-handoff/index.js",
+      "default": "./dist/supervision-handoff/index.js"
     }
   },
   "types": "./dist/index.d.ts",
@@ -533,8 +569,10 @@
     "!src/**/*.test.ts",
     "!src/**/test-helpers/**",
     "drizzle",
+    "RELAY-TRANSPORT.md",
     "README.md",
     "DELIVERY.md",
+    "CORE-REPORT.md",
     "LICENSE"
   ],
   "scripts": {
@@ -545,12 +583,12 @@
     "db:generate": "bunx drizzle-kit generate --config drizzle.config.ts",
     "db:migrate": "bun ./src/drizzle-migrate.ts",
     "check": "bun run --cwd ../agent-sessions build && tsc --noEmit -p tsconfig.json",
-    "test": "bun test src/*.test.ts",
+    "test": "bun test ./src --path-ignore-patterns='**/*live.test.ts'",
     "test:conformance": "OPENSCOUT_CONFORMANCE=1 bun test src/system-probes.test.ts --test-name-pattern='scoutd conformance diff harness'",
     "test:scenarios": "bun test src/scenario-suite.test.ts",
     "test:live:jetstream": "bun test src/jetstream/*live.test.ts",
-    "test:live:codex-app-server": "bun test src/codex-app-server-live.test.ts",
-    "test:live:opencode-acp": "bun test src/opencode-acp-live.test.ts",
+    "test:live:codex-app-server": "OPENSCOUT_LIVE_CODEX_APP_SERVER=1 bun test src/codex-app-server-live.test.ts",
+    "test:live:opencode-acp": "OPENSCOUT_LIVE_OPENCODE_ACP=1 bun test src/opencode-acp-live.test.ts",
     "test:e2e:local-agent-pass": "bash ../../scripts/run-live-local-agent-pass.sh",
     "test:live:local-agent-pass": "bash ../../scripts/run-live-local-agent-pass.sh",
     "prepack": "bun run build && node ../../scripts/prepare-publish-manifest.mjs .",

@@ -23,7 +23,7 @@ export function createScoutbotMcp(options: {
     connecting = (async () => {
       const candidate = new McpClient({ name: "scout-bot", version: "1", requestTimeoutMs: 45_000 });
       // Source CLI avoids a stale dist bundle. mcp is excluded from CLI freshness/restart maintenance.
-      const entry = fileURLToPath(new URL("../../../../../apps/desktop/src/cli/main.ts", import.meta.url));
+      const entry = fileURLToPath(new URL("../../../../cli/src/cli/main.ts", import.meta.url));
       const transport = options.transport?.() ?? new StdioTransport({
         command: process.execPath, args: [entry, "mcp", "--context-root", options.currentDirectory],
         cwd: options.currentDirectory,

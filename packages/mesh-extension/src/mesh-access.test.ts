@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createScoutCommandContext } from "../../../apps/desktop/src/cli/context.ts";
+import { createScoutCommandContext } from "../../cli/src/cli/context.ts";
 import { parseMeshAccessFlags, runMeshAccessCommand } from "./mesh-access.ts";
 import { validateAccessPolicy, validateAccessDelegation, validateAccessGrant, validateAccessRevocation, ACCESS_ARTIFACT_MAX_BYTES, accessKeyId } from "@openscout/runtime/mesh/access";
 import { verifyScopedPeerRequest, PeerNonceCache, PEER_AUTH_HEADERS } from "@openscout/runtime/mesh/peer-auth";

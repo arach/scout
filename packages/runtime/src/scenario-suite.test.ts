@@ -31,17 +31,6 @@ describe("runtime scenario suite", () => {
   runtimeScenario(
     "runs a project routine across docs and OG review asks",
     async (scenario) => {
-      const home = scenario.configurePairingHome(0);
-      const broker = await scenario.startBroker({
-        env: {
-          HOME: home,
-          OPENSCOUT_SUPPORT_DIRECTORY: `${home}/Library/Application Support/OpenScout`,
-          OPENSCOUT_RELAY_HUB: `${home}/.openscout/relay`,
-          OPENSCOUT_SKIP_USER_PROJECT_HINTS: "1",
-        },
-      });
-      await scenario.seedOperator(broker);
-
       const agents = [
         {
           id: "hudson.docs.claude",
@@ -93,18 +82,6 @@ describe("runtime scenario suite", () => {
         },
       ];
 
-      for (const agent of agents) {
-        await scenario.registerAgent(broker, {
-          ...agent,
-          metadata: {
-            routine: "docs-og-review",
-          },
-          endpointMetadata: {
-            routine: "docs-og-review",
-          },
-        });
-      }
-
       const tasks = [
         {
           recordId: "work.hudson.docs-state",
@@ -114,7 +91,7 @@ describe("runtime scenario suite", () => {
           body: "Review Hudson docs and report stale setup steps, missing screenshots, and the current docs state.",
           response: "Hudson docs are usable, but install docs need the new broker direct-service wording and one screenshot refresh.",
           artifact: "docs",
-          expectedTransport: "claude_stream_json",
+          expectedTransport: "pairing_bridge",
         },
         {
           recordId: "work.talkie.docs-state",
@@ -124,7 +101,7 @@ describe("runtime scenario suite", () => {
           body: "Review Talkie docs and summarize what is current, stale, or missing before the next release.",
           response: "Talkie docs cover the main voice loop, but onboarding still references the older pairing screen copy.",
           artifact: "docs",
-          expectedTransport: "codex_app_server",
+          expectedTransport: "pairing_bridge",
         },
         {
           recordId: "work.linea.og-review",
@@ -134,7 +111,7 @@ describe("runtime scenario suite", () => {
           body: "Review Linea Open Graph images for legibility, brand fit, and obvious export issues.",
           response: "Linea OG images read clearly at social-card size; the dark variant needs a stronger product signal.",
           artifact: "og-image",
-          expectedTransport: "codex_app_server",
+          expectedTransport: "pairing_bridge",
         },
         {
           recordId: "work.lattices.og-review",
@@ -144,9 +121,40 @@ describe("runtime scenario suite", () => {
           body: "Review Lattices Open Graph images and call out any weak contrast, cropping, or stale claims.",
           response: "Lattices OG images have solid contrast, but the topology card crops too close on narrow previews.",
           artifact: "og-image",
-          expectedTransport: "claude_stream_json",
+          expectedTransport: "pairing_bridge",
         },
       ];
+
+      // These are simulated reviewers, not live native processes. Route the
+      // asks through the owned fake bridge and keep their harness provenance.
+      const pairing = await scenario.startPairingBridgeServer({ sessions: agents.map(agent => ({
+        id: agent.id, name: agent.displayName, adapterType: agent.harness, status: "idle",
+        response: tasks.find(task => task.targetAgentId === agent.id)!.response,
+      })) });
+      const home = scenario.configurePairingHome(pairing.port);
+      const broker = await scenario.startBroker({ env: {
+        HOME: home,
+        OPENSCOUT_SUPPORT_DIRECTORY: `${home}/Library/Application Support/OpenScout`,
+        OPENSCOUT_RELAY_HUB: `${home}/.openscout/relay`,
+        OPENSCOUT_SKIP_USER_PROJECT_HINTS: "1",
+      } });
+      await scenario.seedOperator(broker);
+      for (const agent of agents) {
+        await scenario.registerAgent(broker, {
+          ...agent,
+          transport: "pairing_bridge",
+          sessionId: agent.id,
+          metadata: {
+            routine: "docs-og-review",
+          },
+          endpointMetadata: {
+            routine: "docs-og-review",
+          },
+        });
+      }
+
+      const registered = await scenario.snapshot<{ endpoints: Record<string, { harness: string; transport: string }> }>(broker);
+      for (const agent of agents) expect(registered.endpoints[agent.endpointId]).toMatchObject({ harness: agent.harness, transport: "pairing_bridge" });
 
       const startedAt = Date.now();
       for (const [index, task] of tasks.entries()) {
@@ -193,7 +201,7 @@ describe("runtime scenario suite", () => {
             intent: "consult",
             targetAgentId: task.targetAgentId,
             ensureAwake: true,
-            createdAt: startedAt + 100 + index,
+            createdAt: Date.now(),
             collaborationRecordId: task.recordId,
             messageMetadata: {
               routine: "docs-og-review",
@@ -236,17 +244,11 @@ describe("runtime scenario suite", () => {
           throw new Error(`expected accepted delivery for ${task.recordId}`);
         }
 
-        await scenario.postMessage(broker, {
-          id: `msg-routine-response-${index + 1}`,
-          conversationId: delivery.conversation.id,
-          actorId: task.targetAgentId,
-          body: task.response,
-          metadata: {
-            routine: "docs-og-review",
-            artifact: task.artifact,
-            collaborationRecordId: task.recordId,
-          },
-        });
+        const answered = await scenario.waitFor(
+          () => scenario.listMessages(broker, delivery.conversation.id),
+          messages => messages.some(message => message.body === task.response),
+        );
+        expect(answered.map(message => message.body)).toContain(task.response);
 
         await scenario.post(broker, "/v1/collaboration/records", {
           id: task.recordId,

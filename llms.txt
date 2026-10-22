@@ -6,6 +6,7 @@
 
 - Overview: /docs/overview
 - Quickstart: /docs/quickstart
+- Extensions: /docs/extensions
 
 ## Overview
 
@@ -18,3 +19,10 @@ Code.
 
 This path installs the public `scout` command, initializes its machine-local
 state, and routes one real request through the broker.
+
+## Extensions
+
+Scout extensions add CLI verbs without changing the runtime. Install a trusted,
+prebuilt local artifact, then run `scout <verb>`. Built-in verbs take precedence.
+An extension cannot replace a built-in command. In particular, installing `mesh`
+does not switch the built-in `scout mesh` command to the extension.

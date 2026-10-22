@@ -1,4 +1,5 @@
-import { readFile, stat } from "node:fs/promises";
+import { open } from "node:fs/promises";
+import { constants } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -17,8 +18,8 @@ import type {
 
 import type { RuntimeEnv } from "../portable-types.js";
 
-import { defineProbeFamily, probeRunOutput, type ProbeCtx } from "./registry.js";
-import { execProbeFile, execSystemFile, ProbeCommandError } from "./exec.js";
+import { defineProbeFamily, probeRunOutput, type ProbeCtx, type ProbeSnapshot } from "./registry.js";
+import { execProbeFile, execSystemFile } from "./exec.js";
 import { runWithScoutdFallback } from "./scoutd-client.js";
 
 const HERDR_TTL_MS = 5_000;
@@ -85,11 +86,6 @@ function parseHerdrProbeKey(key: string): HerdrProbeTarget {
     // A caller-supplied opaque string key; fall through to this process.
   }
   return herdrProbeTarget(process.env);
-}
-
-function isUnavailable(error: unknown): boolean {
-  return error instanceof ProbeCommandError
-    && (error.code === "ENOENT" || error.code === "spawn" || error.code === "exit");
 }
 
 /**
@@ -251,7 +247,7 @@ function normalizeHerdrAgentStatus(value: unknown): HerdrAgentInfo["status"] {
  */
 async function readHerdrSessionsLocal(key: string, ctx: ProbeCtx): Promise<HerdrSessionInfo[]> {
   const target = parseHerdrProbeKey(key);
-  try {
+  {
     // XDG_CONFIG_HOME is forwarded only when the probed environment set it.
     // Forcing it to HOME when unset relocates herdr's config dir from
     // ~/.config/herdr to ~/herdr, and the inventory collapses to a phantom
@@ -264,10 +260,12 @@ async function readHerdrSessionsLocal(key: string, ctx: ProbeCtx): Promise<Herdr
       maxStdoutBytes: 512 * 1024,
       maxStderrBytes: 64 * 1024,
     });
+    const parsed = JSON.parse(stdout) as unknown;
+    const entries = Array.isArray(parsed) ? parsed : parsed && typeof parsed === "object" ? (parsed as { sessions?: unknown }).sessions : null;
+    if (!Array.isArray(entries) || entries.some(entry => !entry || typeof entry !== "object" || typeof entry.name !== "string" || !entry.name.trim())) {
+      throw new Error("Invalid Herdr session inventory");
+    }
     return parseHerdrSessionListJson(stdout);
-  } catch (error) {
-    if (isUnavailable(error)) return [];
-    throw error;
   }
 }
 
@@ -295,11 +293,20 @@ export const herdrSessionsProbe = defineProbeFamily<string | { env?: RuntimeEnv 
   },
 });
 
+/** Preserve probe failures for HTTP readers; the legacy array helper remains tolerant. */
+export async function readHerdrSessionsSnapshot(options: { env?: RuntimeEnv; maxAgeMs?: number } = {}): Promise<ProbeSnapshot<HerdrSessionInfo[]>> {
+  const handle = herdrSessionsProbe.for({ env: options.env });
+  const cached = handle.snapshot();
+  const maxAgeMs = options.maxAgeMs ?? HERDR_TTL_MS;
+  // fresh() deliberately forces failed probes; passive readers must also cache
+  // failure, otherwise an absent executable is spawned on every HTTP request.
+  if (cached.error && Date.now() - cached.error.at <= maxAgeMs && maxAgeMs > 0) return cached;
+  return handle.fresh({ maxAgeMs });
+}
+
 export async function readHerdrSessions(options: { env?: RuntimeEnv; maxAgeMs?: number } = {}): Promise<HerdrSessionInfo[]> {
-  const snapshot = await herdrSessionsProbe.for({ env: options.env }).fresh({
-    maxAgeMs: options.maxAgeMs ?? HERDR_TTL_MS,
-  });
-  return snapshot.value ?? [];
+  const snapshot = await readHerdrSessionsSnapshot(options);
+  return snapshot.error ? [] : snapshot.value ?? [];
 }
 
 export function invalidateHerdrSessions(options: { env?: RuntimeEnv; reason?: string } = {}): void {
@@ -344,7 +351,10 @@ export async function isHerdrAvailable(options: { env?: RuntimeEnv } = {}): Prom
 
 const HERDR_TOPOLOGY_TTL_MS = 2_000;
 
-type HerdrTopologyCacheEntry = { at: number; value: HerdrSessionTopology };
+export type HerdrTopologyRead = { topology: HerdrSessionTopology; availability: "available" | "partial" | "unavailable" };
+type HerdrTopologyCacheEntry = { at: number; value: HerdrTopologyRead };
+const herdrTopologyPending = new Map<string, Promise<HerdrTopologyRead>>();
+const HERDR_TOPOLOGY_CACHE_CAP = 64;
 const herdrTopologyCache = new Map<string, HerdrTopologyCacheEntry>();
 
 function herdrTopologyCacheKey(sessionName: string, env: RuntimeEnv): string {
@@ -725,7 +735,17 @@ async function readPersistedHerdrTopology(
   try {
     if (!unavailable.sessionDir) return null;
     const path = join(unavailable.sessionDir, "session.json");
-    const [raw, stats] = await Promise.all([readFile(path, "utf8"), stat(path)]);
+    const file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
+    let raw: string, savedAt: number;
+    try {
+      const stats = await file.stat();
+      if (!stats.isFile() || stats.size > 512 * 1024) return null;
+      // Bound the actual read too: the file can grow after stat.
+      const bytes = Buffer.alloc(512 * 1024 + 1);
+      const { bytesRead } = await file.read(bytes, 0, bytes.length, 0);
+      if (bytesRead > 512 * 1024) return null;
+      raw = bytes.toString("utf8", 0, bytesRead); savedAt = stats.mtimeMs;
+    } finally { await file.close(); }
     const workspaces = parseHerdrPersistedTopology(JSON.parse(raw));
     if (workspaces === null) return null;
     return {
@@ -733,14 +753,14 @@ async function readPersistedHerdrTopology(
       running: false,
       workspaces,
       observedAt: Date.now(),
-      savedAt: stats.mtimeMs,
+      savedAt,
       unavailable: unavailable.reason,
     };
   } catch {
     return null;
   }
 }
-async function readHerdrTopologyUncached(sessionName: string, env: RuntimeEnv): Promise<HerdrSessionTopology> {
+async function readHerdrTopologyUncached(sessionName: string, env: RuntimeEnv): Promise<HerdrTopologyRead> {
   const bin = herdrBin(env);
   const exec = (args: string[]) => execSystemFile(bin, ["--session", sessionName, ...args], {
     timeoutMs: HERDR_TIMEOUT_MS,
@@ -753,16 +773,29 @@ async function readHerdrTopologyUncached(sessionName: string, env: RuntimeEnv): 
     );
     // Geometry is additive: an older herdr without `api snapshot` (or a busy
     // one timing out) must not take the whole projection down with it.
+    for (const [output, field, ids] of [[workspaceList, "workspaces", ["workspace_id"]], [tabList, "tabs", ["workspace_id", "tab_id"]], [paneList, "panes", ["workspace_id", "tab_id", "pane_id"]]] as const) {
+      const entries = unwrapHerdrResult(output)?.[field];
+      if (!Array.isArray(entries) || entries.some(entry => !entry || typeof entry !== "object" || ids.some(id => !herdrString(entry[id])))) {
+        throw new Error("Invalid Herdr topology inventory");
+      }
+    }
     const [snapshot, agentList] = await Promise.all([
       exec(["api", "snapshot"]).then((r) => r.stdout).catch(() => undefined),
       exec(["agent", "list"]).then((r) => r.stdout).catch(() => undefined),
     ]);
-    return {
+    const snapshotRoot = snapshot ? unwrapHerdrResult(snapshot)?.snapshot : null;
+    const workspaces = parseHerdrTopology({ workspaceList, tabList, paneList, agentList, snapshot });
+    const completeTree = workspaces.length === (unwrapHerdrResult(workspaceList)!.workspaces as unknown[]).length
+      && workspaces.reduce((n, w) => n + w.tabs.length, 0) === (unwrapHerdrResult(tabList)!.tabs as unknown[]).length
+      && workspaces.reduce((n, w) => n + w.tabs.reduce((n, t) => n + t.panes.length, 0), 0) === (unwrapHerdrResult(paneList)!.panes as unknown[]).length;
+    const complete = completeTree && snapshotRoot && typeof snapshotRoot === "object" && Array.isArray((snapshotRoot as Record<string, unknown>).layouts)
+      && agentList && Array.isArray(unwrapHerdrResult(agentList)?.agents);
+    return { availability: complete ? "available" : "partial", topology: {
       session: sessionName,
       running: true,
-      workspaces: parseHerdrTopology({ workspaceList, tabList, paneList, agentList, snapshot }),
+      workspaces,
       observedAt: Date.now(),
-    };
+    } };
   } catch {
     // The live read failed. Usually the session's herdr server is simply not
     // running (connection refused) — an ordinary state, and the layout persists
@@ -773,7 +806,7 @@ async function readHerdrTopologyUncached(sessionName: string, env: RuntimeEnv): 
     // carried on the projection instead of being flattened away.
     const unavailable = await classifyHerdrUnavailable(sessionName, env);
     const persisted = await readPersistedHerdrTopology(sessionName, env, unavailable);
-    return persisted ?? emptyHerdrSessionTopology(sessionName, false, unavailable.reason);
+    return { topology: persisted ?? emptyHerdrSessionTopology(sessionName, false, unavailable.reason), availability: persisted ? "partial" : "unavailable" };
   }
 }
 
@@ -782,22 +815,36 @@ async function readHerdrTopologyUncached(sessionName: string, env: RuntimeEnv): 
  * view polls on a few-second cadence and agent status is the only fast-moving
  * part, so a 2s ceiling keeps it live without shelling herdr per render.
  */
-export async function readHerdrTopology(
+export async function readHerdrTopologySnapshot(
   sessionName: string,
   options: { env?: RuntimeEnv; maxAgeMs?: number } = {},
-): Promise<HerdrSessionTopology> {
+): Promise<HerdrTopologyRead> {
   const session = sessionName.trim();
-  if (!session) return emptyHerdrSessionTopology(session, false);
+  if (!session) return { topology: emptyHerdrSessionTopology(session, false), availability: "unavailable" };
   const env = options.env ?? process.env;
   const key = herdrTopologyCacheKey(session, env);
-  const now = Date.now();
   const cached = herdrTopologyCache.get(key);
-  if (cached && now - cached.at <= (options.maxAgeMs ?? HERDR_TOPOLOGY_TTL_MS)) {
-    return cached.value;
-  }
-  const value = await readHerdrTopologyUncached(session, env);
-  herdrTopologyCache.set(key, { at: now, value });
-  return value;
+  if (cached && Date.now() - cached.at <= (options.maxAgeMs ?? HERDR_TOPOLOGY_TTL_MS)) return cached.value;
+  const pending = herdrTopologyPending.get(key);
+  if (pending) return pending;
+  // Bound cold-key fan-out even when several HTTP requests select different
+  // sessions. Do not evict an active read and accidentally spawn it twice.
+  for (const [oldKey, entry] of herdrTopologyCache) if (Date.now() - entry.at > HERDR_TOPOLOGY_TTL_MS) herdrTopologyCache.delete(oldKey);
+  if (!herdrTopologyCache.has(key) && herdrTopologyCache.size + herdrTopologyPending.size >= HERDR_TOPOLOGY_CACHE_CAP) throw new Error("Herdr topology probe capacity");
+  const run = readHerdrTopologyUncached(session, env).then(value => {
+    if (herdrTopologyPending.get(key) === run) {
+      // Never evict a fresh key to admit another read: that would allow the
+      // evicted session to spawn again inside its TTL under query churn.
+      herdrTopologyCache.set(key, { at: Date.now(), value });
+    }
+    return value;
+  }).finally(() => { if (herdrTopologyPending.get(key) === run) herdrTopologyPending.delete(key); });
+  herdrTopologyPending.set(key, run);
+  return run;
+}
+
+export async function readHerdrTopology(sessionName: string, options: { env?: RuntimeEnv; maxAgeMs?: number } = {}): Promise<HerdrSessionTopology> {
+  return (await readHerdrTopologySnapshot(sessionName, options)).topology;
 }
 
 export function invalidateHerdrTopology(
@@ -807,10 +854,10 @@ export function invalidateHerdrTopology(
   void options.reason;
   if (!sessionName) {
     herdrTopologyCache.clear();
+    herdrTopologyPending.clear();
     return;
   }
   const suffix = `|${sessionName.trim()}`;
-  for (const key of herdrTopologyCache.keys()) {
-    if (key.endsWith(suffix)) herdrTopologyCache.delete(key);
-  }
+  for (const key of herdrTopologyCache.keys()) if (key.endsWith(suffix)) herdrTopologyCache.delete(key);
+  for (const key of herdrTopologyPending.keys()) if (key.endsWith(suffix)) herdrTopologyPending.delete(key);
 }

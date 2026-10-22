@@ -10,7 +10,7 @@ const manifests = ["package.json", "apps/desktop/package.json", ...["agent-sessi
 test("dev bumps lockstep versions and workspace pack ranges, orders dev numerically and promotes to stable", () => {
   const fixture = mkdtempSync(join(tmpdir(), "scout-dev-bump."));
   try {
-    for (const file of [...manifests, "docs.json", "bun.lock", "apps/desktop/src/shared/product.ts", "scripts/bump-version.mjs", "scripts/prepare-publish-manifest.mjs", "scripts/restore-publish-manifest.mjs"]) {
+    for (const file of [...manifests, "docs.json", "bun.lock", "packages/cli/src/lib/shared/product.ts", "scripts/bump-version.mjs", "scripts/prepare-publish-manifest.mjs", "scripts/restore-publish-manifest.mjs"]) {
       mkdirSync(dirname(join(fixture, file)), { recursive: true });
       copyFileSync(new URL(`../${file}`, import.meta.url), join(fixture, file));
     }

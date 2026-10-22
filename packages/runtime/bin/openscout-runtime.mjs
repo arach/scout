@@ -38,14 +38,15 @@ const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const [, , command = "service", ...args] = process.argv;
 // Handle lifecycle help and validate arguments before importing or building any
 // entrypoint. Daemon modules start work as a top-level import side effect.
-const lifecycleCommands = new Set(["base", "broker", "service", "discover"]);
+const lifecycleCommands = new Set(["base", "broker", "service", "discover", "mesh-bridge-preflight"]);
 if (command === "--help" || command === "-h" || command === "help"
     || (lifecycleCommands.has(command) && args.some(arg => arg === "--help" || arg === "-h"))) {
-  console.log("Usage: openscout-runtime <base|broker|service|discover> [options]\n"
+  console.log("Usage: openscout-runtime <base|broker|service|discover|mesh-bridge-preflight> [options]\n"
     + "  base / broker        Run the daemon in the foreground (no flags).\n"
     + "  service [install|start|stop|restart|uninstall|status] [--json]\n"
     + "                       Manage the local broker service; default: status.\n"
     + "  discover [seed ...]  Discover mesh peers through the broker.\n"
+    + "  mesh-bridge-preflight [--json]  Read-only bridge cutover gate (JSON; exit 78 if blocked).\n"
     + "  --help, -h           Show help without starting or changing anything.");
   process.exit(0);
 }
@@ -55,6 +56,7 @@ if (lifecycleCommands.has(command)) {
     ? args.some(arg => arg.startsWith("-") && arg !== "--json")
       || positional.length > 1
       || (positional.length === 1 && !["install", "start", "stop", "restart", "uninstall", "status"].includes(positional[0]))
+    : command === "mesh-bridge-preflight" ? args.some(arg => arg !== "--json")
     : command === "discover" ? args.some(arg => arg.startsWith("-")) : args.length > 0;
   if (invalid) {
     console.error(`Unsupported arguments for openscout-runtime ${command}: ${args.join(" ")} (try --help)`);
@@ -62,6 +64,22 @@ if (lifecycleCommands.has(command)) {
   }
 }
 
+if (command === "mesh-bridge-preflight") {
+  // Never build, import a daemon or default a checkout to dev for this read.
+  const directory = typeof globalThis.Bun !== "undefined" ? sourceDir : distDir;
+  const suffix = typeof globalThis.Bun !== "undefined" ? "ts" : "js";
+  const entry = resolve(directory, `mesh-bridge-preflight.${suffix}`);
+  if (!existsSync(entry)) {
+    console.error("Missing mesh-bridge-preflight entry; install a runtime release containing the cutover gate.");
+    process.exit(78);
+  }
+  await import(pathToFileURL(resolve(directory, `instance-bootstrap.${suffix}`)).href);
+  const { inspectMeshBridgePreflight } = await import(pathToFileURL(entry).href);
+  const { resolveOpenScoutSupportPaths } = await import(pathToFileURL(resolve(directory, `support-paths.${suffix}`)).href);
+  const report = inspectMeshBridgePreflight({ supportDirectory: resolveOpenScoutSupportPaths().supportDirectory, env: process.env });
+  console.log(JSON.stringify(report, null, 2));
+  process.exit(report.ok ? 0 : 78);
+}
 
 if (!Object.hasOwn(sourceMain, command)) {
   // EX_CONFIG; consumed by scout-base without parsing human stderr.

@@ -149,7 +149,8 @@ finally { db.close(); other.close(); }
       const built = await Bun.build({ entrypoints: [entrypoint], outdir: directory, naming: "probe.mjs", target: "node" });
       expect(built.success).toBe(true);
       const child = Bun.spawn(["node", join(directory, "probe.mjs")], {
-        env: { ...process.env, OPENSCOUT_RUNTIME_HOST: "node" }, stdout: "pipe", stderr: "pipe",
+        // Timing diagnostics are unrelated to the strict transaction-error stderr canary.
+        env: { ...process.env, OPENSCOUT_RUNTIME_HOST: "node", OPENSCOUT_SLOW_DB_MS: "0" }, stdout: "pipe", stderr: "pipe",
       });
       const deadline = setTimeout(() => child.kill("SIGKILL"), 5_000);
       try {

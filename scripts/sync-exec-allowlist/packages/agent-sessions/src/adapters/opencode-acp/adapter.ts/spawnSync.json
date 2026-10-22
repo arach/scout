@@ -1,0 +1,7 @@
+{
+  "path": "packages/agent-sessions/src/adapters/opencode-acp/adapter.ts",
+  "symbol": "spawnSync",
+  "category": "imperative",
+  "reason": "local keychain secret lookup for OPENCODE_API_KEY, mirroring the pi-rpc secret-lookup imperative",
+  "owner": "agent-sessions"
+}

@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/mesh-bridge-preflight.test.ts",
+  "symbol": "Bun.spawn",
+  "category": "test",
+  "reason": "isolated read-only runtime preflight subprocess verifies JSON, exit status and no bridge execution",
+  "owner": "runtime"
+}

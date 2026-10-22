@@ -33,6 +33,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Install zsh for shell integration tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends zsh
+          zsh --version
+
       - name: Set up Node for CLI launcher tests
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
@@ -54,13 +60,8 @@ jobs:
         run: bun run check:presentation
 
       - name: Typecheck
-        run: |
-          bun run --cwd packages/protocol check
-          bun run --cwd packages/agent-sessions check
-          bun run --cwd packages/runtime check
-          bun run --cwd packages/session-trace check
-          bun run --cwd packages/session-trace-react check
-          bun run --cwd apps/desktop check
+        # Share the package list with the root check command.
+        run: bun run check:types
 
       - name: CLI launcher and package tests
         run: bun run test:cli

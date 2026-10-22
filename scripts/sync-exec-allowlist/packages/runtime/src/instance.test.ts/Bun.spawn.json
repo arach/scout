@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/instance.test.ts",
+  "symbol": "Bun.spawn",
+  "category": "test",
+  "reason": "claims ledger blocks from concurrent processes to prove the lock",
+  "owner": "runtime"
+}

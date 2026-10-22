@@ -1,0 +1,11 @@
+{
+  "path": "packages/runtime/src/supervision-handoff/darwin-process-source.ts",
+  "symbol": "dlopen",
+  "category": "dlopen",
+  "libraryPaths": [
+    "/usr/lib/libproc.dylib",
+    "/usr/lib/libSystem.B.dylib"
+  ],
+  "reason": "lazy read-only Darwin process/boot sampling from fixed system libraries; no process effects",
+  "owner": "runtime"
+}

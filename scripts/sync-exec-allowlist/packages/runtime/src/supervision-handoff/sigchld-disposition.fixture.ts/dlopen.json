@@ -1,0 +1,10 @@
+{
+  "path": "packages/runtime/src/supervision-handoff/sigchld-disposition.fixture.ts",
+  "symbol": "dlopen",
+  "category": "dlopen",
+  "libraryPaths": [
+    "/usr/lib/libSystem.B.dylib"
+  ],
+  "reason": "test-only setter runs inside an owned isolated child and changes no test-runner or installed-service disposition",
+  "owner": "runtime"
+}

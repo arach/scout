@@ -43,6 +43,8 @@ type PairingBridgeSession = {
   model?: string;
   providerMeta?: Record<string, unknown>;
   adapterBacked?: boolean;
+  /** Synthetic response for a non-adapter fixture; never invokes a harness. */
+  response?: string;
   adapterOptions?: Record<string, unknown>;
 };
 
@@ -152,6 +154,41 @@ function directConversationIdForActors(sourceId: string, targetId: string): stri
   return `dm.${[sourceId, targetId].sort().join(".")}`;
 }
 
+/** Listener health is recovery-safe, not permission to mutate. Keep the
+ * existing six-second startup budget and wait for the advertised capability. */
+export async function waitForScenarioMutationReady(baseUrl: string, deps: {
+  fetch?: typeof fetch;
+  sleep?: (ms: number) => Promise<unknown>;
+  now?: () => number;
+} = {}): Promise<void> {
+  const read = deps.fetch ?? fetch;
+  const sleep = deps.sleep ?? Bun.sleep;
+  const now = deps.now ?? Date.now;
+  const deadline = now() + 6_000;
+  let lastError: unknown;
+  while (now() < deadline) {
+    try {
+      const response = await read(`${baseUrl}/health`, {
+        signal: AbortSignal.timeout(Math.max(1, Math.min(1_000, deadline - now()))),
+      });
+      if (response.ok) {
+        const health = await response.json() as {
+          ok?: boolean;
+          startup?: { state?: string; mutationsAdmitted?: boolean; phase?: string };
+        };
+        if (health?.ok === true && health.startup?.state === "ready" && health.startup.mutationsAdmitted === true) return;
+        lastError = new Error(`broker mutations not ready: ${health?.startup?.state ?? "missing startup"}/${health?.startup?.phase ?? "unknown phase"}`);
+      } else {
+        lastError = new Error(`health returned ${response.status}`);
+      }
+    } catch (error) {
+      lastError = error;
+    }
+    if (now() < deadline) await sleep(Math.min(100, deadline - now()));
+  }
+  throw new Error("broker did not admit mutations within 6000ms", { cause: lastError });
+}
+
 export class RuntimeScenarioHarness {
   private readonly brokers = new Set<ScenarioBroker>();
   private readonly servers = new Set<ReturnType<typeof Bun.serve>>();
@@ -192,11 +229,14 @@ export class RuntimeScenarioHarness {
     const baseUrl = buildDefaultBrokerUrl(DEFAULT_BROKER_HOST, port);
     const derivedNodeId = `node-${basename(controlHome).toLowerCase().replace(/[^a-z0-9-]+/g, "-")}`;
     const child = Bun.spawn({
-      cmd: ["bun", "run", "src/broker-daemon.ts"],
+      cmd: [process.execPath, "run", "src/broker-daemon.ts"],
       cwd: runtimeDir,
       env: {
         ...process.env,
         OPENSCOUT_CONTROL_HOME: controlHome,
+        // NODE_ENV=test is inherited by the real daemon. Its user-data guard
+        // requires this explicit redirect even when HOME is already temporary.
+        OPENSCOUT_SUPPORT_DIRECTORY: join(controlHome, "support"),
         OPENSCOUT_BROKER_HOST: DEFAULT_BROKER_HOST,
         OPENSCOUT_BROKER_PORT: String(port),
         OPENSCOUT_BROKER_URL: baseUrl,
@@ -217,10 +257,12 @@ export class RuntimeScenarioHarness {
       stderr: "pipe",
     });
 
-    await this.waitForHealth(baseUrl);
-    const node = await this.get<NodeDefinition>(baseUrl, "/v1/node");
-    const broker = { baseUrl, controlHome, nodeId: node.id, child };
+    // Retain cleanup custody even if readiness fails before startBroker returns.
+    const broker = { baseUrl, controlHome, nodeId: derivedNodeId, child };
     this.brokers.add(broker);
+    await waitForScenarioMutationReady(baseUrl);
+    const node = await this.get<NodeDefinition>(baseUrl, "/v1/node");
+    broker.nodeId = node.id;
     return broker;
   }
 
@@ -290,7 +332,9 @@ export class RuntimeScenarioHarness {
 
     const server = Bun.serve({
       port: 0,
+      hostname: "127.0.0.1",
       fetch(request, upgradedServer) {
+        if (new URL(request.url).pathname === "/health") return Response.json({ mode: "plaintext" });
         if (upgradedServer.upgrade(request)) {
           return undefined;
         }
@@ -378,7 +422,7 @@ export class RuntimeScenarioHarness {
                         type: "text",
                         status: "completed",
                         index: 0,
-                        text: `Echo: ${text}`,
+                        text: input.sessions.find(session => session.id === sessionId)?.response ?? `Echo: ${text}`,
                       },
                     },
                   ],
@@ -471,7 +515,7 @@ export class RuntimeScenarioHarness {
     this.tempRoots.add(home);
     const pairingRoot = join(home, ".scout", "pairing");
     mkdirSync(pairingRoot, { recursive: true });
-    writeFileSync(join(pairingRoot, "config.json"), JSON.stringify({ port }), "utf8");
+    writeFileSync(join(pairingRoot, "config.json"), JSON.stringify({ port, secure: false }), "utf8");
     writeFileSync(join(pairingRoot, "runtime.json"), JSON.stringify({ status: "paired" }), "utf8");
     return home;
   }
@@ -764,22 +808,7 @@ export class RuntimeScenarioHarness {
     throw new Error(`waitFor timed out after ${timeoutMs}ms.`);
   }
 
-  private async waitForHealth(baseUrl: string): Promise<void> {
-    let lastError: unknown;
-    for (let attempt = 0; attempt < 60; attempt += 1) {
-      try {
-        const response = await fetch(`${baseUrl}/health`);
-        if (response.ok) {
-          return;
-        }
-        lastError = new Error(`health returned ${response.status}`);
-      } catch (error) {
-        lastError = error;
-      }
-      await Bun.sleep(100);
-    }
-    throw lastError ?? new Error("broker did not become healthy");
-  }
+
 }
 
 export function runtimeScenario(

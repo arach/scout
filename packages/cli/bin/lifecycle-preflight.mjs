@@ -212,7 +212,30 @@ export function parseAppCommand(args) {
 }
 
 
-export const UP_HELP = "Usage: scout up <name|path> [--name <alias>] [--harness <harness>] [--provider <provider>] [--model <model>] [--reasoning-effort <effort>] [--permission-profile <profile>]\nStart a local agent.";
+export const UP_HELP = "Usage: scout up <name|path> [--name <alias>] [--harness <harness>] [--provider <provider>] [--model <model>] [--reasoning-effort <effort>] [--permission-profile <profile>]\nStart a local agent.\nAlias: --effort <effort> = --reasoning-effort <effort>.";
+export const NODE_DOCTOR_HELP = [
+  "Usage: scout doctor [--json] [--context-root <path>] [--fix [--yes]]",
+  "", "Node headless CLI:",
+  "Inspect the headless broker and harness readiness.",
+  "--json    One headless report JSON object (not Bun's v1 NDJSON stream).",
+  "--fix     Repair is not run by the Node headless CLI; use Bun or service help.",
+  "--yes     Requires --fix.",
+  "--detail  Available only in the Bun CLI.",
+  "--help    Show this help without checking or maintaining services.",
+].join("\n");
+
+export const DOCTOR_HELP = [
+    "Usage: scout doctor [--detail | --json] [--context-root <path>] [--fix [--yes]]",
+    "", "Bun CLI:", "Default: concise checks as they finish, with a 6-second deadline per check.",
+    "FAIL means observed impairment; ? means inconclusive, not confirmed failure.",
+    "--detail  Full legacy report, including project inventory and internal paths.",
+    "--json    Compatible scout.doctor.v1 NDJSON stream; ends with phase complete.",
+    "Detail and v1 JSON retain the legacy full-scan wait behavior.",
+    "--fix     Explicit native repair request; uses the full legacy report.",
+    "--yes     Non-interactive confirmation for --fix.",
+    "--help    Show this help without checking or maintaining services.",
+  ].join("\n") + "\n\n" + NODE_DOCTOR_HELP;
+
 export const SETUP_HELP = "Usage: scout setup [--source-root <path>] [--default-harness <name>] [--context-root <path>] [--json]\n\nConfigure project discovery and install/start the local broker.\nRepeat --source-root to add workspace roots. Prompts for a root in an interactive terminal.\nUse scout doctor to inspect readiness without requesting setup." + "\n\n" + QUICK_LINKS;
 
 function flagValue(args, index, flag) {
@@ -277,6 +300,7 @@ export const INSTALL_HELP = [
   "  scout install --version <tag> # install a specific release (e.g. v0.2.70)",
   "  scout install --force         # reinstall even if already up to date",
   "  scout install --no-restart    # do not relaunch Scout after installing",
+  "  Aliases: -f = --force; --tag <tag> = --version <tag>",
   "  scout install --candidate <receipt.json> --dmg <file> # explicit local signed candidate",
   "",
   "Behavior:",
@@ -297,11 +321,19 @@ export const INSTALL_HELP = [
 ].join("\n");
 
 // Return help or validate the complete lexical grammar before service maintenance.
-export function preflightLifecycle(argv, currentDirectory = process.cwd()) {
-  const input = parseScoutArgv(argv);
+export function preflightLifecycle(argv, currentDirectory = process.cwd(), { runtimeHost = "auto" } = {}) {
+  const input = parseScoutArgv(extractInstanceFlag(argv).argv);
   if (input.versionRequested) return null;
   let { command, args } = input;
   if (command === "relay") { command = args[0] ?? null; args = args.slice(1); }
+  if (command === "doctor" && (input.helpRequested || args.includes("--help") || args.includes("-h"))) {
+    // Bun/launcher JSON help stays with the declarative registry. Node's
+    // headless entry has no structured-help surface; return its honest text.
+    if (input.outputMode === "json" && runtimeHost !== "node") return null;
+    return runtimeHost === "node" ? NODE_DOCTOR_HELP : DOCTOR_HELP;
+  }
+  // Structured help comes from the command registry, never a lifecycle handler.
+  if (input.outputMode === "json" && input.helpRequested) return null;
   // Installation help is also available before Bun or a runtime bundle exists.
   // Actual install parsing and execution stay with the install command handler.
   if (command === "install" && (input.helpRequested || args.some(arg => ["help", "--help", "-h"].includes(arg)))) return INSTALL_HELP;

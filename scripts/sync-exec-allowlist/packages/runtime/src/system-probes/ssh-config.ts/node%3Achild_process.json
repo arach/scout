@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/system-probes/ssh-config.ts",
+  "symbol": "node:child_process",
+  "category": "probe-exec",
+  "reason": "async `ssh -G` config read with a 3s timeout; no sync exec",
+  "owner": "runtime"
+}

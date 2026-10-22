@@ -1,4 +1,4 @@
-import { isOpaqueChannelId, type CollaborationEvent, type CollaborationKind } from "@openscout/protocol";
+import { isOpaqueChannelId, type TmuxHostAttentionRead, type CollaborationEvent, type CollaborationKind } from "@openscout/protocol";
 import { getScoutWebPairingSessionSnapshots, type ScoutPairingState } from "../../pairing.ts";
 import { queryAgents, queryBrokerAttentionHints, queryFleet } from "../../db-queries.ts";
 import { queryAgentIdsByEndpointSessionId } from "../../db/agents.ts";
@@ -56,6 +56,7 @@ export type TmuxPaneCapture = NonNullable<CreateOpenScoutWebServerOptions["captu
 export type AgentAttentionSnapshot = {
   index: Map<string, AgentAttentionEntry>;
   hostItems: TmuxHostAttentionItem[];
+  tmuxRead: TmuxHostAttentionRead | null;
 };
 
 export let agentAttentionCache: {
@@ -162,7 +163,7 @@ export async function buildAgentAttentionIndexSnapshot(
     for (const agent of brokerAgents) {
       candidatesById.set(agent.id, mergeBrokerAgentProjection(candidatesById.get(agent.id) ?? agent, agent));
     }
-    const tmuxItems = await collectTmuxHostAttention(
+    const tmux = await collectTmuxHostAttention(
       [...candidatesById.values()],
       async (agent, paneTarget) => {
         const terminal = agent.terminalSurface;
@@ -175,8 +176,9 @@ export async function buildAgentAttentionIndexSnapshot(
           lines: 80,
           columns: 240,
         });
-        return result?.body ?? null;
+        return result ?? null;
       },
+      { nodeId: broker?.node.id ?? process.env.OPENSCOUT_NODE_ID?.trim() ?? null },
     );
     const herdr = activeHerdrContinuation;
     const herdrItems = herdr
@@ -185,9 +187,10 @@ export async function buildAgentAttentionIndexSnapshot(
         agents: [...candidatesById.values()],
       }).catch(() => [])
       : [];
-    const hostItems: TmuxHostAttentionItem[] = [...tmuxItems, ...herdrItems];
+    const hostItems: TmuxHostAttentionItem[] = [...tmux.items, ...herdrItems];
     const snapshot = {
       hostItems,
+      tmuxRead: tmux.read,
       index: buildAgentAttentionIndex({
         sessionItems,
         agentIdBySessionId,
@@ -211,6 +214,7 @@ export async function buildAgentAttentionIndexSnapshot(
     return {
       index: new Map<string, AgentAttentionEntry>(),
       hostItems: [],
+      tmuxRead: null,
     };
   }
 }
@@ -691,6 +695,7 @@ export async function buildOperatorAttentionState(
   const deduped = dedupeAttentionItems(items);
   return {
     generatedAt: Date.now(),
+    tmuxHostAttention: hostAttention.tmuxRead,
     totals: {
       all: deduped.length,
       approvals: deduped.filter((item) => item.kind === "approval").length,

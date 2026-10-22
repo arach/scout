@@ -169,7 +169,7 @@ Runtime tails harness output → **observed events** (SCO-042). Those feed UI/st
 | Broker session routing | `packages/runtime` broker layer |
 | Harness adapters | `@openscout/agent-sessions` |
 | Pairing bridge sessions | `**/pairing/runtime/bridge/**` |
-| CLI session commands | `packages/cli`, `apps/desktop/src/cli` |
+| CLI session commands | `packages/cli`, `packages/cli/src/cli` |
 
 ## Verification
 

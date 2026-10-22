@@ -1,0 +1,7 @@
+{
+  "path": "packages/web/server/routes/world.ts",
+  "symbol": "node:child_process",
+  "category": "imperative",
+  "reason": "async /usr/bin/open for an operator's open or reveal action, 5s timeout",
+  "owner": "web"
+}

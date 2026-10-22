@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/system-probes.test.ts",
+  "symbol": "execFileSync",
+  "category": "test",
+  "reason": "git fixture setup for probe tests",
+  "owner": "tests"
+}

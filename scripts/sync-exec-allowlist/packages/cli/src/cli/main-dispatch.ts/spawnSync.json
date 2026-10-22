@@ -1,0 +1,7 @@
+{
+  "path": "packages/cli/src/cli/main-dispatch.ts",
+  "symbol": "spawnSync",
+  "category": "cli",
+  "reason": "desktop CLI launchctl/scout discovery one-shots",
+  "owner": "desktop"
+}

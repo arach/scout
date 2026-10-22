@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/supervision-handoff/contract.test.ts",
+  "symbol": "Bun.spawn",
+  "category": "test",
+  "reason": "isolated custody-lock crash fixtures own and await their exact child handles; no installed runtime or app entrypoint is executed",
+  "owner": "runtime"
+}

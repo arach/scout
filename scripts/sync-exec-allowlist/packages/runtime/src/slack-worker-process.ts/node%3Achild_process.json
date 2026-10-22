@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/slack-worker-process.ts",
+  "symbol": "node:child_process",
+  "category": "process-lifecycle",
+  "reason": "bounded asynchronous credential-verification child with explicit timeout and process-group cleanup",
+  "owner": "runtime"
+}

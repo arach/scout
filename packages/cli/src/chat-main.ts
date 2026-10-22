@@ -1,7 +1,7 @@
 import { basename } from "node:path";
-import { parseScoutArgv } from "../../../apps/desktop/src/cli/argv.ts";
-import { createScoutCommandContext } from "../../../apps/desktop/src/cli/context.ts";
-import { runChatCommand } from "../../../apps/desktop/src/cli/commands/chat.ts";
+import { parseScoutArgv } from "./cli/argv.ts";
+import { createScoutCommandContext } from "./cli/context.ts";
+import { runChatCommand } from "./cli/commands/chat.ts";
 
 const standaloneAlias = basename(process.argv[1] ?? "") === "scout-chat";
 const input = parseScoutArgv([...(standaloneAlias ? ["chat"] : []), ...process.argv.slice(2)]);

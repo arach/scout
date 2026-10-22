@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/tailscale.test.ts",
+  "symbol": "spawnSync",
+  "category": "test",
+  "reason": "subprocess fixture",
+  "owner": "tests"
+}

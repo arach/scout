@@ -55,3 +55,28 @@ test("quarantine is local, bounded, and distinguishes storage errors from missin
   expect((await call("/v1/quarantine/%zz", queries)).status).toBe(400);
   expect((await call("/v1/unrelated", queries)).handled).toBe(false);
 });
+
+test("inventory-friendly dispatch preserves namespace, method and denial precedence", async () => {
+  const id = `quarantine-${"f".repeat(64)}`;
+  const queries: BrokerQuarantineQueries = { status: () => ({ openCount: 0, acknowledgedCount: 0, samples: [] }),
+    list: () => [], read: () => null, acknowledge: () => null };
+  const paths = ["/v1/unrelated", "/v1/quarantine-extra", "/v1/quarantine", `/v1/quarantine/${id}`,
+    `/v1/quarantine/${id}/acknowledge`, "/v1/quarantine/", `/v1/quarantine/${id}/other`];
+  for (const method of [undefined, "GET", "POST", "HEAD", "DELETE"]) {
+    for (const remote of [false, true]) {
+      for (const available of [false, true]) {
+        for (const path of paths) {
+          let status = 0;
+          const handled = await handleBrokerQuarantineRoute({ method, ...(remote ? { transportContext: { transport: "remote" } } : {}) } as never,
+            {} as never, new URL(path, "http://localhost"), available ? queries : undefined, (_res, code) => { status = code; });
+          const inNamespace = path === "/v1/quarantine" || path.startsWith("/v1/quarantine/");
+          const known = path === "/v1/quarantine" || path === `/v1/quarantine/${id}` || path === `/v1/quarantine/${id}/acknowledge`;
+          const supported = (method ?? "GET") === (path.endsWith("/acknowledge") ? "POST" : "GET");
+          const expected = !inNamespace ? 0 : remote ? 403 : !known ? 404 : !supported ? 405 : !available ? 503 : path === "/v1/quarantine" ? 200 : 404;
+          expect({ handled, status }, `${method} ${path} remote=${remote} available=${available}`)
+            .toEqual({ handled: expected !== 0, status: expected });
+        }
+      }
+    }
+  }
+});

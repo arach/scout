@@ -1,1 +1,1 @@
-export * from "./service.ts";
+export * from "../../../../../packages/cli/src/lib/core/agents/service.ts";

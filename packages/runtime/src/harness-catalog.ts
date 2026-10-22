@@ -1,11 +1,11 @@
 import type { RuntimeEnv, RuntimePlatform } from "./portable-types.js";
-import { execFileSync } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { accessSync, constants, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 
-import { resolveCodexExecutableCandidateInputs, resolveCodexExecutableInventory, type CodexExecutableCandidate } from "@openscout/agent-sessions/codex-executable";
+import { resolveCodexExecutableCandidateInputs, resolveCodexExecutableInventory, resolveCodexExecutableInventoryAsync, type CodexExecutableCandidate, type CodexExecutableInventory } from "@openscout/agent-sessions/codex-executable";
 import { harnessAuthModel } from "@openscout/agent-sessions/auth";
 import type { AgentCapability, AgentHarness } from "@openscout/protocol";
 
@@ -156,6 +156,15 @@ export type HarnessCatalogLoadOptions = {
    * readiness rests on a skipped healthcheck reports `configured`, not ready.
    */
   localOnly?: boolean;
+};
+
+/** Async callback additions do not change the synchronous evaluator's contract.
+ * Supplied synchronous callbacks still run on the caller's event loop.
+ */
+export type HarnessCatalogAsyncLoadOptions = Omit<HarnessCatalogLoadOptions, "whichBinary" | "runCommand"> & {
+  whichBinary?: (binary: string, context?: { signal?: AbortSignal }) => string | null | Promise<string | null>;
+  runCommand?: (command: string, context?: { signal?: AbortSignal }) => boolean | Promise<boolean>;
+  signal?: AbortSignal;
 };
 
 const DEFAULT_SUPPORT: HarnessCatalogSupport = {
@@ -930,10 +939,7 @@ export function mergeHarnessCatalogEntries(
   });
 }
 
-export function evaluateHarnessReadiness(
-  entry: HarnessCatalogEntry,
-  options: HarnessCatalogLoadOptions = {},
-): HarnessReadinessReport {
+function readinessInputs(options: HarnessCatalogLoadOptions) {
   const platform = options.platform ?? process.platform;
   const env = options.env ?? process.env;
   const executableExists = options.executableExists ?? ((path: string) => executableFileExists(path, platform));
@@ -943,36 +949,16 @@ export function evaluateHarnessReadiness(
     ? localBinaryPath(binary, env, platform, executableExists, systemDirectories)
     : defaultWhichBinary(binary, platform));
   const requirementExists = options.requirementExists ?? defaultRequirementExists;
-  const runCommand = options.runCommand ?? ((command: string) => defaultRunCommand(command, platform));
 
-  const binary = entry.install?.binary;
-  const codexInventory = entry.name === "codex" && !options.whichBinary && !options.localOnly
-    ? resolveCodexExecutableInventory(env)
-    : null;
-  // Presence is not execution resolution: onboarding never version-ranks or
-  // starts Codex. The task-launch resolver retains its existing policy.
-  const localCodex = entry.name === "codex" && !options.whichBinary && options.localOnly
-    ? [...resolveCodexExecutableCandidateInputs(env), ...systemDirectories.map((directory) => ({ path: join(directory, "codex"), source: "path" as const }))].find((candidate) =>
-      candidate.source !== "fallback" && candidate.path !== "codex" && executableExists(candidate.path))
-    : null;
-  const windowsCodexPath = !localCodex && entry.name === "codex" && !options.whichBinary && options.localOnly && platform === "win32"
-    ? localBinaryPath("codex", env, platform, executableExists, systemDirectories) : null;
-  const binaryPath = codexInventory
-    ? (codexInventory.selected && (codexInventory.selected.source !== "fallback" || codexInventory.selected.versionRaw)
-      ? codexInventory.selectedPath : null)
-    : entry.name === "codex" && !options.whichBinary && options.localOnly
-      ? localCodex?.path ?? windowsCodexPath
-      : (binary ? whichBinary(binary) : null);
-  const verifyCommand = options.localOnly
-    ? undefined
-    : platform === "win32"
-      ? entry.install?.verifyWin ?? entry.install?.verify
-      : entry.install?.verify;
-  const verifiedInstall = verifyCommand ? runCommand(verifyCommand) : null;
-  const installed = binary
-    ? Boolean(binaryPath || verifiedInstall)
-    : verifiedInstall ?? true;
+  return { platform, env, whichBinary, requirementExists, executableExists, systemDirectories };
+}
 
+function readinessConfiguration(
+  entry: HarnessCatalogEntry,
+  installed: boolean,
+  env: RuntimeEnv,
+  requirementExists: NonNullable<HarnessCatalogLoadOptions["requirementExists"]>,
+) {
   const missing: string[] = [];
   const readiness = entry.readiness;
 
@@ -992,15 +978,25 @@ export function evaluateHarnessReadiness(
   }
 
   const configured = installed && missing.length === 0;
-  // Local-only mode skips the healthcheck, so a harness that depends on one
-  // (Cursor: `cursor-agent status`, no local credential signal) stays
-  // unverified. Skipping the check must never read as passing it.
-  const unverified = Boolean(configured && readiness?.healthcheckCommand && options.localOnly);
-  const healthcheckPassed = configured && readiness?.healthcheckCommand
-    ? (options.localOnly ? false : runCommand(readiness.healthcheckCommand))
-    : configured;
-  const ready = configured && healthcheckPassed;
+  return { missing, configured };
+}
 
+/** Pure report projection shared by the sync and async command paths. */
+function readinessReport(
+  entry: HarnessCatalogEntry,
+  binaryPath: string | null,
+  installed: boolean,
+  configuration: ReturnType<typeof readinessConfiguration>,
+  ready: boolean,
+  localOnly: boolean | undefined,
+  codexInventory: CodexExecutableInventory | null,
+  localCodex: { source: string } | null | undefined,
+  windowsCodexPath: string | null,
+): HarnessReadinessReport {
+  const { missing, configured } = configuration;
+  const binary = entry.install?.binary;
+  const readiness = entry.readiness;
+  const unverified = Boolean(configured && readiness?.healthcheckCommand && localOnly);
   let state: HarnessReadinessState;
   let detail: string;
 
@@ -1041,6 +1037,132 @@ export function evaluateHarnessReadiness(
   };
 }
 
+export function evaluateHarnessReadiness(
+  entry: HarnessCatalogEntry,
+  options: HarnessCatalogLoadOptions = {},
+): HarnessReadinessReport {
+  const { platform, env, whichBinary, requirementExists, executableExists, systemDirectories } = readinessInputs(options);
+  const runCommand = options.runCommand ?? ((command: string) => defaultRunCommand(command, platform));
+  const binary = entry.install?.binary;
+  const codexInventory = entry.name === "codex" && !options.whichBinary && !options.localOnly
+    ? resolveCodexExecutableInventory(env)
+    : null;
+  // Presence is not execution resolution: onboarding never version-ranks or
+  // starts Codex. The task-launch resolver retains its existing policy.
+  const localCodex = entry.name === "codex" && !options.whichBinary && options.localOnly
+    ? [...resolveCodexExecutableCandidateInputs(env), ...systemDirectories.map((directory) => ({ path: join(directory, "codex"), source: "path" as const }))].find((candidate) =>
+      candidate.source !== "fallback" && candidate.path !== "codex" && executableExists(candidate.path))
+    : null;
+  const windowsCodexPath = !localCodex && entry.name === "codex" && !options.whichBinary && options.localOnly && platform === "win32"
+    ? localBinaryPath("codex", env, platform, executableExists, systemDirectories) : null;
+  const binaryPath = codexInventory
+    ? (codexInventory.selected && (codexInventory.selected.source !== "fallback" || codexInventory.selected.versionRaw)
+      ? codexInventory.selectedPath : null)
+    : entry.name === "codex" && !options.whichBinary && options.localOnly
+      ? localCodex?.path ?? windowsCodexPath
+      : (binary ? whichBinary(binary) : null);
+  const verifyCommand = options.localOnly
+    ? undefined
+    : platform === "win32"
+      ? entry.install?.verifyWin ?? entry.install?.verify
+      : entry.install?.verify;
+  const verifiedInstall = verifyCommand ? runCommand(verifyCommand) : null;
+  const installed = binary
+    ? Boolean(binaryPath || verifiedInstall)
+    : verifiedInstall ?? true;
+
+  const configuration = readinessConfiguration(entry, installed, env, requirementExists);
+  const { configured } = configuration;
+  const readiness = entry.readiness;
+  const healthcheckPassed = configured && readiness?.healthcheckCommand
+    ? (options.localOnly ? false : runCommand(readiness.healthcheckCommand))
+    : configured;
+  const ready = configured && healthcheckPassed;
+
+  return readinessReport(entry, binaryPath, installed, configuration, ready, options.localOnly, codexInventory, localCodex, windowsCodexPath);
+}
+
+function execCatalogFile(
+  command: string, args: string[], env: RuntimeEnv, capture: boolean, signal?: AbortSignal,
+): Promise<string | null> {
+  signal?.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { env, stdio: ["ignore", capture ? "pipe" : "ignore", "ignore"], signal });
+    const chunks: Buffer[] = [];
+    let failed = false;
+    let size = 0;
+    child.stdout?.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      // Preserve the sync lookup's default stdout budget, not a new cap.
+      if (size > 1024 * 1024) { failed = true; child.kill(); }
+      else chunks.push(chunk);
+    });
+    child.once("error", () => { failed = true; });
+    child.once("close", (code) => {
+      if (signal?.aborted) { reject(signal.reason); return; }
+      resolve(failed || code !== 0 ? null : Buffer.concat(chunks).toString("utf8"));
+    });
+  });
+}
+
+export async function evaluateHarnessReadinessAsync(
+  entry: HarnessCatalogEntry,
+  options: HarnessCatalogAsyncLoadOptions = {},
+): Promise<HarnessReadinessReport> {
+  return evaluateReadinessAsync(entry, { ...options, env: { ...(options.env ?? process.env) } }, { ...process.env });
+}
+
+async function evaluateReadinessAsync(
+  entry: HarnessCatalogEntry,
+  options: HarnessCatalogAsyncLoadOptions,
+  commandEnv: RuntimeEnv,
+): Promise<HarnessReadinessReport> {
+  const signal = options.signal;
+  signal?.throwIfAborted();
+  entry = structuredClone(entry);
+  const env = options.env!;
+  const platform = options.platform ?? process.platform;
+  // Prepare filesystem callbacks only; never call the sync lookup closure.
+  const inputs = readinessInputs({ ...options, env, whichBinary: options.whichBinary ? () => null : undefined, runCommand: undefined });
+  const { executableExists, requirementExists } = inputs;
+  const systemDirectories = options.localOnly && !options.whichBinary ? inputs.systemDirectories : [];
+  const whichBinary = options.whichBinary ?? (async (binary: string) => {
+    if (options.localOnly) return localBinaryPath(binary, env, platform, executableExists, systemDirectories);
+    const raw = await execCatalogFile(platform === "win32" ? "where" : "sh",
+      platform === "win32" ? [binary] : ["-lc", `command -v ${JSON.stringify(binary)}`], commandEnv, true, signal);
+    return raw?.trim().split(/\r?\n/).find(Boolean) ?? null;
+  });
+  const runCommand = options.runCommand ?? (async (command: string) =>
+    (await execCatalogFile(platform === "win32" ? "cmd.exe" : "sh",
+      platform === "win32" ? ["/d", "/s", "/c", command] : ["-lc", command], commandEnv, false, signal)) !== null);
+  const codexInventory = entry.name === "codex" && !options.whichBinary && !options.localOnly
+    ? await resolveCodexExecutableInventoryAsync(env, { signal }) : null;
+  signal?.throwIfAborted();
+  const localCodex = entry.name === "codex" && !options.whichBinary && options.localOnly
+    ? [...resolveCodexExecutableCandidateInputs(env), ...systemDirectories.map((directory) => ({ path: join(directory, "codex"), source: "path" as const }))].find((candidate) =>
+      candidate.source !== "fallback" && candidate.path !== "codex" && executableExists(candidate.path)) : null;
+  const windowsCodexPath = !localCodex && entry.name === "codex" && !options.whichBinary && options.localOnly && platform === "win32"
+    ? localBinaryPath("codex", env, platform, executableExists, systemDirectories) : null;
+  const binary = entry.install?.binary;
+  const binaryPath = codexInventory
+    ? (codexInventory.selected && (codexInventory.selected.source !== "fallback" || codexInventory.selected.versionRaw)
+      ? codexInventory.selectedPath : null)
+    : entry.name === "codex" && !options.whichBinary && options.localOnly
+      ? localCodex?.path ?? windowsCodexPath : (binary ? await whichBinary(binary, { signal }) : null);
+  signal?.throwIfAborted();
+  const verifyCommand = options.localOnly ? undefined
+    : platform === "win32" ? entry.install?.verifyWin ?? entry.install?.verify : entry.install?.verify;
+  const verifiedInstall = verifyCommand ? await runCommand(verifyCommand, { signal }) : null;
+  signal?.throwIfAborted();
+  const installed = binary ? Boolean(binaryPath || verifiedInstall) : verifiedInstall ?? true;
+  const configuration = readinessConfiguration(entry, installed, env, requirementExists);
+  const ready = configuration.configured && entry.readiness?.healthcheckCommand
+    ? (options.localOnly ? false : await runCommand(entry.readiness.healthcheckCommand, { signal }))
+    : configuration.configured;
+  signal?.throwIfAborted();
+  return readinessReport(entry, binaryPath, installed, configuration, ready, options.localOnly, codexInventory, localCodex, windowsCodexPath);
+}
+
 export async function readHarnessCatalogOverrides(
   overridePath = resolveOpenScoutSupportPaths().harnessCatalogPath,
 ): Promise<Record<string, HarnessCatalogOverride>> {
@@ -1072,20 +1194,24 @@ export async function ensureHarnessCatalogOverrideFile(
   await writeHarnessCatalogOverrides({}, overridePath);
 }
 
+export function loadHarnessCatalogSnapshot(options?: HarnessCatalogLoadOptions): Promise<HarnessCatalogSnapshot>;
+export function loadHarnessCatalogSnapshot(options?: HarnessCatalogAsyncLoadOptions): Promise<HarnessCatalogSnapshot>;
 export async function loadHarnessCatalogSnapshot(
-  options: HarnessCatalogLoadOptions = {},
+  options: HarnessCatalogAsyncLoadOptions = {},
 ): Promise<HarnessCatalogSnapshot> {
+  const commandEnv = { ...process.env };
+  options = { ...options, env: { ...(options.env ?? process.env) } };
+  options.signal?.throwIfAborted();
   const overrides = await readHarnessCatalogOverrides(options.overridePath);
-  const entries = mergeHarnessCatalogEntries(createBuiltInHarnessCatalog(), overrides)
-    .map((entry) => {
-      const source: ResolvedHarnessCatalogEntry["source"] = overrides[entry.name] ? "local" : "builtin";
-      return {
-        ...entry,
-        source,
-        readinessReport: evaluateHarnessReadiness(entry, options),
-      };
+  options.signal?.throwIfAborted();
+  const entries: ResolvedHarnessCatalogEntry[] = [];
+  for (const entry of mergeHarnessCatalogEntries(createBuiltInHarnessCatalog(), overrides)) {
+    entries.push({
+      ...entry,
+      source: overrides[entry.name] ? "local" : "builtin",
+      readinessReport: await evaluateReadinessAsync(entry, options, commandEnv),
     });
-
+  }
   return {
     version: HARNESS_CATALOG_VERSION,
     generatedAt: (options.now ?? Date.now)(),

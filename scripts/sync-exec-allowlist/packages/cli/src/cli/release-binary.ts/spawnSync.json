@@ -1,0 +1,7 @@
+{
+  "path": "packages/cli/src/cli/release-binary.ts",
+  "symbol": "spawnSync",
+  "category": "cli",
+  "reason": "one-shot tar extract of a sha256-verified release download (scout tui first run / scout tui install)",
+  "owner": "desktop"
+}

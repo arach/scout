@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/broker-journal-framing.test.ts",
+  "symbol": "Bun.spawn",
+  "category": "test",
+  "reason": "crash-recovery fixture runs a child that SIGKILLs itself mid-append",
+  "owner": "tests"
+}

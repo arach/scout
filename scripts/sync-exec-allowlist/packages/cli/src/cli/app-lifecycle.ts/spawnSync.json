@@ -1,0 +1,7 @@
+{
+  "path": "packages/cli/src/cli/app-lifecycle.ts",
+  "symbol": "spawnSync",
+  "category": "process-lifecycle",
+  "reason": "owns the app/service ownership model: one-shot ps process-table reads and launchctl bootout/bootstrap/kickstart, which must be ordered and observed synchronously",
+  "owner": "desktop"
+}

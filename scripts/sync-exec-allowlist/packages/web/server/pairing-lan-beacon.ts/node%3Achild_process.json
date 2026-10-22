@@ -1,0 +1,7 @@
+{
+  "path": "packages/web/server/pairing-lan-beacon.ts",
+  "symbol": "node:child_process",
+  "category": "process-lifecycle",
+  "reason": "owns dns-sd LAN discovery advertisement lifecycle",
+  "owner": "web"
+}

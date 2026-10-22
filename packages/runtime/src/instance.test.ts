@@ -364,20 +364,30 @@ describe("source checkout defaults", () => {
   test("an explicit instance always wins; outside a checkout nothing changes", () => {
     const main = makeCheckout("main", "openscout");
     const moduleDir = join(main, "packages", "runtime", "src");
+    const home = join(main, "..", "home");
+    const outside = join(main, "..", "outside");
+    mkdirSync(outside);
     try {
       const unset: Record<string, string | undefined> = {};
-      expect(applyCheckoutOpenScoutInstanceDefault(moduleDir, unset)).toBe("dev");
+      expect(applyCheckoutOpenScoutInstanceDefault(moduleDir, unset, home)).toBe("dev");
       expect(unset.OPENSCOUT_INSTANCE).toBe("dev");
 
       const explicit: Record<string, string | undefined> = { OPENSCOUT_INSTANCE: "prod" };
-      expect(applyCheckoutOpenScoutInstanceDefault(moduleDir, explicit)).toBeNull();
+      expect(applyCheckoutOpenScoutInstanceDefault(moduleDir, explicit, home)).toBeNull();
       expect(explicit.OPENSCOUT_INSTANCE).toBe("prod");
 
       // Only an unset OPENSCOUT_INSTANCE takes the default; markers don't matter.
-      expect(applyCheckoutOpenScoutInstanceDefault(moduleDir, { OPENSCOUT_PARENT_PID: String(process.ppid) })).toBe("dev");
-      expect(applyCheckoutOpenScoutInstanceDefault(moduleDir, { OPENSCOUT_INSTANCE: "  " })).toBe("dev");
+      expect(applyCheckoutOpenScoutInstanceDefault(moduleDir, { OPENSCOUT_PARENT_PID: String(process.ppid) }, home)).toBe("dev");
+      expect(applyCheckoutOpenScoutInstanceDefault(moduleDir, { OPENSCOUT_INSTANCE: "  " }, home)).toBe("dev");
 
-      expect(applyCheckoutOpenScoutInstanceDefault(tmpdir(), {})).toBeNull();
+      // This fixture has no checkout within its own search scope, even when
+      // the harness puts TMPDIR inside a real Scout checkout.
+      expect(findOpenScoutCheckout(moduleDir, main)).toEqual({ root: main, isLinkedWorktree: false });
+      expect(findOpenScoutCheckout(outside, outside)).toBeNull();
+      const outsideEnv: Record<string, string | undefined> = {};
+      expect(applyCheckoutOpenScoutInstanceDefault(outside, outsideEnv, home, outside)).toBeNull();
+      expect(outsideEnv).toEqual({});
+      expect(() => findOpenScoutCheckout(moduleDir, outside)).toThrow("must contain");
     } finally {
       rmSync(join(main, ".."), { recursive: true, force: true });
     }

@@ -1,7 +1,7 @@
 /**
  * Mesh status for the web UI.
  *
- * Ported from apps/desktop/src/core/mesh/service.ts — uses the same
+ * Ported from packages/cli/src/lib/core/mesh/service.ts — uses the same
  * broker helpers already available in the web server package.
  */
 

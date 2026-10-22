@@ -1,6 +1,6 @@
 import { readOpenScoutSettings, writeOpenScoutSettings } from "@openscout/runtime/setup";
 
-import { SCOUT_APP_VERSION, SCOUT_PRODUCT_NAME } from "../../shared/product.ts";
+import { SCOUT_APP_VERSION, SCOUT_PRODUCT_NAME } from "../../../../../packages/cli/src/lib/shared/product.ts";
 import {
   resolveScoutSurfaceCapabilities,
   type ScoutHostSurface,

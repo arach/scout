@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/cursor-transport-spike/cli-transport.ts",
+  "symbol": "node:child_process",
+  "category": "process-lifecycle",
+  "reason": "cursor transport spike owns experimental child process lifecycle",
+  "owner": "runtime"
+}

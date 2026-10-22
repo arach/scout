@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/mesh-mdns-service.test.ts",
+  "symbol": "node:child_process",
+  "category": "test",
+  "reason": "test doubles the dns-sd advertiser child lifecycle",
+  "owner": "tests"
+}

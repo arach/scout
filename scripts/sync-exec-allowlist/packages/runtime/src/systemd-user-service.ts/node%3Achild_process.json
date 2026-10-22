@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/systemd-user-service.ts",
+  "symbol": "node:child_process",
+  "category": "process-lifecycle",
+  "reason": "linux-systemd-user service adapter: drives systemctl --user for the broker unit",
+  "owner": "runtime"
+}

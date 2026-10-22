@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/instance.test.ts",
+  "symbol": "Bun.spawnSync",
+  "category": "test",
+  "reason": "runs a forking sh wrapper to prove a pinned instance survives it",
+  "owner": "runtime"
+}

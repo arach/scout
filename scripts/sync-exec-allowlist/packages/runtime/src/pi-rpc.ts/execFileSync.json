@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/pi-rpc.ts",
+  "symbol": "execFileSync",
+  "category": "imperative",
+  "reason": "local secret lookup command kept as explicit imperative outside M3 probe census",
+  "owner": "runtime"
+}

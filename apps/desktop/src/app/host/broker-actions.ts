@@ -28,13 +28,13 @@ import {
   resolveRelayAgentConfig,
   SCOUT_AGENT_ID,
 } from "@openscout/runtime/setup";
-import { runRuntimeBrokerService } from "./runtime-service-client.ts";
+import { runRuntimeBrokerService } from "../../../../../packages/cli/src/lib/app/host/runtime-service-client.ts";
 
 import {
   loadScoutBrokerContext,
   syncScoutBrokerBindings,
-} from "../../core/broker/service.ts";
-import { upScoutAgent } from "../../core/agents/service.ts";
+} from "../../../../../packages/cli/src/lib/core/broker/service.ts";
+import { upScoutAgent } from "../../../../../packages/cli/src/lib/core/agents/service.ts";
 import {
   createScoutDesktopAppInfo,
   loadScoutDesktopRelayShellPatch,

@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/supervision-handoff/node-import.test.ts",
+  "symbol": "Subprocess.kill",
+  "category": "test",
+  "reason": "signals only the owned Node import fixture handle already admitted by the spawn fence and awaits cleanup",
+  "owner": "runtime"
+}

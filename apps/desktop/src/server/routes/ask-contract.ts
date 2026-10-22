@@ -1,7 +1,7 @@
 import type {
   ScoutAskCommand,
   ScoutAskReceipt,
-} from "../../core/broker/ask-types.ts";
+} from "../../../../../packages/cli/src/lib/core/broker/ask-types.ts";
 import {
   parseScoutRuntimeSpec,
   SCOUT_LAUNCHABLE_HARNESSES,

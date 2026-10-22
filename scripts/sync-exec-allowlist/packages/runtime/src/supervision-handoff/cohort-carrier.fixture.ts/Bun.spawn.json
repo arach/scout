@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/supervision-handoff/cohort-carrier.fixture.ts",
+  "symbol": "Bun.spawn",
+  "category": "test",
+  "reason": "entrypoint-only isolated fixture deliberately remaps verified CLOEXEC fence FD 7 to a detached carrier or non-owner negative helper; cooperative roots guard EOF on separate FD 3; all processes have five-second bounds, sanitized scratch environments, file-backed cleanup and zombie-inclusive survivor checks",
+  "owner": "runtime"
+}

@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/mesh-access-startup.test.ts",
+  "symbol": "Bun.spawn",
+  "category": "test",
+  "reason": "isolated child verifies protected admin environment removal; owns and waits for child exit",
+  "owner": "runtime"
+}

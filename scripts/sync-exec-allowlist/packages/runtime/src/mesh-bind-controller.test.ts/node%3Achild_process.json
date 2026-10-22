@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/mesh-bind-controller.test.ts",
+  "symbol": "node:child_process",
+  "category": "test",
+  "reason": "test cross-checks the TLS listener with a real openssl client process",
+  "owner": "tests"
+}

@@ -11,7 +11,7 @@ import { createTRPCClient, createWSClient, wsLink } from "@trpc/client";
 import type { BrokerRouter } from "@openscout/runtime/broker-trpc-router";
 import type { TailEvent } from "@openscout/runtime/tail";
 
-import { resolveScoutBrokerUrl } from "../../../broker/service.ts";
+import { resolveScoutBrokerUrl } from "../../../../../../../packages/cli/src/lib/core/broker/service.ts";
 import { log } from "./log.ts";
 
 type Listener = (event: TailEvent) => void;

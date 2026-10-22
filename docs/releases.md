@@ -97,7 +97,7 @@ bun run test:unit
 bash scripts/ship-npm.sh --dry-run
 ```
 
-Commit the source, version manifests, `apps/desktop/src/shared/product.ts`,
+Commit the source, version manifests, `packages/cli/src/lib/shared/product.ts`,
 `docs.json`, and lockfile on a review branch. Merge only after the standalone
 checks and packed artifact audit pass.
 
@@ -601,7 +601,7 @@ bun run test:unit
 NPM_TAG=dev GITHUB_ACTIONS=true bash scripts/ship-npm.sh --dry-run
 # Review the version-only diff; commit only bumper/install output.
 git add package.json apps/desktop/package.json packages/*/package.json \
-  apps/desktop/src/shared/product.ts docs.json bun.lock
+  packages/cli/src/lib/shared/product.ts docs.json bun.lock
 git commit -m "🔖 Prepare v${VERSION} dev release"
 git push -u origin HEAD
 gh pr create --repo oscout/scout --base main --title "🔖 Prepare v${VERSION} dev release" \

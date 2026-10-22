@@ -26,8 +26,6 @@ import {
 import {
   readRecentLiveEvents,
   readRecentTranscriptEvents,
-  snapshotRecentEvents,
-  subscribeTail,
   type TailEvent,
 } from "./tail/index.js";
 import {
@@ -37,9 +35,23 @@ import {
   type HarnessTopologyEvent,
 } from "./harness-topology/index.js";
 
-import { boundedEventIterable } from "./bounded-event-iterable.js";
+import { boundedEventIterable, StreamResyncRequired } from "./bounded-event-iterable.js";
+import { attachTailReplay, tailReplayEpoch } from "./tail/service.js";
+import type { TailReplayCapture } from "./tail/replay-buffer.js";
 
-const t = initTRPC.create();
+import {
+  tailReplaySelection,
+  tailResyncData,
+  TailResyncRequired,
+  type TailSubscriptionStatus,
+} from "./tail/wire-contract.js";
+
+const t = initTRPC.create({
+  errorFormatter({ shape, error, path }) {
+    const tail = tailResyncData(path, error);
+    return tail ? { ...shape, data: { ...shape.data, tail } } : shape;
+  },
+});
 
 const CONTROL_BACKLOG_LIMIT = 500;
 const TAIL_BACKLOG_LIMIT = 500;
@@ -56,7 +68,14 @@ const tailEventsInput = z
   .object({
     since: z.string().optional(),
     sources: z.array(z.string()).optional(),
+    tailProtocol: z.literal(1).optional(),
+    sinceEpoch: z.string().uuid().optional(),
   })
+  .refine(
+    input => input.sinceEpoch === undefined ||
+      (input.tailProtocol === 1 && !!input.since),
+    { message: "sinceEpoch requires tailProtocol 1 and a nonempty since." },
+  )
   .optional();
 
 const tailRecentInput = z
@@ -83,12 +102,6 @@ function controlEventIterable(kinds: string[] | undefined, signal?: AbortSignal)
   const filter = kinds?.length ? new Set(kinds) : null;
   return boundedEventIterable({ subscribe: subscribeControlEvents, signal,
     accepts: event => !filter || filter.has(event.kind), id: event => event.id });
-}
-
-function tailEventIterable(sources: string[] | undefined, signal?: AbortSignal): AsyncIterable<TailEvent> {
-  const filter = sources?.length ? new Set(sources) : null;
-  return boundedEventIterable({ subscribe: subscribeTail, signal,
-    accepts: event => !filter || filter.has(event.source), id: event => event.id });
 }
 
 function topologyEventIterable(sources: string[] | undefined, signal?: AbortSignal): AsyncIterable<HarnessTopologyEvent> {
@@ -133,6 +146,78 @@ const controlRouter = t.router({
     }),
 });
 
+// Closing the capture before returning wakes a generator blocked on live next.
+// AsyncGenerator.return() alone queues behind that pending next operation.
+function tailEvents(
+  input: z.infer<typeof tailEventsInput>,
+  signal?: AbortSignal,
+): AsyncIterableIterator<ReturnType<typeof tracked<TailEvent>> | TailSubscriptionStatus> {
+  let capture: TailReplayCapture | undefined;
+  let lastDeliveredId: string | undefined;
+  let epoch = tailReplayEpoch();
+  const resync = () =>
+    input?.tailProtocol === 1
+      ? new TailResyncRequired(epoch, lastDeliveredId)
+      : new StreamResyncRequired(lastDeliveredId);
+  const iterator = (async function* () {
+    const sources = input?.sources;
+    const filter = sources && sources.length > 0 ? new Set(sources) : null;
+
+    epoch = tailReplayEpoch();
+    try {
+      capture = attachTailReplay({ limit: TAIL_BACKLOG_LIMIT, sources, signal });
+      const backlog = capture.image.entries;
+      epoch = capture.image.epoch;
+      const { startIndex: startIdx, status } = tailReplaySelection(capture.image, input);
+      if (!capture.check()) return;
+      // This untracked control frame is legal only first in a v1 generation.
+      if (input?.tailProtocol === 1) yield status;
+      for (let i = startIdx; i < backlog.length; i++) {
+        if (!capture.check()) return;
+        const event = backlog[i].event;
+        if (filter && !filter.has(event.source)) continue;
+        const frame = tracked(event.id, event);
+        lastDeliveredId = event.id;
+        yield frame;
+      }
+      // Resume is the explicit `since` input. tRPC lastEventId is not
+      // automatically translated into it; neither implies durable history.
+      for (;;) {
+        const item = await capture.live.next();
+        if (item.done || !capture.check()) return;
+        const event = item.value.event;
+        const frame = tracked(event.id, event);
+        lastDeliveredId = event.id;
+        yield frame;
+      }
+    } catch (error) {
+      if (error instanceof StreamResyncRequired) throw resync();
+      throw error;
+    } finally {
+      capture?.close();
+    }
+  })();
+  return {
+    [Symbol.asyncIterator]() {
+      return this;
+    },
+    next: () => iterator.next(),
+    return: () => {
+      capture?.close();
+      return iterator.return();
+    },
+    throw: async (error) => {
+      capture?.close();
+      try {
+        return await iterator.throw(error);
+      } catch (cause) {
+        if (cause instanceof StreamResyncRequired) throw resync();
+        throw cause;
+      }
+    },
+  };
+}
+
 const tailRouter = t.router({
   recent: t.procedure
     .input(tailRecentInput)
@@ -170,30 +255,7 @@ const tailRouter = t.router({
     }),
   events: t.procedure
     .input(tailEventsInput)
-    .subscription(async function* ({ input, signal }) {
-      const sources = input?.sources;
-      const filter = sources && sources.length > 0 ? new Set(sources) : null;
-
-      // Replay backlog from cursor (if any) before switching to live tail.
-      const backlog = snapshotRecentEvents(TAIL_BACKLOG_LIMIT);
-      let startIdx = 0;
-      if (input?.since) {
-        const idx = backlog.findIndex((e: TailEvent) => e.id === input.since);
-        if (idx >= 0) startIdx = idx + 1;
-      }
-      for (let i = startIdx; i < backlog.length; i++) {
-        const event = backlog[i];
-        if (!event) continue;
-        if (filter && !filter.has(event.source)) continue;
-        yield tracked(event.id, event);
-      }
-
-      // Live tail. tracked(event.id, ...) lets clients reconnect with
-      // lastEventId and pick up exactly where they left off.
-      for await (const event of tailEventIterable(sources, signal)) {
-        yield tracked(event.id, event);
-      }
-    }),
+    .subscription(({ input, signal }) => tailEvents(input, signal)),
 });
 
 const topologyRouter = t.router({

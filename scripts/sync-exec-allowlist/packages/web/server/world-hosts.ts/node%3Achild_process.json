@@ -1,0 +1,7 @@
+{
+  "path": "packages/web/server/world-hosts.ts",
+  "symbol": "node:child_process",
+  "category": "probe-exec",
+  "reason": "async bounded execFile (timeout, SIGKILL) for World host readings; no sync exec",
+  "owner": "web"
+}

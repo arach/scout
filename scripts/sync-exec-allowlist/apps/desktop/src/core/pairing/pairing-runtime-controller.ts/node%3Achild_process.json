@@ -1,0 +1,7 @@
+{
+  "path": "apps/desktop/src/core/pairing/pairing-runtime-controller.ts",
+  "symbol": "node:child_process",
+  "category": "process-lifecycle",
+  "reason": "owns dns-sd advertisement child lifecycle for desktop pair mode",
+  "owner": "desktop"
+}

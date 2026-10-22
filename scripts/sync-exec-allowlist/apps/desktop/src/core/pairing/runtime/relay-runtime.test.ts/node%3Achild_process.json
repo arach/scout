@@ -1,0 +1,7 @@
+{
+  "path": "apps/desktop/src/core/pairing/runtime/relay-runtime.test.ts",
+  "symbol": "node:child_process",
+  "category": "test",
+  "reason": "test subprocess fixture or git fixture setup",
+  "owner": "tests"
+}

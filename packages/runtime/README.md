@@ -28,6 +28,19 @@ Web and Scoutbot source entries require explicit configuration. See the
 [durable entry contract](./SUPERVISION.md) for installer ordering, reload
 boundaries and the temporary installed-npm web compatibility exception.
 
+### Mesh bridge upgrade requirement
+
+Run `openscout-runtime mesh-bridge-preflight` on **every bridge-enabled machine
+before upgrading past the removal of the implicit CLI fallback**. Use the
+candidate runtime and the service's uid, home, instance and environment. Exit
+78 blocks the upgrade: stage a trusted mesh extension or an explicit absolute
+CLI override, repair any refused artifact (which blocks overrides too), then
+rerun the check. Otherwise, do not upgrade.
+
+See the [public mesh bridge upgrade note](./MESH-BRIDGE-CUTOVER.md) for the
+checkout command, exit-code meanings, service environment and installation
+ordering. The preflight neither starts a bridge nor migrates a legacy owner.
+
 ## Quickstart: embed the in-memory runtime
 
 For tests, tools, and small local integrations, start with the in-memory runtime
@@ -88,6 +101,8 @@ imported as first-party Scout messages.
 | Import | Purpose |
 | --- | --- |
 | `@openscout/runtime` | Root broker/runtime surface: registry, broker services, store, setup, config, probes, projections, repo watch/diff, and protocol path re-exports. |
+| `@openscout/runtime/host-attention` | Pure tmux dialog detector and injected machine-local collector; see [the read contract](./HOST-ATTENTION.md). |
+| `@openscout/runtime/core-report` | Pure core-service observations, optional capability availability and core-only completion; see [the contract](./CORE-REPORT.md). |
 | `@openscout/runtime/broker-api` | HTTP client helpers for talking to an active local broker. |
 | `@openscout/runtime/broker-core-service` | Broker service composition boundary for embedding/testing. |
 | `@openscout/runtime/broker-process-manager` | Service config, status, install/start/stop/restart helpers. |
@@ -275,8 +290,30 @@ Also verify an external ESM scratch project with `skipLibCheck: false` and no
 `@types/node`; this catches published declaration leaks that monorepo checks can
 miss.
 
+## Unit and scenario checks
+
+`bun run --cwd packages/runtime test` recursively runs `src`, including the
+scenario suite and nested probe suites. It excludes every `*live.test.ts` file,
+even when live credentials or opt-in variables exist in the environment.
+`test:scenarios` runs just the scenario suite. Scenario brokers wait for
+`/health` to report `ok: true`, `startup.state: "ready"` and
+`startup.mutationsAdmitted: true` before fixture setup sends mutations. An HTTP
+200 during restore is not readiness. The existing startup budget is six seconds;
+no mutation is retried on a restoring response.
+
+The scenario pairing bridge is an owned loopback-only plaintext fake. Its
+throwaway config declares `secure: false`; production secure defaults do not
+change. Simulated reviewers answer through this fake, not real native harnesses.
+
 ## Live and e2e checks
 
+Being signed in is not consent to a live run. Direct OpenCode and Codex test
+file runs require `OPENSCOUT_LIVE_OPENCODE_ACP=1` and
+`OPENSCOUT_LIVE_CODEX_APP_SERVER=1`, respectively. Other values do not opt in.
+The named `test:live:*` scripts below set their respective opt-in variables:
+
+- `bun run --cwd packages/runtime test:live:opencode-acp` requires OpenCode
+  authentication, spawns a real OpenCode process and can spend tokens.
 - `bun run --cwd packages/runtime test:live:codex-app-server` uses
   [README-live-codex-app-server-test.md](./README-live-codex-app-server-test.md)
   for a direct Codex JSON-RPC check against an existing app-server listener.

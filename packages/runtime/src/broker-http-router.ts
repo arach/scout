@@ -1,9 +1,11 @@
+import { readHerdrWorkspaces, type HerdrWorkspacesReadDeps } from "./broker-herdr-workspaces-read.js";
 import { createRepoDiffReadHandler, type RepoDiffRead } from "./broker-repo-diff-read.js";
 import { readProviderQuotas } from "./broker-provider-quota-read.js";
 import { ASSISTANT_CLAIM_HEADER } from "./broker-assistant-claims.js";
 import { handleAttachmentRoute, executeHostAttachmentRead, ATTACHMENT_READ_PATH, type AttachmentHttpDeps } from "./broker-attachments-http.js";
 import { createSessionMaterialsRead } from "./broker-session-materials-read.js";
 import { readObservedSessions, type ObservedSessionReadDeps } from "./broker-observed-sessions-read.js";
+import { productionHandoffReadiness } from "./supervision-handoff/contracts.js";
 import { MeshFeedback, MeshFeedbackError } from "./mesh-feedback.js";
 import { MeshBridgeManagement, MeshBridgeManagementError } from "./mesh-bridge-management.js";
 import { MeshPingError, type createMeshPing } from "./mesh-ping.js";
@@ -209,6 +211,7 @@ export type BrokerHttpRouterDeps = {
   readRepoDiff?: RepoDiffRead;
   attachments?: AttachmentHttpDeps;
   readObservedSessionCache?: ObservedSessionReadDeps["readCache"];
+  herdrWorkspaces?: Omit<HerdrWorkspacesReadDeps, "nodeId">;
   encodedSnapshotBodies?: boolean;
   onSnapshotFlushedBytes?: (bytes: number) => void;
   host: string;
@@ -516,6 +519,16 @@ export function createBrokerHttpRouter(
   const routeRequest = async function(request: RuntimeHttpRequestLike, response: RuntimeHttpResponseLike): Promise<void> {
   const method = request.method ?? "GET";
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? `${host}:${port}`}`);
+  if (method === "GET" && url.pathname === "/v1/supervision-handoff") {
+    const context = request.transportContext;
+    if (!context || !["unix-socket", "loopback"].includes(context.transport) || context.guest || context.scoped
+      || request.headers.origin || request.headers["x-openscout-forwarded-node-id"]) {
+      json(response, 403, { error: "local_only" }); return;
+    }
+    // Metadata only. No locator, store read, enrollment or ownership mutation.
+    json(response, 200, productionHandoffReadiness()); return;
+  }
+
   // Mesh trust cone §4 / §11.9 defense in depth: machine-local mutation
   // handlers re-check the transport context themselves, so a remote caller is
   // refused even while the ingress gate runs in verify-warn. Undefined
@@ -536,6 +549,17 @@ export function createBrokerHttpRouter(
     json(response, 503, { error: "access_unavailable" }); return;
   }
   if (request.transportContext?.scoped) { json(response, 403, { error: "access_denied" }); return; }
+  if (method === "GET" && url.pathname === "/v1/terminal-hosts/herdr/workspaces") {
+    // Same machine-local boundary as observed sessions. No CLI/web forwarding,
+    // guest/scoped grants or origin-bearing browser requests can initiate probes.
+    const context = request.transportContext;
+    if (!context || (!["unix-socket", "loopback"].includes(context.transport) || context.guest || context.scoped)
+      || request.headers.origin || request.headers["x-openscout-forwarded-node-id"]) {
+      json(response, 403, { error: "local_only" }); return;
+    }
+    const result = await readHerdrWorkspaces({ ...deps.herdrWorkspaces, nodeId }, url);
+    json(response, result.status, result.body); return;
+  }
   if (url.pathname === "/v1/assistant-claims" || url.pathname.startsWith("/v1/assistant-claims/")) {
     if (request.transportContext?.transport === "remote" || request.transportContext?.guest || request.headers.origin || request.headers["x-openscout-forwarded-node-id"]) { json(response, 403, { error: "local_only" }); return; }
     const claims = brokerService.assistantClaims;

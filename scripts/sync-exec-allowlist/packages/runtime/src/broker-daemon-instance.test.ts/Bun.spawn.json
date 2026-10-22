@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/broker-daemon-instance.test.ts",
+  "symbol": "Bun.spawn",
+  "category": "test",
+  "reason": "starts a broker from source against a scratch busy port to prove an explicit prod instance is refused there",
+  "owner": "runtime"
+}

@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/onboarding-local-readiness.test.ts",
+  "symbol": "node:child_process",
+  "category": "test",
+  "reason": "Runs a 20-second bounded isolated child test whose launch exports are replaced with throwing guards to verify subprocess-free onboarding readiness.",
+  "owner": "tests"
+}

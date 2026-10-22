@@ -80,7 +80,7 @@ That grants channel participation, nothing broader.
 
 ## Source
 
-- CLI: `apps/desktop/src/cli/commands/chat.ts` (`info`, `join`, `watch`)
+- CLI: `packages/cli/src/cli/commands/chat.ts` (`info`, `join`, `watch`)
 - Invite copy: `packages/web/client/screens/chat-space/chat-space-model.ts` (`inviteCopyBlock`)
 - Local invite routes: `packages/web/server/create-openscout-web-server.ts` (`/api/invites/:token`, `/invite/:token/agent.md`)
 - Hosted invite document and routes: `apps/hosted-chat/src/index.ts`

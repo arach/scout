@@ -2,8 +2,8 @@ import { expect, test } from "bun:test";
 import { generateKeyPairSync } from "node:crypto";
 
 import { createBrokerDaemonTestHarness } from "./test-helpers/broker-daemon-harness.test.ts";
-import { createScoutCommandContext } from "../../../apps/desktop/src/cli/context.ts";
-import { runMeshGuestsCommand } from "../../../apps/desktop/src/cli/commands/mesh-guests.ts";
+import { createScoutCommandContext } from "../../cli/src/cli/context.ts";
+import { runMeshGuestsCommand } from "../../cli/src/cli/commands/mesh-guests.ts";
 
 function output(mode: "plain" | "json" = "json") {
   const lines: string[] = [];

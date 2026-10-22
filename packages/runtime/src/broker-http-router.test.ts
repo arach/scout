@@ -1736,3 +1736,22 @@ describe("exclusive assistant HTTP contract", () => {
     expect((await requestRouter(h, "GET", "/v1/assistant-claims")).response.status).toBe(404);
   });
 });
+
+describe("staged supervision handoff discovery", () => {
+  test("local discovery stays unavailable rather than advertising unfenced ownership", async () => {
+    const h = createHarness();
+    const result = await requestRouter(h, "GET", "/v1/supervision-handoff", { transportContext: { transport: "loopback" } });
+    expect(result.response.status).toBe(200);
+    expect(result.body).toEqual({ capability: "supervision-handoff/1", protocol: 1, ready: false,
+      reason: "r0_effect_integration_unavailable", integratedRoles: [] });
+  });
+  test("remote, forwarded, browser, guest and unclassified callers cannot use the handshake", async () => {
+    const h = createHarness();
+    for (const context of [undefined, { transport: "unexpected" }, { transport: "remote" }, { transport: "loopback", guest: {} }, { transport: "loopback", scoped: {} }]) {
+      expect((await requestRouter(h, "GET", "/v1/supervision-handoff", { transportContext: context as never })).response.status).toBe(403);
+    }
+    for (const headers of [{ origin: "http://fixture.invalid" }, { "x-openscout-forwarded-node-id": "fixture-peer" }]) {
+      expect((await requestRouter(h, "GET", "/v1/supervision-handoff", { transportContext: { transport: "loopback" }, headers })).response.status).toBe(403);
+    }
+  });
+});

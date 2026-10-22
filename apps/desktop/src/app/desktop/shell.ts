@@ -19,7 +19,7 @@ import {
 import type { RuntimeRegistrySnapshot } from "@openscout/runtime/registry";
 import { loadResolvedRelayAgents } from "@openscout/runtime/setup";
 
-import { getRuntimeBrokerServiceStatus } from "../host/runtime-service-client.ts";
+import { getRuntimeBrokerServiceStatus } from "../../../../../packages/cli/src/lib/app/host/runtime-service-client.ts";
 import {
   loadScoutBrokerContext,
   readScoutBrokerHome,
@@ -27,7 +27,7 @@ import {
   readScoutBrokerSnapshot,
   type ScoutBrokerContext,
   type ScoutBrokerHealthState,
-} from "../../core/broker/service.ts";
+} from "../../../../../packages/cli/src/lib/core/broker/service.ts";
 import { createScoutVoiceState } from "../../core/voice/index.ts";
 import type {
   ScoutDesktopHomeActivityItem,

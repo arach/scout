@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/routing/routing.test.ts",
+  "symbol": "execFileSync",
+  "category": "test",
+  "reason": "git fixture setup",
+  "owner": "runtime"
+}

@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/test-helpers/runtime-scenario-harness.test.ts",
+  "symbol": "Bun.spawn",
+  "category": "test",
+  "reason": "test harness starts an isolated runtime child process",
+  "owner": "tests"
+}
