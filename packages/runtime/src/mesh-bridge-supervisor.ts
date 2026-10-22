@@ -1,9 +1,9 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join } from "node:path";
 
-import { readMeshBridgeConfigSnapshot } from "./mesh-bridge-extension.js";
+import { readMeshBridgeConfigSnapshot, type MeshBridgeExtension } from "./mesh-bridge-extension.js";
 import { isMeshBridgeCommand } from "./scout-bridge-command.js";
 
 /**
@@ -68,30 +68,28 @@ export function resolveMeshBridgeDesiredState(input: {
 export type MeshBridgeCommand = { entrypoint: string; args: string[] };
 
 /**
- * Dev mode runs the CLI from source so the bridge loads the same tree as the
- * broker; otherwise prefer a built CLI next to this runtime, then the global
- * install.
+ * Only an explicit operator-selected CLI file may replace an absent extension.
+ * Never infer a CLI from the runtime's checkout, mode, module or global install.
+ * Developers can opt into source by naming it in OPENSCOUT_MESH_BRIDGE_BIN.
  */
 export function resolveMeshBridgeEntrypoint(input: {
-  repoRoot: string | null;
-  moduleDirectory: string;
-  serviceMode: string;
   env: NodeJS.ProcessEnv;
-  home?: string;
   exists?: (path: string) => boolean;
 }): string | null {
-  const exists = input.exists ?? existsSync;
-  const home = input.home ?? homedir();
-  const repo = input.repoRoot;
-  const source = repo ? join(repo, "apps", "desktop", "bin", "scout.ts") : null;
-  const candidates = [
-    input.env.OPENSCOUT_MESH_BRIDGE_BIN?.trim() || null,
-    input.serviceMode === "dev" ? source : null,
-    repo ? join(repo, "packages", "cli", "dist", "main.mjs") : null,
-    resolve(input.moduleDirectory, "..", "main.mjs"),
-    join(home, ".bun", "install", "global", "node_modules", "@openscout", "scout", "dist", "main.mjs"),
-  ].filter((candidate): candidate is string => Boolean(candidate));
-  return candidates.find((candidate) => exists(candidate)) ?? null;
+  const entrypoint = input.env.OPENSCOUT_MESH_BRIDGE_BIN?.trim();
+  if (!entrypoint || !isAbsolute(entrypoint)) return null;
+  try {
+    return (input.exists ? input.exists(entrypoint) : statSync(entrypoint).isFile()) ? entrypoint : null;
+  } catch { return null; }
+}
+
+export const MESH_BRIDGE_INSTALL_FIX = "From a Scout checkout: bun run --cwd packages/mesh-extension build && scout extensions install mesh \"$PWD/packages/mesh-extension/dist/mesh\" (use update for an existing install). Alternatively set OPENSCOUT_MESH_BRIDGE_BIN to an absolute Scout CLI file in the scout-base service environment; it must support mesh bridge --config. Removed or untrusted installs must be repaired; BIN never bypasses them. Then rerun openscout-runtime mesh-bridge-preflight.";
+
+/** Removed/untrusted installs remain authoritative: an override cannot bypass them. */
+export function meshBridgeSelectionRefusal(selected: MeshBridgeExtension, env: NodeJS.ProcessEnv): string | null {
+  if (selected.state === "refused") return selected.reason;
+  if (selected.state === "ready" || resolveMeshBridgeEntrypoint({ env })) return null;
+  return env.OPENSCOUT_MESH_BRIDGE_BIN?.trim() ? "override-unavailable" : "extension-absent";
 }
 
 export function meshBridgeArgs(entrypoint: string, configPath: string): string[] {
