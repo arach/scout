@@ -13,7 +13,8 @@ type AllowCategory =
   | "repo-service-fallback"
   | "imperative-fallback"
   | "process-lifecycle"
-  | "dlopen";
+  | "dlopen"
+  | "native-compile";
 type AllowEntry = {
   path: string;
   symbol:
@@ -24,11 +25,13 @@ type AllowEntry = {
     | "node:child_process"
     | "Bun.spawn"
     | "Subprocess.kill"
-    | "dlopen";
+    | "dlopen"
+    | "cc";
   category: AllowCategory;
   reason: string;
   owner: string;
   libraryPaths?: string[];
+  sourceFiles?: string[];
 };
 
 const ROOT = process.cwd();
@@ -43,7 +46,7 @@ const PHASE_B_ROOTS = [
 ];
 const SYNC_SYMBOLS = ["execFileSync", "execSync", "spawnSync", "Bun.spawnSync"] as const;
 const PHASE_B_SYMBOLS = ["node:child_process", "Bun.spawn", "Bun.spawnSync"] as const;
-const SYMBOLS = [...SYNC_SYMBOLS, "node:child_process", "Bun.spawn", "Subprocess.kill", "dlopen"] as const;
+const SYMBOLS = [...SYNC_SYMBOLS, "node:child_process", "Bun.spawn", "Subprocess.kill", "dlopen", "cc"] as const;
 const CATEGORIES = new Set<AllowCategory>([
   "boot",
   "cli",
@@ -55,6 +58,7 @@ const CATEGORIES = new Set<AllowCategory>([
   "imperative-fallback",
   "process-lifecycle",
   "dlopen",
+  "native-compile",
 ]);
 
 function normalizePath(path: string): string {
@@ -98,9 +102,9 @@ function fixedLibraryPath(path: unknown): path is string {
 
 // Native loads use syntax-aware argument checking. A reviewed file/symbol pair
 // is not permission to substitute an env/cwd/soname path at that call site.
-function nativeLoads(file: string, source: string) {
+function nativeLoads(file: string, source: string, symbol: "dlopen" | "cc" = "dlopen") {
   const out: { index: number; library?: string }[] = [];
-  if (!source.includes("dlopen")) return out;
+  if (!source.includes(symbol) || symbol === "cc" && !source.includes("bun:ffi")) return out;
   const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
   const inspect = (node: ts.Expression) => {
     let expression = node;
@@ -109,22 +113,40 @@ function nativeLoads(file: string, source: string) {
     const call = expression.parent;
     const arg = ts.isCallExpression(call) && call.expression === expression ? call.arguments[0] : undefined;
     // A non-call reference would let an alias/argument escape this inventory.
-    out.push({ index: node.getStart(tree), library: arg && ts.isStringLiteralLike(arg) ? arg.text : undefined });
+    let library = arg && ts.isStringLiteralLike(arg) ? arg.text : undefined;
+    if (symbol === "cc") {
+      library = undefined;
+      // Compile only one reviewed module-relative C source. No flags, library,
+      // include, define, spread, alias or environment-controlled source override.
+      if (arg && ts.isObjectLiteralExpression(arg) && arg.properties.length === 2
+        && new Set(arg.properties.map(p => ts.isPropertyAssignment(p) ? p.name.getText(tree) : "")).size === 2 && arg.properties.every(p => ts.isPropertyAssignment(p)
+        && ts.isIdentifier(p.name) && ["source", "symbols"].includes(p.name.text))) {
+        const source = arg.properties.find(p => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === "source");
+        const value = source && ts.isPropertyAssignment(source) ? source.initializer : undefined;
+        if (value && ts.isNewExpression(value) && ts.isIdentifier(value.expression) && value.expression.text === "URL"
+          && value.arguments?.length === 2 && ts.isStringLiteralLike(value.arguments[0]!)
+          && value.arguments[0]!.text.startsWith("./") && !value.arguments[0]!.text.includes("..")
+          && value.arguments[1]!.getText(tree) === "import.meta.url") {
+          library = posix.join(posix.dirname(file), value.arguments[0]!.text);
+        }
+      }
+    }
+    out.push({ index: node.getStart(tree), library });
   };
   const visit = (node: ts.Node) => {
-    if (ts.isIdentifier(node) && node.text === "dlopen") {
+    if (ts.isIdentifier(node) && node.text === symbol) {
       const parent = node.parent;
       if (ts.isPropertyAccessExpression(parent) && parent.name === node) { /* inspect the member below */ }
       else if (ts.isBindingElement(parent) && parent.name === node && !parent.propertyName) { /* const { dlopen } = ffi */ }
       else if (ts.isImportSpecifier(parent) && parent.name === node && !parent.propertyName) { /* import { dlopen } */ }
       else inspect(node);
-    } else if (ts.isStringLiteralLike(node) && node.text === "dlopen"
+    } else if (ts.isStringLiteralLike(node) && node.text === symbol
       && (ts.isBindingElement(node.parent) && node.parent.propertyName === node
         || ts.isImportSpecifier(node.parent) && node.parent.propertyName === node
         || ts.isComputedPropertyName(node.parent) && ts.isBindingElement(node.parent.parent))) {
       out.push({ index: node.getStart(tree) }); // literal/computed destructuring alias
-    } else if (ts.isPropertyAccessExpression(node) && node.name.text === "dlopen"
-      || ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression) && node.argumentExpression.text === "dlopen") {
+    } else if (ts.isPropertyAccessExpression(node) && node.name.text === symbol
+      || ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression) && node.argumentExpression.text === symbol) {
       inspect(node);
     }
     ts.forEachChild(node, visit);
@@ -155,7 +177,11 @@ function validateAllowlist(value: unknown, locations: readonly string[]): AllowE
     if (entry.symbol === "dlopen") {
       if (entry.category !== "dlopen" || !Array.isArray(entry.libraryPaths) || !entry.libraryPaths.length
         || entry.libraryPaths.some(path => !fixedLibraryPath(path))) throw new Error(`dlopen requires reviewed fixed absolute libraryPaths for ${entry.path}`);
-    } else if (entry.category === "dlopen" || entry.libraryPaths !== undefined) {
+    } else if (entry.symbol === "cc") {
+      if (entry.category !== "native-compile" || !Array.isArray(entry.sourceFiles) || !entry.sourceFiles.length
+        || entry.sourceFiles.some(path => typeof path !== "string" || !path.endsWith(".c") || path.includes("\0") || path.includes("\\")
+          || posix.isAbsolute(path) || posix.normalize(path) !== path || path.startsWith("../"))) throw Error(`cc requires reviewed repository-relative sourceFiles for ${entry.path}`);
+    } else if (entry.category === "dlopen" || entry.libraryPaths !== undefined || entry.category === "native-compile" || entry.sourceFiles !== undefined) {
       throw new Error(`native library policy only applies to dlopen for ${entry.path}`);
     }
     const normalized: AllowEntry = {
@@ -165,6 +191,7 @@ function validateAllowlist(value: unknown, locations: readonly string[]): AllowE
       reason: entry.reason.trim(),
       owner: entry.owner.trim(),
       ...(entry.symbol === "dlopen" ? { libraryPaths: [...entry.libraryPaths!] } : {}),
+      ...(entry.symbol === "cc" ? { sourceFiles: [...entry.sourceFiles!] } : {}),
     };
     const key = `${normalized.path}\u0000${normalized.symbol}`;
     if (seen.has(key)) {
@@ -233,7 +260,7 @@ function isUnderAnyRoot(rel: string, roots: readonly string[]): boolean {
 }
 
 function shouldScanSymbol(rel: string, symbol: AllowEntry["symbol"]): boolean {
-  if (symbol === "dlopen") return true;
+  if (symbol === "dlopen" || symbol === "cc") return true;
   // Custody adds a protected signal boundary. Expand this scope deliberately,
   // rather than silently grandfathering every unrelated lifecycle caller.
   if (symbol === "Subprocess.kill") return isUnderAnyRoot(rel, ["packages/runtime/src/supervision-handoff"]);
@@ -256,12 +283,16 @@ for (const file of files) {
   const source = await readFile(file, "utf8");
   for (const symbol of SYMBOLS) {
     if (!shouldScanSymbol(rel, symbol)) continue;
-    const matches = symbol === "dlopen" ? nativeLoads(rel, source) : source.matchAll(symbolPattern(symbol));
+    const matches = (symbol === "dlopen" || symbol === "cc") ? nativeLoads(rel, source, symbol) : source.matchAll(symbolPattern(symbol));
     for (const match of matches) {
       const key = `${rel}\u0000${symbol}`;
       observed.add(key);
       if (!allowed.has(key)) {
         violations.push(`${rel}:${lineNumber(source, match.index ?? 0)} uses ${symbol} without ${ALLOWLIST_ROOT}/${rel}/${encodeURIComponent(symbol)}.json`);
+      }
+      if (symbol === "cc") {
+        const compiled = (match as {library?: string}).library;
+        if (!compiled || !allowed.get(key)?.sourceFiles?.includes(compiled)) violations.push(`${rel}:${lineNumber(source, match.index ?? 0)} cc must use a reviewed fixed module-relative C source with no compiler overrides`);
       }
       if (symbol === "dlopen") {
         const library = (match as { library?: string }).library;

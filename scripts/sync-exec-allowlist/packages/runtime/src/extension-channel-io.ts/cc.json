@@ -1,0 +1,10 @@
+{
+  "path": "packages/runtime/src/extension-channel-io.ts",
+  "symbol": "cc",
+  "category": "native-compile",
+  "sourceFiles": [
+    "packages/runtime/src/extension-channel-native.c"
+  ],
+  "reason": "dormant exact-revision extension candidate compiles only its reviewed stateless fixed-ABI syscall shim; the shim retains no descriptor or finalizing owner",
+  "owner": "runtime"
+}
