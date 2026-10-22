@@ -224,13 +224,6 @@
     "owner": "agent-sessions"
   },
   {
-    "path": "packages/agent-sessions/src/registry.ts",
-    "symbol": "spawnSync",
-    "category": "boot",
-    "reason": "session registry one-shot git branch metadata capture (node:child_process so it works under Node and Bun)",
-    "owner": "agent-sessions"
-  },
-  {
     "path": "packages/runtime/src/agent-workspace.test.ts",
     "symbol": "Bun.spawn",
     "category": "test",
