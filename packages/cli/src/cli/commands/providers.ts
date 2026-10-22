@@ -1,17 +1,20 @@
 import type { ScoutCommandContext } from "../context.ts";
 import { ScoutCliError } from "../errors.ts";
-import { readScoutWebJson } from "../web-api.ts";
+import { requestScoutBrokerJson, ScoutBrokerHttpError } from "@openscout/runtime/broker-api";
+import { resolveBrokerControlUrl } from "@openscout/runtime/local-config";
 import {
   buildOrchestrationProviderMap,
   isOrchestrationRoleId,
   ORCHESTRATION_ROLE_IDS,
   renderOrchestrationProviderMap,
 } from "@openscout/protocol";
-import type { OrchestrationRoleId } from "@openscout/protocol";
+import type { OrchestrationRoleId, ProviderQuotaRead, ProviderQuotaReadWindow } from "@openscout/protocol";
 
 const HELP_FLAGS = new Set(["--help", "-h", "help"]);
 const PROVIDER_LABELS: Record<string, string> = {
   claude: "Claude",
+  anthropic: "Anthropic",
+  openai: "OpenAI",
   codex: "Codex",
   cursor: "Cursor",
   github: "GitHub",
@@ -20,36 +23,16 @@ const PROVIDER_LABELS: Record<string, string> = {
   minimax: "MiniMax",
 };
 
-type ServiceQuotaWindowPayload = {
-  label?: unknown;
-  fill?: unknown;
-  usedLabel?: unknown;
-  capLabel?: unknown;
-  unitLabel?: unknown;
-  resetAt?: unknown;
-  windowMs?: unknown;
-  capturedAt?: unknown;
-  source?: unknown;
-};
-
-type ServiceGaugePayload = {
-  id?: unknown;
-  label?: unknown;
-  kind?: unknown;
-  fill?: unknown;
-  usedLabel?: unknown;
-  capLabel?: unknown;
-  unitLabel?: unknown;
-  resetAt?: unknown;
-  windows?: unknown;
-  plan?: unknown;
-  capturedAt?: unknown;
-  source?: unknown;
-};
-
-export type ServiceBudgetsPayload = {
-  generatedAt?: unknown;
-  gauges?: unknown;
+/** CLI policy, not a claim that the runtime refreshed a provider. */
+export const PROVIDER_QUOTA_STALE_AFTER_MS = 60 * 60_000;
+export type ProviderQuotaPoolIdentity = {
+  provider: string;
+  accountId: string | null;
+  userId: string | null;
+  endpointId: string | null;
+  sessionId: string | null;
+  harness: string | null;
+  transport: string | null;
 };
 
 export type ProviderUsageFreshness = {
@@ -57,9 +40,12 @@ export type ProviderUsageFreshness = {
   capturedAtIso: string | null;
   ageMs: number | null;
   label: string;
+  stale: boolean;
 };
 
 export type ProviderUsageWindow = {
+  /** Original account/endpoint/session facts, including provenance and capture age. */
+  facts: ProviderQuotaReadWindow;
   label: string;
   usedPercent: number;
   percentRemaining: number;
@@ -73,6 +59,9 @@ export type ProviderUsageWindow = {
 };
 
 export type ProviderUsageProvider = {
+  poolId: string;
+  identity: ProviderQuotaPoolIdentity;
+  routingProviderId: string;
   id: string;
   label: string;
   plan: string | null;
@@ -80,6 +69,11 @@ export type ProviderUsageProvider = {
 };
 
 export type ProviderUsageReport = {
+  schema: "scout.provider-usage/v1";
+  availability: "available" | "stale" | "unknown";
+  refresh: ProviderQuotaRead["refresh"];
+  coverage: ProviderQuotaRead["coverage"];
+
   generatedAt: number;
   generatedAtIso: string;
   generatedAtLocal: string;
@@ -98,7 +92,7 @@ export type ProviderUsageFormatOptions = {
 };
 
 export type ProvidersCommandDependencies = ProviderUsageFormatOptions & {
-  readJson?: typeof readScoutWebJson;
+  readJson?: typeof readProviderQuotaJson;
 };
 
 export function renderProvidersCommandHelp(): string {
@@ -107,7 +101,7 @@ export function renderProvidersCommandHelp(): string {
     "  scout providers usage [--refresh | --cached] [--json]",
     "  scout providers map [--refresh | --cached] [--role <role>] [--json]",
     "",
-    "Show provider quota windows or build a quota-aware orchestration map.",
+    "Read passive runtime observations or build a quota-aware orchestration map.",
     "",
     "The usage view prints percent used, percent remaining, local reset time,",
     "source, and freshness for every provider quota window. The map combines",
@@ -117,10 +111,17 @@ export function renderProvidersCommandHelp(): string {
     `Map roles: ${ORCHESTRATION_ROLE_IDS.join(", ")}`,
     "",
     "Options:",
-    "  --refresh       Force live provider reads (default).",
-    "  --cached        Allow the service-budget cache; do not force a refresh.",
+    "  --refresh       Request refresh (default); runtime reports unsupported.",
+    "                  Reads remain passive; no polling, app or dashboard refresh.",
+    "  --cached        Read passive observations without requesting refresh.",
     "  --role <role>   Limit the orchestration map to one role.",
     "  --json          Emit structured JSON (global Scout flag).",
+    "",
+    "Usage keeps account/endpoint/session pools separate, with capture provenance.",
+    "Unknown is not zero. Facts older than 1h or past reset are labeled stale.",
+    "Map refuses unknown, stale, incomplete or ambiguous observed quota pools;",
+    "there is no per-pool selector in this increment. Inspect usage instead.",
+    "Map quota pools are observation provenance, not a dispatch account binding.",
     "",
     "Examples:",
     "  scout providers usage",
@@ -184,155 +185,126 @@ export async function runProvidersCommand(
     return;
   }
 
-  const path = `/api/service-budgets${options.forceRefresh ? "?refresh=1" : ""}`;
-  const payload = await (dependencies.readJson ?? readScoutWebJson)<ServiceBudgetsPayload>(context, path);
+  const path = `/v1/provider-quotas?limit=200${options.forceRefresh ? "&refresh=1" : ""}`;
+  const payload = await (dependencies.readJson ?? readProviderQuotaJson)<ProviderQuotaRead>(context, path);
+  if (options.forceRefresh && payload.refresh !== "unsupported") throw new ScoutCliError("provider_quotas_invalid_response: passive runtime did not report refresh unsupported");
   const report = buildProviderUsageReport(payload, dependencies);
   if (options.command === "usage") {
     context.output.writeValue(report, renderProviderUsageReport);
     return;
   }
-  const map = buildOrchestrationProviderMap(report, {
-    now: finiteNumber(dependencies.now) ?? undefined,
-    role: options.role,
-  });
-  context.output.writeValue(map, renderOrchestrationProviderMap);
+  const map = buildProviderQuotaMap(report, { now: dependencies.now, role: options.role });
+  context.output.writeValue(map, value => [renderQuotaNotice(report), "Account binding is not enforced; quota pools identify observations, not dispatch credentials.", renderQuotaPools(report), renderOrchestrationProviderMap(value)].join("\n\n"));
+}
+
+/** Provider-only client until the separately reviewed shared reader lands. */
+async function readProviderQuotaJson<T>(context: Pick<ScoutCommandContext, "env">, path: string): Promise<T> {
+  try {
+    return await requestScoutBrokerJson<T>(context.env.OPENSCOUT_BROKER_URL?.trim() || resolveBrokerControlUrl(), path, {
+      socketPath: context.env.OPENSCOUT_BROKER_SOCKET_PATH?.trim() || undefined,
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch (error) {
+    if (!(error instanceof ScoutBrokerHttpError)) throw error;
+    // No runtime API change in this consumer PR. Keep HTTP status even while
+    // the existing error class has no response-body field.
+    throw new ScoutCliError(`Provider quotas unavailable: HTTP ${error.status}`);
+  }
 }
 
 export function buildProviderUsageReport(
-  payload: ServiceBudgetsPayload,
+  payload: ProviderQuotaRead,
   options: ProviderUsageFormatOptions = {},
 ): ProviderUsageReport {
+  if (payload.schema !== "scout.provider-quotas/v1" || !["available", "unknown"].includes(payload.availability)
+    || !["unsupported", "not_requested"].includes(payload.refresh) || !Array.isArray(payload.windows)
+    || !Number.isFinite(payload.generatedAt) || !Number.isFinite(new Date(payload.generatedAt).getTime())
+    || typeof payload.coverage?.truncated !== "boolean" || !Number.isInteger(payload.coverage.endpointsScanned) || payload.coverage.endpointsScanned < 0
+    || (payload.availability === "unknown") !== (payload.windows.length === 0)) throw new ScoutCliError("provider_quotas_invalid_response");
   const now = finiteNumber(options.now) ?? Date.now();
-  const generatedAt = finiteNumber(payload.generatedAt) ?? now;
-  const gauges = Array.isArray(payload.gauges) ? payload.gauges : [];
-  const providers = gauges
-    .filter(isRecord)
-    .map((gauge) => usageProviderFromGauge(gauge as ServiceGaugePayload, now, options))
-    .filter((provider): provider is ProviderUsageProvider => provider !== null);
-
-  return {
-    generatedAt,
-    generatedAtIso: new Date(generatedAt).toISOString(),
-    generatedAtLocal: formatLocalTimestamp(generatedAt, now, options),
-    providers,
+  const pools = new Map<string, ProviderUsageProvider>();
+  for (const facts of payload.windows) {
+    // IDs are opaque: do not trim, case-fold, or infer an account from a provider.
+    if (typeof facts.id !== "string" || !facts.id || typeof facts.provider !== "string" || !facts.provider || !Number.isFinite(facts.ageMs) || facts.ageMs < 0 || !Number.isFinite(facts.capturedAt)
+      || !Number.isFinite(new Date(facts.capturedAt).getTime()) || facts.capturedAt > payload.generatedAt || ![facts.resetAt, facts.windowMs].every(value => value === undefined || Number.isFinite(value))
+      || (facts.resetAt !== undefined && !Number.isFinite(new Date(facts.resetAt).getTime()))) throw new ScoutCliError("provider_quotas_invalid_response");
+    const identity: ProviderQuotaPoolIdentity = { provider: facts.provider, accountId: facts.accountId ?? null, userId: facts.userId ?? null,
+      endpointId: facts.endpointId ?? null, sessionId: facts.sessionId ?? null, harness: facts.harness ?? null, transport: facts.transport ?? null };
+    const poolId = JSON.stringify([identity.provider, identity.accountId, identity.userId, identity.endpointId, identity.sessionId, identity.harness, identity.transport, facts.planType ?? null, identity.accountId === null ? facts.id : null]);
+    let pool = pools.get(poolId);
+    if (!pool) {
+      pool = { poolId, identity, id: facts.provider, routingProviderId: routingProviderId(facts.provider), label: providerLabel(facts.provider, null), plan: facts.planType ?? null, windows: [] };
+      pools.set(poolId, pool);
+    }
+    const used = facts.usedPercent ?? (facts.percentRemaining !== undefined ? 100 - facts.percentRemaining
+      : facts.used !== undefined && facts.limit !== undefined && facts.limit > 0 ? facts.used / facts.limit * 100 : NaN);
+    if (!Number.isFinite(used) || used < 0 || used > 100 || (facts.percentRemaining !== undefined && (!Number.isFinite(facts.percentRemaining) || facts.percentRemaining < 0 || facts.percentRemaining > 100 || Math.abs(used + facts.percentRemaining - 100) > 0.2))) throw new ScoutCliError("provider_quotas_invalid_response");
+    const resetAt = facts.resetAt ?? null;
+    // Receipt age is authoritative; waiting at the client can only age a fact.
+    const ageMs = Math.max(facts.ageMs, payload.generatedAt - facts.capturedAt) + Math.max(0, now - payload.generatedAt);
+    pool.windows.push({ facts, label: legacyWindowLabel(facts.label), usedPercent: roundPercent(used),
+      percentRemaining: roundPercent(facts.percentRemaining ?? 100 - used), windowMs: facts.windowMs ?? null,
+      resetAt, resetAtIso: resetAt === null ? null : new Date(resetAt).toISOString(), resetAtLocal: resetAt === null ? "unknown" : formatLocalTimestamp(resetAt, now, options),
+      resetIn: resetAt === null ? "" : formatRelativeTime(resetAt - now), source: facts.observationSource,
+      freshness: { capturedAt: facts.capturedAt, capturedAtIso: new Date(facts.capturedAt).toISOString(), ageMs, label: formatAge(ageMs),
+        stale: ageMs > PROVIDER_QUOTA_STALE_AFTER_MS || (resetAt !== null && resetAt <= now) },
+    });
+  }
+  const providers = [...pools.values()];
+  return { schema: "scout.provider-usage/v1", generatedAt: payload.generatedAt, generatedAtIso: new Date(payload.generatedAt).toISOString(),
+    generatedAtLocal: formatLocalTimestamp(payload.generatedAt, now, options), providers,
+    availability: providers.length === 0 ? "unknown" : providers.every(pool => pool.windows.every(window => window.freshness.stale)) ? "stale" : "available",
+    refresh: payload.refresh, coverage: payload.coverage,
   };
+}
+
+function routingProviderId(provider: string): string {
+  return provider === "openai" ? "codex" : provider === "anthropic" ? "claude" : provider;
+}
+
+/** Never feed duplicate provider IDs to a mapper whose Map would pick the last account. */
+export function buildProviderQuotaMap(report: ProviderUsageReport, options: { now?: number; role?: OrchestrationRoleId | null } = {}) {
+  if (!report.providers.length) throw new ScoutCliError("provider_quotas_unknown: no approved observed quota facts; unknown is not zero");
+  if (report.coverage.truncated) throw new ScoutCliError("provider_quota_coverage_incomplete: map requires complete observation coverage");
+  const seen = new Set<string>();
+  for (const pool of report.providers) {
+    if (seen.has(pool.routingProviderId)) throw new ScoutCliError(`provider_quota_pool_ambiguous: ${pool.routingProviderId}; inspect providers usage; per-pool map selection is unsupported`);
+    seen.add(pool.routingProviderId);
+    if (!pool.identity.endpointId || !pool.identity.accountId) throw new ScoutCliError("provider_quota_identity_unknown: map needs observed endpoint and account identity; user identity is not an account");
+    if (pool.windows.some(window => window.freshness.stale)) throw new ScoutCliError("provider_quotas_stale: map cannot use stale observations; --refresh is unsupported");
+  }
+  const map = buildOrchestrationProviderMap({ ...report, providers: report.providers.map(pool => ({ ...pool, id: pool.routingProviderId })) }, options);
+  const supported = new Set(map.models.map(model => model.route.providerId));
+  if (report.providers.some(pool => !supported.has(pool.routingProviderId))) throw new ScoutCliError("provider_quota_provider_unsupported: no routing policy for an observed provider");
+  return { ...map, quotaRead: report, quotaBasis: report.providers.map(pool => ({ providerId: pool.routingProviderId, poolId: pool.poolId, identity: pool.identity })),
+    accountBinding: "not_enforced" as const };
+}
+
+function renderQuotaNotice(report: ProviderUsageReport): string {
+  return [report.refresh === "unsupported" ? "Refresh unsupported: passive runtime observations only; no provider was polled." : "Passive runtime observations; refresh not requested.",
+    ...(report.coverage.truncated ? ["Incomplete observation coverage; no completeness claim."] : [])].join("\n");
+}
+
+const displayIdentity = (value: string | null): string => value === null ? "(unknown)" : JSON.stringify(value);
+
+function renderQuotaPools(report: ProviderUsageReport): string {
+  return report.providers.map(pool => `${pool.label}${pool.plan ? ` · ${pool.plan}` : ""} · account ${displayIdentity(pool.identity.accountId)} · user ${displayIdentity(pool.identity.userId)} · endpoint ${displayIdentity(pool.identity.endpointId)} · session ${displayIdentity(pool.identity.sessionId)} · harness ${displayIdentity(pool.identity.harness)} · transport ${displayIdentity(pool.identity.transport)}`).join("\n");
 }
 
 export function renderProviderUsageReport(report: ProviderUsageReport): string {
+  const notice = renderQuotaNotice(report);
+  if (report.availability === "unknown") return `${notice}\n\nProvider quota availability unknown: no approved observations are available. Unknown is not zero.\nOpen a provider session that reports quota metadata; --refresh cannot poll it.`;
   const windowCount = report.providers.reduce((count, provider) => count + provider.windows.length, 0);
-  const lines = [
-    `Provider usage · ${windowCount} ${windowCount === 1 ? "window" : "windows"} · generated ${report.generatedAtLocal}`,
-  ];
-
-  if (windowCount === 0) {
-    lines.push("", "No provider quota windows are currently available.");
-    lines.push("Open a local provider session, then run `scout providers usage --refresh`.");
-    return lines.join("\n");
-  }
-
-  for (const provider of report.providers) {
-    lines.push("", `${provider.label}${provider.plan ? ` · ${provider.plan}` : ""}`);
-    for (const window of provider.windows) {
-      lines.push(
-        `  ${window.label}  ${formatPercent(window.usedPercent)} used · ${formatPercent(window.percentRemaining)} remaining · resets ${window.resetAtLocal}${window.resetIn ? ` (${window.resetIn})` : ""}`,
-      );
-      lines.push(`      ${window.source} · updated ${window.freshness.label}`);
+  const lines = [notice, `Provider usage · ${windowCount} ${windowCount === 1 ? "window" : "windows"} · generated ${report.generatedAtLocal}`,
+    ...(report.availability === "stale" ? ["Stale observations only; these are historical facts, not current capacity."] : [])];
+  for (const pool of report.providers) {
+    lines.push("", renderQuotaPools({ ...report, providers: [pool] }));
+    for (const window of pool.windows) {
+      lines.push(`  ${window.label}  ${formatPercent(window.usedPercent)} used · ${formatPercent(window.percentRemaining)} remaining · resets ${window.resetAtLocal}${window.resetIn ? ` (${window.resetIn})` : ""}`);
+      lines.push(`      ${window.source} · updated ${window.freshness.label}${window.freshness.stale ? " · STALE (historical observation)" : ""}`);
     }
   }
-
   return lines.join("\n");
-}
-
-function usageProviderFromGauge(
-  gauge: ServiceGaugePayload,
-  now: number,
-  options: ProviderUsageFormatOptions,
-): ProviderUsageProvider | null {
-  if (gauge.kind !== "quota") return null;
-
-  const id = stringValue(gauge.id) ?? stringValue(gauge.label) ?? "unknown";
-  const windows = quotaWindowsFromGauge(gauge)
-    .map((window) => usageWindowFromPayload(window, gauge, now, options))
-    .filter((window): window is ProviderUsageWindow => window !== null);
-  if (windows.length === 0) return null;
-
-  return {
-    id,
-    label: providerLabel(id, stringValue(gauge.label)),
-    plan: stringValue(gauge.plan) ?? null,
-    windows,
-  };
-}
-
-function quotaWindowsFromGauge(gauge: ServiceGaugePayload): ServiceQuotaWindowPayload[] {
-  if (Array.isArray(gauge.windows)) {
-    const windows = gauge.windows.filter(isRecord) as ServiceQuotaWindowPayload[];
-    if (windows.length > 0) return windows;
-  }
-
-  return [{
-    label: legacyWindowLabel(stringValue(gauge.unitLabel)),
-    fill: gauge.fill,
-    usedLabel: gauge.usedLabel,
-    capLabel: gauge.capLabel,
-    unitLabel: gauge.unitLabel,
-    resetAt: gauge.resetAt,
-    capturedAt: gauge.capturedAt,
-    source: gauge.source,
-  }];
-}
-
-function usageWindowFromPayload(
-  window: ServiceQuotaWindowPayload,
-  gauge: ServiceGaugePayload,
-  now: number,
-  options: ProviderUsageFormatOptions,
-): ProviderUsageWindow | null {
-  const usedPercent = percentFromWindow(window);
-  if (usedPercent === null) return null;
-
-  const resetAt = finiteNumber(window.resetAt) ?? finiteNumber(gauge.resetAt) ?? null;
-  const capturedAt = finiteNumber(window.capturedAt) ?? finiteNumber(gauge.capturedAt) ?? null;
-  const source = stringValue(window.source) ?? stringValue(gauge.source) ?? "provider report";
-
-  return {
-    label: stringValue(window.label) ?? legacyWindowLabel(stringValue(window.unitLabel)),
-    usedPercent,
-    percentRemaining: roundPercent(100 - usedPercent),
-    windowMs: finiteNumber(window.windowMs),
-    resetAt,
-    resetAtIso: resetAt === null ? null : new Date(resetAt).toISOString(),
-    resetAtLocal: resetAt === null ? "unknown" : formatLocalTimestamp(resetAt, now, options),
-    resetIn: resetAt === null ? "" : formatRelativeTime(resetAt - now),
-    source,
-    freshness: freshnessFromCapturedAt(capturedAt, now),
-  };
-}
-
-function percentFromWindow(window: ServiceQuotaWindowPayload): number | null {
-  const fill = finiteNumber(window.fill);
-  if (fill !== null) return roundPercent(Math.max(0, Math.min(1, fill)) * 100);
-
-  const usedLabel = stringValue(window.usedLabel);
-  const match = usedLabel?.match(/^(-?\d+(?:\.\d+)?)%$/u);
-  if (!match) return null;
-  const percent = Number(match[1]);
-  return Number.isFinite(percent)
-    ? roundPercent(Math.max(0, Math.min(100, percent)))
-    : null;
-}
-
-function freshnessFromCapturedAt(capturedAt: number | null, now: number): ProviderUsageFreshness {
-  if (capturedAt === null) {
-    return { capturedAt: null, capturedAtIso: null, ageMs: null, label: "unknown" };
-  }
-  const ageMs = Math.max(0, now - capturedAt);
-  return {
-    capturedAt,
-    capturedAtIso: new Date(capturedAt).toISOString(),
-    ageMs,
-    label: formatAge(ageMs),
-  };
 }
 
 function formatLocalTimestamp(
@@ -416,12 +388,4 @@ function roundPercent(percent: number): number {
 
 function finiteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function stringValue(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
