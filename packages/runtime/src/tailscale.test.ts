@@ -312,8 +312,8 @@ async function hostCommand(
 if (process.argv[2] !== '--fixture-warmup') {
   appendFileSync(${JSON.stringify(count)}, JSON.stringify(process.argv.slice(2))+'\\n');
   ${initial.ignoreTerm ? "process.on('SIGTERM', ()=>{});" : ""}
-  writeFileSync(${JSON.stringify(started)}, String(process.pid));
   const config=JSON.parse(readFileSync(${JSON.stringify(config)},'utf8'));
+  writeFileSync(${JSON.stringify(started)}, String(process.pid));
   while(config.gate && !existsSync(${JSON.stringify(gate)})) await new Promise(r=>setTimeout(r,1));
   if(config.noise) process.stderr.write('owned fixture warning\\n');
   process.stdout.write(config.raw ?? JSON.stringify(config.status ?? ${JSON.stringify(runningStatus)}));
