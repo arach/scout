@@ -28,7 +28,9 @@ export type AttachmentReadResult = {
   blobId: string; messageId: string; mediaType: string; byteSize: number; fileName?: string;
 } & ({ mode: "image"; data: string } | { mode: "text"; text: string; truncated: boolean; sourceTrust: "untrusted_attachment" });
 export const ATTACHMENT_LIMITS = {
+  /** Decoded image upload and image-mode read ceiling. */
   imageBytes: 25 * 1024 * 1024,
+  /** Text inspection source bytes. Image mode uses imageBytes. */
   readBytes: 256 * 1024,
   textCharacters: 32_000,
   storeBytes: 256 * 1024 * 1024,

@@ -24,7 +24,7 @@ export function decodeAttachment(data: string): Buffer {
 }
 export function validateAttachmentBytes(bytes: Uint8Array, mediaType: string): void {
   if (bytes.length > (isTextMime(mediaType) ? ATTACHMENT_LIMITS.readBytes : ATTACHMENT_LIMITS.imageBytes)) throw new AttachmentError("attachment_too_large", 413);
-  const b = Buffer.from(bytes);
+  const b = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (imageMimes.has(mediaType)) {
     const valid = mediaType === "image/png" ? b.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))
       : mediaType === "image/jpeg" ? b.length >= 3 && b[0] === 255 && b[1] === 216 && b[2] === 255
