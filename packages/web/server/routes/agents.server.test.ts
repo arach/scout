@@ -890,6 +890,7 @@ describe("createOpenScoutWebServer: agents routes", () => {
 
   test("projects active Claude tmux permission prompts into agent and operator attention", async () => {
     useIsolatedOpenScoutHome();
+    stubs.scoutBrokerContextResult = makeA2aBrokerContext({ agent: { capabilities: [] } });
     const agentId = "paper-screen-fable.work-hud-013-voice-settings.arachs-mac-mini-local";
     const sessionId = "relay-paper-screen-fable-work-hud-013-voice-settings-arachs-mac-mini-local-claude";
     stubs.queryAgentsResult = [{
@@ -982,6 +983,7 @@ describe("createOpenScoutWebServer: agents routes", () => {
 
     const attentionResponse = await server.app.request("http://localhost/api/operator-attention");
     const attention = await attentionResponse.json() as {
+      tmuxHostAttention: { availability: string; observations: Array<{ ref: { hostSession: string }; prompt: { promptVersion: string; promptIdentity: null } | null }> };
       items: Array<{
         id: string;
         agentId: string | null;
@@ -989,6 +991,10 @@ describe("createOpenScoutWebServer: agents routes", () => {
         actions: Array<{ kind: string; route?: Record<string, string> }>;
       }>;
     };
+    expect(attention.tmuxHostAttention.availability).toBe("available");
+    const observed = attention.tmuxHostAttention.observations.find(row => row.ref.hostSession === sessionId);
+    expect(observed?.prompt?.promptVersion).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(observed?.prompt?.promptIdentity).toBeNull();
     expect(attention.items.find((item) => item.agentId === agentId)).toMatchObject({
       id: `tmux-host-permission:${agentId}:${sessionId}`,
       title: "Claude needs permission",

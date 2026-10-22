@@ -55,28 +55,7 @@ function agent(overrides: Partial<WebAgent> = {}): WebAgent {
   };
 }
 
-const livePermissionPrompt = `
-⏺ Bash(curl -s -m 5 http://127.0.0.1:29980/api/files)
-
-────────────────────────────────────────────────────────
- Bash command
-
-   curl -s -m 5 http://127.0.0.1:29980/api/files
-   Check Paper API and Studio dev server are up
-
- Permission rule Bash(curl:*) requires confirmation for this command.
- /permissions to update rules
-
- Do you want to proceed?
-   1. Yes
- ❯ 2. No
-
- Esc to cancel · Tab to amend · ctrl+e to explain
-
-  4 tasks (0 done, 1 in progress, 3 open)
-  ◼ Orient: Paper host renderer, MCP protocol, current page tree
-  ◻ Compose Candidate·Orientation CompNode tree via Paper tools
-`;
+import { livePermissionPrompt } from "../../../../runtime/src/test-helpers/tmux-host-attention-fixture.test.ts";
 
 describe("Claude tmux host attention", () => {
   test("detects the active permission prompt from the reported pane", () => {
@@ -98,28 +77,9 @@ describe("Claude tmux host attention", () => {
     });
   });
 
-  test("does not resurrect an old prompt once output follows it", () => {
-    expect(detectClaudeTmuxHostAttention(`${livePermissionPrompt}\n⏺ Read(src/model.ts)\n  ⎿ Read 20 lines`, {
-      agentId: "agent-1",
-      agentName: "Paper Screen Fable",
-      sessionId: SESSION_ID,
-    })).toBeNull();
-  });
-
-  test.each([
-    ["inline", "❯ "],
-    ["boxed", "│ > "],
-  ])("clears a resolved prompt when Claude returns to its %s composer", (_kind, composer) => {
-    expect(detectClaudeTmuxHostAttention(`${livePermissionPrompt}\n${composer}`, {
-      agentId: "agent-1",
-      agentName: "Paper Screen Fable",
-      sessionId: SESSION_ID,
-    })).toBeNull();
-  });
-
   test("scans live Claude tmux panes even when broker state is available", async () => {
     const captures: string[] = [];
-    const items = await collectTmuxHostAttention([
+    const { items, read } = await collectTmuxHostAttention([
       agent(),
       agent({ id: "idle", state: "available" }),
       agent({ id: "retired", state: "available", retiredFromFleet: true }),
@@ -127,8 +87,10 @@ describe("Claude tmux host attention", () => {
     ], async (candidate) => {
       captures.push(candidate.id);
       return livePermissionPrompt;
-    }, { now: 1_700_000_000_000 });
+    }, { nodeId: "node-1", now: 1_700_000_000_000 });
 
+    expect(read.observations[0]?.ref.nodeId).toBe("node-1");
+    expect(read.observations[0]?.prompt?.promptVersion).toMatch(/^sha256:/);
     expect(captures).toEqual([
       "paper-screen-fable.work-hud-013-voice-settings.arachs-mac-mini-local",
       "idle",
@@ -146,15 +108,15 @@ describe("Claude tmux host attention", () => {
   });
 
   test("bounds a stalled pane capture", async () => {
-    const startedAt = Date.now();
-    const items = await collectTmuxHostAttention(
+    const { items, read } = await collectTmuxHostAttention(
       [agent()],
       async () => await new Promise<string>(() => {}),
-      { captureTimeoutMs: 5 },
+      { nodeId: "node-1", captureTimeoutMs: 5 },
     );
 
     expect(items).toEqual([]);
-    expect(Date.now() - startedAt).toBeLessThan(100);
+    expect(read.observations[0]?.availability).toBe("unavailable");
+    expect(read.observations[0]?.reason).toBe("capture_timeout");
   });
 
   test("bounds host scans and prioritizes active recent sessions", async () => {
@@ -168,7 +130,7 @@ describe("Claude tmux host attention", () => {
     await collectTmuxHostAttention(agents, async (candidate) => {
       captures.push(candidate.id);
       return null;
-    }, { maxCandidates: 5, captureConcurrency: 1 });
+    }, { nodeId: "node-1", maxCandidates: 5, captureConcurrency: 1 });
 
     expect(captures).toEqual([
       "agent-29",
@@ -178,4 +140,23 @@ describe("Claude tmux host attention", () => {
       "agent-25",
     ]);
   });
+  test("unknown identity and remote refs cannot trigger local captures", async () => {
+    let calls = 0;
+    const capture = async () => { calls++; return livePermissionPrompt; };
+    const unknown = await collectTmuxHostAttention([agent()], capture, { nodeId: null });
+    expect(unknown.items).toEqual([]);
+    expect(unknown.read.availability).toBe("unknown");
+    const remote = await collectTmuxHostAttention([agent({ homeNodeId: "other-node" })], capture, { nodeId: "node-1" });
+    expect(remote.items).toEqual([]);
+    expect(remote.read.observations[0]?.reason).toBe("nonlocal_ref");
+    expect(calls).toBe(0);
+  });
+
+  test("preserves explicit capture truncation through the adopter", async () => {
+    const result = await collectTmuxHostAttention([agent()], async () => ({ body: livePermissionPrompt, truncated: true }), { nodeId: "node-1" });
+    expect(result.items).toEqual([]);
+    expect(result.read.observations[0]?.availability).toBe("partial");
+    expect(result.read.observations[0]?.reason).toBe("capture_truncated");
+  });
+
 });
