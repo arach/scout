@@ -1,8 +1,10 @@
 # Dormant extension channel I/O candidate
 
-This is source-level candidate code, not an enabled context or credential
-backend. No runner imports it, no public package export is added, and the
-existing context gate still refuses everywhere. API 1 is unchanged.
+This is not an enabled context or credential backend. The dormant context
+executor now consumes the [qualified host facade](./extension-channel-host.md),
+which adds exact runtime checks and fixed artifact verification. The adapter
+and C shim remain byte-identical to their qualified tuple. The context product
+gate is still literal false everywhere. API 1 is unchanged.
 
 ## Ownership and native boundary
 

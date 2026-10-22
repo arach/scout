@@ -24,6 +24,22 @@ if(Bun.revision==='0d9b296af33f2b851fcbf4df3e9ec89751734ba4'&&(process.platform=
 const pair=allocateExtensionChannel('context');if(pair.target!==5)throw Error('wrong mapping');pair.source.close();pair.parent.close();console.log('allocated-and-closed');
 }else{try{allocateExtensionChannel('context');throw Error('unqualified allocation');}catch(e){if(e.message!=='extension_channel_host_unavailable')throw e;}console.log('refused');}`;
     const positive=run(['-e',script],dir); assert.equal(positive.status,0,positive.stderr);assert.match(positive.stdout,/allocated-and-closed|refused/);
+    // Compile the real executor/instrument into a test-only harness. Its factory
+    // MUST come from the installed artifact, never a hidden source-tree import.
+    const witness=join(dir,'runner-witness.mjs');
+    const compiled=run(['build',resolve(root,'scripts/extension-numeric-spike/runner-witness.ts'),'--target=bun','--format=esm','--outfile',witness]);assert.equal(compiled.status,0,compiled.stderr);
+    if(positive.stdout.includes('allocated-and-closed')) {
+      const disposition=run(['-e',`import{allocateExtensionChannel}from ${JSON.stringify(module)};process.on('SIGPIPE',()=>{});try{const p=allocateExtensionChannel('context');p.source.close();p.parent.close();throw Error('SIGPIPE policy accepted');}catch(error){if(error.nativeCode!==-3)throw error;console.log('sigpipe-refused');}`],dir);
+      assert.equal(disposition.status,0,disposition.stderr);assert.equal(disposition.stdout.trim(),'sigpipe-refused');
+      const faults={none:null,'stale-second-close':'reclaimed descriptor lost','second-spawn-close':'replacement spawn descriptor lost','finalizer-close':'finalizer closed runtime-owned number',mapping:'child mapping failed',eof:'child EOF failed',cloexec:'CLOEXEC copy discipline failed','collection-retained':'native subprocess collection was not observed within 64 GC rounds','cancel-double-close':'reclaimed descriptor lost'};
+      for(const [fault,reason] of Object.entries(faults)) {
+        const measured=run([witness,fault,module],dir);
+        assert.equal(measured.status,reason?1:0,measured.stdout+measured.stderr);assert.equal(measured.stderr,'');
+        const events=measured.stdout.trim().split('\n').map(line=>JSON.parse(line));
+        if(reason){assert.equal(events.at(-1).event,'failure');assert.match(events.at(-1).error,new RegExp(reason));}
+        else {assert.equal(events.filter(e=>e.event==='native-collected').length,9);assert.equal(events.filter(e=>e.event==='second-spawn-reuse').length,1);assert.ok(events.filter(e=>e.event==='reclaim-check').length>=160);assert.equal(events.at(-1).event,'complete');}
+      }
+    }
     const shim=join(dir,'extension-channel-native.c'), original=readFileSync(shim);
     writeFileSync(shim,Buffer.concat([original,Buffer.from('\n/* unapproved */')]));
     const check=`import{verifyExtensionChannelHostAssets}from ${JSON.stringify(module)};verifyExtensionChannelHostAssets();`;

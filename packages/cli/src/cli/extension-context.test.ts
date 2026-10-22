@@ -5,14 +5,14 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
 import { chmodSync, closeSync, fstatSync, openSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { Writable } from "node:stream";
+import { releaseExtensionChannelCodeForWitness, BoundedChannelDescriptor } from "../../../runtime/src/extension-channel-io.ts";
 import { applyOpenScoutInstanceEnvironment, deriveOpenScoutInstanceLayout, selectCliOpenScoutInstance } from "@openscout/runtime/instance";
 import { resolveOpenScoutPairingHomeForEnv, resolveOpenScoutHomeForEnv } from "@openscout/runtime/support-paths";
 import { resolveScoutHome } from "@openscout/runtime/scout-home";
 import { findScoutExtension, scoutExtensionEnv } from "./extensions.ts";
 import { mutateScoutExtension, readScoutExtensionInstallReceipt } from "./extension-install.ts";
 import { captureScoutExtensionSelection, projectScoutExtensionContext, encodeScoutExtensionContext, EXTENSION_CONTEXT_MAX_BYTES, type ScoutExtensionContext } from "./extension-context.ts";
-import { prepareScoutExtensionContext, runScoutExtensionWithContext, scoutExtensionContextStdio, deliverScoutExtensionContext, stopScoutExtensionContextChild } from "./extension-context-runner.ts";
+import { prepareScoutExtensionContext, runScoutExtensionWithQualifiedContext, runScoutExtensionWithContext, scoutExtensionContextStdio, stopScoutExtensionContextChild } from "./extension-context-runner.ts";
 import { INHERITED_DESCRIPTOR_LAYOUTS, MAX_INHERITED_DESCRIPTOR_SLOT } from "@openscout/runtime/inherited-descriptors";
 const root = mkdtempSync(join(import.meta.dir, "../../node_modules/.extension-context-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -103,16 +103,19 @@ test("context framing accepts exactly 64 KiB and refuses one byte more",()=>{
  frame.cli.version+="x".repeat(EXTENSION_CONTEXT_MAX_BYTES-empty);expect(encodeScoutExtensionContext(frame).length).toBe(EXTENSION_CONTEXT_MAX_BYTES);frame.cli.version+="x";expect(()=>encodeScoutExtensionContext(frame)).toThrow("context_invalid");
 });
 test("mapping takes registry context only and never maps credentials or worker authority",()=>{
- const stdio=scoutExtensionContextStdio();expect(stdio).toHaveLength(MAX_INHERITED_DESCRIPTOR_SLOT+1);
- expect(stdio[INHERITED_DESCRIPTOR_LAYOUTS.extensionApi2.context]).toBe("pipe");expect(stdio[INHERITED_DESCRIPTOR_LAYOUTS.extensionApi2.credential]).toBe("ignore");
+ const stdio=scoutExtensionContextStdio(33);expect(stdio).toHaveLength(MAX_INHERITED_DESCRIPTOR_SLOT+1);
+ expect(stdio[INHERITED_DESCRIPTOR_LAYOUTS.extensionApi2.context]).toBe(33);expect(stdio[INHERITED_DESCRIPTOR_LAYOUTS.extensionApi2.credential]).toBe("ignore");
  for(const slot of Object.values(INHERITED_DESCRIPTOR_LAYOUTS.roleCustody))expect(stdio[slot]).toBe("ignore");expect(stdio.slice(0,3)).toEqual(["inherit","inherit","inherit"]);
 });
-test("delivery handles partial/backpressured writes and ends exactly once with LF and EOF",async()=>{
- const bytes:Buffer[]=[];let finishes=0;const stream=new Writable({highWaterMark:1,write(chunk,_encoding,done){for(let i=0;i<chunk.length;i+=7)bytes.push(chunk.subarray(i,i+7));setTimeout(done,5);}});stream.once("finish",()=>finishes++);
- await deliverScoutExtensionContext(stream,Buffer.from('{"schema":"test"}\n'),new Promise(()=>{}));expect(Buffer.concat(bytes).toString()).toBe('{"schema":"test"}\n');expect(finishes).toBe(1);await new Promise(done=>setTimeout(done,0));expect(stream.listenerCount("error")).toBe(0);
+test("delivery adapter handles partial/backpressured writes and closes once for EOF",async()=>{
+ const bytes:number[]=[];let closes=0,calls=0;
+ const endpoint=new BoundedChannelDescriptor(99,{read(){return -1;},write(_fd,part){if(++calls===1)return -1;const n=Math.min(7,part.length);bytes.push(...part.subarray(0,n));return n;},close(){closes++;return 0;}});
+ await endpoint.write(Buffer.from('{"schema":"test"}\n'),{timeoutMs:5000});endpoint.close();endpoint.close();
+ expect(Buffer.from(bytes).toString()).toBe('{"schema":"test"}\n');expect(closes).toBe(1);expect(endpoint.stats.writeWouldBlock).toBe(1);
 });
-test("delivery refuses timeout, EPIPE and early child exit and removes listeners",async()=>{
- for(const mode of ["timeout","error","exit"]){const stream=new Writable({write(_chunk,_encoding,done){if(mode==="error")done(new Error("EPIPE"));}});const closed=mode==="exit"?Promise.resolve():new Promise(()=>{});await expect(deliverScoutExtensionContext(stream,Buffer.from("{}\n"),closed,10)).rejects.toThrow(/context_/);await new Promise(done=>setTimeout(done,0));expect(stream.listenerCount("error")).toBe(0);stream.destroy();}
+test("delivery adapter timeout, native error and cancellation terminate once",async()=>{
+ for(const mode of ["timeout","error","exit"]){let closes=0;const abort=new AbortController();const endpoint=new BoundedChannelDescriptor(99,{read(){return -1;},write(){return mode==="error"?-132:-1;},close(){closes++;return 0;}});
+ const pending=endpoint.write(Buffer.from("{}\n"),{timeoutMs:10,signal:abort.signal});if(mode==="exit")abort.abort();await expect(pending).rejects.toThrow(/extension_channel_/);endpoint.close();expect(closes).toBe(1);}
 });
 
 test("public API2 install, binary stdin, argv, context EOF, cwd, output and descendant closure",async()=>{
@@ -205,7 +208,21 @@ test("dormant context refuses eight invocations without creating an extra pipe",
  const f=fixture();mutateScoutExtension("install","context-fixture",f.source,f.env);const extension=findScoutExtension("context-fixture",f.env)!;const {input}=pure(f);
  const frame=prepareScoutExtensionContext({extension,env:f.env,selection:input.selection,cli:input.cli,brokerUrl:input.brokerUrl});
  expect(scoutExtensionContextBackend()).toBe(false);
- for(let i=0;i<8;i++)await expect(runScoutExtensionWithContext(extension,["fail"],scoutExtensionEnv({env:f.env,extension,cliVersion:"1",outputMode:"json",brokerUrl:input.brokerUrl}),frame,f.env)).rejects.toThrow("context_backend_unproven");
+ try{releaseExtensionChannelCodeForWitness(()=>{});}catch(error){expect(String(error)).toContain("no extension channel code loaded");}
+ const raw=Bun.spawn;let spawns=0;Bun.spawn=((...args:unknown[])=>{spawns++;return Reflect.apply(raw,Bun,args);}) as typeof Bun.spawn;
+ try{for(let i=0;i<8;i++)await expect(runScoutExtensionWithContext(extension,["fail"],scoutExtensionEnv({env:f.env,extension,cliVersion:"1",outputMode:"json",brokerUrl:input.brokerUrl}),frame,f.env)).rejects.toThrow("context_backend_unproven");}
+ finally{Bun.spawn=raw;}
+ expect(spawns).toBe(0);expect(()=>releaseExtensionChannelCodeForWitness(()=>{})).toThrow("no extension channel code loaded");
+});
+test("independent credential guard refuses before native load/allocation or provider spawn",async()=>{
+ const f=fixture();mutateScoutExtension("install","context-fixture",f.source,f.env);const extension=findScoutExtension("context-fixture",f.env)!;const {input}=pure(f);
+ const frame=prepareScoutExtensionContext({extension,env:f.env,selection:input.selection,cli:input.cli,brokerUrl:input.brokerUrl});
+ try{releaseExtensionChannelCodeForWitness(()=>{});}catch(error){expect(String(error)).toContain("no extension channel code loaded");}
+ extension.invocation={...extension.invocation!,credentialInputs:[{id:"distribution-key"}] as never};
+ const raw=Bun.spawn;let spawns=0;Bun.spawn=((...args:unknown[])=>{spawns++;return Reflect.apply(raw,Bun,args);}) as typeof Bun.spawn;
+ try{await expect(runScoutExtensionWithQualifiedContext(extension,[],f.env,frame,f.env)).rejects.toThrow("input_backend_unproven");}
+ finally{Bun.spawn=raw;}
+ expect(spawns).toBe(0);expect(()=>releaseExtensionChannelCodeForWitness(()=>{})).toThrow("no extension channel code loaded");
 });
 // Candidate apparatus only: exercise real numeric channels AFTER context work,
 // without reopening the product gate or treating this run as qualification.
