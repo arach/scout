@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {mkdtempSync, rmSync, writeFileSync, readFileSync, copyFileSync} from 'node:fs';
+import {mkdtempSync, rmSync, writeFileSync, readFileSync, copyFileSync, mkdirSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
@@ -17,8 +17,27 @@ for (const bundled of [false,true]) test(`${bundled?'packed sidecar':'runtime ES
       assert.equal(build.status,0,build.stderr);}
     }
     stageExtensionChannel(dir,bundled);
-    const module=join(dir,`extension-channel-host.${bundled?'mjs':'js'}`);
-    const script=`import{verifyExtensionChannelHostAssets,allocateExtensionChannel}from ${JSON.stringify(module)};
+    let assets=dir;
+    if(bundled) {
+      const manifest=JSON.parse(readFileSync(resolve(root,'packages/cli/package.json')));
+      assert.ok(manifest.files.includes('dist'),'CLI package must ship the channel payload');
+      const staging=join(dir,'package'),dist=join(staging,'dist');mkdirSync(dist,{recursive:true});
+      for(const file of ['extension-channel-host.mjs','extension-channel-native.c','extension-channel-artifact.json']) {
+        copyFileSync(join(dir,file),join(dist,file));rmSync(join(dir,file));
+      }
+      writeFileSync(join(staging,'package.json'),JSON.stringify(manifest));
+      const archive=join(dir,'scout-channel-payload.tgz');
+      const pack=spawnSync('tar',['-czf',archive,'-C',dir,'package'],{encoding:'utf8'});assert.equal(pack.status,0,pack.stderr);
+      rmSync(staging,{recursive:true});const unpack=join(dir,'unpacked');mkdirSync(unpack);
+      const extract=spawnSync('tar',['-xzf',archive,'-C',unpack],{encoding:'utf8'});assert.equal(extract.status,0,extract.stderr);
+      assets=join(unpack,'package/dist');
+    }
+    const module=join(assets,`extension-channel-host.${bundled?'mjs':'js'}`);
+    const builder=run(['-e','console.log(JSON.stringify({version:Bun.version,revision:Bun.revision,platform:process.platform,arch:process.arch}))']);assert.equal(builder.status,0,builder.stderr);
+    console.log(JSON.stringify({event:'channel-artifact',mode:bundled?'unpacked-cli-channel-payload':'runtime-esm',builder:JSON.parse(builder.stdout),record:JSON.parse(readFileSync(join(assets,'extension-channel-artifact.json')))}));
+    const script=`import * as host from ${JSON.stringify(module)};
+if(Object.keys(host).sort().join()!=='allocateExtensionChannel,verifyExtensionChannelHostAssets')throw Error('unexpected public channel export');
+const {verifyExtensionChannelHostAssets,allocateExtensionChannel}=host;
 verifyExtensionChannelHostAssets();
 if(Bun.revision==='0d9b296af33f2b851fcbf4df3e9ec89751734ba4'&&(process.platform==='darwin'&&process.arch==='arm64'||process.platform==='linux'&&process.arch==='x64'&&process.report.getReport().header.glibcVersionRuntime)){
 const pair=allocateExtensionChannel('context');if(pair.target!==5)throw Error('wrong mapping');pair.source.close();pair.parent.close();console.log('allocated-and-closed');
@@ -40,12 +59,12 @@ const pair=allocateExtensionChannel('context');if(pair.target!==5)throw Error('w
         else {assert.equal(events.filter(e=>e.event==='native-collected').length,9);assert.equal(events.filter(e=>e.event==='second-spawn-reuse').length,1);assert.ok(events.filter(e=>e.event==='reclaim-check').length>=160);assert.equal(events.at(-1).event,'complete');}
       }
     }
-    const shim=join(dir,'extension-channel-native.c'), original=readFileSync(shim);
+    const shim=join(assets,'extension-channel-native.c'), original=readFileSync(shim);
     writeFileSync(shim,Buffer.concat([original,Buffer.from('\n/* unapproved */')]));
     const check=`import{verifyExtensionChannelHostAssets}from ${JSON.stringify(module)};verifyExtensionChannelHostAssets();`;
     assert.notEqual(run(['-e',check],dir).status,0,'tampered C asset must refuse');
     writeFileSync(shim,original);rmSync(shim);assert.notEqual(run(['-e',check],dir).status,0,'missing asset must refuse');writeFileSync(shim,original);
-    const manifest=join(dir,'extension-channel-artifact.json'), record=JSON.parse(readFileSync(manifest));
+    const manifest=join(assets,'extension-channel-artifact.json'), record=JSON.parse(readFileSync(manifest));
     record.adapter='0'.repeat(64);writeFileSync(manifest,JSON.stringify(record));
     assert.notEqual(run(['-e',check],dir).status,0,'fresh manifest cannot approve wrong source');
     record.adapter='c09006358ff0c37c831da027fe417d09c4f8c0b194230a5901d85a4837e4e62f';record.files['../escape']='0'.repeat(64);writeFileSync(manifest,JSON.stringify(record));

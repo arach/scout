@@ -2,7 +2,7 @@
 import {readFileSync} from "node:fs";
 import {currentExtensionChannelCoordinate, EXTENSION_CHANNEL_QUALIFICATION as Q} from "../packages/runtime/src/extension-channel-qualification.ts";
 if (!currentExtensionChannelCoordinate()) throw Error("qualification job requires the exact supported host; skips are not evidence");
-console.log(JSON.stringify({event:"qualification-host",coordinate:currentExtensionChannelCoordinate(),version:Bun.version,revision:Bun.revision,ruling:Q.ruling}));
+console.log(JSON.stringify({event:"qualification-host",coordinate:currentExtensionChannelCoordinate(),version:Bun.version,revision:Bun.revision,ruling:Q.ruling,sourceHead:Q.head,adapter:Q.adapter,shim:Q.shim}));
 async function command(args: string[], env = process.env) {
   const child = Bun.spawn(args,{env,stdout:"pipe",stderr:"pipe"});
   const [out,err,code] = await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited]);
