@@ -43,7 +43,7 @@ export type HerdrHostAttentionAnswerDependencies = {
   /** Exact-terminal dispatch only. Resolution is input acceptance, not an answer. */
   sendKeys: (target: HerdrHostAttentionTarget, keys: readonly string[], options: { signal: AbortSignal }) => Promise<void>;
   /** Owner-token CAS only; never delete the current claim by pane/key alone.
-   * Preserve unresolved intent, honor abort and reject late/unowned finalization.
+   * Preserve unresolved send effects, honor abort and reject late/unowned finalization.
    * Existing legacy writers must honor this same protocol before adoption.
    */
   finalize: (input: HerdrHostAttentionFinalization, options: { signal: AbortSignal }) => Promise<{ status: "settled" | "not_owner" | "unavailable" }>;
@@ -80,7 +80,7 @@ export function createHerdrHostAttentionAnswerer(deps: HerdrHostAttentionAnswerD
     if (attempted.size >= limits.maxAttempts) return receipt("refused", "attempt_capacity");
     busy.set(paneKey, performance.now());
     const pending = new Set<Promise<unknown>>();
-    let claim: HerdrHostAttentionClaim | null = null, attempt: HerdrHostAttentionAttempt | null = null, latched = false;
+    let claim: HerdrHostAttentionClaim | null = null, attempt: HerdrHostAttentionAttempt | null = null, sendStarted = false;
     const deadline = performance.now() + limits.preflightTimeoutMs;
     type Operation<T> = { state: "ok"; value: T } | { state: "failed" | "timeout" | "aborted" };
     async function bounded<T>(fn: (signal: AbortSignal) => Promise<T>, ms: number, observeCaller = true): Promise<Operation<T>> {
@@ -116,10 +116,13 @@ export function createHerdrHostAttentionAnswerer(deps: HerdrHostAttentionAnswerD
     async function finish(result: HerdrHostAttentionAnswer): Promise<HerdrHostAttentionAnswer> {
       if (!claim || !attempt) return result;
       const input: HerdrHostAttentionFinalization = { attempt: structuredClone(attempt), claim: { ...claim }, result: { ...result },
-        disposition: !latched ? "cancel_unsent" : result.outcome === "answered" ? "verified_answer" : "retain_unresolved" };
+        disposition: !sendStarted ? "cancel_unsent" : result.outcome === "answered" ? "verified_answer" : "retain_unresolved" };
       // Persist the ending even when the caller disconnected. Separate bounded signal.
       const ending = await bounded(s => finalize(input, { signal: s }), limits.finalizationTimeoutMs, false);
-      if (result.outcome === "answered") {
+      if (input.disposition === "cancel_unsent") {
+        if (ending.state === "ok" && ending.value?.status === "settled") attempted.delete(attemptKey);
+        else attempted.add(attemptKey); // An unsettled cancellation still needs its durable backstop.
+      } else if (result.outcome === "answered") {
         if (ending.state !== "ok" || ending.value?.status !== "settled") return receipt("unverified", "claim_unavailable", "sent");
         attempted.delete(attemptKey);
       }
@@ -139,13 +142,17 @@ export function createHerdrHostAttentionAnswerer(deps: HerdrHostAttentionAnswerD
       if (!Array.isArray(confirmed)) return await finish(confirmed);
       if (attempted.size >= limits.maxAttempts) return await finish(receipt("refused", "attempt_capacity"));
       // Intent may have persisted even if its callback later rejects/times out.
-      attempted.add(attemptKey); latched = true;
+      attempted.add(attemptKey);
       const intent = await bounded(s => writeSendIntent(structuredClone(attempt!), { ...claim! }, { signal: s }), deadline - performance.now());
       if (intent.state !== "ok") return await finish(receipt("failed", intent.state === "aborted" ? "aborted" : "claim_unavailable"));
       if (!intent.value || intent.value.ok !== true) return await finish(admissionFailure(intent.value));
       const last = await preflight(); // Intent/audit can await: recapture once more before transport.
       if (!Array.isArray(last)) return await finish(last);
-      const sent = await bounded(s => sendKeys(copyHerdrHostAttentionTarget(target), [...attempt!.keys], { signal: s }), limits.sendTimeoutMs);
+      const sent = await bounded(s => {
+        const sendTarget = copyHerdrHostAttentionTarget(target), keys = [...attempt!.keys];
+        sendStarted = true; // The transport boundary is invocation, not intent persistence or scheduling.
+        return sendKeys(sendTarget, keys, { signal: s });
+      }, limits.sendTimeoutMs);
       if (sent.state !== "ok") return await finish(receipt(sent.state === "failed" ? "failed" : "unverified",
         sent.state === "timeout" ? "send_timeout" : sent.state === "aborted" ? "aborted" : "send_failed", "unknown"));
       const verifyDeadline = performance.now() + limits.verificationTimeoutMs;

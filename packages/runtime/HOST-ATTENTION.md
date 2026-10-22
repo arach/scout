@@ -337,9 +337,10 @@ by the factory and must match admission's returned token. `writeSendIntent`
 must durably commit that owned intent and the required audit before returning
 `ok: true`. A callback may have committed even when it rejects or times out.
 The local latch therefore starts **before attempting send-intent persistence**,
-more conservatively than tmux's transport-stage latch. Any failure from that
-stage onward retains the incident, including a `not_sent` ending. It does not
-turn permission to inspect an incident into permission to resend it.
+more conservatively than tmux's transport-stage latch. The factory records
+whether it actually invoked `sendKeys`, independently of intent persistence.
+An ending before that invocation can cancel its exclusively owned unsent
+attempt, even if intent persistence failed or the prompt changed after intent.
 
 A resolved send is input acceptance only. The factory polls without another
 send, and requires a complete read of the same terminal with no recognized
@@ -348,18 +349,23 @@ missing/error/truncated read, timeout or cancellation never becomes answered.
 
 `finalize` receives a copied owner token, attempt, result and disposition:
 
-- `cancel_unsent`: release only this preparation, before the intent stage.
+- `cancel_unsent`: release only this owner's attempt; `sendKeys` was never invoked.
 - `retain_unresolved`: preserve the intent and record the unresolved ending.
 - `verified_answer`: record verified completion and release only this owner.
 
 The callback must atomically compare **both** token fields against the current
 owner, including after an await. A late finalizer must never delete a replacement
-claim by terminal/key alone. Factory context copies do not replace this required
+claim by terminal/key alone. A `writeSendIntent` that completes after finalization
+must be refused by the same owner-token check, even when it ignored abort.
+Factory context copies do not replace this required
 owner-token CAS in the durable implementation. Finalization has its own bounded
 signal so caller disconnect does not skip recording an ending.
 
-Only a verified disappearance **and** finalization's `status: "settled"` returns
-`answered` and evicts the local latch. Failed, unavailable, timed-out or unowned
+An unsent attempt leaves the local latch only when `cancel_unsent` finalization
+returns `status: "settled"`; a failed or unsettled cancellation retains the latch,
+including when failure preceded intent persistence. After a send invocation,
+only a verified disappearance **and** settled finalization returns `answered`
+and evicts the local latch. Failed, unavailable, timed-out or unowned
 finalization after disappearance returns `unverified/claim_unavailable/sent`
 and retains the latch. Other unsuccessful endings keep their original reason
 and effect; durable state remains unresolved if their finalization fails.

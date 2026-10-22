@@ -103,17 +103,56 @@ describe("inactive guarded Herdr answers", () => {
     expect(await f.answer(await request())).toEqual({ outcome: reason === "authority_refused" || reason === "claimed_elsewhere" ? "refused" : "failed", reason, effect: "not_sent" });
     expect(f.sent).toEqual([]); expect(f.events).not.toContain("intent");
   });
-  test("missing audit/intent prevents sends, and the failed intent stage cannot be replayed", async () => {
+  test("missing audit/intent prevents sends, and settled cancel_unsent releases the unsent attempt", async () => {
     const f = fixture({ writeSendIntent: async () => ({ ok: false, reason: "audit_failed" }) }); const input = await request();
     expect(await f.answer(input)).toEqual({ outcome: "failed", reason: "audit_failed", effect: "not_sent" });
-    expect(await f.answer(input)).toMatchObject({ outcome: "refused", reason: "already_attempted" }); expect(f.sent).toEqual([]);
-    expect(f.store.endings[0]!.disposition).toBe("retain_unresolved"); expect(f.store.audit).toEqual([]);
+    expect(f.store.endings[0]!.disposition).toBe("cancel_unsent"); expect(f.store.rows.size).toBe(0);
+    expect(await f.answer(input)).toEqual({ outcome: "failed", reason: "audit_failed", effect: "not_sent" }); expect(f.sent).toEqual([]);
+    expect(f.store.audit).toEqual([]);
   });
-  test("intent rejection may already have persisted intent; no send or replay follows", async () => {
-    const store = journal(); const f = fixture({ writeSendIntent: async (attempt, claim) => { await store.intent(attempt, claim); throw Error("ack lost"); } }, store);
+  test("intent rejection after persistence cancels an exclusively owned attempt that never invoked send", async () => {
+    const store = journal(); let writes = 0;
+    const f = fixture({ writeSendIntent: async (attempt, claim) => { const result = await store.intent(attempt, claim); if (++writes === 1) throw Error("ack lost"); return result; } }, store);
     const input = await request(); expect(await f.answer(input)).toEqual({ outcome: "failed", reason: "claim_unavailable", effect: "not_sent" });
+    expect(f.store.endings[0]!.disposition).toBe("cancel_unsent"); expect(f.store.rows.size).toBe(0); expect(f.sent).toEqual([]);
+    expect((await f.answer(input)).outcome).toBe("answered");
+    expect((await f.reconstruct()(input)).outcome).toBe("answered"); expect(f.sent).toHaveLength(2);
+  });
+  test.each([["gone", "❯ ", "prompt_gone"], ["stale", changed, "prompt_changed"]] as const)("%s after intent cancels without consuming a permanent attempt slot", async (outcome, body, reason) => {
+    let reads = 0;
+    const f = fixture({ limits: { maxAttempts: 1 }, capture: async row => evidence(row, ++reads === 3 ? body : reads === 7 ? "❯ " : pane) });
+    const input = await request();
+    expect(await f.answer(input)).toEqual({ outcome, reason, effect: "not_sent" });
+    expect(f.store.endings[0]!.disposition).toBe("cancel_unsent"); expect(f.store.audit).toHaveLength(1);
+    expect(f.store.rows.size).toBe(0); expect(f.sent).toEqual([]);
+    expect((await f.answer(input)).outcome).toBe("answered"); expect(f.sent).toHaveLength(1);
+  });
+  test.each(["throw", "not_owner", "unavailable"] as const)("failed cancel_unsent (%s) retains the in-memory latch", async status => {
+    const f = fixture({ writeSendIntent: async () => ({ ok: false, reason: "audit_failed" }), finalize: async input => {
+      expect(input.disposition).toBe("cancel_unsent");
+      if (status === "throw") throw Error("cancel unavailable");
+      return { status };
+    } }); const input = await request();
+    expect(await f.answer(input)).toEqual({ outcome: "failed", reason: "audit_failed", effect: "not_sent" });
+    expect(await f.answer(input)).toMatchObject({ reason: "already_attempted", effect: "not_sent" }); expect(f.sent).toEqual([]);
+  });
+  test("failed cancel_unsent before intent adds a latch even though none existed yet", async () => {
+    let reads = 0;
+    const f = fixture({ capture: async row => evidence(row, ++reads === 2 ? changed : pane), finalize: async input => {
+      expect(input.disposition).toBe("cancel_unsent"); return { status: "unavailable" };
+    } }); const input = await request();
+    expect(await f.answer(input)).toEqual({ outcome: "stale", reason: "prompt_changed", effect: "not_sent" });
+    expect(await f.answer(input)).toMatchObject({ reason: "already_attempted" }); expect(f.store.audit).toEqual([]); expect(f.sent).toEqual([]);
+  });
+  test("cancel_unsent timeout retains the latch after its abort-ignoring finalizer eventually settles", async () => {
+    const gate = deferred<void>(), store = journal(); let finalSignal!: AbortSignal;
+    const f = fixture({ limits: { finalizationTimeoutMs: 5 }, writeSendIntent: async () => ({ ok: false, reason: "audit_failed" }), finalize: async (input, { signal }) => {
+      finalSignal = signal; expect(input.disposition).toBe("cancel_unsent"); await gate.promise; return store.finalize(input);
+    } }, store); const input = await request();
+    expect(await f.answer(input)).toMatchObject({ reason: "audit_failed", effect: "not_sent" }); expect(finalSignal.aborted).toBe(true);
+    expect(await f.answer(input)).toMatchObject({ reason: "busy" });
+    gate.resolve(); await Bun.sleep(0);
     expect(await f.answer(input)).toMatchObject({ reason: "already_attempted" }); expect(f.sent).toEqual([]);
-    expect(await f.reconstruct()(input)).toMatchObject({ reason: "claimed_elsewhere", effect: "not_sent" });
   });
   test("effect-unknown recurrence excludes decision from the key and never sends again", async () => {
     let sends = 0; const f = fixture({ sendKeys: async () => { sends++; throw Error("may have acted"); } }); const input = await request();
@@ -170,12 +209,24 @@ describe("inactive guarded Herdr answers", () => {
     expect(await f.answer(input)).toMatchObject({ reason: "busy" }); gate.resolve(evidence()); await Bun.sleep(0);
     expect(f.events).toEqual([]); expect(f.sent).toEqual([]);
   });
-  test("late intent cannot resume a send; its unknown persistence remains pinned", async () => {
-    const gate = deferred<{ ok: true }>(); let signal!: AbortSignal;
-    const f = fixture({ limits: { preflightTimeoutMs: 5 }, writeSendIntent: async (_a, _c, options) => { signal = options.signal; return gate.promise; } }); const input = await request();
+  test.each([false, true])("late intent cannot write after settled cancel_unsent (replacement=%s)", async replace => {
+    const gate = deferred<void>(), store = journal(); let signal!: AbortSignal, late!: Awaited<ReturnType<Deps["writeSendIntent"]>>;
+    const f = fixture({ limits: { preflightTimeoutMs: 5 }, writeSendIntent: async (attempt, claim, options) => {
+      signal = options.signal; await gate.promise; return late = await store.intent(attempt, claim);
+    } }, store); const input = await request();
     expect(await f.answer(input)).toEqual({ outcome: "failed", reason: "claim_unavailable", effect: "not_sent" }); expect(signal.aborted).toBe(true);
-    gate.resolve({ ok: true }); await Bun.sleep(0); expect(f.sent).toEqual([]);
-    expect(await f.answer(input)).toMatchObject({ reason: "already_attempted" });
+    const ending = store.endings[0]!; expect(ending.disposition).toBe("cancel_unsent"); expect(store.rows.size).toBe(0);
+    expect(await f.answer(input)).toMatchObject({ reason: "busy" });
+    const replacement = { claim: { id: ending.claim.id, attemptId: "replacement-owner" }, intent: false, preparedAt: 1 };
+    if (replace) store.rows.set(ending.attempt.paneKey, replacement);
+    gate.resolve(); await Bun.sleep(0); expect(late).toEqual({ ok: false, reason: "claim_unavailable" });
+    expect(store.audit).toEqual([]); expect(f.sent).toEqual([]);
+    if (replace) {
+      expect(store.rows.get(ending.attempt.paneKey)).toEqual(replacement);
+      expect(await f.answer(input)).toMatchObject({ reason: "claimed_elsewhere" });
+    } else {
+      expect((await f.answer(input)).outcome).toBe("answered"); expect(f.sent).toHaveLength(1);
+    }
   });
   test("the whole preflight budget includes admission rather than restarting a deadline", async () => {
     const f = fixture({ limits: { preflightTimeoutMs: 5 }, admit: async () => new Promise<never>(() => {}) }); const input = await request();
