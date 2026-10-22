@@ -64,7 +64,8 @@ import {
   type MeshBridgeDesiredState,
 } from "./mesh-bridge-supervisor.js";
 import { openScoutNetworkServiceEnvironment } from "./open-scout-network.js";
-import { readTailscaleSelfWebHostsSync } from "./tailscale.js";
+import { readTailscaleSelfWebHosts } from "./tailscale.js";
+import { createBaseEdgeRefresh } from "./base-edge-refresh.js";
 import { resolveOpenScoutLocalEdgeDirectory } from "./support-paths.js";
 import { selectInstanceAwareEntrypoint } from "./instance.js";
 
@@ -102,6 +103,8 @@ process.title = PROCESS_NAME;
 let shuttingDown = false;
 let brokerProcess: ChildProcess | null = null;
 let caddyProcess: ChildProcess | null = null;
+let edgeGeneration = 0;
+let brokerStartInFlight = false;
 let edgeLanWatchTimer: ReturnType<typeof setInterval> | null = null;
 let edgeLanOnly = false;
 const edgeAdvertisements = createLocalEdgeAdvertisementOwner({
@@ -180,10 +183,6 @@ function appendCsvValues(input: string | undefined, values: string[]): string | 
   return out.length > 0 ? out.join(",") : undefined;
 }
 
-function resolveTailnetWebHosts(): string[] {
-  return readTailscaleSelfWebHostsSync();
-}
-
 /**
  * This machine's own non-loopback addresses, so the local edge answers for a
  * bare LAN address (http://192.168.1.20) the way it already answers for the
@@ -203,8 +202,8 @@ function resolveLanWebHosts(): string[] {
     .filter((address) => !address.toLowerCase().startsWith("fe80:"));
 }
 
-function resolveWebTrustedHostsEnv(): string | undefined {
-  return appendCsvValues(process.env.OPENSCOUT_WEB_TRUSTED_HOSTS, resolveTailnetWebHosts());
+function resolveWebTrustedHostsEnv(tailnetHosts: string[]): string | undefined {
+  return appendCsvValues(process.env.OPENSCOUT_WEB_TRUSTED_HOSTS, tailnetHosts);
 }
 
 let jetStreamSidecar: NatsJetStreamSidecar | null = null;
@@ -230,8 +229,8 @@ function runtimeEntrypoint(config: BrokerServiceConfig): string {
   return join(config.runtimePackageDir, "bin", "openscout-runtime.mjs");
 }
 
-function spawnBroker(): void {
-  if (shuttingDown || brokerProcess) {
+async function spawnBroker(): Promise<void> {
+  if (shuttingDown || brokerProcess || brokerStartInFlight) {
     return;
   }
   if (!config.bunExecutable) {
@@ -242,10 +241,23 @@ function spawnBroker(): void {
     return;
   }
 
-  const webTrustedHostsEnv = resolveWebTrustedHostsEnv();
+  const executable = config.bunExecutable;
+  brokerStartInFlight = true;
+  try {
+    const hosts = await readTailscaleSelfWebHosts();
+    if (shuttingDown || brokerProcess) return;
+    spawnBrokerWithHosts(hosts, executable);
+  } catch (error) {
+    warn("broker host resolution/start failed", String(error));
+    if (!shuttingDown) scheduleBrokerRestart();
+  } finally { brokerStartInFlight = false; }
+}
+
+function spawnBrokerWithHosts(hosts: string[], executable: string): void {
+  const webTrustedHostsEnv = resolveWebTrustedHostsEnv(hosts);
   const stdout = logFile("broker.stdout.log");
   const stderr = logFile("broker.stderr.log");
-  brokerProcess = spawn(config.bunExecutable, [
+  brokerProcess = spawn(executable, [
     "run",
     runtimeEntrypoint(config),
     "broker",
@@ -309,7 +321,7 @@ function scheduleBrokerRestart(): void {
   brokerRestartDelayMs = Math.min(brokerRestartDelayMs * 2, RESTART_MAX_DELAY_MS);
   setTimeout(() => {
     if (!shuttingDown) {
-      spawnBroker();
+      void spawnBroker();
       void startWebWhenBrokerIsReady();
     }
   }, delay).unref();
@@ -354,7 +366,7 @@ function forwardedProtoForEdgeScheme(scheme: OpenScoutLocalEdgeScheme): "http" |
   return scheme === "https" ? "https" : "http";
 }
 
-function resolveEdgeConfig(): OpenScoutLocalEdgeConfig {
+function resolveEdgeConfig(tailnetHosts: string[]): OpenScoutLocalEdgeConfig {
   const lanOnly = loadLocalConfig().webLanOnly === true;
   const portalHost = process.env.OPENSCOUT_WEB_PORTAL_HOST?.trim() || DEFAULT_SCOUT_WEB_PORTAL_HOST;
   const nodeHost = process.env.OPENSCOUT_WEB_ADVERTISED_HOST?.trim()
@@ -372,7 +384,7 @@ function resolveEdgeConfig(): OpenScoutLocalEdgeConfig {
     viteHmrPath: process.env.OPENSCOUT_WEB_VITE_HMR_PATH,
     extraHosts: [
       ...splitCsv(process.env.OPENSCOUT_WEB_TRUSTED_HOSTS),
-      ...resolveTailnetWebHosts(),
+      ...tailnetHosts,
       ...resolveLanWebHosts(),
     ],
   });
@@ -462,6 +474,7 @@ async function startJetStreamSidecar(): Promise<void> {
 }
 
 function stopEdgeProcesses(): void {
+  edgeGeneration++;
   edgeAdvertisements.stop();
   if (caddyProcess && !caddyProcess.killed) {
     caddyProcess.kill("SIGTERM");
@@ -469,19 +482,41 @@ function stopEdgeProcesses(): void {
   caddyProcess = null;
 }
 
-function startLocalEdge(): void {
-  if (!shouldStartOpenScoutLocalEdge({
+const edgeStartRefresh = createBaseEdgeRefresh({
+  current: () => !shuttingDown && !caddyProcess && shouldStartOpenScoutLocalEdge({
     isProd: openScoutInstanceBootstrap.layout.isProd,
     platform: process.platform,
     enabled: process.env.OPENSCOUT_BASE_EDGE_ENABLED,
-  })) {
-    return;
-  }
-  if (shuttingDown || caddyProcess) {
-    return;
-  }
+  }) ? { generation: edgeGeneration, owner: caddyProcess } : null,
+  readHosts: () => readTailscaleSelfWebHosts(),
+  apply: hosts => startLocalEdgeWithHosts(hosts),
+});
+const edgeWatchRefresh = createBaseEdgeRefresh({
+  current: () => !shuttingDown && caddyProcess
+    ? { generation: edgeGeneration, owner: caddyProcess } : null,
+  readHosts: () => readTailscaleSelfWebHosts(),
+  apply: hosts => {
+    const current = resolveEdgeConfig(hosts);
+    if ((current.lanOnly === true) !== edgeLanOnly) {
+      edgeRestartDelayMs = RESTART_MIN_DELAY_MS;
+      stopEdgeProcesses();
+      return;
+    }
+    const schemes = current.scheme === "both" ? ["http", "https"] as const : [current.scheme];
+    edgeAdvertisements.update(resolveOpenScoutLocalEdgeAdvertisements(current, resolveScoutLanNetworks()), schemes);
+  },
+});
 
-  const edgeConfig = resolveEdgeConfig();
+async function startLocalEdge(): Promise<void> {
+  try { await edgeStartRefresh.refresh(); }
+  catch (error) {
+    warn("local edge host resolution/start failed", String(error));
+    if (!shuttingDown) scheduleEdgeRestart();
+  }
+}
+
+function startLocalEdgeWithHosts(hosts: string[]): void {
+  const edgeConfig = resolveEdgeConfig(hosts);
   const advertisements = resolveOpenScoutLocalEdgeAdvertisements(edgeConfig);
   edgeLanOnly = edgeConfig.lanOnly === true;
   const schemes = edgeConfig.scheme === "both" ? ["http", "https"] as const : [edgeConfig.scheme] as const;
@@ -498,15 +533,8 @@ function startLocalEdge(): void {
     // DHCP and interface loss refresh only the owned mDNS children. Changing
     // the explicit mode also regenerates routes, once the old edge exits.
     edgeLanWatchTimer = setInterval(() => {
-      if (shuttingDown || !caddyProcess) return;
-      const current = resolveEdgeConfig();
-      if ((current.lanOnly === true) !== edgeLanOnly) {
-        edgeRestartDelayMs = RESTART_MIN_DELAY_MS;
-        stopEdgeProcesses();
-        return;
-      }
-      const currentSchemes = current.scheme === "both" ? ["http", "https"] as const : [current.scheme];
-      edgeAdvertisements.update(resolveOpenScoutLocalEdgeAdvertisements(current, resolveScoutLanNetworks()), currentSchemes);
+      // Every interval joins the current refresh; rejected work is observed.
+      void edgeWatchRefresh.refresh().catch(error => warn("local edge refresh failed", String(error)));
     }, 5_000);
     edgeLanWatchTimer.unref();
   }
@@ -530,14 +558,19 @@ function startLocalEdge(): void {
     caddyfile: caddyfilePath,
   });
 
-  caddyProcess.once("error", (error: RuntimeErrnoError) => {
-    stopEdgeProcesses();
+  const child = caddyProcess;
+  child.once("error", (error: RuntimeErrnoError) => {
+    if (caddyProcess && caddyProcess !== child) return;
+    if (caddyProcess === child) stopEdgeProcesses();
     warn("local edge failed to start", error.message);
     scheduleEdgeRestart();
   });
-  caddyProcess.once("exit", (code, signal) => {
+  child.once("exit", (code, signal) => {
     log("local edge exited", { code, signal });
-    stopEdgeProcesses();
+    if (caddyProcess && caddyProcess !== child) return;
+    // stopEdgeProcesses may already have invalidated this child's generation.
+    // Its later exit must not invalidate a new pending start or stop a successor.
+    if (caddyProcess === child) stopEdgeProcesses();
     if (!shuttingDown) {
       scheduleEdgeRestart();
     }
@@ -549,7 +582,7 @@ function scheduleEdgeRestart(): void {
   edgeRestartDelayMs = Math.min(edgeRestartDelayMs * 2, RESTART_MAX_DELAY_MS);
   setTimeout(() => {
     if (!shuttingDown) {
-      startLocalEdge();
+      void startLocalEdge();
     }
   }, delay).unref();
 }
@@ -570,7 +603,9 @@ async function startWebWhenBrokerIsReady(): Promise<void> {
     }
 
     try {
-      const edgeConfig = resolveEdgeConfig();
+      const hosts = await readTailscaleSelfWebHosts();
+      if (shuttingDown) return;
+      const edgeConfig = resolveEdgeConfig(hosts);
       const scheme = forwardedProtoForEdgeScheme(edgeConfig.scheme);
       const response = await fetch(new URL("/v1/web/start", brokerControlUrl), {
         method: "POST",
@@ -1236,9 +1271,9 @@ anchorBaseDaemonLifetime();
 // silently attach it to a foreign server. Resolves immediately when the
 // feature is off, which is the default.
 await startJetStreamSidecar();
-spawnBroker();
+await spawnBroker();
 roomListeningSupervisor.start();
-startLocalEdge();
+await startLocalEdge();
 startPairingSupervision();
 startMeshBridgeSupervision();
 startMenuBarApp();
