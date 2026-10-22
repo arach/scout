@@ -13,6 +13,30 @@ type Pair = ReturnType<typeof pair> | ReturnType<typeof createExtensionChannelCa
 
 export type Fault = "stale-second-close" | "second-spawn-close" | "finalizer-close" | "mapping" | "eof" | "cloexec" | "collection-retained";
 let retainedForNegativeControl: object | undefined;
+export const PRESSURE_DRAIN_BYTES = 4096;
+export const PRESSURE_PRIMER_LIMIT = 1024 * 1024;
+/** Witness-only, bounded raw writes while the child is causally forbidden to
+ * read. Measure capacity by EAGAIN; never assume a platform's pipe size. */
+export function prefillForWriteAbort(write: (bytes: Uint8Array) => number) {
+  const primer = Buffer.alloc(PRESSURE_DRAIN_BYTES, "p");
+  let bytes = 0, calls = 0;
+  while (bytes < PRESSURE_PRIMER_LIMIT && calls < PRESSURE_PRIMER_LIMIT / PRESSURE_DRAIN_BYTES + 64) {
+    calls++;
+    try {
+      const part = primer.subarray(0, Math.min(primer.length, PRESSURE_PRIMER_LIMIT - bytes));
+      const n = write(part);
+      if (!Number.isInteger(n) || n <= 0 || n > part.length) throw Error("invalid pressure write result");
+      bytes += n;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "EINTR") continue;
+      if (code !== "EAGAIN" && code !== "EWOULDBLOCK") throw error;
+      if (bytes < PRESSURE_DRAIN_BYTES) throw Error("pressure pipe cannot supply the drain quota");
+      return {bytes, calls};
+    }
+  }
+  throw Error("pressure fill did not reach EAGAIN within the bounded primer");
+}
 function identity(fd: number) {
   try { const s = fstatSync(fd); return { dev: s.dev, ino: s.ino, file: s.isFile(), fifo: s.isFIFO(), socket: s.isSocket() }; } catch { return null; }
 }
@@ -28,11 +52,13 @@ async function exchange(input: {
   const {form, iteration, channel, expected, previous, home, directory, event, fault, options, observe} = input;
   const mode = iteration === 8 ? "normal" : options?.mode ?? (fault === "cancel-double-close" ? "cancel" : "normal");
   const duplex = form === "credential", slot = INHERITED_DESCRIPTOR_LAYOUTS.extensionApi2[form];
+  const pressureAbort = options?.io === "async" && !duplex && (mode === "timeout" || mode === "cancel");
   const reapFirst = iteration === 8, ports = [channel.parent.fd, channel.child.fd];
   let child: ReturnType<typeof spawn> | null = null;
   let exited: Promise<number | null> | undefined, deadline: ReturnType<typeof setTimeout> | undefined;
   try {
     const stdio: Array<"ignore" | "pipe" | number> = Array(MAX_INHERITED_DESCRIPTOR_SLOT + 1).fill("ignore");
+    if (pressureAbort) stdio[0] = "pipe"; // Standard-input control only; never wraps the numeric channel.
     stdio[1] = "pipe"; stdio[2] = "pipe"; stdio[fault === "mapping" ? 4 : slot] = channel.child.fd;
     // fs owns ONLY the child's mapped descriptor; the parent never wraps its raw FDs.
     let script = `import{fstatSync,readSync,writeSync}from'node:fs';const slot=${slot};const s=fstatSync(slot);console.log(JSON.stringify({event:'mapped',identity:{dev:s.dev,ino:s.ino,file:s.isFile(),fifo:s.isFIFO(),socket:s.isSocket()}}));${duplex ? `writeSync(slot,'request\\n');` : ""}let wire='';const b=Buffer.alloc(64);for(;;){const n=readSync(slot,b,0,b.length,null);if(!n)break;wire+=b.subarray(0,n);if(${reapFirst}&&wire==='response\\n')break;}if(wire!=='response\\n')process.exit(91);console.log(JSON.stringify({event:${reapFirst ? "'frame'" : "'eof'"}}));`;
@@ -41,9 +67,19 @@ async function exchange(input: {
       script = `import{fstatSync,readSync,writeSync}from'node:fs';const slot=${slot};const s=fstatSync(slot);console.log(JSON.stringify({event:'mapped',identity:{dev:s.dev,ino:s.ino,file:s.isFile(),fifo:s.isFIFO(),socket:s.isSocket()}}));
       ${duplex ? `const request=Buffer.from(${readAbort ? "'q'.repeat(8192)" : "'q'.repeat(65535)+"+lf});let sent=0;while(sent<request.length)sent+=writeSync(slot,request,sent,request.length-sent);` : ""}
       ${mode === "crash" ? "process.exit(7);" : ""}
-      await Bun.sleep(200);
-      let wire='';const b=Buffer.alloc(4096);for(;;){const n=readSync(slot,b,0,b.length,null);if(!n)break;wire+=b.subarray(0,n);if(${reapFirst}&&wire.length===69632)break;await Bun.sleep(3);}
-      if(${readAbort} ? wire!=='' : ${aborted} ? !(wire.startsWith('p'.repeat(4096))&&wire.length>4096&&wire.length<69632) : wire!=='p'.repeat(4096)+'r'.repeat(65535)+${lf})process.exit(91);
+      let wire='',pressureBytes=4096;const b=Buffer.alloc(4096);
+      if(${pressureAbort}) {
+        const control=Buffer.alloc(1);let header='';
+        while(header.length<32) {if(readSync(0,control,0,1,null)!==1)process.exit(93);if(control[0]===10)break;header+=control.toString();}
+        pressureBytes=Number(header);
+        if(!Number.isInteger(pressureBytes)||pressureBytes<${PRESSURE_DRAIN_BYTES}||pressureBytes>=${PRESSURE_PRIMER_LIMIT})process.exit(93);
+        while(wire.length<${PRESSURE_DRAIN_BYTES}) {const n=readSync(slot,b,0,${PRESSURE_DRAIN_BYTES}-wire.length,null);if(!n)process.exit(93);wire+=b.subarray(0,n);}
+        if(wire!=='p'.repeat(${PRESSURE_DRAIN_BYTES}))process.exit(93);
+        console.log(JSON.stringify({event:'pressure-drained',bytes:${PRESSURE_DRAIN_BYTES}}));
+        if(readSync(0,control,0,1,null)!==1||control[0]!==100)process.exit(93);
+      } else await Bun.sleep(200);
+      for(;;){const n=readSync(slot,b,0,b.length,null);if(!n)break;wire+=b.subarray(0,n);if(${reapFirst}&&wire.length===69632)break;await Bun.sleep(3);}
+      if(${readAbort} ? wire!=='' : ${aborted} ? !(wire.startsWith('p'.repeat(pressureBytes))&&wire.length>pressureBytes&&wire.length<pressureBytes+65536&&wire.slice(pressureBytes)==='r'.repeat(wire.length-pressureBytes)) : wire!=='p'.repeat(4096)+'r'.repeat(65535)+${lf})process.exit(91);
       console.log(JSON.stringify({event:${reapFirst ? "'frame'" : "'eof'"}}));`;
     }
     let nativeRef: WeakRef<object> | undefined;
@@ -58,6 +94,7 @@ async function exchange(input: {
     }) as typeof Bun.spawn;
     try { child = spawn(process.execPath, ["-e", script], { stdio, env: { HOME: home, PATH: process.env.PATH } }); }
     finally { Bun.spawn = rawSpawn; }
+    child.stdin?.on("error", () => {}); // Child exit is checked below; avoid an unhandled control-pipe EPIPE.
     if (!nativeRef) throw Error("native subprocess was not observed");
     exited = new Promise<number | null>((done, reject) => { child!.once("exit", done); child!.once("error", reject); });
     let output = "", errors = "";
@@ -103,10 +140,23 @@ async function exchange(input: {
           if (Buffer.from(request ?? []).toString() !== "q".repeat(65535) + "\n") throw Error("duplex request failed");
         }
         if (mode === "crash") { await exited; await closed; }
-        // Test-only pressure primer: force an actual full pipe/socket even when
-        // the kernel grows a pipe to hold one complete 64-KiB frame. No queued
-        // application writes: the primer completes before the frame starts.
-        if (mode !== "crash") await endpoint.write(Buffer.from("p".repeat(4096)), {timeoutMs: 2000});
+        if (pressureAbort) {
+          // Fill the REAL nonblocking context pipe before granting any reads.
+          // Then permit exactly one chunk and hold the reader again. The timed
+          // frame must make positive progress and hit EAGAIN in its first turn,
+          // regardless of pipe capacity or time spent in earlier GC checks.
+          const pressure = prefillForWriteAbort(bytes => writeSync(endpoint.fd, bytes, 0, bytes.length, null));
+          event({event: "pressure-fill", iteration, primerBytes: pressure.bytes, writeCalls: pressure.calls, blocked: true, drainQuota: PRESSURE_DRAIN_BYTES});
+          child.stdin!.write(`${pressure.bytes}\n`);
+          const ready = JSON.stringify({event: "pressure-drained", bytes: PRESSURE_DRAIN_BYTES}) + "\n";
+          const until = Date.now() + 2000;
+          while (!output.includes(ready) && child.exitCode === null && Date.now() < until) await Bun.sleep(2);
+          if (!output.includes(ready)) throw Error("pressure child did not confirm its held drain quota");
+          event({event: "pressure-held", iteration, drainedBytes: PRESSURE_DRAIN_BYTES});
+        } else if (mode !== "crash") {
+          // Existing test-only primer for normal/socket modes. No queued writes.
+          await endpoint.write(Buffer.from("p".repeat(4096)), {timeoutMs: 2000});
+        }
         const beforeFrame = endpoint.stats.writeBytes;
         const abort = new AbortController();
         let cancel: ReturnType<typeof setTimeout> | undefined;
@@ -118,7 +168,7 @@ async function exchange(input: {
           const reason = mode === "timeout" ? "timeout" : mode === "cancel" ? "cancelled" : mode === "crash" ? "native_error" : null;
           if (!(error instanceof ChannelIoError) || !reason || error.reason !== reason) throw error;
           if (mode !== "crash" && !(endpoint.stats.writeBytes - beforeFrame > 0 && endpoint.stats.writeBytes - beforeFrame < 65536)) throw Error("abort did not happen mid-exchange");
-        } finally { clearTimeout(cancel); }
+        } finally { clearTimeout(cancel); if (pressureAbort) child.stdin!.end("d"); }
         if (mode === "normal" && !reapFirst && fault !== "eof") endpoint.close();
         event({event: "async-io", iteration, mode, frameBytes: endpoint.stats.writeBytes - beforeFrame, stats: {...endpoint.stats}});
         if (mode !== "normal" && endpoint.stats.closeCalls !== 1) throw Error("abort/crash close count was not one");

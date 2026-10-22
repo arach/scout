@@ -26,6 +26,16 @@ for (const form of ["context", "credential"] as DescriptorForm[]) {
       expect(events.filter(e => e.event === "reclaim-check").length).toBeGreaterThanOrEqual(160);
       expect(events.every(e => e.target === (form === "context" ? 5 : 6))).toBe(true);
       const io = events.filter(e => e.event === "async-io"); expect(io).toHaveLength(9);
+      if (form === "context" && (mode === "timeout" || mode === "cancel")) {
+        const pressure = events.filter(e => e.event === "pressure-fill");
+        const held = events.filter(e => e.event === "pressure-held");
+        expect(pressure).toHaveLength(8); expect(held).toHaveLength(8);
+        for (const e of pressure) {
+          expect(e.blocked).toBe(true); expect(e.primerBytes as number).toBeGreaterThanOrEqual(4096);
+          expect(e.primerBytes as number).toBeLessThan(1024 * 1024); expect(e.drainQuota).toBe(4096);
+        }
+        for (const e of held) expect(e.drainedBytes).toBe(4096);
+      }
       for (const e of io) {
         const stats = e.stats as Record<string, number>;
         const readAbort = e.mode === "read-timeout" || e.mode === "read-cancel";
@@ -37,6 +47,7 @@ for (const form of ["context", "credential"] as DescriptorForm[]) {
         if (e.mode === "timeout" || e.mode === "cancel") {
           expect(e.frameBytes as number).toBeGreaterThan(0); expect(e.frameBytes as number).toBeLessThan(65536);
           expect(stats.closeCalls).toBe(1); expect(stats.writeWouldBlock).toBeGreaterThan(0);
+          if (form === "context") expect(e.frameBytes).toBe(4096);
         }
       }
     }, 30_000);

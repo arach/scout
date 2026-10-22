@@ -88,12 +88,27 @@ forms; credential read-timeout/read-cancel modes exercise partial incoming
 frames. A cancellation-path stale second close targets the reclaimed PARENT
 number, not merely the child's former source number.
 
-The test child deliberately delays draining. A completed 4-KiB pressure primer
-precedes the 64-KiB frame, forcing backpressure even on kernels that grow a pipe
-to hold an entire frame. This is test-only wire data, not a context protocol
-change; no two writes are queued. Normal completion still requires actual EOF.
-Timeout/cancel cases must transfer a strict partial frame, close once, and let
-the child see EOF. Reader-abort cases must read 8 KiB without LF before closing.
+Normal/socket modes keep the completed 4-KiB test primer and delayed reader.
+Context timeout/cancel modes instead hold the child on a standard-input control
+pipe. Before granting any reads, the parent fills the actual numeric context
+pipe with <=4-KiB raw writes until EAGAIN (bounded by a 1-MiB test-only primer).
+The child then consumes exactly 4096 primer bytes, acknowledges that quota, and
+holds again. Only now does the layer start its unchanged 64-KiB timed write.
+That write must transfer exactly 4096 bytes and encounter EAGAIN before the
+reader is released. Cancellation/timeout must close once; only afterward can
+the child drain the remaining primer/partial frame and observe actual EOF.
+
+This is bounded instrument data, not a context protocol or layer frame-limit
+change. No application writes are queued, and no new numeric-descriptor wrapper
+is created. Capacity is measured rather than assumed: on the measured Linux
+pipe, 65,536 bytes fit when empty, but the existing 4096-byte primer leaves only
+61,440 bytes for a frame. The old 200-ms reader sleep could expire during parent
+GC/setup checks, so a larger pipe alone did not explain the missed aborts. The
+causal reader gate removes that elapsed-time assumption. Linux capacity varies;
+see the [Linux pipe documentation](https://man7.org/linux/man-pages/man7/pipe.7.html).
+Normal completion still requires actual EOF. Reader-abort modes and the cold
+no-DFG lane are unchanged: read 8 KiB without LF before closing, then require
+all nine wrappers collected and all reclaim checks clean.
 
 The async witness observes native wrapper collection with FinalizationRegistry
 notifications, then checks WeakRef disappearance once. It does not repeatedly
