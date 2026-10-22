@@ -4,6 +4,7 @@ import {mkdtempSync, rmSync, writeFileSync, readFileSync, copyFileSync, mkdirSyn
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
+import {createRequire} from 'node:module';
 import {fileURLToPath} from 'node:url';
 import {stageExtensionChannel} from '../../runtime/scripts/stage-extension-channel.mjs';
 const root = fileURLToPath(new URL('../../../',import.meta.url));
@@ -11,10 +12,21 @@ const run = (args,cwd=root) => spawnSync('bun',args,{cwd,encoding:'utf8',timeout
 for (const bundled of [false,true]) test(`${bundled?'packed sidecar':'runtime ESM'} has fixed assets and refuses missing/tampered records outside checkout`,()=>{
   const dir=mkdtempSync(join(tmpdir(),'scout-channel-artifact-'));
   try {
+    let emitter={kind:'bun-build'};
     if (!bundled) {
-      const sources=['extension-channel-host','extension-channel-io','extension-channel-qualification','inherited-descriptors'];
-      for(const name of sources){const build=run(['build',resolve(root,'packages/runtime/src',name+'.ts'),'--no-bundle','--target=bun','--outfile',join(dir,name+'.js')]);
-      assert.equal(build.status,0,build.stderr);}
+      // Emit with the production TypeScript compiler/options, not Bun's
+      // transpiler: the runtime's actual ESM factory is the evidence target.
+      const require=createRequire(resolve(root,'packages/runtime/package.json'));
+      const ts=require('typescript'),runtime=resolve(root,'packages/runtime');
+      const config=ts.readConfigFile(join(runtime,'tsconfig.json'),ts.sys.readFile);
+      assert.equal(config.error,undefined);
+      const parsed=ts.parseJsonConfigFileContent(config.config,ts.sys,runtime,undefined,join(runtime,'tsconfig.json'));
+      const sources=['extension-channel-host','extension-channel-io','extension-channel-qualification','inherited-descriptors'].map(name=>join(runtime,'src',name+'.ts'));
+      const program=ts.createProgram(sources,{...parsed.options,outDir:dir});
+      const diagnostics=ts.getPreEmitDiagnostics(program);
+      assert.equal(diagnostics.length,0,ts.formatDiagnosticsWithColorAndContext(diagnostics,{getCanonicalFileName:x=>x,getCurrentDirectory:()=>root,getNewLine:()=>"\n"}));
+      assert.equal(program.emit().emitSkipped,false);
+      emitter={kind:'typescript',version:ts.version,node:process.version};
     }
     stageExtensionChannel(dir,bundled);
     let assets=dir;
@@ -34,7 +46,7 @@ for (const bundled of [false,true]) test(`${bundled?'packed sidecar':'runtime ES
     }
     const module=join(assets,`extension-channel-host.${bundled?'mjs':'js'}`);
     const builder=run(['-e','console.log(JSON.stringify({version:Bun.version,revision:Bun.revision,platform:process.platform,arch:process.arch}))']);assert.equal(builder.status,0,builder.stderr);
-    console.log(JSON.stringify({event:'channel-artifact',mode:bundled?'unpacked-cli-channel-payload':'runtime-esm',builder:JSON.parse(builder.stdout),record:JSON.parse(readFileSync(join(assets,'extension-channel-artifact.json')))}));
+    console.log(JSON.stringify({event:'channel-artifact',mode:bundled?'unpacked-cli-channel-payload':'runtime-esm',emitter,executionHost:JSON.parse(builder.stdout),record:JSON.parse(readFileSync(join(assets,'extension-channel-artifact.json')))}));
     const script=`import * as host from ${JSON.stringify(module)};
 if(Object.keys(host).sort().join()!=='allocateExtensionChannel,verifyExtensionChannelHostAssets')throw Error('unexpected public channel export');
 const {verifyExtensionChannelHostAssets,allocateExtensionChannel}=host;
