@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { CodexWireLog } from "./codex-wire-log.ts";
+import { CODEX_WIRE_LOG_GAP_PREFIX, CodexWireLog } from "./codex-wire-log.ts";
 
 function deferred() {
   let resolve!: () => void;
@@ -65,24 +65,69 @@ test("wire logs bound small-line descriptors as well as bytes", async () => {
   expect(pauses).toEqual([true, false]);
 });
 
-test("wire log errors retain pending context, pause input, and reject flush without uncertain replay", async () => {
-  const failure = new Error("ENOSPC");
-  const errors: Error[] = [];
-  const pauses: boolean[] = [];
-  let attempts = 0;
-  const log = new CodexWireLog({
-    setPaused: (paused) => pauses.push(paused), onError: (error) => errors.push(error),
-    append: async () => { attempts += 1; throw failure; },
-  });
-  log.append("stdout", "output\n");
-  log.append("stdout", "completed\n");
-  await expect(log.flush()).rejects.toThrow("ENOSPC");
-  expect(log.bufferedEntries).toBe(2);
-  expect(log.bufferedBytes).toBe(17);
-  expect(errors).toEqual([failure]);
-  expect(pauses).toEqual([true]);
-  await expect(log.flush()).rejects.toThrow("ENOSPC");
-  expect(attempts).toBe(1);
+function enospc() { return Object.assign(new Error("disk full"), { code: "ENOSPC" }); }
+async function until(predicate: () => boolean) {
+  const deadline = Date.now() + 2000;
+  while (!predicate() && Date.now() < deadline) await Bun.sleep(5);
+  expect(predicate()).toBe(true);
+}
+
+test("ENOSPC drops bounded payloads, releases backpressure and retries a counted gap without new input", async () => {
+  let full = true, clock = 0; const errors: Error[] = [], pauses: boolean[] = [], writes: string[] = [];
+  const log = new CodexWireLog({ retryMs: 10, highWaterBytes: 1, lowWaterBytes: 0, now: () => clock++,
+    setPaused: value => pauses.push(value), onError: error => errors.push(error),
+    append: async (_path, text) => { if (full) throw enospc(); writes.push(text); } });
+  try {
+    log.append("stdout", "output\n"); log.append("stdout", "completed\n");
+    await log.flush(); // A failed observational flush must not fail the session.
+    for (let n = 0; n < 500; n++) log.append("stdout", "x");
+    expect(log.bufferedEntries).toBe(0); expect(log.bufferedBytes).toBe(0);
+    expect(log.droppedEntries).toBe(502); expect(log.droppedBytes).toBe(517);
+    expect(log.isPaused).toBe(false); expect(pauses).toEqual([true, false]); expect(errors).toHaveLength(1);
+    full = false;
+    await until(() => writes.some(text => text.startsWith("\n" + CODEX_WIRE_LOG_GAP_PREFIX)));
+    await log.flush();
+    const markers = writes.map(text => JSON.parse(text.trim().slice(CODEX_WIRE_LOG_GAP_PREFIX.length)));
+    expect(markers.reduce((sum, gap) => sum + gap.entries, 0)).toBe(502);
+    expect(markers.reduce((sum, gap) => sum + gap.bytes, 0)).toBe(517);
+    expect(markers[0]).toMatchObject({ schema: "scout.codex-wire-log-gap/v1", firstAt: new Date(0).toISOString(), lastAt: new Date(1).toISOString(), error: "ENOSPC", partialWritePossible: true });
+    expect(markers.at(-1).lastAt).toBe(new Date(501).toISOString());
+    log.append("stdout", "after\n"); await log.flush(); expect(writes.at(-1)).toBe("after\n");
+  } finally { log.setActive(false); }
+});
+
+test("partial data and failed markers are not replayed; recovery separates and identifies the gap", async () => {
+  let file = "", attempt = 0;
+  const log = new CodexWireLog({ retryMs: 10, setPaused: () => {}, onError: () => {}, append: async (_path, text) => {
+    attempt++;
+    if (attempt === 1) { file += text.slice(0, 5); throw enospc(); }
+    if (attempt === 2) { file += text; throw enospc(); } // Possibly-complete uncertain marker.
+    file += text;
+  } });
+  try {
+    log.append("stdout", '{"data":"never-replayed"}\n'); await log.flush();
+    await until(() => attempt >= 3); await log.flush();
+    log.append("stdout", '{"after":true}\n'); await log.flush();
+    expect(file.startsWith('{"dat\n' + CODEX_WIRE_LOG_GAP_PREFIX)).toBe(true);
+    expect(file).not.toContain("never-replayed");
+    const markers = file.split("\n").filter(line => line.startsWith(CODEX_WIRE_LOG_GAP_PREFIX)).map(line => JSON.parse(line.slice(CODEX_WIRE_LOG_GAP_PREFIX.length)));
+    expect(markers).toHaveLength(2); expect(markers[0]).toEqual(markers[1]);
+    expect(markers[0].entries).toBe(1); expect(markers[0].bytes).toBe(Buffer.byteLength('{"data":"never-replayed"}\n'));
+    expect(file.endsWith('{"after":true}\n')).toBe(true);
+  } finally { log.setActive(false); }
+});
+
+test("stdout and stderr gaps remain separate and disconnected retry timers stop", async () => {
+  let full = true, attempts = 0; const writes: Array<[string, string]> = [];
+  const log = new CodexWireLog({ retryMs: 10, setPaused: () => {}, onError: () => {}, append: async (path, text) => {
+    attempts++; if (full) throw enospc(); writes.push([path, text]);
+  } });
+  try {
+    log.append("stdout", "out"); log.append("stderr", "err"); await log.flush(); log.setActive(false);
+    const stopped = attempts; await Bun.sleep(30); expect(attempts).toBe(stopped);
+    full = false; log.setActive(true); await until(() => writes.length === 2);
+    expect(writes.map(([path]) => path).sort()).toEqual(["stderr", "stdout"]);
+  } finally { log.setActive(false); }
 });
 
 
@@ -110,4 +155,40 @@ test("wire-log flush preserves ordered tail across bounded sink rotation", async
     expect(log.bufferedBytes).toBe(0);
     expect(errors).toEqual([]);
   } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("a failing diagnostic callback cannot prevent dropping or retrying failed payloads", async () => {
+  let full = true; const writes: string[] = [];
+  const log = new CodexWireLog({ retryMs: 10, setPaused: () => {}, onError: () => { throw enospc(); },
+    append: async (_path, text) => { if (full) throw enospc(); writes.push(text); } });
+  try {
+    log.append("stdout", "data\n"); await log.flush(); expect(log.droppedEntries).toBe(1); expect(log.bufferedEntries).toBe(0);
+    full = false; await until(() => writes.length === 1); expect(writes[0]).toContain(CODEX_WIRE_LOG_GAP_PREFIX);
+  } finally { log.setActive(false); }
+});
+
+test("recovery emits a gap marker before persisting later data", async () => {
+  let full = true; const writes: string[] = [];
+  const log = new CodexWireLog({ retryMs: 1000, setPaused: () => {}, onError: () => {},
+    append: async (_path, text) => { if (full) throw enospc(); writes.push(text); } });
+  try {
+    log.append("stdout", "lost\n"); await log.flush(); full = false; await log.flush();
+    log.append("stdout", "after\n"); await log.flush();
+    expect(writes[0]?.startsWith("\n" + CODEX_WIRE_LOG_GAP_PREFIX)).toBe(true);
+    expect(JSON.parse(writes[0]!.trim().slice(CODEX_WIRE_LOG_GAP_PREFIX.length)).entries).toBe(1);
+    expect(writes[1]).toBe("after\n");
+  } finally { log.setActive(false); }
+});
+
+test("backpressure remains paused between batches above the low-water mark", async () => {
+  const first = deferred(), second = deferred(), secondStarted = deferred(); const pauses: boolean[] = []; let writes = 0;
+  const log = new CodexWireLog({ highWaterBytes: 12, lowWaterBytes: 3, setPaused: value => pauses.push(value), onError: () => {},
+    append: async () => { writes++; if (writes === 1) await first.promise; else { secondStarted.resolve(); await second.promise; } } });
+  try {
+    log.append("stdout", "1234567"); log.append("stdout", "7654321");
+    expect(log.bufferedBytes).toBe(14); expect(pauses).toEqual([true]);
+    first.resolve(); await secondStarted.promise;
+    expect(log.bufferedBytes).toBe(7); expect(log.isPaused).toBe(true); expect(pauses).toEqual([true]);
+    second.resolve(); await log.flush(); expect(pauses).toEqual([true, false]);
+  } finally { first.resolve(); second.resolve(); await log.flush(); log.setActive(false); }
 });

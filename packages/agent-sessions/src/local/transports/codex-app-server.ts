@@ -1,11 +1,12 @@
 import { appendBoundedLog } from "../bounded-log.js";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 import { buildScoutMcpCodexLaunchArgs } from "../../codex-launch-config.js";
 import { resolveCodexExecutable } from "../../codex-executable.js";
 import { redactSecrets } from "../../secret-redaction.js";
+import { writeCodexMetadata } from "./codex-metadata-file.js";
 import { CodexWireLog } from "./codex-wire-log.js";
 import {
   connectCodexAppServerSocket,
@@ -849,7 +850,7 @@ async function readCodexSessionCatalog(runtimeDirectory: string): Promise<CodexS
 
 async function writeCodexSessionCatalog(runtimeDirectory: string, catalog: CodexSessionCatalog): Promise<void> {
   await mkdir(runtimeDirectory, { recursive: true });
-  await writeFile(join(runtimeDirectory, SESSION_CATALOG_FILENAME), JSON.stringify(catalog, null, 2) + "\n");
+  await writeCodexMetadata(join(runtimeDirectory, SESSION_CATALOG_FILENAME), JSON.stringify(catalog, null, 2) + "\n");
 }
 
 async function recordCodexSessionCatalog(
@@ -951,6 +952,16 @@ export class CodexAppServerTransport {
   private starting: Promise<void> | null = null;
   private startupSignal: AbortSignal | undefined;
   private threadPersistence: Promise<void> = Promise.resolve();
+  private threadPersistenceRunning = false;
+  private threadPersistenceDirty = false;
+  private promptDirty = false;
+  private readonly writeMetadata = writeCodexMetadata;
+  private readonly recordCatalog = recordCodexSessionCatalog;
+  private confirmedThreadId: string | null = null;
+  private catalogedThreadId: string | null = null;
+  private metadataRetry: ReturnType<typeof setTimeout> | null = null;
+  private metadataRetriesEnabled = true;
+  private metadataRetryMs = 1000;
   private threadId: string | null = null;
   private threadPath: string | null = null;
   private durableThreadId: string | null = null;
@@ -965,9 +976,9 @@ export class CodexAppServerTransport {
     this.stdoutLogPath = join(options.logsDirectory, "stdout.log");
     this.stderrLogPath = join(options.logsDirectory, "stderr.log");
     this.wireLog = new CodexWireLog({
-      append: appendBoundedLog,
+      append: async (path, text) => { await mkdir(this.options.logsDirectory, { recursive: true }); await appendBoundedLog(path, text); },
       setPaused: (paused) => this.connection?.setReadingPaused(paused),
-      onError: (error) => console.warn(`[openscout] Codex wire-log persistence failed; input paused: ${error.message}`),
+      onError: (error) => console.warn(`[openscout] Codex wire-log persistence failed; logging degraded, input continues: ${error.message}`),
     });
     this.lastConfigSignature = this.configSignature(options);
   }
@@ -1130,6 +1141,7 @@ export class CodexAppServerTransport {
 
     // Spawned: Scout owns the child and terminates it. Attached: close only
     // disconnects; the shared server keeps running.
+    this.setPersistenceActive(false);
     await connection?.close();
     connection?.detach();
     await this.wireLog.flush();
@@ -1139,6 +1151,7 @@ export class CodexAppServerTransport {
     if (options.resetThread) {
       await closeCodexSessionCatalog(this.options.runtimeDirectory, this.durableThreadId);
       this.threadId = null;
+      this.confirmedThreadId = null; this.catalogedThreadId = null;
       this.threadPath = null;
       this.durableThreadId = null;
       await rm(this.threadIdPath, { force: true });
@@ -1230,6 +1243,7 @@ export class CodexAppServerTransport {
         // Share cleanup with every startup waiter. Never let an old failure
         // detach the connection created by a later startup attempt.
         const failedConnection = this.connection;
+        this.setPersistenceActive(false);
         this.connection = null;
         failedConnection?.detach();
         await failedConnection?.close();
@@ -1246,13 +1260,13 @@ export class CodexAppServerTransport {
   }
 
   private async startSession(signal: AbortSignal): Promise<void> {
-    await mkdir(this.options.runtimeDirectory, { recursive: true });
-    signal.throwIfAborted();
-    await mkdir(this.options.logsDirectory, { recursive: true });
+    this.setPersistenceActive(true);
     signal.throwIfAborted();
     await this.wireLog.flush();
     signal.throwIfAborted();
-    await writeFile(join(this.options.runtimeDirectory, "prompt.txt"), this.options.systemPrompt);
+    // This prompt file is observational; baseInstructions goes over JSON-RPC.
+    this.promptDirty = true;
+    await this.persistPrompt();
     this.proactiveShutdown = null;
     try {
       await assertCodexWorkingDirectory(this.options.cwd, this.options.agentName);
@@ -1620,6 +1634,7 @@ export class CodexAppServerTransport {
   }
 
   private failSession(error: Error): void {
+    this.setPersistenceActive(false);
     this.connection?.detach();
     this.connection = null;
 
@@ -1663,13 +1678,43 @@ export class CodexAppServerTransport {
     this.wireLog.append(path, redactSecrets(text));
   }
 
-  private persistThreadId(options: { confirmed?: boolean } = {}): Promise<void> {
-    const persistence = this.threadPersistence.then(() => this.persistThreadIdNow(options));
-    this.threadPersistence = persistence.catch(() => undefined);
-    return persistence;
+  private setPersistenceActive(active: boolean): void {
+    this.wireLog.setActive(active); this.metadataRetriesEnabled = active;
+    if (!active && this.metadataRetry) { clearTimeout(this.metadataRetry); this.metadataRetry = null; }
   }
 
-  private async persistThreadIdNow(options: { confirmed?: boolean }): Promise<void> {
+  private metadataFailed(error: unknown): void {
+    if (this.metadataRetry) return;
+    try { console.warn(`[openscout] Codex metadata persistence failed; control continues: ${redactSecrets(errorMessage(error))}`); }
+    catch { /* Diagnostic failure must not reject a control-path persistence promise. */ }
+    if (!this.metadataRetriesEnabled) return;
+    this.metadataRetry = setTimeout(() => { this.metadataRetry = null; void this.persistPrompt().then(() => this.persistThreadId()); }, this.metadataRetryMs);
+    this.metadataRetry.unref?.();
+  }
+
+  private async persistPrompt(): Promise<void> {
+    if (!this.promptDirty) return;
+    try { await this.writeMetadata(join(this.options.runtimeDirectory, "prompt.txt"), this.options.systemPrompt); this.promptDirty = false; }
+    catch (error) { this.metadataFailed(error); }
+  }
+
+  private persistThreadId(options: { confirmed?: boolean } = {}): Promise<void> {
+    if (this.durableThreadId !== this.threadId) this.durableThreadId = null;
+    if (options.confirmed) this.confirmedThreadId = this.threadId;
+    this.threadPersistenceDirty = true;
+    if (this.threadPersistenceRunning) return this.threadPersistence;
+    this.threadPersistenceRunning = true;
+    this.threadPersistence = (async () => {
+      do {
+        this.threadPersistenceDirty = false;
+        try { await this.persistThreadIdNow(); }
+        catch (error) { this.threadPersistenceDirty = false; this.metadataFailed(error); break; }
+      } while (this.threadPersistenceDirty);
+    })().finally(() => { this.threadPersistenceRunning = false; });
+    return this.threadPersistence;
+  }
+
+  private async persistThreadIdNow(): Promise<void> {
     const threadId = this.threadId;
     if (!threadId) {
       this.durableThreadId = null;
@@ -1687,28 +1732,33 @@ export class CodexAppServerTransport {
       }
     }
 
-    if (!options.confirmed && !rolloutExists && this.durableThreadId !== threadId) {
+    if (this.confirmedThreadId !== threadId && !rolloutExists && this.durableThreadId !== threadId) {
       this.durableThreadId = null;
       await rm(this.threadIdPath, { force: true });
       await this.persistState();
       return;
     }
 
-    const becameDurable = this.durableThreadId !== threadId;
-    await writeFile(this.threadIdPath, `${threadId}\n`);
+    await this.writeMetadata(this.threadIdPath, `${threadId}\n`);
+    // A later notification may have selected another thread during the write.
+    if (this.threadId !== threadId) { this.threadPersistenceDirty = true; return; }
     this.durableThreadId = threadId;
     await this.persistState();
-    if (becameDurable) {
-      await recordCodexSessionCatalog(this.options.runtimeDirectory, threadId, this.catalogRuntimeMeta());
+    if (this.catalogedThreadId !== threadId) {
+      await this.recordCatalog(this.options.runtimeDirectory, threadId, this.catalogRuntimeMeta());
+      this.catalogedThreadId = threadId;
     }
   }
 
   private async persistState(): Promise<void> {
+    try { await this.persistStateNow(); } catch (error) { this.metadataFailed(error); }
+  }
+
+  private async persistStateNow(): Promise<void> {
     const durableThreadPath = this.durableThreadId === this.threadId
       ? this.threadPath
       : null;
-    await mkdir(this.options.runtimeDirectory, { recursive: true });
-    await writeFile(
+    await this.writeMetadata(
       this.statePath,
       JSON.stringify({
         agentId: this.options.agentName,
