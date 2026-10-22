@@ -1,4 +1,5 @@
 import { ScoutCommandUnavailableError, renderScoutCommandUnavailable } from "./command-unavailable.ts";
+import { runCoreBootstrap } from "./core-bootstrap.ts";
 import { runScoutDiscovery } from "./discovery.ts";
 import { SCOUT_APP_VERSION } from "../lib/shared/product.ts";
 import { applyInstanceFlag, preflightLifecycle } from "../../bin/lifecycle-preflight.mjs";
@@ -16,7 +17,7 @@ try {
   // its broker port, socket, homes and identity. Materialize it before any
   // service module reads env, and refuse a non-prod instance that would reach
   // prod (for example an inherited OPENSCOUT_BROKER_URL on 43110).
-  if (await runScoutDiscovery(process.argv.slice(2), SCOUT_APP_VERSION)) {
+  if (await runScoutDiscovery(process.argv.slice(2), SCOUT_APP_VERSION) || await runCoreBootstrap(process.argv.slice(2))) {
     // Discovery is read-only and must not bootstrap runtime services.
   } else {
     applyInstanceFlag(process);

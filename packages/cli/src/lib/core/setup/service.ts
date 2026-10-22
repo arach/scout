@@ -7,18 +7,7 @@ import {
   resolveConfiguredScoutWebHostname,
   resolveScoutWebNamedHostname,
 } from "@openscout/runtime/local-config";
-import {
-  isScoutRuntimeHarnessListed,
-  SCOUT_RUNTIME_CATALOG,
-  scoutRuntimeDefaultHarness,
-  scoutRuntimeDefaultModel,
-  scoutRuntimeDefaultReasoningEffort,
-  scoutRuntimeDefaultsByHarness,
-  scoutRuntimeEffortCatalog,
-  scoutRuntimeModelCatalog,
-  type ScoutCapabilityMatrixSnapshot,
-  type ScoutRuntimeCapabilityCatalog,
-} from "@openscout/protocol";
+import type { ScoutCapabilityMatrixSnapshot } from "@openscout/protocol";
 import { resolveOpenScoutLocalEdgeConfig } from "@openscout/runtime/local-edge";
 import {
   loadResolvedRelayAgents,
@@ -49,7 +38,7 @@ import {
   inspectScoutTerminalPtyDependencies,
   type ScoutTerminalPtyReport,
 } from "../../../../../../apps/desktop/src/core/setup/terminal-pty-dependencies.ts";
-import { readScoutCapabilityMatrix, readScoutRuntimeCatalog } from "../broker/service.ts";
+import { readScoutCapabilityMatrix } from "../broker/service.ts";
 import { resolveOpenScoutLocalEdgeDirectory } from "@openscout/runtime/support-paths";
 
 export type ScoutLocalEdgeDoctorReport = {
@@ -107,13 +96,7 @@ export type ScoutSetupReport = {
   claudeStatusline: ClaudeStatuslineInstallReport;
 };
 
-export type ScoutRuntimesReport = {
-  currentDirectory: string;
-  harnessCatalogPath: string;
-  catalog: Awaited<ReturnType<typeof loadHarnessCatalogSnapshot>>;
-  capabilities: ScoutCapabilityMatrixSnapshot | null;
-  runtimeCapabilities: ScoutRuntimeCapabilityCatalog;
-};
+export { loadScoutRuntimesReport, type ScoutRuntimesReport } from "./runtimes.ts";
 
 export type ScoutProjectInventoryEntry = ProjectInventoryEntry;
 
@@ -294,58 +277,6 @@ export async function runScoutSetup(input: {
       catalog: setupResult.catalog,
       scoutSkill: setupResult.scoutSkill,
       claudeStatusline: setupResult.claudeStatusline,
-    };
-  });
-}
-
-export async function loadScoutRuntimesReport(currentDirectory: string): Promise<ScoutRuntimesReport> {
-  return withScoutCoreCommandLock("runtimes", async () => {
-    const [catalog, liveCatalog] = await Promise.all([
-      loadHarnessCatalogSnapshot(),
-      readScoutRuntimeCatalog(),
-    ]);
-    const runtimeCatalog = liveCatalog?.catalog ?? SCOUT_RUNTIME_CATALOG;
-    const defaultHarness = scoutRuntimeDefaultHarness(runtimeCatalog);
-    const defaultModel = scoutRuntimeDefaultModel(defaultHarness ?? "", runtimeCatalog);
-    return {
-      currentDirectory,
-      harnessCatalogPath: resolveOpenScoutSupportPaths().harnessCatalogPath,
-      catalog,
-      capabilities: await readScoutCapabilityMatrix(),
-      runtimeCapabilities: {
-        schemaVersion: "openscout.runtime-capabilities.v1",
-        catalogVersion: runtimeCatalog.schemaVersion,
-        catalogRevision: runtimeCatalog.revision,
-        generatedAt: Date.now(),
-        scope: "global",
-        defaults: {
-          ...(defaultHarness ? { harness: defaultHarness } : {}),
-          model: defaultModel,
-          reasoningEffort: scoutRuntimeDefaultReasoningEffort(defaultHarness ?? "", defaultModel, runtimeCatalog),
-        },
-        defaultsByHarness: scoutRuntimeDefaultsByHarness(runtimeCatalog),
-        harnesses: runtimeCatalog.harnesses
-          .filter((entry) => entry.enabled && entry.listed !== false)
-          .map((entry) => {
-            const readiness = catalog.entries.find((candidate) => candidate.harness === entry.id);
-            return {
-              id: entry.id,
-              name: readiness?.name,
-              label: entry.label,
-              description: readiness?.description,
-              state: readiness?.readinessReport.state,
-              ready: readiness?.readinessReport.ready,
-              detail: readiness?.readinessReport.detail,
-            };
-          }),
-        models: scoutRuntimeModelCatalog(runtimeCatalog).map((model) => ({ ...model, harnesses: [...model.harnesses] })),
-        efforts: scoutRuntimeEffortCatalog(runtimeCatalog).map((effort) => ({
-          ...effort,
-          harnesses: [...effort.harnesses],
-          ...(effort.models ? { models: [...effort.models] } : {}),
-        })),
-        ...(liveCatalog?.warnings.length ? { warnings: liveCatalog.warnings } : {}),
-      },
     };
   });
 }
