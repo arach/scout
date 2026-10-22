@@ -36,10 +36,22 @@ import {
 } from "./harness-topology/index.js";
 
 import { boundedEventIterable, StreamResyncRequired } from "./bounded-event-iterable.js";
-import { attachTailReplay } from "./tail/service.js";
+import { attachTailReplay, tailReplayEpoch } from "./tail/service.js";
 import type { TailReplayCapture } from "./tail/replay-buffer.js";
 
-const t = initTRPC.create();
+import {
+  tailReplaySelection,
+  tailResyncData,
+  TailResyncRequired,
+  type TailSubscriptionStatus,
+} from "./tail/wire-contract.js";
+
+const t = initTRPC.create({
+  errorFormatter({ shape, error, path }) {
+    const tail = tailResyncData(path, error);
+    return tail ? { ...shape, data: { ...shape.data, tail } } : shape;
+  },
+});
 
 const CONTROL_BACKLOG_LIMIT = 500;
 const TAIL_BACKLOG_LIMIT = 500;
@@ -56,7 +68,14 @@ const tailEventsInput = z
   .object({
     since: z.string().optional(),
     sources: z.array(z.string()).optional(),
+    tailProtocol: z.literal(1).optional(),
+    sinceEpoch: z.string().uuid().optional(),
   })
+  .refine(
+    input => input.sinceEpoch === undefined ||
+      (input.tailProtocol === 1 && !!input.since),
+    { message: "sinceEpoch requires tailProtocol 1 and a nonempty since." },
+  )
   .optional();
 
 const tailRecentInput = z
@@ -132,22 +151,27 @@ const controlRouter = t.router({
 function tailEvents(
   input: z.infer<typeof tailEventsInput>,
   signal?: AbortSignal,
-): AsyncIterableIterator<ReturnType<typeof tracked<TailEvent>>> {
+): AsyncIterableIterator<ReturnType<typeof tracked<TailEvent>> | TailSubscriptionStatus> {
   let capture: TailReplayCapture | undefined;
   let lastDeliveredId: string | undefined;
+  let epoch = tailReplayEpoch();
+  const resync = () =>
+    input?.tailProtocol === 1
+      ? new TailResyncRequired(epoch, lastDeliveredId)
+      : new StreamResyncRequired(lastDeliveredId);
   const iterator = (async function* () {
     const sources = input?.sources;
     const filter = sources && sources.length > 0 ? new Set(sources) : null;
 
-    capture = attachTailReplay({ limit: TAIL_BACKLOG_LIMIT, sources, signal });
+    epoch = tailReplayEpoch();
     try {
-      // Resolve since in the unfiltered image, then select sources.
+      capture = attachTailReplay({ limit: TAIL_BACKLOG_LIMIT, sources, signal });
       const backlog = capture.image.entries;
-      let startIdx = 0;
-      if (input?.since) {
-        const idx = backlog.findIndex((item) => item.event.id === input.since);
-        if (idx >= 0) startIdx = idx + 1;
-      }
+      epoch = capture.image.epoch;
+      const { startIndex: startIdx, status } = tailReplaySelection(capture.image, input);
+      if (!capture.check()) return;
+      // This untracked control frame is legal only first in a v1 generation.
+      if (input?.tailProtocol === 1) yield status;
       for (let i = startIdx; i < backlog.length; i++) {
         if (!capture.check()) return;
         const event = backlog[i].event;
@@ -167,11 +191,10 @@ function tailEvents(
         yield frame;
       }
     } catch (error) {
-      if (error instanceof StreamResyncRequired)
-        throw new StreamResyncRequired(lastDeliveredId);
+      if (error instanceof StreamResyncRequired) throw resync();
       throw error;
     } finally {
-      capture.close();
+      capture?.close();
     }
   })();
   return {
@@ -188,8 +211,7 @@ function tailEvents(
       try {
         return await iterator.throw(error);
       } catch (cause) {
-        if (cause instanceof StreamResyncRequired)
-          throw new StreamResyncRequired(lastDeliveredId);
+        if (cause instanceof StreamResyncRequired) throw resync();
         throw cause;
       }
     },

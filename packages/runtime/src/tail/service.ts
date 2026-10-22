@@ -1280,6 +1280,11 @@ function publicSubscriberCount(): number {
   return subscribers.size + aggregateBuffer.subscriberCount;
 }
 
+/** One epoch for the process-owned aggregate, shared by every listener. */
+export function tailReplayEpoch(): string {
+  return aggregateBuffer.epoch;
+}
+
 /** Internal router seam: register, capture one replay image, then start shared demand. */
 export function attachTailReplay(
   options: { limit: number; sources?: string[]; signal?: AbortSignal },

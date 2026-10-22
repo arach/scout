@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { StreamResyncRequired } from "../bounded-event-iterable.js";
 import type { TailEvent } from "./types.js";
 
@@ -9,6 +10,7 @@ export type TailPublication = {
 export type TailReplayImage = {
   readonly entries: readonly TailPublication[];
   readonly watermark: number;
+  readonly epoch: string;
 };
 export type TailReplayCapture = {
   readonly image: TailReplayImage;
@@ -33,6 +35,11 @@ export class TailReplayBuffer {
   private readonly entries: TailPublication[] = [];
   private readonly listeners = new Set<CaptureQueue>();
   private exhausted = false;
+  private incarnation = randomUUID();
+
+  get epoch(): string {
+    return this.incarnation;
+  }
 
   constructor(
     private readonly capacity: number,
@@ -70,7 +77,11 @@ export class TailReplayBuffer {
   snapshot(limit: number): TailReplayImage {
     const entries = this.entries.slice(-limit);
     // The watermark belongs to this exact ring image, not a later head read.
-    return { entries, watermark: entries.at(-1)?.ordinal ?? this.ordinal };
+    return {
+      entries,
+      watermark: entries.at(-1)?.ordinal ?? this.ordinal,
+      epoch: this.epoch,
+    };
   }
 
   recent(limit: number): TailEvent[] {
@@ -84,7 +95,7 @@ export class TailReplayBuffer {
     });
     if (options.signal?.aborted)
       return {
-        image: { entries: [], watermark: this.ordinal },
+        image: { entries: [], watermark: this.ordinal, epoch: this.epoch },
         live: queue,
         check: () => queue.check(),
         close: () => queue.close(),
@@ -111,6 +122,7 @@ export class TailReplayBuffer {
   reset(): void {
     for (const listener of [...this.listeners]) listener.fail();
     this.entries.length = 0;
+    this.incarnation = randomUUID();
   }
 }
 
