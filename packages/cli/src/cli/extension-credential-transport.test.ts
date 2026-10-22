@@ -22,7 +22,10 @@ test("runtime-owned credential slot is duplex and GC never closes an unrelated d
       const channel = (child.stdio as unknown[])[slot] as Duplex | null;
       let output = "", errors = "";
       child.stdout?.on("data", chunk => output += chunk); child.stderr?.on("data", chunk => errors += chunk);
-      const timer = setTimeout(() => child.kill("SIGKILL"), 5000);
+      const timer = setTimeout(() => {
+        console.error(JSON.stringify({ witnessDeadline: true, exitCode: child.exitCode, signal: child.signalCode, output, errors, readable: channel?.readable, writable: channel?.writable }));
+        channel?.destroy(); child.kill("SIGKILL");
+      }, 5000);
       try {
         if (!scoutExtensionContextBackend()) {
           expect(channel).toBeNull(); child.kill("SIGKILL"); await closed;
@@ -30,7 +33,7 @@ test("runtime-owned credential slot is duplex and GC never closes an unrelated d
           expect(channel?.readable).toBe(true); expect(channel?.writable).toBe(true);
           let request = "";
           channel!.on("error", () => {});
-          channel!.on("data", chunk => { request += chunk; if (request === "request\n") channel!.end("response\n"); });
+          channel!.on("data", chunk => { request += chunk; if (request === "request\n") channel!.end("response\n", () => channel!.destroy()); });
           Bun.gc(true);
           const status = await closed; expect(errors).toBe(""); expect(status).toBe(0); expect(request).toBe("request\n"); expect(output.trim()).toBe("duplex-eof"); expect(errors).toBe("");
         }
