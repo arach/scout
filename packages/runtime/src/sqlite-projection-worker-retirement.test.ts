@@ -8,6 +8,8 @@ for (const mode of ["watchdog-success", "watchdog-error", "close-success", "clos
     const root = await mkdtemp(join(tmpdir(), "scout-projection-retirement-"));
     const child = Bun.spawn({
       cmd: [process.execPath, new URL("./test-helpers/projection-retirement-child.ts", import.meta.url).pathname, mode, root],
+      // Timing diagnostics are unrelated to the strict retirement-error stderr canary.
+      env: { ...process.env, OPENSCOUT_SLOW_DB_MS: "0" },
       stdout: "pipe", stderr: "pipe",
     });
     const timer = setTimeout(() => child.kill(), 15_000);
