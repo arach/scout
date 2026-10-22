@@ -2,6 +2,7 @@ import { afterAll, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { ScoutCommandUnavailableError } from "./command-unavailable.ts";
 import { findScoutExtension } from "./extensions.ts";
 import { mutateScoutExtension } from "./extension-install.ts";
 import { assertScoutExtensionInputGrant, grantScoutExtensionInput, listScoutExtensionInputGrants, revokeScoutExtensionInputGrant,
@@ -103,47 +104,37 @@ import { captureScoutExtensionSelection } from "./extension-context.ts";
 import { prepareScoutExtensionContext } from "./extension-context-runner.ts";
 import { prepareScoutExtensionInputSession, encodeScoutExtensionInputResponse, EXTENSION_INPUT_REQUEST_SCHEMA } from "./extension-input-session.ts";
 import { scoutExtensionContextBackend } from "./extension-context-host.ts";
-function sessionFor(f: ReturnType<typeof fixture>, current = () => true) {
+function sessionFor(f: ReturnType<typeof fixture>) {
   const extension = findScoutExtension("input-fixture", f.env)!;
   const layout = deriveOpenScoutInstanceLayout({ env: f.env, home: f.home, name: "prod" });
   const frame = prepareScoutExtensionContext({ extension, env: f.env, selection: captureScoutExtensionSelection({ layout, env: f.env, home: f.home, uid: process.getuid!(), cwd: f.base }),
     cli: { version: "1.2.3", executable: join(import.meta.dir, "main.ts"), runtimeExecutable: process.execPath, cwd: f.base, output: "json" }, brokerUrl: "http://127.0.0.1:43110" });
-  const session = prepareScoutExtensionInputSession(extension, frame, f.env, current)!;
+  const session = prepareScoutExtensionInputSession(extension, frame, f.env)!;
   return { session, request: { schema: EXTENSION_INPUT_REQUEST_SCHEMA, id: session.metadata.id, treeDigest: session.metadata.treeDigest } };
 }
-test("input model is lazy, presence is frozen, absence is not denied and only one bounded response can contain a value", () => {
-  if (!scoutExtensionContextBackend()) { expect(scoutExtensionContextBackend()).toBe(false); return; }
-  const f = fixture(), initial = sessionFor(f); expect(JSON.stringify(initial.session.metadata)).not.toContain(f.env.SCOUT_DIST_KEY!);
-  expect(initial.session.metadata.present).toBe(true); expect(listScoutExtensionInputGrants(f.env).grants).toEqual([]);
-  expect(() => initial.session.request(initial.request)).toThrow("input_not_authorized");
-  for (const value of [undefined, "", " \t\n "]) {
-    const absent = fixture(); if (value === undefined) delete absent.env.SCOUT_DIST_KEY; else absent.env.SCOUT_DIST_KEY = value;
-    const input = sessionFor(absent); expect(input.session.metadata.present).toBe(false);
-    expect(input.session.request(input.request).status).toBe("absent"); expect(existsSync(scoutExtensionGrantStore(absent.env))).toBe(false);
+test("dormant input metadata freezes presence without exposing a value or reading policy", () => {
+  for (const value of [undefined, "", " \t\n ", "synthetic-present-value"]) {
+    const f = fixture(); if (value === undefined) delete f.env.SCOUT_DIST_KEY; else f.env.SCOUT_DIST_KEY = value;
+    const { session, request } = sessionFor(f);
+    expect(session.metadata.present).toBe(Boolean(value?.trim()));
+    if (value?.trim()) expect(JSON.stringify(session.metadata)).not.toContain(value);
+    expect(existsSync(scoutExtensionGrantStore(f.env))).toBe(false);
+    f.env.SCOUT_DIST_KEY = "changed-synthetic-value";
+    expect(session.metadata.present).toBe(Boolean(value?.trim()));
+    expect(() => session.request(request)).toThrow("input_backend_unproven");
+    expect(existsSync(scoutExtensionGrantStore(f.env))).toBe(false);
   }
-  grantScoutExtensionInput(f.env, f.binding()); const approved = sessionFor(f), response = approved.session.request(approved.request);
-  expect(response.status).toBe("provided"); expect(response.value).toBe(f.env.SCOUT_DIST_KEY); expect(encodeScoutExtensionInputResponse(response).at(-1)).toBe(10);
-  expect(() => approved.session.request(approved.request)).toThrow("input_protocol_invalid");
-  for (const value of ["x".repeat(8193), "a\nb", "a\u0085b", "a\u0000b", "a\ud800"]) {
-    const bad = fixture(); bad.env.SCOUT_DIST_KEY = value; grantScoutExtensionInput(bad.env, bad.binding()); const input = sessionFor(bad);
-    expect(input.session.metadata.present).toBe(true); expect(() => input.session.request(input.request)).toThrow("input_value_invalid");
-  }
-  expect(() => encodeScoutExtensionInputResponse({ ...response, value: "\\".repeat(8192) })).toThrow("input_value_invalid");
 });
-test("request-time model rejects idle revocation, changed source, changed selection and unknown or repeated requests", () => {
-  if (!scoutExtensionContextBackend()) { expect(scoutExtensionContextBackend()).toBe(false); return; }
-  for (const mutation of ["revoke", "source", "selection", "declaration", "update", "endpoint"]) {
-    const f = fixture(), grant = grantScoutExtensionInput(f.env, f.binding()), input = sessionFor(f, () => mutation !== "selection");
-    if (mutation === "revoke") revokeScoutExtensionInputGrant(f.env, grant.id);
-    if (mutation === "source") f.env.SCOUT_DIST_KEY = "different-synthetic-input";
-    if (mutation === "endpoint") f.env.OPENSCOUT_DIST_URL = "https://different.example.test/path";
-    if (mutation === "declaration") writeFileSync(join(f.env.OPENSCOUT_EXTENSIONS_HOME!, "input-fixture", "extension.json"), JSON.stringify({ api: 2, command: "run", invocation: { ...declaration, credentialInputs: [{ ...declaration.credentialInputs[0], purpose: "Different disclosure" }] } }));
-    if (mutation === "update") { writeFileSync(join(f.source, "auxiliary"), "changed"); mutateScoutExtension("update", "input-fixture", f.source, f.env); }
-    expect(() => input.session.request(input.request)).toThrow(mutation === "revoke" ? "input_not_authorized" : mutation === "source" ? "input_source_changed" : "selection_changed");
-  }
-  for (const value of [{}, { schema: "unknown", id: "distribution-key" }, { schema: EXTENSION_INPUT_REQUEST_SCHEMA, id: "other", treeDigest: "wrong" }]) {
-    const f = fixture(), input = sessionFor(f); expect(() => input.session.request(value)).toThrow("input_protocol_invalid");
-  }
+test("dormant input model never returns a value even with an exact grant, revocation or repeated request", () => {
+  expect(scoutExtensionContextBackend()).toBe(false);
+  const f = fixture(), grant = grantScoutExtensionInput(f.env, f.binding()), { session, request } = sessionFor(f);
+  for (const value of [request, request, {}, { schema: "unknown" }]) expect(() => session.request(value)).toThrow("input_backend_unproven");
+  revokeScoutExtensionInputGrant(f.env, grant.id);
+  expect(() => session.request(request)).toThrow("input_backend_unproven");
+  const refusedResponse = session.refusal(new ScoutCommandUnavailableError("input-fixture", "input_backend_unproven", "No qualified input transport"));
+  expect(refusedResponse.status).toBe("refused"); expect(refusedResponse).not.toHaveProperty("value");
+  expect(encodeScoutExtensionInputResponse(refusedResponse).at(-1)).toBe(10);
+  expect(() => encodeScoutExtensionInputResponse({ ...refusedResponse, value: "synthetic-invalid-value" })).toThrow("input_protocol_invalid");
 });
 
 test("unqualified input transport refuses a valid granted declaration before any provider execution", async () => {
@@ -155,7 +146,7 @@ test("unqualified input transport refuses a valid granted declaration before any
   const child = spawn(process.execPath, ["--preload", preload, join(import.meta.dir, "main.ts"), "--json", "input-fixture"], { env: f.env, cwd: f.base, stdio: ["ignore", "pipe", "pipe"] });
   let stdout = "", stderr = ""; child.stdout.on("data", data => stdout += data); child.stderr.on("data", data => stderr += data);
   const timer = setTimeout(() => child.kill("SIGKILL"), 10_000);
-  try { const code = await new Promise<number | null>(done => child.once("close", done)); refused({ code, stdout, stderr }, scoutExtensionContextBackend() ? "input_backend_unproven" : "context_backend_unproven"); expect(existsSync(marker)).toBe(false); }
+  try { const code = await new Promise<number | null>(done => child.once("close", done)); refused({ code, stdout, stderr }, "context_backend_unproven"); expect(existsSync(marker)).toBe(false); }
   finally { clearTimeout(timer); }
 }, 15_000);
 

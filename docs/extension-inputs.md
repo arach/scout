@@ -1,22 +1,30 @@
 # Declared extension inputs
 
-API 2 supports one credential source: the caller's environment `SCOUT_DIST_KEY`.
-It is optional, opaque and available only through an explicitly declared,
-single-request input channel. Installation, updates, receipts and automatic
+The API-2 declaration names one future credential source: the caller's
+environment `SCOUT_DIST_KEY`. It is optional and opaque; future delivery must
+use an explicitly declared, single-request input channel. Installation, updates, receipts and automatic
 reconciliation do not issue grants. A manifest cannot request arbitrary
 environment names, files, keychain labels, credential helpers or network lookups.
 
-**Transport is held, not implemented or enabled.** The runtime-owned descriptor
-measurement passes in isolation but fails after the full context/GC witnesses.
-Declared-input artifacts refuse with `input_backend_unproven` on the context-
-qualified host, before provider spawn. The permission store and parent-side
-request model below are reviewable preparation, not successful key delivery.
-Protocol/lifecycle sections specify the proposed next slice.
+**No context or credential transport is qualified on any host.** This slice is
+permission-store and management preparation, not key delivery. Every API-2
+invocation refuses with `context_backend_unproven` before provider spawn.
+Credential target6 remains ignored. The independent input gate also remains
+closed; the metadata-only parent session's `request` always refuses with
+`input_backend_unproven`, even with an exact grant. It retains no raw value in
+the returned session and implements no request-time authorization or response
+server. Protocol/lifecycle sections below specify the proposed future slice.
 
-This contract is a draft. It enables no command flip or service authority.
-The exact qualified API-2 runtime floor from [context](./extension-context.md)
-still applies. Bun 1.3.13 refuses before provider spawn. The floor must be
-reviewed again before a different Bun revision becomes supported.
+The prior exact-1.3.14 qualification is withdrawn on macOS and Linux. The old
+pre-opened-FD witness could not detect a second close of a reused number;
+hosted run39717881161 is void as transport qualification. Isolated positive
+exchanges and old parent-model successes do not qualify a channel. API1 stays
+unchanged. No verb flip or service authority is enabled.
+
+W5 delivery requires a single-owner transport passing the corrected witness on
+its CI's exact pinned revision and platform, as described in
+[context](./extension-context.md). No currently installed revision is assumed
+qualified; a pin move alone does not meet that gate.
 
 ## Declaration
 
@@ -132,7 +140,11 @@ with that evidence and exact adopted digest. Failure to append must refuse.
 Adoption cannot issue a grant or revive a revoked one. This v1 store does not
 accept a fabricated verified-publisher or adoption record.
 
-## Input protocol
+## Input protocol (not implemented)
+
+The following is required future behavior, not an enabled channel. Current
+metadata sessions refuse every request. Request parsing, authorization at the
+channel boundary, delivery, deadlines and the provider adapter remain unimplemented.
 
 Context `credentialInputs` exposes only the declared ID, frozen `present`
 boolean, `treeDigest`, `declarationDigest` and selected destination. Unset, empty
