@@ -1,3 +1,4 @@
+import { DOCTOR_HELP } from "../../../bin/lifecycle-preflight.mjs";
 import { DOCTOR_CHECK_NAMES, runDoctorCheck, renderDoctorCheck, renderDoctorAssessment } from "../doctor-checks.ts";
 import type { ScoutCommandContext } from "../context.ts";
 import { defaultScoutContextDirectory } from "../context.ts";
@@ -37,17 +38,7 @@ function renderDoctorInstanceLine(): string {
 }
 
 export function renderDoctorCommandHelp(): string {
-  return [
-    "Usage: scout doctor [--detail | --json] [--context-root <path>] [--fix [--yes]]",
-    "", "Default: concise checks as they finish, with a 6-second deadline per check.",
-    "FAIL means observed impairment; ? means inconclusive, not confirmed failure.",
-    "--detail  Full legacy report, including project inventory and internal paths.",
-    "--json    Compatible scout.doctor.v1 NDJSON stream; ends with phase complete.",
-    "Detail and v1 JSON retain the legacy full-scan wait behavior.",
-    "--fix     Explicit native repair request; uses the full legacy report.",
-    "--yes     Non-interactive confirmation for --fix.",
-    "--help    Show this help without checking or maintaining services.",
-  ].join("\n");
+  return DOCTOR_HELP;
 }
 
 export async function runDoctorCommand(context: ScoutCommandContext, args: string[]): Promise<void> {
