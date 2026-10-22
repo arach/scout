@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { scoutExtensionTreeDigest } from "../extension-tree-digest.ts";
 import { mutateScoutExtension, readScoutExtensionInstallReceipt, ScoutExtensionInstallError, type ScoutExtensionInstallOptions } from "../extension-install.ts";
 import type { ScoutCommandContext } from "../context.ts";
 import { ScoutCliError } from "../errors.ts";
@@ -12,9 +13,10 @@ scout extensions install <verb> <dir>    Install a trusted prebuilt local artifa
 scout extensions update <verb> <dir>     Atomically activate a new artifact
 scout extensions remove <verb>           Remove a managed install; block legacy fallback
 scout extensions receipt <verb>          Read the selected generation's publication receipt
+scout extensions tree-digest <directory> Read the canonical full-tree identity (no install)
 
 Conditional install: --expect-absent --operation-id <id>
-Conditional update:  --expect-generation <absolute-dir> --expect-digest <sha256> --operation-id <id>
+Conditional update:  --expect-generation <absolute-dir> --expect-tree-digest <tree-digest> --operation-id <id>
 Conditions are checked under the installer lock. Without them, explicit install,
 update and re-enable behavior is unchanged. --operation-id is also optional alone.
 
@@ -27,24 +29,29 @@ and docs/extension-install-conditions.md for conditions and receipt recovery.`;
 
 function mutationOptions(args: string[]): ScoutExtensionInstallOptions {
   const values = new Map<string, string>(); let absent = false;
-  const invalid = () => new ScoutExtensionInstallError("EXTENSION_CONDITION_INVALID", "use --expect-absent or both --expect-generation <absolute-dir> and --expect-digest <sha256>, with --operation-id <id>; flags must not repeat");
+  const invalid = () => new ScoutExtensionInstallError("EXTENSION_CONDITION_INVALID", "use --expect-absent or both --expect-generation <absolute-dir> and --expect-tree-digest <tree-digest>, with --operation-id <id>; flags must not repeat");
   for (let index = 0; index < args.length; index++) {
     const flag = args[index]!;
     if (flag === "--expect-absent") { if (absent) throw invalid(); absent = true; }
-    else if (["--expect-generation", "--expect-digest", "--operation-id"].includes(flag)) {
+    else if (["--expect-generation", "--expect-tree-digest", "--operation-id"].includes(flag)) {
       const value = args[++index];
       if (!value || value.startsWith("--") || values.has(flag)) throw invalid();
       values.set(flag, value);
     } else throw invalid();
   }
-  const generation = values.get("--expect-generation"), digest = values.get("--expect-digest");
-  if ((absent && (generation !== undefined || digest !== undefined)) || (generation === undefined) !== (digest === undefined)) throw invalid();
-  return { operationId: values.get("--operation-id"), expected: absent ? { absent: true } : generation !== undefined ? { generation, digest: digest! } : undefined };
+  const generation = values.get("--expect-generation"), treeDigest = values.get("--expect-tree-digest");
+  if ((absent && (generation !== undefined || treeDigest !== undefined)) || (generation === undefined) !== (treeDigest === undefined)) throw invalid();
+  return { operationId: values.get("--operation-id"), expected: absent ? { absent: true } : generation !== undefined ? { generation, treeDigest: treeDigest! } : undefined };
 }
 
 export async function runExtensionsCommand(context: ScoutCommandContext, args: string[]): Promise<void> {
   if (args.includes("--help") || args.includes("-h")) {
     context.output.writeText(EXTENSIONS_HELP);
+    return;
+  }
+  if (args[0] === "tree-digest") {
+    if (args.length !== 2) throw new ScoutCliError("usage: scout extensions tree-digest <directory>");
+    context.output.writeValue({ treeDigest: scoutExtensionTreeDigest(args[1]!) }, value => value.treeDigest);
     return;
   }
   if (args.length) {

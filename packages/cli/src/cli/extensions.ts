@@ -29,3 +29,5 @@ export async function runScoutExtension(extension: ScoutExtension, args: readonl
     process.off("SIGINT", wait);
   }
 }
+
+export { scoutExtensionTreeDigest, isScoutExtensionTreeDigest, SCOUT_EXTENSION_TREE_DIGEST_SCHEME, type ScoutExtensionTreeDigest } from "./extension-tree-digest.ts";

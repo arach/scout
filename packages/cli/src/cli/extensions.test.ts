@@ -305,7 +305,7 @@ process.exitCode = await runScoutExtension(extension, [], process.env);`);
     const f = cliArtifact("update-race");
     const inspected = JSON.parse((await cli(["install", "mesh", f.source], f.selected)).stdout);
     const automaticArgs = ["update", "mesh", f.source, "--expect-generation", inspected.publishedGeneration,
-      "--expect-digest", inspected.digest, "--operation-id", "auto-update"];
+      "--expect-tree-digest", inspected.treeDigest, "--operation-id", "auto-update"];
     const replacement = JSON.parse((await cli(["update", "mesh", f.source], f.selected)).stdout);
     const refused = await cli(automaticArgs, f.selected);
     const error = refusal(refused, "EXTENSION_PRECONDITION_FAILED");
@@ -324,7 +324,7 @@ process.exitCode = await runScoutExtension(extension, [], process.env);`);
     expect(receipt.operationId).toBe("lost:install");
     expect(receipt.publishedGeneration).toBe(realpathSync(join(f.selected, "mesh")));
     const updated = await cli(["update", "mesh", f.source, "--expect-generation", receipt.publishedGeneration,
-      "--expect-digest", receipt.digest, "--operation-id", "lost:update"], f.selected, true);
+      "--expect-tree-digest", receipt.treeDigest, "--operation-id", "lost:update"], f.selected, true);
     expect(updated.code).toBe(0);
     const next = JSON.parse((await cli(["receipt", "mesh"], f.selected)).stdout);
     expect(next.operationId).toBe("lost:update");
@@ -344,7 +344,7 @@ process.exitCode = await runScoutExtension(extension, [], process.env);`);
     const f = cliArtifact("bad-options");
     for (const flags of [
       ["--expect-absent"], ["--expect-generation", "/absolute", "--operation-id", "x"],
-      ["--expect-absent", "--expect-digest", "0".repeat(64), "--operation-id", "x"],
+      ["--expect-absent", "--expect-tree-digest", "0".repeat(64), "--operation-id", "x"],
       ["--expect-absent", "--expect-absent", "--operation-id", "x"], ["--operation-id", "../bad"],
     ]) {
       const result = await cli(["install", "mesh", f.source, ...flags], f.selected);
@@ -354,5 +354,29 @@ process.exitCode = await runScoutExtension(extension, [], process.env);`);
     const missing = await cli(["receipt", "mesh"], f.selected);
     expect(refusal(missing, "EXTENSION_RECEIPT_UNAVAILABLE").lastReceipt).toBeUndefined();
     expect(fs.existsSync(f.selected)).toBe(false);
+  }, 30_000);
+  test("public CLI: inventory, receipt and automatic update use one full-tree identity", async () => {
+    const f = cliArtifact("tree-identity"); writeFileSync(join(f.source, "asset"), "asset");
+    const inventory = await cli(["tree-digest", f.source], f.selected);
+    expect(inventory.code).toBe(0); expect(fs.existsSync(f.selected)).toBe(false);
+    const first = JSON.parse((await cli(["install", "mesh", f.source], f.selected)).stdout);
+    expect(first.treeDigest).toBe(JSON.parse(inventory.stdout).treeDigest);
+    writeFileSync(join(first.publishedGeneration, "asset"), "changed");
+    const inspected = JSON.parse((await cli(["tree-digest", first.publishedGeneration], f.selected)).stdout);
+    expect(inspected.treeDigest).not.toBe(first.treeDigest);
+    const refused = await cli(["update", "mesh", f.source, "--expect-generation", first.publishedGeneration,
+      "--expect-tree-digest", first.treeDigest, "--operation-id", "stale-tree"], f.selected);
+    expect(refusal(refused, "EXTENSION_PRECONDITION_FAILED").lastReceipt).toBeUndefined();
+    const recovery = await cli(["receipt", "mesh"], f.selected);
+    expect(refusal(recovery, "EXTENSION_RECEIPT_UNAVAILABLE").lastReceipt).toBeUndefined();
+    expect(realpathSync(join(f.selected, "mesh"))).toBe(first.publishedGeneration);
+    const explicit = JSON.parse((await cli(["update", "mesh", f.source], f.selected)).stdout);
+    expect(explicit.treeDigest).toBe(first.treeDigest);
+    const wrongAxis = await cli(["update", "mesh", f.source, "--expect-generation", explicit.publishedGeneration,
+      "--expect-tree-digest", explicit.digest, "--operation-id", "wrong-axis"], f.selected);
+    refusal(wrongAxis, "EXTENSION_CONDITION_INVALID");
+    const oldFlag = await cli(["update", "mesh", f.source, "--expect-generation", explicit.publishedGeneration,
+      "--expect-digest", explicit.digest, "--operation-id", "old-draft-flag"], f.selected);
+    refusal(oldFlag, "EXTENSION_CONDITION_INVALID");
   }, 30_000);
 });

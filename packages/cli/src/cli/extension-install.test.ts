@@ -1,10 +1,11 @@
 import { afterEach, expect, test } from "bun:test";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mutateScoutExtension, readScoutExtensionInstallReceipt, ScoutExtensionInstallError, type ScoutExtensionInstallOptions } from "./extension-install.ts";
 import { findScoutExtension, scoutExtensionDigest } from "./extensions.ts";
 import { findScoutCommandRegistration } from "./registry.ts";
+import { scoutExtensionTreeDigest } from "./extension-tree-digest.ts";
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 function fixture() {
@@ -103,14 +104,14 @@ test("conditional update refuses a changed generation even when its digest is id
   expect(replacement.publishedGeneration).not.toBe(inspected.publishedGeneration);
   const before = readdirSync(join(f.home, ".installed", "mesh"));
   conditionFailure(() => mutateScoutExtension("update", "mesh", f.source, f.env, {
-    expected: { generation: inspected.publishedGeneration, digest: inspected.digest! }, operationId: "update-race",
+    expected: { generation: inspected.publishedGeneration, treeDigest: inspected.treeDigest! }, operationId: "update-race",
   }));
   expect(realpathSync(join(f.home, "mesh"))).toBe(replacement.publishedGeneration);
   expect(readdirSync(join(f.home, ".installed", "mesh"))).toEqual(before);
 });
 test("conditional update requires the digest too, and cannot repair unknown or removed state", () => {
   const f = fixture(), installed = f.change("install");
-  const options = { expected: { generation: installed.publishedGeneration, digest: installed.digest! }, operationId: "checked-update" };
+  const options = { expected: { generation: installed.publishedGeneration, treeDigest: installed.treeDigest! }, operationId: "checked-update" };
   writeFileSync(join(f.home, "mesh", "bin/scout-mesh"), "#!/bin/sh\nexit 2\n");
   conditionFailure(() => mutateScoutExtension("update", "mesh", f.source, f.env, options));
   writeFileSync(join(f.home, "mesh", "extension.json"), "not JSON");
@@ -136,12 +137,12 @@ test("conditional successes persist a receipt before stdout and support the next
   expect(readScoutExtensionInstallReceipt("mesh", f.env)).toEqual(first);
   f.manifest({ version: "2.0.0" });
   const next = mutateScoutExtension("update", "mesh", f.source, f.env, {
-    expected: { generation: first.publishedGeneration, digest: first.digest! }, operationId: "update:2",
+    expected: { generation: first.publishedGeneration, treeDigest: first.treeDigest! }, operationId: "update:2",
   });
   expect(next.previousArtifact).toBe(first.publishedGeneration);
   expect(readScoutExtensionInstallReceipt("mesh", f.env)).toEqual(next);
   const rollback = mutateScoutExtension("update", "mesh", first.publishedGeneration, f.env, {
-    expected: { generation: next.publishedGeneration, digest: next.digest! }, operationId: "rollback:3",
+    expected: { generation: next.publishedGeneration, treeDigest: next.treeDigest! }, operationId: "rollback:3",
   });
   expect(rollback.digest).toBe(first.digest);
   expect(rollback.publishedGeneration).not.toBe(first.publishedGeneration);
@@ -157,12 +158,12 @@ test("invalid conditions and correlation IDs fail before creating installation s
   const f = fixture();
   for (const options of [
     { expected: { absent: true } }, { expected: { absent: false }, operationId: "x" },
-    { expected: { generation: "relative", digest: "a".repeat(64) }, operationId: "x" },
-    { expected: { generation: "/absolute", digest: "bad" }, operationId: "x" },
+    { expected: { generation: "relative", treeDigest: "a".repeat(64) }, operationId: "x" },
+    { expected: { generation: "/absolute", treeDigest: "bad" }, operationId: "x" },
     { operationId: "../../bad" }, { operationId: "a\nb" }, { operationId: "x\n" }, { operationId: "x".repeat(129) },
   ]) conditionFailure(() => mutateScoutExtension("install", "mesh", f.source, f.env, options as ScoutExtensionInstallOptions), "EXTENSION_CONDITION_INVALID");
   conditionFailure(() => mutateScoutExtension("remove", "mesh", undefined, f.env, { expected: { absent: true }, operationId: "x" }), "EXTENSION_CONDITION_INVALID");
-  conditionFailure(() => mutateScoutExtension("update", "mesh", f.source, f.env, { expected: { generation: "/absolute", digest: "a".repeat(64) + "\n" }, operationId: "x" }), "EXTENSION_CONDITION_INVALID");
+  conditionFailure(() => mutateScoutExtension("update", "mesh", f.source, f.env, { expected: { generation: "/absolute", treeDigest: "sha256:scout-extension-tree-v1:" + "a".repeat(64) + "\n" }, operationId: "x" }), "EXTENSION_CONDITION_INVALID");
   expect(existsSync(f.home)).toBe(false);
 });
 test("receipt recovery refuses torn, symlinked, stale or missing records without mutating selection", () => {
@@ -198,4 +199,32 @@ test("unconditional receipts use null operation ID; remove retains only its sele
   f.change("update"); const removed = f.change("remove");
   expect(readScoutExtensionInstallReceipt("mesh", f.env)).toEqual(removed);
   expect(readdirSync(join(f.home, ".receipts", "mesh"))).toHaveLength(1);
+});
+test("full-tree conditions and receipts detect auxiliary mode, bytes, additions and renames missed by the legacy digest", () => {
+  for (const mutation of ["mode", "bytes", "add", "rename"] as const) {
+    const f = fixture(); writeFileSync(join(f.source, "asset"), "asset", { mode: 0o600 });
+    const receipt = f.change("install"), artifact = receipt.publishedGeneration;
+    if (mutation === "mode") chmodSync(join(artifact, "asset"), 0o700);
+    if (mutation === "bytes") writeFileSync(join(artifact, "asset"), "other");
+    if (mutation === "add") writeFileSync(join(artifact, "extra"), "extra");
+    if (mutation === "rename") renameSync(join(artifact, "asset"), join(artifact, "renamed"));
+    expect(scoutExtensionDigest(findScoutExtension("mesh", f.env)!)).toBe(receipt.digest!);
+    expect(scoutExtensionTreeDigest(artifact)).not.toBe(receipt.treeDigest!);
+    conditionFailure(() => mutateScoutExtension("update", "mesh", f.source, f.env, {
+      expected: { generation: artifact, treeDigest: receipt.treeDigest! }, operationId: `changed-${mutation}`,
+    }));
+    conditionFailure(() => readScoutExtensionInstallReceipt("mesh", f.env), "EXTENSION_RECEIPT_UNAVAILABLE");
+    expect(realpathSync(join(f.home, "mesh"))).toBe(artifact);
+  }
+});
+test("installed normalization and relocation reuse the same tree identity, not receipt or generation bytes", () => {
+  const f = fixture(); chmodSync(join(f.source, "bin/scout-mesh"), 0o755);
+  const source = scoutExtensionTreeDigest(f.source), installed = f.change("install");
+  expect(installed.treeDigest).toBe(source);
+  expect(scoutExtensionTreeDigest(installed.publishedGeneration)).toBe(installed.treeDigest!);
+  const updated = mutateScoutExtension("update", "mesh", f.source, f.env, {
+    expected: { generation: installed.publishedGeneration, treeDigest: installed.treeDigest! }, operationId: "new-correlation",
+  });
+  expect(updated.treeDigest).toBe(installed.treeDigest);
+  expect(updated.publishedGeneration).not.toBe(installed.publishedGeneration);
 });
