@@ -48,6 +48,21 @@ import { LAUNCH_AGENT_LABEL as MESH_BRIDGE_LAUNCH_AGENT_LABEL } from "./mesh-bri
 const HELP_FLAGS = new Set(["--help", "-h", "help"]);
 const PROBE_TIMEOUT_MS = 20_000;
 
+// Fixed code only, never caller command/instance interpolation. The target's
+// existing Node or Bun performs the same ECMAScript trim as Scout selection;
+// shell :- would treat whitespace-only values as an explicit instance and
+// could query prod instead of the target's client pointer. Runtime still owns
+// instance-name normalization and isolation. The existing SSH process-group
+// timeout covers this read-only wrapper and its service-status child.
+const REMOTE_RUNTIME_STATUS_JS = [
+  'const env = process.env;',
+  'env.OPENSCOUT_INSTANCE = env.OPENSCOUT_INSTANCE?.trim() || env.OPENSCOUT_CLIENT_INSTANCE?.trim() || "prod";',
+  'const result = require("node:child_process").spawnSync("openscout-runtime", ["service", "status", "--json"], { env, stdio: "inherit" });',
+  'process.exit(result.status ?? 1);',
+].join(" ");
+const REMOTE_RUNTIME_STATUS_SHELL =
+  `js=$(command -v node || command -v bun) || exit 127; exec "$js" -e '${REMOTE_RUNTIME_STATUS_JS}'`;
+
 export type ScoutUpdateDependencies = {
   loadMachines?: () => Promise<{ machines: MachineRecord[] }>;
   install?: typeof runInstallCommand;
@@ -347,12 +362,9 @@ function createDefaultProbe(exec: SshExec, options: { sshUser: string | null }) 
     // version guessed from broker health (or a private diagnostic fallback).
     const runtimeCommand = ["openscout-runtime", "service", "status", "--json"];
     const runtime = await read(machine.isSelf ? runtimeCommand : [
-      // OpenSSH uses the target's login shell. This fixed POSIX program mirrors
-      // scout's explicit-instance -> client-pointer -> prod selection THERE;
-      // the runtime service CLI intentionally does not read client pointers.
-      // Never interpolate the caller's instance or environment into SSH.
-      "/bin/sh", "-c",
-      '\'OPENSCOUT_INSTANCE="${OPENSCOUT_INSTANCE:-${OPENSCOUT_CLIENT_INSTANCE:-prod}}" exec openscout-runtime service status --json\'',
+      // Select explicit instance -> client pointer -> prod on the target.
+      // Both quote layers contain fixed program text, not caller data.
+      "/bin/sh", "-c", "'" + REMOTE_RUNTIME_STATUS_SHELL.replace(/'/g, "'\\''") + "'",
     ]);
     const status = readJsonStdout(runtime.stdout) as { runtimeFreshness?: {
       version?: unknown; intentional?: unknown; state?: unknown;
