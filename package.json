@@ -90,7 +90,8 @@
     "bump": "node scripts/bump-version.mjs",
     "scout:tui:check": "bash scripts/cargo.sh check --manifest-path crates/scout-tui/Cargo.toml",
     "scout:tui:build": "bash scripts/cargo.sh build --release --manifest-path crates/scout-tui/Cargo.toml",
-    "scout:tui:install": "bash scripts/cargo.sh install --locked --path crates/scout-tui"
+    "scout:tui:install": "bash scripts/cargo.sh install --locked --path crates/scout-tui",
+    "test:extension-channel:qualification": "bun scripts/extension-channel-qualification.ts"
   },
   "ignoreScripts": [
     "sharp",
