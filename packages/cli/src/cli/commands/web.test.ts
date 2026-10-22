@@ -165,6 +165,26 @@ describe("scout web", () => {
     } finally { child.mockRestore(); }
   });
 
+  test("a stalled body is cancelled at the download deadline and leaves no partial install", async () => {
+    let cancelled = false;
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const body = new ReadableStream<Uint8Array>({
+      start(value) { controller = value; controller.enqueue(new Uint8Array([1, 2, 3])); },
+      cancel() { cancelled = true; },
+    });
+    const run = harness({ env: { SCOUT_DIST_KEY: KEY } });
+    // Cleanup-only EOF: without the consumer deadline this yields a normal test failure, not a hung runner.
+    const watchdog = setTimeout(() => { if (!cancelled) controller.close(); }, 750);
+    try { await expect(runWebCommand(run.context, ["install", "--no-restart"], {
+      ...run.deps, downloadTimeoutMs: 25,
+      // Deliberately not connected to fetch's signal: the consumer must own a deadline.
+      fetchImpl: async () => new Response(body, { headers: { "x-openscout-sha256": "0".repeat(64) } }),
+    })).rejects.toThrow(/abort/i); } finally { clearTimeout(watchdog); }
+    expect(cancelled).toBe(true);
+    expect(resolveInstalledWebFullClient(VERSION, { env: {}, supportDirectory: support })).toBeNull();
+    expect(readdirSync(join(support, "web", "full"))).toEqual([]);
+  });
+
   test("install explains a missing key and an unpublished version", async () => {
     const none = harness();
     await expect(runWebCommand(none.context, ["install"], none.deps)).rejects.toThrow("No download key");
@@ -230,6 +250,39 @@ describe("scout web", () => {
     expect(JSON.parse(current.lines[0]!)).toMatchObject({
       serves: "full", reason: "full-installed", installedVersions: [VERSION], nextSteps: [],
     });
+  });
+
+  test("a stalled upgrade preserves the old Full client and key after cancelling its download", async () => {
+    const previousVersion = "9.8.6";
+    const previous = harness({ tarball: packClient(previousVersion), env: { SCOUT_DIST_KEY: KEY } });
+    await fileDistKeyStore(support).write(KEY);
+    await runWebCommand(previous.context, ["install", "--no-restart"], { ...previous.deps, version: previousVersion });
+    const tarball = packClient(VERSION);
+    let cancelled = false;
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const body = new ReadableStream<Uint8Array>({
+      start(value) { controller = value; controller.enqueue(tarball); }, // All bytes, but no EOF.
+      cancel() { cancelled = true; },
+    });
+    const restarted: string[] = [];
+    const current = harness({ json: true, restarted });
+    // Cleanup-only EOF: without the consumer deadline this yields a normal test failure, not a hung runner.
+    const watchdog = setTimeout(() => { if (!cancelled) controller.close(); }, 750);
+    try { await expect(runWebCommand(current.context, ["install"], {
+      ...current.deps, downloadTimeoutMs: 25,
+      fetchImpl: async (_url, init) => {
+        expect(init?.signal).toBeInstanceOf(AbortSignal);
+        return new Response(body, { headers: { "x-openscout-sha256": sha256(tarball) } });
+      },
+    })).rejects.toThrow(/abort/i); } finally { clearTimeout(watchdog); }
+    expect(cancelled).toBe(true);
+    expect(restarted).toEqual([]);
+    expect(await fileDistKeyStore(support).read()).toBe(KEY);
+    expect(resolveInstalledWebFullClient(previousVersion, { env: {}, supportDirectory: support })).not.toBeNull();
+    expect(resolveInstalledWebFullClient(VERSION, { env: {}, supportDirectory: support })).toBeNull();
+    expect(readdirSync(join(support, "web", "full"))).toEqual([previousVersion]);
+    await runWebCommand(current.context, ["status"], current.deps);
+    expect(JSON.parse(current.lines[0]!)).toMatchObject({ reason: "version-mismatch", installedVersions: [previousVersion] });
   });
 
   test("forcing Basic preserves the installed Full path and explains the override", async () => {

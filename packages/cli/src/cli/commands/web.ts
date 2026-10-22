@@ -48,6 +48,8 @@ export type ScoutWebCommandDeps = {
   keyStores?: DistKeyStore[];
   promptKey?: () => Promise<string>;
   restartWeb?: () => Promise<string>;
+  /** May shorten the complete download budget; never extends the production cap. */
+  downloadTimeoutMs?: number;
 };
 
 export function renderWebCommandHelp(): string {
@@ -123,13 +125,14 @@ async function distRequest(
   key: string,
   path: string,
   timeoutMs = 15_000,
+  signal = AbortSignal.timeout(timeoutMs),
 ): Promise<Response> {
   const fetchImpl = deps.fetchImpl ?? fetch;
   const url = `${distBaseUrl(context.env)}${path}`;
   try {
     return await fetchImpl(url, {
       headers: { authorization: `Bearer ${key}`, accept: "application/json, application/gzip" },
-      signal: AbortSignal.timeout(timeoutMs),
+      signal,
     });
   } catch (error) {
     throw new ScoutCliError(`Couldn't reach ${distBaseUrl(context.env)}: ${error instanceof Error ? error.message : String(error)}`);
@@ -202,7 +205,12 @@ async function runInstall(context: ScoutCommandContext, args: string[], deps: Sc
     return;
   }
 
-  const response = await distRequest(context, deps, resolved.key, `/v1/dist/web-full/${encodeURIComponent(version)}`, DOWNLOAD_TIMEOUT_MS);
+  const timeoutMs = Number.isFinite(deps.downloadTimeoutMs)
+    ? Math.max(1, Math.min(DOWNLOAD_TIMEOUT_MS, deps.downloadTimeoutMs!)) : DOWNLOAD_TIMEOUT_MS;
+  // One budget covers headers, body consumption AND the file writer. Passing
+  // a signal only to fetch leaves a stalled stream/pipeline without a deadline.
+  const downloadSignal = AbortSignal.timeout(timeoutMs);
+  const response = await distRequest(context, deps, resolved.key, `/v1/dist/web-full/${encodeURIComponent(version)}`, timeoutMs, downloadSignal);
   if (!response.ok) {
     const body = await response.json().catch(() => null) as { error?: string } | null;
     const reason = explainFailure(response.status, body);
@@ -223,7 +231,7 @@ async function runInstall(context: ScoutCommandContext, args: string[], deps: Sc
     const hash = createHash("sha256");
     const source = Readable.fromWeb(response.body as unknown as NodeWebReadableStream<Uint8Array>);
     source.on("data", (chunk: Buffer) => hash.update(chunk));
-    await pipeline(source, createWriteStream(tarball));
+    await pipeline(source, createWriteStream(tarball), { signal: downloadSignal });
     const actual = hash.digest("hex");
     if (actual !== expected) {
       throw new ScoutCliError(`Checksum mismatch (expected ${expected.slice(0, 12)}…, got ${actual.slice(0, 12)}…); not installing.`);
