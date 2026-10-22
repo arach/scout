@@ -1,3 +1,7 @@
+export { assessCoreServiceAcquisition, CORE_ACQUISITION_SCHEMA, CORE_ACQUISITION_BLOCKED_REASONS,
+  type CoreAcquisitionTarget, type CoreAcquisitionObservation, type CoreAcquisitionAdapterEvidence,
+  type CoreAcquisitionIdentityBasis, type CoreAcquisitionCoverageBasis, type CoreAcquisitionBlockedReason,
+  type CoreAcquisitionInput, type CoreServiceAcquisition } from "./core-acquisition.js";
 export { assessSetupCompletion, hasUsableScoutApp, type SetupCompletion } from "./setup-completion.js";
 import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
