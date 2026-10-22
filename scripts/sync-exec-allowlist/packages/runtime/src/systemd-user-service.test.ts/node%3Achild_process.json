@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/systemd-user-service.test.ts",
+  "symbol": "node:child_process",
+  "category": "test",
+  "reason": "unit-render test runs `systemd-analyze verify` on a temp unit when available",
+  "owner": "runtime"
+}

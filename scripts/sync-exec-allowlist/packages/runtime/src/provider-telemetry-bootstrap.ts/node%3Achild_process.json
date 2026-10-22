@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/provider-telemetry-bootstrap.ts",
+  "symbol": "node:child_process",
+  "category": "probe-exec",
+  "reason": "async `command -v` login-shell probe (3s timeout, SIGKILL) when checking the Claude statusline wrapper at web-server boot and in the throttled heal that quota reads trigger; no sync exec",
+  "owner": "runtime"
+}

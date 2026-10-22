@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/base-daemon.ts",
+  "symbol": "node:child_process",
+  "category": "process-lifecycle",
+  "reason": "owns base broker/caddy/dns-sd daemon child lifecycle",
+  "owner": "runtime"
+}

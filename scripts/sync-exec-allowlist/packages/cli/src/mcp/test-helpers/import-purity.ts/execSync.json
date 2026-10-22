@@ -1,0 +1,7 @@
+{
+  "path": "packages/cli/src/mcp/test-helpers/import-purity.ts",
+  "symbol": "execSync",
+  "category": "test",
+  "reason": "pure-import probe replaces these child-process APIs with fail-fast guards before importing the factory; it never executes them",
+  "owner": "cli"
+}

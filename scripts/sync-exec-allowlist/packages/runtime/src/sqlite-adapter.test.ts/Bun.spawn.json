@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/sqlite-adapter.test.ts",
+  "symbol": "Bun.spawn",
+  "category": "test",
+  "reason": "isolated real Node SQLite contract probe with a 5s SIGKILL deadline and awaited owned-child cleanup",
+  "owner": "tests"
+}

@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/room-listening-service.test.ts",
+  "symbol": "node:child_process",
+  "category": "test",
+  "reason": "isolated asynchronous listening-service subprocess with owned temporary state and cleanup",
+  "owner": "runtime"
+}

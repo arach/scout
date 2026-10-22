@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/systemd-user-service.ts",
+  "symbol": "spawnSync",
+  "category": "process-lifecycle",
+  "reason": "one-shot, time-bounded systemctl --user install/start/stop/show and `bun pm bin -g` lookups during setup/service commands, which must be ordered and observed synchronously",
+  "owner": "runtime"
+}

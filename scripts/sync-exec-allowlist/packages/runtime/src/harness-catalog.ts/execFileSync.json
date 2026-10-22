@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/harness-catalog.ts",
+  "symbol": "execFileSync",
+  "category": "boot",
+  "reason": "harness catalog capability/version discovery",
+  "owner": "runtime"
+}

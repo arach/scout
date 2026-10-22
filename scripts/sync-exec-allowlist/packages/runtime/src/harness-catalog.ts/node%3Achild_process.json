@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/harness-catalog.ts",
+  "symbol": "node:child_process",
+  "category": "boot",
+  "reason": "harness catalog capability/version discovery remains BOOT-OK",
+  "owner": "runtime"
+}

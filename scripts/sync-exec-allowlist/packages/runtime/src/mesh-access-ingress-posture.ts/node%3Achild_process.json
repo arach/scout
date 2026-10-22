@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/mesh-access-ingress-posture.ts",
+  "symbol": "node:child_process",
+  "category": "probe-exec",
+  "reason": "read-only relay inventory uses asynchronous allowlisted commands with 1.5-second timeouts and bounded output",
+  "owner": "runtime"
+}

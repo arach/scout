@@ -1,5 +1,5 @@
 import type { Dirent } from "node:fs";
-import { readdir, readFile } from "node:fs/promises";
+import { lstat, readdir, readFile } from "node:fs/promises";
 import { join, relative, posix } from "node:path";
 import ts from "typescript";
 
@@ -32,6 +32,7 @@ type AllowEntry = {
 };
 
 const ROOT = process.cwd();
+const ALLOWLIST_ROOT = "scripts/sync-exec-allowlist";
 const SCAN_ROOTS = ["packages", "apps"];
 const PHASE_B_ROOTS = [
   "packages/web/server",
@@ -131,13 +132,13 @@ function nativeLoads(file: string, source: string) {
   visit(tree); return out;
 }
 
-function validateAllowlist(value: unknown): AllowEntry[] {
+function validateAllowlist(value: unknown, locations: readonly string[]): AllowEntry[] {
   if (!Array.isArray(value)) {
     throw new Error("sync exec allowlist must be an array");
   }
   const entries: AllowEntry[] = [];
   const seen = new Set<string>();
-  for (const raw of value) {
+  for (const [index, raw] of value.entries()) {
     if (!raw || typeof raw !== "object") {
       throw new Error("allowlist entries must be objects");
     }
@@ -169,10 +170,42 @@ function validateAllowlist(value: unknown): AllowEntry[] {
     if (seen.has(key)) {
       throw new Error(`duplicate allowlist entry for ${normalized.path} ${normalized.symbol}`);
     }
+    const expected = `${normalized.path}/${encodeURIComponent(normalized.symbol)}.json`;
+    if (locations[index] !== expected) {
+      throw new Error(`allowlist entry ${normalized.path} ${normalized.symbol} is in ${ALLOWLIST_ROOT}/${locations[index]}; move it to ${ALLOWLIST_ROOT}/${expected}`);
+    }
     seen.add(key);
     entries.push(normalized);
   }
   return entries;
+}
+
+async function readAllowlist(): Promise<AllowEntry[]> {
+  // Never silently ignore an old policy alongside the per-key files.
+  try {
+    await lstat(join(ROOT, "scripts/sync-exec-allowlist.json"));
+    throw new Error(`legacy scripts/sync-exec-allowlist.json is unsupported; move each object to ${ALLOWLIST_ROOT}/<path>/<percent-encoded-symbol>.json and remove the array`);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  const directory = join(ROOT, ALLOWLIST_ROOT);
+  const locations: string[] = [];
+  const visit = async (path: string): Promise<void> => {
+    const entries = (await readdir(path, { withFileTypes: true })).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+    for (const entry of entries) {
+      const file = join(path, entry.name);
+      if (entry.isDirectory()) await visit(file);
+      else if (entry.isFile() && entry.name.endsWith(".json")) locations.push(normalizePath(relative(directory, file)));
+      else throw new Error(`unexpected allowlist path ${ALLOWLIST_ROOT}/${normalizePath(relative(directory, file))}; use regular per-key JSON files only`);
+    }
+  };
+  await visit(directory);
+  const raw: unknown[] = [];
+  for (const location of locations.sort()) {
+    try { raw.push(JSON.parse(await readFile(join(directory, location), "utf8"))); }
+    catch (error) { throw new Error(`invalid allowance JSON in ${ALLOWLIST_ROOT}/${location}: ${String(error)}`); }
+  }
+  return validateAllowlist(raw, locations);
 }
 
 function lineNumber(source: string, index: number): number {
@@ -211,8 +244,7 @@ function shouldScanSymbol(rel: string, symbol: AllowEntry["symbol"]): boolean {
   return false;
 }
 
-const allowlistRaw = JSON.parse(await readFile(join(ROOT, "scripts", "sync-exec-allowlist.json"), "utf8")) as unknown;
-const allowlist = validateAllowlist(allowlistRaw);
+const allowlist = await readAllowlist();
 const allowed = new Map(allowlist.map((entry) => [`${entry.path}\u0000${entry.symbol}`, entry]));
 
 const files = (await Promise.all(SCAN_ROOTS.map((root) => walk(join(ROOT, root))))).flat();
@@ -229,7 +261,7 @@ for (const file of files) {
       const key = `${rel}\u0000${symbol}`;
       observed.add(key);
       if (!allowed.has(key)) {
-        violations.push(`${rel}:${lineNumber(source, match.index ?? 0)} uses ${symbol} without scripts/sync-exec-allowlist.json`);
+        violations.push(`${rel}:${lineNumber(source, match.index ?? 0)} uses ${symbol} without ${ALLOWLIST_ROOT}/${rel}/${encodeURIComponent(symbol)}.json`);
       }
       if (symbol === "dlopen") {
         const library = (match as { library?: string }).library;

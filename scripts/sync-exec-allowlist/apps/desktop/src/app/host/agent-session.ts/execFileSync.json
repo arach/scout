@@ -1,0 +1,7 @@
+{
+  "path": "apps/desktop/src/app/host/agent-session.ts",
+  "symbol": "execFileSync",
+  "category": "imperative",
+  "reason": "desktop host session helper is outside the M3 server/core burn-down scope",
+  "owner": "desktop"
+}

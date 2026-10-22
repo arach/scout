@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/tailscale.ts",
+  "symbol": "node:child_process",
+  "category": "boot",
+  "reason": "startup tailscale origin resolution remains BOOT-OK",
+  "owner": "runtime"
+}

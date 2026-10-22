@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/routing/routing.test.ts",
+  "symbol": "node:child_process",
+  "category": "test",
+  "reason": "test subprocess fixture or git fixture setup",
+  "owner": "runtime"
+}

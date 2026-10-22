@@ -1,0 +1,7 @@
+{
+  "path": "packages/web/server/pairing-bridge-client.test.ts",
+  "symbol": "Bun.spawn",
+  "category": "test",
+  "reason": "test subprocess fixture or git fixture setup",
+  "owner": "web"
+}

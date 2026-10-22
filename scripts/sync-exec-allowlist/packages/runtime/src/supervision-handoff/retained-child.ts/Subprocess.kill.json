@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/supervision-handoff/retained-child.ts",
+  "symbol": "Subprocess.kill",
+  "category": "process-lifecycle",
+  "reason": "inactive SDK signals only its private retained direct-child handle under an effect permit or serialized durable cohort-retirement intent; refuses after terminal status/reap and never calls kill(pid)",
+  "owner": "runtime"
+}

@@ -1,0 +1,7 @@
+{
+  "path": "packages/web/server/harness-completion.ts",
+  "symbol": "node:child_process",
+  "category": "process-lifecycle",
+  "reason": "async harness CLI completion in its own process group; on timeout the group gets TERM, then KILL after a grace period, and the run settles once it exits (pipes torn down after a bounded wait) before any fallback runs",
+  "owner": "web"
+}

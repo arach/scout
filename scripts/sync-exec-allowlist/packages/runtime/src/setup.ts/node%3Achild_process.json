@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/setup.ts",
+  "symbol": "node:child_process",
+  "category": "boot",
+  "reason": "explicit setup/bootstrap one-shot checks remain BOOT-OK",
+  "owner": "runtime"
+}

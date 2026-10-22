@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/routing/identity.ts",
+  "symbol": "node:child_process",
+  "category": "cli",
+  "reason": "imports execFileSync for the CLI-only routing index refresh",
+  "owner": "runtime"
+}

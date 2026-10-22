@@ -1,0 +1,7 @@
+{
+  "path": "packages/web/server/terminal-context.test.ts",
+  "symbol": "node:child_process",
+  "category": "test",
+  "reason": "test subprocess fixture or git fixture setup",
+  "owner": "web"
+}

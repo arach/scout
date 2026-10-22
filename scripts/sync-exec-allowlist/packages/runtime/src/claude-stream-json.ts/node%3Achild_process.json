@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/claude-stream-json.ts",
+  "symbol": "node:child_process",
+  "category": "process-lifecycle",
+  "reason": "owns Claude stream-json harness process lifecycle",
+  "owner": "runtime"
+}

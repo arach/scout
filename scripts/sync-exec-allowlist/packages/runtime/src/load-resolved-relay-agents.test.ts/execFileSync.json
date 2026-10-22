@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/load-resolved-relay-agents.test.ts",
+  "symbol": "execFileSync",
+  "category": "test",
+  "reason": "git fixture setup",
+  "owner": "tests"
+}

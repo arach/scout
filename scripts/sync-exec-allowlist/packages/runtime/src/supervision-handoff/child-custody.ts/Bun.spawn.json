@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/supervision-handoff/child-custody.ts",
+  "symbol": "Bun.spawn",
+  "category": "process-lifecycle",
+  "reason": "inactive retained spawn owns an EOF parent pipe at child FD 3 and lifetime fence at FD 7, stages CLOEXEC source copies above slot 7, and maps no caller FDs; only audited Darwin Bun 1.3.14 borrowed extras, with immediate owned-copy cleanup and retained handle before native birth sampling",
+  "owner": "runtime"
+}

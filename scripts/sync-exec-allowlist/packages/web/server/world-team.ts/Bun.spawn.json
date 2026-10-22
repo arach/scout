@@ -1,0 +1,7 @@
+{
+  "path": "packages/web/server/world-team.ts",
+  "symbol": "Bun.spawn",
+  "category": "probe-exec",
+  "reason": "async ssh and gh reads for World team snapshots, each SIGKILLed on its timeout",
+  "owner": "web"
+}

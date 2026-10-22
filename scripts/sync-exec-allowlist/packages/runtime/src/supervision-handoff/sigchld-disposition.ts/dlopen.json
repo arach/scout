@@ -1,0 +1,10 @@
+{
+  "path": "packages/runtime/src/supervision-handoff/sigchld-disposition.ts",
+  "symbol": "dlopen",
+  "category": "dlopen",
+  "libraryPaths": [
+    "/usr/lib/libSystem.B.dylib"
+  ],
+  "reason": "lazy read-only sigaction query for the audited Darwin custody backend; no disposition mutation or foreign-reaper claim",
+  "owner": "runtime"
+}

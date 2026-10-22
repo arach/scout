@@ -1,0 +1,7 @@
+{
+  "path": "packages/cli/src/mcp/mesh-bridge-connect.ts",
+  "symbol": "Bun.spawnSync",
+  "category": "cli",
+  "reason": "one-shot Keychain writes during `scout login`: `security -i` takes the secret on stdin so it never appears in the process list",
+  "owner": "desktop"
+}

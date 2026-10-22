@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/local-edge-trust.ts",
+  "symbol": "node:child_process",
+  "category": "imperative",
+  "reason": "security verify-cert check of the local CA (tens of ms) on explicit setup, doctor, CLI and Settings requests; the password-dialog path in the web server is async",
+  "owner": "runtime"
+}

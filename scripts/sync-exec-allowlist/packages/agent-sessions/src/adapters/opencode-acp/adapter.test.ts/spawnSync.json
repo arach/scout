@@ -1,0 +1,7 @@
+{
+  "path": "packages/agent-sessions/src/adapters/opencode-acp/adapter.test.ts",
+  "symbol": "spawnSync",
+  "category": "test",
+  "reason": "asserts the keychain fallback against a stub binary passed by absolute path",
+  "owner": "agent-sessions"
+}

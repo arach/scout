@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/room-listening-supervisor.test.ts",
+  "symbol": "Bun.spawn",
+  "category": "test",
+  "reason": "runs the runtime entrypoint with an unknown command to assert it exits 78 before importing any daemon",
+  "owner": "runtime"
+}

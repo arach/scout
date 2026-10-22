@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/broker-web-control-service.ts",
+  "symbol": "node:child_process",
+  "category": "process-lifecycle",
+  "reason": "owns web server child process lifecycle",
+  "owner": "runtime"
+}

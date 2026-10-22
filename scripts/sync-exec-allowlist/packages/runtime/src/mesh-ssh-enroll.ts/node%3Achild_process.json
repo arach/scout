@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/mesh-ssh-enroll.ts",
+  "symbol": "node:child_process",
+  "category": "imperative",
+  "reason": "explicit SSH enrollment owns a bounded argv-only ssh child process",
+  "owner": "runtime"
+}

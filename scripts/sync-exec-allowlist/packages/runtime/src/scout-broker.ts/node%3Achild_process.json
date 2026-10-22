@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/scout-broker.ts",
+  "symbol": "node:child_process",
+  "category": "process-lifecycle",
+  "reason": "owns optional ffplay audio process lifecycle for voice preview",
+  "owner": "runtime"
+}

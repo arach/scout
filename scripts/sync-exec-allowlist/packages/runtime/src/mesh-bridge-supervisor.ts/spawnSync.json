@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/mesh-bridge-supervisor.ts",
+  "symbol": "spawnSync",
+  "category": "process-lifecycle",
+  "reason": "one-shot ps identity reads (pid + start time, to survive pid reuse) and ordered launchctl bootout of the legacy mesh-bridge agent",
+  "owner": "runtime"
+}

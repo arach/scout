@@ -1,0 +1,13 @@
+{
+  "path": "packages/runtime/src/supervision-handoff/store.ts",
+  "symbol": "dlopen",
+  "category": "dlopen",
+  "libraryPaths": [
+    "/usr/lib/libSystem.B.dylib",
+    "/lib/x86_64-linux-gnu/libc.so.6",
+    "/lib/aarch64-linux-gnu/libc.so.6",
+    "/lib64/libc.so.6"
+  ],
+  "reason": "lazy stable-inode flock/errno binding for ledger serialization, separate inactive lifetime fences and child shared-description checks; fixed system libraries only, no soname or env lookup",
+  "owner": "runtime"
+}

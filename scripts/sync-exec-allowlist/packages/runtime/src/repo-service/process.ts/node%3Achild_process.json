@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/repo-service/process.ts",
+  "symbol": "node:child_process",
+  "category": "repo-service-fallback",
+  "reason": "bounded spawn fallback for repo service when scoutd transport is unavailable",
+  "owner": "runtime"
+}

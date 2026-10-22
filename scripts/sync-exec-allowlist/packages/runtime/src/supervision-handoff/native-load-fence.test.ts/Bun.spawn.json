@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/supervision-handoff/native-load-fence.test.ts",
+  "symbol": "Bun.spawn",
+  "category": "test",
+  "reason": "executes only the static fence CLI in an owned temporary source tree; a bounded exact child handle is awaited and no native fixture expression is evaluated",
+  "owner": "runtime"
+}

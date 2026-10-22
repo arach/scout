@@ -1,0 +1,7 @@
+{
+  "path": "packages/runtime/src/supervision-handoff/sigchld-disposition.test.ts",
+  "symbol": "Bun.spawn",
+  "category": "test",
+  "reason": "owns and awaits isolated native disposition fixtures; unsafe SIGCHLD modes are never set in the test runner and fixtures spawn no children",
+  "owner": "runtime"
+}
