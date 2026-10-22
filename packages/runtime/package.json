@@ -559,6 +559,12 @@
       "types": "./dist/supervision-handoff/index.d.ts",
       "import": "./dist/supervision-handoff/index.js",
       "default": "./dist/supervision-handoff/index.js"
+    },
+    "./extension-channel-host": {
+      "bun": "./src/extension-channel-host.ts",
+      "types": "./dist/extension-channel-host.d.ts",
+      "import": "./dist/extension-channel-host.js",
+      "default": "./dist/extension-channel-host.js"
     }
   },
   "types": "./dist/index.d.ts",
@@ -576,7 +582,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "bun run --cwd ../agent-sessions build && rm -rf dist && node_modules/.bin/tsc -p tsconfig.json",
+    "build": "bun run --cwd ../agent-sessions build && rm -rf dist && node_modules/.bin/tsc -p tsconfig.json && node scripts/stage-extension-channel.mjs",
     "broker": "node ./bin/openscout-runtime.mjs broker",
     "service": "node ./bin/openscout-runtime.mjs service",
     "discover": "node ./bin/openscout-runtime.mjs discover",

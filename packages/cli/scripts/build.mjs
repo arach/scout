@@ -15,6 +15,7 @@ import {
 import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { stageExtensionChannel } from "../../runtime/scripts/stage-extension-channel.mjs";
 import { stageScoutd } from "./stage-scoutd.mjs";
 import { bundleRuntimeEntrypoints } from "./runtime-entrypoints.mjs";
 
@@ -102,6 +103,7 @@ const scoutdPackagedBinary = resolve(packageDirectory, "bin", "scoutd");
 const scoutdSignScript = resolve(repoRoot, "scripts", "sign-scoutd.sh");
 
 mkdirSync(outputDirectory, { recursive: true });
+stageExtensionChannel(outputDirectory, true);
 rmSync(buildManifestOutput, { force: true });
 
 const chatResult = spawnSync("bun", ["build", resolve(packageDirectory, "src/chat-main.ts"), "--target=node", "--format=esm", "--outfile", resolve(outputDirectory, "chat.mjs")], { cwd: packageDirectory, stdio: "inherit" });
