@@ -30,7 +30,7 @@ import {
   readOwnedSuitePids,
   readSuiteStatus,
   summarizeBridgeClients,
-  readRuntimeIdentityFromDoctorStream,
+  readRuntimeIdentityFromScoutdStatus,
   resolveMachineReferences,
   scoutNodeIdsFor,
   summarizeMachineUpdateRun,
@@ -305,15 +305,15 @@ function readJsonStdout(stdout: string): unknown {
  * Read one machine's versions.
  *
  * Every command here is read-only. `scout install --check` reports the app
- * version, `scout doctor scoutd --json` the runtime, and `scout --version` the
+ * version, `openscout-runtime service status --json` the runtime, and `scout --version` the
  * CLI — which the app version does not imply, because the CLI is a separate
  * package that can lag behind its own app.
  */
 function createDefaultProbe(exec: SshExec, options: { sshUser: string | null }) {
   const aliases = readSshConfigAliases();
   return async function probe(machine: MachineRecord): Promise<MachineUpdateReading> {
-    // Local and remote differ only in argv: the same never-a-shell runner spawns
-    // `scout …` here or `ssh host scout …` there.
+    // Share target resolution and the argv-only local runner. OpenSSH runs
+    // remote commands through the target's login shell, not the local shell.
     const wrap = machine.isSelf
       ? (command: string[]) => command
       : (() => {
@@ -341,11 +341,28 @@ function createDefaultProbe(exec: SshExec, options: { sshUser: string | null }) 
     if (app.failure) return emptyReading(app.failure);
     const appPayload = readJsonStdout(app.stdout) as { installed?: unknown } | null;
 
-    // `scout doctor --json` is the only surface that carries scoutd's runtime
-    // verdict; `scout app status --json` reports the app process tree and has
-    // no runtimeFreshness at all.
-    const runtime = await read(["scout", "doctor", "--json"]);
-    const identity = readRuntimeIdentityFromDoctorStream(runtime.stdout);
+    // Doctor reports core readiness, not artifact ownership. Read the existing
+    // service-status contract through the same local/SSH instance context.
+    // Missing or malformed freshness is unknown, never an implicit unpin or a
+    // version guessed from broker health (or a private diagnostic fallback).
+    const runtimeCommand = ["openscout-runtime", "service", "status", "--json"];
+    const runtime = await read(machine.isSelf ? runtimeCommand : [
+      // OpenSSH uses the target's login shell. This fixed POSIX program mirrors
+      // scout's explicit-instance -> client-pointer -> prod selection THERE;
+      // the runtime service CLI intentionally does not read client pointers.
+      // Never interpolate the caller's instance or environment into SSH.
+      "/bin/sh", "-c",
+      '\'OPENSCOUT_INSTANCE="${OPENSCOUT_INSTANCE:-${OPENSCOUT_CLIENT_INSTANCE:-prod}}" exec openscout-runtime service status --json\'',
+    ]);
+    const status = readJsonStdout(runtime.stdout) as { runtimeFreshness?: {
+      version?: unknown; intentional?: unknown; state?: unknown;
+    } } | null;
+    const freshness = status?.runtimeFreshness;
+    const identity = readRuntimeIdentityFromScoutdStatus(
+      freshness && (freshness.version === null || typeof freshness.version === "string" && freshness.version.trim())
+      && typeof freshness.intentional === "boolean"
+      && typeof freshness.state === "string" && freshness.state.trim() ? { runtimeFreshness: freshness } : null,
+    );
 
     const cli = await read(["scout", "--version"]);
 

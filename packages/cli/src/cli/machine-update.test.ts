@@ -208,6 +208,16 @@ describe("resolveMachineReferences", () => {
 });
 
 describe("readRuntimeIdentityFromScoutdStatus", () => {
+  test("reads the normalized runtime service-status contract without native doctor nesting", () => {
+    const payload = JSON.parse(readFileSync(
+      new URL("./test-fixtures/scout-runtime-service-status-pinned.json", import.meta.url), "utf8",
+    ));
+    expect(payload.scoutdState).toBeUndefined();
+    expect(readRuntimeIdentityFromScoutdStatus(payload)).toEqual({
+      runtimeVersion: "0.2.78", runtimeIntentional: true, runtimeState: "pinned",
+      runtimeCommit: "1111111111111111111111111111111111111111",
+    });
+  });
   test("reads the runtime version from the real scoutd status contract", () => {
     const payload = JSON.parse(
       readFileSync(new URL("./test-fixtures/scoutd-status-stale.json", import.meta.url), "utf8"),
