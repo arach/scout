@@ -11,13 +11,14 @@ const kinds = new Set(["message", "invocation", "flight", "delivery", "delivery_
  * indexed locations; individual reads return the complete original record. */
 export async function handleBrokerHistoryRoute(request: RuntimeHttpRequestLike, response: RuntimeHttpResponseLike, url: URL,
   queries: BrokerHistoryQueries | undefined, json: (response: RuntimeHttpResponseLike, status: number, value: unknown) => void): Promise<boolean> {
-  if ((request.method ?? "GET") !== "GET" || !url.pathname.startsWith("/v1/history/records")) return false;
+  const method = request.method ?? "GET";
+  if (method !== "GET" || !url.pathname.startsWith("/v1/history/records")) return false;
   if (request.transportContext?.transport === "remote") {
     json(response, 403, { error: "forbidden", detail: "Historical storage is machine-local." }); return true;
   }
   if (!queries) { json(response, 503, { error: "history_unavailable" }); return true; }
   try {
-    const exact = url.pathname.match(/^\/v1\/history\/records\/([^/]+)\/([^/]+)$/);
+    const exact = method === "GET" ? url.pathname.match(/^\/v1\/history\/records\/(?<kind>[^/]+)\/(?<id>[^/]+)$/) : null;
     if (exact) {
       const kind = decodeURIComponent(exact[1]); const id = decodeURIComponent(exact[2]);
       if (!kinds.has(kind) || !id || id.length > 1024) { json(response, 400, { error: "invalid_history_identity" }); return true; }
@@ -25,7 +26,7 @@ export async function handleBrokerHistoryRoute(request: RuntimeHttpRequestLike, 
       json(response, record === undefined ? 404 : 200, record === undefined ? { error: "history_record_not_found" } : { kind, id, record });
       return true;
     }
-    if (url.pathname !== "/v1/history/records") return false;
+    if (!(method === "GET" && url.pathname === "/v1/history/records")) return false;
     const kind = url.searchParams.get("kind") ?? "message";
     const limit = Number(url.searchParams.get("limit") ?? 100);
     if (!kinds.has(kind) || !Number.isInteger(limit) || limit < 1 || limit > 500) { json(response, 400, { error: "invalid_history_page" }); return true; }

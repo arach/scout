@@ -239,6 +239,16 @@ const MESH_ROUTE_MATRIX: Record<string, MeshRouteTier> = {
   "POST /v1/web/restart": "local",
   "POST /v1/web/start": "local",
 
+  // Delegated handlers were already default-local; make that policy explicit.
+  "GET /v1/attachments/capability": "local",
+  "POST /v1/attachments/read": "local",
+  "POST /v1/messages/with-attachments": "local",
+  "GET /v1/history/records": "local",
+  "GET /v1/history/records/:kind/:id": "local",
+  "GET /v1/quarantine": "local",
+  "GET /v1/quarantine/:id": "local",
+  "POST /v1/quarantine/:id/acknowledge": "local",
+
   // ── guest: owner-approved guest keys only (never mesh peers)
   "GET /v1/guest/agents": "guest",
   "GET /v1/guest/asks/:id": "guest",
@@ -256,34 +266,53 @@ const MESH_ROUTE_MATRIX: Record<string, MeshRouteTier> = {
   "POST /v1/guest-grants/revoke": "local",
 };
 
-const exactTiers = new Map<string, MeshRouteTier>();
-const patternTiers: Array<{ regex: RegExp; tier: MeshRouteTier }> = [];
-
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-for (const [route, tier] of Object.entries(MESH_ROUTE_MATRIX)) {
-  const [method, path] = route.split(" ", 2);
-  if (!method || !path) {
-    throw new Error(`malformed mesh route matrix entry: ${route}`);
+/** Compile metadata once. The live gate always uses the fixed module matrix;
+ * this factory also lets tests compare registrations with the previous policy. */
+export function compileMeshRouteMatrix(matrix: Readonly<Record<string, MeshRouteTier>>) {
+  const exactTiers = new Map<string, MeshRouteTier>();
+  const patternTiers: Array<{ regex: RegExp; tier: MeshRouteTier }> = [];
+  for (const [route, tier] of Object.entries(matrix)) {
+    const [method, path] = route.split(" ", 2);
+    if (!method || !path) {
+      throw new Error(`malformed mesh route matrix entry: ${route}`);
+    }
+    if (path.includes(":")) {
+      const regex = new RegExp(
+        `^${method} ${path.split("/:").map((segment, index) => {
+          if (index === 0) {
+            return escapeRegExp(segment);
+          }
+          // each "/:param" segment matches exactly one path segment
+          const rest = segment.replace(/^[^/]+/, "");
+          return `/[^/]+${escapeRegExp(rest)}`;
+        }).join("")}$`,
+      );
+      patternTiers.push({ regex, tier });
+    } else {
+      exactTiers.set(route, tier);
+    }
   }
-  if (path.includes(":")) {
-    const regex = new RegExp(
-      `^${method} ${path.split("/:").map((segment, index) => {
-        if (index === 0) {
-          return escapeRegExp(segment);
-        }
-        // each "/:param" segment matches exactly one path segment
-        const rest = segment.replace(/^[^/]+/, "");
-        return `/[^/]+${escapeRegExp(rest)}`;
-      }).join("")}$`,
-    );
-    patternTiers.push({ regex, tier });
-  } else {
-    exactTiers.set(route, tier);
-  }
+
+  return (method: string, pathname: string): MeshRouteTier => {
+    const key = `${method.toUpperCase()} ${pathname}`;
+    const exact = exactTiers.get(key);
+    if (exact) {
+      return exact;
+    }
+    for (const { regex, tier } of patternTiers) {
+      if (regex.test(key)) {
+        return tier;
+      }
+    }
+    return "local";
+  };
 }
+
+const registeredRouteTier = compileMeshRouteMatrix(MESH_ROUTE_MATRIX);
 
 /** A snapshot of the declared matrix, for inventory cross-checks. */
 export function meshRouteMatrixEntries(): Record<string, MeshRouteTier> {
@@ -295,17 +324,7 @@ export function meshRouteMatrixEntries(): Record<string, MeshRouteTier> {
  * default, so an unmapped route is never accidentally remote-reachable.
  */
 export function meshRouteTierFor(method: string, pathname: string): MeshRouteTier {
-  const key = `${method.toUpperCase()} ${pathname}`;
-  const exact = exactTiers.get(key);
-  if (exact) {
-    return exact;
-  }
-  for (const { regex, tier } of patternTiers) {
-    if (regex.test(key)) {
-      return tier;
-    }
-  }
-  return "local";
+  return registeredRouteTier(method, pathname);
 }
 
 /**
