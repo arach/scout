@@ -1,5 +1,6 @@
 import { numericWitness } from "../../../../scripts/extension-numeric-spike/witness.ts";
 import { checkReclaimedDescriptors } from "./extension-descriptor-witness.ts";
+import { currentExtensionChannelCoordinate } from "@openscout/runtime/extension-channel-qualification";
 import { scoutExtensionContextBackend } from "./extension-context-host.ts";
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
@@ -12,7 +13,7 @@ import { resolveScoutHome } from "@openscout/runtime/scout-home";
 import { findScoutExtension, scoutExtensionEnv } from "./extensions.ts";
 import { mutateScoutExtension, readScoutExtensionInstallReceipt } from "./extension-install.ts";
 import { captureScoutExtensionSelection, projectScoutExtensionContext, encodeScoutExtensionContext, EXTENSION_CONTEXT_MAX_BYTES, type ScoutExtensionContext } from "./extension-context.ts";
-import { prepareScoutExtensionContext, runScoutExtensionWithQualifiedContext, runScoutExtensionWithContext, scoutExtensionContextStdio, stopScoutExtensionContextChild } from "./extension-context-runner.ts";
+import { prepareScoutExtensionContext, runScoutExtensionWithContext, scoutExtensionContextStdio, stopScoutExtensionContextChild } from "./extension-context-runner.ts";
 import { INHERITED_DESCRIPTOR_LAYOUTS, MAX_INHERITED_DESCRIPTOR_SLOT } from "@openscout/runtime/inherited-descriptors";
 const root = mkdtempSync(join(import.meta.dir, "../../node_modules/.extension-context-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -196,33 +197,71 @@ test("spawn failure is a typed context refusal with empty stdout",async()=>{
  const f=fixture();writeFileSync(join(f.source,"run"),"#!/missing-context-interpreter\nexit 0\n");await installed(f);typed(await cli(f,["--json","context-fixture"]),scoutExtensionContextBackend()?"context_delivery_failed":"context_backend_unproven");
 },10_000);
 
-test("unqualified context backends refuse before descriptor creation",()=>{
- expect(scoutExtensionContextBackend()).toBe(false); // No revision/platform is qualified.
+test("context authorization is bound to the exact runtime coordinate",()=>{
+ expect(scoutExtensionContextBackend()).toBe(currentExtensionChannelCoordinate() !== null);
 });
 
 test("unqualified host emits the versioned backend refusal without starting a provider",async()=>{
  if(scoutExtensionContextBackend())return;const f=fixture();await installed(f);typed(await cli(f,["--json","context-fixture"]),"context_backend_unproven");
 });
 
-test("dormant context refuses eight invocations without creating an extra pipe",async()=>{
+test("public context dispatch: eight qualified invocations or zero-spawn unsupported refusals",async()=>{
  const f=fixture();mutateScoutExtension("install","context-fixture",f.source,f.env);const extension=findScoutExtension("context-fixture",f.env)!;const {input}=pure(f);
  const frame=prepareScoutExtensionContext({extension,env:f.env,selection:input.selection,cli:input.cli,brokerUrl:input.brokerUrl});
- expect(scoutExtensionContextBackend()).toBe(false);
+ const supported=scoutExtensionContextBackend();
  try{releaseExtensionChannelCodeForWitness(()=>{});}catch(error){expect(String(error)).toContain("no extension channel code loaded");}
  const raw=Bun.spawn;let spawns=0;Bun.spawn=((...args:unknown[])=>{spawns++;return Reflect.apply(raw,Bun,args);}) as typeof Bun.spawn;
- try{for(let i=0;i<8;i++)await expect(runScoutExtensionWithContext(extension,["fail"],scoutExtensionEnv({env:f.env,extension,cliVersion:"1",outputMode:"json",brokerUrl:input.brokerUrl}),frame,f.env)).rejects.toThrow("context_backend_unproven");}
+ try{for(let i=0;i<8;i++){
+   const pending=runScoutExtensionWithContext(extension,["fail"],scoutExtensionEnv({env:f.env,extension,cliVersion:"1",outputMode:"json",brokerUrl:input.brokerUrl}),frame,f.env);
+   if(supported)expect(await pending).toBe(23);else await expect(pending).rejects.toThrow("context_backend_unproven");
+ }}
+ finally{Bun.spawn=raw;}
+ if(supported){expect(spawns).toBeGreaterThanOrEqual(8);releaseExtensionChannelCodeForWitness(()=>{});}else expect(spawns).toBe(0);
+ expect(()=>releaseExtensionChannelCodeForWitness(()=>{})).toThrow("no extension channel code loaded");
+});
+test("independent credential guard refuses through public dispatch before native load/allocation or provider spawn",async()=>{
+ const f=fixture(2,{invocation:{...invocation,inputSchema:"scout.extension-inputs/v1",
+ credentialInputs:[{id:"distribution-key",source:{kind:"environment",name:"SCOUT_DIST_KEY"},presence:"optional",destination:"distribution",purpose:"Fixture download"}],
+ destinations:[{id:"distribution",defaultUrl:"https://downloads.example.test/",overrideProjection:"distribution.endpoint/v1"}]}});
+ mutateScoutExtension("install","context-fixture",f.source,f.env);const extension=findScoutExtension("context-fixture",f.env)!;const {input}=pure(f);
+ const frame=prepareScoutExtensionContext({extension,env:f.env,selection:input.selection,cli:input.cli,brokerUrl:input.brokerUrl});
+ try{releaseExtensionChannelCodeForWitness(()=>{});}catch(error){expect(String(error)).toContain("no extension channel code loaded");}
+ const raw=Bun.spawn;let spawns=0;Bun.spawn=((...args:unknown[])=>{spawns++;return Reflect.apply(raw,Bun,args);}) as typeof Bun.spawn;
+ try{await expect(runScoutExtensionWithContext(extension,[],f.env,frame,f.env)).rejects.toThrow(scoutExtensionContextBackend()?"input_backend_unproven":"context_backend_unproven");}
  finally{Bun.spawn=raw;}
  expect(spawns).toBe(0);expect(()=>releaseExtensionChannelCodeForWitness(()=>{})).toThrow("no extension channel code loaded");
 });
-test("independent credential guard refuses before native load/allocation or provider spawn",async()=>{
+test("unsupported runtime coordinates refuse public dispatch before native load or spawn",async()=>{
  const f=fixture();mutateScoutExtension("install","context-fixture",f.source,f.env);const extension=findScoutExtension("context-fixture",f.env)!;const {input}=pure(f);
  const frame=prepareScoutExtensionContext({extension,env:f.env,selection:input.selection,cli:input.cli,brokerUrl:input.brokerUrl});
- try{releaseExtensionChannelCodeForWitness(()=>{});}catch(error){expect(String(error)).toContain("no extension channel code loaded");}
- extension.invocation={...extension.invocation!,credentialInputs:[{id:"distribution-key"}] as never};
- const raw=Bun.spawn;let spawns=0;Bun.spawn=((...args:unknown[])=>{spawns++;return Reflect.apply(raw,Bun,args);}) as typeof Bun.spawn;
- try{await expect(runScoutExtensionWithQualifiedContext(extension,[],f.env,frame,f.env)).rejects.toThrow("input_backend_unproven");}
- finally{Bun.spawn=raw;}
- expect(spawns).toBe(0);expect(()=>releaseExtensionChannelCodeForWitness(()=>{})).toThrow("no extension channel code loaded");
+ for(const mutation of [
+   "Object.defineProperty(process,'arch',{value:'ia32'});",
+   "Object.defineProperty(process,'platform',{value:'win32'});",
+   "Object.defineProperty(process,'platform',{value:'linux'});Object.defineProperty(process,'arch',{value:'x64'});process.report.getReport=()=>({header:{}});",
+   "Object.defineProperty(process,'platform',{value:'linux'});Object.defineProperty(process,'arch',{value:'x64'});process.report.getReport=()=>{throw Error('unavailable')};",
+ ]) {
+   const script=`import{runScoutExtensionWithContext as run}from ${JSON.stringify(join(import.meta.dir,"extension-context-runner.ts"))};
+import{releaseExtensionChannelCodeForWitness as release}from ${JSON.stringify(join(import.meta.dir,"../../../runtime/src/extension-channel-io.ts"))};
+${mutation}
+let spawns=0;Bun.spawn=()=>{spawns++;throw Error('spawn forbidden')};
+try{await run(${JSON.stringify(extension)},[],process.env,${JSON.stringify(frame)},process.env);throw Error('accepted');}catch(error){if(error.reason!=='context_backend_unproven')throw error;}
+if(spawns!==0)throw Error('spawn happened');
+try{release(()=>{});throw Error('native loaded');}catch(error){if(!error.message.includes('no extension channel code loaded'))throw error;}
+console.log('refused-before-native-and-spawn');`;
+   const child=Bun.spawn([process.execPath,"-e",script],{env:f.env,stdout:"pipe",stderr:"pipe"});
+   const [code,out,err]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()]);
+   expect(code).toBe(0);expect(err).toBe("");expect(out.trim()).toBe("refused-before-native-and-spawn");
+ }
+});
+test("selection changed during fixed host loading refuses before allocation",async()=>{
+ if(!scoutExtensionContextBackend())return;
+ const f=fixture();const receipt=mutateScoutExtension("install","context-fixture",f.source,f.env);const extension=findScoutExtension("context-fixture",f.env)!;const {input}=pure(f);
+ const frame=prepareScoutExtensionContext({extension,env:f.env,selection:input.selection,cli:input.cli,brokerUrl:input.brokerUrl});
+ try{releaseExtensionChannelCodeForWitness(()=>{});}catch{}
+ const pending=runScoutExtensionWithContext(extension,[],f.env,frame,f.env);
+ writeFileSync(join(receipt.publishedGeneration,"changed-during-load"),"changed");
+ await expect(pending).rejects.toThrow("selection_changed");
+ expect(()=>releaseExtensionChannelCodeForWitness(()=>{})).toThrow("no extension channel code loaded");
 });
 // Candidate apparatus only: exercise real numeric channels AFTER context work,
 // without reopening the product gate or treating this run as qualification.
