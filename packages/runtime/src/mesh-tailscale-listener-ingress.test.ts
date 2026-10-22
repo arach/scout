@@ -48,7 +48,9 @@ async function fixture(mode: "verify-warn" | "enforce") {
   guard = createTailscaleListenerGuard({ port, socketPath }, { now: () => now, read: async () => ({ ok, stdout: status, source: "cli" }) });
   const base = `http://127.0.0.1:${port}`;
   const request = (path: string, viaUnix = false, headers: Record<string, string> = {}, method = "GET") => new Promise<{ status: number; body: any }>((resolve, reject) => {
-    const req = httpRequest({ ...(viaUnix ? { socketPath } : { hostname: "127.0.0.1", port }), path, headers, method }, (res) => {
+    // Guard activation retires idle keepalive sockets. Use a fresh connection so
+    // the next assertion measures ingress policy, not client-pool close timing.
+    const req = httpRequest({ agent: false, ...(viaUnix ? { socketPath } : { hostname: "127.0.0.1", port }), path, headers, method }, (res) => {
       let body = ""; res.on("data", (chunk) => body += chunk); res.on("end", () => resolve({ status: res.statusCode!, body: JSON.parse(body) }));
     }); req.on("error", reject); req.end();
   });
