@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as childProcess from "node:child_process";
-import { spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 
 import { resolveInstalledWebFullClient } from "@openscout/runtime/web-full-client";
 
@@ -33,16 +34,14 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-function packClient(version: string, profileVersion = version): Uint8Array<ArrayBuffer> {
+async function packClient(version: string, profileVersion = version): Promise<Uint8Array<ArrayBuffer>> {
   const client = join(root, `client-${version}-${profileVersion}`);
   mkdirSync(join(client, "assets"), { recursive: true });
   writeFileSync(join(client, "index.html"), "<title>Scout</title>");
   writeFileSync(join(client, "assets", "app.js"), "Mission Control");
   writeFileSync(join(client, "scout-web-profile.json"), JSON.stringify({ profile: "full", version: profileVersion }));
   const tarball = join(root, `${version}-${profileVersion}.tar.gz`);
-  const packed = spawnSync("tar", ["-czf", tarball, "-C", client, "."], { timeout: 5_000, killSignal: "SIGKILL" });
-  expect(packed.error).toBeUndefined();
-  expect(packed.status, packed.stderr?.toString()).toBe(0);
+  await promisify(execFile)("tar", ["-czf", tarball, "-C", client, "."], { timeout: 5_000, killSignal: "SIGKILL", maxBuffer: 128 * 1024 });
   return new Uint8Array(readFileSync(tarball));
 }
 
@@ -95,6 +94,27 @@ function harness(options: {
 }
 
 describe("scout web", () => {
+  test.skipIf(process.platform !== "linux")("install leaves stdout usable for the next command even under GC", async () => {
+    const tarball = await packClient(VERSION);
+    const archive = join(root, "stdio.tar.gz");
+    writeFileSync(archive, tarball);
+    // Own the risky old-Bun state in a child, with real pollable stdio pipes.
+    const child = Bun.spawn({
+      cmd: [process.execPath, new URL("./fixtures/web-stdio.ts", import.meta.url).pathname, archive, support],
+      env: { ...process.env, BUN_JSC_slowPathAllocsBetweenGCs: "3" },
+      stdout: "pipe", stderr: "pipe", stdin: "ignore",
+    });
+    const timeout = setTimeout(() => child.kill("SIGKILL"), 30_000);
+    try {
+      const [stdout, stderr, exit] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+      expect({ exit, stdout, stderr }).toEqual({ exit: 0, stdout: "stdio survived install\n", stderr: "stdio regression finished\n" });
+    } finally {
+      clearTimeout(timeout);
+      child.kill("SIGKILL");
+      await child.exited;
+    }
+  }, 35_000);
+
   test("login checks the key with the host and saves it privately", async () => {
     const { context, deps, lines, requests } = harness();
     await runWebCommand(context, ["login", "--key", KEY], deps);
@@ -114,7 +134,7 @@ describe("scout web", () => {
 
   test("install downloads, verifies and installs the full client for this version, then restarts web", async () => {
     const restarted: string[] = [];
-    const tarball = packClient(VERSION);
+    const tarball = await packClient(VERSION);
     const { context, deps, lines, requests } = harness({ tarball, env: { SCOUT_DIST_KEY: KEY }, restarted });
     await runWebCommand(context, ["install"], deps);
 
@@ -139,11 +159,11 @@ describe("scout web", () => {
   });
 
   test("a checksum mismatch or a client for another version is never installed", async () => {
-    const tarball = packClient(VERSION);
+    const tarball = await packClient(VERSION);
     const tampered = harness({ tarball, digest: "0".repeat(64), env: { SCOUT_DIST_KEY: KEY } });
     await expect(runWebCommand(tampered.context, ["install"], tampered.deps)).rejects.toThrow("Checksum mismatch");
 
-    const wrong = harness({ tarball: packClient(VERSION, "1.0.0"), env: { SCOUT_DIST_KEY: KEY } });
+    const wrong = harness({ tarball: await packClient(VERSION, "1.0.0"), env: { SCOUT_DIST_KEY: KEY } });
     await expect(runWebCommand(wrong.context, ["install"], wrong.deps)).rejects.toThrow("isn't the full web app");
 
     expect(resolveInstalledWebFullClient(VERSION, { env: {}, supportDirectory: support })).toBeNull();
@@ -151,15 +171,16 @@ describe("scout web", () => {
   });
 
   test("a stuck unpack child has a hard deadline, reports its error and leaves no partial install", async () => {
-    const tarball = packClient(VERSION);
+    const tarball = await packClient(VERSION);
     const { context, deps } = harness({ tarball, env: { SCOUT_DIST_KEY: KEY } });
-    const child = spyOn(childProcess, "spawnSync").mockReturnValue({
-      status: null, signal: "SIGKILL", error: Object.assign(new Error("spawnSync tar ETIMEDOUT"), { code: "ETIMEDOUT" }),
-      pid: 0, output: [], stdout: "", stderr: "partial tar diagnostic",
-    });
+    const child = spyOn(childProcess, "execFile").mockImplementation(((_file: string, ...args: unknown[]) => {
+      const callback = args.at(-1) as (error: Error, stdout: string, stderr: string) => void;
+      callback(Object.assign(new Error("tar ETIMEDOUT"), { code: "ETIMEDOUT" }), "", "partial tar diagnostic");
+      return {};
+    }) as typeof childProcess.execFile);
     try {
-      await expect(runWebCommand(context, ["install", "--no-restart"], deps)).rejects.toThrow("Couldn't unpack the download: spawnSync tar ETIMEDOUT");
-      expect(child).toHaveBeenCalledWith("tar", expect.any(Array), expect.objectContaining({ timeout: 30_000, killSignal: "SIGKILL" }));
+      await expect(runWebCommand(context, ["install", "--no-restart"], deps)).rejects.toThrow("Couldn't unpack the download: tar ETIMEDOUT");
+      expect(child).toHaveBeenCalledWith("tar", expect.any(Array), expect.objectContaining({ timeout: 30_000, killSignal: "SIGKILL", maxBuffer: 128 * 1024 }), expect.any(Function));
       expect(resolveInstalledWebFullClient(VERSION, { env: {}, supportDirectory: support })).toBeNull();
       expect(readdirSync(join(support, "web", "full"))).toEqual([]);
     } finally { child.mockRestore(); }
@@ -194,7 +215,7 @@ describe("scout web", () => {
   });
 
   test("status reports what is served; uninstall goes back to basic", async () => {
-    const tarball = packClient(VERSION);
+    const tarball = await packClient(VERSION);
     const run = harness({ tarball, env: { SCOUT_DIST_KEY: KEY } });
     await runWebCommand(run.context, ["status"], run.deps);
     expect(run.lines.join("\n")).toContain("serves     the basic web app");
@@ -226,11 +247,11 @@ describe("scout web", () => {
 
   test("an upgraded CLI diagnoses the old Full client and recovers with the saved key", async () => {
     const previousVersion = "9.8.6";
-    const previous = harness({ tarball: packClient(previousVersion), env: { SCOUT_DIST_KEY: KEY } });
+    const previous = harness({ tarball: await packClient(previousVersion), env: { SCOUT_DIST_KEY: KEY } });
     await fileDistKeyStore(support).write(KEY);
     await runWebCommand(previous.context, ["install", "--no-restart"], { ...previous.deps, version: previousVersion });
 
-    const current = harness({ tarball: packClient(VERSION), json: true });
+    const current = harness({ tarball: await packClient(VERSION), json: true });
     await runWebCommand(current.context, ["status"], current.deps);
     expect(JSON.parse(current.lines[0]!)).toMatchObject({
       version: VERSION, serves: "basic", reason: "version-mismatch", installed: null,
@@ -254,10 +275,10 @@ describe("scout web", () => {
 
   test("a stalled upgrade preserves the old Full client and key after cancelling its download", async () => {
     const previousVersion = "9.8.6";
-    const previous = harness({ tarball: packClient(previousVersion), env: { SCOUT_DIST_KEY: KEY } });
+    const previous = harness({ tarball: await packClient(previousVersion), env: { SCOUT_DIST_KEY: KEY } });
     await fileDistKeyStore(support).write(KEY);
     await runWebCommand(previous.context, ["install", "--no-restart"], { ...previous.deps, version: previousVersion });
-    const tarball = packClient(VERSION);
+    const tarball = await packClient(VERSION);
     let cancelled = false;
     let controller!: ReadableStreamDefaultController<Uint8Array>;
     const body = new ReadableStream<Uint8Array>({
@@ -286,7 +307,7 @@ describe("scout web", () => {
   });
 
   test("forcing Basic preserves the installed Full path and explains the override", async () => {
-    const run = harness({ tarball: packClient(VERSION), env: { SCOUT_DIST_KEY: KEY, OPENSCOUT_WEB_CLIENT_PROFILE: " basic " }, json: true });
+    const run = harness({ tarball: await packClient(VERSION), env: { SCOUT_DIST_KEY: KEY, OPENSCOUT_WEB_CLIENT_PROFILE: " basic " }, json: true });
     await runWebCommand(run.context, ["install", "--no-restart"], run.deps);
     run.lines.length = 0;
     await runWebCommand(run.context, ["status"], run.deps);
@@ -330,7 +351,7 @@ describe("scout web", () => {
 
   test("an unpublished upgrade leaves the old Full install and saved key intact", async () => {
     const previousVersion = "9.8.6";
-    const previous = harness({ tarball: packClient(previousVersion), env: { SCOUT_DIST_KEY: KEY } });
+    const previous = harness({ tarball: await packClient(previousVersion), env: { SCOUT_DIST_KEY: KEY } });
     await fileDistKeyStore(support).write(KEY);
     await runWebCommand(previous.context, ["install", "--no-restart"], { ...previous.deps, version: previousVersion });
     const restarted: string[] = [];

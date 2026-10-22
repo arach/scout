@@ -1,8 +1,9 @@
-import { spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
+import { promisify } from "node:util";
 import { Writable } from "node:stream";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -239,8 +240,15 @@ async function runInstall(context: ScoutCommandContext, args: string[], deps: Sc
 
     const unpacked = join(workDirectory, "client");
     mkdirSync(unpacked, { recursive: true });
-    const tar = spawnSync("tar", ["-xzf", tarball, "-C", unpacked], { encoding: "utf8", timeout: 30_000, killSignal: "SIGKILL" });
-    if (tar.status !== 0) throw new ScoutCliError(`Couldn't unpack the download: ${(tar.error?.message || tar.stderr || "tar failed").trim()}`);
+    // Keep extraction on the main event loop. On Bun 1.3.13/1.3.14, GC
+    // inside synchronous child execution can poison Linux stdio epoll entries.
+    try {
+      await promisify(execFile)("tar", ["-xzf", tarball, "-C", unpacked], {
+        encoding: "utf8", timeout: 30_000, killSignal: "SIGKILL", maxBuffer: 128 * 1024,
+      });
+    } catch (error) {
+      throw new ScoutCliError(`Couldn't unpack the download: ${error instanceof Error ? error.message : String(error)}`);
+    }
     const profile = readWebFullClientProfile(unpacked);
     if (!existsSync(join(unpacked, "index.html")) || profile?.version !== version) {
       throw new ScoutCliError(`The download isn't the full web app for ${version}; not installing it.`);
