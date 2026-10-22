@@ -1,3 +1,4 @@
+import { ScoutCommandUnavailableError, renderScoutCommandUnavailable } from "./command-unavailable.ts";
 import { runScoutDiscovery } from "./discovery.ts";
 import { SCOUT_APP_VERSION } from "../lib/shared/product.ts";
 import { applyInstanceFlag, preflightLifecycle } from "../../bin/lifecycle-preflight.mjs";
@@ -34,6 +35,14 @@ try {
     else await import("./main-dispatch.ts");
   }
 } catch (error) {
+  if (error instanceof ScoutCommandUnavailableError) {
+    if (process.argv.includes("--json")) {
+      process.stderr.write(JSON.stringify(error.toJSON()) + "\n");
+    } else {
+      console.error(renderScoutCommandUnavailable(error, false));
+    }
+    process.exit(error.exitCode);
+  }
   console.error(`error: ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);
 }

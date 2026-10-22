@@ -1,3 +1,4 @@
+import { resolveReservedScoutExtension } from "./command-unavailable.ts";
 import { INSTALL_HELP, SETUP_HELP, UP_HELP, renderAppCommandHelp } from "../../bin/lifecycle-preflight.mjs";
 import { findScoutCommandRegistration, SCOUT_COMMANDS, SCOUT_GLOBAL_FLAGS, SCOUT_COMMAND_GLOBAL_FLAGS, unknownScoutCommandMessage } from "./registry.ts";
 import type { ScoutCommandGrammar } from "./registry-grammar.ts";
@@ -21,7 +22,7 @@ export function scoutCommandHelp(path: string[], version: string, env: NodeJS.Pr
   ] };
   const registration = findScoutCommandRegistration(name);
   if (!registration || registration.provider === "extension") {
-    const extension = findScoutExtension(name, env);
+    const extension = registration?.provider === "extension" ? resolveReservedScoutExtension(registration, env) : findScoutExtension(name, env);
     if (extension?.refused) throw new Error(extension.refused);
     if (extension) {
       if (path.length > 1) throw new Error("extension help is provided for the verb; consult its Markdown for subcommands");
