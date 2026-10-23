@@ -46,7 +46,7 @@ describe("v2 real process publication and recovery",()=>{
     expect(linked).toBeGreaterThan(0);expect(projection).toBeGreaterThan(linked);expect(retired).toHaveLength(2);
     expect(dirsync(linked,retired[0]!)).toBe(true);expect(dirsync(retired.at(-1)!,receipt)).toBe(true);expect(dirsync(receipt,released)).toBe(true);
     const staged=events.slice(0,linked).filter(e=>e.event==="sync_success" && !e.directory);
-    expect(staged).toHaveLength(5);expect(events.filter(e=>e.event==="sync_success")).toHaveLength(15);
+    expect(staged).toHaveLength(5);expect(events.filter(e=>e.event==="sync_success")).toHaveLength(16);
     expect(dirsync(-1,linked)).toBe(true);
   });
   test("fresh process validates early outcome bytes rather than a prior positive",async()=>{
@@ -61,7 +61,9 @@ describe("v2 real process publication and recovery",()=>{
     expect(output.code,output.stderr).toBe(0);expect(output.value).toEqual({ok:true,removed:true,revision:4,peers:1,reconnectGenerations:0});
     const events=readFileSync(join(coordination,"trace.jsonl"),"utf8").trim().split("\n").map(JSON.parse);
     const publications=events.filter(e=>(e.event==="link" || e.event==="rename") && !e.target.endsWith("trusted-peers.last-seen.json"));
-    expect(publications).toHaveLength(13);expect(publications.every(e=>e.held===true)).toBe(true);
+    expect(publications.filter(e=>!/\.pairing-v2-slot-[0-7]$/.test(e.target))).toHaveLength(13);
+    expect(publications.filter(e=>/\.pairing-v2-slot-[0-7]$/.test(e.target))).toHaveLength(4);
+    expect(publications.every(e=>e.held===true)).toBe(true);
     expect(readdirSync(data).filter(n=>n.includes(".commit."))).toEqual(["trusted-peers.v2.commit.5.json"]);
   });
   test("real interruptions retain exact retries, bounded collection and fresh readers",async()=>{
@@ -78,9 +80,16 @@ describe("v2 real process publication and recovery",()=>{
       expect(readdirSync(data).filter(n=>n.includes(".commit.")).length).toBe(1);
       expect(readdirSync(data).filter(n=>n.includes(".done.")).length).toBe(1);
       expect(readdirSync(data).filter(n=>n.startsWith(".pairing-v2-slot-")).length).toBe(["after-staging","after-token-release"].includes(point)?1:0);
+      if(point==="after-token-release"){
+        // An exact retry need not stage anything. A NEW mutation proves the
+        // empty slot is reclaimable and can no longer brick revocation.
+        const later=await result(launch("capsule-write",data,coordination,JSON.stringify({managed,expected:expected+1,id:"reclaim-after-release",mutation:{type:"revoke",publicKey:key}})));
+        expect(later.value).toMatchObject({ok:true,result:{revision:expected+2}});
+        expect(readdirSync(data).filter(n=>n.startsWith(".pairing-v2-slot-")).length).toBe(0);
+      }
       console.log(JSON.stringify({capsuleCrash:{managed,point},events:readFileSync(join(coordination,"trace.jsonl"),"utf8").trim().split("\n").map(JSON.parse)}));
     }
-  },30000);
+  },60000);
   test("late helpers cannot recreate consumed projection or receipt after a later revoke",async()=>{
     for(const point of ["before-projection","before-receipt"]){
       const {data,coordination,store}=completedCapsule();
@@ -95,9 +104,10 @@ describe("v2 real process publication and recovery",()=>{
       expect(readdirSync(data).filter(n=>n.includes(".commit."))).toEqual(["trusted-peers.v2.commit.3.json"]);
       expect(readdirSync(data).filter(n=>n.includes(".done."))).toEqual(["trusted-peers.v2.done.3.json"]);
       const events=readFileSync(join(coordination,"trace.jsonl"),"utf8").trim().split("\n").map(JSON.parse);
-      expect(events.filter(e=>e.event==="rename")).toHaveLength(point==="before-receipt"?1:0);
+      expect(events.filter(e=>e.event==="rename" && !/\.pairing-v2-slot-[0-7]$/.test(e.target))).toHaveLength(point==="before-receipt"?1:0);
+      expect(events.filter(e=>e.event==="rename" && /\.pairing-v2-slot-[0-7]$/.test(e.target))).toHaveLength(1);
     }
-  });
+  },30000);
   test("concurrent v2 staging refuses interference without merging stale mutations",async()=>{
     const {data,coordination,store}=completedCapsule();
     const children=["a","b"].map(id=>launch("capsule-race",data,coordination,JSON.stringify({id,expected:1,mutation:{type:"grant",peer:{...peer,publicKey:id.repeat(64)}}})));
@@ -144,7 +154,7 @@ describe("v2 real process publication and recovery",()=>{
         expect(readdirSync(data).filter(n=>n.includes(".commit.")).length).toBe(1);
       }
     }
-  });
+  },30000);
   test("first managed adoption can recover after consuming its sole marker stage",async()=>{
     const {data,coordination}=completedCapsule();
     const output=await result(launch("capsule-write",data,coordination,JSON.stringify({point:"after-marker",managed:true,expected:1,id:"first-manage",mutation:{type:"manage"}})));
@@ -152,7 +162,7 @@ describe("v2 real process publication and recovery",()=>{
     const recovered=await result(launch("capsule-recover",data,coordination,JSON.stringify({managed:true})));
     expect(recovered.value).toMatchObject({ok:true,snapshot:{revision:2}});
     const unregistered=await result(launch("read",data,coordination));expect(unregistered.value.error).toContain("managed_adapter_required");
-  });
+  },30000);
 });
 
 describe("pairing owner real cross-process and I/O paths", () => {

@@ -64,7 +64,7 @@ test("v2 required actual fsync barriers",()=>{
 const root=original.mkdtempSync(join(tmpdir(),"pairing-capsule-sync-"));
 try{const f=capsuleFixture(root,{factory:pairingTrustOwner});syncs=0;
 f.owner.mutate(1,"two",{type:"grant",peer:{publicKey:"b".repeat(64),pairedAt:"date"}});
-expect(syncs).toBe(15);
+expect(syncs).toBe(16);
 }finally{original.rmSync(root,{recursive:true,force:true});}
 });`;
       writeFileSync(testFile,tests);

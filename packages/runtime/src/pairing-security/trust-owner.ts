@@ -192,6 +192,7 @@ export class PairingTrustOwner {
   private writeNew(root: PairingRootIdentity, name: string, bytes: string | Buffer) {
     this.check(root);
     if ((name.includes("/") && !/^\.pairing-v2-slot-[0-7]\/[a-f0-9-]{36}\.json$/.test(name)
+      && !/^\.pairing-claim-[a-f0-9-]{36}\/[a-f0-9-]{36}\.json$/.test(name)
       && !(name.startsWith(`${CUT_DIRECTORY}/`) && cutName(name.slice(CUT_DIRECTORY.length + 1))))
       || name === "." || name === "..") refuse("unsafe_path");
     if (Buffer.byteLength(bytes) > FILE_LIMIT) refuse("capacity");
@@ -735,10 +736,11 @@ export class PairingTrustOwner {
     if (!active || active.owner !== this) refuse("managed_context_required");
     this.validateInvocation(active, root);
   }
-  /** mkdir reserves one of eight slots, including empty interrupted claims.
+  /** Atomic rename reserves one of eight nonempty token-bearing slots.
+   * Empty canonical directories are abandoned, never live pre-token claims.
    * Tokens identify claims across time. dev:ino alone is only meaningful while
    * an open directory descriptor pins that object; freed inodes can be reused.
-   * Empty/crashed slots remain occupied; no PID, timestamp or age takeover. */
+   * Nonempty claims stay occupied; no PID, timestamp or age takeover. */
   private capsuleSlots(root: PairingRootIdentity, inventory: string[]) {
     const claims = new Map<string,CapsuleSlot>(), allowed = new Set<string>();
     for (const name of inventory.filter(n => n.startsWith(".pairing-v2-slot-"))) {
@@ -924,20 +926,51 @@ export class PairingTrustOwner {
       if(!this.slotMatches(root,slot,fd))refuse("capsule_slot_invalid");
     } finally {closeSync(fd);}this.check(root);
   }
+  /** A candidate carries only its small claim file, never staged payloads.
+   * It is outside the authority inventory until its atomic directory rename.
+   * Only an empty canonical slot can be replaced; live claims stay nonempty. */
   private claimCapsuleSlot(root: PairingRootIdentity): CapsuleSlot {
     for(let index=0;index<8;index++){
-      const path=join(root.path,slotName(index));
       this.check(root);
-      try{mkdirSync(path,{mode:0o700});}catch(e){if((e as NodeJS.ErrnoException).code==="EEXIST")continue;throw e;}
-      const fd=openSync(path,constants.O_RDONLY|constants.O_DIRECTORY|constants.O_NOFOLLOW);
+      const candidate=`.pairing-claim-${randomUUID()}`,source=join(root.path,candidate);
+      mkdirSync(source,{mode:0o700});
+      const fd=openSync(source,constants.O_RDONLY|constants.O_DIRECTORY|constants.O_NOFOLLOW);
       try {
-        const stat=fstatSync(fd);owned(stat,true);
-        const slot={index,token:randomUUID(),identity:id(stat)};
+        const stat=fstatSync(fd);
+        owned(stat,true);
+        const slot={index,token:randomUUID(),identity:id(stat)},child=`${slot.token}.json`;
+        let renamed=false;
         try {
-          this.writeNew(root,`${slotName(index)}/${slot.token}.json`,pack("claim",{rootId:root.id,...slot}));
-          if(!this.slotMatches(root,slot,fd) || !same(readdirSync(path),[`${slot.token}.json`]))refuse("capsule_slot_invalid");
-          this.syncSlot(root,slot);this.syncDirectory(root);return slot;
-        } catch(e){this.releaseCapsuleSlot(root,slot);throw e;}
+          this.writeNew(root,`${candidate}/${child}`,pack("claim",{rootId:root.id,...slot}));
+          if(id(lstatSync(source))!==id(stat) || !same(readdirSync(source),[child]))refuse("capsule_slot_invalid");
+          const bytes=this.readFile(root,`${candidate}/${child}`,false);
+          if(!bytes || !same(unpack(bytes,"claim",refuse),{rootId:root.id,...slot}))refuse("capsule_slot_invalid");
+          // Persist the complete claim BEFORE exposing it at a reusable index.
+          fsyncSync(fd);this.syncDirectory(root);
+          try {renameSync(source,join(root.path,slotName(index)));}
+          catch(e){
+            if(["ENOTEMPTY","EEXIST"].includes((e as NodeJS.ErrnoException).code??""))continue;
+            throw e;
+          }
+          renamed=true;
+          if(!this.slotMatches(root,slot,fd))refuse("capsule_slot_invalid");
+          this.syncDirectory(root);
+          return slot;
+        } catch(e){
+          if(renamed)this.releaseCapsuleSlot(root,slot);
+          throw e;
+        } finally {
+          if(!renamed){
+            // The descriptor pins THIS unique candidate across cleanup.
+            // Crashed candidates are metadata, not canonical resource claims.
+            if(id(lstatSync(source))!==id(fstatSync(fd)))refuse("capsule_slot_invalid");
+            const names=readdirSync(source);
+            if(names.some(name=>name!==child))refuse("capsule_slot_invalid");
+            if(names.length)unlinkSync(join(source,child));
+            rmdirSync(source);
+            this.syncDirectory(root);
+          }
+        }
       } finally {closeSync(fd);}
     }
     return refuse("capsule_staging_capacity");

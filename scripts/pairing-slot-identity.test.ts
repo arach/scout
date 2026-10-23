@@ -7,13 +7,17 @@ const original={...fs}, descriptors=new Map<number,string>();
 let reuse:{path:string;ino:number}|null=null, remapped=0;
 let afterUnlink:((path:string)=>void)|null=null;
 const remap=(path:string,stat:fs.Stats)=>{
-  if(reuse && path===reuse.path){Object.defineProperty(stat,"ino",{value:reuse.ino,configurable:true});remapped++;}
+  if(reuse && (path===reuse.path || path.includes("/.pairing-claim-") && stat.isDirectory())){Object.defineProperty(stat,"ino",{value:reuse.ino,configurable:true});remapped++;}
   return stat;
 };
 fs.lstatSync=((path:any,...args:any[])=>remap(String(path),(original.lstatSync as any)(path,...args))) as any;
 fs.openSync=((path:any,...args:any[])=>{const fd=(original.openSync as any)(path,...args);descriptors.set(fd,String(path));return fd;}) as any;
 fs.closeSync=((fd:number)=>{descriptors.delete(fd);return original.closeSync(fd);}) as any;
 fs.fstatSync=((fd:number,...args:any[])=>remap(descriptors.get(fd)??"",(original.fstatSync as any)(fd,...args))) as any;
+fs.renameSync=((source:any,target:any)=>{
+  original.renameSync(source,target);
+  for(const [fd,path] of descriptors)if(path===String(source))descriptors.set(fd,String(target));
+}) as any;
 fs.unlinkSync=((path:any)=>{original.unlinkSync(path);afterUnlink?.(String(path));}) as any;
 mock.module("node:fs",()=>({...fs}));
 const {pairingTrustOwner}=await import("../packages/runtime/src/pairing-security/trust-owner.ts");
@@ -44,11 +48,8 @@ test("stale release never removes an empty or initialized newer claim with the s
     original.mkdirSync(reuse!.path,{mode:0o700});
     owner.releaseCapsuleSlot(root,old);
     expect(original.existsSync(reuse!.path)).toBe(true);
-    // An empty mkdir is a real occupied resource, not takeover permission.
-    for(let index=1;index<8;index++)original.mkdirSync(join(f.root,`.pairing-v2-slot-${index}`),{mode:0o700});
-    expect(()=>owner.claimCapsuleSlot(root)).toThrow("capsule_staging_capacity");
-    for(let index=1;index<8;index++)original.rmdirSync(join(f.root,`.pairing-v2-slot-${index}`));
-    original.rmdirSync(reuse!.path);
+    // Empty canonical slots now prove abandonment; they are deliberately
+    // reclaimed by rename. The separate eight-LIVE-claims test still refuses.
     const next=owner.claimCapsuleSlot(root);expect(next.identity).toBe(old.identity);expect(next.token).not.toBe(old.token);
     owner.releaseCapsuleSlot(root,old);
     expect(original.readdirSync(reuse!.path)).toEqual([`${next.token}.json`]);

@@ -130,6 +130,58 @@ active root, retain it as evidence and retry from a fresh view. Do not do this
 after a barrier has won. The runtime provides no automatic takeover or
 uncoordinated discard API.
 
+## Slot reclamation and recovery
+
+Ordinary v2 writers use structural reclamation. Each writer constructs a unique
+`.pairing-claim-<uuid>` directory with its complete token file, synchronizes the
+file and directory, then renames it onto a canonical `.pairing-v2-slot-N`.
+Canonical slots are never directly created with `mkdir`. Every v2 writer must
+use this protocol: the one-time drain also covers dormant R1 binaries that can
+read v2 but still directly create slots. The exact combined release cohort is
+required, not merely a v2-aware binary. Rename can atomically
+replace an empty directory, but refuses a nonempty live claim on APFS and Linux.
+The writer synchronizes the root before staging any bulk files. Claim tokens,
+not persistent inode identity, bind ownership; descriptor pins protect each
+check/use interval.
+
+A slot emptied by release is already abandoned. If the releasing process dies
+before `rmdir`, the next writer replaces it safely. A paused late release cannot
+remove the replacement's nonempty token. Eight live token-bearing claims still
+refuse a ninth writer. Eight abandoned empty slots do not brick revocation:
+the next real mutation reclaims an empty slot and can revoke immediately. This
+is structural authority, never an age, PID, process-disappearance or timeout
+judgment.
+
+A process can die before exposing its candidate or while holding a nonempty
+uncommitted claim. Those objects are not automatically declared dead. A private
+pre-rename candidate contains only one small token, no bulk files and no
+authority; it consumes no canonical slot. For such metadata, or capacity occupied
+by nonempty uncommitted claims, the trusted operator can recover under explicit
+quiescence:
+
+1. Stop every desktop, CLI, web runtime and maintenance caller. Prove that none
+   can still access the root; do not infer quiescence from elapsed time.
+2. Preserve the full file inventory. With the correct adapter, run an ordinary
+   owner read to complete any committed publication and verify current capsule,
+   receipt, chunks, marker and exact outcomes. If it refuses, retain evidence and
+   obtain reviewed repair; do not discard a pending head or witness.
+3. With callers still stopped, identify remaining candidate directories and
+   canonical claims from their complete token records. Confirm that candidate
+   sources and token-qualified payloads are not referenced by any verified head,
+   retained chunk or pending publication. An empty candidate has no token and
+   no authority, but its removal still requires this proven quiescence.
+4. Move only those proven uncommitted resources outside the active root into a
+   retained evidence directory on the same filesystem. Preserve all authority,
+   receipts and referenced files. Synchronize the root, then repeat the complete
+   owner read and a trusted local mutation before restarting listeners.
+
+This is an explicit offline operator procedure, not a remote endpoint or an
+automatic garbage collector. A nonempty claim alone never authorizes takeover.
+If the operator cannot prove quiescence or distinguish referenced resources,
+stop for repair rather than guessing. The root qualification chain witnesses
+process exits at candidate creation/file sync/directory sync/rename and release
+unlink/rmdir, a two-process empty-slot race, a late release and planted bypasses.
+
 ## Inherited limits and qualification
 
 Pre-owner raw-projection writers are **not excluded** by the cut. Standalone
@@ -142,7 +194,10 @@ Historical peer snapshots are retired, not freshly replayed on admission.
 External archives are diagnostics; their hashes do not prove unread bytes.
 All retained outcomes and current authority are freshly read and verified.
 
-The process suite pins the byte-exact v1 owner, interrupts every table row,
+The process suite pins and hashes the byte-exact v1 owner's entire recursive
+import closure (`trust-owner.ts`, `support-paths.ts`, `instance.ts`) from
+509c7595, without current-code shims. All three sources ship with the fixture
+for shallow CI. The suite interrupts every table row,
 tests both CAS outcomes and paused old writers, measures actual reservation
 extents/barriers, and checks source mutations against healthy fixtures. The
 read gate must run on **real migrated stores** at both tiers/Buns, three fresh

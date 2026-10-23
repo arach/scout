@@ -1,4 +1,4 @@
-/** Fresh-process production-owner read gate. Test fixture only; no migration. */
+/** Fresh-process production-owner read gate on real migrated test stores. */
 import {mkdtempSync,rmSync,readFileSync} from "node:fs";
 import {tmpdir,cpus,release,platform} from "node:os";
 import {join} from "node:path";

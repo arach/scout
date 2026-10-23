@@ -273,21 +273,28 @@ editor who forges the entire root.
 
 ### Publication, recovery and bounded collection
 
-A writer first claims one of eight `.pairing-v2-slot-<0..7>` directories by
-exclusive creation. A unique token file binds the claim to the root and
-directory inode. **The token identifies the claim over time; device/inode alone
-does not.** Filesystems can reuse an inode after deletion. Inventory, claim
-initialization, sync and release keep an open directory descriptor while
-checking or acting on that claim. Head recovery matches the verified token and
-complete claim, not a reused directory index or inode.
+A writer prepares a unique `.pairing-claim-<uuid>` directory with its complete
+token file, synchronizes both, then atomically renames it onto one of eight
+`.pairing-v2-slot-<0..7>` directories. It never directly creates a canonical
+slot directory. A directory rename replaces an empty destination atomically;
+a nonempty live claim refuses replacement (`ENOTEMPTY` or `EEXIST`). The root is
+synchronized before any bulk staging. Only eight canonical claims can stage
+bulk payloads, each within its 3 MiB bound.
 
-These are resource claims, not time-based locks. An empty interrupted mkdir
-still occupies its slot. Release requires the matching token before unlinking
-it, then retains its descriptor through `rmdir` so another directory cannot
-reuse the pinned inode. A stale release never removes a newer empty claim.
-A crash after token unlink can leave an empty occupied directory; it is not
-reclaimed automatically and does not itself make a completed head pending.
-There is no PID/age takeover or recursive slot deletion.
+**An empty canonical slot proves abandonment.** No live claim is exposed before
+its token exists. A crash after token unlink leaves a safely replaceable empty
+slot; the next writer can reclaim it without an operator or ownership guess.
+Two claimants racing that empty slot have one rename winner. A stale release
+cannot remove the winner's nonempty claim. Claim tokens identify ownership over
+time; device/inode alone does not. Inventory, sync and release retain directory
+descriptor pins across their check/use intervals.
+
+Pre-rename candidates contain only the small token, never bulk payloads or
+authority. An interrupted candidate does not consume a canonical slot or enter
+the authority inventory. Nonempty canonical claims remain occupied and are
+never inferred dead. No PID, age, timeout or inode-only takeover exists. See the
+[cutover and recovery runbook](pairing-capsule-cutover.md) for quiescent cleanup
+of interrupted candidates or nonempty uncommitted claims.
 
 Before bulk staging, the writer checks the 3 MiB candidate budget, 1 MiB file
 bound and resulting authority limits. It writes and synchronizes the new

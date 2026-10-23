@@ -79,7 +79,18 @@ fs.unlinkSync = ((path: any) => {
 mock.module("node:fs", () => ({...fs}));
 
 const pinned = new URL("./fixtures/pairing-v1/pairing-security/trust-owner.ts", import.meta.url);
-if (createHash("sha256").update(original.readFileSync(pinned)).digest("hex") !== "e0f650bacb7e72a413df1beb6520e136ba237feaf376500f5de77d0e9a6c4695") throw Error("pinned v1 owner changed");
+// Exact recursive import closure from 509c7595; source bytes ship in the
+// fixture so this assertion does not depend on a deep CI git checkout.
+const closure = {
+  "./trust-owner.ts": "e0f650bacb7e72a413df1beb6520e136ba237feaf376500f5de77d0e9a6c4695",
+  "../support-paths.ts": "89bb061034a2e8ce7d11ca17c4db888744fd980d2a2e101ad8d4d2604298c6b1",
+  "../instance.ts": "22872b4328ff65c863308adaad4e2035b083ed6694c0ac8d8461e1a11a047f65"
+};
+for (const [path, expected] of Object.entries(closure)) {
+  const actual = createHash("sha256").update(original.readFileSync(new URL(path, pinned))).digest("hex");
+  if (actual !== expected) throw Error(`pinned v1 closure changed: ${path}: ${actual} != ${expected}`);
+}
+
 const current = await import("../packages/runtime/src/pairing-security/trust-owner.ts");
 const old = await import("./fixtures/pairing-v1/pairing-security/trust-owner.ts");
 try {
