@@ -1,4 +1,4 @@
-# Pairing trust owner contract v1
+# Pairing trust owner contract
 
 The public runtime owns pairing trust persistence for one resolved pairing root.
 Runtime pairing, retained desktop pairing, reconnect membership checks and the web
@@ -103,8 +103,8 @@ file, 128 MiB of generation bytes, or 4096 peers. There is no automatic compacti
 reset or age-based loss of deduplication. Capacity/recovery/migration must be an
 explicit reviewed operation; deleting owner metadata is not a supported reset.
 Only real trust mutations (grant, revoke, managed adoption) grow this chain.
-**Named follow-up: authority-chain checkpoint/compaction**, with a separately
-reviewed root/revision/dedup preservation protocol. It is not a merge gate.
+The dormant v2 representation below reduces retained peer snapshots. It does
+not reset these limits or activate compaction for an existing store.
 
 There is no mutable head pointer and no new unmanaged cross-process lock.
 A writer stages and synchronizes the peer projection and complete generation,
@@ -192,6 +192,157 @@ power-loss certification. Native bounded cancellation/durability qualification
 for a host's combined authority-and-journal hold is a separate prerequisite;
 this additive seam does not certify it. A JavaScript timeout cannot release a
 host gate while an uninterruptible native operation continues.
+
+## Dormant completed-v2 store
+
+The same runtime owner can read, mutate and recover a **completed**
+`scout.pairing-capsule/v2` store. New stores and existing v1 stores still write
+v1. There is no migration API, environment flag, listener hook, automatic
+upgrade or production fixture constructor in this change. The completed-store
+builder in `scripts/fixtures` accepts only empty temporary test directories.
+It is not a crash-safe migration implementation.
+
+This is R1 of a two-PR storage change. R2 must implement and qualify explicit
+trusted local cutover, its reservation and old-writer races, recovery and the
+drain/restart runbook. **No upstream milestone may carry R1 without R2.** The
+remedy is not complete until both are reviewed and shipped together. The
+live-session registry remains a separate, blocked follow-up. This change adds
+no transport close code or credential behavior.
+
+### Retained authority and logical identity
+
+A completed v2 store retains these root-bound files:
+
+- One permanent `trusted-peers.owner.<cut-revision+1>.json` barrier. It commits
+  to the last v1 logical head, initial outcome digest, policy, legacy byte
+  charge and initial chunk inventory. A missing completion receipt in
+  `trusted-peers.v2.cutover.json` refuses; R1 does not attempt an interrupted
+  migration.
+- One current `trusted-peers.v2.commit.<serial>.json` capsule. It contains
+  current peers, logical revision and head, exact projection digest, complete
+  outcome-chunk inventory, permanent managed policy, charge, candidate claim
+  and bounded retirement record. During collection, the previous commit can
+  also remain. More committed epochs refuse.
+- Immutable `trusted-peers.v2.data.<token>.json` outcome chunks. Each row stores
+  mutation ID, logical revision, type, full key, changed flag, **exact request
+  string**, legacy byte charge and any managed-adoption marker. All rows are
+  retained in logical order. Initial cut chunks never change; later writes
+  copy only the last post-cut chunk or append a new chunk.
+- A `trusted-peers.v2.done.<serial>.json` collection receipt binding the current
+  physical capsule hash. The barrier and initial cut receipt remain permanent.
+
+Every authority operation opens, hashes and validates every retained outcome
+chunk and row. There is no positive cache, mtime shortcut, skipped prefix or
+unverified checkpoint fast path. The reader validates the contiguous logical
+revisions, unique IDs, byte-charge sum, complete and initial outcome digests,
+current peers and projection, marker, root and managed invocation. A changed
+early chunk refuses after warm reads as well as cold reads. An unexpected
+v1 generation in the active namespace refuses. An unsupported highest serial
+refuses; the reader never falls back to an older readable capsule.
+
+The first capsule keeps the v1 **logical** head. It does not substitute the
+physical capsule checksum in the pairing authority stamp. Later mutations
+advance the logical head from the previous logical head, current peer digest,
+policy, exact request/outcome, adoption and complete outcome digest. Physical
+serials identify publications, not logical authority. Fixture tests prove stamp
+continuity; proof across a real migration belongs to R2.
+
+Three hashes remain distinct: the last committed logical peers hash, the
+normalized current checkpoint peers hash and the exact raw projection-byte
+hash. Standalone outside-write adoption preserves the original logical baseline
+and records the changed raw hash on the next mutation. Reads do not canonicalize
+the outside file. A missing projection uses the empty-byte hash. Encoded `[]`
+and noncanonical JSON have different raw hashes. An empty file is malformed JSON
+and refuses. Managed projection changes refuse.
+
+The managed policy is derived from the retained adoption row and checked
+against the barrier and head. Deleting the marker or clearing a head flag
+cannot turn managed history into standalone history. The real registered
+adapter, invocation and current holder are still required. The inherited
+outside-writer and same-user-forgery limitations below remain unchanged.
+
+V2 gives up fresh replay of retired historical **peer snapshots**, not outcome
+history or current membership. An external archive is diagnostic material,
+never authority. A checksum of archived bytes does not verify unread bytes.
+Neither format provides a durable anti-rollback anchor against a same-user
+editor who forges the entire root.
+
+### Publication, recovery and bounded collection
+
+A writer first claims one of eight `.pairing-v2-slot-<0..7>` directories by
+exclusive creation. A unique token file binds the claim to the root and
+directory inode. These are resource claims, not time-based locks. An empty
+or abandoned claim stays occupied until explicit quiescent maintenance; there
+is no age, PID or timeout takeover. Cleanup removes only the writer's unique
+token and an empty matching directory, never a recursively deleted slot.
+
+Before bulk staging, the writer checks the 3 MiB candidate budget, 1 MiB file
+bound and resulting authority limits. It writes and synchronizes the new
+chunk, projection, capsule, optional first managed marker and collection
+receipt source. It synchronizes the directory, freshly revalidates its
+baseline, and asserts all prior rows are unchanged. An exclusive hard link
+to the exact next serial is the CAS. A competing winner causes refusal, not
+an automatic retry or relative-update merge.
+
+The commit staging link remains as a pending witness. Original writer and
+helpers atomically rename the **same pre-staged source** to publish the marker
+and projection. They never reconstruct a consumed source. After verifying the
+current head and projection, they unlink the witness and synchronize the
+directory. Before collection they establish another directory barrier. Only
+files named in the capsule's retirement record can be removed, after checking
+their recorded inode and byte hash. The record contains at most the previous
+commit, previous receipt and replaced last chunk. The collector synchronizes
+retirement, consumes the pre-staged collection receipt by rename, synchronizes
+again, then releases the claim. A late helper cannot overwrite a later revoke
+or recreate a retired receipt. Exact-ID retries return the original outcome
+after establishing durability, even after lost ACK or later mutations.
+
+A collector failure refuses reads and new mutations until completion succeeds.
+It never authorizes unbounded accumulation of retired epochs. A resurrected
+retired file beside a completed collection receipt refuses. Uncertain CAS I/O
+retains candidate evidence rather than deleting a potentially committed source.
+Structural errors retain their precise refusal codes; unavailable publication
+or collection never returns an old positive snapshot.
+
+The bounds remain 65,536 logical mutations, 4096 peers, 1 MiB per file and
+128 MiB lifetime legacy-generation charge. Compaction preserves each old charge;
+new mutations charge the canonical v1-equivalent envelope size. Current retained
+capsule authority is also limited to 128 MiB and 256 chunks. Compatibility
+projection bytes and the separately bounded staging claims are not counted as
+retained authority. Reads are linear in all retained outcomes, not constant
+time. The 65,536 format ceiling is not a latency qualification.
+
+### Completed-store verification
+
+Run the regular owner suite plus the capsule fixtures and controls:
+
+```sh
+bun test packages/runtime/src/pairing-security/trust-capsule.test.ts \
+  scripts/pairing-trust-owner-process.test.ts
+bun scripts/pairing-capsule-controls.ts /tmp/pairing-capsule-evidence
+bun scripts/pairing-capsule-benchmark.ts realistic
+bun scripts/pairing-capsule-benchmark.ts large
+```
+
+`bun run test:pairing-capsule` runs the process/census suite and planted capsule
+controls in the root unit-test chain, including hosted CI when dispatched. Give
+the controls an explicit evidence directory to retain their individual logs.
+
+Process tests interrupt actual writes at staging, CAS, directory barriers,
+projection consumption, witness removal, collection, receipt consumption,
+claim release and ACK. They also pause two next-serial contenders and late
+helpers, inject candidate/collector failures and recover managed publications.
+Source controls deliberately cache a positive, skip an early chunk, erase
+managed policy, substitute a physical stamp or reset the byte charge. Each
+healthy fixture must pass before its isolated broken-source copy fails.
+
+The production-owner gate uses 100 generations/4 keys and 10,000/32, three fresh
+processes per tier on each supported test Bun. Each path (`read` and stamp) gets
+100 warmups then 1000 timed reads; raw samples and CPU time are emitted. Every
+run must independently meet p50/p95/max of 5/15/50 ms and 25/75/200 ms respectively.
+The runner stops on a timed maximum breach or failed percentiles. This qualifies
+the completed-store read path, not migration, registry admissions, gate holds,
+idle CPU, native durability or physical phones.
 
 ## Root identity and external writers
 

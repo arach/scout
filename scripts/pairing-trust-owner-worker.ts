@@ -18,7 +18,43 @@ const pause = (name: string) => {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
   }
 };
-if (["instrument","managed-instrument","instrument-revoke","managed-instrument-revoke","recover","recover-managed","managed-paths"].includes(mode)) {
+const capsule = mode.startsWith("capsule-") && mode!=="capsule-paths" ? JSON.parse(detail || "{}") : null;
+if (capsule) {
+  let published=false;
+  const crash=(point:string)=>{if(capsule.point===point)process.exit(81);};
+  fs.openSync=((path:any,...args:any[])=>{const fd=(original.openSync as any)(path,...args);fdPaths.set(fd,String(path));return fd;}) as any;
+  fs.fsyncSync=((fd:number)=>{
+    const path=fdPaths.get(fd);trace({event:"sync",path,held});
+    if(capsule.point==="sync-fail" && path?.endsWith("-peers.tmp"))throw Object.assign(Error("candidate sync failure"),{code:"EIO"});
+    original.fsyncSync(fd);trace({event:"sync_success",path,directory:original.fstatSync(fd).isDirectory()});
+    if(path?.endsWith("-done.tmp"))crash("after-staging");
+    if(published && path===original.realpathSync(root))crash("after-publication-sync");
+  }) as any;
+  fs.linkSync=((source:any,target:any)=>{
+    if(capsule.point==="before-cas")pause(`ready-before-cas-${capsule.id}`);
+    original.linkSync(source,target);published=true;trace({event:"link",target:String(target),held});crash("after-cas");
+  }) as any;
+  fs.renameSync=((source:any,target:any)=>{
+    const to=String(target), from=String(source);
+    if(capsule.point==="before-projection" && to.endsWith("trusted-peers.json"))pause("ready-before-projection");
+    if(capsule.point==="before-receipt" && to.includes(".done."))pause("ready-before-receipt");
+    if(capsule.point==="rename-fail" && to.endsWith("trusted-peers.json"))throw Object.assign(Error("projection failure"),{code:"EIO"});
+    original.renameSync(source,target);trace({event:"rename",source:from,target:to,held});
+    if(to.endsWith("trusted-peers.managed.json"))crash("after-marker");
+    if(to.endsWith("trusted-peers.json"))crash("after-projection");
+    if(to.includes(".done."))crash("after-receipt");
+  }) as any;
+  fs.unlinkSync=((path:any)=>{
+    const p=String(path), retired=p.includes(".commit.") || p.includes(".done.");
+    if(retired && capsule.point==="collector-fail")throw Object.assign(Error("collector failure"),{code:"EIO"});
+    original.unlinkSync(path);trace({event:"unlink",path:p});
+    if(p.endsWith("-commit.tmp"))crash("after-witness");
+    if(retired)crash("during-collection");
+    if(p.includes(".pairing-v2-slot-"))crash("after-token-release");
+  }) as any;
+  mock.module("node:fs",()=>({...fs}));
+}
+if (["instrument","managed-instrument","instrument-revoke","managed-instrument-revoke","recover","recover-managed","managed-paths","capsule-paths"].includes(mode)) {
   fs.openSync = ((path: any, ...args: any[]) => { const fd = (original.openSync as any)(path, ...args); fdPaths.set(fd, String(path)); return fd; }) as any;
   fs.fsyncSync = ((fd: number) => {
     syncs++; trace({event: "sync", number: syncs, path: fdPaths.get(fd)});
@@ -42,11 +78,20 @@ const {pairingTrustOwner} = await import("../packages/runtime/src/pairing-securi
 const key = "a".repeat(64), peer = {publicKey: key, pairedAt: "2026-01-01T00:00:00Z"};
 try {
   const owner = pairingTrustOwner(root);
-  if (mode.startsWith("managed-instrument") || mode === "recover-managed") {
+  if (mode.startsWith("managed-instrument") || mode === "recover-managed" || capsule?.managed) {
     let holder:object|null=null;
     owner.register({id:"test.adapter",withGate(_r,body){holder={};held=true;try{return body(holder);}finally{held=false;holder=null;}},currentHolder(){return holder;}});
   }
-  if (mode === "recover" || mode === "recover-managed") {
+  if (capsule) {
+    if(mode==="capsule-recover")console.log(JSON.stringify({ok:true,snapshot:owner.read()}));
+    else {
+      const expected=capsule.expected??owner.read().revision;
+      if(mode==="capsule-race")pause(`ready-${capsule.id}`);
+      const result=owner.mutate(expected,capsule.id??"capsule-write",capsule.mutation??{type:"grant",peer});
+      if(capsule.point==="lost-ack")process.exit(82);
+      console.log(JSON.stringify({ok:true,result}));
+    }
+  } else if (mode === "recover" || mode === "recover-managed") {
     console.log(JSON.stringify({ok:true,snapshot:owner.read()}));
   } else if (mode === "race") {
     const snapshot = owner.read(); pause(`ready-${detail}`);
@@ -60,9 +105,9 @@ try {
     const revoking=mode.endsWith("-revoke"), managed=mode.startsWith("managed-");
     const result = owner.mutate((managed?1:0)+(revoking?1:0), "instrument", revoking?{type:"revoke",publicKey:key}:{type: "grant", peer});
     console.log(JSON.stringify({ok: true, result, syncs}));
-  } else if (mode === "managed-paths" || mode === "routes") {
+  } else if (mode === "managed-paths" || mode === "capsule-paths" || mode === "routes") {
     const web = await import("../packages/web/server/pairing.ts");
-    if (mode === "managed-paths") {
+    if (mode === "managed-paths" || mode === "capsule-paths") {
       let holder: object | null = null;
       const remove = owner.register({id:"test.adapter", withGate(_r,body) {holder={};held=true;try{return body(holder);}finally{held=false;holder=null;}},currentHolder(){return holder;}});
       owner.withInvocation(c=>owner.mutate(0,"adopt",{type:"manage"},c));
