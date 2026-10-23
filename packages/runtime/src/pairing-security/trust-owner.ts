@@ -1,14 +1,20 @@
 /** Canonical pairing trust persistence. No I/O or adapter installation on import.
  * See docs/pairing-trust-owner.md for the on-disk and interruption contract. */
 import { AsyncLocalStorage } from "node:async_hooks";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomUUID, randomFillSync } from "node:crypto";
 import {
   closeSync, constants, existsSync, fstatSync, fsyncSync, linkSync, lstatSync,
   mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync,
-  unlinkSync, writeFileSync, type Stats,
+  unlinkSync, writeFileSync, rmdirSync, ftruncateSync, type Stats,
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { resolveOpenScoutPairingHome } from "../support-paths.js";
+import { CAPSULE_PREFIX, CUTOVER, CHUNK_TARGET, SLOT_LIMIT, commitName, doneName, dataName, slotName, stageName,
+  pack, unpack, hex, integer, token, same, policyValid, partValid, rowValid, outcome,
+  logicalHead, legacyCharge, type CapsuleBarrier, type CapsuleHead, type CapsuleDecoded,
+  type CapsuleSlot, type CapsuleRow, type CapsulePart, type ManagedPolicy, type RetiredFile } from "./trust-capsule.js";
+import { CUT_DIRECTORY, RESERVATION_FILES, RESERVATION_BYTES, reserveName, cutChild, cutName, cutBodies,
+  type CutClaim, type CutPlan, type CutFile, type CutRetired, type CutResult } from "./trust-cutover.js";
 
 export type TrustedPeer = { publicKey: string; name?: string; pairedAt: string; lastSeen?: string };
 export type PairingRootIdentity = Readonly<{ path: string; id: string }>;
@@ -52,10 +58,12 @@ export interface PairingOpportunity {
 export type TrustSnapshot = Readonly<{ revision: number; peers: readonly TrustedPeer[] }>;
 type State = { revision: number; peers: TrustedPeer[]; hash: string; peersHash: string;
   managed: Marker | null; outcomes: Record<string, SavedOutcome>; bytes: number;
-  projectionHash: string; adoption: ProjectionAdoption | null; pendingStage: string | null; projectionStage: string | null };
+  projectionHash: string; adoption: ProjectionAdoption | null; pendingStage: string | null; projectionStage: string | null;
+  capsule?: CapsuleDecoded };
 type Invocation = { owner: PairingTrustOwner; root: PairingRootIdentity; adapter: PairingTrustAdapter;
   holder: object; active: boolean; used: boolean };
 const invocations = new AsyncLocalStorage<Invocation>();
+const liveInvocations = new Set<Invocation>();
 const contexts = new WeakMap<object, Invocation>();
 const adapters = new Map<string, PairingTrustAdapter>();
 const owners = new Map<string, PairingTrustOwner>();
@@ -139,7 +147,7 @@ export class PairingTrustOwner {
   private readFile(root: PairingRootIdentity, name: string, stagedGeneration = name.startsWith(PREFIX)): Buffer | null {
     this.check(root); const path = join(root.path, name);
     let fd: number;
-    try { fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW); }
+    try { fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); }
     catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return null; throw e; }
     try {
       const stat = fstatSync(fd); owned(stat, false, name === PEERS, stagedGeneration);
@@ -177,14 +185,22 @@ export class PairingTrustOwner {
     finally { closeSync(fd); }
   }
   private stage(root: PairingRootIdentity, bytes: string, prefix = ".pairing-owner"): string {
-    this.check(root);
-    if (Buffer.byteLength(bytes) > FILE_LIMIT) refuse("capacity");
     const name = `${prefix}-${randomUUID()}.tmp`, path = join(root.path, name);
+    this.writeNew(root, name, bytes);
+    return path;
+  }
+  private writeNew(root: PairingRootIdentity, name: string, bytes: string | Buffer) {
+    this.check(root);
+    if ((name.includes("/") && !/^\.pairing-v2-slot-[0-7]\/[a-f0-9-]{36}\.json$/.test(name)
+      && !/^\.pairing-claim-[a-f0-9-]{36}\/[a-f0-9-]{36}\.json$/.test(name)
+      && !(name.startsWith(`${CUT_DIRECTORY}/`) && cutName(name.slice(CUT_DIRECTORY.length + 1))))
+      || name === "." || name === "..") refuse("unsafe_path");
+    if (Buffer.byteLength(bytes) > FILE_LIMIT) refuse("capacity");
+    const path = join(root.path, name);
     const fd = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
     try { owned(fstatSync(fd)); writeFileSync(fd, bytes); fsyncSync(fd); this.check(root); }
     catch (e) { try { unlinkSync(path); } catch {} throw e; }
     finally { closeSync(fd); }
-    return path;
   }
   /** Display-only data. Broken/unsafe advisory files never affect authority.
    * O_NONBLOCK also prevents a raced-in FIFO from blocking an advisory read. */
@@ -249,6 +265,8 @@ export class PairingTrustOwner {
   }
   private state(root: PairingRootIdentity, allowPending = false): State {
     this.check(root);
+    const inventory = readdirSync(root.path);
+    if (inventory.some(n => n.startsWith(CAPSULE_PREFIX) || n.startsWith(".pairing-v2"))) return this.capsuleState(root, allowPending, inventory);
     const marker = this.marker(root);
     const names = readdirSync(root.path).filter(n => n.startsWith(PREFIX));
     if (names.length > REVISION_LIMIT) refuse("capacity");
@@ -372,9 +390,770 @@ export class PairingTrustOwner {
     } finally { completing.delete(root.id); }
   }
   private readyState(root: PairingRootIdentity): State {
+    this.finishPendingCutover(root);
     const state = this.state(root, true);
+    if (state.capsule) {
+      if (state.capsule.needsRecovery) this.completeCapsule(root, state);
+      return state.capsule.needsRecovery ? this.state(root) : state;
+    }
     if (state.pendingStage) this.completePublication(root, state);
     return state.pendingStage ? this.state(root) : state;
+  }
+  private cutDirectory(root: PairingRootIdentity, claim: CutClaim) {
+    this.check(root);
+    const stat = lstatSync(join(root.path, CUT_DIRECTORY));
+    owned(stat, true);
+    if (claim.rootId !== root.id || id(stat) !== claim.identity) refuse("migration_claim_changed");
+  }
+  private syncCutDirectory(root: PairingRootIdentity, claim: CutClaim) {
+    this.cutDirectory(root, claim);
+    const fd = openSync(join(root.path, CUT_DIRECTORY), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    try {
+      if (id(fstatSync(fd)) !== claim.identity) refuse("migration_claim_changed");
+      fsyncSync(fd);
+    } finally { closeSync(fd); }
+    this.cutDirectory(root, claim);
+  }
+  private cutSource(root: PairingRootIdentity, claim: CutClaim, name: string) {
+    if (!cutName(name)) refuse("migration_plan_invalid");
+    this.cutDirectory(root, claim);
+    const bytes = this.retainedStage(root, cutChild(name), name === "barrier.json");
+    this.cutDirectory(root, claim);
+    return bytes;
+  }
+  private cutReceipt(root: PairingRootIdentity, barrier: CapsuleBarrier, cutHash: string) {
+    const bytes = this.readFile(root, CUTOVER, false);
+    if (!bytes) return false;
+    const receipt = unpack<Record<string, unknown>>(bytes, "receipt", refuse);
+    if (receipt.schema !== "scout.pairing-cutover-done/v2" || receipt.rootId !== root.id
+      || receipt.cutHash !== cutHash || receipt.migrationId !== barrier.migration?.migrationId) refuse("migration_receipt_invalid");
+    return true;
+  }
+  /** Only the creator before CAS, or a barrier/receipt-authorized helper after
+   * CAS, owns this exact directory inode. No recursive or age-based cleanup. */
+  private removeCutFiles(root: PairingRootIdentity, claim: CutClaim) {
+    let stat;
+    try { stat = lstatSync(join(root.path, CUT_DIRECTORY)); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
+    owned(stat, true);
+    if (id(stat) !== claim.identity) refuse("migration_claim_changed");
+    const names = readdirSync(join(root.path, CUT_DIRECTORY));
+    if (names.length > RESERVATION_FILES || names.some(name => !cutName(name))) refuse("migration_claim_changed");
+    // Keep the claim until all payloads are gone, including when helpers race.
+    names.sort((a, b) => Number(a === "claim.json") - Number(b === "claim.json") || a.localeCompare(b));
+    for (const name of names) {
+      this.cutDirectory(root, claim);
+      const bytes = this.cutSource(root, claim, name);
+      if (bytes) {
+        try { unlinkSync(join(root.path, cutChild(name))); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+      }
+    }
+    this.syncCutDirectory(root, claim);
+    try { rmdirSync(join(root.path, CUT_DIRECTORY)); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    this.syncDirectory(root);
+  }
+  /** Materialize 320 MiB, not a sparse truncate or free-space observation.
+   * Later sources reuse these allocated files; no second bulk allocation. */
+  private reserveCutover(root: PairingRootIdentity, claim: CutClaim) {
+    const buffer = Buffer.alloc(FILE_LIMIT);
+    let allocated = 0;
+    for (let index = 0; index < RESERVATION_FILES; index++) {
+      this.cutDirectory(root, claim);
+      randomFillSync(buffer);
+      const name = cutChild(reserveName(index));
+      this.writeNew(root, name, buffer);
+      const stat = lstatSync(join(root.path, name)); owned(stat);
+      if (stat.size !== FILE_LIMIT || stat.blocks * 512 < FILE_LIMIT) refuse("migration_reservation_unavailable");
+      allocated += stat.size;
+    }
+    if (allocated !== RESERVATION_BYTES) refuse("migration_reservation_unavailable");
+    this.syncCutDirectory(root, claim);
+    this.syncDirectory(root);
+  }
+  private fillCutReservation(root: PairingRootIdentity, claim: CutClaim, index: number, name: string, bytes: string) {
+    if (index >= RESERVATION_FILES || !cutName(name) || Buffer.byteLength(bytes) > FILE_LIMIT) refuse("capacity");
+    this.cutDirectory(root, claim);
+    const source = join(root.path, cutChild(reserveName(index))), target = join(root.path, cutChild(name));
+    if (existsSync(target)) refuse("migration_claim_changed");
+    const fd = openSync(source, constants.O_WRONLY | constants.O_NOFOLLOW);
+    try {
+      const stat = fstatSync(fd); owned(stat);
+      if (stat.size !== FILE_LIMIT || stat.blocks * 512 < FILE_LIMIT || id(lstatSync(source)) !== id(stat)) refuse("migration_reservation_unavailable");
+      writeFileSync(fd, bytes);
+      ftruncateSync(fd, Buffer.byteLength(bytes));
+      fsyncSync(fd);
+      this.cutDirectory(root, claim);
+      if (id(lstatSync(source)) !== id(stat)) refuse("migration_claim_changed");
+      renameSync(source, target);
+    } finally { closeSync(fd); }
+  }
+  private finishPendingCutover(root: PairingRootIdentity) {
+    if (!existsSync(join(root.path, CUT_DIRECTORY))) return;
+    // Private pre-CAS staging is deliberately invisible to v1 authority.
+    const names = readdirSync(root.path).filter(name => /^trusted-peers\.owner\.[1-9][0-9]*\.json$/.test(name));
+    if (!names.length) return;
+    const name = names.sort((a, b) => Number(a.split(".")[2]) - Number(b.split(".")[2])).at(-1)!;
+    const bytes = this.readFile(root, name, true);
+    if (!bytes) refuse("revision_conflict");
+    if (!record(JSON.parse(bytes.toString()).barrier)) return;
+    const barrier = unpack<CapsuleBarrier>(bytes, "barrier", refuse);
+    const m = barrier.migration;
+    if (barrier.schema !== "scout.pairing-cut/v2" || barrier.rootId !== root.id
+      || !integer(barrier.revision, 0, REVISION_LIMIT) || name !== `${PREFIX}${barrier.revision + 1}.json`
+      || !m || !token(m.token) || !/^[a-zA-Z0-9._:-]{1,128}$/.test(m.migrationId)
+      || !/^\d+:\d+$/.test(m.identity) || !hex(m.planHash)
+      || !hex(barrier.logicalHead) || !hex(barrier.logicalPeersHash) || !hex(barrier.checkpointPeersHash)
+      || !hex(barrier.projectionHash) || !hex(barrier.outcomesDigest) || !integer(barrier.chargedBytes, 0, TOTAL_LIMIT)
+      || !policyValid(barrier.policy, root.id, barrier.revision)) refuse("migration_barrier_invalid");
+    this.completeCutover(root, barrier, bytes);
+  }
+  private completeCutover(root: PairingRootIdentity, barrier: CapsuleBarrier, barrierBytes: Buffer) {
+    const m = barrier.migration!, claim: CutClaim = {rootId: root.id, token: m.token, identity: m.identity, migrationId: m.migrationId};
+    const cutHash = hash(barrierBytes);
+    if ([...liveInvocations].some(active => active.active && active.root.id === root.id
+      && active !== invocations.getStore())) refuse("migration_holder_active");
+    this.capsulePolicy(root, barrier.policy);
+    if (!same(this.marker(root), barrier.policy?.marker ?? null)) refuse("managed_marker_mismatch");
+    try {
+      if (!this.cutReceipt(root, barrier, cutHash)) {
+        const barrierPath = join(root.path, `${PREFIX}${barrier.revision + 1}.json`);
+        const target = lstatSync(barrierPath), witness = lstatSync(join(root.path, cutChild("barrier.json")));
+        owned(target, false, false, true); owned(witness, false, false, true);
+        if (target.nlink !== 2 || id(target) !== id(witness)) refuse("migration_witness_invalid");
+        const planBytes = this.cutSource(root, claim, "plan.json");
+        if (!planBytes || hash(planBytes) !== m.planHash) refuse("migration_plan_invalid");
+        const plan = unpack<CutPlan>(planBytes, "plan", refuse);
+        if (plan.schema !== "scout.pairing-cutover-plan/v2" || !same({rootId: plan.rootId, token: plan.token,
+          identity: plan.identity, migrationId: plan.migrationId}, claim)
+          || !Array.isArray(plan.parts) || plan.parts.length > 256 || !plan.parts.every(partValid)
+          || !Array.isArray(plan.inventories) || plan.inventories.length > 64) refuse("migration_plan_invalid");
+        const bodies = cutBodies(plan, m.planHash);
+        if (bodies.barrierBytes !== barrierBytes.toString() || hash(encodePeers(peersOf(plan.peers))) !== plan.checkpointPeersHash) refuse("migration_plan_invalid");
+        if (plan.adoption !== null && (!record(plan.adoption) || !hex(plan.adoption.fromProjectionHash)
+          || !hex(plan.adoption.toProjectionHash))) refuse("migration_plan_invalid");
+        const authorityBytes = plan.parts.reduce((sum, part) => sum + part.bytes, 0) + barrierBytes.length
+          + bodies.files.reduce((sum, [, bytes]) => sum + Buffer.byteLength(bytes), 0);
+        if (authorityBytes > TOTAL_LIMIT || plan.parts.length + plan.inventories.length + 6 > RESERVATION_FILES
+          || bodies.files.some(([, bytes]) => Buffer.byteLength(bytes) > FILE_LIMIT)) refuse("capacity");
+        const savedClaim = this.cutSource(root, claim, "claim.json");
+        if (!savedClaim || !same(unpack<CutClaim>(savedClaim, "claim", refuse), claim)) refuse("migration_claim_changed");
+        // Validate ALL retained rows and retirement evidence before publication
+        // or deletion. Neither a partial old prefix nor membership is a shortcut.
+        const rows: CapsuleRow[] = [], ids = new Set<string>();
+        let charge = 0, policy: ManagedPolicy | null = null;
+        for (const part of plan.parts) {
+          const bytes = this.cutSource(root, claim, part.name) ?? this.readFile(root, part.name, false);
+          if (!bytes || bytes.length !== part.bytes || hash(bytes) !== part.sha256) refuse("migration_chunk_invalid");
+          const values = JSON.parse(bytes.toString());
+          if (!Array.isArray(values) || values.length !== part.count) refuse("migration_chunk_invalid");
+          for (const row of values) {
+            if (!rowValid(row, rows.length + 1, root.id) || ids.has(row[0])) refuse("migration_outcome_invalid");
+            ids.add(row[0]); rows.push(row); charge += row[6];
+            if (row[2] === "manage") {
+              if (policy) refuse("managed_downgrade");
+              policy = {revision: row[1], marker: row[7]!};
+            }
+          }
+        }
+        if (rows.length !== plan.revision || hash(JSON.stringify(rows)) !== plan.outcomesDigest
+          || charge !== plan.chargedBytes || charge > TOTAL_LIMIT || !same(policy, plan.policy)) refuse("migration_outcome_invalid");
+        this.capsulePolicy(root, policy);
+        const retired: CutRetired[] = [];
+        let retiredBytes = 0;
+        for (const part of plan.inventories) {
+          if (!/^retire\.[a-f0-9-]{36}\.json$/.test(part.name) || !hex(part.sha256)
+            || !integer(part.bytes, 2, FILE_LIMIT) || !integer(part.count, 1, REVISION_LIMIT)) refuse("migration_inventory_invalid");
+          const bytes = this.cutSource(root, claim, part.name);
+          if (!bytes || bytes.length !== part.bytes || hash(bytes) !== part.sha256) refuse("migration_inventory_invalid");
+          const values = JSON.parse(bytes.toString());
+          if (!Array.isArray(values) || values.length !== part.count) refuse("migration_inventory_invalid");
+          for (const item of values) {
+            if (!record(item) || item.name !== `${PREFIX}${retired.length + 1}.json` || !hex(item.sha256)
+              || !integer(item.bytes, 1, FILE_LIMIT) || typeof item.identity !== "string"
+              || !/^\d+:\d+$/.test(item.identity)) refuse("migration_inventory_invalid");
+            retired.push(item as CutRetired); retiredBytes += item.bytes;
+          }
+        }
+        if (retired.length !== plan.revision || retiredBytes !== plan.chargedBytes) refuse("migration_inventory_invalid");
+        // Establish the barrier before any root publication or retirement.
+        this.syncDirectory(root);
+        const publish = (name: string, expectedHash: string) => {
+          this.capsulePolicy(root, plan.policy);
+          if (this.cutReceipt(root, barrier, cutHash)) return;
+          const source = this.cutSource(root, claim, name);
+          if (source) {
+            if (hash(source) !== expectedHash) refuse("migration_candidate_invalid");
+            try { renameSync(join(root.path, cutChild(name)), join(root.path, name)); }
+            catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+          }
+          if (this.cutReceipt(root, barrier, cutHash)) return;
+          const target = this.readFile(root, name, false);
+          if (!target || hash(target) !== expectedHash) refuse("migration_candidate_invalid");
+        };
+        for (const part of plan.parts) publish(part.name, part.sha256);
+        for (const [name, bytes] of bodies.files.filter(([name]) => name !== CUTOVER)) publish(name, hash(bytes));
+        this.syncDirectory(root);
+        for (const item of retired) {
+          this.capsulePolicy(root, plan.policy);
+          if (this.cutReceipt(root, barrier, cutHash)) break;
+          const bytes = this.readFile(root, item.name, false);
+          if (!bytes) continue;
+          const stat = lstatSync(join(root.path, item.name)); owned(stat);
+          if (id(stat) !== item.identity || bytes.length !== item.bytes || hash(bytes) !== item.sha256) refuse("migration_retirement_changed");
+          this.check(root);
+          try { unlinkSync(join(root.path, item.name)); }
+          catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+        }
+        this.syncDirectory(root);
+        // One prewritten, consumable receipt. Never reconstruct it after ENOENT.
+        const receipt = bodies.files.find(([name]) => name === CUTOVER)![1];
+        publish(CUTOVER, hash(receipt));
+        this.syncDirectory(root);
+      }
+      if (!this.cutReceipt(root, barrier, cutHash)) refuse("migration_incomplete");
+      // The durable receipt authorizes deleting transition evidence, not vice versa.
+      this.syncDirectory(root);
+      this.removeCutFiles(root, claim);
+      this.state(root); // Full current capsule verification, including later heads.
+    } catch (error) {
+      // A helper may have completed AND a later writer collected serial 1.
+      // Return only after verifying the receipt and current authority afresh.
+      if (!existsSync(join(root.path, CUT_DIRECTORY)) && this.cutReceipt(root, barrier, cutHash)) {
+        try { this.syncDirectory(root); this.state(root); return; } catch { /* unavailable, not an old positive */ }
+      }
+      if (error instanceof PairingTrustError) throw error;
+      refuse("migration_incomplete");
+    }
+  }
+  /** Trusted local maintenance only. Drain all store users before calling.
+   * No remote route, automatic startup upgrade or environment selector. */
+  migrateToCapsule(migrationId: string, context?: PairingTrustContext): CutResult {
+    if (!/^[a-zA-Z0-9._:-]{1,128}$/.test(migrationId)) refuse("invalid_mutation");
+    // Refuse a visible older holder BEFORE attempting a potentially blocking
+    // acquisition. This cannot discover an unobservable foreign process.
+    const observed = this.root(), adapter = observed ? adapters.get(observed.id) : undefined;
+    const held = observed && adapter?.currentHolder(observed);
+    const captured = context === undefined ? undefined : contexts.get(context as object);
+    if (held && (!captured || captured !== invocations.getStore() || !captured.active
+      || captured.owner !== this || captured.root.id !== observed!.id || captured.holder !== held)) refuse("migration_holder_active");
+    return this.operation(context, (root, invocation) => {
+      if (!root) refuse("migration_missing_root");
+      if ([...liveInvocations].some(active => active.active && active.root.id === root.id && active !== invocation)) refuse("migration_holder_active");
+      const state = this.readyState(root);
+      if (state.capsule) {
+        const b = state.capsule.barrier;
+        if (b.migration?.migrationId !== migrationId || !this.cutReceipt(root, b, state.capsule.cutHash)) refuse("migration_id_reused");
+        this.syncDirectory(root);
+        const verified = this.state(root);
+        if (verified.capsule?.cutHash !== state.capsule.cutHash) refuse("migration_receipt_invalid");
+        if (invocation) this.validateInvocation(invocation, root);
+        return {migrationId, revision: b.revision, logicalHead: b.logicalHead};
+      }
+      if (invocation?.used) refuse("context_already_used");
+      let stat;
+      try { mkdirSync(join(root.path, CUT_DIRECTORY), {mode: 0o700}); stat = lstatSync(join(root.path, CUT_DIRECTORY)); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === "EEXIST") refuse("migration_busy"); throw error; }
+      owned(stat, true);
+      const claim: CutClaim = {rootId: root.id, token: randomUUID(), identity: id(stat), migrationId};
+      let reserved = false, uncertain = false;
+      try {
+        this.syncCutDirectory(root, claim); this.syncDirectory(root);
+        this.reserveCutover(root, claim);
+        const rows: CapsuleRow[] = [], retired: CutRetired[] = [];
+        let policy: ManagedPolicy | null = null;
+        for (let revision = 1; revision <= state.revision; revision++) {
+          const name = `${PREFIX}${revision}.json`, bytes = this.readFile(root, name, false);
+          if (!bytes) refuse("revision_conflict");
+          const generation = JSON.parse(bytes.toString()).generation as Generation;
+          const saved = generation.mutation, o = saved.outcome;
+          if (!same(saved, state.outcomes[o.mutationId])) refuse("revision_conflict");
+          rows.push([o.mutationId, o.revision, o.type, o.publicKey, o.changed, saved.request, bytes.length,
+            o.type === "manage" ? generation.managed : null]);
+          if (o.type === "manage") policy = {revision, marker: generation.managed!};
+          retired.push({name, sha256: hash(bytes), bytes: bytes.length, identity: id(lstatSync(join(root.path, name)))});
+        }
+        if (rows.length !== state.revision || !rows.every((row, index) => rowValid(row, index + 1, root.id))
+          || rows.reduce((sum, row) => sum + row[6], 0) !== state.bytes
+          || !same(policy?.marker ?? null, state.managed)) refuse("migration_outcome_invalid");
+        const payloads: [string, string][] = [];
+        const group = <T>(values: T[], name: () => string): CutFile[] => {
+          const parts: CutFile[] = []; let batch: string[] = [], size = 2;
+          const flush = () => {
+            if (!batch.length) return;
+            const bytes = `[${batch.join(",")}]`, filename = name();
+            if (Buffer.byteLength(bytes) > FILE_LIMIT) refuse("capacity");
+            parts.push({name: filename, sha256: hash(bytes), bytes: Buffer.byteLength(bytes), count: batch.length});
+            payloads.push([filename, bytes]); batch = []; size = 2;
+          };
+          for (const value of values) {
+            const row = JSON.stringify(value);
+            if (size + Buffer.byteLength(row) + 1 > CHUNK_TARGET) flush();
+            batch.push(row); size += Buffer.byteLength(row) + 1;
+          }
+          flush(); return parts;
+        };
+        const parts = group(rows, () => dataName(randomUUID()));
+        const inventories = group(retired, () => `retire.${randomUUID()}.json`);
+        const plan: CutPlan = {...claim, schema: "scout.pairing-cutover-plan/v2", revision: state.revision,
+          logicalHead: state.hash, logicalPeersHash: state.peersHash, checkpointPeersHash: hash(encodePeers(state.peers)),
+          projectionHash: state.projectionHash, peers: state.peers, outcomesDigest: hash(JSON.stringify(rows)),
+          chargedBytes: state.bytes, policy, parts, inventories, adoption: state.adoption};
+        const planBytes = pack("plan", plan), planHash = hash(planBytes), bodies = cutBodies(plan, planHash);
+        payloads.push(["claim.json", pack("claim", claim)], ["plan.json", planBytes], ["barrier.json", bodies.barrierBytes], ...bodies.files);
+        const authorityBytes = parts.reduce((n, part) => n + part.bytes, 0) + Buffer.byteLength(bodies.barrierBytes)
+          + bodies.files.reduce((n, [, bytes]) => n + Buffer.byteLength(bytes), 0);
+        if (parts.length > 256 || inventories.length > 64 || payloads.length > RESERVATION_FILES || authorityBytes > TOTAL_LIMIT
+          || payloads.some(([, bytes]) => Buffer.byteLength(bytes) > FILE_LIMIT)) refuse("capacity");
+        payloads.forEach(([name, bytes], index) => this.fillCutReservation(root, claim, index, name, bytes));
+        this.syncCutDirectory(root, claim); this.syncDirectory(root);
+        for (const [name, bytes] of payloads) {
+          if (!this.cutSource(root, claim, name)?.equals(Buffer.from(bytes))) refuse("migration_candidate_invalid");
+        }
+        const before = this.state(root);
+        if (before.revision !== state.revision || before.hash !== state.hash || before.projectionHash !== state.projectionHash
+          || !same(before.outcomes, state.outcomes) || before.bytes !== state.bytes) refuse("revision_conflict");
+        if (invocation) { this.validateInvocation(invocation, root); invocation.used = true; }
+        uncertain = true;
+        try { linkSync(join(root.path, cutChild("barrier.json")), join(root.path, bodies.barrierName)); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code === "EEXIST") { uncertain = false; refuse("revision_conflict"); } throw error; }
+        reserved = true; uncertain = false;
+        this.syncDirectory(root);
+        this.completeCutover(root, bodies.barrier, Buffer.from(bodies.barrierBytes));
+        if (invocation) this.validateInvocation(invocation, root);
+        return {migrationId, revision: state.revision, logicalHead: state.hash};
+      } finally {
+        if (!reserved && !uncertain) this.removeCutFiles(root, claim);
+      }
+    });
+  }
+  private capsulePolicy(root: PairingRootIdentity, policy: ManagedPolicy | null) {
+    if (!policy) return;
+    const adapter = adapters.get(root.id);
+    if (!adapter || adapter.id !== policy.marker.adapterId) refuse("managed_adapter_required");
+    const active = invocations.getStore();
+    if (!active || active.owner !== this) refuse("managed_context_required");
+    this.validateInvocation(active, root);
+  }
+  /** Atomic rename reserves one of eight nonempty token-bearing slots.
+   * Empty canonical directories are abandoned, never live pre-token claims.
+   * Tokens identify claims across time. dev:ino alone is only meaningful while
+   * an open directory descriptor pins that object; freed inodes can be reused.
+   * Nonempty claims stay occupied; no PID, timestamp or age takeover. */
+  private capsuleSlots(root: PairingRootIdentity, inventory: string[]) {
+    const claims = new Map<string,CapsuleSlot>(), allowed = new Set<string>();
+    for (const name of inventory.filter(n => n.startsWith(".pairing-v2-slot-"))) {
+      if (!/^\.pairing-v2-slot-[0-7]$/.test(name)) refuse("capacity");
+      const index = Number(name.at(-1)), path = join(root.path,name);
+      const fd = openSync(path,constants.O_RDONLY|constants.O_DIRECTORY|constants.O_NOFOLLOW);
+      try {
+        const stat = fstatSync(fd); owned(stat,true);
+        if(id(lstatSync(path))!==id(stat))refuse("capsule_slot_invalid");
+        const children = readdirSync(path);
+        if (children.length > 1) refuse("unsafe_path");
+        allowed.add(name);
+        if (!children.length) {
+          if(id(lstatSync(path))!==id(stat))refuse("capsule_slot_invalid");
+          continue;
+        }
+        const child = children[0]!;
+        if (!/^[a-f0-9-]{36}\.json$/.test(child)) refuse("unsafe_path");
+        const bytes = this.readFile(root,`${name}/${child}`,false); if (!bytes) refuse("revision_conflict");
+        const claim = unpack<Record<string,unknown>>(bytes,"claim",refuse);
+        if (claim.rootId !== root.id || claim.index !== index || !token(claim.token) || child !== `${claim.token}.json`
+          || claim.identity !== id(stat) || id(lstatSync(path)) !== id(stat)) refuse("unsafe_path");
+        const slot = {index,token:claim.token,identity:id(stat)};
+        if(claims.has(slot.token))refuse("capsule_slot_invalid");claims.set(slot.token,slot);
+        let total = bytes.length;
+        for (const candidate of [dataName(slot.token), ...(["peers","commit","marker","done"] as const).map(r=>stageName(slot.token,r))]) {
+          allowed.add(candidate);
+          try {
+            const s = lstatSync(join(root.path,candidate)); owned(s,false,false,candidate===stageName(slot.token,"commit"));
+            if (s.size > FILE_LIMIT) refuse("capacity"); total += s.size;
+          } catch (e) {if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;}
+        }
+        if (total > SLOT_LIMIT) refuse("capacity");
+        if(!this.slotMatches(root,slot,fd))refuse("capsule_slot_invalid");
+      } finally {closeSync(fd);}
+    }
+    this.check(root); return {claims,allowed};
+  }
+  private capsuleState(root: PairingRootIdentity, allowPending: boolean, inventory: string[]): State {
+    const names = inventory.filter(n=>n.startsWith(PREFIX) || n.startsWith(CAPSULE_PREFIX) || n.startsWith(".pairing-v2")).sort();
+    if (names.length > 360) refuse("capacity");
+    const barriers = names.filter(n=>n.startsWith(PREFIX));
+    if (barriers.length !== 1) refuse("capsule_unexpected_history");
+    const barrierBytes = this.readFile(root,barriers[0]!,false); if (!barrierBytes) refuse("capsule_barrier_required");
+    const b = unpack<CapsuleBarrier>(barrierBytes,"barrier",refuse), cutHash = hash(barrierBytes);
+    if (b.schema !== "scout.pairing-cut/v2" || b.rootId !== root.id || !integer(b.revision,0,REVISION_LIMIT)
+      || barriers[0] !== `${PREFIX}${b.revision+1}.json` || !hex(b.logicalHead) || !hex(b.logicalPeersHash)
+      || !hex(b.checkpointPeersHash) || !hex(b.projectionHash) || !hex(b.outcomesDigest)
+      || !integer(b.chargedBytes,0,TOTAL_LIMIT) || !policyValid(b.policy,root.id,b.revision)
+      || !Array.isArray(b.parts) || b.parts.length>256 || !b.parts.every(partValid)) refuse("capsule_barrier_invalid");
+    const cutBytes = this.readFile(root,CUTOVER,false); if (!cutBytes) refuse("capsule_cutover_incomplete");
+    const cut = unpack<Record<string,unknown>>(cutBytes,"receipt",refuse);
+    if (cut.schema !== "scout.pairing-cutover-done/v2" || cut.rootId !== root.id || cut.cutHash !== cutHash) refuse("capsule_cutover_incomplete");
+    const serials = names.filter(n=>n.startsWith(`${CAPSULE_PREFIX}commit.`)).map(n=>{
+      const match=/^trusted-peers\.v2\.commit\.([1-9][0-9]*)\.json$/.exec(n);
+      if (!match || !integer(Number(match[1]),1,Number.MAX_SAFE_INTEGER)) refuse("capsule_serial_invalid");
+      return Number(match[1]);
+    });
+    if (!serials.length || serials.length>2) refuse("capsule_serial_invalid");
+    const serial = Math.max(...serials), name = commitName(serial);
+    const physical = this.readFile(root,name,true); if (!physical) refuse("revision_conflict");
+    const h = unpack<CapsuleHead>(physical,"capsule",refuse), physicalHash = hash(physical);
+    if (h.schema !== "scout.pairing-capsule/v2") refuse("capsule_version_unsupported");
+    if (h.rootId !== root.id || h.cutHash !== cutHash || h.serial !== serial || !integer(h.revision,b.revision,REVISION_LIMIT)
+      || h.serial!==h.revision-b.revision+1
+      || !hex(h.logicalHead) || !hex(h.previousLogicalHead) || !hex(h.previousPhysicalHead)
+      || !hex(h.logicalPeersHash) || !hex(h.checkpointPeersHash) || !hex(h.projectionHash) || !hex(h.outcomesDigest)
+      || !integer(h.chargedBytes,0,TOTAL_LIMIT) || !policyValid(h.policy,root.id,h.revision)
+      || !Array.isArray(h.parts) || h.parts.length>256 || !h.parts.every(partValid)
+      || !Array.isArray(h.retire) || h.retire.length>3) refuse("capsule_invalid");
+    if (!same(h.parts.slice(0,b.parts.length),b.parts)) refuse("capsule_cut_changed");
+    const checkpointPeers=peersOf(h.peers);
+    if (hash(encodePeers(checkpointPeers)) !== h.checkpointPeersHash) refuse("capsule_peers_invalid");
+    if (h.adoption !== null && (!record(h.adoption) || !hex(h.adoption.fromProjectionHash) || !hex(h.adoption.toProjectionHash))) refuse("capsule_invalid");
+    const uniqueParts=new Set(h.parts.map(p=>p.name));
+    if (uniqueParts.size !== h.parts.length) refuse("capsule_invalid");
+    const outcomes:Record<string,SavedOutcome>={}, rows:CapsuleRow[]=[], partData:Buffer[]=[];
+    let charge=0, cutCharge=0, policy:ManagedPolicy|null=null, cutPolicy:ManagedPolicy|null=null, authorityBytes=physical.length+barrierBytes.length+cutBytes.length;
+    // Reject an over-budget inventory before allocating its bodies. Each
+    // declared byte length is also compared with the checked file below.
+    if(authorityBytes+h.parts.reduce((n,p)=>n+p.bytes,0)>TOTAL_LIMIT)refuse("capacity");
+    const fullDigest=createHash("sha256").update("["), cutDigest=createHash("sha256").update("[");
+    for (let i=0;i<h.parts.length;i++) {
+      const p=h.parts[i]!, bytes=this.readFile(root,p.name,false); if (!bytes) refuse("capsule_chunk_missing");
+      authorityBytes+=bytes.length; if (authorityBytes>TOTAL_LIMIT) refuse("capacity");
+      if (bytes.length!==p.bytes || hash(bytes)!==p.sha256) refuse("capsule_chunk_checksum");
+      if (bytes[0]!==91 || bytes.at(-1)!==93) refuse("capsule_rows_invalid");
+      const values:unknown=JSON.parse(bytes.toString());
+      if (!Array.isArray(values) || values.length!==p.count) refuse("capsule_rows_invalid");
+      if(i) fullDigest.update(","); fullDigest.update(bytes.subarray(1,-1));
+      if(i<b.parts.length){if(i)cutDigest.update(",");cutDigest.update(bytes.subarray(1,-1));}
+      for(const value of values){
+        if(!rowValid(value,rows.length+1,root.id) || Object.hasOwn(outcomes,value[0])) refuse("capsule_outcome_invalid");
+        const row=value; rows.push(row); charge+=row[6];
+        if(row[2]==="manage") {if(policy)refuse("managed_downgrade");policy={revision:row[1],marker:row[7]!};}
+        if(row[1]<=b.revision){cutCharge+=row[6];cutPolicy=policy;}
+        Object.defineProperty(outcomes,row[0],{value:{request:row[5],outcome:outcome(row)},enumerable:true});
+      }
+      partData.push(bytes);
+    }
+    if(rows.length!==h.revision || charge!==h.chargedBytes || charge>TOTAL_LIMIT || cutCharge!==b.chargedBytes
+      || b.parts.reduce((n,p)=>n+p.count,0)!==b.revision || fullDigest.update("]").digest("hex")!==h.outcomesDigest
+      || cutDigest.update("]").digest("hex")!==b.outcomesDigest) refuse("capsule_outcomes_invalid");
+    // Permanent policy is derived from all retained records, not a head flag.
+    if(!same(policy,h.policy) || !same(cutPolicy,b.policy)) refuse("managed_downgrade");
+    if(h.revision===b.revision){
+      if(h.previousLogicalHead!==b.logicalHead || h.previousPhysicalHead!==cutHash || h.logicalHead!==b.logicalHead || h.logicalPeersHash!==b.logicalPeersHash || h.checkpointPeersHash!==b.checkpointPeersHash
+        || h.projectionHash!==b.projectionHash || h.outcomesDigest!==b.outcomesDigest) refuse("capsule_cut_changed");
+    } else if(h.logicalPeersHash!==h.checkpointPeersHash || h.projectionHash!==h.checkpointPeersHash
+      || h.logicalHead!==logicalHead(root.id,h.revision,h.previousLogicalHead,h.logicalPeersHash,h.policy,rows.at(-1)!,h.adoption,h.outcomesDigest)) refuse("capsule_logical_head_invalid");
+    this.capsulePolicy(root,policy);
+    const slots=this.capsuleSlots(root,inventory);
+    if(h.slot!==null && (!record(h.slot) || !integer(h.slot.index,0,7) || !token(h.slot.token)
+      || typeof h.slot.identity!=="string" || !/^\d+:\d+$/.test(h.slot.identity))) refuse("capsule_slot_invalid");
+    if(h.slot===null && (h.serial!==1 || h.revision!==b.revision)) refuse("capsule_slot_invalid");
+    const stat=lstatSync(join(root.path,name));owned(stat,false,false,true);
+    const pending=stat.nlink===2;
+    if(pending){
+      if(!h.slot || !same(slots.claims.get(h.slot.token),h.slot)) refuse("capsule_slot_invalid");
+      const witness=lstatSync(join(root.path,stageName(h.slot.token,"commit")));owned(witness,false,false,true);
+      if(id(witness)!==id(stat))refuse("publication_incomplete");
+    }
+    const marker=this.marker(root), managed=policy?.marker??null;
+    if(!same(marker,managed) && !(pending && marker===null && managed!==null)) refuse("managed_marker_mismatch");
+    const projection=this.readFile(root,PEERS), projectionHash=hash(projection??Buffer.alloc(0));
+    let peers=checkpointPeers, adoption:ProjectionAdoption|null=null;
+    if(!pending){
+      if(managed && projectionHash!==h.logicalPeersHash)refuse("external_change_or_incomplete");
+      if(!managed){
+        peers=projection?peersOf(JSON.parse(projection.toString())):[];
+        if(projectionHash!==h.logicalPeersHash)adoption={fromProjectionHash:h.logicalPeersHash,toProjectionHash:projectionHash};
+      }
+    }
+    const allowed=new Set([barriers[0]!,CUTOVER,name,doneName(serial),...h.parts.map(p=>p.name),...slots.allowed]);
+    const retiredNames=new Set<string>();
+    if(serial===1 && h.retire.length)refuse("capsule_retirement_invalid");
+    for(const r of h.retire){
+      if(!record(r) || typeof r.name!=="string" || !hex(r.sha256) || typeof r.identity!=="string" || !/^\d+:\d+$/.test(r.identity)
+        || retiredNames.has(r.name) || uniqueParts.has(r.name)
+        || !(r.name===commitName(serial-1) && r.sha256===h.previousPhysicalHead || r.name===doneName(serial-1)
+          || /^trusted-peers\.v2\.data\.[a-f0-9-]{36}\.json$/.test(r.name))) refuse("capsule_retirement_invalid");
+      retiredNames.add(r.name);allowed.add(r.name);
+    }
+    if(serial>1 && (!retiredNames.has(commitName(serial-1)) || !retiredNames.has(doneName(serial-1))))refuse("capsule_retirement_invalid");
+    if(names.some(n=>!allowed.has(n)))refuse("capsule_unexpected_history");
+    const receiptBytes=this.readFile(root,doneName(serial),false);
+    if(receiptBytes){const receipt=unpack<Record<string,unknown>>(receiptBytes,"receipt",refuse);
+      if(authorityBytes+receiptBytes.length>TOTAL_LIMIT)refuse("capacity");
+      if(receipt.schema!=="scout.pairing-collected/v2" || receipt.rootId!==root.id || receipt.serial!==serial || receipt.physicalHash!==physicalHash)refuse("capsule_receipt_invalid");
+      if(h.retire.some(r=>names.includes(r.name)))refuse("capsule_retired_reappeared");
+    }
+    const ownSlotExists=!!(h.slot && same(slots.claims.get(h.slot.token),h.slot));
+    const needsRecovery=pending || !receiptBytes || ownSlotExists;
+    if(needsRecovery && !allowPending)refuse("publication_incomplete");
+    const after=readdirSync(root.path).filter(n=>n.startsWith(PREFIX)||n.startsWith(CAPSULE_PREFIX)||n.startsWith(".pairing-v2")).sort();
+    if(!same(names,after))refuse("revision_conflict");this.check(root);
+    this.capsulePolicy(root,policy); // Also validate the holder after all authority I/O.
+    return {revision:h.revision,peers,hash:h.logicalHead,peersHash:h.logicalPeersHash,managed,outcomes,bytes:charge,
+      projectionHash,adoption,pendingStage:pending&&h.slot?join(root.path,stageName(h.slot.token,"commit")):null,
+      projectionStage:h.slot?stageName(h.slot.token,"peers"):null,
+      capsule:{barrier:b,barrierName:barriers[0]!,cutHash,head:h,physicalHash,rows,partData,needsRecovery,pending}};
+  }
+  /** The descriptor must stay open for the entire check/use interval. */
+  private slotMatches(root: PairingRootIdentity, slot: CapsuleSlot, fd: number): boolean {
+    const stat=fstatSync(fd);owned(stat,true);
+    if(id(stat)!==slot.identity)return false;
+    const directory=join(root.path,slotName(slot.index));
+    try {
+      if(id(lstatSync(directory))!==id(stat))return false;
+      const bytes=this.readFile(root,`${slotName(slot.index)}/${slot.token}.json`,false);
+      if(!bytes)return false; // Includes a newer mkdir before its token write.
+      const claim=unpack<Record<string,unknown>>(bytes,"claim",refuse);
+      if(!same(claim,{rootId:root.id,...slot}))refuse("capsule_slot_invalid");
+      return id(lstatSync(directory))===id(stat);
+    } catch(e) {if((e as NodeJS.ErrnoException).code==="ENOENT")return false;throw e;}
+  }
+  private syncSlot(root: PairingRootIdentity, slot: CapsuleSlot) {
+    this.check(root);const path=join(root.path,slotName(slot.index));
+    const fd=openSync(path,constants.O_RDONLY|constants.O_DIRECTORY|constants.O_NOFOLLOW);
+    try {
+      if(!this.slotMatches(root,slot,fd))refuse("capsule_slot_invalid");
+      fsyncSync(fd);
+      if(!this.slotMatches(root,slot,fd))refuse("capsule_slot_invalid");
+    } finally {closeSync(fd);}this.check(root);
+  }
+  /** A candidate carries only its small claim file, never staged payloads.
+   * It is outside the authority inventory until its atomic directory rename.
+   * Only an empty canonical slot can be replaced; live claims stay nonempty. */
+  private claimCapsuleSlot(root: PairingRootIdentity): CapsuleSlot {
+    for(let index=0;index<8;index++){
+      this.check(root);
+      const candidate=`.pairing-claim-${randomUUID()}`,source=join(root.path,candidate);
+      mkdirSync(source,{mode:0o700});
+      const fd=openSync(source,constants.O_RDONLY|constants.O_DIRECTORY|constants.O_NOFOLLOW);
+      try {
+        const stat=fstatSync(fd);
+        owned(stat,true);
+        const slot={index,token:randomUUID(),identity:id(stat)},child=`${slot.token}.json`;
+        let renamed=false;
+        try {
+          this.writeNew(root,`${candidate}/${child}`,pack("claim",{rootId:root.id,...slot}));
+          if(id(lstatSync(source))!==id(stat) || !same(readdirSync(source),[child]))refuse("capsule_slot_invalid");
+          const bytes=this.readFile(root,`${candidate}/${child}`,false);
+          if(!bytes || !same(unpack(bytes,"claim",refuse),{rootId:root.id,...slot}))refuse("capsule_slot_invalid");
+          // Persist the complete claim BEFORE exposing it at a reusable index.
+          fsyncSync(fd);this.syncDirectory(root);
+          try {renameSync(source,join(root.path,slotName(index)));}
+          catch(e){
+            if(["ENOTEMPTY","EEXIST"].includes((e as NodeJS.ErrnoException).code??""))continue;
+            throw e;
+          }
+          renamed=true;
+          if(!this.slotMatches(root,slot,fd))refuse("capsule_slot_invalid");
+          this.syncDirectory(root);
+          return slot;
+        } catch(e){
+          if(renamed)this.releaseCapsuleSlot(root,slot);
+          throw e;
+        } finally {
+          if(!renamed){
+            // The descriptor pins THIS unique candidate across cleanup.
+            // Crashed candidates are metadata, not canonical resource claims.
+            if(id(lstatSync(source))!==id(fstatSync(fd)))refuse("capsule_slot_invalid");
+            const names=readdirSync(source);
+            if(names.some(name=>name!==child))refuse("capsule_slot_invalid");
+            if(names.length)unlinkSync(join(source,child));
+            rmdirSync(source);
+            this.syncDirectory(root);
+          }
+        }
+      } finally {closeSync(fd);}
+    }
+    return refuse("capsule_staging_capacity");
+  }
+  private releaseCapsuleSlot(root: PairingRootIdentity, slot: CapsuleSlot) {
+    this.check(root);const directory=join(root.path,slotName(slot.index));
+    let fd:number;
+    try{fd=openSync(directory,constants.O_RDONLY|constants.O_DIRECTORY|constants.O_NOFOLLOW);}
+    catch(e){if((e as NodeJS.ErrnoException).code==="ENOENT")return;throw e;}
+    try {
+      // A matching inode without this token is not ownership. In particular,
+      // never rmdir an empty newer claim that reused a previous inode number.
+      if(!this.slotMatches(root,slot,fd))return;
+      const name=`${slotName(slot.index)}/${slot.token}.json`;
+      try{unlinkSync(join(root.path,name));}
+      catch(e){if((e as NodeJS.ErrnoException).code!=="ENOENT")throw e;}
+      // Keep fd open across unlink and rmdir: another helper can consume this
+      // directory, but its replacement cannot reuse this still-pinned inode.
+      if(id(lstatSync(directory))!==id(fstatSync(fd)))return;
+      fsyncSync(fd);rmdirSync(directory);
+    } catch(e) {
+      if(!["ENOENT","ENOTEMPTY","EEXIST"].includes((e as NodeJS.ErrnoException).code??""))throw e;
+    } finally {closeSync(fd);}
+    this.syncDirectory(root);
+  }
+  private capsuleFileIdentity(root: PairingRootIdentity, name: string): RetiredFile {
+    const bytes=this.readFile(root,name,false);if(!bytes)refuse("revision_conflict");
+    const stat=lstatSync(join(root.path,name));owned(stat);
+    return {name,sha256:hash(bytes),identity:id(stat)};
+  }
+  private completeCapsule(root: PairingRootIdentity, snapshot: State) {
+    if(completing.has(root.id))refuse("publication_incomplete");
+    completing.add(root.id);
+    try {
+      let state=this.state(root,true), cap=state.capsule!;
+      if(!cap || cap.head.serial!==snapshot.capsule!.head.serial)return;
+      const h=cap.head, slot=h.slot;
+      if(cap.pending){
+        if(!slot)refuse("publication_incomplete");
+        this.capsulePolicy(root,h.policy);
+        if(h.policy){
+          const markerSource=stageName(slot.token,"marker"), staged=this.readFile(root,markerSource,false);
+          if(staged){
+            if(!same(JSON.parse(staged.toString()),h.policy.marker))refuse("publication_incomplete");
+            try{renameSync(join(root.path,markerSource),join(root.path,MARKER));}
+            catch(e){if((e as NodeJS.ErrnoException).code!=="ENOENT")throw e;}
+          }
+          if(!same(this.marker(root),h.policy.marker))refuse("managed_marker_mismatch");
+        }
+        const source=stageName(slot.token,"peers"), bytes=this.readFile(root,source,false);
+        if(bytes){
+          if(hash(bytes)!==h.projectionHash)refuse("publication_incomplete");
+          this.check(root);
+          try{renameSync(join(root.path,source),join(root.path,PEERS));}
+          catch(e){if((e as NodeJS.ErrnoException).code!=="ENOENT")throw e;}
+        }
+        state=this.state(root,true);cap=state.capsule!;
+        if(cap.head.serial!==h.serial)return;
+        if(state.projectionHash!==h.projectionHash || !same(this.marker(root),h.policy?.marker??null))refuse("publication_incomplete");
+        try{unlinkSync(join(root.path,stageName(slot.token,"commit")));}
+        catch(e){if((e as NodeJS.ErrnoException).code!=="ENOENT")throw e;}
+        this.syncDirectory(root);
+      }
+      state=this.state(root,true);cap=state.capsule!;
+      if(cap.head.serial!==h.serial)return;
+      if(!this.readFile(root,doneName(h.serial),false)){
+        // Establish publication durability BEFORE retiring any older authority.
+        this.syncDirectory(root);
+        try {
+          for(const retired of h.retire){
+            const bytes=this.readFile(root,retired.name,false);
+            if(!bytes)continue;
+            const stat=lstatSync(join(root.path,retired.name));owned(stat);
+            if(id(stat)!==retired.identity || hash(bytes)!==retired.sha256)refuse("capsule_retirement_changed");
+            this.check(root);
+            try{unlinkSync(join(root.path,retired.name));}catch(e){if((e as NodeJS.ErrnoException).code!=="ENOENT")throw e;}
+          }
+          this.syncDirectory(root);
+          if(!slot)refuse("publication_incomplete");
+          const receiptSource=stageName(slot.token,"done"), receipt=this.readFile(root,receiptSource,false);
+          if(receipt){
+            const r=unpack<Record<string,unknown>>(receipt,"receipt",refuse);
+            if(r.rootId!==root.id || r.serial!==h.serial || r.physicalHash!==cap.physicalHash || r.schema!=="scout.pairing-collected/v2")refuse("capsule_receipt_invalid");
+            try{renameSync(join(root.path,receiptSource),join(root.path,doneName(h.serial)));}
+            catch(e){if((e as NodeJS.ErrnoException).code!=="ENOENT")throw e;}
+          }
+          this.syncDirectory(root);
+          // A consumed receipt source is never reconstructed by a late helper.
+          const latest=this.state(root,true);
+          if(latest.capsule!.head.serial!==h.serial)return;
+          if(!this.readFile(root,doneName(h.serial),false))refuse("publication_incomplete");
+        }catch(e){if(e instanceof PairingTrustError)throw e;refuse("capsule_collection_failed");}
+      }
+      if(slot)this.releaseCapsuleSlot(root,slot);
+    } catch(e){if(e instanceof PairingTrustError)throw e;refuse("publication_incomplete");}
+    finally{completing.delete(root.id);}
+  }
+  private publishCapsule(root: PairingRootIdentity, state: State, peers: TrustedPeer[], managed: Marker|null,
+    request: string, result: TrustOutcome, invocation?: Invocation, beforePublish?:()=>void): TrustOutcome {
+    const prior=state.capsule!, old=prior.head;
+    if(old.serial>=Number.MAX_SAFE_INTEGER)refuse("capacity");
+    const charge=legacyCharge(root.id,result.revision,state.hash,peers,managed,request,result,state.adoption);
+    if(charge>FILE_LIMIT || state.bytes+charge>TOTAL_LIMIT)refuse("capacity");
+    const row:CapsuleRow=[result.mutationId,result.revision,result.type,result.publicKey,result.changed,request,charge,
+      result.type==="manage"?managed:null];
+    const policy:ManagedPolicy|null=result.type==="manage"?{revision:result.revision,marker:managed!}:old.policy;
+    this.capsulePolicy(root,policy);
+    const slot=this.claimCapsuleSlot(root), serial=old.serial+1;
+    let reserved=false, uncertain=false;
+    try {
+      const parts=old.parts.map(p=>({...p})), payloads=prior.partData.slice();
+      let replaced:CapsulePart|undefined, data:string;
+      const tail=payloads.at(-1);
+      // Initial cut chunks stay immutable forever. Later writes COW only the final chunk.
+      if(parts.length>prior.barrier.parts.length && tail && tail.length+Buffer.byteLength(JSON.stringify(row))+1<=CHUNK_TARGET){
+        replaced=parts.pop();payloads.pop();
+        data=tail.subarray(0,-1).toString()+","+JSON.stringify(row)+"]";
+        if(!Buffer.from(data).subarray(0,tail.length-1).equals(tail.subarray(0,-1)))refuse("capsule_prior_rows_changed");
+      }else data=JSON.stringify([row]);
+      const bytes=Buffer.from(data), part:CapsulePart={name:dataName(slot.token),sha256:hash(bytes),bytes:bytes.length,
+        count:(replaced?.count??0)+1};
+      if(bytes.length>FILE_LIMIT || parts.length>=256)refuse("capacity");
+      parts.push(part);payloads.push(bytes);
+      const table=createHash("sha256").update("[");
+      payloads.forEach((b,i)=>{if(i)table.update(",");table.update(b.subarray(1,-1));});
+      const outcomesDigest=table.update("]").digest("hex"), peerBytes=encodePeers(peers), peersHash=hash(peerBytes);
+      const retire=[this.capsuleFileIdentity(root,commitName(old.serial)),this.capsuleFileIdentity(root,doneName(old.serial))];
+      if(replaced)retire.push(this.capsuleFileIdentity(root,replaced.name));
+      const h:CapsuleHead={schema:"scout.pairing-capsule/v2",rootId:root.id,cutHash:prior.cutHash,serial,
+        revision:result.revision,logicalHead:logicalHead(root.id,result.revision,state.hash,peersHash,policy,row,state.adoption,outcomesDigest),
+        previousLogicalHead:state.hash,previousPhysicalHead:prior.physicalHash,logicalPeersHash:peersHash,
+        checkpointPeersHash:peersHash,projectionHash:peersHash,peers,policy,outcomesDigest,chargedBytes:state.bytes+charge,
+        parts,adoption:state.adoption,slot,retire};
+      const header=pack("capsule",h), physicalHash=hash(header);
+      const receipt=pack("receipt",{schema:"scout.pairing-collected/v2",rootId:root.id,serial,physicalHash});
+      const markerBytes=managed && !state.managed?JSON.stringify(managed):"";
+      if([data,peerBytes,header,receipt,markerBytes].some(v=>Buffer.byteLength(v)>FILE_LIMIT))refuse("capacity");
+      const barrierBytes=this.readFile(root,prior.barrierName,false), cutBytes=this.readFile(root,CUTOVER,false);
+      if(!barrierBytes || !cutBytes)refuse("revision_conflict");
+      if(Buffer.byteLength(header)+parts.reduce((n,p)=>n+p.bytes,0)+barrierBytes.length+cutBytes.length+Buffer.byteLength(receipt)>TOTAL_LIMIT)refuse("capacity");
+      const claimBytes=this.readFile(root,`${slotName(slot.index)}/${slot.token}.json`,false);
+      if(!claimBytes || claimBytes.length+bytes.length+Buffer.byteLength(peerBytes)+Buffer.byteLength(header)+Buffer.byteLength(receipt)+Buffer.byteLength(markerBytes)>SLOT_LIMIT)refuse("capacity");
+      this.writeNew(root,part.name,data);
+      this.writeNew(root,stageName(slot.token,"peers"),peerBytes);
+      if(markerBytes)this.writeNew(root,stageName(slot.token,"marker"),markerBytes);
+      this.writeNew(root,stageName(slot.token,"commit"),header);
+      this.writeNew(root,stageName(slot.token,"done"),receipt);
+      this.capsuleSlots(root,readdirSync(root.path));
+      this.syncDirectory(root);
+      const before=this.state(root);
+      if(!before.capsule || before.revision!==state.revision || before.hash!==state.hash || before.projectionHash!==state.projectionHash
+        || before.capsule.physicalHash!==prior.physicalHash)refuse("revision_conflict");
+      // Verify the actual candidate sources, not just the in-memory intent.
+      const candidateFiles:[string,string][]=[[part.name,data],[stageName(slot.token,"peers"),peerBytes],
+        [stageName(slot.token,"commit"),header],[stageName(slot.token,"done"),receipt]];
+      if(markerBytes)candidateFiles.push([stageName(slot.token,"marker"),markerBytes]);
+      for(const [name,expected] of candidateFiles){const actual=this.readFile(root,name,false);
+        if(!actual || !actual.equals(Buffer.from(expected)))refuse("capsule_candidate_changed");}
+      // Assert prior records, not merely their count, immediately before publication.
+      const oldRows=before.capsule.rows;
+      const candidateRows=payloads.flatMap(b=>JSON.parse(b.toString()) as CapsuleRow[]);
+      if(!same(candidateRows.slice(0,-1),oldRows) || !same(candidateRows.at(-1),row))refuse("capsule_prior_rows_changed");
+      if(invocation){this.validateInvocation(invocation,root);invocation.used=true;}
+      beforePublish?.();
+      uncertain=true;
+      try{linkSync(join(root.path,stageName(slot.token,"commit")),join(root.path,commitName(serial)));}
+      catch(e){if((e as NodeJS.ErrnoException).code==="EEXIST"){uncertain=false;refuse("revision_conflict");}throw e;}
+      reserved=true;uncertain=false;
+      this.syncDirectory(root);
+      this.completeCapsule(root,this.state(root,true));
+      if(invocation)this.validateInvocation(invocation,root);
+      const committed=this.readyState(root);
+      if(committed.outcomes[result.mutationId]?.request!==request)refuse("outcome_unavailable");
+      return structuredClone(result);
+    } finally {
+      if(!reserved && !uncertain){
+        for(const name of [dataName(slot.token),...(["peers","commit","marker","done"] as const).map(r=>stageName(slot.token,r))]){
+          const bytes=this.readFile(root,name,false);
+          if(bytes){this.check(root);try{unlinkSync(join(root.path,name));}catch(e){if((e as NodeJS.ErrnoException).code!=="ENOENT")throw e;}}
+        }
+        this.releaseCapsuleSlot(root,slot);
+      }
+    }
   }
   private validateInvocation(invocation: Invocation, root: PairingRootIdentity) {
     if (!invocation.active || invocations.getStore() !== invocation || invocation.owner !== this
@@ -390,15 +1169,16 @@ export class PairingTrustOwner {
       const invocation: Invocation = {owner: this, root, adapter, holder, active: true, used: false};
       const context = Object.freeze({ toJSON(): never { return refuse("context_not_serializable"); } }) as unknown as PairingTrustContext;
       contexts.set(context, invocation);
+      liveInvocations.add(invocation);
       return invocations.run(invocation, () => {
         try {
           this.validateInvocation(invocation, root);
           const result = body(context);
           if (result && typeof (result as {then?: unknown}).then === "function") {
-            return Promise.resolve(result).finally(() => { invocation.active = false; }) as T;
+            return Promise.resolve(result).finally(() => { invocation.active = false; liveInvocations.delete(invocation); }) as T;
           }
-          invocation.active = false; return result;
-        } catch (e) { invocation.active = false; throw e; }
+          invocation.active = false; liveInvocations.delete(invocation); return result;
+        } catch (e) { invocation.active = false; liveInvocations.delete(invocation); throw e; }
       });
     });
   }
@@ -548,6 +1328,7 @@ export class PairingTrustOwner {
       }
       const outcome: TrustOutcome = {mutationId, revision: state.revision + 1, type: mutation.type, publicKey, changed};
       const peerBytes = encodePeers(peers);
+      if (state.capsule) return this.publishCapsule(root, state, peers, managed, request, outcome, invocation, beforePublish);
       let stagedPeers: string | null = null, stagedGeneration: string | null = null, stagedMarker: string | null = null;
       let reserved = false;
       try {

@@ -9,6 +9,10 @@ const root = fileURLToPath(new URL("..",import.meta.url)), output = process.argv
 if (!output) throw Error("usage: bun scripts/pairing-trust-owner-controls.ts <evidence-directory>");
 mkdirSync(output,{recursive:true});
 const original = readFileSync(join(root,"packages/runtime/src/pairing-security/trust-owner.ts"),"utf8");
+const relocate=(source:string)=>source
+  .replace('"../support-paths.js"',JSON.stringify(pathToFileURL(join(root,"packages/runtime/src/support-paths.ts")).href))
+  .replace('"./trust-capsule.js"',JSON.stringify(pathToFileURL(join(root,"packages/runtime/src/pairing-security/trust-capsule.ts")).href))
+  .replace('"./trust-cutover.js"',JSON.stringify(pathToFileURL(join(root,"packages/runtime/src/pairing-security/trust-cutover.ts")).href));
 const unit = readFileSync(join(root,"packages/runtime/src/pairing-security/trust-owner.test.ts"),"utf8");
 const controls = [
   {id:"cas", expected:"stale revision refuses byte-identically", edits:[
@@ -56,7 +60,7 @@ for (const control of controls) {
       if (!source.includes(needle!)) throw Error(`control anchor absent: ${control.id}`);
       source = source.replaceAll(needle!,replacement!);
     }
-    source = source.replace('"../support-paths.js"',JSON.stringify(pathToFileURL(join(root,"packages/runtime/src/support-paths.ts")).href));
+    source = relocate(source);
     const module = join(scratch,"owner.ts"); writeFileSync(module,source);
     const testFile = join(scratch,"control.test.ts");
     let tests = unit.replace('"./trust-owner.ts"',JSON.stringify(module));
@@ -108,7 +112,7 @@ expect(interposed).toBe(true);expect(owner.read()).toEqual({revision:2,peers:[]}
     }
     if (control.id.startsWith("late-writer-")) {
       const baselineModule=join(scratch,"baseline.ts"), baselineTest=join(scratch,"baseline.test.ts");
-      writeFileSync(baselineModule,original.replace('"../support-paths.js"',JSON.stringify(pathToFileURL(join(root,"packages/runtime/src/support-paths.ts")).href)));
+      writeFileSync(baselineModule,relocate(original));
       writeFileSync(baselineTest,tests.replaceAll(module,baselineModule));
       await checkDisk(control.id+"-positive");
       const baseline=Bun.spawn([process.execPath,"test",baselineTest],{stdout:"pipe",stderr:"pipe"});
