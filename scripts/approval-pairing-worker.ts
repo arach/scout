@@ -64,16 +64,17 @@ let qrState: any = null;
 const published: unknown[] = [];
 const expiryCallbacks: Array<() => void> = [];
 const originalSetTimeout = globalThis.setTimeout;
-if (scenario === "A-RETRY") globalThis.setTimeout = ((callback: any, delay: number, ...args: any[]) => {
+if (["A-RETRY", "A-SPENT-POLL"].includes(scenario)) globalThis.setTimeout = ((callback: any, delay: number, ...args: any[]) => {
   const timer = originalSetTimeout(callback, delay, ...args);
   if (delay === 300000) expiryCallbacks.push(() => {clearTimeout(timer); callback(...args);});
   return timer;
 }) as typeof setTimeout;
-const runtime = await startPairingRuntime({
+const runtimeOptions = {
   relayUrl: relayURL + "?key=stale-configured-key",
   relayEvents: {onConnected: ({room}: {room: string}) => { connectedRooms.push(room); published.push({room}); }},
   onPairingOpportunity: (payload: any) => {windowVisible = payload !== null; qrState = payload ? {...payload, qrValue: JSON.stringify(payload)} : null; published.push(qrState);},
-});
+};
+let runtime = await startPairingRuntime(runtimeOptions);
 const hostKey = bytesToHex(runtime.identity.publicKey), owner = pairingTrustOwner();
 const trusted = generateKeyPair(), intended = generateKeyPair(), trustedKey = bytesToHex(trusted.publicKey);
 const sockets: WebSocket[] = [];
@@ -181,9 +182,13 @@ function payload(response: Response) {
   const location = response.headers.get("location");
   return location ? JSON.parse(new URL(location).searchParams.get("payload")!) : null;
 }
-async function read(request: any) {
+async function readResult(request: any) {
   return requestLocalApprovalPairingOpportunity(bridgePort, "read", {requestId: request.token,
     ...(request.requesterPublicKey ? {publicKey: request.requesterPublicKey} : {})});
+}
+async function read(request: any) {
+  const result = await readResult(request);
+  return result && "payload" in result ? result : null;
 }
 async function carrierReady(room: string) {
   await waitFor(() => carriers.some(socket => new URL(socket.url).searchParams.get("room") === room && socket.readyState === WebSocket.OPEN), "approval carrier");
@@ -358,6 +363,54 @@ try {
     const repeatBody = await repeat.json() as any;
     record({normalized: request.requesterPublicKey === key, prefixStatus: bad.status,
       notRedisclosed: repeatBody.token !== request.token});
+  } else if (scenario === "A-SPENT-POLL") {
+    const statuses: number[] = [];
+    let spent = true, noTouch = true, noLocation = true, expiredBodies = true;
+    let lastRequest: any;
+    // Each request is still approved in the HTTP store and has not fetched its
+    // room. Only the runtime can distinguish spent from temporarily absent.
+    for (const reason of ["cancel", "consumed", "authority", "expiry", "cleanup"]) {
+      const request = await knock(); lastRequest = request;
+      assert.equal((await approve(request)).status, 200, "fixture: approved live window");
+      const invitation = await read(request); assert(invitation, "fixture: real window before spending");
+      if (reason === "cancel") await requestLocalApprovalPairingOpportunity(bridgePort, "cancel", {requestId: request.token});
+      if (reason === "consumed") {
+        await carrierReady(invitation.payload.room);
+        assert(await probe(await connect(intended, invitation.payload.room, "XX")), "fixture: admission consumes window");
+      }
+      if (reason === "authority") grantTrusted();
+      if (reason === "cleanup") for (const expire of expiryCallbacks.splice(0)) expire();
+      const originalNow = Date.now;
+      if (reason === "expiry") Date.now = () => originalNow() + 300001;
+      try {
+        const expiresAt = store.get(request.token)!.expiresAt; clock += 1500;
+        const response = await poll(request); statuses.push(response.status);
+        const body = await response.json() as any;
+        expiredBodies &&= body.status === "expired" && body.token === request.token;
+        noTouch &&= store.get(request.token)!.expiresAt === expiresAt;
+        noLocation &&= response.headers.get("location") === null;
+        const result = await readResult(request);
+        spent &&= Boolean(result && "status" in result && result.status === "spent");
+      } finally { Date.now = originalNow; }
+    }
+    const text = await app.request(`http://localhost/pair?token=${lastRequest.token}`, {redirect: "manual"});
+    const textStatus = text.status, textExpired = (await text.text()) === "Pairing request expired.";
+    // An absent window is not known spent. Do not turn startup/unavailability
+    // into a terminal response or reconstruct an invitation from approval.
+    const unknown = await knock(); store.decide(unknown.token, "approve");
+    const unknownStatus = (await poll(unknown)).status;
+    await runtime.stop();
+    runtime = await startPairingRuntime(runtimeOptions);
+    const afterRestart = await poll(lastRequest);
+    record({statuses, spent, noTouch, noLocation, expiredBodies, textStatus, textExpired, unknownStatus,
+      restartStatus: afterRestart.status, restartNoRoom: afterRestart.headers.get("location") === null && await read(lastRequest) === null});
+  } else if (scenario === "A-CANCEL-FIRST") {
+    const binding = {requestId: crypto.randomUUID(), publicKey: bytesToHex(intended.publicKey)};
+    const revision = owner.read().revision;
+    await requestLocalApprovalPairingOpportunity(bridgePort, "cancel", binding);
+    // Use the runtime control directly, without the HTTP route denial recheck.
+    const result = await requestLocalApprovalPairingOpportunity(bridgePort, "open", binding);
+    record({opened: Boolean(result && "payload" in result), noGrant: owner.read().revision === revision});
   } else if (scenario === "A-EXPIRY") {
     const request = await knock(); await approve(request); const invitation = await read(request); assert(invitation);
     const original = Date.now; Date.now = () => original() + 300001;

@@ -19,6 +19,9 @@ const cases: Record<string, Record<string, unknown>> = {
   "A-LOCAL-AUTH": {errorCode: -32001, noRoom: true, remainsOpen: true},
   "A-HEADER": {normalized: true, prefixStatus: 400, notRedisclosed: true},
   "A-EXPIRY": {expired: true},
+  "A-CANCEL-FIRST": {opened: false, noGrant: true},
+  "A-SPENT-POLL": {statuses: [410, 410, 410, 410, 410], spent: true, noTouch: true, noLocation: true,
+    expiredBodies: true, textStatus: 410, textExpired: true, unknownStatus: 202, restartStatus: 202, restartNoRoom: true},
 };
 for (const flavor of ["web", "desktop"]) for (const [id, expected] of Object.entries(cases)) {
   test(`${id} (${flavor})`, async () => {

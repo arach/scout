@@ -1,4 +1,4 @@
-import type { PairingRequestBinding, LocalPairingOpportunity } from "@openscout/runtime/pairing-local-socket";
+import type { PairingRequestBinding, LocalApprovalPairingOpportunity } from "@openscout/runtime/pairing-local-socket";
 import { pairingTrustOwner, type PairingOpportunity } from "@openscout/runtime/pairing-security/trust-owner";
 import { homedir } from "node:os";
 
@@ -41,7 +41,7 @@ export type StartedPairingRuntime = {
   qrPayload: QRPayload | null;
   openPairing: () => {windowId: string; payload: QRPayload};
   cancelPairing: (windowId?: string) => void;
-  approvalPairing: (action: "open" | "read" | "cancel", binding: PairingRequestBinding) => LocalPairingOpportunity | null;
+  approvalPairing: (action: "open" | "read" | "cancel", binding: PairingRequestBinding) => LocalApprovalPairingOpportunity | null;
   stop: () => Promise<void>;
 };
 
@@ -117,11 +117,18 @@ export async function startPairingRuntime(options?: {
     }
     window.connections = [];
   }
-  function approvalPairing(action: "open" | "read" | "cancel", binding: PairingRequestBinding): LocalPairingOpportunity | null {
+  function approvalPairing(action: "open" | "read" | "cancel", binding: PairingRequestBinding): LocalApprovalPairingOpportunity | null {
     let window = approvalWindows.get(binding.requestId);
+    // Cancel is terminal even if controller startup has not opened the window.
+    if (action === "cancel") {
+      spentApprovalRequests.add(binding.requestId);
+      if (window) closeApproval(window);
+      return null;
+    }
     if (window && window.publicKey !== binding.publicKey) throw new Error("Pairing request binding changed");
-    if (!window && spentApprovalRequests.has(binding.requestId)) return null;
-    if (action === "cancel") { if (window) closeApproval(window); return null; }
+    // A missing window is unknown (for example after restart), not spent.
+    const spentResult = action === "read" ? {status: "spent" as const} : null;
+    if (!window && spentApprovalRequests.has(binding.requestId)) return spentResult;
     if (!window && action === "open") {
       if (approvalWindows.size >= 32) throw new Error("Too many pairing windows");
       const payload = Object.freeze({...qrPayload, room: crypto.randomUUID(), expiresAt: Date.now() + 300_000});
@@ -133,8 +140,9 @@ export async function startPairingRuntime(options?: {
       catch (error) { closeApproval(window); approvalWindows.delete(binding.requestId); throw error; }
       window.timer = setTimeout(() => { closeApproval(current); approvalWindows.delete(binding.requestId); }, 300_000);
     }
-    if (!window || window.closed) return null;
-    if (!window.opportunity.isOpen()) { closeApproval(window); return null; }
+    if (!window) return null;
+    if (window.closed) return spentResult;
+    if (!window.opportunity.isOpen()) { closeApproval(window); return spentResult; }
     return {windowId: window.opportunity.id, payload: window.payload};
   }
   let opportunity: PairingOpportunity | null = null;
