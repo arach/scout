@@ -301,3 +301,14 @@ require fresh decisions. Synchronous fanout batching does not establish a bound
 on arbitrary streaming CPU, and does not introduce a delayed output buffer,
 frame aggregation policy or new authorization lifetime. Broker watcher domain
 bindings are trusted local composition values and are not forwarded on the wire.
+
+Each awaited subscription frame requires one full authority read. Prior gate (g)
+owner-only large-tier CPU samples averaged 10.618–10.962 ms per read. At 75% of
+one core, that gives a **reference model** of 68.4–70.6 read-only frames/s before
+registry, encoding or network work. This is not a measured capacity of the
+registry implementation. The registry cost gate must include a declared rate
+of at least 10 awaited frames/s across live subscriptions, concurrently with
+10 RPC admissions/s and 10 event batches/s at both store tiers. A passing gate
+qualifies that declared workload, not the reference streaming rate. Payload
+aggregation or a cheaper read requires separate review; a positive authority
+view must never be retained across a wait to meet a CPU ceiling.
