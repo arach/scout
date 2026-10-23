@@ -42,7 +42,8 @@ for(const control of controls){
   try{
     const source=(text:string)=>text.replace('"../support-paths.js"',JSON.stringify(pathToFileURL(join(root,"packages/runtime/src/support-paths.ts")).href))
       .replace('"./trust-capsule.js"',JSON.stringify(pathToFileURL(join(root,"packages/runtime/src/pairing-security/trust-capsule.ts")).href))
-      .replace('"./trust-cutover.js"',JSON.stringify(pathToFileURL(join(root,"packages/runtime/src/pairing-security/trust-cutover.ts")).href));
+      .replace('"./trust-cutover.js"',JSON.stringify(pathToFileURL(join(root,"packages/runtime/src/pairing-security/trust-cutover.ts")).href))
+      .replaceAll('"./trust-reclamation.js"',JSON.stringify(pathToFileURL(join(root,"packages/runtime/src/pairing-security/trust-reclamation.ts")).href));
     let mutated=original;
     for(const [needle,replacement] of control.edits){if(!mutated.includes(needle!))throw Error(`missing anchor ${control.id}`);mutated=mutated.replaceAll(needle!,replacement!);}
     const hashes:any={};

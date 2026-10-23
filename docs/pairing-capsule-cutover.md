@@ -17,7 +17,8 @@ after the root has migrated. This ID is separate from trust-mutation IDs.
    engine alone. Do not activate while an installed opener still needs v1.
 2. Verify release provenance. Build the runtime with
    `bun run --cwd packages/runtime build`; its compiled output must contain
-   `trust-owner.js`, `trust-capsule.js` and `trust-cutover.js`. Run the source
+   `trust-owner.js`, `trust-capsule.js`, `trust-cutover.js` and
+   `trust-reclamation.js`. Run the source
    census and `bun run test:pairing-capsule`. Test the emitted owner under the
    supported Node 24 runtime, not only Bun source imports:
    `node scripts/pairing-cutover-compiled-smoke.mjs`. The root unit chain builds
@@ -161,26 +162,74 @@ quiescence:
 
 1. Stop every desktop, CLI, web runtime and maintenance caller. Prove that none
    can still access the root; do not infer quiescence from elapsed time.
-2. Preserve the full file inventory. With the correct adapter, run an ordinary
-   owner read to complete any committed publication and verify current capsule,
-   receipt, chunks, marker and exact outcomes. If it refuses, retain evidence and
-   obtain reviewed repair; do not discard a pending head or witness.
-3. With callers still stopped, identify remaining candidate directories and
-   canonical claims from their complete token records. Confirm that candidate
-   sources and token-qualified payloads are not referenced by any verified head,
-   retained chunk or pending publication. An empty candidate has no token and
-   no authority, but its removal still requires this proven quiescence.
-4. Move only those proven uncommitted resources outside the active root into a
-   retained evidence directory on the same filesystem. Preserve all authority,
-   receipts and referenced files. Synchronize the root, then repeat the complete
-   owner read and a trusted local mutation before restarting listeners.
+2. From trusted local maintenance code, call the canonical owner operation with
+   a stable recovery ID. The assertion is an operator fact, not a liveness test:
 
-This is an explicit offline operator procedure, not a remote endpoint or an
-automatic garbage collector. A nonempty claim alone never authorizes takeover.
-If the operator cannot prove quiescence or distinguish referenced resources,
-stop for repair rather than guessing. The root qualification chain witnesses
-process exits at candidate creation/file sync/directory sync/rename and release
-unlink/rmdir, a two-process empty-slot race, a late release and planted bypasses.
+   ```ts
+   const receipt = owner.reclaimCapsuleStaging(recoveryId, {quiescent: true});
+   ```
+
+   Call this **outside** any existing owner invocation. An observable holder or
+   live invocation refuses before acquisition. Managed roots still require
+   their matching registered adapter for this operation's own gate. The method
+   cannot discover unobservable foreign processes; keep all users excluded.
+3. Preserve the returned receipt and evidence. The operation first completes
+   committed publications using the existing owner recovery protocol. It then
+   freshly verifies the completed capsule and every full token before moving
+   only unreferenced canonical claims, their exact token-qualified payloads,
+   and complete pre-rename candidates. A committed claim is completed, never
+   treated as abandoned. A reused slot index is not an ownership reference;
+   the full token must match. No PID, age, timeout or process-disappearance
+   inference is used.
+
+   The retained evidence is a private sibling directory:
+   `<canonical-root>.pairing-reclamation/op.<recoveryId>/`. It must be owned,
+   non-symlinked and on the same filesystem. `plan.json` binds the root,
+   verified authority and each resource's token, identity, byte length and
+   digest. Payloads move before their claim directory, so every interrupted
+   partial state remains readable. Files and directories are synchronized;
+   each move is followed by evidence-directory and root synchronization.
+   Token-bearing staging resources are moved by rename, never deleted. Normal
+   committed-publication recovery retains its existing exact retirement rules.
+
+   Retry the **same ID** after interruption or lost acknowledgement. The
+   operation verifies each artifact at its source or retained destination,
+   resumes the remaining moves, synchronizes again and freshly verifies current
+   authority. It never overwrites an unrelated destination. `receipt.json` and
+   the returned receipt list every source, retained destination, full token,
+   kind and non-reference reason, plus plan hash and the verified authority.
+   An exact retry returns the original receipt only after fresh verification;
+   it is not a cached membership result. Reclamation itself creates no trust
+   generation.
+4. With callers still stopped, run a complete owner read and a deliberate
+   trusted local mutation before restarting listeners. Use the normal owner
+   API for the intended trust change; do not edit the projection. The process
+   suite proves that a real revoke succeeds after recovery of eight stranded
+   claims and after each interrupted maintenance move/synchronization.
+
+Empty candidates and empty slots have no complete token. They are retained and
+reported, not inferred dead or deleted by this operation. Ordinary writers can
+already structurally reclaim empty canonical slots. Corrupt/incomplete token
+records, ambiguous resources, referenced payloads, changed root/files,
+conflicting evidence or a plan exceeding one MiB refuse and retain evidence.
+A scan exceeding 1,024 candidate/slot directories also refuses. These are
+maintenance bounds, not changes to the eight-slot or authority-store limits.
+
+The pre-CAS **`.pairing-cutover` migration directory is not covered**. The
+operation requires a fully verified v2 capsule; a still-v1 root refuses with
+`reclamation_capsule_required` and an abandoned pre-CAS cut retains
+`migration_busy`. The earlier reviewed offline migration repair procedure
+still applies there. Malformed claims, partial/corrupt maintenance plans and
+unknown obstructions likewise require reviewed offline repair rather than
+normal file surgery or guessed ownership. Preserve them; never reset a barrier,
+remove authority, delete token evidence or infer that a writer is dead.
+
+There is no remote endpoint, startup hook, automatic collector or environment
+selector for this method. The code replaces routine slot/candidate recovery,
+not the operator's proof of quiescence or exceptional forensic repair. Tests
+use real process exits before and after every move and sync, retained-byte/receipt checks,
+holder/invocation refusal, committed-publication help, platform collision
+injection and paired healthy/broken-source controls.
 
 ## Inherited limits and qualification
 

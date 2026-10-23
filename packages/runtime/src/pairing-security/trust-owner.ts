@@ -16,6 +16,9 @@ import { CAPSULE_PREFIX, CUTOVER, CHUNK_TARGET, SLOT_LIMIT, commitName, doneName
 import { CUT_DIRECTORY, RESERVATION_FILES, RESERVATION_BYTES, reserveName, cutChild, cutName, cutBodies,
   type CutClaim, type CutPlan, type CutFile, type CutRetired, type CutResult } from "./trust-cutover.js";
 
+import {reclaimCapsuleStaging, type CapsuleReclamationReceipt} from "./trust-reclamation.js";
+export type {CapsuleReclamationReceipt} from "./trust-reclamation.js";
+
 export type TrustedPeer = { publicKey: string; name?: string; pairedAt: string; lastSeen?: string };
 export type PairingRootIdentity = Readonly<{ path: string; id: string }>;
 declare const contextBrand: unique symbol;
@@ -726,6 +729,32 @@ export class PairingTrustOwner {
       } finally {
         if (!reserved && !uncertain) this.removeCutFiles(root, claim);
       }
+    });
+  }
+  /** Explicit trusted-local maintenance. Calling with quiescent:true asserts
+   * ALL writers/maintenance callers are excluded; no PID/age inference exists.
+   * Even this caller's live invocation must be drained before entry. */
+  reclaimCapsuleStaging(reclamationId: string, options: {quiescent: true}): CapsuleReclamationReceipt {
+    if (!/^[a-zA-Z0-9._:-]{1,128}$/.test(reclamationId) || options?.quiescent !== true) refuse("reclamation_quiescence_required");
+    const observed = this.root();
+    if (!observed) refuse("reclamation_missing_root");
+    const adapter = adapters.get(observed.id);
+    if (adapter?.currentHolder(observed) || [...liveInvocations].some(i => i.active && i.root.id === observed.id)) refuse("reclamation_holder_active");
+    return this.operation(undefined, (bound, invocation) => {
+      const root = bound!;
+      const authority = () => {
+        if ([...liveInvocations].some(i => i.active && i.root.id === root.id && i !== invocation)) refuse("reclamation_holder_active");
+        if (invocation) this.validateInvocation(invocation, root);
+        const state = this.readyState(root), cap = state.capsule;
+        if (!cap) refuse("reclamation_capsule_required");
+        const references = new Set([PEERS, MARKER, cap.barrierName, CUTOVER, commitName(cap.head.serial), doneName(cap.head.serial),
+          ...cap.head.parts.map(p => p.name), ...cap.barrier.parts.map(p => p.name), ...cap.head.retire.map(r => r.name)]);
+        const tokens = new Set<string>();
+        if (cap.head.slot) tokens.add(cap.head.slot.token); // An index alone is not a resource reference.
+        if (cap.barrier.migration) tokens.add(cap.barrier.migration.token);
+        return {revision: state.revision, logicalHead: state.hash, physicalHead: cap.physicalHash, cutHash: cap.cutHash, references, tokens};
+      };
+      return reclaimCapsuleStaging(root, reclamationId, {check: () => this.check(root), authority, fail: refuse});
     });
   }
   private capsulePolicy(root: PairingRootIdentity, policy: ManagedPolicy | null) {

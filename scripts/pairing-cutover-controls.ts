@@ -71,7 +71,7 @@ for (const control of controls) {
       let source = raw!;
       for (const [from, to] of [["../support-paths.js", "packages/runtime/src/support-paths.ts"],
         ["./trust-capsule.js", "packages/runtime/src/pairing-security/trust-capsule.ts"],
-        ["./trust-cutover.js", "packages/runtime/src/pairing-security/trust-cutover.ts"]]) source = source.replace(JSON.stringify(from), JSON.stringify(url(to!)));
+        ["./trust-cutover.js", "packages/runtime/src/pairing-security/trust-cutover.ts"],["./trust-reclamation.js","packages/runtime/src/pairing-security/trust-reclamation.ts"]]) source = source.replaceAll(JSON.stringify(from), JSON.stringify(url(to!)));
       writeFileSync(subject, source); hashes[kind!] = createHash("sha256").update(raw!).digest("hex");
       let workerSource = readFileSync(join(project, "scripts/pairing-cutover-worker.ts"), "utf8");
       workerSource = workerSource.replaceAll('"../' + ownerPath + '"', JSON.stringify(subject))

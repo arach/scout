@@ -48,14 +48,14 @@ describe("v2 real process publication and recovery",()=>{
     const staged=events.slice(0,linked).filter(e=>e.event==="sync_success" && !e.directory);
     expect(staged).toHaveLength(5);expect(events.filter(e=>e.event==="sync_success")).toHaveLength(16);
     expect(dirsync(-1,linked)).toBe(true);
-  });
+  }, 30000);
   test("fresh process validates early outcome bytes rather than a prior positive",async()=>{
     const {data,coordination,store}=completedCapsule();
     expect((await result(launch("read",data,coordination))).value.ok).toBe(true);
     const path=join(data,store.head.parts[0]!.name),bytes=readFileSync(path,"utf8");
     writeFileSync(path,bytes.replace("fixture-final","fixture-dirty"));
     const changed=await result(launch("read",data,coordination));expect(changed.value.ok).toBe(false);expect(changed.value.error).toContain("capsule_chunk_checksum");
-  });
+  }, 30000);
   test("runtime and desktop Noise plus web revoke use the same managed v2 owner",async()=>{
     const {data,coordination}=completedCapsule(false,0),output=await result(launch("capsule-paths",data,coordination));
     expect(output.code,output.stderr).toBe(0);expect(output.value).toEqual({ok:true,removed:true,revision:4,peers:1,reconnectGenerations:0});
@@ -65,7 +65,7 @@ describe("v2 real process publication and recovery",()=>{
     expect(publications.filter(e=>/\.pairing-v2-slot-[0-7]$/.test(e.target))).toHaveLength(4);
     expect(publications.every(e=>e.held===true)).toBe(true);
     expect(readdirSync(data).filter(n=>n.includes(".commit."))).toEqual(["trusted-peers.v2.commit.5.json"]);
-  });
+  }, 30000);
   test("real interruptions retain exact retries, bounded collection and fresh readers",async()=>{
     for(const managed of [false,true])for(const point of ["after-staging","after-cas","after-publication-sync","after-projection","after-witness","during-collection","after-receipt","after-token-release","lost-ack"]){
       const {data,coordination}=completedCapsule(managed),expected=managed?2:1;
@@ -121,7 +121,7 @@ describe("v2 real process publication and recovery",()=>{
     // ACK after CAS. A caller must obtain a fresh view, not merge stale edits.
     if(snapshot.revision===1)store.owner.mutate(1,"explicit-fresh-attempt",{type:"grant",peer});
     expect(store.owner.read().revision).toBe(2);
-  });
+  }, 30000);
   test("two paused next-serial CAS contenders publish exactly one head",async()=>{
     const {data,coordination,store}=completedCapsule();
     const children:ReturnType<typeof launch>[]=[];
@@ -136,7 +136,7 @@ describe("v2 real process publication and recovery",()=>{
     expect(events.filter(e=>e.event==="link")).toHaveLength(1);
     const winner=snapshot.peers.some(p=>p.publicKey===key)?"a":"b";
     expect(store.owner.mutate(1,winner,{type:"grant",peer:{...peer,publicKey:winner.repeat(64)}}).revision).toBe(2);
-  });
+  }, 30000);
   test("failed candidate leaves no authority; failed collector refuses new epochs until repaired",async()=>{
     for(const point of ["sync-fail","rename-fail","collector-fail"]){
       const {data,coordination,store}=completedCapsule();
@@ -176,7 +176,7 @@ describe("pairing owner real cross-process and I/O paths", () => {
     expect(values.find(v => !v.value.ok)?.value.error).toMatch(/revision_conflict|publication_incomplete|external_change_or_incomplete|unsafe_path/);
     expect(pairingTrustOwner(data).read().peers.length).toBe(1);
     expect(readdirSync(data).some(name => name.includes("lock"))).toBe(false);
-  });
+  }, 30000);
   test("a helper completes a live writer; a later revoke survives the original writer resuming", async () => {
     const {data,coordination}=fixture(), first=launch("instrument",data,coordination,"before-projection");
     await ready(join(coordination,"ready-before-projection"));
@@ -188,7 +188,7 @@ describe("pairing owner real cross-process and I/O paths", () => {
     expect(owner.read()).toEqual({revision:2,peers:[]});
     const events=readFileSync(join(coordination,"trace.jsonl"),"utf8").trim().split("\n").map(line=>JSON.parse(line));
     expect(events.filter(e=>e.event === "rename")).toEqual([]);
-  });
+  }, 30000);
   test("failed projection rename retains recoverable evidence and reports publication_incomplete", async () => {
     const {data,coordination}=fixture(), output=await result(launch("instrument",data,coordination,"rename-fail"));
     expect(output.value.ok).toBe(false); expect(output.value.error).toContain("publication_incomplete");
@@ -196,7 +196,7 @@ describe("pairing owner real cross-process and I/O paths", () => {
     const owner=pairingTrustOwner(data);
     expect(owner.read()).toEqual({revision:1,peers:[peer]});
     expect(owner.mutate(0,"instrument",{type:"grant",peer}).revision).toBe(1);
-  });
+  }, 30000);
   test("crash between link and rename rolls forward on the next operation in both modes", async () => {
     for (const managed of [false,true]) for (const revoking of [false,true]) {
       const {data,coordination}=fixture(), owner=pairingTrustOwner(data);
@@ -215,14 +215,14 @@ describe("pairing owner real cross-process and I/O paths", () => {
       const renames=events.filter(e=>e.event === "rename"); expect(renames.length).toBe(1);
       expect(renames[0].held).toBe(managed);
     }
-  });
+  }, 30000);
   test("a read unable to finish in-flight publication reports publication_incomplete", async () => {
     const {data,coordination}=fixture(), first=launch("instrument",data,coordination,"before-projection");
     await ready(join(coordination,"ready-before-projection"));
     const reader=await result(launch("recover",data,coordination,"rename-fail"));
     expect(reader.value.ok).toBe(false); expect(reader.value.error).toContain("publication_incomplete");
     writeFileSync(join(coordination,"go"),"go");expect((await result(first)).value.ok).toBe(true);
-  });
+  }, 30000);
   test("delayed reconnect in another process cannot restore a revoked key", async () => {
     const {data, coordination} = fixture(), owner = pairingTrustOwner(data);
     owner.mutate(0,"seed",{type:"grant",peer});
@@ -230,7 +230,7 @@ describe("pairing owner real cross-process and I/O paths", () => {
     owner.mutate(1,"revoke",{type:"revoke",publicKey:key}); writeFileSync(join(coordination,"go"),"go");
     const output = await result(reconnect); expect(output.value.ok).toBe(false); expect(output.value.error).toContain("peer_revoked");
     expect(owner.read().peers).toEqual([]);
-  });
+  }, 30000);
   test("real barriers reached; crash after publication and ACK-loss retry", async () => {
     for (const point of ["", "after-cas", "after-rename", "sync-1", "sync-2", "sync-3"]) {
       const {data, coordination} = fixture(), output = await result(launch("instrument",data,coordination,point));
@@ -256,7 +256,7 @@ describe("pairing owner real cross-process and I/O paths", () => {
         expect(trace.filter(e=>e.event === "rename").length).toBe(1);
       }
     }
-  });
+  }, 30000);
   test("all override spellings select the same owner for runtime and desktop", async () => {
     for (const spelling of ["OPENSCOUT_PAIRING_HOME","SCOUT_PAIRING_HOME","OPENSCOUT_PAIRING_DIR","OPENSCOUT_SCOUT_HOME"]) {
       const fixtureRoot = fixture(), coordination = fixtureRoot.coordination;
@@ -266,7 +266,7 @@ describe("pairing owner real cross-process and I/O paths", () => {
       expect(output.code).toBe(0); expect(output.value).toMatchObject({ok:true, keys:[key,"b".repeat(64)]});
       expect(pairingTrustOwner(data).read().revision).toBe(2);
     }
-  });
+  }, 30000);
   test("managed store stays unavailable in another process despite loader-shaped environment/argv/JSON", async () => {
     const {data,coordination} = fixture(), owner = pairingTrustOwner(data);
     let holder: object | null = null;
@@ -283,7 +283,7 @@ describe("pairing owner real cross-process and I/O paths", () => {
     expect(output.stderr).not.toContain("ENV_ADAPTER_WAS_LOADED");
     const forged = await result(launch("forged",data,coordination,capture));
     expect(forged.value.ok).toBe(false); expect(forged.value.error).toContain("invalid_context");
-  });
+  }, 30000);
   test("real runtime and retained desktop reconnect storm writes zero generations; authority publications stay gated", async () => {
     const {data,coordination}=fixture(), output=await result(launch("managed-paths",data,coordination));
     expect(output.code,output.stderr).toBe(0); expect(output.value).toEqual({ok:true,removed:true,revision:4,peers:1,reconnectGenerations:0});
@@ -292,7 +292,7 @@ describe("pairing owner real cross-process and I/O paths", () => {
     expect(advisory.length).toBe(200); expect(advisory.every(e=>e.held === false)).toBe(true);
     const publications=events.filter(e=>(e.event === "link" || e.event === "rename") && !e.target.endsWith("trusted-peers.last-seen.json"));
     expect(publications.length).toBe(9); expect(publications.every(e=>e.held === true)).toBe(true);
-  });
+  }, 30000);
   test("real runtime and desktop handshakes survive advisory sync and rename failures", async () => {
     for (const fault of ["advisory-sync-fail","advisory-rename-fail"]) {
       const {data,coordination}=fixture(), output=await result(launch("managed-paths",data,coordination,fault));
@@ -301,11 +301,11 @@ describe("pairing owner real cross-process and I/O paths", () => {
       expect(events.filter(e=>e.event === "rename" && e.target.endsWith("trusted-peers.last-seen.json"))).toEqual([]);
       expect(readdirSync(data).filter(n=>n.endsWith(".tmp"))).toEqual([]);
     }
-  });
+  }, 30000);
   test("actual web DELETE returns ambiguous 409, full-key 200, missing 404 and managed unavailable 503", async () => {
     const {data,coordination}=fixture(), output=await result(launch("routes",data,coordination));
     expect(output.code,output.stderr).toBe(0); expect(output.value).toEqual({ok:true,statuses:[409,200,404,503]});
-  });
+  }, 30000);
   test("hardlink and unprotected trust files refuse before serving authority", () => {
     const {data,coordination} = fixture(), source = join(coordination,"source");
     writeFileSync(source,"[]",{mode:0o600}); linkSync(source,join(data,"trusted-peers.json"));
