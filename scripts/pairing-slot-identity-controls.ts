@@ -23,7 +23,8 @@ try{
       for(const [kind,source] of [["healthy",original],["bypass",original.replace(control.needle,control.replacement)]]){
         const module=join(scratch,`${kind}.ts`),file=join(scratch,`${kind}.test.ts`);
         writeFileSync(module,source!.replace('"../support-paths.js"',JSON.stringify(pathToFileURL(join(root,"packages/runtime/src/support-paths.ts")).href))
-          .replace('"./trust-capsule.js"',JSON.stringify(pathToFileURL(join(root,"packages/runtime/src/pairing-security/trust-capsule.ts")).href)));
+          .replace('"./trust-capsule.js"',JSON.stringify(pathToFileURL(join(root,"packages/runtime/src/pairing-security/trust-capsule.ts")).href))
+          .replace('"./trust-cutover.js"',JSON.stringify(pathToFileURL(join(root,"packages/runtime/src/pairing-security/trust-cutover.ts")).href)));
         writeFileSync(file,tests.replace('"../packages/runtime/src/pairing-security/trust-owner.ts"',JSON.stringify(module))
           .replace('"./fixtures/pairing-capsule.ts"',JSON.stringify(pathToFileURL(join(root,"scripts/fixtures/pairing-capsule.ts")).href)));
         const child=Bun.spawn([process.execPath,"test",file,"--test-name-pattern",control.test],{stdout:"pipe",stderr:"pipe"});

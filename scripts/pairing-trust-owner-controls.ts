@@ -11,7 +11,8 @@ mkdirSync(output,{recursive:true});
 const original = readFileSync(join(root,"packages/runtime/src/pairing-security/trust-owner.ts"),"utf8");
 const relocate=(source:string)=>source
   .replace('"../support-paths.js"',JSON.stringify(pathToFileURL(join(root,"packages/runtime/src/support-paths.ts")).href))
-  .replace('"./trust-capsule.js"',JSON.stringify(pathToFileURL(join(root,"packages/runtime/src/pairing-security/trust-capsule.ts")).href));
+  .replace('"./trust-capsule.js"',JSON.stringify(pathToFileURL(join(root,"packages/runtime/src/pairing-security/trust-capsule.ts")).href))
+  .replace('"./trust-cutover.js"',JSON.stringify(pathToFileURL(join(root,"packages/runtime/src/pairing-security/trust-cutover.ts")).href));
 const unit = readFileSync(join(root,"packages/runtime/src/pairing-security/trust-owner.test.ts"),"utf8");
 const controls = [
   {id:"cas", expected:"stale revision refuses byte-identically", edits:[

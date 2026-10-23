@@ -13,9 +13,9 @@ const root=mkdtempSync(join(tmpdir(),"pairing-capsule-benchmark-"));
 const result:any={schema:1,tier,generations,keys,limits,warmups:100,iterations:1000,
   runtime:Bun.version,runtimeRevision:Bun.revision,executableSha256:createHash("sha256").update(readFileSync(process.execPath)).digest("hex"),
   os:{platform:platform(),release:release(),arch:process.arch,cpu:cpus()[0]?.model},
-  sources:Object.fromEntries(["trust-owner.ts","trust-capsule.ts"].map(n=>[n,createHash("sha256").update(readFileSync(new URL(`../packages/runtime/src/pairing-security/${n}`,import.meta.url))).digest("hex")])),paths:[]};
+  sources:Object.fromEntries(["trust-owner.ts","trust-capsule.ts","trust-cutover.ts"].map(n=>[n,createHash("sha256").update(readFileSync(new URL(`../packages/runtime/src/pairing-security/${n}`,import.meta.url))).digest("hex")])),paths:[]};
 try{
-  const f=capsuleFixture(root,{generations,keys});result.legacyBytes=f.legacyBytes;
+  const f=capsuleFixture(root,{generations,keys,migrate:true});result.legacyBytes=f.legacyBytes;result.realMigration=f.barrier.migration;
   for(const path of ["read","stamp"]){
     let actual:unknown;
     const run=()=>{actual=path==="read"?f.owner.read():f.owner.pairingAuthorityStamp();};

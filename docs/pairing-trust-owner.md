@@ -30,6 +30,10 @@ registry, authorization endpoint or automatic adapter installation.
 - `revokePrefix` resolves either the existing 16-character display prefix or a
   full 64-character key against the current snapshot. The persisted operation
   and outcome always name the full key.
+- `migrateToCapsule(migrationId, context?)` is explicit trusted local maintenance.
+  It preserves logical authority and exact retries while changing the retained
+  representation. Follow the [cutover runbook](./pairing-capsule-cutover.md)
+  before activation; no remote permission or automatic upgrade is provided.
 
 **API behavior change:** `DELETE /api/pairing/peers/:fingerprint` returns **409**
 for an ambiguous prefix instead of deleting all matching keys. Use the full
@@ -193,21 +197,21 @@ for a host's combined authority-and-journal hold is a separate prerequisite;
 this additive seam does not certify it. A JavaScript timeout cannot release a
 host gate while an uninterruptible native operation continues.
 
-## Dormant completed-v2 store
+## Completed-v2 store and explicit cutover
 
 The same runtime owner can read, mutate and recover a **completed**
 `scout.pairing-capsule/v2` store. New stores and existing v1 stores still write
-v1. There is no migration API, environment flag, listener hook, automatic
-upgrade or production fixture constructor in this change. The completed-store
-builder in `scripts/fixtures` accepts only empty temporary test directories.
-It is not a crash-safe migration implementation.
+v1 until trusted local maintenance explicitly calls
+`owner.migrateToCapsule(migrationId, context?)`. There is no environment activation
+flag, remote route, listener hook or automatic startup upgrade. Ordinary reads
+can complete an already committed cutover; they never initiate one.
 
-This is R1 of a two-PR storage change. R2 must implement and qualify explicit
-trusted local cutover, its reservation and old-writer races, recovery and the
-drain/restart runbook. **No upstream milestone may carry R1 without R2.** The
-remedy is not complete until both are reviewed and shipped together. The
-live-session registry remains a separate, blocked follow-up. This change adds
-no transport close code or credential behavior.
+The completed-store engine and cutover ship together. **No upstream milestone
+may carry the engine without the cutover.** See the
+[cutover runbook](./pairing-capsule-cutover.md) for the one-time drain, actual
+320 MiB reservation, recovery and same-release verification for desktop, CLI and
+web runtime. The live-session registry is a separate follow-up. Storage cutover
+does not add transport close codes or credential behavior.
 
 ### Retained authority and logical identity
 
@@ -216,8 +220,8 @@ A completed v2 store retains these root-bound files:
 - One permanent `trusted-peers.owner.<cut-revision+1>.json` barrier. It commits
   to the last v1 logical head, initial outcome digest, policy, legacy byte
   charge and initial chunk inventory. A missing completion receipt in
-  `trusted-peers.v2.cutover.json` refuses; R1 does not attempt an interrupted
-  migration.
+  `trusted-peers.v2.cutover.json` refuses unless the committed barrier and its
+  retained transition evidence permit verified roll-forward.
 - One current `trusted-peers.v2.commit.<serial>.json` capsule. It contains
   current peers, logical revision and head, exact projection digest, complete
   outcome-chunk inventory, permanent managed policy, charge, candidate claim
@@ -245,7 +249,7 @@ physical capsule checksum in the pairing authority stamp. Later mutations
 advance the logical head from the previous logical head, current peer digest,
 policy, exact request/outcome, adoption and complete outcome digest. Physical
 serials identify publications, not logical authority. Fixture tests prove stamp
-continuity; proof across a real migration belongs to R2.
+continuity across both synthetic completed fixtures and real migration.
 
 Three hashes remain distinct: the last committed logical peers hash, the
 normalized current checkpoint peers hash and the exact raw projection-byte
@@ -334,7 +338,7 @@ bun scripts/pairing-capsule-benchmark.ts large
 ```
 
 `bun run test:pairing-capsule` runs the process/census suite and planted capsule
-controls in the root unit-test chain, including hosted CI when dispatched. Give
+and cutover controls in the root unit-test chain, including hosted CI when dispatched. Give
 the controls an explicit evidence directory to retain their individual logs.
 
 Process tests interrupt actual writes at staging, CAS, directory barriers,
@@ -350,7 +354,7 @@ processes per tier on each supported test Bun. Each path (`read` and stamp) gets
 100 warmups then 1000 timed reads; raw samples and CPU time are emitted. Every
 run must independently meet p50/p95/max of 5/15/50 ms and 25/75/200 ms respectively.
 The runner stops on a timed maximum breach or failed percentiles. This qualifies
-the completed-store read path, not migration, registry admissions, gate holds,
+the migrated-store read path, not registry admissions, gate holds,
 idle CPU, native durability or physical phones.
 
 ## Root identity and external writers

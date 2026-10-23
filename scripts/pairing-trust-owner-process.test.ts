@@ -25,7 +25,7 @@ afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); for (cons
 function completedCapsule(managed=false,generations=1){
   const f=fixture(),data=join(f.root,"pairing-capsule-data");mkdirSync(data,{mode:0o700});
   let unregister:(()=>void)|undefined;
-  const store=capsuleFixture(data,{generations,prepare:managed?owner=>{
+  const store=capsuleFixture(data,{generations,migrate:true,prepare:managed?owner=>{
     let holder:object|null=null;
     unregister=owner.register({id:"test.adapter",withGate(_r,body){holder={};try{return body(holder);}finally{holder=null;}},currentHolder(){return holder;}});
     owner.withInvocation(c=>owner.mutate(1,"fixture-manage",{type:"manage"},c));
