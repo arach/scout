@@ -5,7 +5,7 @@ import {executeScoutExtensionContext, scoutExtensionContextStdio, EXTENSION_CONT
 import {BoundedChannelDescriptor,type ChannelDriver} from "../../../runtime/src/extension-channel-io.ts";
 import {allocateExtensionChannel} from "../../../runtime/src/extension-channel-host.ts";
 import {currentExtensionChannelCoordinate} from "../../../runtime/src/extension-channel-qualification.ts";
-import {prefillForWriteAbort} from "../../../../scripts/extension-numeric-spike/witness.ts";
+import {prefillForWriteAbort} from "../../../../scripts/extension-numeric-spike/pressure.ts";
 import {writeSync} from "node:fs";
 const input={command:process.execPath,args:[] as string[],env:process.env,cwd:process.cwd(),wire:Buffer.from('{}\n')};
 function doubles(write:ChannelDriver["write"] = (_fd,bytes)=>bytes.length) {

@@ -23,8 +23,13 @@ export async function command(args: string[], env = process.env) {
   const [out, err, code] = await Promise.all([
     new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited,
   ]);
-  process.stdout.write(out);
-  process.stderr.write(err);
+  // A nonzero child can emit a large refusal record. Do not throw (and let the
+  // caller exit) while either hosted output pipe still has buffered bytes.
+  const write = (stream: NodeJS.WritableStream, text: string) => new Promise<void>((resolve, reject) => {
+    stream.write(text, error => error ? reject(error) : resolve());
+  });
+  const writes = await Promise.allSettled([write(process.stdout, out), write(process.stderr, err)]);
+  for (const result of writes) if (result.status === "rejected") throw result.reason;
   if (code !== 0) throw Error(`qualification command failed: ${args.join(" ")}`);
   return out + err;
 }

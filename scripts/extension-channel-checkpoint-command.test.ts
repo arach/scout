@@ -133,3 +133,39 @@ test("preloaded proof tests select the test command, never the package test scri
     expect(out+err).not.toContain("WRONG_");expect(out+err).toMatch(/1 pass/);
   }finally{rmSync(root,{recursive:true,force:true});}
 });
+
+test("nonzero command drains both piped output tails before its parent exits", async () => {
+  const root = mkdtempSync(join(tmpdir(), "checkpoint-output-tail-"));
+  let child: ReturnType<typeof Bun.spawn> | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const bytes = 2 * 1024 * 1024;
+    const stdout = "o".repeat(bytes) + "\nLAST_STDOUT_REFUSAL_LINE\n";
+    const stderr = "e".repeat(bytes) + "\nLAST_STDERR_REFUSAL_LINE\n";
+    const writer = join(root, "writer.ts"), parent = join(root, "parent.ts");
+    writeFileSync(writer, `import {writeSync} from "node:fs";
+      const writeAll=(fd,text)=>{const bytes=Buffer.from(text);let offset=0;while(offset<bytes.length)offset+=writeSync(fd,bytes,offset,bytes.length-offset);};
+      writeAll(1,"o".repeat(${bytes})+"\\nLAST_STDOUT_REFUSAL_LINE\\n");
+      writeAll(2,"e".repeat(${bytes})+"\\nLAST_STDERR_REFUSAL_LINE\\n");
+      process.exit(1);`);
+    writeFileSync(parent, `import {command} from ${JSON.stringify(join(import.meta.dir,"extension-channel-checkpoint-command.ts"))};
+      try {await command([process.execPath,${JSON.stringify(writer)}]);}
+      catch(error) {process.exit(String(error).includes("qualification command failed:")?1:2);}
+      process.exit(3);`);
+    child = Bun.spawn([process.execPath, parent], {stdout: "pipe", stderr: "pipe"});
+    timer = setTimeout(() => child?.kill("SIGKILL"), 10000);
+    // Let the parent's pipes fill before consuming them, rather than relying
+    // on the platform's pipe capacity or the scheduler to expose the bug.
+    await Bun.sleep(100);
+    const [out, err, code] = await Promise.all([
+      new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited,
+    ]);
+    expect(code).toBe(1);
+    expect(out).toBe(stdout);
+    expect(err).toBe(stderr);
+  } finally {
+    clearTimeout(timer);
+    if (child) {if (child.exitCode === null) child.kill("SIGKILL"); await child.exited;}
+    rmSync(root, {recursive: true, force: true});
+  }
+}, 15000);

@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createExtensionChannelCandidate, releaseExtensionChannelCodeForWitness } from "../../../runtime/src/extension-channel-io.ts";
 import { checkReclaimedDescriptors } from "./extension-descriptor-witness.ts";
-import { APPARATUS_MESSAGES } from "../../../../scripts/extension-numeric-spike/reservations.ts";
+import { APPARATUS_MESSAGES } from "../../../../scripts/extension-numeric-spike/apparatus-contract.ts";
 import { numericWitness, type Fault, type AsyncWitnessOptions } from "../../../../scripts/extension-numeric-spike/witness.ts";
 import type { DescriptorForm, WitnessEvent } from "./extension-descriptor-witness.ts";
 const candidate = Bun.revision === "0d9b296af33f2b851fcbf4df3e9ec89751734ba4" && (process.platform === "darwin" && process.arch === "arm64" || process.platform === "linux" && process.arch === "x64");

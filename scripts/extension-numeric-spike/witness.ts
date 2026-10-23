@@ -1,4 +1,5 @@
-import { reservations, clearEscapedSetupPin, setupPinEscaped, type ApparatusControl } from "./reservations.ts";
+import { reservations, clearEscapedSetupPin, setupPinEscaped } from "./reservations.ts";
+import type { ApparatusControl } from "./apparatus-contract.ts";
 /** Product-free numeric backend spike; corrected in-tree reclaim instrument is shared. */
 import { spawn } from "node:child_process";
 import { closeSync, fstatSync, mkdirSync, mkdtempSync, readSync, rmSync, writeSync } from "node:fs";
@@ -14,7 +15,6 @@ type Pair = ReturnType<typeof pair> | ReturnType<typeof createExtensionChannelCa
 
 export type Fault = "stale-second-close" | "second-spawn-close" | "finalizer-close" | "mapping" | "eof" | "cloexec" | "collection-retained";
 let retainedForNegativeControl: object | undefined;
-export {PRESSURE_DRAIN_BYTES, PRESSURE_PRIMER_LIMIT, prefillForWriteAbort} from "./pressure.ts";
 import {PRESSURE_DRAIN_BYTES, PRESSURE_PRIMER_LIMIT, prefillForWriteAbort} from "./pressure.ts";
 function identity(fd: number) {
   try { const s = fstatSync(fd); return { dev: s.dev, ino: s.ino, file: s.isFile(), fifo: s.isFIFO(), socket: s.isSocket() }; } catch { return null; }
