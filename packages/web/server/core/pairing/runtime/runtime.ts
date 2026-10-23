@@ -1,3 +1,4 @@
+import type { PairingRequestBinding, LocalPairingOpportunity } from "@openscout/runtime/pairing-local-socket";
 import { pairingTrustOwner, type PairingOpportunity } from "@openscout/runtime/pairing-security/trust-owner";
 import { homedir } from "node:os";
 
@@ -40,6 +41,7 @@ export type StartedPairingRuntime = {
   qrPayload: QRPayload | null;
   openPairing: () => {windowId: string; payload: QRPayload};
   cancelPairing: (windowId?: string) => void;
+  approvalPairing: (action: "open" | "read" | "cancel", binding: PairingRequestBinding) => LocalPairingOpportunity | null;
   stop: () => Promise<void>;
 };
 
@@ -100,6 +102,41 @@ export async function startPairingRuntime(options?: {
   let pairingConnections: RelayConnection[] = [];
   const retiredConnections = new Set<RelayConnection>();
   const reconnectRoom = crypto.randomUUID();
+  type ApprovalWindow = { requestId: string; payload: QRPayload; opportunity: PairingOpportunity; connections: RelayConnection[];
+    timer?: ReturnType<typeof setTimeout>; closed: boolean; publicKey?: string };
+  const approvalWindows = new Map<string, ApprovalWindow>();
+  // Keep only spent IDs for the runtime lifetime, not permission or QR data.
+  const spentApprovalRequests = new Set<string>();
+  function closeApproval(window: ApprovalWindow) {
+    spentApprovalRequests.add(window.requestId);
+    window.closed = true;
+    window.opportunity.cancel();
+    for (const connection of window.connections) {
+      retiredConnections.add(connection);
+      connection.retire(() => retiredConnections.delete(connection));
+    }
+    window.connections = [];
+  }
+  function approvalPairing(action: "open" | "read" | "cancel", binding: PairingRequestBinding): LocalPairingOpportunity | null {
+    let window = approvalWindows.get(binding.requestId);
+    if (window && window.publicKey !== binding.publicKey) throw new Error("Pairing request binding changed");
+    if (!window && spentApprovalRequests.has(binding.requestId)) return null;
+    if (action === "cancel") { if (window) closeApproval(window); return null; }
+    if (!window && action === "open") {
+      if (approvalWindows.size >= 32) throw new Error("Too many pairing windows");
+      const payload = Object.freeze({...qrPayload, room: crypto.randomUUID(), expiresAt: Date.now() + 300_000});
+      window = { requestId: binding.requestId, payload, publicKey: binding.publicKey, closed: false, connections: [],
+        opportunity: pairingTrustOwner().openPairingOpportunity(payload.room, payload.expiresAt, binding.publicKey, binding.authorityStamp) };
+      approvalWindows.set(binding.requestId, window);
+      const current = window;
+      try { window.connections = connectRelays("pairing", payload, window); }
+      catch (error) { closeApproval(window); approvalWindows.delete(binding.requestId); throw error; }
+      window.timer = setTimeout(() => { closeApproval(current); approvalWindows.delete(binding.requestId); }, 300_000);
+    }
+    if (!window || window.closed) return null;
+    if (!window.opportunity.isOpen()) { closeApproval(window); return null; }
+    return {windowId: window.opportunity.id, payload: window.payload};
+  }
   let opportunity: PairingOpportunity | null = null;
   let opportunityTimer: ReturnType<typeof setTimeout> | undefined;
   function cancelPairing(windowId?: string) {
@@ -129,7 +166,10 @@ export async function startPairingRuntime(options?: {
     bridge,
     port: config.port,
     // Local workflow control always authenticates the host's Noise identity.
-    pairingControl: (action, windowId) => {
+    pairingControl: (action, windowId, binding) => {
+      if (binding && action.startsWith("request-")) {
+        return approvalPairing(action.slice(8) as "open" | "read" | "cancel", binding);
+      }
       if (action === "open") return openPairing();
       cancelPairing(windowId); return null;
     },
@@ -151,7 +191,7 @@ export async function startPairingRuntime(options?: {
   }
 
   qrPayload = createQRPayload(identity.publicKey, primaryRelayUrl, advertisedRelayUrls.slice(1));
-  function connectRelays(kind: "pairing" | "reconnect", payload: QRPayload): RelayConnection[] {
+  function connectRelays(kind: "pairing" | "reconnect", payload: QRPayload, approval?: ApprovalWindow): RelayConnection[] {
     const connections: RelayConnection[] = [];
     try {
       for (const endpoint of relayEndpoints) connections.push(connectToRelay(endpoint.relayUrl.trim(), identity, bridge, {
@@ -160,8 +200,20 @@ export async function startPairingRuntime(options?: {
         kind,
         reconnectRoom,
         qrPayload: payload,
-        events: options?.relayEvents,
-        ...(kind === "pairing" ? {
+        // Approval rooms never enter QR state, status detail, or status events.
+        events: approval ? undefined : options?.relayEvents,
+        privateRoom: Boolean(approval),
+        ...(approval ? {
+          onPeerAdmitted: () => closeApproval(approval),
+          authorizePeer: (key: string, room: string, live: () => boolean) => {
+            if (approval.closed) return false;
+            try {
+              const admitted = approval.opportunity.admit(key, room, live);
+              if (!admitted && !approval.opportunity.isOpen()) closeApproval(approval);
+              return admitted;
+            } catch (error) { closeApproval(approval); throw error; }
+          },
+        } : kind === "pairing" ? {
           onPeerAdmitted: () => cancelPairing(),
           admitNewPeer: (key: string, room: string, live: () => boolean) => {
             const current = opportunity;
@@ -202,12 +254,15 @@ export async function startPairingRuntime(options?: {
     identity,
     config,
     get relayConnection() { return relayConnections[0] ?? null; },
-    get relayConnections() { return [...relayConnections, ...pairingConnections, ...retiredConnections]; },
+    get relayConnections() { return [...relayConnections, ...pairingConnections, ...[...approvalWindows.values()].flatMap(window => window.connections), ...retiredConnections]; },
     get qrPayload() { return qrPayload; },
     openPairing,
     cancelPairing,
+    approvalPairing,
     async stop() {
       cancelPairing();
+      for (const window of approvalWindows.values()) { clearTimeout(window.timer); closeApproval(window); }
+      approvalWindows.clear();
       for (const relayConnection of [...relayConnections, ...pairingConnections, ...retiredConnections]) {
         relayConnection.disconnect();
       }

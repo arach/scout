@@ -1,4 +1,4 @@
-import { requestLocalPairingOpportunity } from "@openscout/runtime/pairing-local-socket";
+import { requestLocalApprovalPairingOpportunity, requestLocalPairingOpportunity } from "@openscout/runtime/pairing-local-socket";
 import { pairingTrustOwner } from "@openscout/runtime/pairing-security/trust-owner";
 import { spawn } from "node:child_process";
 import {
@@ -1053,6 +1053,28 @@ export async function getScoutWebPairingSessionSnapshots(): Promise<SessionState
 
   const resolvedConfig = resolveScoutPairingConfig();
   return loadScoutPairingSessionSnapshots(resolvedConfig.port);
+}
+
+/** Explicit host approval; never opens or reads the QR window. */
+export async function controlScoutWebApprovalPairing(
+  action: "open" | "read" | "cancel",
+  request: {token: string; requesterPublicKey?: string | null},
+  currentDirectory?: string,
+) {
+  const binding = {requestId: request.token, ...(request.requesterPublicKey ? {publicKey: request.requesterPublicKey} : {})};
+  if (action !== "open") {
+    if (!isScoutPairingRuntimeRunning()) return null;
+    return requestLocalApprovalPairingOpportunity(resolveScoutPairingConfig().port, action, binding);
+  }
+  return serializePairingMutation(async () => {
+    // Preserve the approved authority baseline across asynchronous startup.
+    const authorityStamp = pairingTrustOwner().pairingAuthorityStamp();
+    await ensureDefaultScoutPairingWorkspaceConfig(currentDirectory);
+    if (!await requestPairingActionFromSupervisor("start")) await ensureScoutPairingRuntimeStarted();
+    const result = await requestLocalApprovalPairingOpportunity(resolveScoutPairingConfig().port, "open", {...binding, authorityStamp});
+    invalidateScoutWebPairingStateCache();
+    return result;
+  });
 }
 
 export async function controlScoutWebPairingService(
