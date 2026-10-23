@@ -155,3 +155,10 @@ The existing onboarding start/custody path still waits for gate 09. A pure
 completion/report API does not make core-only setup service acquisition pass
 that gate. Credential/acquisition separation is the later dist-access PR.
 Stop, uninstall, native update and repair behavior remain unchanged.
+
+## Staged acquisition observations
+
+The separate [core acquisition contract](./CORE-ACQUISITION.md) classifies supplied
+observations and trusted adapter effect-coverage evidence. Health and matching
+identity alone do not verify acquisition coverage. Its `custody` remains
+`not_assessed`; it performs no lifecycle operation and is not adopted by setup.
