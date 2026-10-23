@@ -16,3 +16,7 @@ const bytes=Buffer.from('reviewed bundle');
 const attested={...observed,outputSha256:Object.fromEntries(expected.packedFiles.map(p=>[p,createHash('sha256').update(bytes).digest('hex')]))};
 test('packed bytes match the independently observed build',()=>assert.deepEqual(check(expected,attested,expected.packedFiles,()=>bytes),[]));
 test('same filenames cannot hide substituted bundle bytes',()=>assert.match(check(expected,attested,expected.packedFiles,()=>Buffer.from('substituted')).join('\n'),/differs from observed build bytes/));
+
+for (const p of ['apps/desktop/src/core/setup/local-edge-dependencies.ts', 'apps/desktop/src/core/setup/terminal-pty-dependencies.ts']) {
+ test(`retired readiness input cannot return: ${p}`, () => assert.match(check({...expected,removedSources:[p]}, {...observed,sources:[source,{...source,source:p}]}, expected.packedFiles).join('\n'), /Removed private source returned/));
+}

@@ -26,6 +26,9 @@ scout setup
 scout doctor
 ```
 
+Setup and doctor assess the public core, not private app health. See the
+[core readiness contract](docs/core-readiness.md) for JSON schemas and limits.
+
 ### Linux and headless servers
 
 The packaged `scoutd` supervisor is macOS-only and is never executed on Linux.

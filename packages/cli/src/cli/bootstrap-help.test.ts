@@ -22,7 +22,7 @@ test("Node doctor help describes its actual JSON report and unsupported native r
   }
   expect(NODE_DOCTOR_HELP).toContain("One headless report JSON object");
   expect(NODE_DOCTOR_HELP).toContain("Repair is not run");
-  expect(DOCTOR_HELP).toContain("scout.doctor.v1 NDJSON");
+  expect(DOCTOR_HELP).toContain("scout.doctor.core/v1 NDJSON");
   expect(DOCTOR_HELP).toContain("Node headless CLI");
 });
 

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -10,23 +10,15 @@ for (const mode of ["plain", "json"] as const) {
     test(`setup process ${mode}: local edge ${status}`, () => {
       const home = mkdtempSync(join(tmpdir(), "scout-setup-process-"));
       try {
-        const brew = join(home, "brew");
-        writeFileSync(brew, "#!/bin/sh\necho 'fixture: attempted Caddy install failed' >&2\nexit 7\n");
-        chmodSync(brew, 0o755);
         const service = resolve(import.meta.dir, "../../lib/core/setup/service.ts");
         const command = resolve(import.meta.dir, "setup.ts");
         const context = resolve(import.meta.dir, "../context.ts");
-        const dependencies = resolve(import.meta.dir, "../../../../../apps/desktop/src/core/setup/local-edge-dependencies.ts");
         const child = join(home, "child.ts");
         writeFileSync(child, `
 import { mock } from "bun:test";
-import { ensureScoutLocalEdgeDependencies } from ${JSON.stringify(dependencies)};
-const attempted = ensureScoutLocalEdgeDependencies({
-  env: { HOME: ${JSON.stringify(home)}, PATH: ${JSON.stringify(home)} },
-  platform: "darwin", commonDirectories: [],
-});
-if (attempted.status !== "error" || !attempted.detail.includes("attempted Caddy install failed")) throw new Error("fixture did not attempt installation");
+import { healthyCoreReport } from ${JSON.stringify(resolve(import.meta.dir, "../test-fixtures/core-report.ts"))};
 const report = {
+  coreReport: healthyCoreReport(),
   currentDirectory: ${JSON.stringify(home)},
   setup: { supportDirectory: "fixture", settingsPath: "fixture", harnessCatalogPath: "fixture",
     relayAgentsPath: "fixture", managedInstallsPath: "fixture", currentProjectConfigPath: null,
@@ -38,8 +30,9 @@ const report = {
   catalog: { entries: [{ name: "codex", label: "Codex", harness: "codex",
     readinessReport: { state: "ready", ready: true, detail: "synthetic" } }] },
   scoutSkill: { entries: [] }, claudeStatusline: { status: "skipped", wrapperPath: "fixture" },
-  localEdge: { ...attempted, status: ${JSON.stringify(status)},
-    detail: ${status === "error" ? "attempted.detail" : JSON.stringify(`optional edge fixture: ${status}`)} },
+  scope: "core", appReadiness: { status: "not_checked", reason: "private_app_scope", detail: "Private app readiness is not checked." },
+  // Old app-side fields cannot turn core readiness into a failure.
+  localEdge: { status: ${JSON.stringify(status)}, detail: "stale app-side report" },
 };
 mock.module(${JSON.stringify(service)}, () => ({ runScoutSetup: async () => report }));
 const { runSetupCommand } = await import(${JSON.stringify(command)});
@@ -48,21 +41,23 @@ await runSetupCommand(createScoutCommandContext({ cwd: ${JSON.stringify(home)}, 
 `);
         const env = { ...process.env, HOME: home, OPENSCOUT_HOME: join(home, ".openscout"),
           OPENSCOUT_SUPPORT_DIRECTORY: join(home, "support"), OPENSCOUT_CONTROL_HOME: join(home, "control"),
-          OPENSCOUT_RELAY_HUB: join(home, "relay") };
+          OPENSCOUT_RELAY_HUB: join(home, "relay"), OPENSCOUT_BROKER_URL: "http://127.0.0.1:1",
+          OPENSCOUT_BROKER_SOCKET_PATH: join(home, "absent.sock") };
         const result = Bun.spawnSync([process.execPath, child], { env, timeout: 20_000 });
         const stdout = result.stdout.toString();
         expect(result.stderr.toString()).toBe("");
-        expect(result.exitCode).toBe(status === "error" ? 1 : 0);
-        const headline = status === "error" ? "Scout setup failed." : "Scout is ready.";
+        expect(result.exitCode).toBe(0);
+        const headline = "Scout core is available. Coding-agent sign-in has not been checked.";
         if (mode === "json") {
           const report = JSON.parse(stdout);
-          expect(report.outcome).toBe(status === "error" ? "failed" : "ready");
+          expect(report.outcome).toBe("ready");
           expect(report.headline).toBe(headline);
           expect(report.localEdge.status).toBe(status);
-          expect(report.nextStep).toBe(status === "error" ? "scout setup" : "scout whoami");
+          expect(report.nextStep).toBe("scout whoami");
+          expect(report.webUrl).toBeNull();
         } else {
           expect(stdout).toContain(headline);
-          if (status === "error") expect(stdout).toContain("fixture: attempted Caddy install failed");
+          expect(stdout).not.toContain("Browser:");
         }
       } finally { rmSync(home, { recursive: true, force: true }); }
     });
@@ -70,14 +65,14 @@ await runSetupCommand(createScoutCommandContext({ cwd: ${JSON.stringify(home)}, 
 }
 
 // The headless handoff through the REAL runScoutSetup mapping: only the
-// onboarding run and the local-edge install underneath it are synthetic.
+// onboarding run is synthetic. Private app diagnostics are never invoked.
 const HANDOFF_DETAIL = "Next step: run `openscout-runtime broker` in this shell or under your process manager. "
   + "The headless service adapter leaves broker start to that foreground process.";
 const HANDOFF_CASES = {
   handoff: { fails: false },
   "handoff with broker warning": { fails: true },
   "handoff with skill error": { fails: true },
-  "handoff with local edge error": { fails: true },
+  "handoff with local edge error": { fails: false },
 } as const;
 
 for (const mode of ["plain", "json"] as const) {
@@ -87,23 +82,11 @@ for (const mode of ["plain", "json"] as const) {
       try {
         const command = resolve(import.meta.dir, "setup.ts");
         const context = resolve(import.meta.dir, "../context.ts");
-        const dependencies = resolve(import.meta.dir, "../../../../../apps/desktop/src/core/setup/local-edge-dependencies.ts");
         const onboardingModule = Bun.resolveSync("@openscout/runtime/onboarding", import.meta.dir);
         const child = join(home, "child.ts");
         writeFileSync(child, `
 import { mock } from "bun:test";
 const onboarding = { ...(await import(${JSON.stringify(onboardingModule)})) };
-const edge = { ...(await import(${JSON.stringify(dependencies)})) };
-const inspected = edge.inspectScoutLocalEdgeDependencies({
-  env: { HOME: ${JSON.stringify(home)}, PATH: ${JSON.stringify(home)} }, platform: "darwin", commonDirectories: [],
-});
-const edgeError = ${JSON.stringify(name === "handoff with local edge error")};
-mock.module(${JSON.stringify(dependencies)}, () => ({
-  ...edge,
-  ensureScoutLocalEdgeDependencies: () => ({ ...inspected,
-    status: edgeError ? "error" : "skipped",
-    detail: edgeError ? "fixture: attempted Caddy install failed" : "optional edge fixture: skipped" }),
-}));
 mock.module(${JSON.stringify(onboardingModule)}, () => ({
   ...onboarding,
   runOpenScoutOnboardingSetup: async () => ({
@@ -120,6 +103,7 @@ mock.module(${JSON.stringify(onboardingModule)}, () => ({
       readinessReport: { state: "ready", ready: true, detail: "synthetic" } }] },
     scoutSkill: { entries: ${JSON.stringify(name === "handoff with skill error" ? [{ id: "fixture-skill", status: "error", error: "fixture: skill install failed" }] : [])} },
     claudeStatusline: { status: "skipped", wrapperPath: "fixture" },
+    localEdge: ${JSON.stringify(name === "handoff with local edge error" ? {status:"error",detail:"stale app-side error"} : undefined)},
     state: {},
   }),
 }));
@@ -129,14 +113,17 @@ await runSetupCommand(createScoutCommandContext({ cwd: ${JSON.stringify(home)}, 
 `);
         const env = { ...process.env, HOME: home, OPENSCOUT_HOME: join(home, ".openscout"),
           OPENSCOUT_SUPPORT_DIRECTORY: join(home, "support"), OPENSCOUT_CONTROL_HOME: join(home, "control"),
-          OPENSCOUT_RELAY_HUB: join(home, "relay") };
+          OPENSCOUT_RELAY_HUB: join(home, "relay"), OPENSCOUT_BROKER_URL: "http://127.0.0.1:1",
+          OPENSCOUT_BROKER_SOCKET_PATH: join(home, "absent.sock") };
         const result = Bun.spawnSync([process.execPath, child], { env, timeout: 20_000 });
         const stdout = result.stdout.toString();
         expect(result.stderr.toString()).toBe("");
-        expect(result.exitCode).toBe(fails ? 1 : 0);
-        const headline = fails ? "Scout setup failed." : "Scout is set up. Start the broker to finish.";
+        expect(result.exitCode, stdout).toBe(fails ? 1 : 0);
+        const headline = fails ? "Scout core needs attention." : "Scout is set up. Start the broker to finish.";
         if (mode === "json") {
           const report = JSON.parse(stdout);
+          expect(report.localEdge).toBeUndefined();
+          expect(report.appReadiness.status).toBe("not_checked");
           expect(report.outcome).toBe(fails ? "failed" : "handoff");
           expect(report.headline).toBe(headline);
           // Failed or handed off, the headless next step is the broker command, never "scout setup".

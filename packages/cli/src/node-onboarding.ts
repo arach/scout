@@ -1,4 +1,4 @@
-import { assessSetupCompletion } from "@openscout/runtime/onboarding";
+import { APP_READINESS_UNCHECKED, assessScoutSetupCompletion, loadScoutCoreReport } from "./lib/core/setup/readiness.ts";
 import { parseSetupCommandOptions, parseScoutArgv, preflightLifecycle, QUICK_LINKS, SETUP_HELP } from "../bin/lifecycle-preflight.mjs";
 import {
   brokerServiceStatus,
@@ -329,24 +329,25 @@ async function runSetupCommand(args: string[]): Promise<void> {
     sourceRoots: options.sourceRoots,
     defaultHarness: options.defaultHarness,
   });
-  const completion = assessSetupCompletion({ ...report,
-    defaultHarness: report.setup.settings.agents.defaultHarness,
+  const completion = assessScoutSetupCompletion({ ...report,
+    coreReport: await loadScoutCoreReport({ catalog: report.catalog }),
     failures: [
       ...report.scoutSkill.entries.filter((entry) => entry.status === "error")
         .map((entry) => entry.error ?? `Skill install failed: ${entry.id}`),
       ...(report.claudeStatusline.status === "error"
         ? [report.claudeStatusline.error ?? "Claude statusline install failed"] : []),
     ],
-  }, { interactive: false });
+  });
   if (completion.outcome === "failed") process.exitCode = 1;
   if (options.output === "json") {
-    writeJson({ ...report, ...completion });
+    writeJson({ schema: "scout.setup.v2", ...report, ...completion });
     return;
   }
 
   const setup = report.setup;
   const lines = [
     completion.headline,
+    `Scope: core only. ${APP_READINESS_UNCHECKED.detail}`,
     `Support directory: ${setup.supportDirectory}`,
     `Settings: ${setup.settingsPath}`,
     `Harness catalog: ${setup.harnessCatalogPath}`,
@@ -366,7 +367,8 @@ async function runSetupCommand(args: string[]): Promise<void> {
   for (const entry of report.scoutSkill.entries.filter((entry) => entry.status === "error")) lines.push(`Error: ${entry.error ?? `Skill install failed: ${entry.id}`}`);
   if (report.claudeStatusline.status === "error") lines.push(`Error: ${report.claudeStatusline.error ?? "Claude statusline install failed"}`);
   lines.push(`Logs: ${report.broker.stdoutLogPath} | ${report.broker.stderrLogPath}`);
-  lines.push(`Next: ${completion.nextStep}`, `Browser: ${completion.webUrl} (starts on demand)`);
+  lines.push(`Next: ${completion.nextStep}`);
+  if (completion.webUrl) lines.push(`Browser: ${completion.webUrl} (starts on demand)`);
   if (completion.browserGuidance) lines.push(completion.browserGuidance);
   lines.push("Also available:", ...completion.alsoAvailable.map((step) => `  ${step}`));
   process.stdout.write(`${lines.join("\n")}\n`);
@@ -431,7 +433,7 @@ async function loadBrokerRuntimeCatalog(): Promise<ScoutOwnedRuntimeCatalog | nu
 async function runDoctorCommand(args: string[]): Promise<void> {
   const options = parseDoctorOptions(args);
   const broker = await brokerServiceStatus();
-  const catalog = await loadHarnessCatalogSnapshot();
+  const catalog = await loadHarnessCatalogSnapshot({ localOnly: true });
   const state = await markOpenScoutOnboardingCommand({
     command: "doctor",
     currentDirectory: options.currentDirectory,
@@ -440,6 +442,10 @@ async function runDoctorCommand(args: string[]): Promise<void> {
   });
   const support = resolveOpenScoutSupportPaths();
   const report = {
+    schema: "scout.doctor.core.node/v1",
+    coreReport: await loadScoutCoreReport({ catalog }),
+    scope: "core",
+    appReadiness: APP_READINESS_UNCHECKED,
     currentDirectory: options.currentDirectory,
     support,
     broker,
@@ -559,6 +565,7 @@ function formatDoctor(report: {
 }): string {
   const lines = [
     "Scout doctor",
+    `Scope: core only. ${APP_READINESS_UNCHECKED.detail}`,
     `Context root: ${report.currentDirectory}`,
     `Support directory: ${report.support.supportDirectory}`,
     `Settings: ${report.support.settingsPath}`,

@@ -1,16 +1,12 @@
 import { renderCapabilitySnapshotSummary } from "./runtimes.ts";
 export { renderScoutRuntimesReport } from "./runtimes.ts";
-import { assessSetupCompletion, type SetupCompletion } from "@openscout/runtime/onboarding";
+import { assessScoutSetupCompletion, type ScoutSetupCompletion } from "../../core/setup/readiness.ts";
 import type {
   ScoutDoctorReport,
-  ScoutLocalEdgeDoctorReport,
-  ScoutLocalEdgeHostResolution,
   ScoutProjectInventoryEntry,
   ScoutSetupReport,
 } from "../../core/setup/service.ts";
 import { deriveOpenScoutInstanceLayout } from "@openscout/runtime/instance";
-
-type LocalEdgeDependencyReport = ScoutSetupReport["localEdge"];
 
 function renderInstanceLine(): string {
   const layout = deriveOpenScoutInstanceLayout();
@@ -111,9 +107,8 @@ export function renderScoutDoctorTailAfterStream(report: ScoutDoctorReport): str
     `  Stdout: ${report.broker.stdoutLogPath}`,
     `  Stderr: ${report.broker.stderrLogPath}`,
     "",
-    ...renderLocalEdgeDoctor(report.localEdge),
-    "",
-    ...renderTerminalPtyReport(report.terminalPty),
+    `Scope: core only. ${report.appReadiness.detail}`,
+    ...report.coreReport.service.checks.map(check => `  ${check.name}: ${check.state} — ${check.detail}`),
     "",
     ...renderSystemProbes(report.systemProbes),
     "",
@@ -161,44 +156,6 @@ function renderProjectInventory(projects: ScoutProjectInventoryEntry[]): string[
   return lines;
 }
 
-function renderLocalEdgeDependencyReport(report: LocalEdgeDependencyReport): string[] {
-  const lines = [
-    "Local edge:",
-    `  Caddy: ${report.status}`,
-    `  Detail: ${report.detail}`,
-  ];
-  if (report.caddyPath) {
-    lines.push(`  Path: ${report.caddyPath}`);
-  }
-  if (report.caddyVersion) {
-    lines.push(`  Version: ${report.caddyVersion}`);
-  }
-  if (report.installCommand) {
-    lines.push(`  Install: ${report.installCommand}`);
-  }
-  return lines;
-}
-
-function renderTerminalPtyReport(report: ScoutDoctorReport["terminalPty"]): string[] {
-  const lines = [
-    "Web terminal (Node PTY relay):",
-    `  State: ${report.status}`,
-    `  Detail: ${report.detail}`,
-  ];
-  if (report.nodePath) {
-    lines.push(`  Node: ${report.nodePath}${report.nodeVersion ? ` (${report.nodeVersion})` : ""}`);
-  }
-  lines.push(
-    report.bindingPath
-      ? `  Binding: ${report.bindingPackage} -> ${report.bindingPath}`
-      : `  Binding: ${report.bindingPackage}`,
-  );
-  if (report.installCommand) {
-    lines.push(`  Install: ${report.installCommand}`);
-  }
-  return lines;
-}
-
 function renderSystemProbes(report: ScoutDoctorReport["systemProbes"]): string[] {
   const lines = [
     "System probes:",
@@ -220,44 +177,6 @@ function renderSystemProbes(report: ScoutDoctorReport["systemProbes"]): string[]
   for (const warning of report.warnings) {
     lines.push(`  Warning: ${warning}`);
   }
-  return lines;
-}
-
-function formatLocalEdgeHostResolution(resolution: ScoutLocalEdgeHostResolution): string {
-  if (resolution.resolved) {
-    return `${resolution.host} -> ${resolution.addresses.join(", ")}`;
-  }
-  return `${resolution.host} -> not resolved${resolution.error ? ` (${resolution.error})` : ""}`;
-}
-
-function renderLocalEdgeDoctor(edge: ScoutLocalEdgeDoctorReport): string[] {
-  const lines = [
-    "Local web edge:",
-    `  State: ${edge.state}`,
-    `  Caddy: ${edge.dependency.status}`,
-    `  Detail: ${edge.dependency.detail}`,
-  ];
-  if (edge.dependency.caddyPath) {
-    lines.push(`  Path: ${edge.dependency.caddyPath}`);
-  }
-  if (edge.dependency.caddyVersion) {
-    lines.push(`  Version: ${edge.dependency.caddyVersion}`);
-  }
-  if (edge.dependency.installCommand) {
-    lines.push(`  Install: ${edge.dependency.installCommand}`);
-  }
-  lines.push(
-    `  Portal host: ${formatLocalEdgeHostResolution(edge.dns.portal)}`,
-    `  Node host: ${formatLocalEdgeHostResolution(edge.dns.node)}`,
-    `  Caddyfile: ${edge.caddyfilePath}`,
-    `  HTTP listener: ${edge.listeners.http.listening ? "yes" : "no"} (127.0.0.1:${edge.listeners.http.port})`,
-    `  HTTPS listener: ${edge.listeners.https.listening ? "yes" : "no"} (127.0.0.1:${edge.listeners.https.port})`,
-  );
-
-  for (const hint of edge.hints) {
-    lines.push(`  Hint: ${hint}`);
-  }
-
   return lines;
 }
 
@@ -312,9 +231,8 @@ export function renderScoutDoctorReport(report: ScoutDoctorReport): string {
     `  Stdout: ${report.broker.stdoutLogPath}`,
     `  Stderr: ${report.broker.stderrLogPath}`,
     "",
-    ...renderLocalEdgeDoctor(report.localEdge),
-    "",
-    ...renderTerminalPtyReport(report.terminalPty),
+    `Scope: core only. ${report.appReadiness.detail}`,
+    ...report.coreReport.service.checks.map(check => `  ${check.name}: ${check.state} — ${check.detail}`),
     "",
     ...renderSystemProbes(report.systemProbes),
     "",
@@ -335,7 +253,7 @@ export function renderScoutDoctorReport(report: ScoutDoctorReport): string {
   return lines.join("\n");
 }
 
-export function renderScoutSetupReport(report: ScoutSetupReport, completion: SetupCompletion = assessSetupCompletion(report)): string {
+export function renderScoutSetupReport(report: ScoutSetupReport, completion: ScoutSetupCompletion = assessScoutSetupCompletion(report)): string {
   const lines = [
     completion.headline,
     `Context root: ${report.currentDirectory}`,
@@ -377,7 +295,7 @@ export function renderScoutSetupReport(report: ScoutSetupReport, completion: Set
     lines.push(`  Health error: ${report.broker.health.error ?? "Broker health verification failed"}`);
   }
 
-  lines.push("", ...renderLocalEdgeDependencyReport(report.localEdge));
+  lines.push("", `Scope: core only. ${report.appReadiness.detail}`);
 
   lines.push("", "Harnesses:");
   for (const entry of report.catalog.entries) {
@@ -386,7 +304,8 @@ export function renderScoutSetupReport(report: ScoutSetupReport, completion: Set
     lines.push(`    Detail: ${entry.readinessReport.detail}`);
   }
 
-  lines.push("", `Next: ${completion.nextStep}`, `Browser: ${completion.webUrl} (starts on demand)`);
+  lines.push("", `Next: ${completion.nextStep}`);
+  if (completion.webUrl) lines.push(`Browser: ${completion.webUrl} (starts on demand)`);
   if (completion.browserGuidance) lines.push(completion.browserGuidance);
   lines.push("", "Also available:", ...completion.alsoAvailable.map((step) => `  ${step}`));
 

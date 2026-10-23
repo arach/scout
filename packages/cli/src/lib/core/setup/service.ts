@@ -1,14 +1,6 @@
-import { lookup } from "node:dns/promises";
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { Socket } from "node:net";
-import {
-  DEFAULT_SCOUT_WEB_PORTAL_HOST,
-  resolveConfiguredScoutWebHostname,
-  resolveScoutWebNamedHostname,
-} from "@openscout/runtime/local-config";
+import { APP_READINESS_UNCHECKED, loadScoutCoreReport } from "./readiness.ts";
+import type { CoreServiceReport } from "@openscout/runtime/core-report";
 import type { ScoutCapabilityMatrixSnapshot } from "@openscout/protocol";
-import { resolveOpenScoutLocalEdgeConfig } from "@openscout/runtime/local-edge";
 import {
   loadResolvedRelayAgents,
   type ClaudeStatuslineInstallReport,
@@ -29,54 +21,16 @@ import {
   type SystemProbeDoctorReport,
 } from "@openscout/runtime/system-probes";
 import { withScoutCoreCommandLock } from "./command-lock.ts";
-import {
-  ensureScoutLocalEdgeDependencies,
-  inspectScoutLocalEdgeDependencies,
-  type ScoutLocalEdgeDependencyReport,
-} from "../../../../../../apps/desktop/src/core/setup/local-edge-dependencies.ts";
-import {
-  inspectScoutTerminalPtyDependencies,
-  type ScoutTerminalPtyReport,
-} from "../../../../../../apps/desktop/src/core/setup/terminal-pty-dependencies.ts";
 import { readScoutCapabilityMatrix } from "../broker/service.ts";
-import { resolveOpenScoutLocalEdgeDirectory } from "@openscout/runtime/support-paths";
-
-export type ScoutLocalEdgeDoctorReport = {
-  state: "ready" | "degraded" | "missing";
-  portalHost: string;
-  nodeHost: string;
-  caddyfilePath: string;
-  dependency: ScoutLocalEdgeDependencyReport;
-  dns: {
-    portal: ScoutLocalEdgeHostResolution;
-    node: ScoutLocalEdgeHostResolution;
-  };
-  listeners: {
-    http: ScoutLocalEdgePortProbe;
-    https: ScoutLocalEdgePortProbe;
-  };
-  hints: string[];
-};
-
-export type ScoutLocalEdgeHostResolution = {
-  host: string;
-  resolved: boolean;
-  addresses: string[];
-  error: string | null;
-};
-
-export type ScoutLocalEdgePortProbe = {
-  port: number;
-  listening: boolean;
-};
 
 export type ScoutDoctorReport = {
   currentDirectory: string;
   repoRoot: string;
   supportPaths: ReturnType<typeof resolveOpenScoutSupportPaths>;
   broker: BrokerServiceStatus;
-  localEdge: ScoutLocalEdgeDoctorReport;
-  terminalPty: ScoutTerminalPtyReport;
+  coreReport: CoreServiceReport;
+  scope: "core";
+  appReadiness: typeof APP_READINESS_UNCHECKED;
   systemProbes: SystemProbeDoctorReport;
   setup: Awaited<ReturnType<typeof loadResolvedRelayAgents>>;
   catalog: Awaited<ReturnType<typeof loadHarnessCatalogSnapshot>>;
@@ -90,7 +44,9 @@ export type ScoutSetupReport = {
   brokerWarning: string | null;
   /** Headless foreground adapter with no broker yet: an expected handoff, not a failure. */
   brokerHandoff: OpenScoutBrokerHandoff | null;
-  localEdge: ScoutLocalEdgeDependencyReport;
+  coreReport: CoreServiceReport;
+  scope: "core";
+  appReadiness: typeof APP_READINESS_UNCHECKED;
   catalog: Awaited<ReturnType<typeof loadHarnessCatalogSnapshot>>;
   scoutSkill: ScoutSkillInstallReport;
   claudeStatusline: ClaudeStatuslineInstallReport;
@@ -108,150 +64,32 @@ export async function loadScoutDoctorReport(input: {
   onProjectInventoryError?: (error: ProjectInventoryError) => void | Promise<void>;
 }): Promise<ScoutDoctorReport> {
   return withScoutCoreCommandLock("doctor", async () => {
-    const [broker, localEdge, terminalPty, systemProbes, setup, catalog, capabilities] = await Promise.all([
+    const [broker, systemProbes, setup, catalog, capabilities] = await Promise.all([
       getRuntimeBrokerServiceStatus(),
-      loadScoutLocalEdgeDoctorReport(input.env ?? process.env),
-      Promise.resolve(inspectScoutTerminalPtyDependencies({ env: input.env ?? process.env })),
       loadSystemProbeDoctorReport({ repoRoot: input.repoRoot }),
       loadResolvedRelayAgents({
         currentDirectory: input.currentDirectory,
         onProjectInventoryEntry: input.onProjectInventoryEntry,
         onProjectInventoryError: input.onProjectInventoryError,
       }),
-      loadHarnessCatalogSnapshot(),
+      loadHarnessCatalogSnapshot({ localOnly: true }),
       readScoutCapabilityMatrix(),
     ]);
 
     return {
+      coreReport: await loadScoutCoreReport({ env: input.env, catalog }),
       currentDirectory: input.currentDirectory,
       repoRoot: input.repoRoot,
       supportPaths: resolveOpenScoutSupportPaths(),
       broker,
-      localEdge,
-      terminalPty,
+      scope: "core",
+      appReadiness: APP_READINESS_UNCHECKED,
       systemProbes,
       setup,
       catalog,
       capabilities,
     };
   });
-}
-
-export async function loadScoutLocalEdgeDoctorReport(env: NodeJS.ProcessEnv): Promise<ScoutLocalEdgeDoctorReport> {
-  const dependency = inspectScoutLocalEdgeDependencies({ env });
-  const nodeHost = env.OPENSCOUT_WEB_ADVERTISED_HOST?.trim()
-    || (env.OPENSCOUT_WEB_LOCAL_NAME?.trim()
-      ? resolveScoutWebNamedHostname(env.OPENSCOUT_WEB_LOCAL_NAME)
-      : resolveConfiguredScoutWebHostname());
-  const localEdgeConfig = resolveOpenScoutLocalEdgeConfig({
-    portalHost: env.OPENSCOUT_WEB_PORTAL_HOST?.trim() || DEFAULT_SCOUT_WEB_PORTAL_HOST,
-    nodeHost,
-  });
-  const portalHost = localEdgeConfig.portalHost;
-
-  const [portalDns, nodeDns, http, https] = await Promise.all([
-    resolveLocalEdgeHost(portalHost),
-    resolveLocalEdgeHost(localEdgeConfig.nodeHost),
-    probeTcpPort(80),
-    probeTcpPort(443),
-  ]);
-
-  const hints: string[] = [];
-  const caddyAvailable = dependency.status === "ready" || dependency.status === "installed";
-  const httpsTrustReady = dependency.trust.status === "trusted" || dependency.trust.status === "installed";
-  if (!caddyAvailable) {
-    hints.push(dependency.detail);
-  }
-  if (https.listening && !httpsTrustReady) {
-    hints.push(`${dependency.trust.detail} Run \`scout server trust\` if you intended to use HTTPS.`);
-  }
-  if (!portalDns.resolved || !nodeDns.resolved || (!http.listening && !https.listening)) {
-    hints.push("Start the local edge with `scout server edge`.");
-  }
-
-  const state = caddyAvailable
-    && portalDns.resolved
-    && nodeDns.resolved
-    && (http.listening || https.listening)
-    && (!https.listening || httpsTrustReady)
-    ? "ready"
-    : caddyAvailable || portalDns.resolved || nodeDns.resolved || http.listening || https.listening
-      ? "degraded"
-      : "missing";
-
-  return {
-    state,
-    portalHost,
-    nodeHost: localEdgeConfig.nodeHost,
-    caddyfilePath: join(resolveOpenScoutLocalEdgeDirectory(), "Caddyfile"),
-    dependency,
-    dns: {
-      portal: portalDns,
-      node: nodeDns,
-    },
-    listeners: {
-      http,
-      https,
-    },
-    hints,
-  };
-}
-
-async function resolveLocalEdgeHost(host: string): Promise<ScoutLocalEdgeHostResolution> {
-  try {
-    const entries = await withTimeout(lookup(host, { all: true }), 1_500);
-    const addresses = [...new Set(entries.map((entry) => entry.address))];
-    return {
-      host,
-      resolved: addresses.length > 0,
-      addresses,
-      error: null,
-    };
-  } catch (error) {
-    return {
-      host,
-      resolved: false,
-      addresses: [],
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
-}
-
-async function probeTcpPort(port: number): Promise<ScoutLocalEdgePortProbe> {
-  const listening = await new Promise<boolean>((resolve) => {
-    const socket = new Socket();
-    const done = (result: boolean) => {
-      socket.removeAllListeners();
-      socket.destroy();
-      resolve(result);
-    };
-    socket.setTimeout(350);
-    socket.once("connect", () => done(true));
-    socket.once("error", () => done(false));
-    socket.once("timeout", () => done(false));
-    socket.connect(port, "127.0.0.1");
-  });
-
-  return {
-    port,
-    listening,
-  };
-}
-
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<T>((_, reject) => {
-        timeout = setTimeout(() => reject(new Error(`timed out after ${timeoutMs}ms`)), timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timeout) {
-      clearTimeout(timeout);
-    }
-  }
 }
 
 export async function runScoutSetup(input: {
@@ -265,15 +103,16 @@ export async function runScoutSetup(input: {
       sourceRoots: input.sourceRoots,
       defaultHarness: input.defaultHarness,
     });
-    const localEdge = ensureScoutLocalEdgeDependencies({ trustLocalHttps: false });
 
     return {
+      coreReport: await loadScoutCoreReport({ catalog: setupResult.catalog }),
       currentDirectory: input.currentDirectory,
       setup: setupResult.setup,
       broker: setupResult.broker,
       brokerWarning: setupResult.brokerWarning,
       brokerHandoff: setupResult.brokerHandoff,
-      localEdge,
+      scope: "core",
+      appReadiness: APP_READINESS_UNCHECKED,
       catalog: setupResult.catalog,
       scoutSkill: setupResult.scoutSkill,
       claudeStatusline: setupResult.claudeStatusline,
