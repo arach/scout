@@ -1616,8 +1616,8 @@ const mobileRouter = t.router({
         lastReadMessageId: z.string().nullable().optional(),
       }),
     )
-    .mutation(async ({ input }) => {
-      return markScoutMobileConversationRead(input);
+    .mutation(async ({ input, ctx }) => {
+      return markScoutMobileConversationRead(input, () => { requireTransportContext(ctx); });
     }),
 
   // -- Terminal (in-app SSH/PTY) ------------------------------------------

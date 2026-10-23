@@ -1977,7 +1977,7 @@ export async function sendScoutMobileComms(
 export async function markScoutMobileConversationRead(input: {
   conversationId: string;
   lastReadMessageId?: string | null;
-}): Promise<{ conversationId: string; unreadCount: number }> {
+}, beforeEffect?: () => void): Promise<{ conversationId: string; unreadCount: number }> {
   const broker = await loadScoutBrokerContext();
   if (!broker) throw new Error("Relay is not reachable.");
   if (!broker.snapshot.conversations?.[input.conversationId]) {
@@ -2010,6 +2010,7 @@ export async function markScoutMobileConversationRead(input: {
       lastReadMessageId,
     },
     broker.baseUrl,
+    beforeEffect,
   );
   // Read through the latest message ⇒ caught up. The next list pull reconciles
   // if a new inbound message landed in the same instant.

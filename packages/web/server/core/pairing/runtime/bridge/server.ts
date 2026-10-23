@@ -968,7 +968,7 @@ async function handleRPCInner(
           result: await markScoutMobileConversationRead({
             conversationId: p.conversationId,
             lastReadMessageId: p.lastReadMessageId ?? null,
-          }),
+          }, () => { requireTransportContext(rpcContext); }),
         };
       }
 

@@ -952,6 +952,7 @@ async function brokerReadJson<T>(
 }
 
 type BrokerPostJsonOptions<T> = {
+  beforeEffect?: () => void;
   acceptErrorJson?: (value: unknown) => value is T;
 };
 
@@ -965,6 +966,7 @@ async function brokerPostJson<T>(
     method: "POST",
     body,
     acceptErrorJson: options.acceptErrorJson,
+    beforeEffect: options.beforeEffect,
     socketPath: resolveBrokerSocketPathForBaseUrl(baseUrl),
   });
   // A successful broker mutation makes every bounded snapshot for this broker
@@ -1398,13 +1400,14 @@ export async function recordScoutBrokerReadCursor(
     lastReadAt?: number;
   },
   baseUrl = resolveScoutBrokerUrl(),
+  beforeEffect?: () => void,
 ): Promise<{ ok: boolean; acknowledgedDeliveries?: number }> {
   const path = `${scoutBrokerPaths.v1.conversations}/${encodeURIComponent(input.conversationId)}/read-cursors`;
   return brokerPostJson<{ ok: boolean; acknowledgedDeliveries?: number }>(baseUrl, path, {
     actorId: input.actorId,
     lastReadMessageId: input.lastReadMessageId ?? undefined,
     lastReadAt: input.lastReadAt,
-  });
+  }, {beforeEffect});
 }
 
 export async function loadScoutBrokerContext(
