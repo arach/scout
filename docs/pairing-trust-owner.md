@@ -271,10 +271,19 @@ editor who forges the entire root.
 
 A writer first claims one of eight `.pairing-v2-slot-<0..7>` directories by
 exclusive creation. A unique token file binds the claim to the root and
-directory inode. These are resource claims, not time-based locks. An empty
-or abandoned claim stays occupied until explicit quiescent maintenance; there
-is no age, PID or timeout takeover. Cleanup removes only the writer's unique
-token and an empty matching directory, never a recursively deleted slot.
+directory inode. **The token identifies the claim over time; device/inode alone
+does not.** Filesystems can reuse an inode after deletion. Inventory, claim
+initialization, sync and release keep an open directory descriptor while
+checking or acting on that claim. Head recovery matches the verified token and
+complete claim, not a reused directory index or inode.
+
+These are resource claims, not time-based locks. An empty interrupted mkdir
+still occupies its slot. Release requires the matching token before unlinking
+it, then retains its descriptor through `rmdir` so another directory cannot
+reuse the pinned inode. A stale release never removes a newer empty claim.
+A crash after token unlink can leave an empty occupied directory; it is not
+reclaimed automatically and does not itself make a completed head pending.
+There is no PID/age takeover or recursive slot deletion.
 
 Before bulk staging, the writer checks the 3 MiB candidate budget, 1 MiB file
 bound and resulting authority limits. It writes and synchronizes the new

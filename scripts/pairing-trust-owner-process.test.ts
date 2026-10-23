@@ -77,7 +77,7 @@ describe("v2 real process publication and recovery",()=>{
       expect(retried.value,`${managed}:${point}`).toMatchObject({ok:true,result:{mutationId:"capsule-write",revision:expected+1}});
       expect(readdirSync(data).filter(n=>n.includes(".commit.")).length).toBe(1);
       expect(readdirSync(data).filter(n=>n.includes(".done.")).length).toBe(1);
-      expect(readdirSync(data).filter(n=>n.startsWith(".pairing-v2-slot-")).length).toBe(point==="after-staging"?1:0);
+      expect(readdirSync(data).filter(n=>n.startsWith(".pairing-v2-slot-")).length).toBe(["after-staging","after-token-release"].includes(point)?1:0);
       console.log(JSON.stringify({capsuleCrash:{managed,point},events:readFileSync(join(coordination,"trace.jsonl"),"utf8").trim().split("\n").map(JSON.parse)}));
     }
   },30000);

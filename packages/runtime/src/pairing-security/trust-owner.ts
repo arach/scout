@@ -400,36 +400,45 @@ export class PairingTrustOwner {
     if (!active || active.owner !== this) refuse("managed_context_required");
     this.validateInvocation(active, root);
   }
-  /** A slot is an atomic mkdir resource claim. The unique token file is never
-   * reused. Late release unlinks only that token; rmdir cannot remove a new,
-   * nonempty claim. A raced empty replacement fails its creator's inode check.
+  /** mkdir reserves one of eight slots, including empty interrupted claims.
+   * Tokens identify claims across time. dev:ino alone is only meaningful while
+   * an open directory descriptor pins that object; freed inodes can be reused.
    * Empty/crashed slots remain occupied; no PID, timestamp or age takeover. */
   private capsuleSlots(root: PairingRootIdentity, inventory: string[]) {
     const claims = new Map<string,CapsuleSlot>(), allowed = new Set<string>();
     for (const name of inventory.filter(n => n.startsWith(".pairing-v2-slot-"))) {
       if (!/^\.pairing-v2-slot-[0-7]$/.test(name)) refuse("capacity");
-      const index = Number(name.at(-1)), path = join(root.path,name), stat = lstatSync(path); owned(stat,true);
-      const children = readdirSync(path);
-      if (children.length > 1) refuse("unsafe_path");
-      allowed.add(name);
-      if (!children.length) continue;
-      const child = children[0]!;
-      if (!/^[a-f0-9-]{36}\.json$/.test(child)) refuse("unsafe_path");
-      const bytes = this.readFile(root,`${name}/${child}`,false); if (!bytes) refuse("revision_conflict");
-      const claim = unpack<Record<string,unknown>>(bytes,"claim",refuse);
-      if (claim.rootId !== root.id || claim.index !== index || !token(claim.token) || child !== `${claim.token}.json`
-        || claim.identity !== id(stat) || id(lstatSync(path)) !== id(stat)) refuse("unsafe_path");
-      const slot = {index,token:claim.token,identity:id(stat)};
-      if(claims.has(slot.token))refuse("capsule_slot_invalid");claims.set(slot.token,slot);
-      let total = bytes.length;
-      for (const candidate of [dataName(slot.token), ...(["peers","commit","marker","done"] as const).map(r=>stageName(slot.token,r))]) {
-        allowed.add(candidate);
-        try {
-          const s = lstatSync(join(root.path,candidate)); owned(s,false,false,candidate===stageName(slot.token,"commit"));
-          if (s.size > FILE_LIMIT) refuse("capacity"); total += s.size;
-        } catch (e) {if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;}
-      }
-      if (total > SLOT_LIMIT) refuse("capacity");
+      const index = Number(name.at(-1)), path = join(root.path,name);
+      const fd = openSync(path,constants.O_RDONLY|constants.O_DIRECTORY|constants.O_NOFOLLOW);
+      try {
+        const stat = fstatSync(fd); owned(stat,true);
+        if(id(lstatSync(path))!==id(stat))refuse("capsule_slot_invalid");
+        const children = readdirSync(path);
+        if (children.length > 1) refuse("unsafe_path");
+        allowed.add(name);
+        if (!children.length) {
+          if(id(lstatSync(path))!==id(stat))refuse("capsule_slot_invalid");
+          continue;
+        }
+        const child = children[0]!;
+        if (!/^[a-f0-9-]{36}\.json$/.test(child)) refuse("unsafe_path");
+        const bytes = this.readFile(root,`${name}/${child}`,false); if (!bytes) refuse("revision_conflict");
+        const claim = unpack<Record<string,unknown>>(bytes,"claim",refuse);
+        if (claim.rootId !== root.id || claim.index !== index || !token(claim.token) || child !== `${claim.token}.json`
+          || claim.identity !== id(stat) || id(lstatSync(path)) !== id(stat)) refuse("unsafe_path");
+        const slot = {index,token:claim.token,identity:id(stat)};
+        if(claims.has(slot.token))refuse("capsule_slot_invalid");claims.set(slot.token,slot);
+        let total = bytes.length;
+        for (const candidate of [dataName(slot.token), ...(["peers","commit","marker","done"] as const).map(r=>stageName(slot.token,r))]) {
+          allowed.add(candidate);
+          try {
+            const s = lstatSync(join(root.path,candidate)); owned(s,false,false,candidate===stageName(slot.token,"commit"));
+            if (s.size > FILE_LIMIT) refuse("capacity"); total += s.size;
+          } catch (e) {if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;}
+        }
+        if (total > SLOT_LIMIT) refuse("capacity");
+        if(!this.slotMatches(root,slot,fd))refuse("capsule_slot_invalid");
+      } finally {closeSync(fd);}
     }
     this.check(root); return {claims,allowed};
   }
@@ -546,7 +555,7 @@ export class PairingTrustOwner {
       if(receipt.schema!=="scout.pairing-collected/v2" || receipt.rootId!==root.id || receipt.serial!==serial || receipt.physicalHash!==physicalHash)refuse("capsule_receipt_invalid");
       if(h.retire.some(r=>names.includes(r.name)))refuse("capsule_retired_reappeared");
     }
-    const ownSlotExists=!!(h.slot && names.includes(slotName(h.slot.index)) && id(lstatSync(join(root.path,slotName(h.slot.index))))===h.slot.identity);
+    const ownSlotExists=!!(h.slot && same(slots.claims.get(h.slot.token),h.slot));
     const needsRecovery=pending || !receiptBytes || ownSlotExists;
     if(needsRecovery && !allowPending)refuse("publication_incomplete");
     const after=readdirSync(root.path).filter(n=>n.startsWith(PREFIX)||n.startsWith(CAPSULE_PREFIX)||n.startsWith(".pairing-v2")).sort();
@@ -557,41 +566,66 @@ export class PairingTrustOwner {
       projectionStage:h.slot?stageName(h.slot.token,"peers"):null,
       capsule:{barrier:b,barrierName:barriers[0]!,cutHash,head:h,physicalHash,rows,partData,needsRecovery,pending}};
   }
+  /** The descriptor must stay open for the entire check/use interval. */
+  private slotMatches(root: PairingRootIdentity, slot: CapsuleSlot, fd: number): boolean {
+    const stat=fstatSync(fd);owned(stat,true);
+    if(id(stat)!==slot.identity)return false;
+    const directory=join(root.path,slotName(slot.index));
+    try {
+      if(id(lstatSync(directory))!==id(stat))return false;
+      const bytes=this.readFile(root,`${slotName(slot.index)}/${slot.token}.json`,false);
+      if(!bytes)return false; // Includes a newer mkdir before its token write.
+      const claim=unpack<Record<string,unknown>>(bytes,"claim",refuse);
+      if(!same(claim,{rootId:root.id,...slot}))refuse("capsule_slot_invalid");
+      return id(lstatSync(directory))===id(stat);
+    } catch(e) {if((e as NodeJS.ErrnoException).code==="ENOENT")return false;throw e;}
+  }
   private syncSlot(root: PairingRootIdentity, slot: CapsuleSlot) {
-    this.check(root); const path=join(root.path,slotName(slot.index));
+    this.check(root);const path=join(root.path,slotName(slot.index));
     const fd=openSync(path,constants.O_RDONLY|constants.O_DIRECTORY|constants.O_NOFOLLOW);
-    try {const s=fstatSync(fd);owned(s,true);if(id(s)!==slot.identity)refuse("capsule_slot_invalid");fsyncSync(fd);}
-    finally {closeSync(fd);} this.check(root);
+    try {
+      if(!this.slotMatches(root,slot,fd))refuse("capsule_slot_invalid");
+      fsyncSync(fd);
+      if(!this.slotMatches(root,slot,fd))refuse("capsule_slot_invalid");
+    } finally {closeSync(fd);}this.check(root);
   }
   private claimCapsuleSlot(root: PairingRootIdentity): CapsuleSlot {
     for(let index=0;index<8;index++){
       const path=join(root.path,slotName(index));
       this.check(root);
       try{mkdirSync(path,{mode:0o700});}catch(e){if((e as NodeJS.ErrnoException).code==="EEXIST")continue;throw e;}
-      const stat=lstatSync(path);owned(stat,true);
-      const slot={index,token:randomUUID(),identity:id(stat)};
+      const fd=openSync(path,constants.O_RDONLY|constants.O_DIRECTORY|constants.O_NOFOLLOW);
       try {
-        this.writeNew(root,`${slotName(index)}/${slot.token}.json`,pack("claim",{rootId:root.id,...slot}));
-        if(id(lstatSync(path))!==slot.identity || !same(readdirSync(path),[`${slot.token}.json`]))refuse("capsule_slot_invalid");
-        this.syncSlot(root,slot);this.syncDirectory(root);return slot;
-      } catch(e){this.releaseCapsuleSlot(root,slot);throw e;}
+        const stat=fstatSync(fd);owned(stat,true);
+        const slot={index,token:randomUUID(),identity:id(stat)};
+        try {
+          this.writeNew(root,`${slotName(index)}/${slot.token}.json`,pack("claim",{rootId:root.id,...slot}));
+          if(!this.slotMatches(root,slot,fd) || !same(readdirSync(path),[`${slot.token}.json`]))refuse("capsule_slot_invalid");
+          this.syncSlot(root,slot);this.syncDirectory(root);return slot;
+        } catch(e){this.releaseCapsuleSlot(root,slot);throw e;}
+      } finally {closeSync(fd);}
     }
     return refuse("capsule_staging_capacity");
   }
   private releaseCapsuleSlot(root: PairingRootIdentity, slot: CapsuleSlot) {
     this.check(root);const directory=join(root.path,slotName(slot.index));
-    let stat;try{stat=lstatSync(directory);}catch(e){if((e as NodeJS.ErrnoException).code==="ENOENT")return;throw e;}
-    owned(stat,true);if(id(stat)!==slot.identity)return; // a different, newer claim
-    const name=`${slotName(slot.index)}/${slot.token}.json`, bytes=this.readFile(root,name,false);
-    if(bytes){const claim=unpack<Record<string,unknown>>(bytes,"claim",refuse);
-      if(!same(claim,{rootId:root.id,...slot}))refuse("capsule_slot_invalid");
-      try{unlinkSync(join(root.path,name));}catch(e){if((e as NodeJS.ErrnoException).code!=="ENOENT")throw e;}
-    }
-    // Never delete an entry owned by another token, or recursively remove a slot.
+    let fd:number;
+    try{fd=openSync(directory,constants.O_RDONLY|constants.O_DIRECTORY|constants.O_NOFOLLOW);}
+    catch(e){if((e as NodeJS.ErrnoException).code==="ENOENT")return;throw e;}
     try {
-      if(id(lstatSync(directory))!==slot.identity)return;
-      this.syncSlot(root,slot);rmdirSync(directory);
-    }catch(e){if(!["ENOENT","ENOTEMPTY","EEXIST"].includes((e as NodeJS.ErrnoException).code??""))throw e;}
+      // A matching inode without this token is not ownership. In particular,
+      // never rmdir an empty newer claim that reused a previous inode number.
+      if(!this.slotMatches(root,slot,fd))return;
+      const name=`${slotName(slot.index)}/${slot.token}.json`;
+      try{unlinkSync(join(root.path,name));}
+      catch(e){if((e as NodeJS.ErrnoException).code!=="ENOENT")throw e;}
+      // Keep fd open across unlink and rmdir: another helper can consume this
+      // directory, but its replacement cannot reuse this still-pinned inode.
+      if(id(lstatSync(directory))!==id(fstatSync(fd)))return;
+      fsyncSync(fd);rmdirSync(directory);
+    } catch(e) {
+      if(!["ENOENT","ENOTEMPTY","EEXIST"].includes((e as NodeJS.ErrnoException).code??""))throw e;
+    } finally {closeSync(fd);}
     this.syncDirectory(root);
   }
   private capsuleFileIdentity(root: PairingRootIdentity, name: string): RetiredFile {
