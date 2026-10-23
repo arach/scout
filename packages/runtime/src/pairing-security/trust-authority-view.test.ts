@@ -7,7 +7,7 @@ import {capsuleFixture} from "../../../../scripts/fixtures/pairing-capsule.ts";
 import {pack,digest,commitName,doneName} from "./trust-capsule.ts";
 const roots:string[]=[],removers:(()=>void)[]=[];
 afterEach(()=>{for(const r of removers.splice(0))r();for(const r of roots.splice(0))rmSync(r,{recursive:true,force:true});});
-function fixture(options:Parameters<typeof capsuleFixture>[1]={}){const root=mkdtempSync(join(tmpdir(),"pairing-capsule-view-"));roots.push(root);return capsuleFixture(root,{generations:4,keys:2,...options});}
+function fixture(options:Parameters<typeof capsuleFixture>[1]={}){const root=mkdtempSync(join(tmpdir(),"pairing-capsule-view-"));roots.push(root);return capsuleFixture(root,{factory:pairingTrustOwner,generations:4,keys:2,...options});}
 function adapter(){let holder:object|null=null;const a:PairingTrustAdapter={id:"view.test",currentHolder:()=>holder,withGate(_r,body){holder={};try{return body(holder);}finally{holder=null;}}};return a;}
 function code(body:()=>unknown){try{body();return "accepted";}catch(e){return e instanceof PairingTrustError?e.code:(e as NodeJS.ErrnoException).code??(e as Error).name;}}
 function rewrite(f:ReturnType<typeof fixture>,edit:(h:any)=>void){const h=JSON.parse(readFileSync(join(f.root,commitName(1)),"utf8")).capsule;edit(h);const bytes=pack("capsule",h);writeFileSync(join(f.root,commitName(1)),bytes);writeFileSync(join(f.root,doneName(1)),pack("receipt",{schema:"scout.pairing-collected/v2",rootId:f.rootId,serial:1,physicalHash:digest(bytes)}));}
@@ -62,7 +62,13 @@ test("authority view completes a real committed publication before serving peers
  expect(readdirSync(f.root)).toContain(commitName(2));expect(readFileSync(join(f.root,"trusted-peers.json"),"utf8")).toContain(f.keys[0]!);
  o.completeCapsule=complete;const v=o.readAuthority();
  expect(v.revision).toBe(5);expect(v.peers.some((p:any)=>p.publicKey===f.keys[0])).toBe(false);
- expect(v.stamp).toBe(o.pairingAuthorityStamp());expect(readdirSync(f.root)).toContain(doneName(2));expect(readdirSync(f.root)).not.toContain(commitName(1));
+ expect(readdirSync(f.root)).toContain(doneName(2));expect(readdirSync(f.root)).not.toContain(commitName(1));
+ expect(v.stamp).toBe(o.pairingAuthorityStamp());
  expect(readFileSync(join(f.root,"trusted-peers.json"),"utf8")).not.toContain(f.keys[0]!);
  expect(o.mutate(4,"pending-revoke",{type:"revoke",publicKey:f.keys[0]}).revision).toBe(5);
+});
+
+for(const flavor of ["full","view"] as const)test(`shared row validator ${flavor} flavor rejects a checksum-consistent malformed row`,()=>{
+ const f=fixture();rows(f,r=>r[0][4]="not-boolean");
+ expect(code(()=>flavor==="full"?f.owner.read():f.owner.readAuthority())).toBe("capsule_outcome_invalid");
 });
