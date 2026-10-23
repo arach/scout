@@ -1,3 +1,4 @@
+import {namedControlFailed} from "./fixtures/source-control-evidence.ts";
 /** Deliberately broken public-source copies. Never patches the checkout or
  * installs an adapter in product state. Run explicitly with an evidence dir. */
 import { createHash } from "node:crypto";
@@ -35,7 +36,7 @@ const controls = [
     ['reserved = true;','reserved = true; unlinkSync(stagedGeneration);'],
   ]},
   {id:"generation-two-links", expected:"pending head rolls forward on the next read", edits:[['stagedGeneration = name.startsWith(PREFIX)','stagedGeneration = false']]},
-  {id:"roll-forward", expected:"pending head rolls forward on the next read", edits:[['if (state.pendingStage) this.completePublication(root, state);','']]},
+  {id:"roll-forward", expected:"pending head rolls forward on the next read", edits:[['      this.completePublication(root, state);','      // planted omission: pending publication is not completed']]},
   {id:"pending-classification", expected:"unfinishable pending read refuses publication_incomplete", edits:[['refuse("publication_incomplete")','refuse("unsafe_path")']]},
   {id:"recovery-hash", expected:"recovery refuses a tampered shared projection stage", edits:[['if (hash(staged) !== state.peersHash) refuse("publication_incomplete");','']]},
   {id:"late-writer-ack", expected:"consumed projection stage tolerates a helper and a later revoke", edits:[['catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }','catch (error) { throw error; }']]},
@@ -111,7 +112,8 @@ expect(owner.mutate(0,"first",{type:"grant",peer:{publicKey:"a".repeat(64),paire
 expect(interposed).toBe(true);expect(owner.read()).toEqual({revision:2,peers:[]});
 });`;
     }
-    if (control.id.startsWith("late-writer-")) {
+    {
+      // Every broken source is paired with its exact healthy fixture.
       const baselineModule=join(scratch,"baseline.ts"), baselineTest=join(scratch,"baseline.test.ts");
       writeFileSync(baselineModule,relocate(original));
       writeFileSync(baselineTest,tests.replaceAll(module,baselineModule));
@@ -127,8 +129,8 @@ expect(interposed).toBe(true);expect(owner.read()).toEqual({revision:2,peers:[]}
     const child = Bun.spawn([process.execPath,"test",testFile],{stdout:"pipe",stderr:"pipe"});
     const [exit,stdout,stderr]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()]);
     const log=stdout+stderr; writeFileSync(join(output,`${control.id}.log`),log);
-    const caught = exit !== 0 && log.includes(`(fail)`) && log.includes(control.expected) && !log.includes("Cannot find module");
-    const row={id:control.id,caught,exit,expected:control.expected,sourceSha256:createHash("sha256").update(source).digest("hex")};
+    const caught = exit !== 0 && namedControlFailed(log, control.expected) && !log.includes("Cannot find module");
+    const row={id:control.id,caught,exit,expected:control.expected,healthySourceSha256:createHash("sha256").update(relocate(original)).digest("hex"),sourceSha256:createHash("sha256").update(source).digest("hex")};
     evidence.push(row); console.log(JSON.stringify(row));
     if (!caught) throw Error(`negative control did not fail its required case: ${control.id}`);
   } finally { rmSync(scratch,{recursive:true,force:true}); }

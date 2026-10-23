@@ -1,3 +1,4 @@
+import {namedControlFailed} from "./fixtures/source-control-evidence.ts";
 /** Isolated source mutations paired with passing real-process fixtures. */
 import {mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync, statfsSync} from "node:fs";
 import {tmpdir} from "node:os";
@@ -89,7 +90,7 @@ for (const control of controls) {
       const child = Bun.spawn([process.execPath, "test", file, "--test-name-pattern", control.test], {cwd: project, stdout: "pipe", stderr: "pipe"});
       const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
       const log = out + err; writeFileSync(join(output, `${control.id}-${kind}.log`), log);
-      if (kind === "healthy" ? code !== 0 : !(code !== 0 && log.includes("(fail)") && log.includes(control.test)
+      if (kind === "healthy" ? code !== 0 : !(code !== 0 && namedControlFailed(log,control.test)
         && !log.includes("Cannot find module") && !log.includes("worker did not reach"))) {
         console.error(log); throw Error(`${control.id}:${kind} did not reach its required assertion; evidence ${output}`);
       }

@@ -1,3 +1,4 @@
+import {namedControlFailed} from "./fixtures/source-control-evidence.ts";
 /** Paired source controls in isolated copies. No production selector or hook. */
 import {mkdtempSync,mkdirSync,readFileSync,writeFileSync,rmSync,statfsSync} from "node:fs";
 import {join} from "node:path";
@@ -34,7 +35,7 @@ for(const c of controls){
    const child=Bun.spawn([process.execPath,"test",tests,"--test-name-pattern",c.test],{stdout:"pipe",stderr:"pipe"});
    const [exit,stdout,stderr]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()]);const log=stdout+stderr;
    writeFileSync(join(out,`${c.id}-${kind}.log`),log);
-   if(kind==="healthy"?exit!==0:!(exit!==0&&log.includes("(fail)")&&log.includes(c.test)&&!(/Cannot find module|ParseError|SyntaxError|timed out|fixture coordination/.test(log))))throw Error(`${c.id}/${kind}: invalid evidence in ${out}`);
+   if(kind==="healthy"?exit!==0:!(exit!==0&&namedControlFailed(log,c.test)&&!(/Cannot find module|ParseError|SyntaxError|timed out|fixture coordination/.test(log))))throw Error(`${c.id}/${kind}: invalid evidence in ${out}`);
   }
   results.push({id:c.id,caught:true,hashes});
  }finally{rmSync(scratch,{recursive:true,force:true});}

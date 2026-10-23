@@ -1,3 +1,4 @@
+import {namedControlFailed} from "./fixtures/source-control-evidence.ts";
 /** Source controls for inode reuse. Tests run separately to isolate fs mocks. */
 import {mkdtempSync,mkdirSync,readFileSync,writeFileSync,rmSync,statfsSync} from "node:fs";
 import {tmpdir} from "node:os";
@@ -31,7 +32,7 @@ try{
         const child=Bun.spawn([process.execPath,"test",file,"--test-name-pattern",control.test],{stdout:"pipe",stderr:"pipe"});
         const [exit,stdout,stderr]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()]);
         const log=stdout+stderr;writeFileSync(join(output,`${control.id}-${kind}.log`),log);
-        if(kind==="healthy"?exit!==0:!(exit!==0 && log.includes("(fail)") && log.includes(control.test) && !log.includes("Cannot find module")))throw Error(`${control.id}:${kind}: unexpected result in ${output}`);
+        if(kind==="healthy"?exit!==0:!(exit!==0 && namedControlFailed(log,control.test) && !log.includes("Cannot find module")))throw Error(`${control.id}:${kind}: unexpected result in ${output}`);
       }
       results.push({id:control.id,caught:true});
     }finally{rmSync(scratch,{recursive:true,force:true});}
