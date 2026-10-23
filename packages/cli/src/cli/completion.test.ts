@@ -1,3 +1,4 @@
+import { warmCompletionHook } from "./test-fixtures/warm-completion-hook.ts";
 import { preflightLifecycle } from "../../bin/lifecycle-preflight.mjs";
 import { afterAll, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -116,6 +117,7 @@ test("hook gets argv, the filtered environment and a fixed artifact cwd", async 
   const f = fixture({ complete: "complete" });
   const result = join(f.root, "hook.json");
   writeFileSync(join(f.source, "complete"), `#!/bin/sh
+    if [ "$1" = "--scout-fixture-warmup" ]; then exit 0; fi
     { printf '{"argv":["%s","%s","%s"],"env":{' "$1" "$2" "$3"
       if [ "\${SCOUT_SECRET+x}" ]; then printf '"SCOUT_SECRET":"present",'; fi
       if [ "\${OPENSCOUT_NODE_KEY+x}" ]; then printf '"OPENSCOUT_NODE_KEY":"present",'; fi
@@ -126,6 +128,8 @@ test("hook gets argv, the filtered environment and a fixed artifact cwd", async 
   f.install();
   const env = { ...f.env, SCOUT_SECRET: "hidden", OPENSCOUT_NODE_KEY: "hidden", USER_POLICY: "kept", OPENSCOUT_BROKER_URL: "http://127.0.0.1:43110" };
   const extension = findScoutExtension("sample", env)!;
+  await warmCompletionHook(extension.complete!);
+  expect(existsSync(result)).toBe(false);
   expect(await completeScoutExtension(extension, ["a b", "--json", ""], env, "test-version")).toEqual(["done"]);
   const record = JSON.parse(readFileSync(result, "utf8"));
   expect(record.argv).toEqual(["a b", "--json", ""]);
@@ -145,7 +149,8 @@ for (const [label, body] of [
   ["nonzero exit", "printf 'word\\n'; exit 1"],
 ] as const) test(`hook failure is silent and bounded: ${label}`, async () => {
   const f = fixture({ complete: "complete" });
-  writeFileSync(join(f.source, "complete"), `#!/bin/sh\n${body}\n`, { mode: 0o700 }); f.install();
+  writeFileSync(join(f.source, "complete"), `#!/bin/sh\nif [ "$1" = "--scout-fixture-warmup" ]; then exit 0; fi\n${body}\n`, { mode: 0o700 }); f.install();
+  await warmCompletionHook(findScoutExtension("sample", f.env)!.complete!);
   const start = Date.now(); expect(await f.query(["sample", ""])).toEqual([]);
   expect(Date.now() - start).toBeLessThan(1500);
 });

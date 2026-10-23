@@ -173,8 +173,8 @@ Redirects, arbitrary URLs and attachment filesystem reads are not allowed.
 
 Text/code attachments must match their declared MIME type, contain valid UTF-8
 text, and stay within 256 KiB. Returned text is limited to 32,000 characters and
-reports truncation. Image, audio, video, PDF, and other binary inspection is
-explicitly unavailable in this runtime; accepting such a file in the composer
+reports truncation. The `attachments_read` tool does not expose image, audio,
+video, PDF, or other binary inspection; accepting such a file in the composer
 does not imply that the assistant can inspect it. HTML, SVG and MIME charset
 aliases are not supported by the canonical text allowlist.
 
@@ -186,3 +186,7 @@ The runtime's `untrusted_attachment` marker maps to the existing MCP marker
 preserve the runtime HTTP/operation status and error code, not empty content.
 The reader bounds JSON transport responses to 512 KiB in addition to the
 256 KiB inspection and 32,000-character output limits.
+
+App previews use the runtime's separate [authorized image-mode read](attachments.md),
+which permits up to 25 MiB for the existing image MIME allowlist. This does not
+raise the text tool's inspection or transport limits.

@@ -18,7 +18,9 @@ const clientModule =
   createRequire(new URL("../../web/package.json", import.meta.url)).resolve(
     "@trpc/client",
   );
-const remoteModule = process.env.TAIL_WIRE_REMOTE_MODULE;
+const remoteModule =
+  process.env.TAIL_WIRE_REMOTE_MODULE ??
+  fileURLToPath(new URL("./remote-tail.ts", import.meta.url));
 async function run(mode: string) {
   return await new Promise<any>((resolve, reject) => {
     const worker = new Worker(fixturePath, {
@@ -64,7 +66,7 @@ test("new status, error, cancellation and reset paths release capture custody", 
 test("installed WS adapter and JS client preserve untracked status and structured resync", async () => {
   expect((await run("transport")).realClient).toBe(true);
 }, 20_000);
-test.skipIf(!remoteModule)(
+test(
   "unchanged C raw codec accepts legacy and retains its own delivered cursor",
   async () => {
     expect((await run("legacy-codec")).serverAheadIgnored).toBe(true);

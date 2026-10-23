@@ -1,3 +1,4 @@
+import { warmCompletionHook } from "./test-fixtures/warm-completion-hook.ts";
 import { afterAll, expect, test } from "bun:test";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -78,7 +79,9 @@ test("query treats shell source and flags after its boundary as argv data", asyn
   const artifact = join(extensions, "sample"); mkdirSync(artifact);
   writeFileSync(join(artifact, "extension.json"), JSON.stringify({ api: 1, command: "run", complete: "run" }));
   const captured = join(root, "argv.json"), injected = join(root, "should-not-exist");
-  writeFileSync(join(artifact, "run"), `#!/bin/sh\nprintf '%s\\n' "$@" > ${JSON.stringify(captured)}\nprintf 'safe\\n'\n`, { mode: 0o700 });
+  writeFileSync(join(artifact, "run"), `#!/bin/sh\nif [ "$1" = "--scout-fixture-warmup" ]; then exit 0; fi\nprintf '%s\\n' "$@" > ${JSON.stringify(captured)}\nprintf 'safe\\n'\n`, { mode: 0o700 });
+  await warmCompletionHook(join(artifact, "run"));
+  expect(existsSync(captured)).toBe(false);
   const source = `$(touch ${injected})`;
   const result = await run(process.execPath, [entry, "completion", "--query", "4", "--", "sample", source, "--json", "--instance", ""]);
   expect(result.stderr).toBe(""); expect(result.stdout.trim()).toBe("safe");
