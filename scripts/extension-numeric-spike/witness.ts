@@ -1,4 +1,5 @@
-import { initializeDescriptorReservations, readDescriptorReservations, clearEscapedSetupPin, setupPinEscaped } from "./reservations.ts";
+import { startNumericWitnessProcess, requireNumericWitnessStartup, numericWitnessSentinelStatus } from "./sentinel.ts";
+import { readDescriptorReservations, clearEscapedSetupPin, setupPinEscaped } from "./reservations.ts";
 import type { ApparatusControl } from "./apparatus-contract.ts";
 /** Product-free numeric backend spike; corrected in-tree reclaim instrument is shared. */
 import { spawn } from "node:child_process";
@@ -232,6 +233,7 @@ async function exchanges(home: string, form: DescriptorForm, event: (e: WitnessE
 }
 export async function numericWitness(form: DescriptorForm, emit: (e: WitnessEvent) => void = () => {}, fault?: AnyFault, options?: AsyncWitnessOptions) {
   if (Bun.revision !== "0d9b296af33f2b851fcbf4df3e9ec89751734ba4") throw Error("numeric spike requires the exact candidate Bun revision");
+  requireNumericWitnessStartup();
   const reservations = readDescriptorReservations();
   const home = mkdtempSync(join(tmpdir(), "scout-numeric-"));
   const event = (e: WitnessEvent) => emit({ io: options?.io ?? "blocking-spike", mode: options?.mode ?? "normal", form, target: INHERITED_DESCRIPTOR_LAYOUTS.extensionApi2[form], ...e });
@@ -281,8 +283,9 @@ export async function numericWitness(form: DescriptorForm, emit: (e: WitnessEven
     const final = join(home, "final"); mkdirSync(final);
     await checkReclaimedDescriptors({former: last.ports, directory: final, victims: reservations.victims(last.ports), reserveFormerAll: reservations.handoff, audit: ()=>reservations!.audit(), emit: e => event({phase: "all-native-finalized", ...e})});
     success=true;
-    event({event: "complete", eofExchanges: options?.mode && options.mode !== "normal" || fault === "cancel-double-close" ? 0 : 8, modeExchanges: 8, reapFirstExchanges: 1, reuse: true});
+    event({event: "complete", eofExchanges: options?.mode && options.mode !== "normal" || fault === "cancel-double-close" ? 0 : 8, modeExchanges: 8, reapFirstExchanges: 1, reuse: true, sentinel: numericWitnessSentinelStatus()});
   } finally {
+    if (!success) event({event: "sentinel-status", sentinel: numericWitnessSentinelStatus()});
     last?.restoreClose();
     if (last && same(last.channel.parent.fd, last.expected[0]!)) last.channel.parent.close();
     clearEscapedSetupPin();reservations.end(success);
@@ -291,7 +294,7 @@ export async function numericWitness(form: DescriptorForm, emit: (e: WitnessEven
   }
 }
 if (import.meta.main) {
-  initializeDescriptorReservations();
+  await startNumericWitnessProcess();
   const form = process.argv[2] as DescriptorForm, fault = (process.argv[3] === "none" ? undefined : process.argv[3]) as AnyFault | undefined;
   const options: AsyncWitnessOptions | undefined = process.argv[4] === "async" ? {io: "async", mode: process.argv[5] as AsyncWitnessOptions["mode"], apparatus: process.argv[6] as ApparatusControl | undefined} : undefined;
   if (form !== "context" && form !== "credential") throw Error("choose context or credential");

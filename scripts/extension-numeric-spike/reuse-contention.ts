@@ -5,10 +5,11 @@
 import { fstatSync } from "node:fs";
 import { join } from "node:path";
 import { numericWitness } from "./witness.ts";
-import { initializeDescriptorReservations, readDescriptorReservations } from "./reservations.ts";
+import { readDescriptorReservations } from "./reservations.ts";
+import { startNumericWitnessProcess } from "./sentinel.ts";
 import { command } from "../extension-channel-checkpoint-command.ts";
 export async function reuseContention() {
-initializeDescriptorReservations();
+await startNumericWitnessProcess();
 const reservations = readDescriptorReservations();
 let former:number[]=[],refusal="";
 try {
