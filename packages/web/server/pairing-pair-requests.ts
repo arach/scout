@@ -1,12 +1,10 @@
 // Approval-gated LAN pairing requests.
 //
-// Initial pairing over the relay is trust-on-first-use: whoever completes the
-// Noise handshake in the live relay room is silently trusted. The deliberate
-// human gate that keeps that safe is that pair mode only runs when someone
-// starts it. To let a phone on the LAN pair with a single tap *without*
-// dropping that gate, a tap registers a pending request here, the Mac surfaces
-// it ("A device wants to pair — Allow?"), and only an explicit approval starts
-// pair mode and hands the phone the payload. Unapproved requests expire.
+// Reconnect rooms accept trusted keys only. An explicit host approval opens a
+// private, single-use pairing room bound to this request. Only its approved
+// polling token can retrieve the invitation; QR windows are separate. Optional
+// full Noise public keys bind owner admission, not just delivery. Older phones
+// omit the key and use the one-time response as their possession channel.
 //
 // State is per-MAC, not per-process.
 //
@@ -97,6 +95,7 @@ import { assertIsolatedPairingRunStateWrite } from "./pairing-run-state.ts";
 export type PairRequestStatus = "pending" | "approved" | "denied";
 
 export const SCOUT_PAIR_CLIENT_HEADER = "x-scout-client";
+export const SCOUT_PAIR_PUBLIC_KEY_HEADER = "x-scout-device-public-key";
 export const SCOUT_PAIR_RELAY_HEADER = "x-scout-pair-relay";
 
 export class PairRequestCapacityError extends Error {
@@ -115,6 +114,8 @@ export interface PairRequest {
   status: PairRequestStatus;
   /** Best-effort requester identity for the approval prompt. */
   requesterIp: string | null;
+  /** Full Noise static public key; immutable for this token. Absent on older clients. */
+  requesterPublicKey?: string | null;
   requesterLabel: string | null;
   /**
    * Connecting application family (`scout-ios`, `talkie-ios`, …).
@@ -128,7 +129,7 @@ export interface PairRequest {
   expiresAt: number;
 }
 
-/** Public view of a request, minus nothing sensitive (there is nothing). */
+/** Host-authenticated request view. The polling token is a bearer credential. */
 export type PairRequestView = PairRequest;
 
 const PAIR_CLIENT_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/;
@@ -144,6 +145,13 @@ const PAIR_CLIENT_LABELS: Record<string, string> = {
  * `/pair` is allow/deny, not operator login. The connecting app names itself
  * so the Mac prompt can say what is knocking.
  */
+export function parseScoutPairPublicKey(value: string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const key = value.trim().toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(key)) throw new Error("Expected a full Noise public key");
+  return key;
+}
+
 export function parseScoutPairClient(
   headerValue: string | null | undefined,
   userAgent?: string | null,
@@ -179,6 +187,7 @@ export interface PendingPairRequestStore {
    */
   create(input: {
     requesterIp?: string | null;
+    requesterPublicKey?: string | null;
     requesterLabel?: string | null;
     requesterApp?: string | null;
     route?: string | null;
@@ -324,6 +333,8 @@ function isPairRequest(value: unknown): value is PairRequest {
     // would survive into `findReusable` and get republished, so check the
     // nullable fields too rather than only the ones we sort and expire on.
     isNullableString(r.requesterIp) &&
+    (r.requesterPublicKey === undefined || r.requesterPublicKey === null
+      || (typeof r.requesterPublicKey === "string" && /^[a-f0-9]{64}$/.test(r.requesterPublicKey))) &&
     isNullableString(r.requesterLabel) &&
     (r.requesterApp === undefined || isNullableString(r.requesterApp)) &&
     isNullableString(r.route) &&
@@ -910,6 +921,7 @@ export function createPendingPairRequestStore(
         rows.filter(isPairRequest).map((row) => ({
           ...row,
           requesterApp: row.requesterApp ?? null,
+          requesterPublicKey: row.requesterPublicKey ?? null,
         })),
         markers,
       );
@@ -1202,12 +1214,13 @@ export function createPendingPairRequestStore(
   // Don't keep the process alive solely for the sweep.
   (sweepTimer as { unref?: () => void }).unref?.();
 
-  function findReusable(requesterIp: string | null): PairRequest | null {
+  function findReusable(requesterIp: string | null, publicKey: string | null): PairRequest | null {
     if (!requesterIp) return null;
     const t = now();
     for (const req of byToken.values()) {
       if (
         req.requesterIp === requesterIp &&
+        (req.status === "denied" || (req.status === "pending" && (req.requesterPublicKey ?? null) === publicKey)) &&
         req.expiresAt > t
       ) {
         return req;
@@ -1219,6 +1232,7 @@ export function createPendingPairRequestStore(
   return {
     create(input) {
       const requesterIp = boundedMetadata(input.requesterIp, 64);
+      const publicKey = parseScoutPairPublicKey(input.requesterPublicKey);
       const label = boundedMetadata(input.requesterLabel, 96);
       const app = boundedMetadata(input.requesterApp, 32);
       const route = boundedMetadata(input.route, 16);
@@ -1229,7 +1243,7 @@ export function createPendingPairRequestStore(
         // Re-evaluated per attempt, so a peer that registered this device while
         // we were losing the swap collapses the prompt rather than duplicating
         // it — which is the same reasoning as reusing within one instance.
-        const existing = findReusable(requesterIp);
+        const existing = findReusable(requesterIp, publicKey);
         if (existing) {
           // One authoritative source gets at most one live row. A denied row is
           // also reused until it expires so repeated knocks cannot turn a deny
@@ -1263,6 +1277,7 @@ export function createPendingPairRequestStore(
           token,
           status: "pending",
           requesterIp,
+          requesterPublicKey: publicKey,
           requesterLabel: label,
           requesterApp: app,
           route,

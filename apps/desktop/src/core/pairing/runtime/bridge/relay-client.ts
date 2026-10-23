@@ -37,6 +37,9 @@ export type RelayRoomKind = "pairing" | "reconnect";
 
 export interface RelayClientOptions {
   kind?: RelayRoomKind;
+  /** Request windows must authorize trusted keys too, through the owner. */
+  authorizePeer?: (publicKey: string, room: string, isLive: () => boolean) => boolean;
+  privateRoom?: boolean;
   reconnectRoom?: string;
   /** Enable Noise encryption on the relay connection. Default: true. */
   secure?: boolean;
@@ -147,6 +150,7 @@ export function connectToRelay(
   const qrPayload = options.qrPayload
     ?? createQRPayload(identity.publicKey, eventRelayUrl, options.fallbackRelayUrls);
 
+  const roomLabel = options.privateRoom ? "request-bound" : qrPayload.room;
   let ws: WebSocket | null = null;
   let eventUnsub: (() => void) | null = null;
   let brokerWatchAbort: AbortController | null = null;
@@ -165,7 +169,7 @@ export function connectToRelay(
 
     const bridgeKeyHex = bytesToHex(identity.publicKey);
     const url = buildRelayUrl(relayUrl, qrPayload.room, kind === "reconnect" ? bridgeKeyHex : undefined);
-    console.log(`[relay-client] connecting to relay (room: ${qrPayload.room})`);
+    console.log(`[relay-client] connecting to relay (room: ${roomLabel})`);
     events?.onConnecting?.({ relayUrl: eventRelayUrl, room: qrPayload.room });
 
     const socket = new WebSocket(url, relayWebSocketOptions(relayUrl) as never);
@@ -173,7 +177,7 @@ export function connectToRelay(
 
     socket.addEventListener("open", () => {
       if (stopped || ws !== socket) return;
-      console.log(`[relay-client] connected to relay (room: ${qrPayload.room})`);
+      console.log(`[relay-client] connected to relay (room: ${roomLabel})`);
       backoff = INITIAL_BACKOFF_MS;
       events?.onConnected?.({ relayUrl: eventRelayUrl, room: qrPayload.room });
     });
@@ -273,8 +277,9 @@ export function connectToRelay(
           const pubHex = bytesToHex(remotePublicKey);
           try {
             const live = () => !stopped && ws?.readyState === WebSocket.OPEN && securePeers.get(clientId) === peer;
-            const trusted = isTrustedPeer(pubHex)
-              || (kind === "pairing" && !retired && options.admitNewPeer?.(pubHex, qrPayload.room, live) === true);
+            const trusted = options.authorizePeer
+              ? options.authorizePeer(pubHex, qrPayload.room, live)
+              : isTrustedPeer(pubHex) || (kind === "pairing" && !retired && options.admitNewPeer?.(pubHex, qrPayload.room, live) === true);
             if (!live() || !trusted || !isTrustedPeer(pubHex)) {
               sendRelayClose(clientId, 4003, "Untrusted peer");
               teardownSecurePeer(clientId);

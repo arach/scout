@@ -2,15 +2,17 @@ import { PairingTrustError } from "@openscout/runtime/pairing-security/trust-own
 import type { Hono } from "hono";
 import {
   controlScoutWebPairingService,
+  controlScoutWebApprovalPairing,
   removeScoutPairingTrustedPeer,
   type ScoutPairingControlAction,
-  type ScoutPairingState,
 } from "../pairing.ts";
 import {
   PairRequestCapacityError,
   pairRequesterDisplay,
   parseScoutPairClient,
   SCOUT_PAIR_CLIENT_HEADER,
+  SCOUT_PAIR_PUBLIC_KEY_HEADER,
+  parseScoutPairPublicKey,
   SCOUT_PAIR_RELAY_HEADER,
 } from "../pairing-pair-requests.ts";
 import { isLoopbackScoutAddress, isSameMacScoutRequest, resolveScoutRequestPeerAddress } from "../server-core.ts";
@@ -65,11 +67,8 @@ export function mountPairingRoutes(app: Hono, deps: PairingRouteDeps) {
   app.get("/api/pairing-state/refresh", async (c) =>
     c.json(await loadPairingState(currentDirectory, true)),
   );
-  const pickPairingLocation = (
-    state: ScoutPairingState,
-    route: string | null,
-  ): string | null => {
-    const links = pairingDeepLinks(pairingQrValueWithWebPort(state.pairing?.qrValue, options.webPort));
+  const pickPairingQrLocation = (qrValue: string | null | undefined, route: string | null): string | null => {
+    const links = pairingDeepLinks(pairingQrValueWithWebPort(qrValue, options.webPort));
     return route === "lan"
       ? links.lan ?? links.default
       : route === "ts" || route === "tsn" || route === "tailnet"
@@ -118,7 +117,7 @@ export function mountPairingRoutes(app: Hono, deps: PairingRouteDeps) {
     // reader so LAN traffic cannot force filesystem/process discovery work on
     // every request; the phone already tolerates this short refresh window.
     const state = await loadPairingState(currentDirectory, false);
-    const location = pickPairingLocation(state, route);
+    const location = pickPairingQrLocation(state.pairing?.qrValue, route);
 
     // A polling token is a bearer credential for one operator decision. Check
     // that decision before considering the live payload, and make the approved
@@ -135,7 +134,11 @@ export function mountPairingRoutes(app: Hono, deps: PairingRouteDeps) {
           ? c.json({ status: "denied", token }, 403)
           : c.text("Pairing request was denied.", 403);
       }
-      if (location && request.status === "approved") {
+      const invitation = request.status === "approved"
+        ? await controlScoutWebApprovalPairing("read", request, currentDirectory).catch(() => null)
+        : null;
+      const requestLocation = invitation ? pickPairingQrLocation(JSON.stringify(invitation.payload), route) : null;
+      if (requestLocation && request.status === "approved") {
         if (!pendingPairRequests.fulfill(token, "approved")) {
           // A consume that cannot win the shared CAS fails closed without
           // deleting the request. Keep an approved device polling; if a peer
@@ -153,7 +156,7 @@ export function mountPairingRoutes(app: Hono, deps: PairingRouteDeps) {
             ? c.json({ status: "expired", token }, 410)
             : c.text("Pairing request expired.", 410);
         }
-        return c.redirect(location, 302);
+        return c.redirect(requestLocation, 302);
       }
       // pending, or approved but the relay payload isn't up yet — keep polling.
       // Touch so an actively-polling device doesn't age out mid-approval.
@@ -182,10 +185,14 @@ export function mountPairingRoutes(app: Hono, deps: PairingRouteDeps) {
         : c.text("Unable to identify pairing requester.", 503);
     }
 
+    let requesterPublicKey: string | null;
+    try { requesterPublicKey = parseScoutPairPublicKey(c.req.header(SCOUT_PAIR_PUBLIC_KEY_HEADER)); }
+    catch { return c.json({ error: "Expected a full Noise public key" }, 400); }
     let request: ReturnType<typeof pendingPairRequests.create>;
     try {
       request = pendingPairRequests.create({
         requesterIp,
+        requesterPublicKey,
         requesterLabel: c.req.header("x-scout-device-name")?.trim() || null,
         requesterApp,
         route,
@@ -252,8 +259,23 @@ export function mountPairingRoutes(app: Hono, deps: PairingRouteDeps) {
     if (!req) {
       return c.json({ error: "unknown or expired pairing request" }, 404);
     }
-    // Approval authorizes retrieval only during an explicitly opened window.
-    // It must not create pairing consent or expose a reconnect room.
+    try {
+      const window = await controlScoutWebApprovalPairing(decision === "approve" ? "open" : "cancel", req, currentDirectory);
+      if (decision === "approve" && !window) {
+        return c.json({ error: "Pairing request window closed; make a new request" }, 409);
+      }
+      // Approval can wait for controller startup while another instance denies.
+      // Close even if that denial arrived before the runtime window existed.
+      if (decision === "approve" && pendingPairRequests.get(token)?.status === "denied") {
+        await controlScoutWebApprovalPairing("cancel", req, currentDirectory);
+        shellStateCache.invalidate();
+        return c.json({ error: "Pairing request was denied" }, 409);
+      }
+      // Fulfillment still rechecks status through the shared-store CAS.
+    } catch {
+      shellStateCache.invalidate();
+      return c.json({ error: "Pairing authority unavailable" }, 503);
+    }
     shellStateCache.invalidate();
     return c.json({ request: req });
   });

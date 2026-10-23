@@ -74,7 +74,7 @@ describe("createOpenScoutWebServer: pairing routes", () => {
       body: JSON.stringify({ decision: "approve" }),
     });
     expect(approval.status).toBe(200);
-    expect(stubs.controlPairingCalls, "approval must not open a pairing window").toBe(0);
+    expect(stubs.controlPairingCalls, "approval must not open the QR window").toBe(0);
 
     peerAddress = "192.168.18.201";
     const delivered = await server.app.request(`http://localhost/pair?route=lan&token=${token}`, {
@@ -83,7 +83,8 @@ describe("createOpenScoutWebServer: pairing routes", () => {
     });
     expect(delivered.status).toBe(302);
     expect(delivered.headers.get("location"))
-      .toBe(`scout://pair?payload=${encodeURIComponent(qrValue)}`);
+      .toBe(`scout://pair?payload=${encodeURIComponent(JSON.stringify(stubs.approvalPairingWindows.get(token)!.payload))}`);
+    expect(delivered.headers.get("location")).not.toContain(encodeURIComponent(qrValue));
 
     const replay = await server.app.request(`http://localhost/pair?route=lan&token=${token}`, {
       headers: { accept: "application/json" },
@@ -93,7 +94,7 @@ describe("createOpenScoutWebServer: pairing routes", () => {
     await server.stop();
   });
 
-  test("approval outside an explicit window yields no payload and opens no window", async () => {
+  test("approval alone opens a private request window without publishing a QR", async () => {
     stubs.pairingStateResult = makePairingState({ pairing: null });
     let peerAddress = "192.168.18.203";
     const server = await createOpenScoutWebServer({ currentDirectory: "/tmp/openscout",
@@ -106,13 +107,15 @@ describe("createOpenScoutWebServer: pairing routes", () => {
       const approval = await server.app.request(`http://localhost/api/pairing/requests/${token}/decide`, {
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ decision: "approve" }) });
       expect(approval.status).toBe(200);
-      expect(stubs.controlPairingCalls, "approval must not open a pairing window").toBe(0);
+      expect(stubs.controlPairingCalls, "approval must not open the QR window").toBe(0);
       peerAddress = "192.168.18.203";
       const poll = await server.app.request(`http://localhost/pair?token=${token}`, {
         headers: { accept: "application/json" }, redirect: "manual" });
-      expect(poll.status).toBe(202);
-      expect(poll.headers.get("location")).toBeNull();
-      expect(await poll.json()).toMatchObject({ status: "approved", token });
+      expect(poll.status).toBe(302);
+      const deliveredPayload = JSON.parse(new URL(poll.headers.get("location")!).searchParams.get("payload")!);
+      expect(deliveredPayload.room).toBe(`request-${token}`);
+      expect(stubs.pairingStateResult.pairing).toBeNull();
+      expect(stubs.approvalPairingCalls.filter(call => call.action === "open")).toHaveLength(1);
     } finally { await server.stop(); }
   });
 
