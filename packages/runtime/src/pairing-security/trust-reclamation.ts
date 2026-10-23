@@ -100,7 +100,11 @@ export function reclaimCapsuleStaging(root:PairingRootIdentity,reclamationId:str
   if(prior){base=ensure(evidence);op=ensure(operation);const bytes=read(op,"plan.json").bytes;
    plan=unpack<Plan>(bytes,"reclamation",fail);planHash=digest(bytes);
   }else{
-   const found=scan();base=ensure(evidence);const parent=pin(dirname(root.path));try{sync(parent);}finally{closeSync(parent.fd);}
+   const found=scan();base=ensure(evidence);
+   // The parent is outside the trust boundary: sync its entry exactly as the
+   // owner does. Store/evidence objects retain every ownership and pin check.
+   const parent=openSync(dirname(root.path),constants.O_RDONLY|constants.O_DIRECTORY|constants.O_NOFOLLOW);
+   try{fsyncSync(parent);}finally{closeSync(parent);}
    op=ensure(operation);sync(base);
    if(readdirSync(op.path).length)fail("reclamation_invalid_plan");
    plan={schema:"scout.pairing-staging-reclamation/v1",reclamationId,rootId:root.id,

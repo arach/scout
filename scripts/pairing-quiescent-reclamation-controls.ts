@@ -12,6 +12,7 @@ const guards='if (adapter?.currentHolder(observed) || [...liveInvocations].some(
 const tokenCheck='if(!c || c.rootId!==root.id || !integer(c.index,0,7) || !token(c.token) || c.identity!==dirId\n    || !same(c,{rootId:root.id,index:c.index,token:c.token,identity:dirId}))fail("reclamation_token_invalid");';
 const reference='if(a.tokens.has(g.claim.token)||a.references.has(g.source)||payloads(g.claim.token).some(n=>a.references.has(n)))fail("reclamation_referenced");';
 const controls=[
+ {id:"parent-store-predicate",subject:"engine",test:"a group-writable parent",needle:'const parent=openSync(dirname(root.path),constants.O_RDONLY|constants.O_DIRECTORY|constants.O_NOFOLLOW);\n   try{fsyncSync(parent);}finally{closeSync(parent);}',replacement:'const parent=pin(dirname(root.path));try{sync(parent);}finally{closeSync(parent.fd);}'},
  {id:"delete-instead-of-move",subject:"engine",test:"healthy move-only receipt",needle:'renameSync(join(root.path,p.source),join(op.path,p.source));',replacement:'require("node:fs").rmSync(join(root.path,p.source),{recursive:true,force:true});'},
  {id:"skip-full-token-verification",subject:"engine",test:"complete token record is verified",needle:tokenCheck,replacement:'if(false)fail("reclamation_token_invalid");'},
  {id:"skip-holder-preflight",subject:"owner",test:"observable holder refuses",needle:guards,replacement:'if(false)refuse("reclamation_holder_active");'},

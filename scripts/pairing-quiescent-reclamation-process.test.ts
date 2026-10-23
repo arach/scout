@@ -1,7 +1,7 @@
 import {test,expect,afterEach} from "bun:test";
-import {mkdtempSync,mkdirSync,rmSync,readdirSync,readFileSync,writeFileSync,existsSync,lstatSync,renameSync,statfsSync,symlinkSync} from "node:fs";
+import {mkdtempSync,mkdirSync,rmSync,readdirSync,readFileSync,writeFileSync,existsSync,lstatSync,renameSync,statfsSync,symlinkSync,chmodSync} from "node:fs";
 import {tmpdir} from "node:os";
-import {join} from "node:path";
+import {join,dirname} from "node:path";
 import {fileURLToPath} from "node:url";
 import {pack} from "../packages/runtime/src/pairing-security/trust-capsule.ts";
 import {capsuleFixture} from "./fixtures/pairing-capsule.ts";
@@ -194,3 +194,17 @@ test("a symlink evidence root is refused rather than followed",()=>{
  expect(()=>f.owner.reclaimCapsuleStaging("symlink",{quiescent:true})).toThrow();expect(f.owner.read().revision).toBe(1);
  expect(readdirSync(f.root).filter(n=>n.startsWith(".pairing-claim-"))).toHaveLength(1);
 },30_000);
+
+test("a group-writable parent is outside the store boundary and still durably reclaims",async()=>{
+ for(const mode of [0o775,0o777]){const f=fixture();await debris(f);chmodSync(dirname(f.root),mode);
+  expect(lstatSync(dirname(f.root)).mode&0o777).toBe(mode);
+  const result=await maintenance(f);expect(result.exit,result.err).toBe(0);
+  expect(result.value?.ok,JSON.stringify(result.value)).toBe(true);
+  expect(result.value.result.moved).toHaveLength(6);
+  expect(trace(f).some(e=>e.event==="sync"&&e.directory&&e.path===dirname(f.root))).toBe(true);
+  prove(f,`parent-${mode}`);
+  // The parent predicate is removed, never the evidence object's predicate.
+  chmodSync(f.root+".pairing-reclamation",0o775);
+  expect(()=>f.owner.reclaimCapsuleStaging("maintenance",{quiescent:true})).toThrow("reclamation_unsafe_path");
+ }
+},60_000);
