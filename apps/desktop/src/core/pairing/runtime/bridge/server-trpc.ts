@@ -1,4 +1,5 @@
-import { transportDomainForBridge, requireTransportContext, hasPairedTransport, plaintextPilotContext, type TransportContext } from "@openscout/runtime/pairing-security/transport";
+import {watchSharedScoutMessages} from "./broker-message-fanout.ts";
+import { subscribeTransportEvents, transportDomainForBridge, requireTransportContext, hasPairedTransport, plaintextPilotContext, type TransportContext } from "@openscout/runtime/pairing-security/transport";
 import type { PairingOpportunityControlAction, PairingRequestBinding } from "@openscout/runtime/pairing-local-socket";
 // Bridge server — Hono + tRPC edition.
 //
@@ -45,8 +46,8 @@ import { resolveConfig } from "./config.ts";
 import { handleRPC, type BridgeServerOptions } from "./server.ts";
 import { bridgeRouter, lookupMobileInboxItemForEvent, type MobileInboxItem } from "./router.ts";
 import { getTailFanout } from "./tail-fanout.ts";
+import type { TailEvent } from "@openscout/runtime/tail";
 import {
-  watchScoutMessages,
   type ScoutBrokerConversationLifecycleRecord,
   type ScoutBrokerMessageRecord,
 } from "../../../../../../../packages/cli/src/lib/core/broker/service.ts";
@@ -600,14 +601,17 @@ export function startBridgeServerTRPC(options: {
     };
 
     // Push current sessions on connect.
+    const replaySessions = () => {
     for (const session of bridge.listSessions()) {
       sendEvent(
         JSON.stringify({ seq: 0, event: { event: "session:update", session } }),
       );
     }
+    };
+    if (domain) domain.batch(replaySessions); else replaySessions();
 
     // Subscribe to future events.
-    state.unsub = bridge.onEvent((sequenced) => {
+    state.unsub = subscribeTransportEvents(domain, bridge, (sequenced) => {
       if (state.transport && !state.transport.isLive()) return;
       logBridgeEvent(sequenced.event, sequenced.seq);
       sendEvent(
@@ -637,14 +641,15 @@ export function startBridgeServerTRPC(options: {
     // Subscribe to the broker's machine-wide harness firehose. Each TailEvent
     // is forwarded as its own raw JSON message, in parity with the SequencedEvent
     // path above. iOS decodes via TailEvent shape (no `seq` field).
-    state.tailUnsub = getTailFanout().subscribe((tailEvent) => {
-      sendEvent(JSON.stringify(tailEvent));
-    });
+    const tail = getTailFanout();
+    const onTail = (tailEvent: TailEvent) => { sendEvent(JSON.stringify(tailEvent)); };
+    state.tailUnsub = domain ? domain.subscribe(tail, tail.subscribe.bind(tail), onTail) : tail.subscribe(onTail);
 
     state.brokerWatchAbort?.abort();
     const brokerWatchAbort = new AbortController();
     state.brokerWatchAbort = brokerWatchAbort;
-    void watchScoutMessages({
+    void watchSharedScoutMessages({
+      transportDomain: domain,
       allConversations: true,
       signal: brokerWatchAbort.signal,
       onMessage(message) {

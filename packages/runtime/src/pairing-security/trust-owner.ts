@@ -141,6 +141,15 @@ export class PairingTrustOwner {
     this.transportObservers.add(observer);
     return () => { this.transportObservers.delete(observer); };
   }
+  /** A writer's verified durable acknowledgement, never an ordinary read.
+   * Helpers/readers use the disk indicator or fresh decision, not this hint. */
+  private notifyTransportPublication(root: PairingRootIdentity, state: State): void {
+    if (!this.transportObservers.size) return;
+    try {
+      const view = this.transportView(root, state);
+      for (const observer of this.transportObservers) { try { observer(view); } catch { /* A hint cannot undo publication. */ } }
+    } catch { /* Notification is not authority and cannot turn a durable ACK into failure. */ }
+  }
   /** v1 is intentionally unavailable to registry listeners. The host must drain
    * old binaries and explicitly run migrateToCapsule before starting them. */
   withTransportAuthority<T>(body: (view: TransportAuthorityView) => T, context?: PairingTrustContext): T {
@@ -457,10 +466,6 @@ export class PairingTrustOwner {
     } else if (state.pendingStage) {
       this.completePublication(root, state);
       ready = this.state(root);
-    }
-    if (this.transportObservers.size) {
-      const view = this.transportView(root, ready);
-      for (const observer of this.transportObservers) { try { observer(view); } catch { /* A hint cannot undo publication. */ } }
     }
     return ready;
   }
@@ -1240,6 +1245,7 @@ export class PairingTrustOwner {
       if(invocation)this.validateInvocation(invocation,root);
       const committed=this.readyState(root);
       if(committed.outcomes[result.mutationId]?.request!==request)refuse("outcome_unavailable");
+      this.notifyTransportPublication(root,committed);
       return structuredClone(result);
     } finally {
       if(!reserved && !uncertain){
@@ -1414,6 +1420,7 @@ export class PairingTrustOwner {
         if (invocation) this.validateInvocation(invocation, root);
         const verified = this.state(root);
         if (verified.outcomes[mutationId]?.request !== request) refuse("outcome_unavailable");
+        this.notifyTransportPublication(root, verified);
         return structuredClone(saved.outcome);
       }
       if (state.revision !== expectedRevision) refuse("revision_conflict");
@@ -1467,6 +1474,7 @@ export class PairingTrustOwner {
         if (invocation) this.validateInvocation(invocation, root);
         const committed = this.state(root, true);
         if (committed.outcomes[mutationId]?.request !== request) refuse("outcome_unavailable");
+        this.notifyTransportPublication(root, committed);
         return structuredClone(outcome);
       } finally {
         for (const path of [reserved ? null : stagedPeers, reserved ? null : stagedGeneration, stagedMarker]) {

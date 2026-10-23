@@ -1,4 +1,4 @@
-import { transportDomainForBridge, requireTransportContext, hasPairedTransport, plaintextPilotContext, type TransportContext } from "@openscout/runtime/pairing-security/transport";
+import { subscribeTransportEvents, transportDomainForBridge, requireTransportContext, hasPairedTransport, plaintextPilotContext, type TransportContext } from "@openscout/runtime/pairing-security/transport";
 import type { PairingOpportunityControlAction, PairingRequestBinding } from "@openscout/runtime/pairing-local-socket";
 import { watchSharedScoutMessages } from "./broker-message-fanout.ts";
 // Bridge server — Hono + tRPC edition.
@@ -604,14 +604,17 @@ export function startBridgeServerTRPC(options: {
     };
 
     // Push current sessions on connect.
+    const replaySessions = () => {
     for (const session of bridge.listSessions()) {
       sendEvent(
         JSON.stringify({ seq: 0, event: { event: "session:update", session } }),
       );
     }
+    };
+    if (domain) domain.batch(replaySessions); else replaySessions();
 
     // Subscribe to future events.
-    state.unsub = bridge.onEvent((sequenced) => {
+    state.unsub = subscribeTransportEvents(domain, bridge, (sequenced) => {
       if (state.transport && !state.transport.isLive()) return;
       logBridgeEvent(sequenced.event, sequenced.seq);
       sendEvent(
@@ -647,6 +650,7 @@ export function startBridgeServerTRPC(options: {
     const brokerWatchAbort = new AbortController();
     state.brokerWatchAbort = brokerWatchAbort;
     void watchSharedScoutMessages({
+      transportDomain: domain,
       allConversations: true,
       signal: brokerWatchAbort.signal,
       onMessage(message) {

@@ -116,6 +116,9 @@ export class TransportDomain {
   private batchView?: TransportAuthorityView;
   private disposed = false;
   private leases = 0;
+  private fanouts = new Map<object, {
+    listeners: Set<(event: unknown) => void>; stop: () => void; stopped: boolean;
+  }>();
   /** Endpoints/retained carriers own explicit idempotent boot-domain leases. */
   retain(): () => void {
     if (this.disposed) throw Error("Transport domain disposed");
@@ -127,6 +130,10 @@ export class TransportDomain {
     this.unobserve = owner.observeTransportAuthority(view => this.reconcile(view));
   }
   private reconcile(view: TransportAuthorityView) {
+    // A publication/fresh admission can interrupt a synchronous producer. Drop
+    // the old batch permission; never rebase a handle or trust a hint as a grant.
+    if (this.batchView && (this.batchView.rootId !== view.rootId || this.batchView.stamp !== view.stamp))
+      this.batchView = undefined;
     for (const e of this.entries) if (e.kind === "paired-peer" &&
       (view.rootId !== this.rootId || e.stamp !== view.stamp || !view.has(e.key!)))
       this.invalidate(e, view.rootId === this.rootId && view.has(e.key!) ? PAIRING_AUTHORITY_CHANGED_CLOSE_CODE : 4003);
@@ -165,20 +172,72 @@ export class TransportDomain {
       const decide = (view: TransportAuthorityView) => {
         this.reconcile(view); return e.kind === "paired-peer";
       };
-      return this.batchView ? decide(this.batchView) : this.owner.withTransportAuthority(decide, context);
+      // A managed caller's explicit context is always validated by the owner.
+      if (this.batchView && context === undefined) {
+        const view = this.batchView;
+        if (view.rootId !== this.rootId || e.stamp !== view.stamp || !view.has(e.key!))
+          this.invalidate(e, view.rootId === this.rootId && view.has(e.key!) ? PAIRING_AUTHORITY_CHANGED_CLOSE_CODE : 4003);
+        return e.kind === "paired-peer";
+      }
+      return this.owner.withTransportAuthority(decide, context);
     } catch { this.invalidate(e, 4003); return false; }
   }
-  /** The verified view exists only on this synchronous stack. Async/timer work
-   * gets another read even if spawned by body. No cached-view parameter. */
+  /** One fresh decision per synchronous delivery batch. Frames/cleanup are
+   * emitted AFTER the managed authority gate releases. No view crosses a wait,
+   * queued callback, timer or later turn. A nested batch shares this stack only. */
   batch<T>(body: () => T): T {
-    return this.owner.withTransportAuthority(view => {
-      const prior = this.batchView; this.batchView = view;
-      try {
-        this.reconcile(view); const result = body();
-        if (result && typeof (result as {then?: unknown}).then === "function") throw Error("synchronous batch required");
-        return result;
-      } finally { this.batchView = prior; }
+    if (this.disposed) throw Error("Transport domain disposed");
+    const synchronous = () => {
+      const result = body();
+      if (result && typeof (result as {then?: unknown}).then === "function") throw Error("synchronous batch required");
+      return result;
+    };
+    if (this.batchView) return synchronous();
+    const view = this.owner.withTransportAuthority(fresh => {
+      this.reconcile(fresh); return fresh;
     });
+    this.batchView = view;
+    try { return synchronous(); }
+    finally { this.batchView = undefined; }
+  }
+  /** One source callback fans out to every local subscription for this boot
+   * domain, even across direct/relay carriers. No view is stored by the hub.
+   * Async iterator continuations are separate decisions, not this batch. */
+  subscribe<T>(source: object, start: (emit: (event: T) => void) => () => void, listener: (event: T) => void): () => void {
+    if (this.disposed) throw Error("Transport domain disposed");
+    let hub = this.fanouts.get(source);
+    const first = !hub;
+    if (!hub) {
+      hub = {listeners: new Set(), stop: () => {}, stopped: false};
+      this.fanouts.set(source, hub);
+    }
+    const current = hub, callback = listener as (event: unknown) => void;
+    current.listeners.add(callback);
+    const release = () => {
+      if (!current.listeners.delete(callback) || current.listeners.size) return;
+      if (this.fanouts.get(source) === current) this.fanouts.delete(source);
+      current.stopped = true; current.stop();
+    };
+    if (first) {
+      try {
+        const stop = start(event => {
+          if (this.disposed || current.stopped) return;
+          try {
+            this.batch(() => {
+              for (const deliver of [...current.listeners]) {
+                if (this.disposed) break;
+                if (current.listeners.has(deliver)) {
+                  try { deliver(event); } catch { /* A failed listener cannot deliver or suppress a sibling. */ }
+                }
+              }
+            });
+          } catch { /* Authority unavailable: no protected callback/delivery. */ }
+        });
+        current.stop = stop;
+        if (current.stopped) stop(); // release during a synchronous first event
+      } catch (error) { release(); throw error; }
+    }
+    return release;
   }
   activate(e: LiveEntry, local = false): boolean {
     if (e.kind !== "unadmitted" || !this.entries.has(e)) return false;
@@ -188,6 +247,7 @@ export class TransportDomain {
         e.kind = "local-service";
       } else this.owner.withTransportAuthority(view => {
         if (view.rootId !== this.rootId || !view.has(e.key!)) throw Error("untrusted peer");
+        this.reconcile(view);
         e.stamp = view.stamp; e.kind = "paired-peer";
       });
       clearTimeout(e.timer);
@@ -208,6 +268,10 @@ export class TransportDomain {
     if (this.disposed) return; this.disposed = true;
     for (const e of this.entries) this.invalidate(e, 4003);
     clearInterval(this.timer); this.unobserve(); bridgeDomains.delete(this.bridge);
+    for (const hub of this.fanouts.values()) {
+      hub.stopped = true; hub.listeners.clear(); try { hub.stop(); } catch { /* Teardown continues. */ }
+    }
+    this.fanouts.clear();
     if ((this.bridge as any)[compositionBrand] === this) delete (this.bridge as any)[compositionBrand];
   }
 }
@@ -221,8 +285,78 @@ export function transportDomainForBridge(bridge: object, hostKey: string, owner?
   return domain;
 }
 
+/** Subscribe to one synchronous emitter; plaintext remains explicitly outside
+ * paired authorization and cannot manufacture a transport handle. */
+export function subscribeTransportEvents<T>(domain: TransportDomain | undefined,
+  source: {onEvent(listener: (event: T) => void): () => void}, listener: (event: T) => void): () => void {
+  return domain ? domain.subscribe(source, emit => source.onEvent(emit), listener) : source.onEvent(listener);
+}
+
 /** Trusted boot teardown, including retained rooms absent from window maps. */
 export function disposeTransportDomainForBridge(bridge: object): void { bridgeDomains.get(bridge)?.dispose(); }
+
+export type TransportWatchOptions<Message, Lifecycle> = {
+  allConversations: true; signal?: AbortSignal;
+  onMessage(message: Message): void; onLifecycle?(event: Lifecycle): void;
+  /** Trusted local composition only; never forwarded to the underlying watch. */
+  transportDomain?: TransportDomain;
+};
+
+/** One underlying watch, with one fresh delivery decision per boot domain for
+ * each synchronous source callback. No authority retained by the watch. */
+export function createTransportWatchFanout<Message, Lifecycle>(
+  watch: (options: TransportWatchOptions<Message, Lifecycle>) => Promise<void>,
+) {
+  type Options = TransportWatchOptions<Message, Lifecycle>;
+  type Listener = {options: Options; finish(error?: unknown): void};
+  const listeners = new Set<Listener>();
+  let active: AbortController | null = null;
+  const start = () => {
+    if (active) return;
+    const controller = new AbortController(); active = controller;
+    const dispatch = (deliver: (options: Options) => void) => {
+      if (active !== controller) return;
+      const groups = new Map<TransportDomain | undefined, Listener[]>();
+      for (const listener of listeners) {
+        const key = listener.options.transportDomain;
+        const group = groups.get(key) ?? []; group.push(listener); groups.set(key, group);
+      }
+      for (const [domain, group] of groups) {
+        const batch = () => {
+          for (const listener of group) if (listeners.has(listener)) {
+            try { deliver(listener.options); } catch (error) { listener.finish(error); }
+          }
+        };
+        try { if (domain) domain.batch(batch); else batch(); }
+        catch (error) { for (const listener of group) listener.finish(error); }
+      }
+    };
+    const finish = (error?: unknown) => {
+      if (active !== controller) return;
+      active = null; controller.abort();
+      for (const listener of [...listeners]) listener.finish(error);
+    };
+    void Promise.resolve().then(() => {
+      if (controller.signal.aborted) return;
+      return watch({allConversations: true, signal: controller.signal,
+        onMessage: message => dispatch(options => options.onMessage(message)),
+        onLifecycle: event => dispatch(options => options.onLifecycle?.(event))});
+    }).then(() => finish(), finish);
+  };
+  return (options: Options): Promise<void> => {
+    if (options.signal?.aborted) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const abort = () => listener.finish();
+      const listener: Listener = {options, finish(error) {
+        if (!listeners.delete(listener)) return;
+        options.signal?.removeEventListener("abort", abort);
+        if (!listeners.size) {const previous = active; active = null; previous?.abort();}
+        if (error !== undefined) reject(error); else resolve();
+      }};
+      listeners.add(listener); options.signal?.addEventListener("abort", abort, {once: true}); start();
+    });
+  };
+}
 
 // ---------------------------------------------------------------------------
 // SecureTransport

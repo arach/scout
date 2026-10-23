@@ -1,4 +1,4 @@
-import { transportDomainForBridge, requireTransportContext, plaintextPilotContext, type TransportContext } from "@openscout/runtime/pairing-security/transport";
+import { subscribeTransportEvents, transportDomainForBridge, requireTransportContext, plaintextPilotContext, type TransportContext } from "@openscout/runtime/pairing-security/transport";
 import { isTrustedPeer } from "@openscout/runtime/pairing-security/identity";
 import { watchSharedScoutMessages } from "./broker-message-fanout.ts";
 // Relay client — connects the bridge OUTBOUND to a relay server.
@@ -300,7 +300,7 @@ export function connectToRelay(
             return;
           }
           if (kind === "pairing") options.onPeerAdmitted?.();
-          replaceOlderPeerForSameDevice(peer);
+          // Same-key replacement belongs to the registry, including close-code precedence.
           ensureBridgeEventSubscription();
           ensureBrokerMessageSubscription();
           console.log(
@@ -344,19 +344,6 @@ export function connectToRelay(
     return peer;
   }
 
-  function replaceOlderPeerForSameDevice(peer: RelayPeerState): void {
-    if (!peer.admitted || !peer.publicKey) return;
-
-    for (const [otherClientId, otherPeer] of securePeers) {
-      if (otherClientId === peer.clientId || !otherPeer.admitted || otherPeer.publicKey !== peer.publicKey) {
-        continue;
-      }
-      otherPeer.transport.dispose();
-      sendRelayClose(otherClientId, 4001, "Replaced by newer connection");
-      teardownSecurePeer(otherClientId);
-    }
-  }
-
   function teardownSecurePeer(clientId: string, expected?: RelayPeerState): void {
     if (!securePeers.has(clientId) || (expected && securePeers.get(clientId) !== expected)) {
       return;
@@ -394,7 +381,7 @@ export function connectToRelay(
   function ensureBridgeEventSubscription(): void {
     if (eventUnsub) return;
 
-    eventUnsub = bridge.onEvent((sequenced) => {
+    eventUnsub = subscribeTransportEvents(domain, bridge, (sequenced) => {
       const json = JSON.stringify({
         seq: sequenced.seq,
         event: sequenced.event,
@@ -410,6 +397,7 @@ export function connectToRelay(
     const abort = new AbortController();
     brokerWatchAbort = abort;
     void watchSharedScoutMessages({
+      transportDomain: domain,
       allConversations: true,
       signal: abort.signal,
       onMessage(message) {
@@ -456,12 +444,15 @@ export function connectToRelay(
   }
 
   function sendExistingSessions(send: (json: string) => void): void {
+    const replaySessions = () => {
     for (const session of bridge.listSessions()) {
       send(JSON.stringify({
         seq: 0,
         event: { event: "session:update", session },
       }));
     }
+    };
+    if (domain) domain.batch(replaySessions); else replaySessions();
   }
 
   async function dispatchTRPC(

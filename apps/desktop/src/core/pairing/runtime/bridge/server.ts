@@ -1,4 +1,4 @@
-import { transportDomainForBridge, requireTransportContext, hasPairedTransport, plaintextPilotContext, type TransportContext } from "@openscout/runtime/pairing-security/transport";
+import { subscribeTransportEvents, transportDomainForBridge, requireTransportContext, hasPairedTransport, plaintextPilotContext, type TransportContext } from "@openscout/runtime/pairing-security/transport";
 // Bridge WebSocket server.
 //
 // Exposes the bridge over a local WebSocket so the relay (or a direct LAN
@@ -224,15 +224,18 @@ export function startBridgeServer(
                 }
 
                 // Push existing sessions through the encrypted channel.
+                domain!.batch(() => {
                 for (const session of bridge.listSessions()) {
                   transport.send(JSON.stringify({
                     seq: 0,
                     event: { event: "session:update", session },
                   }));
                 }
+                });
 
                 // Subscribe to future events — forwarded encrypted with seq.
-                state.unsub = bridge.onEvent((sequenced) => {
+                state.unsub = subscribeTransportEvents(domain, bridge, (sequenced) => {
+                  if (!transport.isLive()) return;
                   logBridgeEvent(sequenced.event, sequenced.seq);
                   transport.send(JSON.stringify({
                     seq: sequenced.seq,
@@ -284,7 +287,7 @@ export function startBridgeServer(
           }
 
           // Subscribe to all future events, wrapped with seq.
-          state.unsub = bridge.onEvent((sequenced) => {
+          state.unsub = subscribeTransportEvents(domain, bridge, (sequenced) => {
             ws.send(JSON.stringify({
               seq: sequenced.seq,
               event: sequenced.event,

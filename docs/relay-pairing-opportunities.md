@@ -278,3 +278,26 @@ required follow-on work after the registry. Only an established full-key owner
 can migrate automatically; ambiguous or unknown legacy ownership requires local
 review or explicit re-provisioning. The registry does not complete credential
 revocation or the private consuming-graph proof.
+
+### Synchronous delivery batches
+
+The runtime registry shares one verified authority view across a synchronous
+Bridge event fanout, broker message/lifecycle fanout, initial-session replay or
+desktop Tail fanout. Every target still checks its own exact handle and lifetime.
+Nested delivery batches reuse only the current synchronous stack. A publication
+or a newer admission discards an older batch permission; it never rebases an old
+handle. Network frames leave after the batch's narrow managed read callback
+returns, rather than from inside that callback. This does not certify ordering
+against an outer private native invocation.
+
+No view survives an await, microtask, timer or later source callback. An explicit
+managed context is always validated by the owner, even inside a public delivery
+batch. Writer notifications run after verified durable publication or retry ACK,
+not on ordinary reads. They remain an invalidation hint, never an authorization
+cache or a substitute for the disk indicator and full-read backstop.
+
+Independent inbound frames and subscription results resumed after a wait still
+require fresh decisions. Synchronous fanout batching does not establish a bound
+on arbitrary streaming CPU, and does not introduce a delayed output buffer,
+frame aggregation policy or new authorization lifetime. Broker watcher domain
+bindings are trusted local composition values and are not forwarded on the wire.

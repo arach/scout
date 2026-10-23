@@ -7,7 +7,7 @@ export function liveTransport(domain: TransportDomain, phone: KeyPair, options: 
 } = {}) {
   const frames: ["host"|"phone", string|Uint8Array][] = [];
   const closes: {code:number;reason:string;time:number}[] = [];
-  const messages: string[] = [];
+  const messages: string[] = [], outbound: string[] = [];
   let ctx: any;
   // The fixture supplies a real host identity, not domain.hostKey as a key pair.
   const host = hostKeys.get(domain);
@@ -20,12 +20,12 @@ export function liveTransport(domain: TransportDomain, phone: KeyPair, options: 
     }, onMessage: m => messages.push(m), onError: e => {throw e;},
   }, {domain, replacementGroup: options.group, close: (code,reason) => closes.push({code,reason,time:performance.now()}),
     trustOnComplete:false, skipTrustWrite:()=>true});
-  const client = new SecureTransport({send:f=>frames.push(["host",f])}, "initiator", phone, {},
+  const client = new SecureTransport({send:f=>frames.push(["host",f])}, "initiator", phone, {onMessage: message => outbound.push(message)},
     {trustOnComplete:false,skipTrustWrite:()=>true});
   const flush = () => {while (frames.length) {const [to,f] = frames.shift()!; (to === "host" ? server : client).receive(f);}};
   flush();
   if (!ctx || !server.isReady()) throw Error("Real Noise handshake did not complete");
-  return {server, client, ctx, closes, messages, flush};
+  return {server, client, ctx, closes, messages, outbound, flush};
 }
 const hostKeys = new WeakMap<TransportDomain, KeyPair>();
 export function fixtureHost(domain: TransportDomain, host: KeyPair) {hostKeys.set(domain,host);}
